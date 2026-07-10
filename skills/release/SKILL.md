@@ -26,7 +26,8 @@ Record and verify:
 - backups or recovery point where state changes;
 - staged rollout/canary plan, blast-radius cap and stop conditions;
 - tested rollback or forward-fix path with an owner and time bound;
-- observability queries, expected baseline and post-release success thresholds;
+- observation window, signals, owner, privacy/sampling, containment, close
+  condition, expected baseline and post-release success thresholds;
 - user-facing docs, changelog and operator communication when relevant.
 
 Release authority is separate from change authority. It pins the artifact,

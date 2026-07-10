@@ -14,7 +14,7 @@ SPEC.loader.exec_module(checkpoint_run)
 
 def make_run(tmp_path):
     path = tmp_path / "RUN.json"
-    path.write_text(json.dumps({"checkpoint": {"generation": 0, "artifact_paths": ["RUN.json"]}}))
+    path.write_text(json.dumps({"schema_version": 1, "contract": "delivery-run", "checkpoint": {"generation": 0, "artifact_paths": ["RUN.json"]}}))
     return path
 
 

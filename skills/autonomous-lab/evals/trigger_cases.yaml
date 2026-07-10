@@ -1,0 +1,12 @@
+positive:
+  - spin up an autonomous agent lab and keep working until I write STOP
+  - run this sprawling research programme across sessions and crashes
+  - explore the whole space with a durable ledger and human gates
+negative:
+  - implement this ordinary feature and stop at final acceptance
+  - fan out a one-shot code review
+  - keep a normal session handoff before compaction
+boundary:
+  - this is large but has a bounded finish and does not need run-until-STOP
+  - monitor the external state until it changes
+  - use a lab only if ordinary orchestration cannot survive the horizon

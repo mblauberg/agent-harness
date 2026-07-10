@@ -44,6 +44,24 @@ Audit usage periodically. Retire zero-use skills that add no durable capability,
 but preserve required third-party notices and use repository history rather than
 live backup folders as the normal safety boundary.
 
+Record a public rename in `config/skill-renames.json`. Test the managed
+reconciliation path; do not rely on users deleting or replacing global links
+by hand. Preview with `scripts/manage_installation.py plan`, then reconcile
+with the rename registry. Never claim or overwrite an unmanaged target.
+
+## Change the delivery kernel
+
+Keep profile policy in `config/delivery-profiles.json`, surface-selected checks
+in `config/security-evidence.json` and machine invariants in the `deliver`
+validator. New domains should first compose an existing base profile plus a
+domain skill. Add a base profile only when its artifacts, deterministic gates,
+judgement gates and release meaning are materially distinct.
+
+Every lifecycle/core skill needs positive, negative and boundary trigger
+fixtures. Changes to routing descriptions also run the held-out lifecycle
+dataset with repeated trials and record raw numerator/denominator, model and
+harness versions.
+
 ## Public and third-party hygiene
 
 - No personal absolute paths, private project names, credentials, local plugin
@@ -58,6 +76,7 @@ live backup folders as the normal safety boundary.
 
 ```sh
 scripts/check-harness
+scripts/static-security-check.py
 scripts/public-release-check
 git diff --check
 ```

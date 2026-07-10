@@ -1,0 +1,12 @@
+positive:
+  - build a repeatable eval for this stochastic agent behaviour
+  - compare these model outputs across a versioned dataset and rubric
+  - red-team this prompt system with thresholds and regression cases
+negative:
+  - run the deterministic unit test suite
+  - review this source diff for maintainability
+  - diagnose one reproducible parser crash
+boundary:
+  - this heuristic is deterministic but the output quality needs human judgement
+  - verify the agent repeatedly follows this safety policy
+  - add an eval only if the behaviour is stochastic or judgement-bearing

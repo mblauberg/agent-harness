@@ -5,38 +5,53 @@ description: Use when writing or reviewing TypeScript/JavaScript — type-level 
 
 # TypeScript clean code
 
-Generic clean-code sense (small functions, meaningful names, DRY, one-thing) is assumed. This skill carries only the TypeScript-specific, non-obvious, bright-line rules. See `references/typescript-patterns.md` for the worked examples behind each rule.
+Generic clean-code sense is assumed. Apply these TypeScript-specific rules. See
+`references/typescript-patterns.md` for worked examples.
 
 ## Types
 
-- **Model illegal states as unrepresentable.** Prefer a discriminated union over an object with optional fields + a boolean flag. `{ status: 'loading' } | { status: 'ok'; data: T } | { status: 'err'; error: E }`, not `{ loading; data?; error? }`.
-- **`unknown`, never `any`.** `any` disables checking and spreads silently. Use `unknown` at boundaries and narrow. Ban `any` via lint; if unavoidable, isolate and comment why.
-- **No type assertions to launder types.** `as` (and `as unknown as`) asserts a lie the compiler can't verify. Narrow with type guards / `in` / `typeof` / `instanceof`, or validate at the boundary (zod/valibot) so the type is *earned*, not asserted. `as const` and `satisfies` are fine.
-- **Exhaustiveness via `never`.** In a switch over a union, a `default: assertNever(x)` (assigns to `never`) turns a missed case into a compile error when the union grows.
-- **Derive, don't duplicate.** `type X = z.infer<typeof schema>`, `keyof`, `typeof`, mapped/`Pick`/`Omit`. One source of truth for each shape.
+- **Make illegal states unrepresentable.** Prefer a discriminated union to
+  optional fields plus a flag.
+- **`unknown`, never `any`.** Use `unknown` at boundaries and narrow. Ban `any`
+  via lint; if unavoidable, isolate and explain it.
+- **Do not launder types with assertions.** Narrow with guards, `in`, `typeof`
+  or `instanceof`, or validate boundaries. Avoid `as` and `as unknown as`;
+  `as const` and `satisfies` are fine.
+- **Enforce exhaustiveness with `never`.** Use `default: assertNever(x)` for
+  union switches.
+- **Derive, do not duplicate.** Use `z.infer`, `keyof`, `typeof`, mapped types,
+  `Pick` or `Omit`; keep one source for each shape.
 - **Prefer `type` for unions/functions/mapped types.** Use `interface` only for object shapes meant to be `extend`ed/merged.
-- **Brand primitives that must not be interchanged.** `type UserId = string & { readonly __brand: 'UserId' }` stops passing an `OrderId` where a `UserId` is due.
+- **Brand primitives that must not be interchanged**, such as `UserId` and
+  `OrderId`.
 
-## tsconfig (the config *is* the linter)
+## tsconfig
 
-- `strict: true` is the floor, not the ceiling. Also turn on `noUncheckedIndexedAccess` (array/record access yields `T | undefined`), `exactOptionalPropertyTypes`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `useUnknownInCatchVariables` (on under `strict`).
-- Treat the type-checker as a test suite: `tsc --noEmit` in CI is non-negotiable.
+- Require `strict`, `noUncheckedIndexedAccess` (indexed access can be
+  undefined), `exactOptionalPropertyTypes`,
+  `noImplicitOverride`, `noFallthroughCasesInSwitch` and
+  `useUnknownInCatchVariables`.
+- Run `tsc --noEmit` in CI.
 
 ## Errors & null
 
-- **`catch` binds `unknown`.** Narrow before use (`instanceof`, or a type guard) — don't touch `err.message` blind.
-- **Wrap third-party/lower-layer errors** in your own error class and pass `{ cause: err }` (native, preserves the chain). Define error classes by how callers branch, not by origin.
-- **Prefer `T | undefined` over `null`; don't return `null` for "none".** Return `[]` for empty collections; use a Result/union for expected failure. Reserve throwing for the truly exceptional. `?.` / `??` for safe access — not scattered `if (x == null)`.
+- **`catch` binds `unknown`.** Narrow before accessing it.
+- Wrap lower-layer errors in caller-meaningful classes with `{ cause: err }`.
+- Prefer `T | undefined` to `null`; return `[]` for empty collections and a
+  Result/union for expected failure. Throw only for exceptional cases. Prefer
+  `?.` and `??` to scattered null checks.
 - Never widen a function's return to include `null`/`undefined` "just in case" — that pushes a guard onto every caller.
 
 ## Async
 
 - `await` every promise or explicitly `void` it — a floating promise swallows rejections. Enable `no-floating-promises`.
 - Parallelise independent awaits with `Promise.all`; don't `await` in a loop when the iterations are independent.
-- Type async functions `Promise<T>`; never mark a function `async` only to satisfy a caller.
+- Type async functions `Promise<T>`; do not add `async` only for a caller.
 
 ## Tests
 
-- Type behaviour with type-level tests where the types are the contract: `expectTypeOf` / `@ts-expect-error` on the cases that must *not* compile.
-- Don't assert against `any`-typed mocks — a mistyped mock passes vacuously. Type mocks to the real interface.
-- Structure Arrange-Act-Assert; one behaviour per test; test the public contract, not private shape. Vitest/Jest: prefer `toEqual`/`toStrictEqual` over deep manual field asserts.
+- Test type contracts with `expectTypeOf` and `@ts-expect-error` for cases that
+  must not compile.
+- Type mocks to real interfaces; `any`-typed mocks pass vacuously.
+- Use Arrange-Act-Assert, one public behaviour per test, and prefer
+  `toEqual`/`toStrictEqual` to manual field assertions.

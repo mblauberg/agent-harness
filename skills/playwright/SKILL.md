@@ -6,18 +6,19 @@ description: "Use when the task requires automating a real browser from the term
 
 # Playwright CLI Skill
 
-Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed.
-Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
+Drive a real browser from the terminal with `playwright-cli` and the bundled
+wrapper. Do not pivot to `@playwright/test` unless explicitly asked for tests.
 
 ## Prerequisite check (required)
 
-Before proposing commands, check whether `npx` is available (the wrapper depends on it):
+Before proposing commands, check for the wrapper dependency:
 
 ```bash
 command -v npx >/dev/null 2>&1
 ```
 
-If it is not available, pause and ask the user to install Node.js/npm (which provides `npx`). Provide these steps verbatim:
+If absent, pause and ask the user to install Node.js/npm. Give these steps
+verbatim:
 
 ```bash
 # Verify Node/npm are installed
@@ -29,7 +30,7 @@ npm install -g @playwright/cli@latest
 playwright-cli --help
 ```
 
-Once `npx` is present, proceed with the wrapper script. A global install of `playwright-cli` is optional.
+Once present, use the wrapper; a global install is optional.
 
 ## Skill path (set once)
 
@@ -37,8 +38,6 @@ Once `npx` is present, proceed with the wrapper script. A global install of `pla
 export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 export PWCLI="$CODEX_HOME/skills/playwright/scripts/playwright_cli.sh"
 ```
-
-User-scoped skills install under `$CODEX_HOME/skills` (default: `~/.codex/skills`).
 
 ## Quick start
 
@@ -51,13 +50,6 @@ Use the wrapper script:
 "$PWCLI" type "Playwright"
 "$PWCLI" press Enter
 "$PWCLI" screenshot
-```
-
-If the user prefers a global install, this is also valid:
-
-```bash
-npm install -g @playwright/cli@latest
-playwright-cli --help
 ```
 
 ## Core workflow
@@ -86,7 +78,7 @@ Snapshot again after:
 - opening/closing modals or menus
 - tab switches
 
-Refs can go stale. When a command fails due to a missing ref, snapshot again.
+Refs can go stale; re-snapshot after a missing-ref failure.
 
 ## Recommended patterns
 
@@ -121,13 +113,13 @@ Refs can go stale. When a command fails due to a missing ref, snapshot again.
 
 ## Wrapper script
 
-The wrapper script uses `npx --package @playwright/cli playwright-cli` so the CLI can run without a global install:
+The wrapper uses `npx --package @playwright/cli playwright-cli`:
 
 ```bash
 "$PWCLI" --help
 ```
 
-Prefer the wrapper unless the repository already standardizes on a global install.
+Prefer it unless the repository standardises on a global install.
 
 ## References
 

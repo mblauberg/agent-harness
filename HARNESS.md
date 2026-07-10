@@ -1,7 +1,10 @@
 # Global agent harness constitution
 
-Revised 2026-07-10. Project instructions override this file with the narrowest
-necessary layer. Maintainer rationale lives in `docs/ARCHITECTURE.md`; change
+Revised 2026-07-10. Platform/system policy and explicit human authority lead;
+the nearest project instruction may specialise or strengthen the global
+harness but may not silently broaden authority, weaken safety gates or redefine
+global cross-project memory policy. Maintainer rationale lives in
+`docs/ARCHITECTURE.md`; change
 rules live in `MAINTAINING.md`. Optimise **quality per human attention-hour**: delegate useful
 depth, verify before handoff, and preserve curated project truth rather than raw
 agent chatter.
@@ -28,7 +31,7 @@ surface cannot certify its independent review.
 
 ```text
 session -> scope -> human spec/one-way-door gate
-        -> implement [tdd | diagnose]
+        -> deliver profile -> implement/domain execution [tdd | diagnose]
         -> deterministic verification
         -> evaluate when behaviour is stochastic/judgement-bearing
         -> independent review + bounded repair
@@ -41,6 +44,9 @@ session -> scope -> human spec/one-way-door gate
 `autonomous-lab` is the crash-safe run-until-STOP tier, not the default implementation
 loop. Non-software work uses the same shape: scope, authorised execution,
 evidence, independent review, human acceptance and any external-action gate.
+
+`deliver` owns the single neutral `delivery-run` schema-v1 receipt and profile
+gates. `implement` remains the software front door and uses that same receipt.
 
 Human approval is mandatory for specs and one-way doors, risk-tier downgrades,
 unresolved acceptance criteria, final acceptance, production promotion,
@@ -99,6 +105,7 @@ Operational depth is loaded only when triggered:
 
 - orchestration/routing/Herdr: `skills/orchestrate/`
 - ordinary implementation/review: `skills/implement/`, `skills/code-review/`
+- cross-domain lifecycle/profile contract: `skills/deliver/`
 - long sessions/context hygiene: `skills/session/`
 - release and stochastic assurance: `skills/release/`, `skills/evaluate/`
 - post-cycle improvement: `skills/retrospect/`

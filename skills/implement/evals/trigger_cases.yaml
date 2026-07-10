@@ -10,3 +10,7 @@ negative:
   - run a multi-week autonomous research lab until I stop it
   - implement only the failing regression test before any production code
   - what should we implement next quarter
+boundary:
+  - deliver this software change through the software profile
+  - diagnose the regression first then continue the approved implementation loop
+  - implement locally but stop before production release

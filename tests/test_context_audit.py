@@ -47,21 +47,19 @@ def test_audit_reports_incomplete_run_index(tmp_path):
     assert "incomplete-run-index" in codes(findings)
 
 
+def test_direct_delivery_run_with_run_receipt_does_not_require_orchestration_scaffold(tmp_path):
+    run = tmp_path / ".agent-run" / "direct"
+    run.mkdir(parents=True)
+    (run / "RUN.json").write_text('{"schema_version": 1, "contract": "delivery-run"}')
+    assert "incomplete-run-index" not in codes(context_audit.audit(tmp_path))
+
+
 def test_audit_reports_incomplete_claude_workflow_run(tmp_path):
     run = tmp_path / ".work" / "wf" / "implement" / "one"
     run.mkdir(parents=True)
     (run / "MANIFEST.md").write_text("manifest")
     findings = context_audit.audit(tmp_path)
     assert "incomplete-run-index" in codes(findings)
-
-
-def test_legacy_change_workflow_run_still_requires_change_receipt(tmp_path):
-    run = tmp_path / ".work" / "wf" / "change" / "one"
-    run.mkdir(parents=True)
-    for name in ("MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"):
-        (run / name).write_text(name)
-    findings = context_audit.audit(tmp_path)
-    assert any(item.code == "incomplete-run-index" and "RUN.json" in item.detail for item in findings)
 
 
 def test_cli_is_advisory_unless_strict(tmp_path):
@@ -133,3 +131,123 @@ def test_audit_does_not_traverse_shared_worktree_checkouts(tmp_path):
     assert context_audit.audit(
         tmp_path, now=datetime(2030, 1, 1, tzinfo=timezone.utc),
     ) == []
+
+
+def test_audit_uses_pruned_walk_instead_of_unpruned_rglob(tmp_path, monkeypatch):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "ok.md").write_text("ok")
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("unpruned rglob used")
+
+    monkeypatch.setattr(Path, "rglob", explode)
+    context_audit.audit(tmp_path)
+
+
+def test_audit_never_reads_symlinked_run_or_markdown_outside_root(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "private-run").mkdir()
+    (tmp_path / ".agent-run").symlink_to(outside, target_is_directory=True)
+    (outside / "secret.md").write_text("Canonical key: private\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "linked.md").symlink_to(outside / "secret.md")
+    findings = context_audit.audit(tmp_path)
+    assert not any("private-run" in finding.path or "linked.md" in finding.path for finding in findings)
+
+
+def test_audit_does_not_follow_nested_run_directory_symlinks(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-nested-outside"
+    outside_run = outside / "private-run"
+    outside_run.mkdir(parents=True)
+    (outside_run / "MANIFEST.md").write_text("private")
+
+    agent_runs = tmp_path / ".agent-run"
+    agent_runs.mkdir()
+    (agent_runs / "linked-run").symlink_to(outside_run, target_is_directory=True)
+
+    work = tmp_path / ".work"
+    work.mkdir()
+    (work / "wf").symlink_to(outside, target_is_directory=True)
+
+    findings = context_audit.audit(tmp_path)
+    assert not any("linked-run" in finding.path or "private-run" in finding.path for finding in findings)
+
+
+def test_audit_does_not_read_symlinked_run_receipt_outside_root(tmp_path, monkeypatch):
+    outside = tmp_path.parent / f"{tmp_path.name}-receipt-outside"
+    outside.mkdir()
+    private_receipt = outside / "RUN.json"
+    private_receipt.write_text('{"schema_version": 1, "contract": "delivery-run"}')
+    run = tmp_path / ".agent-run" / "linked-receipt"
+    run.mkdir(parents=True)
+    (run / "RUN.json").symlink_to(private_receipt)
+
+    original = Path.read_text
+
+    def guarded(path, *args, **kwargs):
+        if path.resolve(strict=False) == private_receipt.resolve():
+            raise AssertionError("audit read a receipt through an out-of-root symlink")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded)
+    findings = context_audit.audit(tmp_path)
+    assert "incomplete-run-index" in codes(findings)
+
+
+def test_delivery_run_manifest_reports_orphan_and_expired_scratch(tmp_path):
+    run = tmp_path / ".agent-run" / "DEL-1"
+    run.mkdir(parents=True)
+    for name in ("MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"):
+        (run / name).write_text(name)
+    (run / "RUN.json").write_text(__import__("json").dumps({
+        "schema_version": 1,
+        "contract": "delivery-run",
+        "artifacts": [{
+            "id": "scratch-one",
+            "path": "scratch-one.tmp",
+            "class": "scratch",
+            "owner": "run",
+            "retention": "until-expiry",
+            "expires_at": "2026-01-01T00:00:00Z",
+        }],
+    }))
+    (run / "scratch-one.tmp").write_text("owned")
+    (run / "scratch-orphan.tmp").write_text("unknown")
+    findings = context_audit.audit(tmp_path, now=datetime(2026, 7, 10, tzinfo=timezone.utc))
+    assert "expired-run-scratch" in codes(findings)
+    assert "orphan-run-scratch" in codes(findings)
+    assert (run / "scratch-one.tmp").exists()
+
+
+def test_duplicate_explicit_canonical_keys_are_reported(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "one.md").write_text("Canonical key: current-architecture\n")
+    (docs / "two.md").write_text("Canonical key: current-architecture\n")
+    findings = context_audit.audit(tmp_path)
+    assert "duplicate-canonical-key" in codes(findings)
+
+
+def test_old_raw_log_is_a_retention_signal(tmp_path):
+    log = tmp_path / "worker.jsonl"
+    log.write_text("{}\n")
+    import os
+    old = datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(log, (old, old))
+    findings = context_audit.audit(tmp_path, now=datetime(2026, 7, 10, tzinfo=timezone.utc), stale_log_days=30)
+    assert "stale-raw-log" in codes(findings)
+
+
+def test_done_effort_cannot_retain_active_handoff(tmp_path):
+    docs = tmp_path / "docs"
+    efforts = docs / "efforts"
+    handoffs = docs / "handoffs"
+    efforts.mkdir(parents=True)
+    handoffs.mkdir()
+    (efforts / "EFFORT-one.md").write_text("# EFFORT: one\n\nStatus: done\n")
+    (handoffs / "HANDOFF-one.md").write_text(
+        "Status: active\nEffort: one\nLeg: final\nSupersedes: none\nConsumed-at: pending\n"
+    )
+    findings = context_audit.audit(tmp_path)
+    assert "done-effort-active-handoff" in codes(findings)

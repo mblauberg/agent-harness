@@ -10,3 +10,7 @@ negative:
   - build an eval benchmark for this stochastic agent
   - diagnose this failing deployment without making changes
   - implement the already approved refactor and run its tests
+boundary:
+  - the cycle ended; determine whether evidence supports a harness change or no-change
+  - review recurrence only after a later comparable cycle exists
+  - close the session now and run a retrospective only if the delivery evidence warrants it

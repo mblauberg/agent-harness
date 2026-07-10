@@ -43,6 +43,25 @@ Human approval is required for:
 Routine reversible implementation inside approved authority does not need a
 stream of micro-approvals.
 
+## Neutral delivery kernel
+
+`deliver` is the cross-domain lifecycle front door and `delivery-run` schema v1 is
+its portable state machine. It selects one profile from
+`config/delivery-profiles.json`: software, research, analysis, document or
+agent product. The high-stakes overlay adds source-authority, privacy,
+qualified-review and explicit human-action controls without multiplying the
+base profiles.
+
+A digest-bound project policy may add a complete profile or add evidence and
+measure gates to a built-in profile. Global minima load first and cannot be
+removed or reclassified by the project overlay.
+
+The kernel binds approved intent, design, authority, artifacts, deterministic
+and judgement evidence, review independence, acceptance, release, observation
+and retrospective linkage. Domain skills own methods; the kernel owns state
+and proof. `implement` remains the software front door and uses the same
+canonical receipt; there is no parallel implementation schema or adapter.
+
 ## Equal primaries, accountable ownership
 
 Claude Code and Codex are equal primary orchestrators. Whichever harness the
@@ -113,6 +132,16 @@ Pruning is conservative: delete only proven run-owned ephemeral data, compact
 rather than blindly append, and merge or split curated documents when their
 retrieval cost signals demand it. Sibling `.worktrees` are protected and
 excluded from context scans.
+
+## Managed installation
+
+`scripts/manage_installation.py` plans, installs, reconciles and removes only
+harness-owned skill links. A versioned manifest records ownership, source
+tree digests, the bound target and rename history beside the target skills
+directory. Unmanaged paths are never claimed or overwritten; changed managed
+targets fail for human resolution and link
+mutations roll back if the manifest commit fails.
+Provider bootstraps remain small and share the same precedence sentence.
 
 ## Completion evidence
 

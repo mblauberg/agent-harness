@@ -44,6 +44,14 @@
   },
   "observability": {
     "baseline": "",
+    "window": "24h",
+    "window_started_at": "",
+    "window_ended_at": "",
+    "signals": ["error-rate"],
+    "owner": "named-observation-owner",
+    "rollback_or_containment": "path/to/runbook-or-plan",
+    "sampling_and_privacy": "aggregate-redacted",
+    "close_condition": "all thresholds pass for the declared window",
     "success_thresholds": [{"id": "error-rate", "direction": "lte", "limit": 0.01, "unit": "ratio"}],
     "checks": []
   },

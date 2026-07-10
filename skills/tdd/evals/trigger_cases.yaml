@@ -8,3 +8,7 @@ negative:
   - diagnose why this existing test fails without changing source
   - review this pull request without implementing fixes
   - help me decide the feature requirements
+boundary:
+  - write only the first failing test and stop before production code
+  - use TDD as one slice inside the wider implement run
+  - reproduce this bug as a test before fixing it

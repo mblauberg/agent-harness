@@ -59,6 +59,11 @@ Use the read-only auditor from any project root:
 python3 "${AGENTS_HOME:-$HOME/.agents}/skills/session/scripts/context_audit.py" .
 ```
 
+For a canonical `delivery-run` receipt, preview expired manifest-owned scratch with
+`cleanup_run_artifacts.py RUN.json`. Execution additionally requires
+`--execute --authorised-by ... --authority-evidence ...`; it never removes
+unknown, canonical, evidence, handoff or external artifacts.
+
 Thresholds are signals, not deletion authority. Project instructions may tune
 them. Use `--json` for a receipt. Structural errors fail by default (`--strict`
 is a compatibility alias); `--warnings-as-errors` is an explicit project-level

@@ -15,6 +15,9 @@ before any decision about orchestration, model choice, delegation, or memory.
   authorised, linked worktrees live only at the owning repository's
   `.worktrees/<task-agent>` path; see `docs/worktrees.md`.
 - **Style:** $caveman by default (terse; technical substance intact).
-- Project instructions (project AGENTS.md/CLAUDE.md) may strengthen these
-  rules. Only a direct human instruction may make a one-run worktree-location
-  exception.
+
+Platform/system policy and explicit human authority lead; the nearest project
+instruction may specialise or strengthen the global harness but may not
+silently broaden authority, weaken safety gates or redefine global
+cross-project memory policy. Only a direct human instruction may make a
+one-run worktree-location exception.

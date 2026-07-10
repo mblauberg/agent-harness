@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Atomically update and verify the recovery checkpoint in an implementation RUN.json."""
+"""Atomically update and verify a canonical delivery-run recovery checkpoint."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ def update(path: Path, current_slice: str, next_action: str, in_flight: list[Any
     path = path.resolve()
     root = path.parent
     run = json.loads(path.read_text())
-    if not isinstance(run, dict):
-        raise ValueError("RUN.json root must be an object")
+    if not isinstance(run, dict) or run.get("contract") != "delivery-run" or run.get("schema_version") != 1:
+        raise ValueError("RUN.json must be a canonical delivery-run v1 receipt")
     checkpoint = run.get("checkpoint")
     if not isinstance(checkpoint, dict):
         raise ValueError("RUN.json checkpoint must be an object")

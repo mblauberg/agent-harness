@@ -101,13 +101,23 @@ def test_claude_workflows_use_router_and_safe_implement_loop():
     assert "required: false" in implementation
     assert "otherPrimaryRan" in implementation
     assert "bonus availability never blocks" in implementation
-    assert "Copy the global implement RUN.template.json" in implementation
+    assert "Copy the global deliver RUN.template.json" in implementation
     assert "refusing the next dispatch" in implementation
     assert "do not recreate or replace it" in implementation
     assert "Review verdicts and dispatcher lineage" in implementation
     assert "certification_eligible" in implementation
     assert "Machine gate FAILED" in implementation
     assert "state: 'failed'" in implementation
+
+
+def test_implement_skill_uses_canonical_delivery_completion_states():
+    text = (ROOT / "skills" / "implement" / "SKILL.md").read_text()
+    assert "`awaiting_acceptance`" in text
+    assert "`accepted`" in text
+    assert "`complete` only after" not in text
+    assert "`awaiting-human` is a successful machine-gate state" not in text
+    assert not (ROOT / "skills" / "implement" / "scripts" / "validate_run.py").exists()
+    assert not (ROOT / "skills" / "implement" / "templates" / "RUN.template.json").exists()
 
 
 def test_read_only_review_allows_scoped_artifacts_but_forbids_unscoped_scratch():
@@ -130,34 +140,32 @@ def test_default_agent_run_directory_is_ignored_in_the_harness_repo():
     assert ".agent-run/" in (ROOT / ".gitignore").read_text().splitlines()
 
 
-def test_context_hygiene_is_owned_by_session_and_machine_receipts():
+def test_context_hygiene_is_owned_by_session_and_delivery_checkpoints():
     harness = " ".join((ROOT / "HARNESS.md").read_text().split())
     implementation = (ROOT / "skills" / "implement" / "references" / "run-contract.md").read_text()
     assert "`session` owns context hygiene" in harness
-    assert "context_hygiene" in implementation
+    assert "RUN.json" in implementation
+    assert "checkpoint" in (ROOT / "skills" / "deliver" / "templates" / "RUN.template.json").read_text()
 
 
 def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
     assert not (ROOT / "skills" / "change").exists()
     readme = (ROOT / "README.md").read_text()
     assert "$change" not in readme
-    assert "implement · bounded delivery loop" in readme
+    assert "deliver · profile and typed RUN.json" in readme
     lifecycle = readme.split("## Lifecycle", 1)[1].split("## Core workflows", 1)[0]
     diagrams = re.findall(r"```mermaid\n(.*?)\n```", lifecycle, re.DOTALL)
     semantics = "\n".join(diagrams)
-    assert len(diagrams) >= 2
+    assert len(diagrams) == 1
     assert all("accTitle:" in diagram and "accDescr:" in diagram for diagram in diagrams)
-    assert semantics.count("HUMAN ·") == 4
+    assert semantics.count("HUMAN ·") == 3
     for stage in (
         "session",
         "scope",
         "implement",
-        "tdd",
-        "deterministic verification",
-        "diagnose",
-        "evaluate",
-        "independent code review",
-        "rescope or stop",
+        "deliver",
+        "verify",
+        "review",
         "release",
         "observe",
         "retrospect",
@@ -204,7 +212,7 @@ def test_readme_catalogue_contains_every_portable_skill():
         "<!-- skill-catalogue:end -->", 1
     )[0]
     listed = set(re.findall(r"`([a-z0-9-]+)`", catalogue))
-    assert len(skills) == 30
+    assert len(skills) == 31
     assert listed == skills
     for name in skills:
         assert f"(skills/{name}/SKILL.md)" in catalogue

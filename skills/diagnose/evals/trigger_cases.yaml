@@ -1,0 +1,12 @@
+positive:
+  - diagnose why this test is failing without implementing a permanent fix
+  - debug this startup crash and report the evidence-backed cause
+  - investigate this performance regression read-only
+negative:
+  - implement the approved fix and review until clean
+  - review this diff for regressions
+  - write the first failing test for this known bug
+boundary:
+  - find the cause first and wait before changing production code
+  - reproduce this intermittent failure with temporary instrumentation
+  - diagnose and then fix it under the enclosing implement run

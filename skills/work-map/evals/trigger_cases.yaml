@@ -1,0 +1,12 @@
+positive:
+  - create a persistent map for this multi-session migration
+  - resume this long effort and show which leg is active
+  - coordinate several agents across separate legs of the same programme
+negative:
+  - answer this short question
+  - create a one-session task checklist
+  - archive this consumed handoff only
+boundary:
+  - this may span contexts; decide whether it needs an effort map
+  - three handoffs exist for one effort and nobody knows the current leg
+  - update the route only when this leg is complete

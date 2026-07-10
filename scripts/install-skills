@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SOURCE="$ROOT/skills"
 TARGET=""
 
 usage() {
@@ -28,20 +27,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$TARGET" ]] || { usage; exit 2; }
-mkdir -p "$TARGET"
-
-linked=0
-existing=0
-for manifest in "$SOURCE"/*/SKILL.md; do
-  skill_dir="${manifest%/SKILL.md}"
-  name="${skill_dir##*/}"
-  destination="$TARGET/$name"
-  if [[ -e "$destination" || -L "$destination" ]]; then
-    existing=$((existing + 1))
-    continue
-  fi
-  ln -s "$skill_dir" "$destination"
-  linked=$((linked + 1))
-done
-
-echo "skills linked=$linked existing=$existing target=$TARGET"
+exec "$ROOT/scripts/manage_installation.py" install \
+  --source "$ROOT/skills" \
+  --target "$TARGET" \
+  --summary

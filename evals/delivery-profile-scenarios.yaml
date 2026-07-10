@@ -1,0 +1,197 @@
+schema_version: 1
+dataset_id: delivery-profile-held-out-v1
+
+# These expectations are deliberately authored here rather than read from the
+# production profile registry. Registry drift must break this gate until a
+# maintainer makes an explicit dataset decision.
+profile_fixtures:
+  software:
+    artifact_type: source
+    deterministic_gates: [tests]
+    judgement_gates: [code-review]
+    outcome_measure: functional-correctness
+    trajectory_measure: verification-completion
+    observation_signal: task-success
+    stochastic: false
+    security_surfaces: [source]
+    security_checks: [secrets-scan, sast]
+  research:
+    artifact_type: report
+    deterministic_gates: [source-coverage]
+    judgement_gates: [source-quality]
+    outcome_measure: claim-support
+    trajectory_measure: source-coverage-trajectory
+    observation_signal: citation-audit
+    stochastic: false
+    security_surfaces: []
+    security_checks: []
+  analysis:
+    artifact_type: model
+    deterministic_gates: [recalculation]
+    judgement_gates: [interpretation]
+    outcome_measure: decision-utility
+    trajectory_measure: assumption-validation
+    observation_signal: assumption-review
+    stochastic: false
+    security_surfaces: []
+    security_checks: []
+  document:
+    artifact_type: pdf
+    deterministic_gates: [render]
+    judgement_gates: [audience-fit]
+    outcome_measure: audience-readiness
+    trajectory_measure: render-quality
+    observation_signal: recipient-confirmation
+    stochastic: false
+    security_surfaces: []
+    security_checks: []
+  agent-product:
+    artifact_type: prompt
+    deterministic_gates: [tests, permission-check]
+    judgement_gates: [behavioural-eval, red-team]
+    outcome_measure: task-success
+    trajectory_measure: policy-compliance
+    observation_signal: policy-violations
+    stochastic: true
+    security_surfaces: [agent-tools]
+    security_checks: [permission-check, tool-boundary-tests, prompt-injection-tests]
+
+thresholds:
+  minimum_expectation_match_rate: 1.0
+  minimum_cases_per_profile: 2
+  minimum_high_stakes_cases: 2
+
+cases:
+  - id: software-source-positive
+    profile: software
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches: []
+  - id: software-required-test-negative
+    profile: software
+    case_type: negative
+    expected: fail
+    expected_error: profile gate tests requires passing deterministic evidence
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches:
+      - {op: replace, path: /evidence/0/gate, value: renamed-test-gate}
+  - id: software-migration-security-boundary
+    profile: software
+    case_type: boundary
+    expected: pass
+    high_stakes: false
+    risk_tier: crucial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: migration
+      security_surfaces: [source, destructive-boundary]
+      security_checks: [secrets-scan, sast, destructive-boundary-tests]
+    patches: []
+
+  - id: research-report-positive
+    profile: research
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches: []
+  - id: research-outcome-negative
+    profile: research
+    case_type: negative
+    expected: fail
+    expected_error: profile-required outcome measures are missing
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches:
+      - {op: replace, path: /measures/outcome/0/id, value: unsupported-claims}
+
+  - id: analysis-model-positive
+    profile: analysis
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches: []
+  - id: analysis-artifact-type-negative
+    profile: analysis
+    case_type: negative
+    expected: fail
+    expected_error: canonical artifact outcome type is outside the selected profile
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches:
+      - {op: replace, path: /artifacts/0/artifact_type, value: source}
+
+  - id: document-pdf-positive
+    profile: document
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches: []
+  - id: document-review-negative
+    profile: document
+    case_type: negative
+    expected: fail
+    expected_error: profile gate audience-fit requires passing judgement evidence
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches:
+      - {op: replace, path: /evidence/1/status, value: unavailable}
+      - {op: replace, path: /evidence/2/status, value: unavailable}
+  - id: document-high-stakes-positive
+    profile: document
+    case_type: boundary
+    expected: pass
+    high_stakes: true
+    risk_tier: substantial
+    repetitions: 2
+    patches: []
+  - id: document-high-stakes-shared-evidence-negative
+    profile: document
+    case_type: boundary
+    expected: fail
+    expected_error: high-stakes control privacy must use distinct evidence
+    high_stakes: true
+    risk_tier: substantial
+    repetitions: 1
+    patches:
+      - {op: replace, path: /high_stakes_controls/privacy/evidence_id, value: high-source-authority}
+
+  - id: agent-product-stochastic-positive
+    profile: agent-product
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 3
+    patches: []
+  - id: agent-product-repetition-negative
+    profile: agent-product
+    case_type: negative
+    expected: fail
+    expected_error: evaluation 0 repetitions is below minimum
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches:
+      - {op: replace, path: /assurance/evaluations/0/repetitions, value: 2}
+  - id: agent-product-security-boundary
+    profile: agent-product
+    case_type: boundary
+    expected: pass
+    high_stakes: false
+    risk_tier: crucial
+    repetitions: 2
+    patches: []

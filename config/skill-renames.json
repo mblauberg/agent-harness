@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "renames": [
+    {"from": "change", "to": "implement"},
+    {"from": "humanise-text", "to": "natural-writing"},
+    {"from": "multi-agent-orchestration", "to": "orchestrate"},
+    {"from": "skill-optimizer", "to": "skill-audit"},
+    {"from": "write-a-skill", "to": "skill-authoring"},
+    {"from": "vercel-react-best-practices", "to": "react-performance"}
+  ]
+}

@@ -1,0 +1,15 @@
+positive:
+  - deliver this approved research report end to end with source checks independent review and final acceptance
+  - complete this analysis package autonomously and verify the calculations and interpretation
+  - take this approved document through rendering review and human acceptance
+  - deliver this agent product with behavioural evals security evidence and observation
+negative:
+  - help me decide what this project should produce
+  - implement this approved TypeScript feature and review until clean
+  - proofread this short paragraph
+  - deploy the already accepted release to production
+  - review this pull request without editing it
+boundary:
+  - deliver this approved mixed report and data package across several domain skills
+  - complete this outcome end to end but stop before any external release
+  - use the neutral lifecycle only if this is more than a tiny one-shot task

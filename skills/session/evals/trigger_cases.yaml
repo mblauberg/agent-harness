@@ -1,0 +1,12 @@
+positive:
+  - start this substantial session and load the current project state
+  - write a compact handoff before this context window ends
+  - close this changed session and graduate durable findings into project docs
+negative:
+  - answer this one factual question
+  - clean up every ignored file in the repository
+  - run a retrospective on the last release
+boundary:
+  - summarise where we are in this multi-session effort before continuing
+  - this task may compact; keep a recovery checkpoint while implementing
+  - inspect session logs but do not change project state

@@ -7,8 +7,10 @@ import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 
@@ -16,6 +18,8 @@ SKIP_PARTS = {".git", ".worktrees", "node_modules", ".venv", "venv", ".backups",
 SCRATCH_NAMES = re.compile(r"^(?:\.temp|temp[-_.]|scratch[-_.]|.*\.(?:tmp|scratch|bak|orig)|.*\.bak[-_.].*)", re.I)
 FRESHNESS = re.compile(r"^(?:updated|last updated|last verified|as of)\s*:\s*(\S+)", re.I | re.M)
 HANDOFF_FIELD = re.compile(r"^(?:-\s*)?(?:\*\*)?(Status|Effort|Leg|Supersedes|Consumed-at)(?:\*\*)?\s*:\s*(.+?)\s*$", re.I | re.M)
+CANONICAL_KEY = re.compile(r"^(?:-\s*)?(?:\*\*)?Canonical key(?:\*\*)?\s*:\s*([A-Za-z0-9._-]+)\s*$", re.I | re.M)
+EFFORT_STATUS = re.compile(r"^(?:-\s*)?(?:\*\*)?Status(?:\*\*)?\s*:\s*(active|blocked|done)\s*$", re.I | re.M)
 
 
 @dataclass(frozen=True)
@@ -26,10 +30,59 @@ class Finding:
     detail: str
 
 
+def contained(path: Path, root: Path, *, kind: str) -> bool:
+    """Require every component and the resolved object to stay below root."""
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    current = root
+    try:
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return False
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(root)
+        observed = os.stat(current, follow_symlinks=False)
+        if current.resolve(strict=True) != resolved:
+            return False
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISREG(observed.st_mode) if kind == "file" else stat.S_ISDIR(observed.st_mode)
+
+
 def skipped(path: Path, root: Path) -> bool:
     rel = path.relative_to(root)
     parts = set(rel.parts)
     return bool(parts & SKIP_PARTS)
+
+
+def walked_files(root: Path):
+    root = root.resolve()
+    for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        base = Path(current)
+        dirs[:] = [
+            name for name in dirs
+            if name not in SKIP_PARTS and contained(base / name, root, kind="dir")
+        ]
+        for name in files:
+            path = base / name
+            if contained(path, root, kind="file"):
+                yield path
+
+
+def walked_dirs(root: Path, name: str):
+    root = root.resolve()
+    for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
+        base = Path(current)
+        dirs[:] = [
+            entry for entry in dirs
+            if entry not in SKIP_PARTS and contained(base / entry, root, kind="dir")
+        ]
+        for entry in dirs:
+            if entry == name:
+                yield base / entry
 
 
 def is_hot_markdown(path: Path, root: Path) -> bool:
@@ -56,13 +109,15 @@ def audit(
     max_log_mb: int = 5,
     max_state_lines: int = 120,
     stale_handoff_days: int = 30,
+    stale_log_days: int = 30,
     now: datetime | None = None,
 ) -> list[Finding]:
     root = root.resolve()
     now = now or datetime.now(timezone.utc)
     findings: list[Finding] = []
+    canonical_keys: dict[str, str] = {}
 
-    for path in root.rglob("*"):
+    for path in walked_files(root):
         if not path.is_file() or skipped(path, root):
             continue
         rel = path.relative_to(root).as_posix()
@@ -75,6 +130,10 @@ def audit(
             findings.append(Finding("warning", "large-agent-doc", rel, f"{size} bytes exceeds {max_markdown_kb} KiB split/merge signal"))
         if path.suffix.lower() in {".log", ".jsonl"} and size > max_log_mb * 1024 * 1024:
             findings.append(Finding("warning", "large-raw-log", rel, f"{size} bytes exceeds {max_log_mb} MiB rotation/retention signal"))
+        if path.suffix.lower() in {".log", ".jsonl"}:
+            age_days = (now - datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)).days
+            if age_days > stale_log_days:
+                findings.append(Finding("warning", "stale-raw-log", rel, f"{age_days} days old; apply the owning retention policy"))
         if path.parent == root and SCRATCH_NAMES.match(path.name):
             findings.append(Finding("warning", "root-scratch", rel, "unscoped repo-root scratch candidate; inspect ownership before removal"))
 
@@ -88,37 +147,93 @@ def audit(
             if not has_freshness("\n".join(lines[:12])):
                 findings.append(Finding("warning", "state-freshness-missing", rel, "no anchored Updated/Last verified/As of field in first 12 lines"))
 
+        if path.suffix.lower() == ".md" and "docs" in path.relative_to(root).parts:
+            try:
+                match = CANONICAL_KEY.search(path.read_text(errors="replace")[:4096])
+            except OSError:
+                match = None
+            if match:
+                key = match.group(1).lower()
+                if key in canonical_keys:
+                    findings.append(Finding("error", "duplicate-canonical-key", rel, f"same canonical key as {canonical_keys[key]}"))
+                else:
+                    canonical_keys[key] = rel
+
         if "handoffs" in path.parts:
             age_days = (now - datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)).days
             if age_days > stale_handoff_days:
                 findings.append(Finding("warning", "stale-live-handoff", rel, f"{age_days} days old; archive if consumed"))
 
     run_dirs: set[Path] = set()
-    for run_root in root.rglob(".agent-run"):
-        if run_root.is_dir() and not skipped(run_root, root):
-            run_dirs.update(path for path in run_root.iterdir() if path.is_dir())
-    for work_root in root.rglob(".work"):
+    for run_root in walked_dirs(root, ".agent-run"):
+        if contained(run_root, root, kind="dir") and not skipped(run_root, root):
+            run_dirs.update(path for path in run_root.iterdir() if contained(path, root, kind="dir"))
+    for work_root in walked_dirs(root, ".work"):
         wf_root = work_root / "wf"
-        if not wf_root.is_dir() or skipped(work_root, root):
+        if not contained(wf_root, root, kind="dir") or skipped(work_root, root):
             continue
         for workflow_dir in wf_root.iterdir():
-            if workflow_dir.is_dir():
-                run_dirs.update(path for path in workflow_dir.iterdir() if path.is_dir())
+            if contained(workflow_dir, root, kind="dir"):
+                run_dirs.update(path for path in workflow_dir.iterdir() if contained(path, root, kind="dir"))
     for run_dir in sorted(run_dirs):
+        if not contained(run_dir, root, kind="dir"):
+            continue
         rel = run_dir.relative_to(root).as_posix()
-        required = ["MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"]
-        if run_dir.parent.name in {"implement", "change"}:  # retain legacy run readability
+        scaffold = ["MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"]
+        direct_delivery = (
+            run_dir.parent.name == ".agent-run"
+            and contained(run_dir / "RUN.json", root, kind="file")
+            and not any(contained(run_dir / name, root, kind="file") for name in scaffold)
+        )
+        required = ["RUN.json"] if direct_delivery else scaffold
+        if run_dir.parent.name == "implement":  # orchestrated workflow capsules also require RUN.json
             required.append("RUN.json")
         missing = [
             name
             for name in required
-            if not (run_dir / name).is_file()
+            if not contained(run_dir / name, root, kind="file")
         ]
         if missing:
             findings.append(Finding("error", "incomplete-run-index", rel, "missing " + ", ".join(missing)))
+        run_path = run_dir / "RUN.json"
+        if contained(run_path, root, kind="file"):
+            try:
+                run = json.loads(run_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                run = None
+            if isinstance(run, dict) and run.get("schema_version") == 1 and run.get("contract") == "delivery-run":
+                declared: set[str] = set()
+                for index, artifact in enumerate(run.get("artifacts", [])):
+                    if not isinstance(artifact, dict) or not isinstance(artifact.get("path"), str):
+                        continue
+                    declared.add(artifact["path"])
+                    if artifact.get("class") == "scratch" and artifact.get("expires_at"):
+                        try:
+                            expiry = datetime.fromisoformat(str(artifact["expires_at"]).replace("Z", "+00:00"))
+                        except ValueError:
+                            findings.append(Finding("error", "invalid-scratch-expiry", f"{rel}/RUN.json", f"artifact {index} expiry is invalid"))
+                        else:
+                            if expiry <= now:
+                                findings.append(Finding("warning", "expired-run-scratch", f"{rel}/{artifact['path']}", "manifest-owned scratch is expired; removal still requires cleanup authority"))
+                for candidate in walked_files(run_dir):
+                    if not candidate.is_file() or candidate == run_path:
+                        continue
+                    candidate_rel = candidate.relative_to(run_dir).as_posix()
+                    if SCRATCH_NAMES.match(candidate.name) and candidate_rel not in declared:
+                        findings.append(Finding("warning", "orphan-run-scratch", f"{rel}/{candidate_rel}", "scratch-like file is absent from the delivery artifact manifest"))
 
     active_handoffs: dict[tuple[str, str], str] = {}
-    for path in root.rglob("HANDOFF-*.md"):
+    done_efforts: set[str] = set()
+    for path in (item for item in walked_files(root) if item.match("EFFORT-*.md")):
+        if not path.is_file() or skipped(path, root):
+            continue
+        try:
+            match = EFFORT_STATUS.search(path.read_text(errors="replace")[:4096])
+        except OSError:
+            continue
+        if match and match.group(1).lower() == "done":
+            done_efforts.add(path.stem.removeprefix("EFFORT-").lower())
+    for path in (item for item in walked_files(root) if item.match("HANDOFF-*.md")):
         if not path.is_file() or skipped(path, root):
             continue
         rel_path = path.relative_to(root)
@@ -144,6 +259,8 @@ def audit(
         leg = fields.get("leg", "none")
         key = (effort, leg)
         if status == "active" and not archived and key != ("none", "none"):
+            if effort in done_efforts:
+                findings.append(Finding("error", "done-effort-active-handoff", rel, f"effort {effort} is done; consume and archive this handoff"))
             if key in active_handoffs:
                 findings.append(Finding("error", "duplicate-active-handoff", rel, f"same effort/leg as {active_handoffs[key]}"))
             else:
@@ -159,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-log-mb", type=int, default=5)
     parser.add_argument("--max-state-lines", type=int, default=120)
     parser.add_argument("--stale-handoff-days", type=int, default=30)
+    parser.add_argument("--stale-log-days", type=int, default=30)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--strict", action="store_true", help="exit 1 on structural errors")
     parser.add_argument("--warnings-as-errors", action="store_true", help="also fail on advisory signals")
@@ -172,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         max_log_mb=args.max_log_mb,
         max_state_lines=args.max_state_lines,
         stale_handoff_days=args.stale_handoff_days,
+        stale_log_days=args.stale_log_days,
     )
     if args.json:
         print(json.dumps({"root": str(args.root.resolve()), "findings": [asdict(item) for item in findings]}, indent=2))

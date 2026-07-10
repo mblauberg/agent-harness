@@ -35,10 +35,12 @@ if command -v node >/dev/null 2>&1 && [[ -d "$HOME/.claude/workflows" ]]; then
 fi
 
 "$PYTHON" scripts/public_release_check.py
+"$PYTHON" scripts/static-security-check.py
+"$PYTHON" scripts/validate_delivery_scenarios.py
 
 "$PYTHON" -m pytest -q \
   tests \
-  skills/implement/tests \
+  skills/implement/tests/test_checkpoint_run.py \
   skills/orchestrate/evals/test_cf_dispatch.py
 
 if [[ "$DOCTOR" == true ]]; then

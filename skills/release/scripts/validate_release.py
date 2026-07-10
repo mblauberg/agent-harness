@@ -16,19 +16,20 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[3]
+WINDOW_DURATION = re.compile(r"^(\d+)([smhd])$")
 
 
-def load_implement_validator():
-    path = ROOT / "skills" / "implement" / "scripts" / "validate_run.py"
-    spec = importlib.util.spec_from_file_location("release_implement_validator", path)
+def load_delivery_validator():
+    path = ROOT / "skills" / "deliver" / "scripts" / "validate_delivery.py"
+    spec = importlib.util.spec_from_file_location("release_delivery_validator", path)
     if not spec or not spec.loader:
-        raise RuntimeError("cannot load implement validator")
+        raise RuntimeError("cannot load delivery validator")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-CHANGE_VALIDATOR = load_implement_validator()
+DELIVERY_VALIDATOR = load_delivery_validator()
 
 
 def mapping(value: Any) -> dict[str, Any]:
@@ -104,7 +105,10 @@ def authorised_commands(values: Any, field: str, prefixes: list[Any]) -> list[st
     return errors
 
 
-def validate(receipt: dict[str, Any], gate: str, base_dir: Path | None = None) -> list[str]:
+def validate(
+    receipt: dict[str, Any], gate: str, base_dir: Path | None = None,
+    workspace_root: Path | None = None,
+) -> list[str]:
     errors: list[str] = []
     if receipt.get("schema_version") != 1:
         errors.append("schema_version must be 1")
@@ -126,15 +130,36 @@ def validate(receipt: dict[str, Any], gate: str, base_dir: Path | None = None) -
         except (OSError, json.JSONDecodeError):
             errors.append("artifact.change_receipt must reference a readable accepted change receipt")
         else:
-            change_errors = CHANGE_VALIDATOR.validate(
-                change if isinstance(change, dict) else {}, gate="complete",
-                base_dir=change_path.parent, verify_live=False,
-            )
-            if change_errors:
-                errors.append("artifact.change_receipt must be human-accepted and complete")
-            change_revision = mapping(change.get("implementation")).get("result_revision")
-            if artifact.get("source_revision") != change_revision:
-                errors.append("artifact.source_revision must match the accepted change result_revision")
+            if isinstance(change, dict) and change.get("schema_version") == 1 and change.get("contract") == "delivery-run":
+                try:
+                    live_root = (workspace_root or base_dir)
+                    project_policy = mapping(change.get("project_policy"))
+                    project_policy_path = (live_root / project_policy["path"]) if live_root and project_policy.get("path") else None
+                    DELIVERY_VALIDATOR.validate(
+                        change, ROOT, receipt_dir=change_path.parent,
+                        workspace_root=live_root, project_policy_path=project_policy_path,
+                        verify_hashes=True,
+                    )
+                except DELIVERY_VALIDATOR.Invalid:
+                    errors.append("artifact.change_receipt must be a valid neutral delivery receipt")
+                if gate == "ready" and change.get("status") != "awaiting_release":
+                    errors.append("artifact.change_receipt must be awaiting_release at the ready gate")
+                if gate == "complete" and (
+                    change.get("status") not in {"observing", "closed"}
+                    or mapping(mapping(change.get("human_gates")).get("release")).get("status") != "approved"
+                ):
+                    errors.append("terminal release requires canonical observing state and approved release gate")
+                observation_status = mapping(change.get("observation")).get("status")
+                if gate == "complete" and (
+                    (change.get("status") == "observing" and observation_status not in {"active", "pass"})
+                    or (change.get("status") == "closed" and observation_status != "pass")
+                ):
+                    errors.append("terminal release requires active or passing canonical observation")
+                delivered = next((item for item in items(change.get("artifacts")) if mapping(item).get("id") == artifact.get("id")), None)
+                if not delivered or mapping(delivered).get("digest") != artifact.get("source_revision"):
+                    errors.append("artifact.source_revision must match the accepted delivery artifact digest")
+            else:
+                errors.append("artifact.change_receipt must use the canonical delivery-run contract")
     authority = mapping(receipt.get("release_authority"))
     if not authority.get("approved_by") or not timestamp(authority.get("expires_at")):
         errors.append("release_authority requires approved_by and UTC expires_at")
@@ -185,6 +210,9 @@ def validate(receipt: dict[str, Any], gate: str, base_dir: Path | None = None) -
             errors.append("destructive/non-compatible migration requires explicit irreversible authority")
 
     observability = mapping(receipt.get("observability"))
+    for field in ("window", "signals", "owner", "rollback_or_containment", "sampling_and_privacy", "close_condition"):
+        if not observability.get(field):
+            errors.append(f"observability.{field} is required")
     thresholds = [mapping(item) for item in items(observability.get("success_thresholds"))]
     if not observability.get("baseline") or not thresholds:
         errors.append("observability baseline and success_thresholds are required")
@@ -198,6 +226,8 @@ def validate(receipt: dict[str, Any], gate: str, base_dir: Path | None = None) -
             threshold_ids.add(threshold_id)
         if threshold.get("direction") not in {"lte", "gte"} or not isinstance(limit, (int, float)) or isinstance(limit, bool) or not math.isfinite(float(limit)):
             errors.append(f"observability.success_thresholds[{index}] requires direction and numeric limit")
+    if set(items(observability.get("signals"))) != threshold_ids:
+        errors.append("observability.signals must match success threshold ids")
 
     if gate == "ready":
         if receipt.get("status") != "awaiting-promotion":
@@ -233,6 +263,20 @@ def validate(receipt: dict[str, Any], gate: str, base_dir: Path | None = None) -
         errors.extend(recorded_checks(observability.get("checks"), "observability.checks"))
     errors.extend(authorised_commands(observability.get("checks"), "observability.checks", prefixes))
     if terminal_status == "complete":
+        window_match = WINDOW_DURATION.fullmatch(str(observability.get("window", "")))
+        window_started = parse_timestamp(observability.get("window_started_at"))
+        window_ended = parse_timestamp(observability.get("window_ended_at"))
+        if not window_match or not window_started or not window_ended or window_ended <= window_started:
+            errors.append("observability requires a typed increasing terminal window")
+        else:
+            amount = int(window_match.group(1))
+            seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[window_match.group(2)]
+            if (window_ended - window_started).total_seconds() < seconds:
+                errors.append("observability window is shorter than declared")
+            if finished_at and window_started < finished_at:
+                errors.append("observability window cannot start before release execution finishes")
+            if updated and updated < window_ended:
+                errors.append("terminal receipt must be updated after the observation window")
         measured = {mapping(item).get("threshold_id"): mapping(item) for item in items(observability.get("checks"))}
         for threshold in thresholds:
             threshold_id = threshold.get("id")
@@ -241,6 +285,9 @@ def validate(receipt: dict[str, Any], gate: str, base_dir: Path | None = None) -
             if not check or not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or not items(check.get("evidence")):
                 errors.append(f"observability threshold {threshold_id} needs a measured value and evidence")
                 continue
+            observed_at = parse_timestamp(check.get("observed_at"))
+            if not observed_at or (window_started and observed_at < window_started) or (window_ended and observed_at > window_ended):
+                errors.append(f"observability threshold {threshold_id} needs a measurement inside the window")
             passed = value <= threshold["limit"] if threshold.get("direction") == "lte" else value >= threshold["limit"]
             if not passed:
                 errors.append(f"observability threshold {threshold_id} was not met")
@@ -274,13 +321,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt", type=Path)
     parser.add_argument("--gate", choices=("ready", "complete"), default="ready")
+    parser.add_argument("--workspace-root", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
     try:
         receipt = json.loads(args.receipt.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         print(f"invalid release receipt: {exc}", file=sys.stderr)
         return 2
-    errors = validate(receipt if isinstance(receipt, dict) else {}, args.gate, args.receipt.parent)
+    errors = validate(receipt if isinstance(receipt, dict) else {}, args.gate, args.receipt.parent, args.workspace_root.resolve())
     if errors:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)

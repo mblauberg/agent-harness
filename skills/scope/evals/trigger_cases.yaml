@@ -1,0 +1,12 @@
+positive:
+  - turn this vague product idea into an approved specification and acceptance criteria
+  - stress-test these requirements and resolve the one-way-door design decisions
+  - scope this milestone before any implementation begins
+negative:
+  - implement this already approved specification
+  - diagnose why the current build fails
+  - review this completed pull request
+boundary:
+  - the requirements are mostly agreed but one acceptance criterion is unresolved
+  - compare two architecture options before I approve the design
+  - estimate the work only after checking whether the scope is coherent

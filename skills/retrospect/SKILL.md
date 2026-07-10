@@ -19,6 +19,10 @@ failures, resource use and retained artifacts. Use only authorised sources.
 Mark a dimension `unknown` when evidence is absent; never infer success from a
 clean final answer.
 
+For substantial+ or repeated cycles, create
+`RETROSPECT.json` from the [template](templates/RETROSPECT.template.json) and validate with
+`scripts/validate_retrospect.py`. It is evidence, not diary or project truth.
+
 ## Review dimensions
 
 - outcome and acceptance-criteria success;
@@ -44,6 +48,10 @@ clean final answer.
    versioned eval cases and run the regression suite before claiming improvement.
 5. **Monitor** the next comparable cycle for recurrence, regressions, cost and
    new failure modes.
+
+`improved` requires an authorised intervention, passing regression gate and
+enough comparable later cycles meeting predeclared target and guard metrics.
+Underpowered or confounded evidence is `inconclusive`.
 
 Route unclear intent to `scope`, deterministic defects to `implement`,
 stochastic behaviour to `evaluate`, individual skill evidence to `skill-audit`,

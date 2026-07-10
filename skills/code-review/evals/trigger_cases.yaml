@@ -7,3 +7,7 @@ negative:
   - why does this service crash on startup
   - implement the approved feature using TDD
   - rewrite this README in clearer English
+boundary:
+  - review and fix until clean under an edit-authorised implement run
+  - inspect the design beyond the diff but keep source read-only
+  - review this tiny patch with only proportionate lenses

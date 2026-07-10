@@ -3,88 +3,60 @@ name: session
 description: Use when starting substantial work in any project, when a long session risks compaction or handoff to a fresh session, or when ending a session that changed project state. Covers session start reads, mid-session handoff files, session-end state updates, and graduating session findings into durable docs. Project-specific variants (e.g. project-session) override this skill in their own workspace.
 ---
 
-# session — long-session protocol (any project)
+# Session
 
-Sessions routinely outlive one context window. Continuity lives on disk, not
-in the conversation. Memory policy: `~/.agents/HARNESS.md` (two-tier,
-repo-first). A project variant skill wins on conflict.
+Continuity lives on disk, not in conversation. A project variant overrides
+this protocol. Defaults: state `docs/STATE.md` (about 120 lines), handoffs
+`docs/handoffs/`, friction `docs/FRICTION.md`, archive `docs/archive/`.
+Project instructions may override `STATE_FILE`, `HANDOFF_DIR`, `FRICTION_LOG`
+and `ARCHIVE_DIR`.
 
-## Knobs (project defaults; override in the project's AGENTS.md or variant skill)
+## Start
 
-- `{{STATE_FILE}}` — rolling snapshot, default `docs/STATE.md`, hard cap ~120 lines
-- `{{HANDOFF_DIR}}` — default `docs/handoffs/`
-- `{{FRICTION_LOG}}` — skill/process friction rows, default `docs/FRICTION.md`
-- `{{ARCHIVE_DIR}}` — consumed artefacts, default `docs/archive/`
+For substantial work, reopen the state file from disk; never trust injected
+state. Read open decisions touching the task and only relevant docs. Human
+gates remain unanswered until a human decides them.
 
-## Session start (substantial work only)
+## Checkpoint
 
-1. Read `{{STATE_FILE}}` **from disk** — never trust a harness-injected
-   snapshot of state/AGENTS content; injection races same-day edits.
-2. Scan the project's open-decision register (if any) for gates touching the
-   task. Never auto-answer a human gate.
-3. Read task-relevant docs only. Do not tour archives or old deliverables.
+Before compaction or handoff, write
+`HANDOFF-YYYY-MM-DD-<slug>.md` with:
 
-## Mid-session checkpoint (before compaction / when handing off)
+- `Status: active`, effort/leg IDs, superseded path and `Consumed-at: pending`;
+- original goal, disk-backed progress paths/commits, ordered remainder;
+- invariants and exact verification commands.
 
-Write `{{HANDOFF_DIR}}/HANDOFF-YYYY-MM-DD-<slug>.md`:
+Keep at most one active handoff per effort/leg. A fresh session resumes from
+the file. In the same update, move a consumed handoff to the archive, mark it
+consumed/time-stamped and index it; never delete it. Update the `work-map` for
+multi-session efforts.
 
-1. **Lifecycle fields** — `Status: active`, `Effort: <id|none>`,
-   `Leg: <id|none>`, `Supersedes: <path|none>`, `Consumed-at: pending`.
-   There is at most one active handoff per effort/leg.
-2. **Goal** — the original ask, verbatim where possible.
-3. **State on disk** — what is done and WHERE (paths, commits).
-4. **Remaining work** — ordered, concrete.
-5. **Invariants** — rules the next session must not break.
-6. **Verify** — exact commands proving the work is intact.
+Before checkpoint, load
+[context-hygiene.md](references/context-hygiene.md). Run its read-only audit
+when run directories, logs, handoffs or large agent-facing docs accumulate.
+Consolidate current state; never paste transcripts into handoffs.
 
-A fresh session resumes FROM THE FILE. Consumed handoff → move to
-`{{ARCHIVE_DIR}}` in the same update, set `Status: consumed` and `Consumed-at`,
-and index it (move, never delete). Multi-session efforts: also update the work
-map (`work-map` skill).
+## End after changed state
 
-Before the checkpoint, load [context-hygiene.md](references/context-hygiene.md)
-and run its read-only audit when the project has accumulated run directories,
-logs, handoffs or large agent-facing docs. Consolidate the current state before
-compaction; never paste a raw transcript into the handoff.
+1. **Graduate:** merge surviving behaviour-changing knowledge into its owner:
+   decision -> spec/ADR; domain fact -> context/README; convention -> project
+   `AGENTS.md`; moving status -> state. Reconcile contradictions, mark
+   supersession, refresh timestamps and archive over-cap history. Do not append
+   duplicates.
+2. **Close context:** retain minimal manifest, synthesis, verification and
+   failure receipts; archive consumed durable records. Remove only run-owned,
+   manifest-classified ephemeral files after proving no live pointer needs
+   them. Never delete unknown, pre-existing or user-owned untracked files.
+   Revalidate time-sensitive memory against its owning source or mark it stale.
+3. **Handoff version control:** run project checks and report the exact diff.
+   Commit only with human/project authority; never commit another actor's state.
+4. **Learn:** add skill/process friction to the friction log; either fix a
+   small issue now or leave an owned open row.
 
-## Session end (state changed → all steps)
+Periodic hygiene is opt-in and records owner, cadence, scope, resource cap,
+last success and disable condition. It may audit/archive classified artifacts
+and refresh indexes; it may not commit, deploy, communicate externally or
+delete unknown files. Staleness becomes visible state, not catch-up churn.
 
-1. **Graduate** (this is the pruning): for each finding this session, ask —
-   did it survive, and does it change future behaviour? Yes → the doc that
-   owns it; no → dies in the session log. Chooser: decision made →
-   spec/ADR · fact about the domain/system → context digest or the relevant
-   README · project convention agents must follow → project AGENTS.md ·
-   still-moving status → `{{STATE_FILE}}`. Graduation is **consolidation,
-   not append**: check the owning doc for an existing entry — update/merge
-   it, create only if novel, delete or mark superseded what the new fact
-   contradicts; date-stamp, newer wins. Refresh `{{STATE_FILE}}` timestamp;
-   prune over-cap lines to archive.
-2. **Context closure**: use the reference's three-tier classification. Retain
-   the minimal manifest/synthesis/verification/failure receipts; archive
-   consumed durable records; remove only ephemeral files created by this run
-   after confirming no live pointer needs them. Never delete unknown,
-   pre-existing or user-owned untracked files. Reconcile stale memory against
-   its owning source and mark unverifiable time-sensitive claims stale.
-3. **Version-control handoff**: run project checks and report the exact diff.
-   Commit only when the human or project policy explicitly authorises it;
-   otherwise leave a verified uncommitted handoff. Never commit someone else's
-   working state.
-4. **Learning loop**: friction, a gotcha, or a wrong/missing step in a skill →
-   one-line row in `{{FRICTION_LOG}}`; fix now (small dated edit) or leave
-   `open` for the next tuning pass. Fixing without logging hides the pattern.
-
-Periodic/background hygiene is opt-in. Record owner, cadence, scope, resource
-cap, last success and disable condition. It may audit, archive classified run
-artifacts and refresh indexes; it may not commit, deploy, message externally or
-delete unknown files. A missed/stale schedule becomes visible state, not an
-infinite catch-up loop.
-
-## Red flags
-
-- "I'll keep the plan in my head" → write the handoff file.
-- Durable knowledge in harness-private memory → invisible to other
-  agents/operators; put it in a repo doc. Project-scoped conventions ("this
-  repo uses pnpm") go in the project's AGENTS.md; private memory holds only
-  cross-project user preferences and facts no repo owns.
-- Session log pasted into the state file → graduate the conclusions, not
-  the transcript.
+Project knowledge belongs in project docs. Harness-private memory contains only
+cross-project user preferences; raw session logs never become state.

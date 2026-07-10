@@ -1,0 +1,12 @@
+positive:
+  - release this accepted change with rollout rollback and post-release checks
+  - prepare the version and promote the approved build to staging
+  - deploy this human-approved migration and observe it
+negative:
+  - implement the feature before acceptance
+  - decide what the release should contain
+  - review this unmerged patch
+boundary:
+  - check release readiness but do not promote anything
+  - prepare a rollback plan while production authority is still pending
+  - publish only after I explicitly approve the external action

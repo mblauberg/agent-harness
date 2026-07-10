@@ -5,9 +5,7 @@ description: Use when implementing an approved feature, bugfix, refactor, migrat
 
 # Implement
 
-Own an ordinary software implementation from an approved contract to a verified human
-handoff. Claude Code and Codex are equal operators; provider workflows are
-accelerators, not the lifecycle source of truth.
+Own the software profile from approved contract to verified human handoff.
 
 ## Entry gate
 
@@ -28,17 +26,16 @@ waives authority or gates and must name a normal follow-up reconciliation run.
 
 ## Loop
 
-1. Start `RUN.json` from [RUN.template.json](templates/RUN.template.json); follow
+1. Create the single canonical `delivery-run` receipt from
+   `../deliver/templates/RUN.template.json`, set profile `software`, and follow
    [run-contract.md](references/run-contract.md).
 2. Implement vertical slices with `tdd`. Use `diagnose` for discovered failures
    and `orchestrate` only when decomposition or independent coverage helps.
 3. Run deterministic checks and map every acceptance criterion to evidence.
    When scope requires assurance, run `evaluate` and attach its passing receipt.
 4. Invoke `code-review` read-only. Reviewer coverage follows the risk tier in
-   `HARNESS.md`: fresh-context native reviewers and the other primary are
-   load-bearing; xAI, Gemini and other bonus families run opportunistically in
-   parallel and never replace the primary pair. Record adapter and actual
-   provider family separately.
+   `HARNESS.md`: fresh native and other-primary reviews are load-bearing;
+   bonus families are opportunistic. Record adapter and actual family.
 5. Repair blocking findings, then repeat verification and independent review.
    Maximum two repair cycles. After that, or on scope/design drift, stop and
    return to the human or `scope` with evidence.
@@ -46,14 +43,16 @@ waives authority or gates and must name a normal follow-up reconciliation run.
    decisions changed. For substantial and higher runs, apply `session` context
    hygiene: refresh the recovery checkpoint, run the read-only audit, graduate
    durable findings and classify retained/ephemeral artifacts in `RUN.json`.
-7. Run `${AGENTS_HOME:-$HOME/.agents}/skills/implement/scripts/validate_run.py RUN.json`.
-   Hand off only when the machine gate
-   passes and unresolved blockers are empty.
+7. Validate with
+   `"${AGENTS_HOME:-$HOME/.agents}/skills/deliver/scripts/validate_delivery.py" \
+   .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes`.
+   Hand off only after the machine gate.
 8. Human final acceptance is mandatory. Production promotion is a separate,
    explicitly authorised `release` action. After acceptance, failure or
    cancellation, terminalise an orchestrated run with
    `${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/run_dir_finalize.py`;
-   awaiting-human runs remain active.
+   an outer orchestrator `awaiting-human` transport result remains active and
+   does not rename the canonical receipt state.
 
 ## Authority and completion
 
@@ -66,5 +65,5 @@ waives authority or gates and must name a normal follow-up reconciliation run.
   adjudicated, not voted.
 - Routine micro-edits need not create `RUN.json` unless requested. Substantial
   and higher changes do.
-- `awaiting-human` is a successful machine-gate state, not completion. Mark
-  `complete` only after explicit human acceptance.
+- `awaiting_acceptance` is the successful machine-gate state. Move the
+  canonical receipt to `accepted` only after explicit human acceptance.

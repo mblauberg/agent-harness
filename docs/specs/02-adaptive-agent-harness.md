@@ -1,0 +1,519 @@
+# Adaptive agent harness lifecycle
+
+Status: Implemented and machine verified; human acceptance pending
+Version: 1.0
+Date: 10 July 2026
+Chair: Codex
+Paired design peer: Claude Code, Fable 5 (Opus fallback)
+
+## 1. Authority and decision
+
+The human instruction on 10 July 2026 approved this specification, authorised
+the complete harness refactor and authorised a repository commit. It permits
+reversible repository changes, tests and documentation within the existing
+harness. It does not authorise provider login, external communications,
+deployment, live installation, destructive migration, Git push or release.
+
+This specification is grounded in
+[`docs/research/agentic-sdlc-harness-2026.md`](../research/agentic-sdlc-harness-2026.md).
+Research claims expire for decision purposes after 90 days or when a cited
+standard/provider interface materially changes, whichever occurs first.
+
+## 2. Problem
+
+The repository has a mature agentic software loop but its top-level claim is
+broader. Non-code delivery has no shared executable contract, design approval
+can be unbound from a design artifact, continuous improvement is prose-only,
+and skill telemetry risks reading private transcripts more broadly than the
+task requires. Security, observation, installation reconciliation and trigger
+evaluation also need stronger machine evidence.
+
+A large all-in-one workflow would increase context cost and couple every domain
+to Git. The target is a small stable kernel plus profiles and existing skills.
+
+## 3. Objectives
+
+- Make the lifecycle usable for software, research, analysis, documents and
+  high-stakes domain work.
+- Keep `implement` as the software entrypoint while removing Git assumptions
+  from the shared contract.
+- Bind scope, authority, design, evidence, review, acceptance, release,
+  observation and improvement through typed receipts.
+- Keep humans at consequential intent, one-way-door, disclosure, acceptance and
+  promotion gates.
+- Make harness improvement measurable, privacy-safe and regression-tested.
+- Keep Claude Code and Codex equal primaries; use other families as additive
+  dissent, never uncorroborated blockers.
+- Keep entrypoints compact and provider-neutral.
+
+## 4. Non-goals
+
+- Replacing domain skills with one generic prompt.
+- Mandating multiple agents for sequential or low-risk work.
+- Storing full provider transcripts as project truth.
+- Autonomous modification of the global harness.
+- Making optional providers, Herdr, Pi or the agent fabric prerequisites for a
+  normal run.
+- Replacing project-specific legal, compliance or release authority.
+- Reimplementing the separately specified shared agent fabric.
+
+## 5. Lifecycle model
+
+```text
+context
+  -> intent and risk
+  -> [HUMAN: material scope/design]
+  -> authorised delivery profile
+  -> deterministic evidence
+  -> behavioural/domain evaluation where needed
+  -> independent multi-lens review
+  -> bounded repair loop
+  -> [HUMAN: final acceptance]
+  -> [HUMAN: external release/promotion]
+  -> observation window
+  -> retrospective proposal and regression
+  -> next intent
+```
+
+A failed deterministic or review gate returns to delivery. A finding that
+changes accepted intent, authority or a one-way-door design returns to the
+human design gate. Observation can open `diagnose`, incident response or a new
+delivery cycle. No status may jump a missing gate.
+
+## 6. Target architecture
+
+### 6.1 Delivery kernel
+
+The delivery kernel is a domain-neutral contract, validator and stable state
+machine. It orchestrates existing capabilities; it does not contain domain
+expertise:
+
+```text
+draft -> scoped -> approved -> executing -> verifying -> reviewing
+      -> repairing -> awaiting_acceptance -> accepted
+      -> awaiting_release -> observing -> closed
+```
+
+`blocked`, `cancelled` and `degraded` are side states with reasons and recovery
+instructions. `degraded` never disguises a mandatory missing gate.
+
+`implement` remains the software profile and supported direct entry point. It
+uses the same canonical receipt; there is no parallel implementation schema or
+compatibility adapter. The
+pre-change held-out baseline scored 30/45 because every cross-domain delivery
+case lacked a lifecycle entrypoint; the `deliver` catalogue scored 45/45
+without displacing `implement`, `scope` or `release`. The public `deliver`
+entrypoint is therefore selected. Evidence:
+[`lifecycle-routing-baseline-2026-07-10.md`](../research/lifecycle-routing-baseline-2026-07-10.md).
+
+### 6.2 Profiles
+
+| Profile | Primary artifacts | Deterministic evidence | Judgement evidence | Release meaning |
+|---|---|---|---|---|
+| `software` | source, migration, config, docs | tests, build, types, lint, security scans, revision/diff | code review, UX/architecture rubric | merge/deploy/publish |
+| `research` | report, dataset, evidence map | source existence, citation/claim coverage, reproducible transforms | source quality, synthesis, uncertainty, dissent | share/publish/use decision |
+| `analysis` | report, model, table, visualisation | input manifest, calculation/recalculation, assumptions and sensitivity | interpretation, uncertainty and decision fit | share/use decision |
+| `document` | Markdown, DOCX, PDF, slides, sheet | schema, formulas, links, render/page checks | accuracy, readability, visual and audience fit | send/file/publish |
+| `agent-product` | prompts, tools, policies, eval sets, deployment config | unit/integration/security tests, version and permission checks | repeated behavioural evals, red team and policy review | staged activation and monitored operation |
+
+Projects may add a complete profile or strengthen a built-in profile through a
+digest-bound additive policy. The global registry loads first; a project policy
+can add evidence or measure requirements but cannot remove or reclassify global
+minima. New profiles compose globally classified artifact types; a new artifact
+type requires an explicit global surface-metadata decision. Profiles declare
+artifact types, deterministic and judgement gates,
+outcome/trajectory measures, stochastic minima, permitted security surfaces,
+boundary checks, evidence retention/redaction and release semantics.
+
+High-stakes work is an orthogonal safeguard, not a file type: it adds source
+authority, privacy, qualified-domain review and explicit human-action gates to
+any base profile.
+
+### 6.3 Skills remain composable
+
+`scope`, `prototype`, `tdd`, `diagnose`, `evaluate`, `code-review`, `release`,
+`session`, `work-map`, `orchestrate` and domain skills remain independently
+triggerable. The kernel (or a future `deliver` entrypoint) calls only what the
+risk and profile require. A tiny answer does not create a run directory merely
+to satisfy ceremony.
+
+## 7. Neutral run receipt
+
+The canonical receipt remains `.agent-run/<run-id>/RUN.json`, using the single
+public `delivery-run` schema v1.
+The single location avoids parallel lifecycle truth beside orchestration and
+agent-fabric receipts. JSON is used for
+validation; human-readable artifacts remain Markdown or native documents.
+
+The following excerpt omits unchanged fields from the full template:
+
+```yaml
+schema_version: 1
+contract: delivery-run
+run_id: DEL-001
+profile: research
+status: reviewing
+risk_tier: substantial
+intent:
+  artifact: docs/specs/example.md
+  digest: sha256:...
+  decision_owner: human-maintainer
+  approval:
+    status: approved
+    approver: human-maintainer
+    evidence: intent-approval
+authority:
+  approved_by: human-maintainer
+  evidence: authority-approval
+  allowed_source_paths: [docs/research/]
+  allowed_artifact_paths: [docs/, .agent-run/DEL-001/]
+  prohibited_actions: [external-publish, commit]
+  disclosure: local-only
+artifacts:
+  - id: report
+    path: docs/research/example.md
+    media_type: text/markdown
+    artifact_type: report
+    digest: sha256:...
+evidence:
+  - id: citation-coverage
+    kind: deterministic
+    gate: source-coverage
+    method: scripts/check-claims
+    status: pass
+    artifact_id: evidence-bundle
+    source_paths: [docs/research/]
+    result: {exit_code: 0, receipt_digest: 'sha256:...'}
+reviews:
+  - provider_family: anthropic
+    independent_of_authorship: true
+    lenses: [source-quality, synthesis, uncertainty]
+    status: pass
+human_gates:
+  acceptance: {status: pending}
+observation: {status: planned, window: {kind: event-count, minimum: 1}}
+```
+
+Required invariants:
+
+- an approved intent has a stable artifact or embedded statement, digest,
+  decision owner, approver and evidence reference;
+- every artifact has a path/URI, media type and digest or an explicit reason a
+  digest is impossible;
+- every gate links to evidence, not only a status;
+- authority may be narrowed by delegates but not broadened;
+- actual model/provider lineage is recorded when model work affects a gate;
+- reviewer independence is explicit;
+- optional-family failure records a reason but cannot fail a primary gate;
+- acceptance and release are separate;
+- a profile validator may add requirements but not remove kernel invariants.
+
+## 8. Design and risk gate
+
+Risk tiers remain `routine`, `substantial`, `crucial` and `terminal`.
+Substantial, crucial and terminal runs require an intent/design artifact.
+Crucial and terminal runs additionally require alternatives, threat/failure
+analysis, rollback or containment, unresolved decisions and named human
+approval; terminal keeps the strongest review and external-action gates in
+`config/risk-policy.json`.
+
+The validator rejects:
+
+- `approved` with a missing artifact, digest, approver or approval evidence;
+- an artifact modified after its recorded approval digest;
+- an unresolved one-way-door decision marked as implementation detail; and
+- a risk downgrade without human evidence.
+
+## 9. Verification and review
+
+### 9.1 Verification plan
+
+Each profile declares:
+
+- deterministic gates and commands/methods;
+- stochastic evaluators, datasets, repetitions and thresholds;
+- outcome and trajectory measures;
+- security checks selected from changed surfaces;
+- artifact rendering or source-boundary checks; and
+- evidence retention and redaction.
+
+Deterministic checks run first. Stochastic checks record model, prompt/rubric,
+dataset version, sample size, aggregation and raw-evidence location. A single
+model verdict cannot be labelled reproducible.
+
+### 9.2 Multi-lens review
+
+Review selects non-overlapping lenses from correctness, specification
+alignment, security, privacy, performance, reliability/concurrency, state/type
+boundaries, test/eval coverage, accessibility, evidence quality,
+readability/maintainability and structural simplification.
+
+Substantial work requires a fresh native reviewer and the other primary family.
+Crucial work also attempts an advisory family. Reviewers work independently
+before synthesis. The reducer adjudicates against evidence and records
+disagreement; no majority vote can override a deterministic failure or human
+authority.
+
+## 10. Privacy-safe skill telemetry
+
+`skill-audit` defaults to static skill analysis. Session analysis requires an
+explicitly named platform/root, time window, skill/task scope and disclosure
+destination. It must show the proposed scope before reading messages.
+
+Default aggregate telemetry contains counts, hashes, timestamps rounded to day,
+skill names and classified outcomes. It excludes full prompts, assistant
+content, secrets, file bodies, project names and absolute paths. Evidence
+snippets require explicit opt-in, are redacted locally and stay in a run-owned
+private artifact. Public reports use synthetic or paraphrased examples.
+
+The deterministic collector provides `--dry-run-scope`, bounded inputs,
+aggregate-only output and machine-readable provenance. Collection requires a
+matching human-approved scope receipt; before-read tests prove dry-run and
+unsupported-schema failures do not inspect source bodies. Unsupported schemas
+fail as `unknown`; they are never silently interpreted. Exact collection bounds
+stay only in the private approval receipt; the portable aggregate emits day
+buckets.
+
+## 11. Measurable retrospective
+
+Every substantial completed cycle may produce `RETROSPECT.json`. Crucial,
+escaped-defect and repeated-correction cycles require it. Human corrections are
+timestamped events linked to matching human evidence; technical repair counts
+remain a separate signal.
+
+Required fields are cycle/profile, evidence window, baseline or explicit
+absence reason, comparable run or absence reason, outcome and trajectory
+measures, root-cause clusters with evidence IDs, proposed changes, authority,
+regression gates, canonical destinations and next-cycle recurrence checks.
+
+A proposal is not `verified` until its regression gate passes. An improvement
+is not `effective` until a comparable later cycle measures recurrence and
+checks for regressions/cost transfer. The validator forbids raw transcript
+payloads and dated diary destinations. `no-change` is valid when evidence
+supports it.
+
+## 12. Security evidence
+
+Software and agent-product profiles select deterministic checks based on the
+changed surface:
+
+- secrets and sensitive-data scanning;
+- dependency/advisory and licence checks;
+- language SAST and unsafe-code rules;
+- IaC/container/config policy checks;
+- generated artifact and provenance checks; and
+- tests for authentication, authorisation and destructive boundaries.
+
+At substantial risk and above, any profile containing a software or
+agent-product artifact type maps every canonical artifact to its type-derived
+minimum surfaces; custom profile names cannot suppress required checks.
+
+Agent-product work also maps applicable OWASP agentic risks: goal hijack, tool
+misuse, excessive privilege, supply chain, code execution, memory/context
+poisoning, insecure inter-agent communication, cascading failures and human
+trust exploitation. `not_applicable` requires a reason. Tool/model review
+cannot substitute for missing deterministic evidence.
+
+## 13. Observation and incidents
+
+Release defines an observation contract before promotion:
+
+```yaml
+window: {kind: duration, minimum_seconds: 86400}
+signals: [availability, error-rate, task-success, policy-violations]
+thresholds:
+  availability: {direction: gte, limit: 99.9}
+  error-rate: {direction: lte, limit: 1}
+  task-success: {direction: gte, limit: 95}
+  policy-violations: {direction: eq, limit: 0}
+owner: human-maintainer
+rollback_or_containment: docs/runbooks/example.md
+sampling_and_privacy: aggregate-redacted
+close_condition: all thresholds pass for the window
+evidence_ids: [observation-report]
+```
+
+Non-production profiles use an appropriate analogue, such as a citation audit,
+recipient confirmation, registry acceptance or decision follow-up. Observation
+may be `not_applicable` only with profile justification. Incidents link the
+release, evidence window, containment, diagnosis and resulting regression case.
+
+## 14. Installation, precedence and portability
+
+Introduce a versioned installation manifest containing skill name, source
+digest, installed target, ownership and rename/supersession history. Installer
+operations support `plan`, `install`, `reconcile` and `uninstall-managed`.
+Unmanaged existing paths are never claimed or overwritten. Broken managed
+links and safe managed renames are repaired with receipts. The target-bound
+manifest hashes full skill-tree bytes and executable modes; link mutations roll
+back if its atomic commit fails. Conflicts stop for human resolution.
+
+Instruction precedence is one sentence across all entrypoints:
+
+> Platform/system policy and explicit human authority lead; the nearest
+> project instruction may specialise or strengthen the global harness but may
+> not silently broaden authority, weaken safety gates or redefine global
+> cross-project memory policy.
+
+Provider-specific adapters advertise capabilities. Skills depend on capability
+contracts, not vendor names. Herdr and the shared agent fabric are optional
+transports; filesystem artifacts and receipts remain portable truth.
+
+## 15. Context and artifact lifecycle
+
+Each run owns an artifact manifest with class, owner, retention and expiry:
+
+- `canonical`: curated project truth; never automatically deleted;
+- `evidence`: retained by profile/risk policy, redacted where required;
+- `handoff`: compacted or graduated when the effort closes;
+- `scratch`: run-owned and safe to remove after the recorded expiry; and
+- `external`: referenced, not copied unless licence and disclosure permit it.
+
+Session/context audit reports oversized entrypoints, stale state, duplicate
+canonical claims, orphaned scratch, expired logs and missing handoff promotion.
+It may delete only manifest-owned scratch under explicit cleanup authority.
+Skills above the body budget move stable detail to targeted references; core
+rules remain early in the entrypoint.
+
+## 16. Evaluation strategy
+
+Maintain three suites:
+
+1. contract tests for deterministic invariants;
+2. balanced routing/discipline evals with positive, negative and boundary cases
+   for every lifecycle/core skill; and
+3. independently authored held-out positive, negative and boundary scenarios
+   across software, research, analysis, documents, agent products and the
+   high-stakes overlay.
+
+Stochastic routing evals run multiple blind batch invocations on declared
+model/harness versions. Each invocation retains its input digest, actual model
+lineage and hash-bound parsed output; case selections reference that invocation.
+Report confidence intervals or raw numerator/denominator, not a single opaque
+score. Production/session examples enter a dataset only after privacy review,
+redaction and explicit approval. Capability cases and regression cases are
+labelled separately.
+
+## 17. Implementation plan
+
+| Phase | Status |
+|---|---|
+| 1 — evidence foundations | Implemented and tested |
+| 2 — neutral kernel | One public v1 contract for every profile |
+| 3 — bound gates | Implemented and tested |
+| 4 — managed evolution | Implemented; live installation not performed |
+| 5 — prove and accept | Deterministic proof complete; independent final review and human acceptance pending |
+
+### Phase 1 — evidence foundations
+
+- Make `skill-audit` static-first and privacy-gated; add the aggregate validator
+  and privacy contract tests, then the bounded scanner before declaring the
+  telemetry subleg complete.
+- Add `skills/retrospect/templates/RETROSPECT.template.json`, a validator and pass/fail fixtures.
+- Record the research baseline and this specification.
+
+### Phase 2 — neutral kernel
+
+- Add the neutral run schema, profile registry and kernel validator.
+- Add software, research, analysis, document and agent-product profiles plus
+  orthogonal high-stakes safeguards.
+- Make `implement` emit the canonical software-profile receipt and remove its
+  superseded receipt shape and validator.
+- Establish the routing baseline before deciding whether to expose `deliver`
+  as a new entry skill.
+
+### Phase 3 — bound gates
+
+- Add design artifact/digest/approver validation.
+- Add security evidence selection and observation contracts.
+- Connect incident and recurrence evidence.
+
+### Phase 4 — managed evolution
+
+- Add installation ownership/reconciliation.
+- Unify precedence wording.
+- Add trigger fixtures and cross-domain held-out evals.
+- Compact oversized skills and implement manifest-led run cleanup.
+
+### Phase 5 — prove and accept
+
+- Run regression and public-safety checks.
+- Exercise all profiles with reference runs and negative cases.
+- Obtain independent native, Fable/Opus and optional-family review.
+- Repair, record remaining degradation and request final human acceptance.
+
+## 18. Stability and rollback
+
+- `implement` remains directly triggerable and uses the canonical software
+  profile receipt.
+- `delivery-run` has one schema. Breaking changes require an explicit design
+  decision; the harness does not carry unused compatibility adapters.
+- Each phase is independently revertible; no migration deletes existing run
+  evidence or installed skills.
+- If a profile cannot prove its gates, it falls back to the existing specialised
+  skill and records `kernel_degraded`, never fabricates completion.
+
+## 19. Acceptance criteria
+
+The refactor is complete when:
+
+1. Reference runs for all five profiles pass the neutral validator and preserve
+   outcome/trajectory evidence.
+2. `implement` uses the canonical software profile and `release` consumes only
+   accepted canonical delivery receipts.
+3. Design approval without artifact/digest/approver fails.
+4. Transcript access without explicit scoped authority fails before content is
+   read; aggregate-only telemetry passes.
+5. A retrospective without baseline/comparator reasons, evidence-linked root
+   causes or recurrence state fails.
+6. Crucial software and agent-product runs cannot close without applicable
+   security evidence and independent primary-family review.
+7. Observation has a window, signals, thresholds, owner and containment path.
+8. Installer dry-run distinguishes managed, unmanaged, stale and conflicting
+   targets and never overwrites unmanaged content.
+9. All core skills have balanced trigger fixtures; held-out profile runs meet
+   declared thresholds across repeated trials.
+10. Public-safety, deterministic harness tests, clean-install tests and context
+    budgets pass.
+11. A Fable/Opus peer and a fresh Codex/native reviewer independently report no
+    unresolved blocking findings.
+12. The human accepts the completed lifecycle; release remains a separate gate.
+
+### Implementation evidence
+
+| Criterion | Evidence |
+|---|---|
+| 1–3 | `config/delivery-profiles.json`, `skills/deliver/`, `tests/test_delivery_contract.py` |
+| 4 | `collect_telemetry.py`, `test_skill_telemetry_collector.py`, privacy validator tests |
+| 5 | `skills/retrospect/templates/RETROSPECT.template.json`, `validate_retrospect.py`, adversarial receipt tests |
+| 6 | `config/security-evidence.json`, security selector and crucial-gate tests |
+| 7 | typed observation contract and strengthened `RELEASE.json` observation gate |
+| 8 | `manage_installation.py`, rename registry and managed-install tests |
+| 9 | balanced core fixtures, held-out dataset and repeated Fable routing receipts |
+| 10 | `scripts/check-harness`, public-release check, clean-install and context-budget suites |
+| 11 | HREF-002 fresh native and Fable review artifacts after the final source freeze |
+| 12 | Pending explicit human acceptance; no release or push is authorised |
+
+## 20. Known risks and controls
+
+| Risk | Control |
+|---|---|
+| Kernel becomes a bloated mega-skill | Stable state machine only; profiles and references hold depth; word-budget test. |
+| Generic gates weaken domain requirements | Profiles may strengthen only; high-stakes release is always human action. |
+| Receipt ceremony overwhelms small tasks | Risk threshold; routine one-shot work may use an ephemeral receipt or none. |
+| Telemetry leaks private work | Static-first, explicit roots/windows, aggregate default, local redaction and public-release checks. |
+| Evals optimise to their own fixtures | Held-out cases, repeated trials, mixed graders and human calibration. |
+| Multi-agent cost exceeds value | Decomposability gate, one writer and proportional lanes. |
+| Concurrent agent-fabric work conflicts | Unique files in Phase 1; shared entrypoints deferred until fabric ownership closes. |
+| Research becomes stale | Dated evidence cut-off, 90-day decision expiry and retrospective refresh proposal. |
+
+## 21. Remaining human gates
+
+The held-out baseline justifies `deliver`; the instruction to implement this
+approved specification entirely selects that named entrypoint. Non-trivial
+neutral runs persist receipts; tiny routine one-shot work remains exempt.
+Private telemetry collection has no implicit retention period: every approved
+scope names its own expiry.
+
+Final lifecycle acceptance remains pending. Runtime activation, live
+installation, provider login, push and release remain separate human decisions.
