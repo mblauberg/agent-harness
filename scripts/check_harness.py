@@ -17,6 +17,7 @@ RETIRED_NAMES = {
     "eng-docs",
     "multi-agent-orchestration",
     "skill-optimizer",
+    "vercel-react-best-practices",
     "wayfinder",
     "write-a-skill",
 }

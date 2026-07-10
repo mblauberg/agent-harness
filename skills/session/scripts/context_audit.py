@@ -107,7 +107,7 @@ def audit(
     for run_dir in sorted(run_dirs):
         rel = run_dir.relative_to(root).as_posix()
         required = ["MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"]
-        if run_dir.parent.name == "change":
+        if run_dir.parent.name in {"implement", "change"}:  # retain legacy run readability
             required.append("RUN.json")
         missing = [
             name

@@ -16,7 +16,7 @@ def frontmatter_name(path: Path) -> str:
 
 
 def test_lifecycle_skills_are_portable_and_named_for_their_directory():
-    for name in ("change", "code-review"):
+    for name in ("implement", "code-review"):
         skill = ROOT / "skills" / name / "SKILL.md"
         assert skill.is_file(), f"missing portable {name} skill"
         assert frontmatter_name(skill) == name
@@ -82,30 +82,30 @@ def test_dispatchers_default_to_their_checkout_not_a_home_install():
 
 
 @pytest.mark.skipif(
-    not all((WORKFLOWS / name).is_file() for name in ("change-run.js", "codebase-polish.js", "cross-verify.js")),
+    not all((WORKFLOWS / name).is_file() for name in ("implement-run.js", "codebase-polish.js", "cross-verify.js")),
     reason="optional local Claude workflow installation is absent",
 )
-def test_claude_workflows_use_router_and_safe_change_loop():
-    for name in ("change-run.js", "codebase-polish.js", "cross-verify.js"):
+def test_claude_workflows_use_router_and_safe_implement_loop():
+    for name in ("implement-run.js", "codebase-polish.js", "cross-verify.js"):
         text = (WORKFLOWS / name).read_text()
         assert "model-route" in text
         assert "claude-haiku-" not in text
-    change = (WORKFLOWS / "change-run.js").read_text()
-    assert "cycle <= 2" in change
-    assert "state: 'awaiting-human'" in change
-    assert "git checkout" not in change
-    assert "git restore" not in change
-    assert "git reset" not in change
-    assert "required: false" in change
-    assert "otherPrimaryRan" in change
-    assert "bonus availability never blocks" in change
-    assert "Copy the global change RUN.template.json" in change
-    assert "refusing the next dispatch" in change
-    assert "do not recreate or replace it" in change
-    assert "Review verdicts and dispatcher lineage" in change
-    assert "certification_eligible" in change
-    assert "Machine gate FAILED" in change
-    assert "state: 'failed'" in change
+    implementation = (WORKFLOWS / "implement-run.js").read_text()
+    assert "cycle <= 2" in implementation
+    assert "state: 'awaiting-human'" in implementation
+    assert "git checkout" not in implementation
+    assert "git restore" not in implementation
+    assert "git reset" not in implementation
+    assert "required: false" in implementation
+    assert "otherPrimaryRan" in implementation
+    assert "bonus availability never blocks" in implementation
+    assert "Copy the global implement RUN.template.json" in implementation
+    assert "refusing the next dispatch" in implementation
+    assert "do not recreate or replace it" in implementation
+    assert "Review verdicts and dispatcher lineage" in implementation
+    assert "certification_eligible" in implementation
+    assert "Machine gate FAILED" in implementation
+    assert "state: 'failed'" in implementation
 
 
 def test_read_only_review_allows_scoped_artifacts_but_forbids_unscoped_scratch():
@@ -130,6 +130,39 @@ def test_default_agent_run_directory_is_ignored_in_the_harness_repo():
 
 def test_context_hygiene_is_owned_by_session_and_machine_receipts():
     harness = " ".join((ROOT / "HARNESS.md").read_text().split())
-    change = (ROOT / "skills" / "change" / "references" / "run-contract.md").read_text()
+    implementation = (ROOT / "skills" / "implement" / "references" / "run-contract.md").read_text()
     assert "`session` owns context hygiene" in harness
-    assert "context_hygiene" in change
+    assert "context_hygiene" in implementation
+
+
+def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
+    assert not (ROOT / "skills" / "change").exists()
+    readme = (ROOT / "README.md").read_text()
+    assert "$change" not in readme
+    assert "implement · bounded delivery loop" in readme
+    assert readme.count("HUMAN ·") == 4
+
+
+def test_readme_catalogue_contains_every_portable_skill():
+    skills = {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
+    readme = (ROOT / "README.md").read_text()
+    catalogue = readme.split("<!-- skill-catalogue:start -->", 1)[1].split(
+        "<!-- skill-catalogue:end -->", 1
+    )[0]
+    listed = set(re.findall(r"`([a-z0-9-]+)`", catalogue))
+    ordered = re.findall(r"`([a-z0-9-]+)`", catalogue)
+    assert len(skills) == 29
+    assert listed == skills
+    assert ordered == sorted(ordered)
+
+
+def test_react_performance_skill_is_vendor_neutral_lean_and_vite_aware():
+    root = ROOT / "skills" / "react-performance"
+    skill = (root / "SKILL.md").read_text()
+    assert frontmatter_name(root / "SKILL.md") == "react-performance"
+    assert len(skill.split()) <= 500
+    assert "Vite" in skill
+    assert not (ROOT / "skills" / "vercel-react-best-practices").exists()
+    assert not any((root / name).exists() for name in ("AGENTS.md", "README.md", "metadata.json"))
+    assert not list((root / "rules").glob("js-*.md"))
+    assert (root / "references" / "vite.md").is_file()

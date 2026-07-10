@@ -28,16 +28,16 @@ surface cannot certify its independent review.
 
 ```text
 session -> scope -> human spec/one-way-door gate
-        -> change [tdd | diagnose]
+        -> implement [tdd | diagnose]
         -> deterministic verification
         -> evaluate when behaviour is stochastic/judgement-bearing
         -> independent review + bounded repair
         -> human acceptance
         -> release authority -> release + observe
-        -> diagnose/change on failure; evidence back to scope
+        -> diagnose/implement on failure; evidence back to scope
 ```
 
-`autonomous-lab` is the crash-safe run-until-STOP tier, not the default change
+`autonomous-lab` is the crash-safe run-until-STOP tier, not the default implementation
 loop. Non-software work uses the same shape: scope, authorised execution,
 evidence, independent review, human acceptance and any external-action gate.
 
@@ -97,7 +97,7 @@ confidence. `clean` is valid; a fluent unverified result is not.
 Operational depth is loaded only when triggered:
 
 - orchestration/routing/Herdr: `skills/orchestrate/`
-- ordinary change/review: `skills/change/`, `skills/code-review/`
+- ordinary implementation/review: `skills/implement/`, `skills/code-review/`
 - long sessions/context hygiene: `skills/session/`
 - release and stochastic assurance: `skills/release/`, `skills/evaluate/`
 - skill naming, promotion and token governance: `MAINTAINING.md`

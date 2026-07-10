@@ -1,0 +1,48 @@
+# Acknowledgements
+
+This file records intellectual and practical influences. Formal copyright and
+licence obligations live in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+and in licence files beside each component; this is credit, not the legal
+record.
+
+## Adapted or redistributed components
+
+- [Impeccable](https://github.com/pbakaus/impeccable) by Paul Bakaus is the
+  basis of `frontend-design` (Apache-2.0). That component also includes
+  [modern-screenshot](https://github.com/qq15725/modern-screenshot) and data
+  derived from [UI UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/v2.0.0/.claude/skills/ui-ux-pro-max/data), both MIT-licensed.
+- [Matt Pocock's `grill-me`](https://github.com/mattpocock/skills/blob/62f43a18177be6ec82da242e59ffbc490a4c22ea/skills/productivity/grill-me/SKILL.md) is the basis of
+  `grill-me` (MIT).
+- [Skill Optimizer](https://github.com/hqhq1025/skill-optimizer/tree/f10e5d85371f72841459493ed750f45ed9afa99d/skills/skill-optimizer) by hqhq1025 is
+  the basis of `skill-audit` (MIT).
+- [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent informed
+  and supplied adapted material in `tdd`, `diagnose` and `skill-authoring`
+  (MIT).
+- [Microsoft Playwright CLI](https://github.com/microsoft/playwright-cli/tree/main/skills/playwright-cli) is
+  the source of adapted material in `playwright` (Apache-2.0).
+- [Vercel agent-skills](https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices)
+  is the basis of the detailed rules in `react-performance` (MIT as declared
+  upstream).
+- [BMAD Labs](https://github.com/bmad-labs/skills/tree/main/skills/typescript-clean-code)
+  supplied the redistributed `typescript-clean-code` material (MIT).
+
+## Independently implemented influences
+
+- The agentic lifecycle was informed by Google's *The New SDLC With Vibe
+  Coding* [whitepaper](https://www.kaggle.com/whitepaper-the-new-SDLC-with-vibe-coding).
+  The implementation, authority model and receipts in this repository are
+  original harness work.
+- The independent-panel pattern is inspired by
+  [Andrej Karpathy's LLM Council](https://github.com/karpathy/llm-council).
+  No council code is incorporated.
+- The structural-review lens is inspired by Cursor Team Kit's
+  [Thermo-Nuclear Code Quality Review](https://github.com/cursor/plugins/blob/main/cursor-team-kit/skills/thermo-nuclear-code-quality-review/SKILL.md).
+  No plugin code is incorporated.
+- `tanstack-query` is an original synthesis from
+  [official TanStack Query documentation](https://tanstack.com/query/latest/docs/framework/react)
+  and source. [DeckardGer's TanStack agent skills](https://github.com/DeckardGer/tanstack-agent-skills)
+  prompted this clean-room replacement; no text or rule structure from that
+  skill is redistributed.
+
+Thank you to these authors and maintainers for making their work inspectable and
+reusable.

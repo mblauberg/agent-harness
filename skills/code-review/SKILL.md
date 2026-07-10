@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when reviewing a pull request, commit, diff, patch, refactor, migration, or implementation for defects, regressions, maintainability, architecture, state/type boundaries, concurrency, or structural simplification — including "review this code", "audit this PR", "look beyond the diff", and deep code-quality review. Not for reproducing a known failure (diagnose) or implementing fixes (tdd).
+description: Use when reviewing a pull request, commit, diff, patch, refactor, migration, or implementation for defects, regressions, maintainability, architecture, state/type boundaries, concurrency, or structural simplification — including "review this code", "audit this PR", "look beyond the diff", and deep code-quality review. Not for reproducing a known failure (diagnose) or an edit-authorised review/fix loop (implement).
 ---
 
 # Code review

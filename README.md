@@ -1,5 +1,8 @@
 # Agent Harness
 
+[![CI](https://github.com/mblauberg/agent-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mblauberg/agent-harness/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/github/license/mblauberg/agent-harness)](LICENSE)
+
 A portable, model-neutral operating layer for serious agent work. It turns a
 folder of skills into a governed agentic SDLC: scope first, execute within
 explicit authority, verify objectively, review independently, and keep humans
@@ -16,27 +19,70 @@ becoming availability dependencies.
 
 ## The lifecycle
 
-```text
-session -> scope -> human spec/design gate -> change [tdd | diagnose]
-        -> deterministic checks -> evaluate when judgement is stochastic
-        -> multi-lens independent review -> bounded repair loop
-        -> human acceptance -> authorised release -> observe
+```mermaid
+flowchart TB
+    S["session · context and hand-off"] --> P["scope · specification and acceptance criteria"]
+    P --> H1{{"HUMAN · approve specification, authority and one-way doors"}}
+    H1 --> I
+
+    subgraph LOOP["implement · bounded delivery loop"]
+        direction TB
+        I["implement · lifecycle owner"] --> T["tdd · vertical slice"]
+        T --> V["deterministic verification"]
+        V --> J{"Judgement-bearing behaviour?"}
+        J -- yes --> E["evaluate"]
+        J -- no --> R["code-review · independent multi-lens review"]
+        E --> R
+        R --> F{"Blocking finding?"}
+        F -- "repair · maximum two cycles" --> I
+        V -- failure --> D["diagnose"]
+        D --> I
+        I -. "delegate when useful" .-> O["orchestrate"]
+        I -. "update durable docs" .-> ED["engineering-docs"]
+        I -. "substantial-run hygiene" .-> SH["session"]
+        R -. "multi-agent coverage" .-> O
+    end
+
+    F -- no --> H2{{"HUMAN · final acceptance"}}
+    F -- "scope drift or repair cap" --> H4{{"HUMAN · decide rescope or stop"}}
+    H4 -- rescope --> P
+    H4 -- stop --> X["stopped with evidence"]
+    H2 --> H3{{"HUMAN · authorise production"}}
+    H3 --> L["release"] --> OBS["observe"]
+    OBS -- failure --> D
 ```
 
-The key constraint is one accountable chair and one active stage owner. Even in
-paired Claude/Codex mode, agents do not become two concurrent bosses and do not
-write overlapping source scopes.
+`implement` owns the inner loop and calls supporting skills only when the task
+needs them. The canonical lifecycle is [HARNESS.md](HARNESS.md); destructive,
+irreversible and external-communication actions retain separate human gates.
+One accountable chair and one active stage owner remain mandatory, including in
+paired Claude/Codex mode.
 
 ## What is included
 
 | Area | Skills and machinery |
 |---|---|
-| SDLC | `session`, `scope`, `change`, `tdd`, `diagnose`, `code-review`, `evaluate`, `release`, `work-map` |
+| SDLC | `session`, `scope`, `implement`, `tdd`, `diagnose`, `code-review`, `evaluate`, `release`, `work-map` |
 | Orchestration | `orchestrate`, `autonomous-lab`, model router, Herdr pane and paired-primary contracts |
 | Documentation | `engineering-docs`, `engineering-writing`, `academic-writing`, `legal-writing`, `humanise-text` |
 | Design and architecture | `prototype`, `frontend-design`, `d2-diagrams`, `uml-diagrams` |
 | Harness maintenance | `skill-authoring`, `skill-audit`, contract tests and public-release checks |
-| Specialist references | Playwright, TypeScript, React/Vercel and current web-stack conventions |
+| Specialist references | TanStack Query, Playwright, TypeScript, React/Next.js/Vite performance and current web-stack conventions |
+
+<details>
+<summary>Full portable skill catalogue (29)</summary>
+
+<!-- skill-catalogue:start -->
+`academic-writing`, `agy-headless`, `autonomous-lab`, `code-review`,
+`d2-diagrams`, `diagnose`, `engineering-docs`, `engineering-writing`,
+`evaluate`, `frontend-design`, `grill-me`, `humanise-text`, `implement`,
+`legal-writing`, `orchestrate`, `playwright`, `prototype`, `react-performance`,
+`release`, `scope`, `session`, `skill-audit`, `skill-authoring`,
+`tanstack-query`, `tdd`, `typescript-clean-code`, `uml-diagrams`,
+`web-stack-conventions`, `work-map`.
+<!-- skill-catalogue:end -->
+
+</details>
 
 The short constitution is [HARNESS.md](HARNESS.md). The rationale and extension
 model are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Skill maintainers
@@ -89,7 +135,7 @@ workflow matters:
 
 ```text
 $scope grill this feature into a spec and acceptance criteria
-$change implement the approved spec and review/fix until clean
+$implement take the approved spec through implementation, review and repair
 $code-review review beyond the diff using correctness, security and design lenses
 $orchestrate use paired Claude/Codex planning and independent verification
 $session checkpoint this run and compact project context
@@ -125,6 +171,13 @@ scripts/                  routers, checks and worktree helper
 skills/<name>/SKILL.md     progressively disclosed workflows
 tests/                    harness contract and regression tests
 ```
+
+## Acknowledgements
+
+This harness adapts and redistributes carefully credited open-source skills and
+draws conceptual inspiration from wider agent-workflow research. See
+[ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) for the human-readable credits and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the legal record.
 
 ## Licence
 

@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Use when implementing any feature, bugfix, refactor, or behavior change, before writing implementation code — "write a test", "TDD this", red-green-refactor. Covers vertical slices, integration-style tests through public interfaces, and mocking at boundaries.
+description: Use when writing the first failing test for a feature, bugfix, refactor, or behaviour change — "write a test", "TDD this", red-green-refactor. Covers vertical slices, public-interface tests and boundary mocking. Not the end-to-end delivery owner; use implement when verification, review, repair and human acceptance are also requested.
 ---
 
 # Test-Driven Development

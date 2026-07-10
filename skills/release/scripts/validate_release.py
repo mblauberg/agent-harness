@@ -18,17 +18,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def load_change_validator():
-    path = ROOT / "skills" / "change" / "scripts" / "validate_run.py"
-    spec = importlib.util.spec_from_file_location("release_change_validator", path)
+def load_implement_validator():
+    path = ROOT / "skills" / "implement" / "scripts" / "validate_run.py"
+    spec = importlib.util.spec_from_file_location("release_implement_validator", path)
     if not spec or not spec.loader:
-        raise RuntimeError("cannot load change validator")
+        raise RuntimeError("cannot load implement validator")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-CHANGE_VALIDATOR = load_change_validator()
+CHANGE_VALIDATOR = load_implement_validator()
 
 
 def mapping(value: Any) -> dict[str, Any]:

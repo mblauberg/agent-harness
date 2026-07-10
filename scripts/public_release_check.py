@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    "ACKNOWLEDGEMENTS.md",
     "README.md",
     "LICENSE",
     "MAINTAINING.md",
@@ -29,7 +30,8 @@ FORBIDDEN_PREFIXES = (
     ".agent-run/",
     ".worktrees/",
     ".pytest_cache/",
-    "skills/tanstack-query-best-practices/",  # upstream publishes no licence
+    "skills/tanstack-query-best-practices/",  # retired local skill must not return
+    "skills/vercel-react-best-practices/",  # retired vendor-branded skill name
 )
 HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/")
 SECRET_PATTERNS = {

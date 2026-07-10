@@ -1,0 +1,10 @@
+positive:
+  - write the failing regression test first, then make it pass
+  - TDD this behaviour one vertical slice at a time
+  - use red green refactor through the public interface
+  - add the first failing test before touching production code
+negative:
+  - implement this approved specification through review and final acceptance
+  - diagnose why this existing test fails without changing source
+  - review this pull request without implementing fixes
+  - help me decide the feature requirements

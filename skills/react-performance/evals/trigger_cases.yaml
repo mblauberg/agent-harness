@@ -1,0 +1,13 @@
+positive:
+  - profile why this React screen rerenders slowly and reduce the measured cost
+  - shrink the Next.js client bundle and remove route request waterfalls
+  - review this Server Component boundary for hydration and serialization overhead
+  - improve INP after profiling this expensive React interaction
+  - profile this Vite React app's slow startup, route chunks and render cost
+negative:
+  - redesign this dashboard's visual hierarchy and colour system
+  - fix TanStack Query invalidation after a mutation
+  - refactor this generic JavaScript utility for readability
+  - configure Vite 8 and interpret the Lighthouse 13 audit names
+  - tighten these generic TypeScript domain types and error unions
+  - make this frontend feel faster by simplifying its visual hierarchy

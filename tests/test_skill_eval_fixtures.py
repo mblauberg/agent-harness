@@ -11,7 +11,7 @@ def load(path: Path):
 
 
 def test_new_lifecycle_trigger_fixtures_have_positive_and_negative_cases():
-    for skill in ("change", "code-review"):
+    for skill in ("implement", "code-review", "react-performance", "tanstack-query", "tdd"):
         data = load(ROOT / "skills" / skill / "evals" / "trigger_cases.yaml")
         assert set(data) == {"positive", "negative"}
         assert len(data["positive"]) >= 3

@@ -32,12 +32,13 @@ least one of:
 - arithmetic/schema reconciliation;
 - human decision.
 
-## Evidence council (adapted from LLM Council)
+## Evidence council (inspired by LLM Council)
 
-Karpathy's LLM Council uses three stages: independent first opinions,
+Karpathy's LLM Council describes three stages: independent first opinions,
 anonymised peer ranking, then a chairman synthesis. Retain the independence,
 identity masking and chair; replace global ranking with claim-level evidence
-adjudication.
+adjudication. This is an independent workflow design; no LLM Council code is
+incorporated.
 
 1. **Blind first pass.** Each reviewer receives the same source packet plus a
    distinct lens. It cannot see other answers. Store each output separately.

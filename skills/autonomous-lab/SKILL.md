@@ -11,7 +11,7 @@ Use this stateful tier when work spans many agents and sessions, must survive
 crashes/compaction, and continues until the human changes `GOAL.md` to `STOP`.
 The lab combines a filesystem memory, a bounded orchestration loop and
 human-gated decision/release controls. It consumes `orchestrate` for each wave;
-ordinary software delivery stays in `change`.
+ordinary software delivery stays in `implement`.
 
 Claude Code and Codex are equal operators. Claude may use dynamic workflows and
 its Stop hook. An eligible GPT-5.6 Codex lead uses Ultra/native multi-agent to
@@ -29,7 +29,7 @@ Use only when all are true:
 - the human wants persistent run state and an explicit STOP gate;
 - build, disclosure, external-action and human-decision ceilings are known.
 
-Use `orchestrate` for a bounded fan-out or deep report, `change` for an approved
+Use `orchestrate` for a bounded fan-out or deep report, `implement` for an approved
 software change, and `diagnose` for tightly coupled debugging.
 
 ## Bootstrap

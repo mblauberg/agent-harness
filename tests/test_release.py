@@ -10,12 +10,12 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
-CHANGE_TEST_PATH = ROOT / "skills" / "change" / "tests" / "test_validate_run.py"
-CHANGE_SPEC = importlib.util.spec_from_file_location("change_fixture", CHANGE_TEST_PATH)
-assert CHANGE_SPEC and CHANGE_SPEC.loader
-CHANGE_FIXTURE = importlib.util.module_from_spec(CHANGE_SPEC)
-CHANGE_SPEC.loader.exec_module(CHANGE_FIXTURE)
-CHANGE_REVISION = CHANGE_FIXTURE.valid_run()["implementation"]["result_revision"]
+IMPLEMENT_TEST_PATH = ROOT / "skills" / "implement" / "tests" / "test_validate_run.py"
+IMPLEMENT_SPEC = importlib.util.spec_from_file_location("implement_fixture", IMPLEMENT_TEST_PATH)
+assert IMPLEMENT_SPEC and IMPLEMENT_SPEC.loader
+IMPLEMENT_FIXTURE = importlib.util.module_from_spec(IMPLEMENT_SPEC)
+IMPLEMENT_SPEC.loader.exec_module(IMPLEMENT_FIXTURE)
+CHANGE_REVISION = IMPLEMENT_FIXTURE.valid_run()["implementation"]["result_revision"]
 
 
 def valid_receipt(status="awaiting-promotion"):
@@ -111,7 +111,7 @@ def test_cli_ready_gate_requires_an_accepted_change_receipt(tmp_path):
     release_path = tmp_path / "RELEASE.json"
     release_path.write_text(json.dumps(value))
     assert MODULE.main(["--gate", "ready", str(release_path)]) == 1
-    change = CHANGE_FIXTURE.valid_run()
+    change = IMPLEMENT_FIXTURE.valid_run()
     change["phase"] = "complete"
     change["human_final"] = {"status": "approved", "approved_by": "human"}
     (tmp_path / "RUN.json").write_text(json.dumps(change))
@@ -122,14 +122,14 @@ def test_cli_ready_gate_requires_an_accepted_change_receipt(tmp_path):
         "certification_eligible": True, "read_only_guarantee": "enforced",
         "output_path": str(tmp_path / "other-primary.md"),
     }))
-    CHANGE_FIXTURE.write_scope_receipt(change, tmp_path)
+    IMPLEMENT_FIXTURE.write_scope_receipt(change, tmp_path)
     assert MODULE.main(["--gate", "ready", str(release_path)]) == 0
 
 
 def test_release_artifact_must_match_accepted_change_revision(tmp_path):
     value = valid_receipt()
     value["artifact"]["source_revision"] = "unrelated"
-    change = CHANGE_FIXTURE.valid_run()
+    change = IMPLEMENT_FIXTURE.valid_run()
     change["phase"] = "complete"
     change["human_final"] = {"status": "approved", "approved_by": "human"}
     (tmp_path / "RUN.json").write_text(json.dumps(change))
@@ -140,7 +140,7 @@ def test_release_artifact_must_match_accepted_change_revision(tmp_path):
         "certification_eligible": True, "read_only_guarantee": "enforced",
         "output_path": str(tmp_path / "other-primary.md"),
     }))
-    CHANGE_FIXTURE.write_scope_receipt(change, tmp_path)
+    IMPLEMENT_FIXTURE.write_scope_receipt(change, tmp_path)
     errors = MODULE.validate(value, "ready", tmp_path)
     assert "artifact.source_revision must match the accepted change result_revision" in errors
 

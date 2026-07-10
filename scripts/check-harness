@@ -38,7 +38,7 @@ fi
 
 "$PYTHON" -m pytest -q \
   tests \
-  skills/change/tests \
+  skills/implement/tests \
   skills/orchestrate/evals/test_cf_dispatch.py
 
 if [[ "$DOCTOR" == true ]]; then

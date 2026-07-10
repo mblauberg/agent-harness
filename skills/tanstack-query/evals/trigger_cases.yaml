@@ -1,0 +1,10 @@
+positive:
+  - refactor these React Query v5 keys and queryOptions factories
+  - debug why this TanStack Query mutation leaves stale cached data
+  - review our optimistic updates, invalidation and rollback behaviour
+  - fix the request waterfall and hydration boundary in this React Query screen
+negative:
+  - optimise this generic React component render path
+  - design a TanStack Router route tree
+  - add Redis caching to the backend
+  - model this form with ordinary local React state

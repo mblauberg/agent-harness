@@ -1,6 +1,6 @@
 ---
 name: diagnose
-description: "Use when debugging broken behaviour, errors, crashes, test failures, or performance regressions — 'diagnose this', 'debug this', 'why is this failing', 'it is not working'. Diagnosis is read-only/temporary-instrumentation by default; permanent repair requires explicit fix authority or an enclosing change run."
+description: "Use when debugging broken behaviour, errors, crashes, test failures, or performance regressions — 'diagnose this', 'debug this', 'why is this failing', 'it is not working'. Diagnosis is read-only/temporary-instrumentation by default; permanent repair requires explicit fix authority or an enclosing implement run."
 ---
 
 # Diagnose
@@ -55,7 +55,7 @@ Each probe maps to one prediction. **Change one variable at a time.** Prefer a d
 ## Phase 5 — Fix + regression test
 
 Enter this phase only when the user requested a fix or `diagnose` is nested
-inside an authorised `change` with matching write scope. Otherwise stop after
+inside an authorised `implement` run with matching write scope. Otherwise stop after
 root cause with the proposed regression-test seam, affected paths, confidence
 and repair handoff. Temporary instrumentation never implies permanent edits.
 

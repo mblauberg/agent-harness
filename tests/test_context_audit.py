@@ -48,14 +48,14 @@ def test_audit_reports_incomplete_run_index(tmp_path):
 
 
 def test_audit_reports_incomplete_claude_workflow_run(tmp_path):
-    run = tmp_path / ".work" / "wf" / "change" / "one"
+    run = tmp_path / ".work" / "wf" / "implement" / "one"
     run.mkdir(parents=True)
     (run / "MANIFEST.md").write_text("manifest")
     findings = context_audit.audit(tmp_path)
     assert "incomplete-run-index" in codes(findings)
 
 
-def test_change_workflow_run_requires_change_receipt(tmp_path):
+def test_legacy_change_workflow_run_still_requires_change_receipt(tmp_path):
     run = tmp_path / ".work" / "wf" / "change" / "one"
     run.mkdir(parents=True)
     for name in ("MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"):

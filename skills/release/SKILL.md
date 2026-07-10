@@ -1,6 +1,6 @@
 ---
 name: release
-description: Use when promoting an accepted software change to a shared, staged, or production environment — release readiness, versioning, migration sequencing, rollout, rollback, post-release verification, or “deploy this”. Requires explicit human promotion authority; not for implementation (change) or provider-specific deployment mechanics.
+description: Use when promoting an accepted software change to a shared, staged, or production environment — release readiness, versioning, migration sequencing, rollout, rollback, post-release verification, or “deploy this”. Requires explicit human promotion authority; not for implementation (`implement`) or provider-specific deployment mechanics.
 ---
 
 # Release

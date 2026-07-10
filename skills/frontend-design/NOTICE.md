@@ -25,3 +25,14 @@ modern-screenshot 4.7.0, distributed under the MIT License. See
 **Original work:** https://github.com/qq15725/modern-screenshot
 **Original author:** wxm
 **Copyright:** Copyright 2021-present wxm
+
+## UI UX Pro Max
+
+`references/ui-styles.csv`, `references/font-pairings.csv`,
+`references/color-palettes.csv` and `references/chart-types.csv` contain data
+derived from UI UX Pro Max v2.0.0, distributed under the MIT License. See
+`UI_UX_PRO_MAX_LICENSE`.
+
+**Original work:** https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/v2.0.0/.claude/skills/ui-ux-pro-max/data
+**Original author:** Next Level Builder
+**Copyright:** Copyright 2024 Next Level Builder

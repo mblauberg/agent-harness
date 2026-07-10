@@ -23,8 +23,8 @@ start/context -> scope -> approved specification -> authorised execution
 
 The lifecycle loops. A failed check returns to execution; a structural review
 finding may return to scope; production evidence may open a diagnosis and a new
-change. `autonomous-lab` adds crash-safe persistence for genuinely sprawling
-run-until-STOP work, but does not replace ordinary change control.
+implementation run. `autonomous-lab` adds crash-safe persistence for genuinely
+sprawling run-until-STOP work, but does not replace the ordinary delivery loop.
 
 Human approval is required for:
 

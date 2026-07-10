@@ -35,7 +35,7 @@ examples outside the hot receipt; link bounded failure cases and hashes.
    replace evidence.
 5. Compare against predeclared thresholds and baseline. A post-hoc threshold
    change is a new evaluation version with a reason and owner.
-6. Preserve representative failures and route product defects to `change`,
+6. Preserve representative failures and route product defects to `implement`,
    unclear requirements to `scope`, and operational regressions to `diagnose`.
 
 Validate the receipt with:
