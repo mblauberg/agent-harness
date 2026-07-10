@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PLATFORM=""
+
+usage() {
+  echo "usage: install-harness --platform <claude|codex>" >&2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --platform)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      PLATFORM="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+case "$PLATFORM" in
+  claude)
+    platform_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    instructions="$platform_home/CLAUDE.md"
+    ;;
+  codex)
+    platform_home="${CODEX_HOME:-$HOME/.codex}"
+    instructions="$platform_home/AGENTS.md"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+
+mkdir -p "$platform_home"
+"$ROOT/scripts/install-skills" --target "$platform_home/skills"
+
+bootstrap="Read and follow \`$ROOT/AGENTS.md\` and \`$ROOT/HARNESS.md\` before making orchestration, delegation, model-routing or memory decisions."
+
+if [[ ! -e "$instructions" && ! -L "$instructions" ]]; then
+  {
+    echo "# Agent harness"
+    echo
+    echo "$bootstrap"
+  } > "$instructions"
+  echo "instructions created=$instructions"
+elif grep -Fq "$ROOT/AGENTS.md" "$instructions" && grep -Fq "$ROOT/HARNESS.md" "$instructions"; then
+  echo "instructions existing=$instructions"
+else
+  echo "instructions preserved=$instructions" >&2
+  echo "add this line to that file:" >&2
+  echo "$bootstrap" >&2
+  exit 3
+fi

@@ -30,6 +30,8 @@ FORBIDDEN_PREFIXES = (
     ".agent-run/",
     ".worktrees/",
     ".pytest_cache/",
+    "skills/clean-writing/",  # rejected interim name; capability is natural-writing
+    "skills/humanise-text/",  # retired name; capability moved to natural-writing
     "skills/tanstack-query-best-practices/",  # retired local skill must not return
     "skills/vercel-react-best-practices/",  # retired vendor-branded skill name
 )

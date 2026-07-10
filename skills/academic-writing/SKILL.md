@@ -5,7 +5,7 @@ description: Use when drafting, rewriting, diagnosing, or polishing academic pro
 
 # Academic Writing
 
-Write academic prose like an engineer explaining research: precise, concrete, restrained, readable, and defensible. This skill covers theses and dissertations, journal and conference papers, literature reviews, abstracts, and reviewer rebuttals. It is self-contained and folds in the human-voice work of a humaniser and the plain-language discipline of a concision guide, tuned for academic writing; do not invoke `humanise-text` or other writing skills unless the user explicitly asks for them.
+Write academic prose like an engineer explaining research: precise, concrete, restrained, readable, and defensible. This skill covers theses and dissertations, journal and conference papers, literature reviews, abstracts, and reviewer rebuttals. It includes the relevant voice cleanup and plain-language discipline; do not invoke `natural-writing` or another writing skill unless the user explicitly asks for it.
 
 ## Quick Start
 

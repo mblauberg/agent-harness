@@ -10,8 +10,16 @@ def load(path: Path):
     return yaml.safe_load(path.read_text())
 
 
-def test_new_lifecycle_trigger_fixtures_have_positive_and_negative_cases():
-    for skill in ("implement", "code-review", "react-performance", "tanstack-query", "tdd"):
+def test_trigger_fixtures_have_positive_and_negative_cases():
+    for skill in (
+        "natural-writing",
+        "implement",
+        "code-review",
+        "react-performance",
+        "tanstack-query",
+        "tdd",
+        "retrospect",
+    ):
         data = load(ROOT / "skills" / skill / "evals" / "trigger_cases.yaml")
         assert set(data) == {"positive", "negative"}
         assert len(data["positive"]) >= 3

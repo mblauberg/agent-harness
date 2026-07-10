@@ -1,0 +1,12 @@
+positive:
+  - humanise this general email without changing any facts
+  - make this sound less like ChatGPT and more like my writing sample
+  - remove the robotic tone and padding from this personal statement
+  - match this mixed-purpose draft to my voice while preserving the citations
+  - clean up this salesy announcement without inventing product claims
+negative:
+  - rewrite this technical README in concise Australian English
+  - polish this thesis discussion without weakening the citations
+  - draft this Australian court affidavit
+  - refactor this TypeScript module for readability
+  - redesign this interface and improve its UX copy

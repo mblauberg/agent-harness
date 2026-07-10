@@ -32,7 +32,7 @@ only rules that change behaviour or prevent observed failures.
 
 The writing parity set shares a tiered anti-AI base. Structural changes to one
 of `engineering-writing`, `academic-writing` or `legal-writing` must be checked
-against the other two. `humanise-text` remains the general fallback.
+against the other two. `natural-writing` remains the general fallback.
 
 ## Promote and retire
 

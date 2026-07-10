@@ -142,10 +142,11 @@ def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
     readme = (ROOT / "README.md").read_text()
     assert "$change" not in readme
     assert "implement · bounded delivery loop" in readme
-    lifecycle = readme.split("## The lifecycle", 1)[1].split("## What is included", 1)[0]
+    lifecycle = readme.split("## Lifecycle", 1)[1].split("## Core workflows", 1)[0]
     diagrams = re.findall(r"```mermaid\n(.*?)\n```", lifecycle, re.DOTALL)
     semantics = "\n".join(diagrams)
     assert len(diagrams) >= 2
+    assert all("accTitle:" in diagram and "accDescr:" in diagram for diagram in diagrams)
     assert semantics.count("HUMAN ·") == 4
     for stage in (
         "session",
@@ -159,6 +160,7 @@ def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
         "rescope or stop",
         "release",
         "observe",
+        "retrospect",
     ):
         assert stage in semantics
 
@@ -191,6 +193,8 @@ def test_engineering_docs_requires_visual_diagram_qa():
     assert "one conceptual level per diagram" in quality
     assert "target's Mermaid version" in quality
     assert "temporary working directory" in quality
+    assert "accTitle" in quality and "accDescr" in quality
+    assert "Never draw a false transition" in quality
 
 
 def test_readme_catalogue_contains_every_portable_skill():
@@ -200,10 +204,29 @@ def test_readme_catalogue_contains_every_portable_skill():
         "<!-- skill-catalogue:end -->", 1
     )[0]
     listed = set(re.findall(r"`([a-z0-9-]+)`", catalogue))
-    ordered = re.findall(r"`([a-z0-9-]+)`", catalogue)
-    assert len(skills) == 29
+    assert len(skills) == 30
     assert listed == skills
-    assert ordered == sorted(ordered)
+    for name in skills:
+        assert f"(skills/{name}/SKILL.md)" in catalogue
+
+
+def test_readme_is_concise_public_facing_and_free_of_process_commentary():
+    readme = (ROOT / "README.md").read_text()
+    assert len(readme.split()) <= 1000
+    for retired_phrase in (
+        "Experimental:",
+        "made public for reuse",
+        "stay out of the geometry",
+        "The short constitution",
+        "Skill maintainers should start",
+        "Before publishing a fork",
+    ):
+        assert retired_phrase not in readme
+    assert "scripts/install-harness" in readme
+    assert "SECURITY.md" in readme
+    installer = ROOT / "scripts" / "install-harness"
+    assert installer.is_file()
+    assert installer.stat().st_mode & 0o111
 
 
 def test_react_performance_skill_is_vendor_neutral_lean_and_vite_aware():
@@ -216,3 +239,40 @@ def test_react_performance_skill_is_vendor_neutral_lean_and_vite_aware():
     assert not any((root / name).exists() for name in ("AGENTS.md", "README.md", "metadata.json"))
     assert not list((root / "rules").glob("js-*.md"))
     assert (root / "references" / "vite.md").is_file()
+
+
+def test_natural_writing_replaces_humanise_text_with_a_lean_general_fallback():
+    root = ROOT / "skills" / "natural-writing"
+    skill = (root / "SKILL.md").read_text()
+    patterns = (root / "references" / "patterns.md").read_text()
+    interface = (root / "agents" / "openai.yaml").read_text()
+    tracked_text = "\n".join(
+        path.read_text()
+        for path in (ROOT / "README.md", ROOT / "HARNESS.md", ROOT / "MAINTAINING.md")
+    )
+    assert frontmatter_name(root / "SKILL.md") == "natural-writing"
+    assert len(skill.split()) <= 500
+    assert not (ROOT / "skills" / "humanise-text").exists()
+    assert not (ROOT / "skills" / "clean-writing").exists()
+    assert "humanise-text" not in tracked_text
+    assert "clean-writing" not in tracked_text
+    assert "engineering-writing" in skill
+    assert "academic-writing" in skill
+    assert "legal-writing" in skill
+    assert "never proof of authorship" in patterns
+    assert "2026.eacl-long.307" in patterns
+    assert "2026.acl-long.2030" in patterns
+    assert "full-humanise" not in skill + patterns
+    assert "$natural-writing" in interface
+
+
+def test_retrospect_closes_the_quality_flywheel_without_log_bloat():
+    path = ROOT / "skills" / "retrospect" / "SKILL.md"
+    skill = path.read_text()
+    assert frontmatter_name(path) == "retrospect"
+    assert len(skill.split()) <= 500
+    for term in ("Benchmark", "Diagnose", "Verify", "Monitor"):
+        assert term in skill
+    assert "one dated log per run" in skill
+    assert "proposal-first and read-only by default" in skill
+    assert "human-approved scope" in skill

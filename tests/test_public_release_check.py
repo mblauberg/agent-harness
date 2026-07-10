@@ -29,6 +29,8 @@ def test_public_scan_rejects_private_paths_secrets_and_unlicensed_skill(tmp_path
         [
             "notes.md",
             "token.txt",
+            "skills/clean-writing/SKILL.md",
+            "skills/humanise-text/SKILL.md",
             "skills/tanstack-query-best-practices/SKILL.md",
             "skills/vercel-react-best-practices/SKILL.md",
         ],
@@ -36,7 +38,7 @@ def test_public_scan_rejects_private_paths_secrets_and_unlicensed_skill(tmp_path
     )
     assert any("personal absolute home path" in error for error in errors)
     assert any("possible GitHub token" in error for error in errors)
-    assert sum("forbidden tracked path" in error for error in errors) == 2
+    assert sum("forbidden tracked path" in error for error in errors) == 4
 
 
 def test_public_scan_accepts_portable_text_tree(tmp_path):
@@ -55,3 +57,15 @@ def test_public_tree_retains_ui_ux_pro_max_attribution():
     assert "UI_UX_PRO_MAX_LICENSE" in notice
     assert "UI UX Pro Max v2.0.0" in repository_notice
     assert "UI_UX_PRO_MAX_LICENSE" in repository_notice
+
+
+def test_public_tree_retains_natural_writing_attribution():
+    root = Path(__file__).resolve().parents[1]
+    licence = root / "skills" / "natural-writing" / "BLADER_HUMANIZER_LICENSE"
+    notice = (root / "skills" / "natural-writing" / "NOTICE.md").read_text()
+    repository_notice = (root / "THIRD_PARTY_NOTICES.md").read_text()
+    assert "Copyright (c) 2025 Siqi Chen" in licence.read_text()
+    assert "blader/humanizer" in notice
+    assert "BLADER_HUMANIZER_LICENSE" in notice
+    assert "Natural writing" in repository_notice
+    assert "BLADER_HUMANIZER_LICENSE" in repository_notice

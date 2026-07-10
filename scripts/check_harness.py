@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 RETIRED_NAMES = {
     "au-legal-writing-style",
     "clear-engineering-writing",
+    "clean-writing",
     "eng-docs",
+    "humanise-text",
     "multi-agent-orchestration",
     "skill-optimizer",
     "vercel-react-best-practices",
@@ -61,7 +63,7 @@ def skill_errors() -> list[str]:
 
 def stale_name_errors() -> list[str]:
     errors: list[str] = []
-    roots = [ROOT / "README.md", ROOT / "HARNESS.md", ROOT / "skills"]
+    roots = [ROOT / "README.md", ROOT / "HARNESS.md", ROOT / "MAINTAINING.md", ROOT / "skills"]
     for root in roots:
         paths = [root] if root.is_file() else root.rglob("*")
         for path in paths:

@@ -19,12 +19,18 @@ harness without rediscovering it from individual skills.
 start/context -> scope -> approved specification -> authorised execution
               -> objective verification -> independent review -> repair
               -> human acceptance -> authorised release -> observation
+              -> retrospective evidence -> next-cycle scope
 ```
 
 The lifecycle loops. A failed check returns to execution; a structural review
 finding may return to scope; production evidence may open a diagnosis and a new
-implementation run. `autonomous-lab` adds crash-safe persistence for genuinely
-sprawling run-until-STOP work, but does not replace the ordinary delivery loop.
+implementation run. `retrospect` closes the quality flywheel by benchmarking
+the completed trajectory, clustering root causes, proposing small
+evidence-backed harness changes, adding regression gates and monitoring the
+next comparable run. It promotes durable learning into canonical project docs
+instead of accumulating retrospective logs. `autonomous-lab` adds crash-safe
+persistence for genuinely sprawling run-until-STOP work, but does not replace
+the ordinary delivery loop.
 
 Human approval is required for:
 

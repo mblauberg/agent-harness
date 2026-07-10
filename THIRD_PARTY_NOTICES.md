@@ -63,3 +63,11 @@ licence and notice are retained as `skills/playwright/LICENSE.txt` and
 [BMAD Labs' TypeScript Clean Code](https://github.com/bmad-labs/skills/tree/main/skills/typescript-clean-code)
 under the MIT License, copyright 2025 BMAD Labs. Its terms are retained in
 `skills/typescript-clean-code/LICENSE`.
+
+## Natural writing
+
+`skills/natural-writing/` is a renamed and substantially modified distribution
+of [Siqi Chen's `humanizer`](https://github.com/blader/humanizer/tree/1b48564898e999219882660237fde01bf4843a0f),
+copyright 2025 Siqi Chen, under the MIT License. Its terms and modification
+notice are retained in `skills/natural-writing/BLADER_HUMANIZER_LICENSE` and
+`skills/natural-writing/NOTICE.md`.

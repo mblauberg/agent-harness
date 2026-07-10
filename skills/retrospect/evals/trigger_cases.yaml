@@ -1,0 +1,12 @@
+positive:
+  - the release is complete; retrospect on whether the harness helped or hindered
+  - review this agent cycle and turn repeated failures into durable improvements
+  - close the quality flywheel across skills, routing, docs, memory and evals
+  - assess our human rework and orchestration effectiveness after this long run
+  - run a post-cycle harness review before we scope the next iteration
+negative:
+  - end this session and clean up its scratch files
+  - audit why the natural-writing skill does not trigger
+  - build an eval benchmark for this stochastic agent
+  - diagnose this failing deployment without making changes
+  - implement the already approved refactor and run its tests

@@ -34,6 +34,7 @@ session -> scope -> human spec/one-way-door gate
         -> independent review + bounded repair
         -> human acceptance
         -> release authority -> release + observe
+        -> retrospect -> next-cycle scope
         -> diagnose/implement on failure; evidence back to scope
 ```
 
@@ -100,4 +101,5 @@ Operational depth is loaded only when triggered:
 - ordinary implementation/review: `skills/implement/`, `skills/code-review/`
 - long sessions/context hygiene: `skills/session/`
 - release and stochastic assurance: `skills/release/`, `skills/evaluate/`
+- post-cycle improvement: `skills/retrospect/`
 - skill naming, promotion and token governance: `MAINTAINING.md`

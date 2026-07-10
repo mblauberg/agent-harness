@@ -25,6 +25,9 @@ record.
   upstream).
 - [BMAD Labs](https://github.com/bmad-labs/skills/tree/main/skills/typescript-clean-code)
   supplied the redistributed `typescript-clean-code` material (MIT).
+- [Siqi Chen's `humanizer`](https://github.com/blader/humanizer/tree/1b48564898e999219882660237fde01bf4843a0f)
+  supplied the original workflow and early pattern inventory now substantially
+  rewritten as `natural-writing` (MIT).
 
 ## Independently implemented influences
 
