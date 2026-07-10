@@ -1,5 +1,7 @@
 from pathlib import Path
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -140,7 +142,55 @@ def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
     readme = (ROOT / "README.md").read_text()
     assert "$change" not in readme
     assert "implement · bounded delivery loop" in readme
-    assert readme.count("HUMAN ·") == 4
+    lifecycle = readme.split("## The lifecycle", 1)[1].split("## What is included", 1)[0]
+    diagrams = re.findall(r"```mermaid\n(.*?)\n```", lifecycle, re.DOTALL)
+    semantics = "\n".join(diagrams)
+    assert len(diagrams) >= 2
+    assert semantics.count("HUMAN ·") == 4
+    for stage in (
+        "session",
+        "scope",
+        "implement",
+        "tdd",
+        "deterministic verification",
+        "diagnose",
+        "evaluate",
+        "independent code review",
+        "rescope or stop",
+        "release",
+        "observe",
+    ):
+        assert stage in semantics
+
+
+@pytest.mark.skipif(shutil.which("mmdc") is None, reason="optional local Mermaid CLI is absent")
+def test_readme_mermaid_parses_with_available_local_renderer(tmp_path):
+    readme = (ROOT / "README.md").read_text()
+    diagrams = re.findall(r"```mermaid\n(.*?)\n```", readme, re.DOTALL)
+    for index, diagram in enumerate(diagrams):
+        source = tmp_path / f"diagram-{index}.mmd"
+        output = tmp_path / f"diagram-{index}.svg"
+        source.write_text(diagram)
+        subprocess.run(
+            ["mmdc", "-i", str(source), "-o", str(output)],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert output.is_file()
+
+
+def test_engineering_docs_requires_visual_diagram_qa():
+    skill_root = ROOT / "skills" / "engineering-docs"
+    skill = (skill_root / "SKILL.md").read_text()
+    quality = (skill_root / "references" / "diagram-quality.md").read_text()
+    assert "visually inspect" in skill
+    assert "narrow widths" in skill
+    assert '(cd "$out" && mmdc' in skill
+    assert "one conceptual level per diagram" in quality
+    assert "target's Mermaid version" in quality
+    assert "temporary working directory" in quality
 
 
 def test_readme_catalogue_contains_every_portable_skill():

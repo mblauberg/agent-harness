@@ -21,42 +21,52 @@ becoming availability dependencies.
 
 ```mermaid
 flowchart TB
-    S["session · context and hand-off"] --> P["scope · specification and acceptance criteria"]
-    P --> H1{{"HUMAN · approve specification, authority and one-way doors"}}
-    H1 --> I
-
-    subgraph LOOP["implement · bounded delivery loop"]
-        direction TB
-        I["implement · lifecycle owner"] --> T["tdd · vertical slice"]
-        T --> V["deterministic verification"]
-        V --> J{"Judgement-bearing behaviour?"}
-        J -- yes --> E["evaluate"]
-        J -- no --> R["code-review · independent multi-lens review"]
-        E --> R
-        R --> F{"Blocking finding?"}
-        F -- "repair · maximum two cycles" --> I
-        V -- failure --> D["diagnose"]
-        D --> I
-        I -. "delegate when useful" .-> O["orchestrate"]
-        I -. "update durable docs" .-> ED["engineering-docs"]
-        I -. "substantial-run hygiene" .-> SH["session"]
-        R -. "multi-agent coverage" .-> O
-    end
-
-    F -- no --> H2{{"HUMAN · final acceptance"}}
-    F -- "scope drift or repair cap" --> H4{{"HUMAN · decide rescope or stop"}}
-    H4 -- rescope --> P
-    H4 -- stop --> X["stopped with evidence"]
+    S["session · establish context"] --> P["scope · specification and acceptance criteria"]
+    P --> H1{{"HUMAN · approve specification and authority"}}
+    H1 --> I["implement · bounded delivery loop"]
+    I --> H2{{"HUMAN · final acceptance"}}
     H2 --> H3{{"HUMAN · authorise production"}}
-    H3 --> L["release"] --> OBS["observe"]
-    OBS -- failure --> D
+    H3 --> L["release"]
+    L --> O["observe"]
+```
+
+The implementation stage expands into a bounded repair loop:
+
+```mermaid
+stateDiagram-v2
+    direction TB
+    [*] --> TDD
+    state "tdd · vertical slice" as TDD
+    state "deterministic verification" as Verify
+    state "diagnose" as Diagnose
+    state "evaluate" as Evaluate
+    state "independent code review" as Review
+    state "ready for human acceptance" as Ready
+    state "HUMAN · rescope or stop" as Rescope
+
+    TDD --> Verify
+    Verify --> Diagnose: failure
+    Diagnose --> TDD
+    Verify --> Review: deterministic pass
+    Verify --> Evaluate: judgement-bearing pass
+    Evaluate --> Review
+    Review --> TDD: blocking · repair (max 2)
+    Review --> Ready: clean
+    Review --> Rescope: scope drift or repair cap
+    Ready --> [*]
+    Rescope --> [*]
 ```
 
 `implement` owns the inner loop and calls supporting skills only when the task
-needs them. The canonical lifecycle is [HARNESS.md](HARNESS.md); destructive,
-irreversible and external-communication actions retain separate human gates.
-One accountable chair and one active stage owner remain mandatory, including in
-paired Claude/Codex mode.
+needs them. Failed observation re-enters `diagnose` and `implement`, with
+evidence back to `scope`. Rescoping returns to the specification gate; stopping
+records the evidence. That gate also covers one-way-door decisions.
+Cross-cutting skills such as `orchestrate`, `engineering-docs` and `session`
+stay out of the geometry so the lifecycle remains legible. The canonical
+lifecycle is [HARNESS.md](HARNESS.md); destructive, irreversible and
+external-communication actions retain separate human gates. One accountable
+chair and one active stage owner remain mandatory, including in paired
+Claude/Codex mode.
 
 ## What is included
 
