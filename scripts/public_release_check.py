@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
     "README.md",
     "LICENSE",
-    "CONTRIBUTING.md",
+    "MAINTAINING.md",
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
     "docs/ARCHITECTURE.md",

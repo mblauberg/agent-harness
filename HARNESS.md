@@ -2,7 +2,7 @@
 
 Revised 2026-07-10. Project instructions override this file with the narrowest
 necessary layer. Maintainer rationale lives in `docs/ARCHITECTURE.md`; change
-rules live in `CONTRIBUTING.md`. Optimise **quality per human attention-hour**: delegate useful
+rules live in `MAINTAINING.md`. Optimise **quality per human attention-hour**: delegate useful
 depth, verify before handoff, and preserve curated project truth rather than raw
 agent chatter.
 
@@ -100,4 +100,4 @@ Operational depth is loaded only when triggered:
 - ordinary change/review: `skills/change/`, `skills/code-review/`
 - long sessions/context hygiene: `skills/session/`
 - release and stochastic assurance: `skills/release/`, `skills/evaluate/`
-- skill naming, promotion and token governance: `CONTRIBUTING.md`
+- skill naming, promotion and token governance: `MAINTAINING.md`

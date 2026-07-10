@@ -40,7 +40,7 @@ write overlapping source scopes.
 
 The short constitution is [HARNESS.md](HARNESS.md). The rationale and extension
 model are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Skill maintainers
-should start with [CONTRIBUTING.md](CONTRIBUTING.md).
+should start with [MAINTAINING.md](MAINTAINING.md).
 
 ## Principles
 

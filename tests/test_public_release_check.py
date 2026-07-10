@@ -7,7 +7,7 @@ def seed_required(root: Path) -> None:
     for relative in (
         "README.md",
         "LICENSE",
-        "CONTRIBUTING.md",
+        "MAINTAINING.md",
         "SECURITY.md",
         "THIRD_PARTY_NOTICES.md",
         "docs/ARCHITECTURE.md",

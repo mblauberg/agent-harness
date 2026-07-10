@@ -1,4 +1,4 @@
-# Contributing
+# Maintaining the harness
 
 ## Start with the contracts
 

@@ -73,6 +73,14 @@ def test_root_harness_checker_is_available():
     assert checker.stat().st_mode & 0o111
 
 
+def test_dispatchers_default_to_their_checkout_not_a_home_install():
+    dispatcher = (ROOT / "skills" / "orchestrate" / "scripts" / "cf_dispatch.sh").read_text()
+    cross_family = (ROOT / "skills" / "autonomous-lab" / "scripts" / "cross-family.sh").read_text()
+    assert 'AGENTS_ROOT="${AGENTS_HOME:-$HARNESS_ROOT}"' in dispatcher
+    assert 'MODEL_ROUTE="${AGENTS_HOME:-$HARNESS_ROOT}/scripts/model-route"' in cross_family
+    assert '${AGENTS_HOME:-$HOME/.agents}/scripts/model-route' not in dispatcher + cross_family
+
+
 @pytest.mark.skipif(
     not all((WORKFLOWS / name).is_file() for name in ("change-run.js", "codebase-polish.js", "cross-verify.js")),
     reason="optional local Claude workflow installation is absent",

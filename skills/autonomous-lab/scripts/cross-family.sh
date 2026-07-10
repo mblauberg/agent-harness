@@ -86,8 +86,9 @@ LABEL="review"          # used in output filenames
 #   5) run-agy-headless found on PATH (command -v);
 #   else leave EMPTY -> run_gemini() falls back to a direct `agy` call.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HARNESS_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CF_DISPATCH="$SCRIPT_DIR/../../orchestrate/scripts/cf_dispatch.sh"
-MODEL_ROUTE="${AGENTS_HOME:-$HOME/.agents}/scripts/model-route"
+MODEL_ROUTE="${AGENTS_HOME:-$HARNESS_ROOT}/scripts/model-route"
 _agy_env="${AGY_WRAPPER:-}"
 AGY_WRAPPER=""
 for _cand in \
