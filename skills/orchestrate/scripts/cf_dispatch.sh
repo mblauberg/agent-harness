@@ -242,6 +242,9 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
   effort_source=""
   effort_capability_source=""
   fallback_model=""
+  requested_model="$model"
+  capabilities_file=""
+  primary_model=""
   if [ -n "$ORCH_FAMILY" ] && ! valid_family "$ORCH_FAMILY"; then
     guarantee="none"
     status="invalid_orchestrator_family"
@@ -263,7 +266,7 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
         --out "$capabilities_file" >>"$diag" 2>&1; then
         rm -f "$capabilities_file"
       fi
-      route_cmd+=(--capabilities-file "$capabilities_file")
+      [ -f "$capabilities_file" ] && route_cmd+=(--capabilities-file "$capabilities_file")
     fi
     [ -n "$effort" ] && route_cmd+=(--effort "$effort")
     [ -n "$model" ] && route_cmd+=(--model "$model")
@@ -271,7 +274,7 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
       route_rc=$?
       route_fields="$(printf '%s' "$route_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("|".join(str(r.get(k,"")) for k in ("status","resolved_model","model_family","endpoint_provider","identity_source","requested_effort","effort","effort_source","effort_capability_source","effort_substitution","substitution","fallback_model")))')"
       IFS='|' read -r status model family endpoint identity requested_effort effort effort_source effort_capability_source effort_substitution substitution fallback_model <<<"$route_fields"
-      requested_model="$model"
+      [ -n "$requested_model" ] || requested_model="$model"
       if [ "$route_rc" -ne 0 ]; then
         guarantee="none"
         printf '%s\n' "$route_json" >>"$diag"
