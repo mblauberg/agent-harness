@@ -1,0 +1,77 @@
+# Static trigger + invariant cases for orchestrate.
+# Flat YAML-like schema consumed by check_skill_triggers.py.
+
+should_trigger_explicit:
+  - "use several subagents and web searches to be sure | explicit subagent plus source verification"
+  - "use many subagents and deep research | explicit fan-out plus research"
+  - "fan out a lot across this repo and review it multiple times | explicit wide orchestration"
+  - "use subagents in waves to review this evidence store | real prompt variant"
+  - "spawn one subagent per point, wait for all, then summarize with file references | codex-native trigger"
+  - "use Claude subagents for three read-only scouts; switch to a workflow only if it grows past a handful | claude-native trigger"
+  - "independent second opinion, read-only | second-opinion verifier"
+  - "READ-ONLY red-team second opinion | adversarial cross-check"
+  - "cross-check this with another model family | cross-family verification"
+  - "use cross-family models like Claude and Gemini alongside native subagents | cross-family plus native fan-out"
+  - "compare these model outputs and decide which is grounded | model-output synthesis"
+  - "use Claude ultracode style review-refine loops | workflow-style loop"
+  - "ultracode: audit every API route from multiple angles | workflow keyword opt-in"
+  - "run a workflow to fan out this migration across packages | explicit workflow request"
+  - "work as a Claude Code and Codex pair throughout this task | paired-primary trigger"
+
+should_trigger_inferred:
+  - "comprehensive source audit across hundreds of files with final synthesis | large read-heavy parallelisable audit"
+  - "high-stakes filing draft; verify every authority and arithmetic before I trust it | independent verification need"
+  - "long-running research task; keep scratchpads and resume state | long-horizon context management"
+  - "comprehensive multi-angle audit of two repos with cross-family second opinions | broad decomposable audit"
+
+should_not_trigger:
+  - "fix this typo in the README | small local edit"
+  - "rename this variable across the file | narrow edit"
+  - "what does this function return | simple explanation"
+  - "format this json file | mechanical formatting"
+  - "the docs mention codex, agy, cursor, and kiro | passive tool-name mention"
+  - "this is high stakes but answer this one factual question briefly | high-stakes alone without decomposition"
+  - "web search one known URL only | single-source lookup"
+
+ambiguous_confirm_first:
+  - "be thorough | seriousness alone is not decomposition"
+  - "audit this one short file | maybe one local pass is enough"
+  - "compare these two paragraphs | may not need model-output orchestration"
+
+doctrine_invariants:
+  - "Cross-family follows the HARNESS risk ladder"
+  - "No concurrent shared-state writes"
+  - "Workers write full output to files"
+  - "Objective checks outrank opinions"
+  - "You own the final call"
+  - "Discover current model/tool options at runtime"
+  - "default to fan-out"
+  - "native same-session subagents"
+  - "Use same-family CLI only for auth/preflight smoke tests"
+  - "cross-family broad review"
+  - "CROSS-FAMILY-NOT-RUN"
+  - "Final gate"
+  - "auth/preflight smoke tests"
+  - "Document update wave"
+
+reference_invariants:
+  - "trigger-boundary.md"
+  - "retrieval-and-tool-routing.md"
+  - "evaluation-and-observability.md"
+  - "debate-and-panels.md"
+  - "codex-subagents.md"
+  - "Claude-only layer"
+  - "read_only_guarantee"
+  - "status=ok"
+  - "same_family_forbidden"
+  - "invalid_orchestrator_family"
+  - "orchestrator_family_required"
+  - "cross_family=true"
+  - "P0/P1 findings triaged"
+  - "best_effort routes may scout but not certify"
+  - "source-anchoring"
+  - "MANIFEST"
+  - "FINAL_GATE"
+  - "dynamic-workflows.md"
+  - "ultracode"
+  - "paired-primary.md"

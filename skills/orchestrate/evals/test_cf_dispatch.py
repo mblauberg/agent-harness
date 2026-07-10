@@ -1,0 +1,805 @@
+#!/usr/bin/env python3
+"""Behaviour tests for cf_dispatch.sh with stubbed CLIs."""
+import json
+import os
+import signal
+import stat
+import subprocess
+import tempfile
+import textwrap
+import time
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+SCRIPT = HERE.parent / "scripts" / "cf_dispatch.sh"
+RUN_DIR_SCRIPT = HERE.parent / "scripts" / "run_dir_init.sh"
+DISPATCH_SCHEMA = {
+    "tool",
+    "adapter",
+    "model",
+    "requested_model",
+    "fallback_model",
+    "effort",
+    "requested_effort",
+    "effort_source",
+    "effort_capability_source",
+    "effort_substitution",
+    "substitution",
+    "status",
+    "exit",
+    "output_path",
+    "read_only_guarantee",
+    "orchestrator_family",
+    "provider_family",
+    "endpoint_provider",
+    "model_family",
+    "resolved_model",
+    "identity_source",
+    "certification_eligible",
+    "cross_family",
+}
+REQUIRED_GATE_ROWS = [
+    "P0/P1 findings triaged or explicitly deferred",
+    "status=ok, cross_family=true, and read_only_guarantee=enforced/oauth_safe_mode",
+    "CROSS-FAMILY-NOT-RUN reasons recorded",
+    "Advisory cross-family findings triaged and either verified or rejected",
+    "Document update wave run or explicitly N/A",
+    "Updated docs verified against current source/artifacts",
+]
+
+
+def write_executable(path, body):
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def run_dispatch_with_stub(stub, role="reviewer"):
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        write_executable(bin_dir / "claude", stub)
+        out = tmp / "out.txt"
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "claude",
+                "--orchestrator-family",
+                "codex",
+                "--role",
+                role,
+                "--out",
+                str(out),
+                "--prompt",
+                "Reply exactly OK",
+            ],
+            cwd=str(tmp),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        return result, record, out.read_text(encoding="utf-8") if out.exists() else ""
+
+
+def test_claude_other_primary_retries_opus_when_fable_is_unavailable():
+    stub = """\
+        #!/usr/bin/env bash
+        model=""
+        while [ $# -gt 0 ]; do
+          if [ "$1" = "--model" ]; then model="$2"; shift 2; else shift; fi
+        done
+        cat >/dev/null
+        if [ "$model" = "fable" ]; then
+          echo "model fable unavailable" >&2
+          exit 1
+        fi
+        [ "$model" = "opus" ] || exit 9
+        echo "OPUS OK"
+    """
+    result, record, output = run_dispatch_with_stub(stub, role="other-primary")
+    assert result.returncode == 0, result.stderr
+    assert record["resolved_model"] == "opus"
+    assert record["requested_model"] == "fable"
+    assert record["fallback_model"] == "opus"
+    assert record["identity_source"] == "runtime-provider-fallback"
+    assert "fable unavailable; used opus" in record["substitution"]
+    assert output.strip() == "OPUS OK"
+
+
+def test_claude_fallback_runs_after_oauth_safe_mode_model_failure():
+    stub = """\
+        #!/usr/bin/env bash
+        if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+          echo '{"loggedIn":true}'
+          exit 0
+        fi
+        model=""; safe=0; bare=0
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --model) model="$2"; shift 2 ;;
+            --safe-mode) safe=1; shift ;;
+            --bare) bare=1; shift ;;
+            *) shift ;;
+          esac
+        done
+        cat >/dev/null
+        if [ "$bare" = 1 ]; then echo "Not logged in" >&2; exit 1; fi
+        if [ "$safe" = 1 ] && [ "$model" = "fable" ]; then echo "model fable is not available" >&2; exit 1; fi
+        if [ "$safe" = 1 ] && [ "$model" = "opus" ]; then echo "SAFE OPUS"; exit 0; fi
+        exit 9
+    """
+    result, record, output = run_dispatch_with_stub(stub, role="other-primary")
+    assert result.returncode == 0, result.stderr
+    assert record["resolved_model"] == "opus"
+    assert record["read_only_guarantee"] == "oauth_safe_mode"
+    assert output.strip() == "SAFE OPUS"
+
+
+def test_help_exits_cleanly():
+    result = subprocess.run(
+        [str(SCRIPT), "--help"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0
+    assert "CF_DISPATCH_AGY_TIMEOUT" in result.stdout
+    assert "--doctor" in result.stdout
+
+
+def test_doctor_exits_cleanly():
+    result = subprocess.run(
+        [str(SCRIPT), "--doctor"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0
+    assert "cf_dispatch doctor" in result.stdout
+    assert "PATH=" in result.stdout
+    assert "CF_DISPATCH_ENABLE_AGY=" in result.stdout
+
+
+def test_missing_option_value_is_clean_error():
+    result = subprocess.run(
+        [str(SCRIPT), "--tool"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 2
+    assert "missing value for --tool" in result.stderr
+    assert "unbound variable" not in result.stderr
+
+
+def test_missing_prompt_file_is_clean_error():
+    result = subprocess.run(
+        [str(SCRIPT), "--tool", "agy", "--orchestrator-family", "codex", "--prompt-file", "/no/such/file"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 2
+    assert "cannot read prompt file: /no/such/file" in result.stderr
+
+
+def test_claude_oauth_fallback_after_bare_auth_failure():
+    stub = """\
+        #!/usr/bin/env bash
+        if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+          echo '{"loggedIn":true,"authMethod":"claude.ai"}'
+          exit 0
+        fi
+        for arg in "$@"; do
+          if [ "$arg" = "--bare" ]; then
+            echo "Not logged in · Please run /login" >&2
+            exit 1
+          fi
+        done
+        cat >/dev/null
+        echo "OK"
+    """
+    result, record, output = run_dispatch_with_stub(stub)
+    assert result.returncode == 0, result.stderr
+    assert record["status"] == "ok"
+    assert record["tool"] == "claude"
+    assert record["read_only_guarantee"] == "oauth_safe_mode"
+    assert output.strip() == "OK"
+
+
+def test_claude_oauth_fallback_uses_verifier_system_prompt():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        args_file = tmp / "claude.args"
+        write_executable(
+            bin_dir / "claude",
+            f"""\
+            #!/usr/bin/env bash
+            if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+              echo '{{"loggedIn":true,"authMethod":"claude.ai"}}'
+              exit 0
+            fi
+            printf '%s\\n' "$@" >> {args_file}
+            printf 'CLAUDE_CODE_DISABLE_WORKFLOWS=%s\\n' "$CLAUDE_CODE_DISABLE_WORKFLOWS" >> {args_file}
+            for arg in "$@"; do
+              if [ "$arg" = "--bare" ]; then
+                echo "Not logged in · Please run /login" >&2
+                exit 1
+              fi
+            done
+            cat >/dev/null
+            echo "OK"
+            """,
+        )
+        out = tmp / "out.txt"
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "claude",
+                "--orchestrator-family",
+                "codex",
+                "--out",
+                str(out),
+                "--prompt",
+                "Reply exactly OK",
+            ],
+            cwd=str(tmp),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode == 0, result.stderr
+        assert record["status"] == "ok"
+        args = args_file.read_text(encoding="utf-8")
+        assert "--system-prompt" in args
+        assert "--disable-slash-commands" in args
+        assert "non-interactive cross-family verifier" in args
+        assert "launch subagents" in args
+        assert "CLAUDE_CODE_DISABLE_WORKFLOWS=1" in args
+        assert "Read,Grep,Glob" in args.splitlines()
+        assert "Bash" not in args.splitlines()
+        assert "Edit" not in args.splitlines()
+        assert out.read_text(encoding="utf-8").strip() == "OK"
+
+
+def test_disabled_adapter_fails_closed_with_schema():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [str(SCRIPT), "--tool", "agy", "--model", "gemini-test", "--orchestrator-family", "codex", "--prompt", "Reply exactly OK"],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "unsafe_by_default"
+        assert record["read_only_guarantee"] == "none"
+        assert Path(record["output_path"]).exists()
+
+
+def test_default_failure_retains_only_the_declared_output_tempfile():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        temp_root = tmp / "tmp"
+        temp_root.mkdir()
+        env = os.environ.copy()
+        env["TMPDIR"] = str(temp_root)
+        result = subprocess.run(
+            [str(SCRIPT), "--tool", "agy", "--model", "gemini-test", "--orchestrator-family", "codex", "--prompt", "Review"],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        output = Path(record["output_path"])
+        assert result.returncode != 0
+        assert output.exists()
+        assert [path.resolve() for path in temp_root.iterdir()] == [output.resolve()]
+        output.unlink()
+
+
+def test_enabled_agy_passes_print_timeout():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        args_file = tmp / "agy.args"
+        write_executable(
+            bin_dir / "agy",
+            f"""\
+            #!/usr/bin/env bash
+            printf '%s\\n' "$@" > {args_file}
+            echo OK
+            """,
+        )
+        out = tmp / "out.txt"
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        env["CF_DISPATCH_ENABLE_AGY"] = "1"
+        env["CF_DISPATCH_AGY_TIMEOUT"] = "17s"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "agy",
+                "--model",
+                "gemini-test",
+                "--orchestrator-family",
+                "codex",
+                "--out",
+                str(out),
+                "--prompt",
+                "Reply exactly OK",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode == 0, result.stderr
+        assert record["status"] == "ok"
+        assert record["read_only_guarantee"] == "best_effort"
+        assert out.read_text(encoding="utf-8").strip() == "OK"
+        args = args_file.read_text(encoding="utf-8").splitlines()
+        assert "--print" in args
+        assert args[args.index("--print") + 1] == "Reply exactly OK"
+        assert "--print-timeout" in args
+        assert "17s" in args
+
+
+def test_orchestrator_family_is_required():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [str(SCRIPT), "--tool", "claude", "--prompt", "Reply exactly OK"],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "orchestrator_family_required"
+        assert record["cross_family"] is False
+
+
+def test_same_family_cli_is_forbidden_when_family_declared():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--orchestrator-family",
+                "codex",
+                "--prompt",
+                "Reply exactly OK",
+            ],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "same_family_forbidden"
+        assert record["read_only_guarantee"] == "none"
+        assert record["cross_family"] is False
+
+
+def test_cursor_model_provider_prevents_disguised_same_family_review():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        write_executable(bin_dir / "cursor-agent", "#!/usr/bin/env bash\necho OK\n")
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "cursor",
+                "--model",
+                "gpt-5.6-sol",
+                "--orchestrator-family",
+                "openai",
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert record["provider_family"] == "openai"
+        assert record["status"] == "same_family_forbidden"
+        assert record["cross_family"] is False
+
+
+def test_cursor_distinct_model_records_adapter_and_provider_family():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        args_file = tmp / "cursor.args"
+        write_executable(
+            bin_dir / "cursor-agent",
+            f"#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {args_file}\necho OK\n",
+        )
+        out = tmp / "out.txt"
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "cursor",
+                "--model",
+                "grok-4.5-xhigh",
+                "--orchestrator-family",
+                "openai",
+                "--out",
+                str(out),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode == 0
+        assert record["adapter"] == "cursor"
+        assert record["provider_family"] == "xai"
+        assert record["endpoint_provider"] == "cursor"
+        assert record["model_family"] == "xai"
+        assert record["resolved_model"] == "grok-4.5-xhigh"
+        assert record["certification_eligible"] is True
+        assert record["cross_family"] is True
+        assert "--trust" in args_file.read_text(encoding="utf-8").splitlines()
+
+
+def test_explicit_output_path_preserves_adapter_failure_diagnostics():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        write_executable(
+            bin_dir / "cursor-agent",
+            "#!/usr/bin/env bash\necho 'simulated adapter failure' >&2\nexit 9\n",
+        )
+        out = tmp / "review.txt"
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "cursor",
+                "--model",
+                "grok-4.5-xhigh",
+                "--orchestrator-family",
+                "openai",
+                "--out",
+                str(out),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert record["status"] == "error"
+        assert record["output_path"] == str(out)
+        assert "simulated adapter failure" in out.read_text(encoding="utf-8")
+
+
+def test_unwritable_output_path_cannot_certify_success():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        write_executable(
+            bin_dir / "codex",
+            """#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              printf '%s\n' '{"models":[{"slug":"gpt-5.6-sol","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"},{"effort":"ultra"}]}]}'
+              exit 0
+            fi
+            echo OK
+            """,
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [str(SCRIPT), "--tool", "codex", "--orchestrator-family", "anthropic", "--out", str(tmp / "missing" / "out.txt"), "--prompt", "Review"],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert record["status"] == "output_write_error"
+        assert record["certification_eligible"] is False
+        assert record["output_path"] == ""
+
+
+def test_resolved_role_effort_reaches_codex_adapter_and_receipt():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        args_file = tmp / "codex.args"
+        write_executable(
+            bin_dir / "codex",
+            f'''#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              printf '%s\n' '{{"models":[{{"slug":"gpt-5.6-sol","supported_reasoning_levels":[{{"effort":"high"}},{{"effort":"xhigh"}}]}}]}}'
+              exit 0
+            fi
+            printf '%s\\n' "$@" > {args_file}
+            cat >/dev/null
+            echo OK
+            ''',
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--orchestrator-family",
+                "anthropic",
+                "--role",
+                "critical-review",
+                "--out",
+                str(tmp / "out.txt"),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode == 0, result.stderr
+        assert record["requested_effort"] == "max"
+        assert record["effort"] == "xhigh"
+        assert record["effort_capability_source"] == "runtime-model-catalog"
+        args = args_file.read_text(encoding="utf-8").splitlines()
+        assert "model_reasoning_effort=xhigh" in args
+
+
+def test_interrupted_dispatch_cleans_internal_tempfiles():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        temp_root = tmp / "tmp"
+        bin_dir.mkdir()
+        temp_root.mkdir()
+        write_executable(bin_dir / "codex", "#!/usr/bin/env bash\nsleep 10\n")
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        env["TMPDIR"] = str(temp_root)
+        proc = subprocess.Popen(
+            [str(SCRIPT), "--tool", "codex", "--orchestrator-family", "anthropic", "--out", str(tmp / "out.txt"), "--prompt", "Review"],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        for _ in range(20):
+            if any(temp_root.iterdir()):
+                break
+            time.sleep(0.05)
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.communicate(timeout=5)
+        assert list(temp_root.iterdir()) == []
+
+
+def test_broker_adapter_requires_resolvable_provider_family():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "cursor",
+                "--orchestrator-family",
+                "openai",
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert record["status"] == "model_required_for_broker"
+        assert record["cross_family"] is False
+
+
+def test_manual_provider_override_is_not_supported():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "claude",
+                "--provider-family",
+                "google",
+                "--orchestrator-family",
+                "anthropic",
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert result.returncode == 2
+        assert "unknown arg: --provider-family" in result.stderr
+
+
+def test_invalid_orchestrator_family_fails_closed():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "claude",
+                "--orchestrator-family",
+                "Claude",
+                "--prompt",
+                "Reply exactly OK",
+            ],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "invalid_orchestrator_family"
+        assert record["cross_family"] is False
+
+
+def test_successful_output_with_auth_words_stays_ok():
+    stub = """\
+        #!/usr/bin/env bash
+        cat >/dev/null
+        echo "The string Not logged in appears in the artifact under review."
+    """
+    result, record, output = run_dispatch_with_stub(stub)
+    assert result.returncode == 0, result.stderr
+    assert record["status"] == "ok"
+    assert output.strip() == "The string Not logged in appears in the artifact under review."
+
+
+def test_chain_all_failed_uses_dispatch_schema():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--chain",
+                "agy:gemini-test kiro",
+                "--orchestrator-family",
+                "codex",
+                "--prompt",
+                "Reply exactly OK",
+            ],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["tool"] == "chain"
+        assert record["status"] == "all_failed"
+        assert record["read_only_guarantee"] == "none"
+
+
+def test_run_dir_init_force_flag_only_creates_final_gate():
+    with tempfile.TemporaryDirectory() as td:
+        result = subprocess.run(
+            [str(RUN_DIR_SCRIPT), "--force"],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert result.returncode == 0, result.stderr
+        run_dir = Path(result.stdout.strip())
+        if not run_dir.is_absolute():
+            run_dir = Path(td) / run_dir
+        assert (run_dir / "FINAL_GATE.md").exists()
+        receipt = json.loads((run_dir / "RUN_RECEIPT.json").read_text(encoding="utf-8"))
+        assert receipt["status"] == "active"
+        assert receipt["retention_policy"] == "capsule-plus-referenced-evidence"
+        assert (run_dir / "traces" / "README.md").exists()
+        gate = (run_dir / "FINAL_GATE.md").read_text(encoding="utf-8")
+        for row in REQUIRED_GATE_ROWS:
+            assert row in gate
+
+
+def test_run_dir_init_force_does_not_clobber_existing_manifest():
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td) / "existing"
+        run_dir.mkdir()
+        manifest = run_dir / "MANIFEST.md"
+        manifest.write_text("KEEP\\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(RUN_DIR_SCRIPT), str(run_dir), "--force"],
+            cwd=td,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert result.returncode == 0, result.stderr
+        assert manifest.read_text(encoding="utf-8") == "KEEP\\n"
+        assert (run_dir / "FINAL_GATE.md").exists()
+        assert (run_dir / "RUN_RECEIPT.json").exists()
+        gate = (run_dir / "FINAL_GATE.md").read_text(encoding="utf-8")
+        for row in REQUIRED_GATE_ROWS:
+            assert row in gate
+
+
+if __name__ == "__main__":
+    test_help_exits_cleanly()
+    test_doctor_exits_cleanly()
+    test_missing_option_value_is_clean_error()
+    test_missing_prompt_file_is_clean_error()
+    test_claude_oauth_fallback_after_bare_auth_failure()
+    test_claude_oauth_fallback_uses_verifier_system_prompt()
+    test_disabled_adapter_fails_closed_with_schema()
+    test_enabled_agy_passes_print_timeout()
+    test_orchestrator_family_is_required()
+    test_same_family_cli_is_forbidden_when_family_declared()
+    test_invalid_orchestrator_family_fails_closed()
+    test_successful_output_with_auth_words_stays_ok()
+    test_chain_all_failed_uses_dispatch_schema()
+    test_run_dir_init_force_flag_only_creates_final_gate()
+    test_run_dir_init_force_does_not_clobber_existing_manifest()
+    print("cf_dispatch behaviour tests: PASS")

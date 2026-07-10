@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOCTOR=false
+if [[ "${1:-}" == "--doctor" ]]; then
+  DOCTOR=true
+  shift
+fi
+[[ $# -eq 0 ]] || { echo "usage: check-harness [--doctor]" >&2; exit 2; }
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -x "${HARNESS_PYTHON:-}" ]]; then
+  PYTHON="$HARNESS_PYTHON"
+elif [[ -x "$HOME/miniforge3/bin/python" ]]; then
+  PYTHON="$HOME/miniforge3/bin/python"
+else
+  PYTHON="$(command -v python3)"
+fi
+
+cd "$ROOT"
+"$PYTHON" scripts/check_harness.py
+"$PYTHON" skills/orchestrate/evals/check_skill_triggers.py
+
+while IFS= read -r -d '' script; do
+  case "$script" in
+    *cross-family.sh) sh -n "$script" ;;
+    *) bash -n "$script" ;;
+  esac
+done < <(find skills -type f -name '*.sh' -print0)
+
+if command -v node >/dev/null 2>&1 && [[ -d "$HOME/.claude/workflows" ]]; then
+  while IFS= read -r -d '' workflow; do
+    node --check "$workflow" >/dev/null
+  done < <(find "$HOME/.claude/workflows" -maxdepth 1 -type f -name '*.js' -print0)
+fi
+
+"$PYTHON" scripts/public_release_check.py
+
+"$PYTHON" -m pytest -q \
+  tests \
+  skills/change/tests \
+  skills/orchestrate/evals/test_cf_dispatch.py
+
+if [[ "$DOCTOR" == true ]]; then
+  echo "environment doctor"
+  if host_bin="$(command -v codex-code-mode-host 2>/dev/null)" && [[ -x "$host_bin" ]]; then
+    echo "codex-code-mode-host=ok path=$host_bin"
+  else
+    echo "codex-code-mode-host=WARN not executable on PATH"
+    app_host="/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host"
+    [[ -x "$app_host" ]] && echo "codex-code-mode-host-candidate=$app_host"
+  fi
+  if command -v herdr >/dev/null 2>&1; then
+    herdr status server || true
+    herdr integration status || true
+  else
+    echo "herdr=WARN not found"
+  fi
+  "$ROOT/scripts/model-route" resolve --adapter claude --alias flagship --role lead || true
+  caps="$(mktemp)"
+  if "$ROOT/skills/orchestrate/scripts/codex_capabilities.py" --out "$caps"; then
+    "$ROOT/scripts/model-route" resolve --adapter codex --alias flagship --role lead --capabilities-file "$caps" || true
+  else
+    echo "codex-capabilities=WARN discovery failed"
+  fi
+  rm -f "$caps"
+fi

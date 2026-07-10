@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "release_id": "REL-000",
+  "updated_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "status": "planning",
+  "target": "staging|production|shared-environment",
+  "artifact": {
+    "id": "immutable-version-or-digest",
+    "source_revision": "git-sha-or-equivalent",
+    "change_receipt": "path/to/accepted/RUN.json"
+  },
+  "owner": "named-human-or-authorised-operator",
+  "release_authority": {
+    "approved_by": "",
+    "expires_at": "YYYY-MM-DDTHH:MM:SSZ",
+    "targets": [],
+    "artifact_ids": [],
+    "allowed_command_prefixes": [],
+    "secrets_access": "none",
+    "external_communication": false,
+    "irreversible_migration": false
+  },
+  "readiness_checks": [],
+  "migration": {
+    "required": false,
+    "type": "none",
+    "plan": "",
+    "order": "",
+    "backward_compatible": true,
+    "compatibility_window": "",
+    "recovery_point": "",
+    "approved_by": ""
+  },
+  "rollout": {
+    "plan": "",
+    "blast_radius_cap": "",
+    "stop_conditions": []
+  },
+  "rollback": {
+    "tested": false,
+    "plan": "",
+    "owner": "",
+    "time_bound": ""
+  },
+  "observability": {
+    "baseline": "",
+    "success_thresholds": [{"id": "error-rate", "direction": "lte", "limit": 0.01, "unit": "ratio"}],
+    "checks": []
+  },
+  "human_promotion": {
+    "status": "pending",
+    "approved_by": "",
+    "approved_at": ""
+  },
+  "execution": {
+    "commands": [],
+    "started_at": "",
+    "finished_at": ""
+  },
+  "rollback_execution": {
+    "commands": [],
+    "restoration_checks": [],
+    "started_at": "",
+    "finished_at": ""
+  },
+  "outcome": {
+    "status": "pending",
+    "evidence": [],
+    "follow_up_owner": ""
+  }
+}

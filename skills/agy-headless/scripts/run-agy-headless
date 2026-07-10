@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: run-agy-headless [options]
+
+Best-effort sandboxed wrapper around the agy (Antigravity / Gemini) CLI headless mode.
+
+Options:
+  --prompt TEXT        Prompt to send. If omitted, stdin is used.
+  --model MODEL        agy model override (see `agy models`; unknown slug falls back to Flash).
+  --strict-model       Require MODEL to match one line from `agy models`.
+  --include-dir PATH   Additional directory to allow access to. Repeatable.
+  --timeout DUR        Print-mode wait timeout (default agy: 5m; repo scope default: 15m).
+  --preflight          Check binary, model list, and a 20s sandboxed OK smoke prompt.
+  --force-large-prompt Allow prompts over 128 KiB.
+  --editable           Allow edits/commands (drops sandbox; adds --dangerously-skip-permissions).
+  --no-sandbox         Disable the sandbox without enabling edits.
+  -h, --help           Show this help.
+
+Default is best-effort read-only intent: sandbox on, prompt must forbid edits.
+It is not a certified no-tools/no-write verifier. Use --preflight before important runs.
+
+Examples:
+  run-agy-headless --prompt "Read-only: summarise this codebase. Do not edit."
+  run-agy-headless --strict-model --model "<exact line from agy models>" --include-dir ../shared --prompt "Audit for risks."
+  printf '%s' "Summarise this text" | run-agy-headless
+EOF
+}
+
+prompt=""
+model=""
+timeout=""
+preflight=false
+strict_model=false
+force_large_prompt=false
+editable=false
+sandbox=true
+declare -a include_dirs=()
+
+classify_failure() {
+  case "$1" in
+    *"Authentication required"*|*"Please sign in"*|*"not authenticated"*|*"not logged in"*) echo "auth_error" ;;
+    *"MODEL_CAPACITY_EXHAUSTED"*|*"RESOURCE_EXHAUSTED"*|*"429"*) echo "capacity_or_rate_limit" ;;
+    *"quota exceeded"*|*"insufficient_quota"*|*"usage limit reached"*) echo "quota_or_limit" ;;
+    *"timed out"*|*"timeout"*) echo "timeout" ;;
+    *) echo "cli_error" ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prompt)      prompt="${2:?missing value for --prompt}"; shift 2 ;;
+    --model)       model="${2:?missing value for --model}"; shift 2 ;;
+    --strict-model) strict_model=true; shift ;;
+    --include-dir) include_dirs+=("${2:?missing value for --include-dir}"); shift 2 ;;
+    --timeout|--print-timeout)     timeout="${2:?missing value for --timeout}"; shift 2 ;;
+    --preflight)   preflight=true; shift ;;
+    --force-large-prompt) force_large_prompt=true; shift ;;
+    --editable)    editable=true; sandbox=false; shift ;;
+    --no-sandbox)  sandbox=false; shift ;;
+    -h|--help)     usage; exit 0 ;;
+    --)            shift; [[ $# -gt 0 ]] && prompt="$*"; break ;;
+    *)             if [[ -z "$prompt" ]]; then prompt="$1"; else prompt+=" $1"; fi; shift ;;
+  esac
+done
+
+agy_bin="$(command -v agy || true)"
+if [[ -z "$agy_bin" && -x "$HOME/.local/bin/agy" ]]; then
+  agy_bin="$HOME/.local/bin/agy"
+fi
+if [[ -z "$agy_bin" ]]; then
+  echo "agy executable not found in PATH or ~/.local/bin" >&2
+  exit 127
+fi
+
+run_preflight() {
+  local smoke_timeout="${AGY_PREFLIGHT_TIMEOUT:-20s}" output rc
+  echo "agy_bin=$agy_bin"
+  if ! "$agy_bin" --help >/dev/null 2>&1; then
+    echo "status=cli_error step=help"
+    return 1
+  fi
+  echo "help=ok"
+  set +e
+  output="$("$agy_bin" models 2>&1)"
+  rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    echo "status=$(classify_failure "$output") step=models exit=$rc"
+    printf '%s\n' "$output"
+    return "$rc"
+  fi
+  echo "models=ok"
+  printf '%s\n' "$output"
+  set +e
+  output="$("$agy_bin" --sandbox --print-timeout "$smoke_timeout" -p "Read-only preflight. Do not inspect files. Reply exactly: OK" 2>&1)"
+  rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    echo "status=$(classify_failure "$output") step=smoke exit=$rc"
+    printf '%s\n' "$output"
+    return "$rc"
+  fi
+  if [[ "$output" != *"OK"* ]]; then
+    echo "status=unexpected_output step=smoke"
+    printf '%s\n' "$output"
+    return 1
+  fi
+  echo "status=ok step=smoke timeout=$smoke_timeout"
+}
+
+if [[ "$preflight" == true ]]; then
+  run_preflight
+  exit $?
+fi
+
+if [[ -z "${prompt// }" ]] && [[ ! -t 0 ]]; then
+  prompt="$(cat)"
+fi
+if [[ -z "${prompt// }" ]]; then
+  echo "A prompt is required via --prompt, positional text, or stdin." >&2
+  exit 64
+fi
+
+prompt_bytes="$(printf '%s' "$prompt" | wc -c | tr -d ' ')"
+if (( prompt_bytes > 131072 )) && [[ "$force_large_prompt" != true ]]; then
+  echo "Prompt is ${prompt_bytes} bytes; use paths/--include-dir or pass --force-large-prompt." >&2
+  exit 65
+elif (( prompt_bytes > 32768 )); then
+  echo "warning: prompt is ${prompt_bytes} bytes; prefer file paths over pasted corpus." >&2
+fi
+
+if [[ "$strict_model" == true ]]; then
+  if [[ -z "$model" ]]; then
+    echo "--strict-model requires --model." >&2
+    exit 64
+  fi
+  if ! "$agy_bin" models 2>/dev/null | grep -Fxq "$model"; then
+    echo "Model '$model' was not found in 'agy models'; refusing silent Flash fallback." >&2
+    exit 66
+  fi
+fi
+
+if [[ -z "$timeout" ]]; then
+  shopt -s nocasematch
+  if (( ${#include_dirs[@]} > 0 )) || [[ "$prompt" =~ (whole[[:space:]-]*repo|whole[[:space:]-]*repository|all[[:space:]-]*files|read[[:space:]]+the[[:space:]]+repo|repository[[:space:]]+audit|repo[[:space:]]+audit) ]]; then
+    timeout="${AGY_REPO_TIMEOUT:-15m}"
+  fi
+  shopt -u nocasematch
+fi
+
+cmd=("$agy_bin" -p "$prompt")
+[[ -n "$model" ]] && cmd+=(--model "$model")
+[[ "$sandbox" == true ]] && cmd+=(--sandbox)
+[[ "$editable" == true ]] && cmd+=(--dangerously-skip-permissions)
+[[ -n "$timeout" ]] && cmd+=(--print-timeout "$timeout")
+for dir in "${include_dirs[@]:-}"; do
+  [[ -n "$dir" ]] && cmd+=(--add-dir "$dir")
+done
+
+exec "${cmd[@]}"

@@ -1,0 +1,9 @@
+positive:
+  - review this pull request for regressions
+  - audit this patch and look beyond the diff
+  - inspect this refactor for structural simplification opportunities
+  - deep code-quality review of this migration
+negative:
+  - why does this service crash on startup
+  - implement the approved feature using TDD
+  - rewrite this README in clearer English

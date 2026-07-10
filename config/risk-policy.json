@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "tier_order": ["routine", "substantial", "crucial", "terminal"],
+  "factors": {
+    "blast_radius": {
+      "local": "routine",
+      "multi-module": "substantial",
+      "shared-system": "crucial",
+      "production": "terminal"
+    },
+    "reversibility": {
+      "easy": "routine",
+      "moderate": "substantial",
+      "hard": "crucial",
+      "irreversible": "terminal"
+    },
+    "data_sensitivity": {
+      "public": "routine",
+      "internal": "substantial",
+      "confidential": "crucial",
+      "regulated": "terminal"
+    },
+    "migration": {
+      "none": "routine",
+      "reversible": "substantial",
+      "stateful": "crucial",
+      "destructive": "terminal"
+    },
+    "oracle_quality": {
+      "strong": "routine",
+      "mixed": "substantial",
+      "weak": "crucial"
+    },
+    "external_effects": {
+      "none": "routine",
+      "reversible": "crucial",
+      "irreversible": "terminal"
+    },
+    "critical_surface": {
+      "none": "routine",
+      "public-contract": "substantial",
+      "auth-security": "crucial",
+      "privacy": "crucial",
+      "financial": "crucial",
+      "legal": "crucial",
+      "build-release-gate": "crucial",
+      "life-safety": "terminal"
+    }
+  }
+}

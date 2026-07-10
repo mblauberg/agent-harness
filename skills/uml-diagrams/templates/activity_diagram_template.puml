@@ -1,0 +1,40 @@
+@startuml
+' Template: activity diagram (requirements specification §7)
+' Models the flow of one clearly identified use case.
+
+title Activity Diagram — Use Case Name\nPackage: Package Name\nAuthor: Author Name
+
+skinparam shadowing false
+skinparam handwritten false
+skinparam defaultFontName Arial
+skinparam ArrowColor #333333
+skinparam BorderColor #333333
+skinparam activity {
+  BackgroundColor #FFF2B8
+  BorderColor #333333
+}
+
+|Primary Actor|
+start
+:Enter Request;
+
+|System|
+:Validate Request;
+if (Request Valid?) then (yes)
+  :Process Request;
+else (no)
+  :Display Error;
+  stop
+endif
+
+fork
+  :Store Result;
+fork again
+  |External System|
+  :Send Notification;
+end fork
+
+|System|
+:Show Confirmation;
+stop
+@enduml

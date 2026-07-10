@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Create and remove shared, project-local Git worktrees safely."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+from typing import Sequence
+
+
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+IGNORE_RULE = "/.worktrees/"
+
+
+class PolicyError(RuntimeError):
+    """A requested operation violates the shared-worktree contract."""
+
+
+def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if check and result.returncode != 0:
+        raise PolicyError(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return result
+
+
+def owning_root(repo: Path) -> Path:
+    result = git(repo.expanduser().resolve(), "rev-parse", "--show-toplevel")
+    return Path(result.stdout.strip()).resolve()
+
+
+def worktree_records(repo: Path) -> list[dict[str, object]]:
+    raw = subprocess.run(
+        ["git", "-C", str(repo), "worktree", "list", "--porcelain", "-z"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if raw.returncode != 0:
+        raise PolicyError(raw.stderr.decode(errors="replace").strip() or "git worktree list failed")
+    records: list[dict[str, object]] = []
+    current: dict[str, object] = {}
+    for field in raw.stdout.split(b"\0"):
+        if not field:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        key, _, value = field.partition(b" ")
+        name = key.decode(errors="replace")
+        current[name] = value.decode(errors="surrogateescape") if value else True
+    if current:
+        records.append(current)
+    return records
+
+
+def primary_root(repo: Path) -> Path:
+    root = owning_root(repo)
+    records = worktree_records(root)
+    if not records or records[0].get("bare") is True or not records[0].get("worktree"):
+        raise PolicyError("repository has no primary checkout root for project-local worktrees")
+    return Path(str(records[0]["worktree"])).resolve()
+
+
+def validate_name(name: str) -> None:
+    if not SAFE_NAME.fullmatch(name) or name in {".", ".."}:
+        raise PolicyError("worktree name must be 1-64 safe filename characters without slashes")
+
+
+def common_git_dir(root: Path) -> Path:
+    value = git(root, "rev-parse", "--git-common-dir").stdout.strip()
+    path = Path(value)
+    return (root / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def ensure_shared_root(root: Path) -> Path:
+    shared = root / ".worktrees"
+    if shared.is_symlink():
+        raise PolicyError(".worktrees must be a real directory, not a symlink")
+    tracked = git(root, "ls-files", "--", ".worktrees").stdout.strip()
+    if tracked:
+        raise PolicyError(".worktrees contains tracked paths; refusing to hide them")
+    shared.mkdir(mode=0o755, exist_ok=True)
+    if not shared.is_dir():
+        raise PolicyError(".worktrees is not a directory")
+
+    exclude = common_git_dir(root) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    existing = exclude.read_text(errors="replace").splitlines() if exclude.exists() else []
+    if IGNORE_RULE not in existing:
+        with exclude.open("a") as handle:
+            if exclude.stat().st_size:
+                handle.write("\n")
+            handle.write(IGNORE_RULE + "\n")
+    probe = git(root, "check-ignore", "--no-index", ".worktrees/.probe", check=False)
+    if probe.returncode != 0:
+        raise PolicyError("failed to protect .worktrees with a repository-local ignore rule")
+    return shared
+
+
+def create(args: argparse.Namespace) -> dict[str, object]:
+    if not args.human_authorised:
+        raise PolicyError("creating a worktree requires explicit human authorisation")
+    validate_name(args.name)
+    root = primary_root(args.repo)
+    shared = ensure_shared_root(root)
+    target = shared / args.name
+    if target.exists() or target.is_symlink():
+        raise PolicyError(f"worktree target already exists: {target}")
+
+    command = ["worktree", "add"]
+    if args.detach is not None:
+        command.extend(["--detach", str(target), args.detach])
+    elif args.existing_branch is not None:
+        command.extend([str(target), args.existing_branch])
+    else:
+        if not args.branch_authorised:
+            raise PolicyError("creating a branch requires separate explicit human authorisation")
+        command.extend(["-b", args.new_branch, str(target), args.start_point])
+    git(root, *command)
+    head_revision = git(target, "rev-parse", "HEAD").stdout.strip()
+    branch_result = git(target, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+    if branch_result.returncode not in {0, 1}:
+        raise PolicyError(branch_result.stderr.strip() or "cannot determine new worktree branch identity")
+    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else None
+    return {
+        "status": "created",
+        "name": args.name,
+        "primary_root": str(root),
+        "worktree_root": str(target),
+        "common_git_dir": str(common_git_dir(root)),
+        "head_revision": head_revision,
+        "branch": branch,
+        "detached": branch is None,
+    }
+
+
+def remove(args: argparse.Namespace) -> dict[str, object]:
+    if not args.human_authorised:
+        raise PolicyError("removing a worktree requires explicit human authorisation")
+    validate_name(args.name)
+    root = primary_root(args.repo)
+    shared = root / ".worktrees"
+    if shared.is_symlink():
+        raise PolicyError(".worktrees must be a real directory, not a symlink")
+    target = shared / args.name
+    registered = {
+        Path(str(item["worktree"])).resolve()
+        for item in worktree_records(root)
+        if item.get("worktree")
+    }
+    if target.resolve() not in registered:
+        raise PolicyError(f"not a registered project worktree: {target}")
+    dirty = git(target, "status", "--porcelain=v1", "--untracked-files=all").stdout
+    if dirty:
+        raise PolicyError("worktree is dirty; preserve or hand off its changes before removal")
+    git(root, "worktree", "remove", str(target))
+    return {"status": "removed", "name": args.name, "primary_root": str(root)}
+
+
+def list_worktrees(args: argparse.Namespace) -> dict[str, object]:
+    root = primary_root(args.repo)
+    return {"primary_root": str(root), "worktrees": worktree_records(root)}
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description=__doc__)
+    sub = result.add_subparsers(dest="command", required=True)
+
+    create_parser = sub.add_parser("create")
+    create_parser.add_argument("name")
+    create_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    create_parser.add_argument("--human-authorised", action="store_true")
+    create_parser.add_argument("--branch-authorised", action="store_true")
+    mode = create_parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--detach", metavar="REV")
+    mode.add_argument("--existing-branch", metavar="BRANCH")
+    mode.add_argument("--new-branch", metavar="BRANCH")
+    create_parser.add_argument("--start-point", default="HEAD")
+    create_parser.set_defaults(handler=create)
+
+    list_parser = sub.add_parser("list")
+    list_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    list_parser.set_defaults(handler=list_worktrees)
+
+    remove_parser = sub.add_parser("remove")
+    remove_parser.add_argument("name")
+    remove_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    remove_parser.add_argument("--human-authorised", action="store_true")
+    remove_parser.set_defaults(handler=remove)
+    return result
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    try:
+        receipt = args.handler(args)
+    except PolicyError as exc:
+        print(f"worktree policy: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(receipt, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

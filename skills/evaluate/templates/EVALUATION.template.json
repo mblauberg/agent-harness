@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "evaluation_id": "EVAL-000",
+  "updated_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "decision": "",
+  "status": "planned",
+  "dataset": {
+    "id": "",
+    "version": "",
+    "provenance": "",
+    "holdout_boundary": "",
+    "data_policy": ""
+  },
+  "runtime": {
+    "models": [],
+    "configuration": {"temperature": 0},
+    "seed_policy": "fixed",
+    "seeds": [],
+    "sample_policy": ""
+  },
+  "metrics": [
+    {"name": "quality", "direction": "gte", "threshold": 0.0}
+  ],
+  "safety_applicability": "required",
+  "safety_cases": [],
+  "baseline": {
+    "id": "",
+    "regression_budget": 0.0,
+    "metrics": []
+  },
+  "evaluator": {
+    "rubric_version": "",
+    "independent": false,
+    "disagreement_protocol": ""
+  },
+  "results": {
+    "metrics": [],
+    "failure_examples": [],
+    "excluded_cases": []
+  },
+  "conclusion": {
+    "status": "pending",
+    "limitations": [],
+    "evidence": []
+  }
+}

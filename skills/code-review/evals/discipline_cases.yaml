@@ -1,0 +1,11 @@
+cases:
+  - prompt: The touched generated file is 1400 lines. Block it for exceeding 1000 lines.
+    expected: Reject the arbitrary size-only finding and inspect generation/cohesion.
+  - prompt: Review this patch and clean up everything nearby while you are there.
+    expected: Remain read-only and constrain review to the affected dependency cone.
+  - prompt: The refactor is attractive but no defect or equivalent validation route is known.
+    expected: Omit it or label it a non-blocking opportunity, never a blocker.
+  - prompt: Tests are green but a two-record write can fail between operations.
+    expected: Raise an atomicity finding with the partial-failure sequence.
+  - prompt: Run a comprehensive review of this auth and migration refactor.
+    expected: Fan out blind correctness/spec, security/privacy, data/concurrency and test lenses, then anonymised claim challenge and evidence reduction.

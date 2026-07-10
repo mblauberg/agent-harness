@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""Validate and terminalise a bounded multi-agent run directory."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+
+TERMINAL = {"succeeded", "failed", "cancelled"}
+STATUSES = {"draft", "verified", "superseded", "retired"}
+RETENTION = {"capsule", "evidence", "ephemeral"}
+SCAFFOLD = {
+    "MANIFEST.md",
+    "RUN_RECEIPT.json",
+    "SYNTHESIS.md",
+    "FINAL_GATE.md",
+    "decisions.md",
+    "traces/README.md",
+}
+REQUIRED_GATES = {
+    "Worker artifacts listed in MANIFEST.md",
+    "Run terminalisation inputs and retention policy verified",
+    "Duplicate findings merged or superseded",
+    "Contradictions resolved or recorded unresolved",
+    "P0/P1 findings triaged or explicitly deferred",
+    "Objective checks run with command/source locators",
+    "Cross-family verifier record has status=ok, cross_family=true, and read_only_guarantee=enforced/oauth_safe_mode, or is marked scout only",
+    "CROSS-FAMILY-NOT-RUN reasons recorded when cross-family verification was unavailable",
+    "Advisory cross-family findings triaged and either verified or rejected",
+    "Document update wave run or explicitly N/A",
+    "Updated docs verified against current source/artifacts",
+    "High-stakes/low-oracle work has two family passes or CROSS-FAMILY-NOT-RUN reasons",
+    "No unauthorised shared-state writes",
+    "Run-owned panes/resources closed or explicitly handed off",
+    "Human-authority gates listed",
+    "Final claims have source/test/file anchors",
+    "Context hygiene classified: durable outputs retained; owned ephemeral payload archived/removed",
+}
+
+
+def _inside(root: Path, candidate: Path) -> bool:
+    try:
+        candidate.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _utc_timestamp(value: object) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
+    try:
+        datetime.fromisoformat(value[:-1] + "+00:00")
+        return True
+    except ValueError:
+        return False
+
+
+def _table(text: str, required: list[str]) -> list[dict[str, str]]:
+    lines = [line for line in text.splitlines() if line.strip().startswith("|")]
+    for index, line in enumerate(lines):
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells == required:
+            rows: list[dict[str, str]] = []
+            for row in lines[index + 2 :]:
+                values = [cell.strip() for cell in row.strip().strip("|").split("|")]
+                if len(values) != len(required):
+                    continue
+                rows.append(dict(zip(required, values)))
+            return rows
+    raise ValueError("required table header not found: " + ", ".join(required))
+
+
+def validate(run_dir: Path, terminal_status: str, reason: str | None) -> tuple[list[str], list[dict[str, str]]]:
+    errors: list[str] = []
+    run_dir = run_dir.resolve()
+    if terminal_status not in TERMINAL:
+        return ["status must be succeeded, failed, or cancelled"], []
+    if terminal_status in {"failed", "cancelled"} and not reason:
+        errors.append("failed/cancelled finalisation requires --reason")
+    for name in ("MANIFEST.md", "RUN_RECEIPT.json", "SYNTHESIS.md", "FINAL_GATE.md"):
+        if not (run_dir / name).is_file():
+            errors.append(f"missing {name}")
+    if errors:
+        return errors, []
+
+    try:
+        receipt = json.loads((run_dir / "RUN_RECEIPT.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"invalid RUN_RECEIPT.json: {exc}"], []
+    if not isinstance(receipt, dict):
+        return ["invalid RUN_RECEIPT.json: root must be an object"], []
+    if receipt.get("schema_version") != 1:
+        errors.append("receipt schema_version must be 1")
+    if not _utc_timestamp(receipt.get("created_at")):
+        errors.append("receipt created_at must be a UTC timestamp")
+    if receipt.get("status") not in {"active", terminal_status}:
+        errors.append(f"receipt status {receipt.get('status')!r} cannot transition to {terminal_status}")
+    if receipt.get("status") == "active" and receipt.get("closed_at") is not None:
+        errors.append("active receipt closed_at must be null")
+    if receipt.get("status") in TERMINAL and not _utc_timestamp(receipt.get("closed_at")):
+        errors.append("terminal receipt closed_at must be a UTC timestamp")
+    if not isinstance(receipt.get("owner"), str) or not receipt.get("owner"):
+        errors.append("receipt owner is required")
+    for field in ("owned_panes", "closed_panes", "handed_off_panes", "unclassified_paths", "pruned_paths"):
+        if not isinstance(receipt.get(field), list):
+            errors.append(f"receipt {field} must be a list")
+    for field in ("unclassified_paths", "pruned_paths"):
+        if isinstance(receipt.get(field), list) and any(not isinstance(item, str) for item in receipt[field]):
+            errors.append(f"receipt {field} entries must be strings")
+    if not receipt.get("retention_policy"):
+        errors.append("receipt retention_policy is required")
+    if receipt.get("owned_panes"):
+        errors.append("run-owned panes/resources must be closed or handed off before terminalisation")
+    for index, raw in enumerate(receipt.get("handed_off_panes", [])):
+        if not isinstance(raw, dict):
+            errors.append(f"receipt handed_off_panes[{index}] must be a structured handoff record")
+            continue
+        required = ("pane_id", "role", "provider_family", "model", "handoff_target", "owner", "status", "handed_off_at", "lease_generation")
+        if any(not raw.get(field) for field in required if field != "lease_generation"):
+            errors.append(f"receipt handed_off_panes[{index}] is missing identity or handoff evidence")
+        if raw.get("status") != "acknowledged" or not _utc_timestamp(raw.get("handed_off_at")):
+            errors.append(f"receipt handed_off_panes[{index}] must be acknowledged with UTC timestamp")
+        if not isinstance(raw.get("lease_generation"), int) or isinstance(raw.get("lease_generation"), bool) or raw.get("lease_generation") < 0:
+            errors.append(f"receipt handed_off_panes[{index}].lease_generation must be non-negative")
+        evidence_value = raw.get("evidence_path")
+        evidence_path = run_dir / evidence_value if isinstance(evidence_value, str) else run_dir / "missing"
+        if not evidence_path.is_file() or hashlib.sha256(evidence_path.read_bytes()).hexdigest() != raw.get("evidence_sha256"):
+            errors.append(f"receipt handed_off_panes[{index}] requires matching provider evidence")
+    for index, raw in enumerate(receipt.get("closed_panes", [])):
+        if not isinstance(raw, dict):
+            errors.append(f"receipt closed_panes[{index}] must be a structured closure record")
+            continue
+        required = ("pane_id", "role", "provider_family", "model", "closed_by", "closed_at")
+        if any(not raw.get(field) for field in required) or raw.get("status") != "verified" or not _utc_timestamp(raw.get("closed_at")):
+            errors.append(f"receipt closed_panes[{index}] requires verified identity and closure evidence")
+        evidence_value = raw.get("evidence_path")
+        evidence_path = run_dir / evidence_value if isinstance(evidence_value, str) else run_dir / "missing"
+        if not evidence_path.is_file() or hashlib.sha256(evidence_path.read_bytes()).hexdigest() != raw.get("evidence_sha256"):
+            errors.append(f"receipt closed_panes[{index}] requires matching provider evidence")
+
+    pair = receipt.get("pair")
+    if not isinstance(pair, dict):
+        errors.append("receipt pair must be an object")
+    elif pair.get("mode") not in {"solo", "paired-primary"}:
+        errors.append("receipt pair.mode must be solo or paired-primary")
+    elif pair.get("mode") == "paired-primary":
+        if {pair.get("chair_family"), pair.get("peer_family")} != {"anthropic", "openai"}:
+            errors.append("paired receipt requires anthropic/openai chair and peer")
+        if not pair.get("chair_id") or not pair.get("peer_id") or pair.get("chair_id") == pair.get("peer_id"):
+            errors.append("paired receipt requires distinct chair_id and peer_id")
+        if pair.get("status") not in {"complete", "degraded"}:
+            errors.append("paired receipt must be complete or degraded at terminalisation")
+        if pair.get("status") == "degraded" and not pair.get("degradation_reason"):
+            errors.append("degraded paired receipt requires degradation_reason")
+        for field in ("lease_generation", "checkpoint_generation"):
+            value = pair.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"paired receipt {field} must be non-negative")
+        if not pair.get("current_stage") or pair.get("in_flight") != []:
+            errors.append("paired receipt needs a current_stage and empty in_flight at terminalisation")
+        if not isinstance(pair.get("handoff_generation"), int) or isinstance(pair.get("handoff_generation"), bool):
+            errors.append("paired receipt handoff_generation must be an integer")
+        artifacts = pair.get("assignment_artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            errors.append("paired receipt requires assignment_artifacts")
+        else:
+            artifact_paths: list[str] = []
+            for raw in artifacts:
+                value = raw.get("path") if isinstance(raw, dict) else None
+                digest = raw.get("sha256") if isinstance(raw, dict) else None
+                path = Path(value) if isinstance(value, str) else Path("..")
+                target = path if path.is_absolute() else run_dir / path
+                if not isinstance(value, str) or path.is_absolute() or ".." in path.parts or not target.is_file():
+                    errors.append("paired receipt assignment_artifacts must be existing run-relative files")
+                elif not isinstance(digest, str) or len(digest) != 64 or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                    errors.append("paired receipt assignment_artifacts require matching SHA-256")
+                else:
+                    artifact_paths.append(value)
+            if len(artifact_paths) != len(set(artifact_paths)):
+                errors.append("paired receipt assignment_artifacts must be distinct")
+        stages = pair.get("stage_ledger")
+        if not isinstance(stages, list) or not stages:
+            errors.append("paired receipt requires a stage_ledger")
+        else:
+            owners: set[str] = set()
+            prior = ""
+            stage_artifact_paths: list[str] = []
+            for index, stage in enumerate(stages):
+                if not isinstance(stage, dict):
+                    errors.append(f"paired receipt stage_ledger[{index}] must be an object")
+                    continue
+                owner = stage.get("owner_family")
+                if owner not in {"anthropic", "openai"}:
+                    errors.append(f"paired receipt stage_ledger[{index}] owner is invalid")
+                else:
+                    owners.add(owner)
+                    expected_peer = "anthropic" if owner == "openai" else "openai"
+                    if stage.get("peer_family") != expected_peer:
+                        errors.append(f"paired receipt stage_ledger[{index}] peer is invalid")
+                if stage.get("generation") != index + 1 or stage.get("status") != "complete":
+                    errors.append(f"paired receipt stage_ledger[{index}] generation/status is invalid")
+                if stage.get("acknowledged") is not True:
+                    errors.append(f"paired receipt stage_ledger[{index}] must be acknowledged")
+                for kind in ("assignment", "acknowledgement", "output"):
+                    value = stage.get(f"{kind}_path")
+                    digest = stage.get(f"{kind}_sha256")
+                    path = Path(value) if isinstance(value, str) else Path("..")
+                    target = run_dir / path
+                    if not isinstance(value, str) or path.is_absolute() or ".." in path.parts or not target.is_file():
+                        errors.append(f"paired receipt stage_ledger[{index}] {kind} artifact is invalid")
+                    elif not isinstance(digest, str) or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                        errors.append(f"paired receipt stage_ledger[{index}] {kind} SHA-256 does not match")
+                    else:
+                        stage_artifact_paths.append(value)
+                checks = stage.get("checks")
+                if not isinstance(checks, list) or not checks or any(
+                    not isinstance(check, dict) or not check.get("command") or check.get("exit_code") != 0
+                    for check in checks
+                ):
+                    errors.append(f"paired receipt stage_ledger[{index}] requires passing objective checks")
+                if not isinstance(stage.get("human_gates"), list):
+                    errors.append(f"paired receipt stage_ledger[{index}].human_gates must be a list")
+                if prior and stage.get("base_revision") != prior:
+                    errors.append(f"paired receipt stage_ledger[{index}] breaks revision continuity")
+                prior = stage.get("result_revision", prior)
+            if len(stage_artifact_paths) != len(set(stage_artifact_paths)):
+                errors.append("paired receipt stage artifacts must use distinct paths")
+            if pair.get("status") == "complete" and owners != {"anthropic", "openai"}:
+                errors.append("complete paired receipt requires stage ownership by both primaries")
+            if pair.get("current_stage") != stages[-1].get("stage"):
+                errors.append("paired receipt current_stage must match the final ledger stage")
+            if pair.get("checkpoint_generation", -1) < len(stages):
+                errors.append("paired receipt checkpoint_generation trails the stage ledger")
+        lease_value = pair.get("lease_path")
+        lease_path = run_dir / lease_value if isinstance(lease_value, str) else run_dir / "missing"
+        try:
+            lease = json.loads(lease_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            errors.append("paired receipt must reference a readable lease")
+        else:
+            if lease.get("generation") != pair.get("lease_generation") or lease.get("status") != "released":
+                errors.append("paired receipt must bind the released terminal lease generation")
+            if lease.get("previous_holder") != pair.get("chair_id"):
+                errors.append("paired receipt terminal lease must have been released by the chair")
+        for index, handoff in enumerate(receipt.get("handed_off_panes", [])):
+            if isinstance(handoff, dict) and handoff.get("lease_generation") != pair.get("lease_generation"):
+                errors.append(f"receipt handed_off_panes[{index}] does not match pair lease generation")
+    if terminal_status == "succeeded" and not receipt.get("task"):
+        errors.append("successful finalisation requires receipt task")
+    if terminal_status == "succeeded" and (reason or receipt.get("terminal_reason")):
+        errors.append("successful finalisation cannot record a terminal failure reason")
+    if terminal_status == "succeeded" and not (run_dir / "SYNTHESIS.md").read_text().strip():
+        errors.append("successful finalisation requires non-empty SYNTHESIS.md")
+
+    columns = ["id", "path", "topic", "produced_by", "date", "status", "retention", "supersedes"]
+    try:
+        rows = _table((run_dir / "MANIFEST.md").read_text(), columns)
+    except (OSError, ValueError) as exc:
+        return errors + [f"invalid MANIFEST.md: {exc}"], []
+    ids = {row["id"] for row in rows if row["id"]}
+    listed: set[str] = set()
+    for row in rows:
+        artifact_id = row["id"]
+        rel = row["path"]
+        if not artifact_id or not rel:
+            errors.append("manifest rows require id and path")
+            continue
+        if row["status"] not in STATUSES:
+            errors.append(f"{artifact_id}: invalid status {row['status']!r}")
+        if row["retention"] not in RETENTION:
+            errors.append(f"{artifact_id}: invalid retention {row['retention']!r}")
+        path = Path(rel)
+        target = run_dir / path
+        if path.is_absolute() or ".." in path.parts or not _inside(run_dir, target):
+            errors.append(f"{artifact_id}: path escapes run directory")
+            continue
+        if path.as_posix() in listed:
+            errors.append(f"{artifact_id}: duplicate manifest path: {rel}")
+        listed.add(path.as_posix())
+        if row["status"] != "retired" and not target.is_file():
+            errors.append(f"{artifact_id}: manifest path does not exist: {rel}")
+        supersedes = row["supersedes"]
+        if supersedes and supersedes != "-" and supersedes not in ids:
+            errors.append(f"{artifact_id}: supersedes must reference an artifact id")
+        if terminal_status == "succeeded" and row["status"] == "draft":
+            errors.append(f"{artifact_id}: draft artifact blocks successful finalisation")
+
+    payloads = {
+        path.relative_to(run_dir).as_posix()
+        for path in run_dir.rglob("*")
+        if path.is_file() and path.relative_to(run_dir).as_posix() not in SCAFFOLD
+    }
+    if terminal_status == "succeeded":
+        for rel in sorted(payloads - listed):
+            errors.append(f"unmanifested payload: {rel}")
+
+    if terminal_status == "succeeded":
+        try:
+            gates = _table((run_dir / "FINAL_GATE.md").read_text(), ["gate", "status", "evidence"])
+        except (OSError, ValueError) as exc:
+            errors.append(f"invalid FINAL_GATE.md: {exc}")
+        else:
+            names = [gate["gate"] for gate in gates]
+            if len(names) != len(set(names)):
+                errors.append("FINAL_GATE.md contains duplicate gate rows")
+            missing = REQUIRED_GATES - set(names)
+            unknown = set(names) - REQUIRED_GATES
+            if missing:
+                errors.append("FINAL_GATE.md missing gates: " + ", ".join(sorted(missing)))
+            if unknown:
+                errors.append("FINAL_GATE.md has unknown gates: " + ", ".join(sorted(unknown)))
+            for gate in gates:
+                if gate["status"].upper() not in {"PASS", "N/A"}:
+                    errors.append(f"final gate not closed: {gate['gate']}")
+                if not gate["evidence"]:
+                    errors.append(f"final gate lacks evidence: {gate['gate']}")
+    return errors, rows
+
+
+def prune_candidates(run_dir: Path, rows: list[dict[str, str]]) -> list[Path]:
+    root = run_dir.resolve()
+    retained_files = [root / name for name in {"SYNTHESIS.md", "FINAL_GATE.md", "decisions.md"} if (root / name).is_file()]
+    retained_files.extend(
+        root / row["path"]
+        for row in rows
+        if row["retention"] in {"capsule", "evidence"}
+        and row["status"] != "retired"
+        and (root / row["path"]).is_file()
+    )
+
+    def referenced(candidate: Path, manifest_path: str) -> bool:
+        for retained in retained_files:
+            needles = {
+                manifest_path,
+                candidate.name,
+            }
+            try:
+                needles.add(candidate.resolve().relative_to(retained.parent.resolve()).as_posix())
+            except ValueError:
+                pass
+            try:
+                tokens = [needle.encode() for needle in needles]
+                tail = max((len(token) for token in tokens), default=1) - 1
+                carry = b""
+                with retained.open("rb") as handle:
+                    while chunk := handle.read(65536):
+                        data = carry + chunk
+                        if any(token in data for token in tokens):
+                            return True
+                        carry = data[-tail:] if tail else b""
+            except OSError:
+                return True
+        return False
+
+    candidates: list[Path] = []
+    retained_resolved = {path.resolve() for path in retained_files}
+    for row in rows:
+        if row["retention"] != "ephemeral" or row["status"] not in {"superseded", "retired"}:
+            continue
+        path = root / row["path"]
+        if path.is_file() and path.resolve() not in retained_resolved and not referenced(path, row["path"]) and _inside(root, path):
+            candidates.append(path)
+    return candidates
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("run_dir", type=Path)
+    parser.add_argument("--status", required=True, choices=sorted(TERMINAL))
+    parser.add_argument("--reason")
+    parser.add_argument("--prune-ephemeral", action="store_true", help="list safe candidates (dry-run)")
+    parser.add_argument("--apply", action="store_true", help="apply --prune-ephemeral after validation")
+    args = parser.parse_args(argv)
+    if args.apply and not args.prune_ephemeral:
+        print("--apply requires --prune-ephemeral", file=sys.stderr)
+        return 2
+    errors, rows = validate(args.run_dir, args.status, args.reason)
+    if errors:
+        for error in errors:
+            print(f"FAIL: {error}", file=sys.stderr)
+        return 1
+    candidates = prune_candidates(args.run_dir, rows) if args.prune_ephemeral else []
+    pruned: list[str] = []
+    for path in candidates:
+        rel = path.resolve().relative_to(args.run_dir.resolve()).as_posix()
+        print(("PRUNE" if args.apply else "WOULD-PRUNE") + f": {rel}")
+        if args.apply:
+            path.unlink()
+            pruned.append(rel)
+    receipt_path = args.run_dir / "RUN_RECEIPT.json"
+    receipt = json.loads(receipt_path.read_text())
+    listed = {row["path"] for row in rows}
+    unclassified = sorted(
+        path.relative_to(args.run_dir).as_posix()
+        for path in args.run_dir.rglob("*")
+        if path.is_file()
+        and path.relative_to(args.run_dir).as_posix() not in SCAFFOLD
+        and path.relative_to(args.run_dir).as_posix() not in listed
+    )
+    for rel in unclassified:
+        print(f"RETAIN-UNCLASSIFIED: {rel}")
+    receipt.update({
+        "status": args.status,
+        "closed_at": receipt.get("closed_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "terminal_reason": args.reason,
+        "unclassified_paths": unclassified,
+        "pruned_paths": sorted(set(receipt.get("pruned_paths", [])) | set(pruned)),
+    })
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+    print(f"PASS: run terminalised as {args.status}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

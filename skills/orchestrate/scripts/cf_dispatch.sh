@@ -1,0 +1,471 @@
+#!/usr/bin/env bash
+# Dispatch one prompt to a different-family CLI with conservative safety defaults.
+#
+# This script is a helper, not an authority. The caller still chooses an appropriate
+# different-family verifier, checks data policy, and records failures in the run manifest.
+# Pass --orchestrator-family when known so same-family verifier routes fail closed.
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: cf_dispatch.sh --tool TOOL --orchestrator-family FAMILY --prompt TEXT [options]
+       cf_dispatch.sh --chain "tool:model:effort ..." --orchestrator-family FAMILY --prompt TEXT [options]
+       cf_dispatch.sh --doctor
+
+Options:
+  --tool TOOL                  One of claude, codex, cursor, agy, kiro, copilot.
+  --chain SPECS                Space-separated fallback chain.
+  --orchestrator-family FAMILY Current orchestrator family; same-family routes fail closed.
+  --alias ALIAS                Durable route alias: flagship, workhorse, scout (default: flagship).
+  --role ROLE                  Route role (default: reviewer).
+  --model MODEL                Optional model passed to adapter.
+  --effort EFFORT              Optional effort passed to adapter.
+  --out PATH                   Clean output path; defaults to mktemp.
+  --prompt TEXT                Prompt text.
+  --prompt-file PATH           Read prompt from file.
+  --doctor                     Print local dispatch diagnostics and exit.
+  -h, --help                   Show this help.
+
+agy is disabled unless CF_DISPATCH_ENABLE_AGY=1. When enabled it is best-effort only.
+Set CF_DISPATCH_AGY_TIMEOUT (for example 30s or 15m) to pass --print-timeout to agy.
+EOF
+}
+
+TOOL="" MODEL="" EFFORT="" OUT="" PROMPT="" PROMPT_FILE="" CHAIN="" ORCH_FAMILY="" MODEL_ALIAS="flagship" ROUTE_ROLE="reviewer" DOCTOR=0
+OUT_CREATED=false
+need_value() {
+  [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 2; }
+}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0;;
+    --doctor) DOCTOR=1; shift;;
+    --tool) need_value "$@"; TOOL="$2"; shift 2;;
+    --model) need_value "$@"; MODEL="$2"; shift 2;;
+    --effort) need_value "$@"; EFFORT="$2"; shift 2;;
+    --out) need_value "$@"; OUT="$2"; shift 2;;
+    --prompt) need_value "$@"; PROMPT="$2"; shift 2;;
+    --prompt-file) need_value "$@"; PROMPT_FILE="$2"; shift 2;;
+    --chain) need_value "$@"; CHAIN="$2"; shift 2;;
+    --orchestrator-family) need_value "$@"; ORCH_FAMILY="$2"; shift 2;;
+    --alias) need_value "$@"; MODEL_ALIAS="$2"; shift 2;;
+    --role) need_value "$@"; ROUTE_ROLE="$2"; shift 2;;
+    *) echo "unknown arg: $1" >&2; exit 2;;
+  esac
+done
+
+append_cli_paths() {
+  local dir home_dir
+  home_dir="${HOME:-}"
+  for dir in /opt/homebrew/bin /usr/local/bin ${home_dir:+"$home_dir/.local/bin"} ${home_dir:+"$home_dir/bin"}; do
+    [ -d "$dir" ] || continue
+    case ":$PATH:" in
+      *":$dir:"*) ;;
+      *) PATH="$PATH:$dir";;
+    esac
+  done
+  export PATH
+}
+append_cli_paths
+
+show_doctor() {
+  local tool cmd
+  printf 'cf_dispatch doctor\n'
+  printf 'pwd=%s\n' "$(pwd)"
+  printf 'PATH=%s\n' "$PATH"
+  if git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    printf 'git_root=%s\n' "$git_root"
+    printf 'git_status_short_count=%s\n' "$(git status --short 2>/dev/null | wc -l | tr -d ' ')"
+  else
+    printf 'git_root=NONE\n'
+  fi
+  printf 'CF_DISPATCH_ENABLE_AGY=%s\n' "${CF_DISPATCH_ENABLE_AGY:-0}"
+  printf 'CF_DISPATCH_AGY_TIMEOUT=%s\n' "${CF_DISPATCH_AGY_TIMEOUT:-}"
+  printf 'CF_DISPATCH_ENABLE_KIRO=%s\n' "${CF_DISPATCH_ENABLE_KIRO:-0}"
+  printf 'CF_DISPATCH_ENABLE_COPILOT=%s\n' "${CF_DISPATCH_ENABLE_COPILOT:-0}"
+  for tool in claude codex cursor-agent agy kiro-cli copilot; do
+    if cmd="$(command -v "$tool" 2>/dev/null)"; then
+      printf '%s=%s\n' "$tool" "$cmd"
+      case "$tool" in
+        claude|codex|agy) "$cmd" --version 2>/dev/null | sed "s/^/${tool}_version=/" | head -n 1;;
+      esac
+    else
+      printf '%s=NOT_FOUND\n' "$tool"
+    fi
+  done
+}
+
+if [ "$DOCTOR" = "1" ]; then
+  show_doctor
+  exit 0
+fi
+
+if [ -n "$PROMPT_FILE" ]; then
+  [ -r "$PROMPT_FILE" ] || { echo "cannot read prompt file: $PROMPT_FILE" >&2; exit 2; }
+  PROMPT="$(cat "$PROMPT_FILE")"
+fi
+[ -z "$PROMPT" ] && { echo "need --prompt or --prompt-file" >&2; exit 2; }
+make_tmp() {
+  local root="${TMPDIR:-/tmp}"
+  [ -d "$root" ] || { echo "temporary directory does not exist: $root" >&2; return 1; }
+  mktemp "$root/cf-dispatch.XXXXXX"
+}
+make_tmp_dir() {
+  local root="${TMPDIR:-/tmp}"
+  [ -d "$root" ] || { echo "temporary directory does not exist: $root" >&2; return 1; }
+  mktemp -d "$root/cf-dispatch-run.XXXXXX"
+}
+if [ -z "$OUT" ]; then
+  OUT="$(make_tmp)"
+  OUT_CREATED=true
+fi
+PROMPT_TMP="$(make_tmp)"
+printf '%s' "$PROMPT" >"$PROMPT_TMP"
+trap 'rm -f "$PROMPT_TMP"' EXIT
+trap 'rm -f "$PROMPT_TMP"; [ "$OUT_CREATED" = true ] && rm -f "$OUT"; exit 143' INT TERM HUP
+
+strip_ansi() { sed $'s/\x1b\\[[0-9;?]*[A-Za-z]//g'; }
+json_escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])'
+}
+normalise_family() {
+  case "$1" in
+    claude) echo "anthropic";;
+    codex) echo "openai";;
+    *) echo "$1";;
+  esac
+}
+valid_family() {
+  case "$1" in
+    anthropic|openai) return 0;;
+    *) return 1;;
+  esac
+}
+resolve_model() {
+  local tool="$1" model="$2"
+  if [ -n "$model" ]; then
+    echo "$model"
+    return
+  fi
+  case "$tool" in
+    cursor) echo "${CF_DISPATCH_CURSOR_MODEL:-}";;
+    agy) echo "${CF_DISPATCH_AGY_MODEL:-}";;
+    kiro) echo "${CF_DISPATCH_KIRO_MODEL:-}";;
+    copilot) echo "${CF_DISPATCH_COPILOT_MODEL:-}";;
+    *) echo "";;
+  esac
+}
+endpoint_provider() {
+  case "$1" in
+    claude) echo "anthropic";;
+    codex) echo "openai";;
+    cursor) echo "cursor";;
+    agy) echo "agy";;
+    kiro) echo "aws";;
+    copilot) echo "github";;
+    *) echo "";;
+  esac
+}
+emit_record() {
+  local tool="$1" model="$2" effort="$3" status="$4" rc="$5" path="$6" guarantee="$7"
+  local family="${8:-}" endpoint="${9:-}" identity="${10:-}" effort_substitution="${11:-}"
+  local requested_effort="${12:-}" effort_source="${13:-}" effort_capability_source="${14:-}" cross cert
+  local substitution="${15:-}" requested_model="${16:-$model}" fallback_model="${17:-}"
+  model="$(resolve_model "$tool" "$model")"
+  [ -n "$endpoint" ] || endpoint="$(endpoint_provider "$tool")"
+  [ -n "$identity" ] || identity="unresolved"
+  cross="false"
+  [ -n "$ORCH_FAMILY" ] && valid_family "$ORCH_FAMILY" && [ -n "$family" ] && [ "$ORCH_FAMILY" != "$family" ] && cross="true"
+  cert="false"
+  [ "$status" = "ok" ] && [ "$cross" = "true" ] && { [ "$guarantee" = "enforced" ] || [ "$guarantee" = "oauth_safe_mode" ]; } && cert="true"
+  printf '{"tool":"%s","adapter":"%s","model":"%s","requested_model":"%s","resolved_model":"%s","fallback_model":"%s","requested_effort":"%s","effort":"%s","effort_source":"%s","effort_capability_source":"%s","effort_substitution":"%s","substitution":"%s","status":"%s","exit":%s,"output_path":"%s","read_only_guarantee":"%s","orchestrator_family":"%s","provider_family":"%s","model_family":"%s","endpoint_provider":"%s","identity_source":"%s","cross_family":%s,"certification_eligible":%s}\n' \
+    "$(printf '%s' "$tool" | json_escape)" \
+    "$(printf '%s' "$tool" | json_escape)" \
+    "$(printf '%s' "$model" | json_escape)" \
+    "$(printf '%s' "$requested_model" | json_escape)" \
+    "$(printf '%s' "$model" | json_escape)" \
+    "$(printf '%s' "$fallback_model" | json_escape)" \
+    "$(printf '%s' "$requested_effort" | json_escape)" \
+    "$(printf '%s' "$effort" | json_escape)" \
+    "$(printf '%s' "$effort_source" | json_escape)" \
+    "$(printf '%s' "$effort_capability_source" | json_escape)" \
+    "$(printf '%s' "$effort_substitution" | json_escape)" \
+    "$(printf '%s' "$substitution" | json_escape)" \
+    "$(printf '%s' "$status" | json_escape)" \
+    "$rc" \
+    "$(printf '%s' "$path" | json_escape)" \
+    "$(printf '%s' "$guarantee" | json_escape)" \
+    "$(printf '%s' "$ORCH_FAMILY" | json_escape)" \
+    "$(printf '%s' "$family" | json_escape)" \
+    "$(printf '%s' "$family" | json_escape)" \
+    "$(printf '%s' "$endpoint" | json_escape)" \
+    "$(printf '%s' "$identity" | json_escape)" \
+    "$cross" \
+    "$cert"
+}
+
+ORCH_FAMILY="$(normalise_family "$ORCH_FAMILY")"
+
+# Specific failure signatures only. Do not treat any mention of "quota" as a failure.
+fail_sig='(Authentication required|Please sign in|Please( run)? login|not logged in|not authenticated|Unauthorized|insufficient_quota|quota exceeded|rate limit exceeded|usage limit reached)'
+model_fail_sig='(model[^[:cntrl:]]*(unavailable|not available|not found|unsupported|does not exist)|unknown model|capacity|overloaded)'
+require_cmd() {
+  local cmd="$1" diag="$2"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "$cmd not found. PATH=$PATH" >"$diag"
+    return 1
+  fi
+}
+
+run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes JSON, returns 0/1
+  local tool="$1" model="$2" effort="$3" tmpdir raw diag combined clean rc status opath guarantee family endpoint identity effort_substitution substitution requested_model requested_effort effort_source effort_capability_source route_json route_rc route_fields capabilities_file fallback_model primary_model
+  model="$(resolve_model "$tool" "$model")"
+  tmpdir="$(make_tmp_dir)"
+  raw="$tmpdir/raw"
+  diag="$tmpdir/diag"
+  clean="$tmpdir/clean"
+  combined="$tmpdir/combined"
+  : >"$raw"
+  : >"$diag"
+  trap "rm -rf -- '$tmpdir'" EXIT
+  trap "rm -rf -- '$tmpdir'; exit 143" INT TERM HUP
+  family=""
+  endpoint=""
+  identity=""
+  effort_substitution=""
+  substitution=""
+  requested_effort="$effort"
+  effort_source=""
+  effort_capability_source=""
+  fallback_model=""
+  if [ -n "$ORCH_FAMILY" ] && ! valid_family "$ORCH_FAMILY"; then
+    guarantee="none"
+    status="invalid_orchestrator_family"
+    echo "invalid orchestrator family: $ORCH_FAMILY" >"$diag"
+    rc=1
+  elif [ -z "$ORCH_FAMILY" ]; then
+    guarantee="none"
+    status="orchestrator_family_required"
+    echo "$tool disabled: pass --orchestrator-family so cross-family status can be proven" >"$diag"
+    rc=1
+  else
+    local -a route_cmd
+    route_cmd=("${AGENTS_HOME:-$HOME/.agents}/scripts/model-route" resolve
+      --adapter "$tool" --alias "$MODEL_ALIAS" --role "$ROUTE_ROLE"
+      --lead-family "$ORCH_FAMILY" --require-distinct)
+    if [ "$tool" = "codex" ]; then
+      capabilities_file="$tmpdir/codex-capabilities.json"
+      if ! "${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/codex_capabilities.py" \
+        --out "$capabilities_file" >>"$diag" 2>&1; then
+        rm -f "$capabilities_file"
+      fi
+      route_cmd+=(--capabilities-file "$capabilities_file")
+    fi
+    [ -n "$effort" ] && route_cmd+=(--effort "$effort")
+    [ -n "$model" ] && route_cmd+=(--model "$model")
+    route_json="$("${route_cmd[@]}" 2>>"$diag")"
+      route_rc=$?
+      route_fields="$(printf '%s' "$route_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("|".join(str(r.get(k,"")) for k in ("status","resolved_model","model_family","endpoint_provider","identity_source","requested_effort","effort","effort_source","effort_capability_source","effort_substitution","substitution","fallback_model")))')"
+      IFS='|' read -r status model family endpoint identity requested_effort effort effort_source effort_capability_source effort_substitution substitution fallback_model <<<"$route_fields"
+      requested_model="$model"
+      if [ "$route_rc" -ne 0 ]; then
+        guarantee="none"
+        printf '%s\n' "$route_json" >>"$diag"
+        rc=1
+      else
+    status=""
+    case "$tool" in
+    claude)
+      guarantee="enforced"
+      local claude_verifier_system_prompt
+      claude_verifier_system_prompt="You are a non-interactive cross-family verifier. You may use only Read, Grep, and Glob to inspect the requested workspace. Do not mutate files, use shell commands, call Task/tool/function abstractions, or launch subagents. Answer only the requested final verification text from the supplied prompt."
+      if ! require_cmd claude "$diag"; then
+        status="tool_not_found"
+        rc=127
+      else
+        CLAUDE_CODE_DISABLE_WORKFLOWS=1 claude -p --bare --disable-slash-commands \
+          --no-session-persistence --permission-mode plan --tools "Read,Grep,Glob" \
+          --system-prompt "$claude_verifier_system_prompt" \
+          ${model:+--model "$model"} ${effort:+--effort "$effort"} \
+          <"$PROMPT_TMP" >"$raw" 2>"$diag"; rc=$?
+      fi
+      if [ "${status:-}" != "tool_not_found" ] && [ "$rc" -ne 0 ] && [ -n "$fallback_model" ] && cat "$raw" "$diag" | grep -Eqi "$model_fail_sig"; then
+        primary_model="$model"
+        : >"$raw"
+        : >"$diag"
+        model="$fallback_model"
+        identity="runtime-provider-fallback"
+        substitution="${substitution:+$substitution; }$primary_model unavailable; used $fallback_model"
+        CLAUDE_CODE_DISABLE_WORKFLOWS=1 claude -p --bare --disable-slash-commands \
+          --no-session-persistence --permission-mode plan --tools "Read,Grep,Glob" \
+          --system-prompt "$claude_verifier_system_prompt" \
+          --model "$model" ${effort:+--effort "$effort"} \
+          <"$PROMPT_TMP" >"$raw" 2>"$diag"; rc=$?
+      fi
+      if [ "${status:-}" != "tool_not_found" ] && [ "$rc" -ne 0 ] && cat "$raw" "$diag" | grep -Eqi "$fail_sig"; then
+        if CLAUDE_CODE_DISABLE_WORKFLOWS=1 claude auth status 2>/dev/null | grep -Eq '"loggedIn"[[:space:]]*:[[:space:]]*true'; then
+          : >"$raw"
+          : >"$diag"
+          guarantee="oauth_safe_mode"
+          CLAUDE_CODE_DISABLE_WORKFLOWS=1 claude -p --safe-mode --no-session-persistence --permission-mode plan \
+            --disable-slash-commands --tools "Read,Grep,Glob" \
+            --system-prompt "$claude_verifier_system_prompt" \
+            ${model:+--model "$model"} ${effort:+--effort "$effort"} \
+          <"$PROMPT_TMP" >"$raw" 2>"$diag"; rc=$?
+        fi
+      fi
+      if [ "$rc" -ne 0 ] && [ -n "$fallback_model" ] && [ "$model" = "$requested_model" ] && cat "$raw" "$diag" | grep -Eqi "$model_fail_sig"; then
+        primary_model="$model"
+        : >"$raw"
+        : >"$diag"
+        model="$fallback_model"
+        identity="runtime-provider-fallback"
+        substitution="${substitution:+$substitution; }$primary_model unavailable; used $fallback_model"
+        if [ "$guarantee" = "oauth_safe_mode" ]; then
+          CLAUDE_CODE_DISABLE_WORKFLOWS=1 claude -p --safe-mode --no-session-persistence --permission-mode plan \
+            --disable-slash-commands --tools "Read,Grep,Glob" --system-prompt "$claude_verifier_system_prompt" \
+            --model "$model" ${effort:+--effort "$effort"} <"$PROMPT_TMP" >"$raw" 2>"$diag"; rc=$?
+        else
+          CLAUDE_CODE_DISABLE_WORKFLOWS=1 claude -p --bare --disable-slash-commands \
+            --no-session-persistence --permission-mode plan --tools "Read,Grep,Glob" --system-prompt "$claude_verifier_system_prompt" \
+            --model "$model" ${effort:+--effort "$effort"} <"$PROMPT_TMP" >"$raw" 2>"$diag"; rc=$?
+        fi
+      fi ;;
+    codex)
+      guarantee="enforced"
+      if ! require_cmd codex "$diag"; then
+        status="tool_not_found"
+        rc=127
+      else
+        codex exec -s read-only --ignore-user-config --ignore-rules --ephemeral ${model:+-m "$model"} \
+          ${effort:+-c model_reasoning_effort="$effort"} \
+          - <"$PROMPT_TMP" >"$raw" 2>"$diag"; rc=$?
+      fi ;;
+    cursor)
+      guarantee="enforced"
+      if ! require_cmd cursor-agent "$diag"; then
+        status="tool_not_found"
+        rc=127
+      else
+        cursor-agent -p --trust --mode plan --sandbox enabled --output-format text \
+          ${model:+--model "$model"} "$(cat "$PROMPT_TMP")" </dev/null >"$raw" 2>"$diag"; rc=$?
+      fi ;;
+    kiro)
+      guarantee="none"
+      if [ "${CF_DISPATCH_ENABLE_KIRO:-0}" != "1" ]; then
+        status="unsafe_by_default"
+        echo "kiro disabled: no hard read-only mode verified in current local help" >"$diag"
+        rc=1
+      else
+        guarantee="best_effort"
+        if ! require_cmd kiro-cli "$diag"; then
+          status="tool_not_found"
+          rc=127
+        else
+          kiro-cli chat --no-interactive ${model:+--model "$model"} ${effort:+--effort "$effort"} \
+            "$(cat "$PROMPT_TMP")" </dev/null >"$raw" 2>"$diag"; rc=$?
+        fi
+      fi ;;
+    agy)
+      guarantee="none"
+      if [ "${CF_DISPATCH_ENABLE_AGY:-0}" != "1" ]; then
+        status="unsafe_by_default"
+        echo "agy disabled: --sandbox is not a full read-only/no-tools guarantee" >"$diag"
+        rc=1
+      else
+        guarantee="best_effort"
+        local -a agy_cmd
+        if ! require_cmd agy "$diag"; then
+          status="tool_not_found"
+          rc=127
+        else
+          agy_cmd=(agy --sandbox)
+          [ -n "$model" ] && agy_cmd+=(--model "$model")
+          agy_cmd+=(--print "$(cat "$PROMPT_TMP")")
+          [ -n "${CF_DISPATCH_AGY_TIMEOUT:-}" ] && agy_cmd+=(--print-timeout "$CF_DISPATCH_AGY_TIMEOUT")
+          "${agy_cmd[@]}" </dev/null >"$raw" 2>"$diag"; rc=$?
+        fi
+      fi ;;
+    copilot)
+      guarantee="none"
+      if [ "${CF_DISPATCH_ENABLE_COPILOT:-0}" != "1" ]; then
+        status="unsafe_by_default"
+        echo "copilot disabled: non-interactive mode may require broad tool permissions" >"$diag"
+        rc=1
+      else
+        guarantee="prompt_only"
+        if ! require_cmd copilot "$diag"; then
+          status="tool_not_found"
+          rc=127
+        else
+          copilot -p "$PROMPT" --mode plan --silent --disable-builtin-mcps \
+            --available-tools='' --disallow-temp-dir ${model:+--model "$model"} ${effort:+--effort "$effort"} \
+            </dev/null >"$raw" 2>"$diag"; rc=$?
+        fi
+      fi ;;
+      *) emit_record "$tool" "$model" "$effort" "unknown_tool" 1 "" "none" "$family" "$endpoint" "$identity" "$effort_substitution" "$requested_effort" "$effort_source" "$effort_capability_source"; rm -f "$raw" "$diag"; return 1;;
+    esac
+    fi
+  fi
+
+  strip_ansi <"$raw" >"$clean"
+  cat "$clean" "$diag" >"$combined"
+  if [ -n "${status:-}" ] && [ "$rc" -ne 0 ]; then
+    :
+  elif [ "$rc" -eq 0 ] && ! grep -q '[^[:space:]]' "$clean"; then
+    status="empty_output"
+    rc=1
+    guarantee="none"
+  elif [ "$rc" -ne 0 ] && grep -Eqi "$fail_sig" "$combined"; then
+    status="auth_or_quota_error"
+  elif [ "$rc" -ne 0 ]; then
+    status="error"
+  else
+    status="ok"
+  fi
+  [ "$status" = "tool_not_found" ] && guarantee="none"
+
+  if [ "$status" = "ok" ]; then
+    if cp "$clean" "$OUT"; then
+      opath="$OUT"
+    else
+      status="output_write_error"
+      rc=1
+      guarantee="none"
+      opath=""
+    fi
+  else
+    if cp "$combined" "$OUT"; then
+      opath="$OUT"
+    else
+      status="output_write_error"
+      rc=1
+      guarantee="none"
+      opath=""
+    fi
+  fi
+  emit_record "$tool" "$model" "$effort" "$status" "$rc" "$opath" "$guarantee" "$family" "$endpoint" "$identity" "$effort_substitution" "$requested_effort" "$effort_source" "$effort_capability_source" "$substitution" "$requested_model" "$fallback_model"
+  [ "$status" = "ok" ]
+}
+
+if [ -n "$CHAIN" ]; then
+  for spec in $CHAIN; do
+    t="${spec%%:*}"
+    rest="${spec#*:}"
+    m="${rest%%:*}"
+    e="${rest#*:}"
+    [ "$rest" = "$spec" ] && { m=""; e=""; }
+    [ "$e" = "$m" ] && e=""
+    rec="$(run_one "$t" "$m" "$e")"; rc=$?
+    echo "$rec" >&2
+    if [ $rc -eq 0 ]; then echo "$rec"; exit 0; fi
+  done
+  [ "$OUT_CREATED" = true ] && rm -f "$OUT"
+  emit_record "chain" "" "" "all_failed" 1 "" "none"
+  exit 1
+else
+  [ -z "$TOOL" ] && { echo "need --tool or --chain" >&2; exit 2; }
+  rec="$(run_one "$TOOL" "$MODEL" "$EFFORT")"; rc=$?
+  echo "$rec"
+  exit $rc
+fi

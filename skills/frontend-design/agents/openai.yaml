@@ -1,0 +1,5 @@
+# Modified from Impeccable for this harness; see ../NOTICE.md.
+interface:
+  display_name: Frontend Design
+  short_description: Use when the user wants to design, redesign, shape, critique, audit, polish, clarify,...
+  default_prompt: Use $frontend-design to redesign, critique, audit, or polish this frontend.

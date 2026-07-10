@@ -1,0 +1,4 @@
+interface:
+  display_name: "Humanise Text"
+  short_description: "Rewrite AI-sounding text into a human voice without drifting facts"
+  default_prompt: "Use $humanise-text to rewrite this draft so it sounds like a real person wrote it while preserving facts, citations, and voice."
