@@ -31,8 +31,15 @@ const digest = (value: string): Sha256Digest => parseSha256Digest(`sha256:${sha2
 const trustDigest = digest("trusted-project-record");
 const contract = {
   schemaVersion: 1,
+  method: "launch_chair",
+  oneUse: true,
+  secretTransport: "private-environment",
+  environment: {
+    capability: "AGENT_FABRIC_CAPABILITY",
+    socketPath: "AGENT_FABRIC_SOCKET_PATH",
+  },
   inputSchemaId: "chair-launch-input.v1",
-  inputSchema: {
+  publicPayloadSchema: {
     type: "object",
     additionalProperties: false,
     required: ["model"],

@@ -41,10 +41,56 @@ export type NormalisedLaunchAuthority = Readonly<{
 
 export type LaunchAdapterContract = Readonly<{
   schemaVersion: 1;
+  method: "launch_chair";
+  oneUse: true;
+  secretTransport: "private-environment";
+  environment: Readonly<{
+    capability: "AGENT_FABRIC_CAPABILITY";
+    socketPath: "AGENT_FABRIC_SOCKET_PATH";
+  }>;
   inputSchemaId: string;
-  inputSchema: Record<string, unknown>;
+  publicPayloadSchema: Record<string, unknown>;
   noEffectProofSchemas: Readonly<Record<string, Record<string, unknown>>>;
 }>;
+
+export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContract {
+  const contract = exactRecord(value, "chairLaunch", [
+    "schemaVersion", "method", "oneUse", "secretTransport", "environment",
+    "inputSchemaId", "publicPayloadSchema", "noEffectProofSchemas",
+  ]);
+  if (
+    contract.schemaVersion !== 1 ||
+    contract.method !== "launch_chair" ||
+    contract.oneUse !== true ||
+    contract.secretTransport !== "private-environment"
+  ) protocol("chairLaunch contract version or private handoff semantics are invalid");
+  const environment = exactRecord(contract.environment, "chairLaunch.environment", ["capability", "socketPath"]);
+  if (
+    environment.capability !== "AGENT_FABRIC_CAPABILITY" ||
+    environment.socketPath !== "AGENT_FABRIC_SOCKET_PATH"
+  ) protocol("chairLaunch environment contract is invalid");
+  if (!isRow(contract.publicPayloadSchema)) protocol("chairLaunch public payload schema must be an object");
+  if (!isRow(contract.noEffectProofSchemas)) protocol("chairLaunch no-effect proof schemas must be an object");
+  const noEffectProofSchemas: Record<string, Record<string, unknown>> = {};
+  for (const [schemaId, schema] of Object.entries(contract.noEffectProofSchemas)) {
+    nonEmptyString(schemaId, "chairLaunch no-effect proof schema ID");
+    if (!isRow(schema)) protocol(`chairLaunch no-effect proof schema ${schemaId} must be an object`);
+    noEffectProofSchemas[schemaId] = schema;
+  }
+  return {
+    schemaVersion: 1,
+    method: "launch_chair",
+    oneUse: true,
+    secretTransport: "private-environment",
+    environment: {
+      capability: "AGENT_FABRIC_CAPABILITY",
+      socketPath: "AGENT_FABRIC_SOCKET_PATH",
+    },
+    inputSchemaId: nonEmptyString(contract.inputSchemaId, "chairLaunch.inputSchemaId"),
+    publicPayloadSchema: contract.publicPayloadSchema,
+    noEffectProofSchemas,
+  };
+}
 
 type LaunchPacket = Readonly<{
   schemaVersion: 1;
@@ -630,7 +676,7 @@ export class LaunchCustodyService {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     let validate: ValidateFunction;
     try {
-      validate = ajv.compile(contract.inputSchema);
+      validate = ajv.compile(contract.publicPayloadSchema);
     } catch {
       protocol("registered launch input schema is invalid");
     }
@@ -860,7 +906,7 @@ export class LaunchCustodyService {
       providerAdapterId: intent.providerAdapterId,
       providerActionId: intent.providerActionId,
       providerContractDigest: intent.providerContractDigest,
-      publicPayload,
+      publicPayload: packet.provider.input,
       capability,
       socketPath: this.#fabricSocketPath,
     };
