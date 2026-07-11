@@ -103,6 +103,37 @@ export type ProjectSessionLaunchIntent = {
   };
 };
 
+type ChairBridgeRecoveryCommon = {
+  kind: "chair-bridge-recovery";
+  schemaVersion: 1;
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  lossId: string;
+  recoveryManifestDigest: Sha256Digest;
+  expectedSessionRevision: number;
+  expectedSessionGeneration: number;
+  expectedRunRevision: number;
+  expectedChairGeneration: number;
+  expectedPrincipalGeneration: number;
+  expectedBridgeRevision: number;
+  expectedLostBridgeGeneration: number;
+  expectedProviderSessionGeneration: number;
+  providerAdapterId: string;
+  providerContractDigest: Sha256Digest;
+};
+
+export type ChairBridgeRecoveryIntent = ChairBridgeRecoveryCommon & (
+  | { path: "rebind"; providerActionId: ProviderActionId }
+  | {
+      path: "takeover";
+      successorAgentId: string;
+      expectedSuccessorPrincipalGeneration: number;
+      expectedSuccessorBridgeGeneration: number;
+      expectedSuccessorRevision: number;
+    }
+  | { path: "abandon"; reason: string }
+);
+
 export type GitRepositoryBinding = {
   repositoryRoot: string;
   worktreePath: string;
@@ -290,6 +321,7 @@ export function assertPromotionIntentGate(intent: PromotionIntent, gate: ScopedG
 export type OperatorActionIntent =
   | OperatorControlIntent
   | ProjectSessionLaunchIntent
+  | ChairBridgeRecoveryIntent
   | OperatorLifecycleIntent
   | OperatorGitIntent
   | RegisteredExternalEffectIntent
@@ -298,6 +330,7 @@ export type OperatorActionIntent =
 export function requiredOperatorActionForIntent(intent: OperatorActionIntent): OperatorAction {
   if (intent.kind === "control") return intent.action;
   if (intent.kind === "project-session-launch") return "launch";
+  if (intent.kind === "chair-bridge-recovery") return "takeover";
   if (intent.kind === "project-session-drain" || intent.kind === "daemon-drain") return "drain";
   if (intent.kind === "project-session-stop" || intent.kind === "daemon-stop") return "stop";
   if (intent.kind === "git") return "git";
@@ -312,6 +345,7 @@ export type OperatorAvailableAction =
   | "cancel"
   | "steer"
   | "project-session-launch"
+  | "chair-bridge-recovery"
   | "project-session-drain"
   | "project-session-stop"
   | "daemon-drain"

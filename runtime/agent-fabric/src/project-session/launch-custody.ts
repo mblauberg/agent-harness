@@ -11,6 +11,7 @@ import {
   parseOperationResult,
   FABRIC_OPERATIONS,
   type AgentCustodyResult,
+  type ChairBridgeRecoveryIntent,
   type ProjectSessionLaunchCurrentState,
   type ProjectSessionLaunchIntent,
   type ProviderActionRefV1,
@@ -22,12 +23,17 @@ import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, rea
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { expandAuthorityActions } from "../domain/operations.js";
+import {
+  parseChairLaunchProviderResult,
+  type ChairLaunchProviderResult,
+} from "../adapters/providers/types.js";
 import { ProjectFabricCoreError } from "./contracts.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
 
 type Digest = Sha256Digest;
 type ArtifactBinding = ArtifactRef;
 type ResourceAmounts = Readonly<Record<string, number>>;
+type ChairRecoveryIntentPath = ChairBridgeRecoveryIntent["path"];
 
 export type LaunchCustodyIntent = ProjectSessionLaunchIntent;
 
@@ -266,6 +272,36 @@ export type LaunchRecoveryResult = Readonly<{
   recoveryRequired: number;
 }>;
 
+export type ChairRecoveryInspection = Readonly<{
+  intent: ChairBridgeRecoveryIntent;
+  inspectionDigest: Digest;
+}>;
+
+export type ChairRecoveryDispatchHandle = Readonly<{
+  schemaVersion: 1;
+  recoveryId: string;
+  intent: ChairBridgeRecoveryIntent;
+  intentDigest: Digest;
+  inspectionDigest: Digest;
+  operatorId: string;
+  operatorCommandId: string;
+  capability?: string;
+  attestationChallenge?: string;
+  socketPath?: string;
+}>;
+
+export type ChairRecoveryCommit = Readonly<{
+  status: "committed" | "ambiguous" | "pending" | "no-effect";
+  recoveryId: string;
+  path: ChairBridgeRecoveryIntent["path"];
+  evidenceDigest: Digest;
+}>;
+
+export type ChairRecoveryCurrentState = Readonly<{
+  revision: number;
+  inspectionDigest: Digest;
+}>;
+
 type LaunchCustodyServiceOptions = Readonly<{
   database: Database.Database;
   clock?: () => number;
@@ -285,6 +321,32 @@ type LaunchCustodyServiceOptions = Readonly<{
       attestationChallengeDigest: Digest;
     }>): Promise<unknown>;
     hasRetainedChairBridge?(entry: RetainedChairBridge): boolean;
+    recoverChair?(handle: ChairRecoveryDispatchHandle): Promise<unknown>;
+    lookupChairRecovery?(input: Readonly<{ adapterId: string; actionId: string }>): Promise<unknown>;
+    lookupRetainedSuccessorBridge?(input: Readonly<{
+      projectSessionId: string;
+      runId: string;
+      agentId: string;
+      principalGeneration: number;
+      adapterId: string;
+      actionId: string;
+      providerSessionRef: string;
+      providerSessionGeneration: number;
+      sourceBridgeGeneration: number;
+      chairBridgeGeneration: number;
+    }>): Promise<"child" | "chair" | "missing">;
+    promoteRetainedSuccessorBridge?(input: Readonly<{
+      projectSessionId: string;
+      runId: string;
+      agentId: string;
+      principalGeneration: number;
+      adapterId: string;
+      actionId: string;
+      providerSessionRef: string;
+      providerSessionGeneration: number;
+      sourceBridgeGeneration: number;
+      chairBridgeGeneration: number;
+    }>): Promise<boolean>;
   };
   agentEffects?: {
     dispatch(handle: AgentDispatchHandle): Promise<unknown>;
@@ -334,6 +396,12 @@ export type AgentDispatchHandle = Readonly<{
   bridgeGeneration: number;
   capability?: string;
   socketPath?: string;
+  expectedPrincipal?: Readonly<{
+    agentId: string;
+    projectSessionId: string;
+    runId: string;
+    principalGeneration: number;
+  }>;
 }>;
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
@@ -706,6 +774,1033 @@ export class LaunchCustodyService {
     return this.#database.transaction(() => this.#persistChairBridgeLoss(input))();
   }
 
+  async inspectChairRecovery(intent: ChairBridgeRecoveryIntent): Promise<ChairRecoveryInspection> {
+    const inspectionDigest = this.#chairRecoveryInspectionDigest(intent);
+    if (intent.path === "rebind") {
+      const contract = await this.#adapterContracts.inspect(intent.providerAdapterId);
+      if (`sha256:${sha256(canonicalJson(contract))}` !== intent.providerContractDigest) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery provider contract changed");
+      }
+    }
+    return { intent, inspectionDigest };
+  }
+
+  async readChairRecoveryCurrentState(intent: ChairBridgeRecoveryIntent): Promise<ChairRecoveryCurrentState> {
+    return {
+      revision: intent.expectedBridgeRevision,
+      inspectionDigest: this.#chairRecoveryInspectionDigest(intent),
+    };
+  }
+
+  prepareChairRecoveryInTransaction(input: Readonly<{
+    inspection: ChairRecoveryInspection;
+    operatorId: string;
+    operatorCommandId: string;
+  }>): ChairRecoveryDispatchHandle {
+    if (!this.#database.inTransaction) throw new Error("chair recovery preparation requires a transaction");
+    const currentDigest = this.#chairRecoveryInspectionDigest(input.inspection.intent);
+    if (currentDigest !== input.inspection.inspectionDigest) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery state changed after inspection");
+    }
+    const intent = input.inspection.intent;
+    const intentJson = canonicalJson(intent);
+    const intentDigest = jsonEvidenceDigest(intent);
+    const recoveryId = `chair-bridge-recovery:${sha256(canonicalJson({
+      lossId: intent.lossId,
+      operatorId: input.operatorId,
+      commandId: input.operatorCommandId,
+    }))}`;
+    const existing = this.#database.prepare(`
+      SELECT intent_digest FROM chair_bridge_recovery_custody
+       WHERE operator_id=? AND operator_command_id=?
+    `).get(input.operatorId, input.operatorCommandId);
+    if (isRow(existing)) {
+      if (text(existing, "intent_digest") !== intentDigest) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "chair recovery command changed");
+      }
+      throw new ProjectFabricCoreError("CONFLICT", "chair recovery command is already prepared");
+    }
+    const openRecovery = this.#database.prepare(`
+      SELECT recovery_id FROM chair_bridge_recovery_custody
+       WHERE loss_id=? AND state NOT IN ('terminal','no-effect')
+       LIMIT 1
+    `).get(intent.lossId);
+    if (isRow(openRecovery)) {
+      throw new ProjectFabricCoreError("CONFLICT", "chair loss already has an open recovery custody");
+    }
+    const now = this.#clock();
+    const loss = row(this.#database.prepare(`
+      SELECT * FROM chair_bridge_losses WHERE loss_id=?
+    `).get(intent.lossId), "chair recovery loss");
+    let capability: string | undefined;
+    let attestationChallenge: string | undefined;
+    let providerActionId: string | null = null;
+    let successorAgentId: string | null = null;
+    let successorPrincipalGeneration: number | null = null;
+    let successorBridgeGeneration: number | null = null;
+    let successorRevision: number | null = null;
+    let newChairAgentId: string | null = null;
+    let newProviderActionId: string | null = null;
+    let newProviderSessionRef: string | null = null;
+    let newProviderSessionGeneration: number | null = null;
+    let newPrincipalGeneration: number | null = null;
+    let newBridgeGeneration: number | null = null;
+    let newCapabilityHash: string | null = null;
+    let newActivationEvidenceDigest: string | null = null;
+    let attestationChallengeDigest: string | null = null;
+    if (intent.path === "rebind") {
+      capability = this.#randomCapability();
+      attestationChallenge = this.#randomAttestationChallenge();
+      if (capability.length === 0 || !/^[0-9a-f]{64}$/u.test(attestationChallenge)) {
+        throw new Error("chair recovery private material is invalid");
+      }
+      providerActionId = intent.providerActionId;
+      newChairAgentId = text(loss, "chair_agent_id");
+      newProviderActionId = intent.providerActionId;
+      newProviderSessionRef = text(loss, "provider_session_ref");
+      newProviderSessionGeneration = intent.expectedProviderSessionGeneration + 1;
+      newPrincipalGeneration = intent.expectedPrincipalGeneration + 1;
+      newBridgeGeneration = intent.expectedLostBridgeGeneration + 1;
+      newCapabilityHash = sha256(capability);
+      attestationChallengeDigest = `sha256:${createHash("sha256").update(Buffer.from(attestationChallenge, "hex")).digest("hex")}`;
+    } else if (intent.path === "takeover") {
+      const successor = this.#chairRecoverySuccessor(intent);
+      successorAgentId = intent.successorAgentId;
+      successorPrincipalGeneration = intent.expectedSuccessorPrincipalGeneration;
+      successorBridgeGeneration = intent.expectedSuccessorBridgeGeneration;
+      successorRevision = intent.expectedSuccessorRevision;
+      newChairAgentId = intent.successorAgentId;
+      newProviderActionId = text(successor, "action_id");
+      newProviderSessionRef = text(successor, "provider_session_ref");
+      newProviderSessionGeneration = integer(successor, "provider_session_generation");
+      newPrincipalGeneration = intent.expectedSuccessorPrincipalGeneration;
+      newBridgeGeneration = intent.expectedLostBridgeGeneration + 1;
+      newCapabilityHash = text(successor, "capability_hash");
+      newActivationEvidenceDigest = text(successor, "activation_evidence_digest");
+    }
+    this.#database.prepare(`
+      INSERT INTO chair_bridge_recovery_custody(
+        recovery_id, loss_id, operator_id, operator_command_id, path,
+        intent_digest, intent_json, recovery_manifest_digest,
+        expected_session_revision, expected_session_generation, expected_run_revision,
+        expected_chair_generation, expected_principal_generation, expected_bridge_revision,
+        expected_lost_bridge_generation, expected_provider_session_generation,
+        provider_adapter_id, provider_contract_digest, provider_action_id,
+        successor_agent_id, expected_successor_principal_generation,
+        expected_successor_bridge_generation, expected_successor_revision,
+        new_chair_agent_id, new_provider_action_id, new_provider_session_ref,
+        new_provider_session_generation, new_principal_generation, new_bridge_generation,
+        new_capability_hash, new_activation_evidence_digest, attestation_challenge_digest,
+        state, result_json, revision, created_at, updated_at
+      ) VALUES (
+        @recoveryId, @lossId, @operatorId, @operatorCommandId, @path,
+        @intentDigest, @intentJson, @recoveryManifestDigest,
+        @expectedSessionRevision, @expectedSessionGeneration, @expectedRunRevision,
+        @expectedChairGeneration, @expectedPrincipalGeneration, @expectedBridgeRevision,
+        @expectedLostBridgeGeneration, @expectedProviderSessionGeneration,
+        @providerAdapterId, @providerContractDigest, @providerActionId,
+        @successorAgentId, @successorPrincipalGeneration, @successorBridgeGeneration, @successorRevision,
+        @newChairAgentId, @newProviderActionId, @newProviderSessionRef,
+        @newProviderSessionGeneration, @newPrincipalGeneration, @newBridgeGeneration,
+        @newCapabilityHash, @newActivationEvidenceDigest, @attestationChallengeDigest,
+        'prepared', NULL, 1, @now, @now
+      )
+    `).run({
+      recoveryId,
+      lossId: intent.lossId,
+      operatorId: input.operatorId,
+      operatorCommandId: input.operatorCommandId,
+      path: intent.path,
+      intentDigest,
+      intentJson,
+      recoveryManifestDigest: intent.recoveryManifestDigest,
+      expectedSessionRevision: intent.expectedSessionRevision,
+      expectedSessionGeneration: intent.expectedSessionGeneration,
+      expectedRunRevision: intent.expectedRunRevision,
+      expectedChairGeneration: intent.expectedChairGeneration,
+      expectedPrincipalGeneration: intent.expectedPrincipalGeneration,
+      expectedBridgeRevision: intent.expectedBridgeRevision,
+      expectedLostBridgeGeneration: intent.expectedLostBridgeGeneration,
+      expectedProviderSessionGeneration: intent.expectedProviderSessionGeneration,
+      providerAdapterId: intent.providerAdapterId,
+      providerContractDigest: intent.providerContractDigest,
+      providerActionId,
+      successorAgentId,
+      successorPrincipalGeneration,
+      successorBridgeGeneration,
+      successorRevision,
+      newChairAgentId,
+      newProviderActionId,
+      newProviderSessionRef,
+      newProviderSessionGeneration,
+      newPrincipalGeneration,
+      newBridgeGeneration,
+      newCapabilityHash,
+      newActivationEvidenceDigest,
+      attestationChallengeDigest,
+      now,
+    });
+    if (intent.path === "rebind") {
+      this.#database.prepare(`
+        INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+        SELECT ?, coordination_run_id, chair_agent_id, ?, ?
+          FROM chair_bridge_losses WHERE loss_id=?
+      `).run(
+        newCapabilityHash,
+        newPrincipalGeneration,
+        now + 24 * 60 * 60_000,
+        intent.lossId,
+      );
+      const publicPayload = {
+        schemaVersion: 1,
+        recoveryId,
+        lossId: intent.lossId,
+        providerSessionRef: newProviderSessionRef,
+        expectedProviderSessionGeneration: intent.expectedProviderSessionGeneration,
+        nextProviderSessionGeneration: newProviderSessionGeneration,
+        bridgeGeneration: newBridgeGeneration,
+        providerContractDigest: intent.providerContractDigest,
+      };
+      const payloadJson = canonicalJson(publicPayload);
+      this.#database.prepare(`
+        INSERT INTO provider_actions(
+          run_id, action_id, adapter_id, operation, target_agent_id,
+          provider_session_generation, turn_lease_generation, identity_hash,
+          payload_hash, payload_json, status, history_json, execution_count,
+          effect_count, idempotency_proven, result_json, updated_at
+        ) SELECT coordination_run_id, ?, provider_adapter_id, 'recover-chair', chair_agent_id,
+                 NULL, NULL, ?, ?, ?, 'prepared', '["prepared"]', 0, 0, 0, NULL, ?
+            FROM chair_bridge_losses WHERE loss_id=?
+      `).run(
+        intent.providerActionId,
+        sha256(canonicalJson({ recoveryId, actionId: intent.providerActionId })),
+        sha256(payloadJson),
+        payloadJson,
+        now,
+        intent.lossId,
+      );
+    }
+    this.#fault("chair-recovery:prepare:custody");
+    return {
+      schemaVersion: 1,
+      recoveryId,
+      intent,
+      intentDigest,
+      inspectionDigest: input.inspection.inspectionDigest,
+      operatorId: input.operatorId,
+      operatorCommandId: input.operatorCommandId,
+      ...(capability === undefined ? {} : { capability }),
+      ...(attestationChallenge === undefined ? {} : { attestationChallenge }),
+      ...(capability === undefined ? {} : { socketPath: this.#fabricSocketPath }),
+    };
+  }
+
+  async dispatchPreparedChairRecovery(handle: ChairRecoveryDispatchHandle): Promise<ChairRecoveryCommit> {
+    const custody = row(this.#database.prepare(`
+      SELECT * FROM chair_bridge_recovery_custody WHERE recovery_id=?
+    `).get(handle.recoveryId), "chair recovery custody");
+    if (
+      text(custody, "operator_id") !== handle.operatorId ||
+      text(custody, "operator_command_id") !== handle.operatorCommandId ||
+      text(custody, "intent_digest") !== handle.intentDigest
+    ) throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "chair recovery handle changed");
+    if (text(custody, "state") === "terminal") {
+      const stored: unknown = JSON.parse(text(custody, "result_json"));
+      if (!isRow(stored) || stored.status !== "committed") throw new Error("terminal chair recovery result is invalid");
+      return stored as ChairRecoveryCommit;
+    }
+    if (text(custody, "state") !== "prepared") {
+      throw new ProjectFabricCoreError("CONFLICT", "chair recovery is not prepared");
+    }
+    if (handle.intent.path === "rebind") {
+      return await this.#dispatchChairRebind({ ...handle, intent: handle.intent });
+    }
+    if (handle.intent.path === "takeover") {
+      return await this.#dispatchChairTakeover({ ...handle, intent: handle.intent });
+    }
+    const abandonIntent = handle.intent;
+    const now = this.#clock();
+    const result = this.#database.transaction((): ChairRecoveryCommit => {
+      const changed = this.#database.prepare(`
+        UPDATE chair_bridge_recovery_custody
+           SET state='committing', revision=revision+1, updated_at=?
+         WHERE recovery_id=? AND state='prepared' AND revision=1
+      `).run(now, handle.recoveryId);
+      if (changed.changes !== 1) stale("chair recovery custody changed before commit");
+      this.#fault("chair-recovery:abandon:committing");
+      const bridge = row(this.#database.prepare(`
+        SELECT revision FROM launched_chair_bridge_state
+         WHERE project_session_id=? AND coordination_run_id=? AND state='lost'
+      `).get(handle.intent.projectSessionId, handle.intent.coordinationRunId), "lost chair bridge");
+      if (integer(bridge, "revision") !== handle.intent.expectedBridgeRevision) {
+        stale("lost chair bridge revision changed");
+      }
+      const abandonedBridge = this.#database.prepare(`
+        UPDATE launched_chair_bridge_state
+           SET state='abandoned', revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND coordination_run_id=? AND state='lost' AND revision=?
+      `).run(
+        now,
+        abandonIntent.projectSessionId,
+        abandonIntent.coordinationRunId,
+        abandonIntent.expectedBridgeRevision,
+      );
+      if (abandonedBridge.changes !== 1) stale("lost chair bridge changed before abandon");
+      const resolution = {
+        schemaVersion: 1,
+        recoveryId: handle.recoveryId,
+        lossId: abandonIntent.lossId,
+        path: "abandon" as const,
+        reason: abandonIntent.reason,
+        previousBridgeGeneration: abandonIntent.expectedLostBridgeGeneration,
+      };
+      const evidenceDigest = jsonEvidenceDigest(resolution);
+      this.#database.prepare(`
+        INSERT INTO chair_bridge_loss_resolutions(
+          loss_id, recovery_id, path, successor_agent_id,
+          new_principal_generation, new_bridge_generation, evidence_digest, created_at
+        ) VALUES (?, ?, 'abandon', NULL, NULL, NULL, ?, ?)
+      `).run(abandonIntent.lossId, handle.recoveryId, evidenceDigest, now);
+      const revokedLease = this.#database.prepare(`
+        UPDATE run_chair_leases SET status='revoked', updated_at=?
+         WHERE project_session_id=? AND run_id=? AND status='frozen'
+      `).run(now, abandonIntent.projectSessionId, abandonIntent.coordinationRunId);
+      if (revokedLease.changes !== 1) stale("frozen chair lease changed before abandon");
+      const terminalPath = canonicalJson({ kind: "cancelled", reason: abandonIntent.reason });
+      const cancelledRun = this.#database.prepare(`
+        UPDATE runs SET lifecycle_state='cancelled', revision=revision+1
+         WHERE run_id=? AND lifecycle_state='recovery_required' AND revision=?
+      `).run(abandonIntent.coordinationRunId, abandonIntent.expectedRunRevision);
+      if (cancelledRun.changes !== 1) stale("run recovery revision changed before abandon");
+      const cancelledSession = this.#database.prepare(`
+        UPDATE project_sessions
+           SET state='cancelled', revision=revision+1, terminal_path_json=?, updated_at=?
+         WHERE project_session_id=? AND state='recovery_required' AND revision=? AND generation=?
+      `).run(
+        terminalPath,
+        now,
+        abandonIntent.projectSessionId,
+        abandonIntent.expectedSessionRevision,
+        abandonIntent.expectedSessionGeneration,
+      );
+      if (cancelledSession.changes !== 1) stale("project session recovery revision changed before abandon");
+      const commit: ChairRecoveryCommit = {
+        status: "committed",
+        recoveryId: handle.recoveryId,
+        path: "abandon",
+        evidenceDigest,
+      };
+      const terminal = this.#database.prepare(`
+        UPDATE chair_bridge_recovery_custody
+           SET state='terminal', result_json=?, revision=revision+1, updated_at=?
+         WHERE recovery_id=? AND state='committing'
+      `).run(canonicalJson(commit), now, handle.recoveryId);
+      if (terminal.changes !== 1) stale("chair abandon custody changed before terminal commit");
+      return commit;
+    })();
+    return result;
+  }
+
+  chairRecoveryStatus(operatorId: string, operatorCommandId: string): ChairRecoveryCommit {
+    const custody = row(this.#database.prepare(`
+      SELECT recovery_id, path, state, result_json FROM chair_bridge_recovery_custody
+       WHERE operator_id=? AND operator_command_id=?
+    `).get(operatorId, operatorCommandId), "chair recovery status");
+    const state = text(custody, "state");
+    if (state === "terminal") {
+      const value: unknown = JSON.parse(text(custody, "result_json"));
+      if (!isRow(value) || value.status !== "committed") throw new Error("terminal chair recovery status is invalid");
+      return value as ChairRecoveryCommit;
+    }
+    const path = text(custody, "path") as ChairRecoveryIntentPath;
+    const evidenceDigest = jsonEvidenceDigest({
+      recoveryId: text(custody, "recovery_id"),
+      path,
+      state,
+      result: custody.result_json,
+    });
+    if (state === "no-effect") {
+      return { status: "no-effect", recoveryId: text(custody, "recovery_id"), path, evidenceDigest };
+    }
+    if (state === "ambiguous") {
+      return { status: "ambiguous", recoveryId: text(custody, "recovery_id"), path, evidenceDigest };
+    }
+    return { status: "pending", recoveryId: text(custody, "recovery_id"), path, evidenceDigest };
+  }
+
+  async reconcileChairRecovery(operatorId: string, operatorCommandId: string): Promise<ChairRecoveryCommit> {
+    const custody = row(this.#database.prepare(`
+      SELECT * FROM chair_bridge_recovery_custody
+       WHERE operator_id=? AND operator_command_id=?
+    `).get(operatorId, operatorCommandId), "chair recovery reconciliation");
+    const status = this.chairRecoveryStatus(operatorId, operatorCommandId);
+    if (status.status === "committed" || status.status === "no-effect") return status;
+    const path = text(custody, "path");
+    const custodyState = text(custody, "state");
+    if (path === "takeover" && ["dispatched", "accepted", "ambiguous"].includes(custodyState)) {
+      return await this.#reconcileChairTakeover(custody, operatorId, operatorCommandId, status);
+    }
+    if (
+      path !== "rebind" || !["dispatched", "accepted", "ambiguous"].includes(custodyState) ||
+      typeof custody.provider_action_id !== "string" || this.#adapterEffects.lookupChairRecovery === undefined
+    ) return status;
+    let record: unknown;
+    try {
+      record = await this.#adapterEffects.lookupChairRecovery({
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: custody.provider_action_id,
+      });
+    } catch {
+      return status;
+    }
+    const provider = this.#chairRecoveryLookupResult(custody, record);
+    if (provider === undefined) return status;
+    const intentValue: unknown = JSON.parse(text(custody, "intent_json"));
+    if (!isRow(intentValue) || intentValue.kind !== "chair-bridge-recovery" || intentValue.path !== "rebind") {
+      throw new Error("stored chair recovery intent is invalid");
+    }
+    const intent = intentValue as ChairBridgeRecoveryIntent & { path: "rebind" };
+    return this.#commitActiveChairRecovery({
+      schemaVersion: 1,
+      recoveryId: text(custody, "recovery_id"),
+      intent,
+      intentDigest: text(custody, "intent_digest") as Digest,
+      inspectionDigest: jsonEvidenceDigest({ recovery: text(custody, "recovery_id") }),
+      operatorId,
+      operatorCommandId,
+    }, jsonEvidenceDigest(provider.fabricContinuity));
+  }
+
+  #chairRecoveryLookupResult(custody: Row, record: unknown): ChairLaunchProviderResult | undefined {
+    if (
+      !isRow(record) || record.actionId !== custody.provider_action_id ||
+      record.status !== "terminal" || record.operation !== "recover_chair" ||
+      record.executionCount !== 1 || record.effectCount !== 1 || !isRow(record.result)
+    ) return undefined;
+    try {
+      const provider = parseChairLaunchProviderResult(record.result, {
+        providerAdapterId: text(custody, "provider_adapter_id"),
+        providerActionId: text(custody, "provider_action_id"),
+        providerContractDigest: text(custody, "provider_contract_digest"),
+        challengeDigest: text(custody, "attestation_challenge_digest"),
+      });
+      return provider.resumeReference === custody.new_provider_session_ref &&
+        provider.providerSessionGeneration === custody.new_provider_session_generation
+        ? provider
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #dispatchChairRebind(
+    handle: ChairRecoveryDispatchHandle & Readonly<{ intent: Extract<ChairBridgeRecoveryIntent, { path: "rebind" }> }>,
+  ): Promise<ChairRecoveryCommit> {
+    if (
+      this.#adapterEffects.recoverChair === undefined ||
+      handle.capability === undefined ||
+      handle.attestationChallenge === undefined ||
+      handle.socketPath === undefined
+    ) throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "chair rebind adapter custody is unavailable");
+    const now = this.#clock();
+    this.#database.transaction(() => {
+      const recovery = this.#database.prepare(`
+        UPDATE chair_bridge_recovery_custody
+           SET state='dispatched', revision=revision+1, updated_at=?
+         WHERE recovery_id=? AND state='prepared'
+      `).run(now, handle.recoveryId);
+      const action = this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='dispatched', history_json='["prepared","dispatched"]',
+               execution_count=1, journal_revision=journal_revision+1, updated_at=?
+         WHERE adapter_id=? AND action_id=? AND status='prepared'
+      `).run(now, handle.intent.providerAdapterId, handle.intent.providerActionId);
+      if (recovery.changes !== 1 || action.changes !== 1) stale("chair rebind changed before dispatch");
+      this.#fault("chair-recovery:rebind:dispatched");
+    })();
+    let raw: unknown;
+    try {
+      raw = await this.#adapterEffects.recoverChair(handle);
+      this.#fault("chair-recovery:rebind:after-adapter");
+    } catch (error: unknown) {
+      return this.#markChairRecoveryAmbiguous(handle, error);
+    }
+    if (!isRow(raw)) return this.#markChairRecoveryAmbiguous(handle, "malformed rebind result");
+    const expectedSessionRef = text(row(this.#database.prepare(`
+      SELECT * FROM chair_bridge_losses WHERE loss_id=?
+    `).get(handle.intent.lossId), "chair rebind loss"), "provider_session_ref");
+    const expectedGeneration = handle.intent.expectedProviderSessionGeneration + 1;
+    if (
+      raw.schemaVersion !== 1 || raw.recoveryId !== handle.recoveryId ||
+      raw.providerAdapterId !== handle.intent.providerAdapterId ||
+      raw.providerActionId !== handle.intent.providerActionId ||
+      raw.providerContractDigest !== handle.intent.providerContractDigest ||
+      raw.providerSessionRef !== expectedSessionRef ||
+      raw.providerSessionGeneration !== expectedGeneration ||
+      typeof raw.activationEvidenceDigest !== "string" || !DIGEST.test(raw.activationEvidenceDigest)
+    ) return this.#markChairRecoveryAmbiguous(handle, "rebind result binding changed");
+    return this.#commitActiveChairRecovery(handle, raw.activationEvidenceDigest as Digest);
+  }
+
+  async #dispatchChairTakeover(
+    handle: ChairRecoveryDispatchHandle & Readonly<{ intent: Extract<ChairBridgeRecoveryIntent, { path: "takeover" }> }>,
+  ): Promise<ChairRecoveryCommit> {
+    const promote = this.#adapterEffects.promoteRetainedSuccessorBridge;
+    if (promote === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "chair takeover bridge promotion is unavailable");
+    }
+    const successor = this.#chairRecoverySuccessor(handle.intent);
+    const now = this.#clock();
+    const dispatched = this.#database.prepare(`
+      UPDATE chair_bridge_recovery_custody
+         SET state='dispatched', revision=revision+1, updated_at=?
+       WHERE recovery_id=? AND state='prepared'
+    `).run(now, handle.recoveryId);
+    if (dispatched.changes !== 1) stale("chair takeover changed before dispatch");
+    this.#fault("chair-recovery:takeover:dispatched");
+    const promotionInput = {
+      projectSessionId: handle.intent.projectSessionId,
+      runId: handle.intent.coordinationRunId,
+      agentId: handle.intent.successorAgentId,
+      principalGeneration: handle.intent.expectedSuccessorPrincipalGeneration,
+      adapterId: text(successor, "adapter_id"),
+      actionId: text(successor, "action_id"),
+      providerSessionRef: text(successor, "provider_session_ref"),
+      providerSessionGeneration: integer(successor, "provider_session_generation"),
+      sourceBridgeGeneration: handle.intent.expectedSuccessorBridgeGeneration,
+      chairBridgeGeneration: handle.intent.expectedLostBridgeGeneration + 1,
+    } as const;
+    let promoted = false;
+    try {
+      promoted = await promote(promotionInput);
+      this.#fault("chair-recovery:takeover:after-adapter");
+    } catch (error: unknown) {
+      return this.#markChairRecoveryAmbiguous(handle, error);
+    }
+    if (!promoted) return await this.#settleUnobservedChairTakeover(handle, promotionInput);
+    return this.#commitActiveChairRecovery(
+      handle,
+      text(successor, "activation_evidence_digest") as Digest,
+    );
+  }
+
+  async #settleUnobservedChairTakeover(
+    handle: ChairRecoveryDispatchHandle & Readonly<{ intent: Extract<ChairBridgeRecoveryIntent, { path: "takeover" }> }>,
+    input: Parameters<NonNullable<LaunchCustodyServiceOptions["adapterEffects"]["promoteRetainedSuccessorBridge"]>>[0],
+  ): Promise<ChairRecoveryCommit> {
+    const lookup = this.#adapterEffects.lookupRetainedSuccessorBridge;
+    if (lookup === undefined) return this.#markChairRecoveryAmbiguous(handle, "successor bridge lookup unavailable");
+    let observed: "child" | "chair" | "missing";
+    try {
+      observed = await lookup(input);
+    } catch (error: unknown) {
+      return this.#markChairRecoveryAmbiguous(handle, error);
+    }
+    if (observed === "chair") {
+      const successor = this.#chairRecoverySuccessor(handle.intent);
+      return this.#commitActiveChairRecovery(handle, text(successor, "activation_evidence_digest") as Digest);
+    }
+    if (observed === "child") return this.#markChairRecoveryNoEffect(handle, "successor remained a child");
+    return this.#markChairRecoveryAmbiguous(handle, "successor bridge state is unobservable");
+  }
+
+  async #reconcileChairTakeover(
+    custody: Row,
+    operatorId: string,
+    operatorCommandId: string,
+    current: ChairRecoveryCommit,
+  ): Promise<ChairRecoveryCommit> {
+    const lookup = this.#adapterEffects.lookupRetainedSuccessorBridge;
+    if (lookup === undefined) return current;
+    const intentValue: unknown = JSON.parse(text(custody, "intent_json"));
+    if (!isRow(intentValue) || intentValue.kind !== "chair-bridge-recovery" || intentValue.path !== "takeover") {
+      throw new Error("stored chair takeover intent is invalid");
+    }
+    const intent = intentValue as ChairBridgeRecoveryIntent & { path: "takeover" };
+    const successor = this.#chairRecoverySuccessor(intent);
+    const handle: ChairRecoveryDispatchHandle & Readonly<{ intent: typeof intent }> = {
+      schemaVersion: 1,
+      recoveryId: text(custody, "recovery_id"),
+      intent,
+      intentDigest: text(custody, "intent_digest") as Digest,
+      inspectionDigest: jsonEvidenceDigest({ recovery: text(custody, "recovery_id") }),
+      operatorId,
+      operatorCommandId,
+    };
+    return await this.#settleUnobservedChairTakeover(handle, {
+      projectSessionId: intent.projectSessionId,
+      runId: intent.coordinationRunId,
+      agentId: intent.successorAgentId,
+      principalGeneration: intent.expectedSuccessorPrincipalGeneration,
+      adapterId: text(successor, "adapter_id"),
+      actionId: text(successor, "action_id"),
+      providerSessionRef: text(successor, "provider_session_ref"),
+      providerSessionGeneration: integer(successor, "provider_session_generation"),
+      sourceBridgeGeneration: intent.expectedSuccessorBridgeGeneration,
+      chairBridgeGeneration: intent.expectedLostBridgeGeneration + 1,
+    });
+  }
+
+  #markChairRecoveryNoEffect(handle: ChairRecoveryDispatchHandle, reason: string): ChairRecoveryCommit {
+    const now = this.#clock();
+    const evidenceDigest = jsonEvidenceDigest({
+      recoveryId: handle.recoveryId,
+      kind: "chair-recovery-proved-no-effect",
+      reason,
+    });
+    const changed = this.#database.prepare(`
+      UPDATE chair_bridge_recovery_custody
+         SET state='no-effect', result_json=?, revision=revision+1, updated_at=?
+       WHERE recovery_id=? AND state IN ('dispatched','accepted','ambiguous')
+    `).run(canonicalJson({ status: "no-effect", evidenceDigest, reason }), now, handle.recoveryId);
+    if (changed.changes !== 1) stale("chair recovery no-effect state changed");
+    return { status: "no-effect", recoveryId: handle.recoveryId, path: handle.intent.path, evidenceDigest };
+  }
+
+  #markChairRecoveryAmbiguous(handle: ChairRecoveryDispatchHandle, evidence: unknown): ChairRecoveryCommit {
+    const now = this.#clock();
+    const evidenceDigest = jsonEvidenceDigest({
+      recoveryId: handle.recoveryId,
+      kind: "chair-recovery-ambiguous",
+      evidence: evidence instanceof Error ? { name: evidence.name, message: evidence.message } : evidence,
+    });
+    this.#database.transaction(() => {
+      this.#database.prepare(`
+        UPDATE chair_bridge_recovery_custody
+           SET state='ambiguous', result_json=?, revision=revision+1, updated_at=?
+         WHERE recovery_id=? AND state IN ('dispatched','accepted','ambiguous')
+      `).run(canonicalJson({ status: "ambiguous", evidenceDigest }), now, handle.recoveryId);
+      if (handle.intent.path === "rebind") {
+        this.#database.prepare(`
+          UPDATE provider_actions
+             SET status='ambiguous', history_json='["prepared","dispatched","ambiguous"]',
+                 result_json=?, journal_revision=journal_revision+1, updated_at=?
+           WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+        `).run(
+          canonicalJson({ kind: "chair-recovery-ambiguous", evidenceDigest }),
+          now,
+          handle.intent.providerAdapterId,
+          handle.intent.providerActionId,
+        );
+      }
+    })();
+    return { status: "ambiguous", recoveryId: handle.recoveryId, path: handle.intent.path, evidenceDigest };
+  }
+
+  #commitActiveChairRecovery(
+    handle: ChairRecoveryDispatchHandle & Readonly<{
+      intent: Extract<ChairBridgeRecoveryIntent, { path: "rebind" | "takeover" }>;
+    }>,
+    activationEvidenceDigest: Digest,
+  ): ChairRecoveryCommit {
+    const now = this.#clock();
+    return this.#database.transaction((): ChairRecoveryCommit => {
+      const custody = row(this.#database.prepare(`
+        SELECT * FROM chair_bridge_recovery_custody WHERE recovery_id=?
+      `).get(handle.recoveryId), "active chair recovery custody");
+      const allowedState = text(custody, "state");
+      if (!["dispatched", "accepted", "ambiguous"].includes(allowedState)) {
+        stale("active chair recovery custody changed");
+      }
+      const committing = this.#database.prepare(`
+        UPDATE chair_bridge_recovery_custody
+           SET state='committing', new_activation_evidence_digest=?, revision=revision+1, updated_at=?
+         WHERE recovery_id=? AND state=?
+      `).run(activationEvidenceDigest, now, handle.recoveryId, allowedState);
+      if (committing.changes !== 1) stale("active chair recovery custody changed before commit");
+      this.#fault(`chair-recovery:${handle.intent.path}:committing`);
+      const updatedBridge = this.#database.prepare(`
+        UPDATE launched_chair_bridge_state
+           SET chair_agent_id=(SELECT new_chair_agent_id FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               provider_adapter_id=(SELECT provider_adapter_id FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               provider_action_id=(SELECT new_provider_action_id FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               provider_contract_digest=(SELECT provider_contract_digest FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               provider_session_ref=(SELECT new_provider_session_ref FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               provider_session_generation=(SELECT new_provider_session_generation FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               principal_generation=(SELECT new_principal_generation FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               bridge_generation=(SELECT new_bridge_generation FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               capability_hash=(SELECT new_capability_hash FROM chair_bridge_recovery_custody WHERE recovery_id=?),
+               activation_evidence_digest=?, state='active', revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND coordination_run_id=? AND state='lost' AND revision=?
+      `).run(
+        handle.recoveryId, handle.recoveryId, handle.recoveryId, handle.recoveryId,
+        handle.recoveryId, handle.recoveryId, handle.recoveryId, handle.recoveryId,
+        handle.recoveryId, activationEvidenceDigest, now,
+        handle.intent.projectSessionId, handle.intent.coordinationRunId,
+        handle.intent.expectedBridgeRevision,
+      );
+      if (updatedBridge.changes !== 1) stale("lost chair bridge changed during recovery");
+      const target = row(this.#database.prepare(`
+        SELECT new_chair_agent_id, new_provider_session_ref, new_provider_session_generation,
+               new_principal_generation, new_bridge_generation
+          FROM chair_bridge_recovery_custody WHERE recovery_id=?
+      `).get(handle.recoveryId), "chair recovery target");
+      const targetAgentId = text(target, "new_chair_agent_id");
+      const newChairGeneration = handle.intent.expectedChairGeneration + 1;
+      const leaseId = `chair:${handle.intent.coordinationRunId}:${String(newChairGeneration)}:recovery`;
+      const revokedLease = this.#database.prepare(`
+        UPDATE run_chair_leases SET status='revoked', updated_at=?
+         WHERE project_session_id=? AND run_id=? AND status='frozen'
+      `).run(now, handle.intent.projectSessionId, handle.intent.coordinationRunId);
+      if (revokedLease.changes !== 1) stale("frozen chair lease changed during recovery");
+      this.#database.prepare(`
+        INSERT INTO run_chair_leases(
+          project_session_id, run_id, lease_id, holder_agent_id, generation, status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?)
+      `).run(
+        handle.intent.projectSessionId,
+        handle.intent.coordinationRunId,
+        leaseId,
+        targetAgentId,
+        newChairGeneration,
+        now,
+      );
+      const updatedRun = this.#database.prepare(`
+        UPDATE runs
+           SET chair_agent_id=?, chair_generation=?, chair_lease_id=?,
+               lifecycle_state='active', revision=revision+1
+         WHERE run_id=? AND lifecycle_state='recovery_required'
+           AND revision=? AND chair_generation=?
+      `).run(
+        targetAgentId,
+        newChairGeneration,
+        leaseId,
+        handle.intent.coordinationRunId,
+        handle.intent.expectedRunRevision,
+        handle.intent.expectedChairGeneration,
+      );
+      if (updatedRun.changes !== 1) stale("run recovery revision changed");
+      const updatedSession = this.#database.prepare(`
+        UPDATE project_sessions
+           SET state='active', generation=generation+1, revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND state='recovery_required'
+           AND revision=? AND generation=?
+      `).run(
+        now,
+        handle.intent.projectSessionId,
+        handle.intent.expectedSessionRevision,
+        handle.intent.expectedSessionGeneration,
+      );
+      if (updatedSession.changes !== 1) stale("project session recovery revision changed");
+      const suspendedChair = this.#database.prepare(`
+        UPDATE agents SET lifecycle='suspended'
+         WHERE run_id=? AND agent_id=(SELECT chair_agent_id FROM chair_bridge_losses WHERE loss_id=?)
+      `).run(handle.intent.coordinationRunId, handle.intent.lossId);
+      if (suspendedChair.changes !== 1) stale("lost chair identity changed during recovery");
+      const activatedChair = this.#database.prepare(`
+        UPDATE agents SET lifecycle='ready', provider_session_ref=? WHERE run_id=? AND agent_id=?
+      `).run(
+        text(target, "new_provider_session_ref"),
+        handle.intent.coordinationRunId,
+        targetAgentId,
+      );
+      if (activatedChair.changes !== 1) stale("recovery target identity changed");
+      this.#database.prepare(`
+        INSERT INTO provider_state(
+          run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256
+        ) VALUES (?, ?, ?, NULL, NULL)
+        ON CONFLICT(run_id, agent_id) DO UPDATE SET
+          provider_session_generation=excluded.provider_session_generation,
+          context_revision=NULL, reconciled_checkpoint_sha256=NULL
+      `).run(
+        handle.intent.coordinationRunId,
+        targetAgentId,
+        integer(target, "new_provider_session_generation"),
+      );
+      this.#database.prepare(`
+        DELETE FROM delivery_freezes
+         WHERE run_id=? AND agent_id=(SELECT chair_agent_id FROM chair_bridge_losses WHERE loss_id=?)
+      `).run(handle.intent.coordinationRunId, handle.intent.lossId);
+      if (handle.intent.path === "takeover") {
+        const clearedSuccessor = this.#database.prepare(`
+          UPDATE agent_bridge_state
+             SET provider_session_ref=NULL, provider_session_generation=NULL,
+                 bridge_state='none', capability_hash=NULL, activation_evidence_digest=NULL,
+                 revision=revision+1, updated_at=?
+           WHERE run_id=? AND agent_id=? AND bridge_state='active' AND revision=?
+        `).run(
+          now,
+          handle.intent.coordinationRunId,
+          handle.intent.successorAgentId,
+          handle.intent.expectedSuccessorRevision,
+        );
+        if (clearedSuccessor.changes !== 1) stale("takeover successor bridge changed during recovery");
+      }
+      const resolution = {
+        schemaVersion: 1,
+        recoveryId: handle.recoveryId,
+        lossId: handle.intent.lossId,
+        path: handle.intent.path,
+        successorAgentId: targetAgentId,
+        newPrincipalGeneration: integer(target, "new_principal_generation"),
+        newBridgeGeneration: integer(target, "new_bridge_generation"),
+        activationEvidenceDigest,
+      };
+      const evidenceDigest = jsonEvidenceDigest(resolution);
+      this.#database.prepare(`
+        INSERT INTO chair_bridge_loss_resolutions(
+          loss_id, recovery_id, path, successor_agent_id,
+          new_principal_generation, new_bridge_generation, evidence_digest, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        handle.intent.lossId,
+        handle.recoveryId,
+        handle.intent.path,
+        targetAgentId,
+        integer(target, "new_principal_generation"),
+        integer(target, "new_bridge_generation"),
+        evidenceDigest,
+        now,
+      );
+      if (handle.intent.path === "rebind") {
+        const providerAction = this.#database.prepare(`
+          UPDATE provider_actions
+             SET status='terminal', history_json=CASE status
+                   WHEN 'ambiguous' THEN '["prepared","dispatched","ambiguous","accepted","terminal"]'
+                   WHEN 'accepted' THEN '["prepared","dispatched","accepted","terminal"]'
+                   ELSE '["prepared","dispatched","accepted","terminal"]'
+                 END,
+                 provider_session_generation=?, effect_count=1, idempotency_proven=1,
+                 result_json=?, journal_revision=journal_revision+1, updated_at=?
+           WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+        `).run(
+          integer(target, "new_provider_session_generation"),
+          canonicalJson(resolution),
+          now,
+          handle.intent.providerAdapterId,
+          handle.intent.providerActionId,
+        );
+        if (providerAction.changes !== 1) stale("chair recovery provider action changed during commit");
+      }
+      const commit: ChairRecoveryCommit = {
+        status: "committed",
+        recoveryId: handle.recoveryId,
+        path: handle.intent.path,
+        evidenceDigest,
+      };
+      const terminal = this.#database.prepare(`
+        UPDATE chair_bridge_recovery_custody
+           SET state='terminal', result_json=?, revision=revision+1, updated_at=?
+         WHERE recovery_id=? AND state='committing'
+      `).run(canonicalJson(commit), now, handle.recoveryId);
+      if (terminal.changes !== 1) stale("chair recovery custody changed before terminal commit");
+      return commit;
+    })();
+  }
+
+  async #recoverChairRecoveryCustody(result: {
+    lookedUp: number;
+    activated: number;
+    failed: number;
+    ambiguous: number;
+    recoveryRequired: number;
+  }): Promise<void> {
+    const prepared = this.#database.prepare(`
+      SELECT * FROM chair_bridge_recovery_custody WHERE state='prepared' ORDER BY created_at, recovery_id
+    `).all().filter(isRow);
+    for (const custody of prepared) {
+      const now = this.#clock();
+      this.#database.transaction(() => {
+        if (text(custody, "path") === "rebind" && typeof custody.new_capability_hash === "string") {
+          this.#database.prepare(`UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL`)
+            .run(now, custody.new_capability_hash);
+        }
+        if (typeof custody.provider_action_id === "string") {
+          const proof = {
+            schemaVersion: 1,
+            kind: "chair-recovery-pre-dispatch-no-effect",
+            recoveryId: text(custody, "recovery_id"),
+            executionCount: 0,
+          };
+          this.#database.prepare(`
+            UPDATE provider_actions
+               SET status='terminal', history_json='["prepared","terminal"]',
+                   execution_count=0, effect_count=0, idempotency_proven=1,
+                   result_json=?, journal_revision=journal_revision+1, updated_at=?
+             WHERE adapter_id=? AND action_id=? AND status='prepared'
+          `).run(
+            canonicalJson({ ...proof, evidenceDigest: jsonEvidenceDigest(proof) }),
+            now,
+            text(custody, "provider_adapter_id"),
+            custody.provider_action_id,
+          );
+        }
+        this.#database.prepare(`
+          UPDATE chair_bridge_recovery_custody
+             SET state='no-effect', result_json=?, revision=revision+1, updated_at=?
+           WHERE recovery_id=? AND state='prepared'
+        `).run(
+          canonicalJson({ status: "no-effect", reason: "prepared-before-restart" }),
+          now,
+          text(custody, "recovery_id"),
+        );
+      })();
+      result.failed += 1;
+      result.recoveryRequired += 1;
+    }
+    const observable = this.#database.prepare(`
+      SELECT * FROM chair_bridge_recovery_custody
+       WHERE path='rebind' AND state IN ('dispatched','accepted','ambiguous')
+       ORDER BY created_at, recovery_id
+    `).all().filter(isRow);
+    for (const custody of observable) {
+      if (this.#adapterEffects.lookupChairRecovery === undefined || typeof custody.provider_action_id !== "string") {
+        result.ambiguous += 1;
+        result.recoveryRequired += 1;
+        continue;
+      }
+      let record: unknown;
+      try {
+        record = await this.#adapterEffects.lookupChairRecovery({
+          adapterId: text(custody, "provider_adapter_id"),
+          actionId: custody.provider_action_id,
+        });
+        result.lookedUp += 1;
+      } catch {
+        result.ambiguous += 1;
+        result.recoveryRequired += 1;
+        continue;
+      }
+      const provider = this.#chairRecoveryLookupResult(custody, record);
+      if (provider === undefined) {
+        result.ambiguous += 1;
+        result.recoveryRequired += 1;
+        continue;
+      }
+      const intentValue: unknown = JSON.parse(text(custody, "intent_json"));
+      if (!isRow(intentValue) || intentValue.kind !== "chair-bridge-recovery" || intentValue.path !== "rebind") {
+        throw new Error("stored chair recovery intent is invalid");
+      }
+      const intent = intentValue as ChairBridgeRecoveryIntent & { path: "rebind" };
+      const handle: ChairRecoveryDispatchHandle & Readonly<{ intent: typeof intent }> = {
+        schemaVersion: 1,
+        recoveryId: text(custody, "recovery_id"),
+        intent,
+        intentDigest: text(custody, "intent_digest") as Digest,
+        inspectionDigest: jsonEvidenceDigest({ recovery: text(custody, "recovery_id") }),
+        operatorId: text(custody, "operator_id"),
+        operatorCommandId: text(custody, "operator_command_id"),
+      };
+      this.#commitActiveChairRecovery(
+        handle,
+        jsonEvidenceDigest(provider.fabricContinuity),
+      );
+      result.activated += 1;
+    }
+    const takeoverObservable = this.#database.prepare(`
+      SELECT operator_id, operator_command_id
+        FROM chair_bridge_recovery_custody
+       WHERE path='takeover' AND state IN ('dispatched','accepted','ambiguous')
+       ORDER BY created_at, recovery_id
+    `).all().filter(isRow);
+    for (const custody of takeoverObservable) {
+      const reconciled = await this.reconcileChairRecovery(
+        text(custody, "operator_id"),
+        text(custody, "operator_command_id"),
+      );
+      result.lookedUp += 1;
+      if (reconciled.status === "committed") result.activated += 1;
+      else if (reconciled.status === "no-effect") {
+        result.failed += 1;
+        result.recoveryRequired += 1;
+      } else {
+        result.ambiguous += 1;
+        result.recoveryRequired += 1;
+      }
+    }
+  }
+
+  #chairRecoveryInspectionDigest(intent: ChairBridgeRecoveryIntent): Digest {
+    const loss = row(this.#database.prepare(`
+      SELECT * FROM chair_bridge_losses WHERE loss_id=?
+    `).get(intent.lossId), "chair bridge loss");
+    const bridge = row(this.#database.prepare(`
+      SELECT * FROM launched_chair_bridge_state
+       WHERE project_session_id=? AND coordination_run_id=?
+    `).get(intent.projectSessionId, intent.coordinationRunId), "launched chair bridge");
+    const session = row(this.#database.prepare(`
+      SELECT project_id, state, revision, generation FROM project_sessions WHERE project_session_id=?
+    `).get(intent.projectSessionId), "chair recovery project session");
+    const run = row(this.#database.prepare(`
+      SELECT lifecycle_state, revision, chair_agent_id, chair_generation FROM runs
+       WHERE project_session_id=? AND run_id=?
+    `).get(intent.projectSessionId, intent.coordinationRunId), "chair recovery run");
+    if (
+      text(loss, "project_session_id") !== intent.projectSessionId ||
+      text(loss, "coordination_run_id") !== intent.coordinationRunId ||
+      text(loss, "recovery_manifest_digest") !== intent.recoveryManifestDigest ||
+      integer(loss, "principal_generation") !== intent.expectedPrincipalGeneration ||
+      integer(loss, "lost_bridge_generation") !== intent.expectedLostBridgeGeneration ||
+      integer(loss, "provider_session_generation") !== intent.expectedProviderSessionGeneration ||
+      text(loss, "provider_adapter_id") !== intent.providerAdapterId ||
+      text(loss, "provider_contract_digest") !== intent.providerContractDigest ||
+      text(bridge, "state") !== "lost" ||
+      integer(bridge, "revision") !== intent.expectedBridgeRevision ||
+      text(session, "state") !== "recovery_required" ||
+      integer(session, "revision") !== intent.expectedSessionRevision ||
+      integer(session, "generation") !== intent.expectedSessionGeneration ||
+      text(run, "lifecycle_state") !== "recovery_required" ||
+      integer(run, "revision") !== intent.expectedRunRevision ||
+      integer(run, "chair_generation") !== intent.expectedChairGeneration
+    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery binding is stale");
+    if (this.#database.prepare(`
+      SELECT 1 FROM chair_bridge_loss_resolutions WHERE loss_id=?
+    `).get(intent.lossId) !== undefined) {
+      throw new ProjectFabricCoreError("CONFLICT", "chair bridge loss is already resolved");
+    }
+    if (intent.path === "rebind" && this.#database.prepare(`
+      SELECT 1 FROM provider_actions WHERE adapter_id=? AND action_id=?
+    `).get(intent.providerAdapterId, intent.providerActionId) !== undefined) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "chair recovery provider action is already used");
+    }
+    const successor = intent.path === "takeover" ? this.#chairRecoverySuccessor(intent) : null;
+    return jsonEvidenceDigest({ intent, loss, bridge, session, run, successor });
+  }
+
+  #chairRecoverySuccessor(
+    intent: Extract<ChairBridgeRecoveryIntent, { path: "takeover" }>,
+  ): Row {
+    const successor = row(this.#database.prepare(`
+      SELECT bridge.*, custody.principal_generation
+        FROM agent_bridge_state bridge
+        JOIN provider_agent_custody custody
+          ON custody.run_id=bridge.run_id AND custody.action_id=bridge.action_id
+         AND custody.adapter_id=bridge.adapter_id AND custody.target_agent_id=bridge.agent_id
+         AND custody.bridge_capable=1
+        JOIN provider_actions action
+          ON action.adapter_id=bridge.adapter_id AND action.action_id=bridge.action_id
+         AND action.run_id=bridge.run_id AND action.target_agent_id=bridge.agent_id
+         AND action.status='terminal' AND action.execution_count=1 AND action.effect_count=1
+        JOIN agents agent
+          ON agent.run_id=bridge.run_id AND agent.agent_id=bridge.agent_id
+         AND agent.authority_id=custody.authority_id AND agent.lifecycle='ready'
+         AND agent.provider_session_ref=bridge.provider_session_ref
+        JOIN authorities authority
+          ON authority.authority_id=custody.authority_id AND authority.run_id=bridge.run_id
+        JOIN capabilities capability
+          ON capability.token_hash=bridge.capability_hash
+         AND capability.run_id=bridge.run_id AND capability.agent_id=bridge.agent_id
+         AND capability.principal_generation=custody.principal_generation
+       WHERE bridge.run_id=? AND bridge.agent_id=? AND bridge.bridge_state='active'
+         AND capability.revoked_at IS NULL AND capability.expires_at>?
+         AND agent.parent_agent_id=(
+           SELECT chair_agent_id FROM chair_bridge_losses WHERE loss_id=?
+         )
+    `).get(
+      intent.coordinationRunId,
+      intent.successorAgentId,
+      this.#clock(),
+      intent.lossId,
+    ), "chair recovery successor bridge");
+    if (
+      text(successor, "adapter_id") !== intent.providerAdapterId ||
+      integer(successor, "principal_generation") !== intent.expectedSuccessorPrincipalGeneration ||
+      integer(successor, "bridge_generation") !== intent.expectedSuccessorBridgeGeneration ||
+      integer(successor, "revision") !== intent.expectedSuccessorRevision
+    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery successor bridge changed");
+    return successor;
+  }
+
   #persistChairBridgeLoss(input: ChairBridgeLossObservation): boolean {
     const stateValue = this.#database.prepare(`
       SELECT * FROM launched_chair_bridge_state
@@ -753,11 +1848,11 @@ export class LaunchCustodyService {
     this.#database.prepare(`
       INSERT INTO chair_bridge_losses(
         loss_id, project_session_id, coordination_run_id, chair_agent_id,
-        provider_adapter_id, provider_action_id, provider_session_ref,
+        provider_adapter_id, provider_action_id, provider_contract_digest, provider_session_ref,
         provider_session_generation, principal_generation, lost_bridge_generation,
         next_bridge_generation, capability_hash, daemon_instance_generation,
         reason, evidence_digest, recovery_manifest_digest, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       lossId,
       input.projectSessionId,
@@ -765,6 +1860,7 @@ export class LaunchCustodyService {
       input.agentId,
       input.adapterId,
       input.actionId,
+      text(state, "provider_contract_digest"),
       input.providerSessionRef,
       input.providerSessionGeneration,
       input.principalGeneration,
@@ -784,34 +1880,41 @@ export class LaunchCustodyService {
          AND state='active' AND revision=?
     `).run(now, input.projectSessionId, input.runId, integer(state, "revision"));
     if (changed.changes !== 1) stale("chair bridge state changed during loss fencing");
-    this.#database.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
-      .run(now, text(state, "capability_hash"));
-    this.#database.prepare(`
+    const revokedCapability = this.#database.prepare(
+      "UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL",
+    ).run(now, text(state, "capability_hash"));
+    if (revokedCapability.changes !== 1) stale("chair capability changed during loss fencing");
+    const frozenLease = this.#database.prepare(`
       UPDATE run_chair_leases SET status='frozen', updated_at=?
        WHERE project_session_id=? AND run_id=? AND holder_agent_id=? AND status='active'
     `).run(now, input.projectSessionId, input.runId, input.agentId);
+    if (frozenLease.changes !== 1) stale("active chair lease changed during loss fencing");
     this.#database.prepare(`
       INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(run_id, agent_id) DO UPDATE SET
         reason=excluded.reason, created_at=excluded.created_at
     `).run(input.runId, input.agentId, lossId, now);
-    this.#database.prepare("UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=?")
-      .run(input.runId, input.agentId);
-    this.#database.prepare(`
+    const suspended = this.#database.prepare(
+      "UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=?",
+    ).run(input.runId, input.agentId);
+    if (suspended.changes !== 1) stale("chair identity changed during loss fencing");
+    const fencedRun = this.#database.prepare(`
       UPDATE runs SET lifecycle_state='recovery_required', revision=revision+1
        WHERE run_id=? AND lifecycle_state IN (
          'active','quiescing','awaiting_acceptance','visibility_degraded',
          'reconciling','quarantined'
        )
     `).run(input.runId);
-    this.#database.prepare(`
+    if (fencedRun.changes !== 1) stale("run state changed during chair loss fencing");
+    const fencedSession = this.#database.prepare(`
       UPDATE project_sessions SET state='recovery_required', revision=revision+1, updated_at=?
        WHERE project_session_id=? AND state IN (
          'active','quiescing','awaiting_acceptance','visibility_degraded',
          'reconciling','quarantined'
        )
     `).run(now, input.projectSessionId);
+    if (fencedSession.changes !== 1) stale("project session state changed during chair loss fencing");
     return true;
   }
 
@@ -1052,6 +2155,9 @@ export class LaunchCustodyService {
         VALUES (?, ?, ?, ?, ?)
       `).run(capabilityHash, input.runId, input.agentId, principalGeneration, expiresAt);
     }
+    const projectSessionId = text(row(this.#database.prepare(`
+      SELECT project_session_id FROM runs WHERE run_id=?
+    `).get(input.runId), "agent custody run"), "project_session_id");
     this.#fault("agent:prepare:capability");
 
     const publicPayload = {
@@ -1156,7 +2262,16 @@ export class LaunchCustodyService {
         bridgeCapable,
         bridgeContractDigest,
         bridgeGeneration,
-        ...(capability === undefined ? {} : { capability, socketPath: this.#fabricSocketPath }),
+        ...(capability === undefined ? {} : {
+          capability,
+          socketPath: this.#fabricSocketPath,
+          expectedPrincipal: {
+            agentId: input.agentId,
+            projectSessionId,
+            runId: input.runId,
+            principalGeneration: principalGeneration as number,
+          },
+        }),
       },
     };
   }
@@ -2030,6 +3145,7 @@ export class LaunchCustodyService {
     const expectedPayload = handle.bridgeCapable
       ? {
           schemaVersion: 1,
+          runId: handle.runId,
           operation: handle.operation,
           targetAgentId: handle.targetAgentId,
           authorityId: handle.authorityId,
@@ -2200,6 +3316,7 @@ export class LaunchCustodyService {
       ambiguous: 0,
       recoveryRequired: 0,
     };
+    await this.#recoverChairRecoveryCustody(result);
     await this.#recoverAgentCustody(result);
     const prepared = this.#database.prepare(`
       SELECT c.*
@@ -2534,16 +3651,17 @@ export class LaunchCustodyService {
     this.#database.prepare(`
       INSERT INTO launched_chair_bridge_state(
         project_session_id, coordination_run_id, chair_agent_id,
-        provider_adapter_id, provider_action_id, provider_session_ref,
+        provider_adapter_id, provider_action_id, provider_contract_digest, provider_session_ref,
         provider_session_generation, principal_generation, bridge_generation,
         capability_hash, activation_evidence_digest, state, revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 'active', 1, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 'active', 1, ?, ?)
     `).run(
       text(custody, "project_session_id"),
       text(custody, "coordination_run_id"),
       text(custody, "chair_agent_id"),
       adapterId,
       actionId,
+      text(custody, "provider_contract_digest"),
       outcome.outcome.providerSessionRef,
       outcome.outcome.providerSessionGeneration,
       text(custody, "capability_hash"),

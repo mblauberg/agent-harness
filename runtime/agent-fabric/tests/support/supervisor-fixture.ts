@@ -15,7 +15,18 @@ lines.on("line", async (line) => {
   const request = JSON.parse(line) as {
     id: string;
     method: string;
-    params?: { actionId?: unknown; providerContractDigest?: unknown };
+    params?: {
+      actionId?: unknown;
+      providerContractDigest?: unknown;
+      bridgeContractDigest?: unknown;
+      bridgeGeneration?: unknown;
+      sourceBridgeGeneration?: unknown;
+      chairBridgeGeneration?: unknown;
+      targetAgentId?: unknown;
+      kind?: unknown;
+      resumeReference?: unknown;
+      nextProviderSessionGeneration?: unknown;
+    };
   };
   const delay = Number(process.env.SUPERVISOR_DELAY_MS ?? "0");
   if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
@@ -29,7 +40,7 @@ lines.on("line", async (line) => {
   const capability = process.env.AGENT_FABRIC_CAPABILITY;
   const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH;
   const attestationChallenge = process.env.AGENT_FABRIC_ATTESTATION_CHALLENGE;
-  if (request.method === "launch_chair") {
+  if (request.method === "launch_chair" || request.method === "recover_chair") {
     const observation = {
         privateCapabilityPresent: typeof capability === "string" && capability.length > 0,
         privateSocketPresent: typeof socketPath === "string" && socketPath.length > 0,
@@ -46,6 +57,23 @@ lines.on("line", async (line) => {
   }
   const providerContractDigest = request.params?.providerContractDigest;
   const providerActionId = request.params?.actionId;
+  const innerBridgeActivatedAt = Number(process.env.SUPERVISOR_INNER_BRIDGE_ACTIVATED_AT ?? "0");
+  if (request.method === "retained_bridge_health") {
+    const initialLive = process.env.SUPERVISOR_INNER_BRIDGE_INITIAL_LIVE !== "0";
+    const delay = Number(process.env.SUPERVISOR_INNER_BRIDGE_LOSS_DELAY_MS ?? "0");
+    const live = initialLive && (delay <= 0 || Date.now() - innerBridgeActivatedAt < delay);
+    process.stdout.write(`${JSON.stringify({
+      id: request.id,
+      result: { schemaVersion: 1, kind: request.params?.kind, live },
+    })}\n`);
+    return;
+  }
+  const providerSessionRef = request.method === "recover_chair"
+    ? String(request.params?.resumeReference)
+    : "fixture-chair-session";
+  const providerSessionGeneration = request.method === "recover_chair"
+    ? Number(request.params?.nextProviderSessionGeneration)
+    : 1;
   const unsigned = {
     schemaVersion: 1 as const,
     kind: "provider-session-fabric-attestation" as const,
@@ -54,22 +82,39 @@ lines.on("line", async (line) => {
     providerAdapterId: "fake",
     providerActionId: String(providerActionId),
     providerContractDigest: String(providerContractDigest),
-    providerSessionRef: "fixture-chair-session",
-    providerSessionGeneration: 1,
+    providerSessionRef,
+    providerSessionGeneration,
     providerTurnRef: "fixture-provider-turn",
     challengeDigest: chairLaunchChallengeDigest(String(attestationChallenge)),
     providerInvocationRef: "fixture-provider-tool-call",
   };
-  const result = request.method === "launch_chair"
+  if (request.method === "launch_chair" || request.method === "recover_chair" || request.method === "provision_agent") {
+    process.env.SUPERVISOR_INNER_BRIDGE_ACTIVATED_AT = String(Date.now());
+  }
+  const result = request.method === "launch_chair" || request.method === "recover_chair"
     ? {
-        resumeReference: "fixture-chair-session",
-        providerSessionGeneration: 1,
+        resumeReference: providerSessionRef,
+        providerSessionGeneration,
         fabricContinuity: {
           ...unsigned,
           attestationDigest: chairLaunchAttestationDigest(unsigned),
         },
       }
-    : { method: request.method, pid: process.pid };
+    : request.method === "provision_agent"
+      ? {
+          schemaVersion: 1,
+          adapterId: "fake",
+          actionId: String(providerActionId),
+          targetAgentId: String(request.params?.targetAgentId),
+          providerSessionRef: "fixture-child-session",
+          providerSessionGeneration: 1,
+          bridgeGeneration: Number(request.params?.bridgeGeneration),
+          bridgeContractDigest: String(request.params?.bridgeContractDigest),
+          activationEvidenceDigest: `sha256:${"a".repeat(64)}`,
+        }
+    : request.method === "promote_retained_bridge"
+      ? { schemaVersion: 1, promoted: true }
+      : { method: request.method, pid: process.pid };
   process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`, () => {
     if (request.method !== "launch_chair") return;
     if (process.env.SUPERVISOR_EXIT_AFTER_LAUNCH === "1") process.exit(0);

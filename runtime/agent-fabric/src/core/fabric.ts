@@ -95,6 +95,7 @@ import {
   type AgentBridgeContract,
   type AgentDispatchHandle,
   type LaunchDispatchHandle,
+  type ChairRecoveryDispatchHandle,
 } from "../project-session/launch-custody.js";
 import { IntakeStore } from "../project-session/intake-store.js";
 import {
@@ -913,6 +914,18 @@ export class Fabric {
             dispatch: async (handle) => await this.#dispatchLaunchAdapter(handle),
             lookup: async (input) => await this.#lookupLaunchAdapter(input),
             hasRetainedChairBridge: (entry) => this.#adapterSupervisor.hasRetainedChairBridge(entry),
+            recoverChair: async (handle) => await this.#dispatchChairRecoveryAdapter(handle),
+            lookupChairRecovery: async (input) => await this.#requestAdapter(
+              input.adapterId,
+              "lookup_action",
+              { actionId: input.actionId },
+            ),
+            lookupRetainedSuccessorBridge: async (input) => (
+              await this.#adapterSupervisor.lookupRetainedSuccessorBridge(input)
+            ),
+            promoteRetainedSuccessorBridge: async (input) => (
+              await this.#adapterSupervisor.promoteRetainedChildBridgeToChair(input)
+            ),
           },
           agentEffects: {
             dispatch: async (handle) => await this.#dispatchAgentAdapter(handle),
@@ -944,6 +957,7 @@ export class Fabric {
       statePort: options.operatorActionPorts?.statePort ?? productionOperatorPorts.statePort,
       effectPort: options.operatorActionPorts?.effectPort ?? productionOperatorPorts.effectPort,
       ...(this.#launchCustody === undefined ? {} : { launchCustody: this.#launchCustody }),
+      ...(this.#launchCustody === undefined ? {} : { chairRecoveryCustody: this.#launchCustody }),
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
@@ -1238,7 +1252,7 @@ export class Fabric {
   }
 
   async #dispatchAgentAdapter(handle: AgentDispatchHandle): Promise<unknown> {
-    if (handle.capability === undefined || handle.socketPath === undefined) {
+    if (handle.capability === undefined || handle.socketPath === undefined || handle.expectedPrincipal === undefined) {
       throw new FabricError("CAPABILITY_UNAVAILABLE", "agent bridge private handoff is unavailable");
     }
     return await this.#adapterSupervisor.provisionAgent(
@@ -1257,7 +1271,11 @@ export class Fabric {
           ? {}
           : { providerSessionRef: handle.requestedProviderSessionRef }),
       },
-      { capability: handle.capability, socketPath: handle.socketPath },
+      {
+        capability: handle.capability,
+        socketPath: handle.socketPath,
+        expectedPrincipal: handle.expectedPrincipal,
+      },
     );
   }
 
@@ -1390,6 +1408,58 @@ export class Fabric {
       throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "chair bridge closed before launch activation");
     }
     return this.#terminalLaunchOutcome(handle, result, "dispatch-return");
+  }
+
+  async #dispatchChairRecoveryAdapter(handle: ChairRecoveryDispatchHandle): Promise<unknown> {
+    if (
+      handle.intent.path !== "rebind" || handle.capability === undefined ||
+      handle.attestationChallenge === undefined || handle.socketPath === undefined
+    ) throw new FabricError("CAPABILITY_UNAVAILABLE", "chair recovery private handoff is unavailable");
+    const loss = rowOrNotFound(this.#database.prepare(`
+      SELECT loss.*, action.payload_json
+        FROM chair_bridge_losses loss
+        JOIN provider_actions action
+          ON action.adapter_id=loss.provider_adapter_id AND action.action_id=loss.provider_action_id
+       WHERE loss.loss_id=?
+    `).get(handle.intent.lossId), "chair recovery loss");
+    const oldPayload: unknown = JSON.parse(stringField(loss, "payload_json"));
+    const providerPayload = isRow(oldPayload) && isRow(oldPayload.input) ? oldPayload.input : {};
+    const result = await this.#adapterSupervisor.recoverChair(
+      handle.intent.providerAdapterId,
+      {
+        schemaVersion: 1,
+        recoveryId: handle.recoveryId,
+        lossId: handle.intent.lossId,
+        actionId: handle.intent.providerActionId,
+        providerContractDigest: handle.intent.providerContractDigest,
+        resumeReference: stringField(loss, "provider_session_ref"),
+        expectedProviderSessionGeneration: handle.intent.expectedProviderSessionGeneration,
+        nextProviderSessionGeneration: handle.intent.expectedProviderSessionGeneration + 1,
+        bridgeGeneration: handle.intent.expectedLostBridgeGeneration + 1,
+        payload: providerPayload,
+      },
+      {
+        capability: handle.capability,
+        socketPath: handle.socketPath,
+        attestationChallenge: handle.attestationChallenge,
+        expectedPrincipal: {
+          agentId: stringField(loss, "chair_agent_id"),
+          projectSessionId: handle.intent.projectSessionId,
+          runId: handle.intent.coordinationRunId,
+          principalGeneration: handle.intent.expectedPrincipalGeneration + 1,
+        },
+      },
+    );
+    return {
+      schemaVersion: 1,
+      recoveryId: handle.recoveryId,
+      providerAdapterId: handle.intent.providerAdapterId,
+      providerActionId: handle.intent.providerActionId,
+      providerContractDigest: handle.intent.providerContractDigest,
+      providerSessionRef: result.resumeReference,
+      providerSessionGeneration: result.providerSessionGeneration,
+      activationEvidenceDigest: sha256Digest(canonicalJson(result.fabricContinuity)),
+    };
   }
 
   async #lookupLaunchAdapter(input: Pick<

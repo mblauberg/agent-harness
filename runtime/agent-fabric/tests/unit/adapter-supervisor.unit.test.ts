@@ -203,6 +203,101 @@ describe("persistent adapter supervision", () => {
     }
   });
 
+  it("recovers and deeply retains an exact higher-generation chair bridge", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-recovery-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: { SUPERVISOR_COUNT_PATH: countPath },
+      },
+    });
+    const principal = { ...EXPECTED_CHAIR_PRINCIPAL, principalGeneration: 2 } as const;
+    try {
+      await expect(supervisor.recoverChair("fake", {
+        schemaVersion: 1,
+        recoveryId: "chair-recovery-1",
+        lossId: "chair-loss-1",
+        actionId: "chair-recover-action-1",
+        providerContractDigest: `sha256:${"7".repeat(64)}`,
+        resumeReference: "fixture-recovered-chair-session",
+        expectedProviderSessionGeneration: 1,
+        nextProviderSessionGeneration: 2,
+        bridgeGeneration: 2,
+        payload: { cwd: "/workspace/project", modelFamily: "fixture", model: "provider-test" },
+      }, {
+        capability: "recovered-chair-capability-canary",
+        socketPath: "/private/recovered-chair.sock",
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: principal,
+      })).resolves.toMatchObject({
+        resumeReference: "fixture-recovered-chair-session",
+        providerSessionGeneration: 2,
+      });
+      expect(supervisor.hasRetainedChairBridge({
+        ...principal,
+        adapterId: "fake",
+        actionId: "chair-recover-action-1",
+        providerSessionRef: "fixture-recovered-chair-session",
+        providerSessionGeneration: 2,
+        bridgeGeneration: 2,
+      })).toBe(true);
+      expect(await readFile(countPath, "utf8")).toBe("1");
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("promotes one exact retained child and observes the idempotent chair binding", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-promotion-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: { SUPERVISOR_COUNT_PATH: countPath, SUPERVISOR_DELAY_MS: "10" },
+      },
+    }, { bridgeHealthIntervalMs: 1 });
+    const childLoss = vi.fn();
+    supervisor.setChildBridgeLossHandler(childLoss);
+    const principal = { agentId: "successor", projectSessionId: "session-1", runId: "run-1", principalGeneration: 2 } as const;
+    const exact = {
+      ...principal,
+      adapterId: "fake",
+      actionId: "successor-spawn-action",
+      providerSessionRef: "fixture-child-session",
+      providerSessionGeneration: 1,
+      sourceBridgeGeneration: 3,
+      chairBridgeGeneration: 4,
+    } as const;
+    try {
+      await supervisor.provisionAgent("fake", {
+        schemaVersion: 1,
+        runId: principal.runId,
+        operation: "spawn",
+        actionId: exact.actionId,
+        targetAgentId: principal.agentId,
+        authorityId: "successor-authority",
+        bridgeGeneration: exact.sourceBridgeGeneration,
+        bridgeContractDigest: `sha256:${"8".repeat(64)}`,
+        payload: {},
+      }, {
+        capability: "successor-capability-canary",
+        socketPath: "/private/successor.sock",
+        expectedPrincipal: principal,
+      });
+      await expect(supervisor.lookupRetainedSuccessorBridge(exact)).resolves.toBe("child");
+      await expect(supervisor.promoteRetainedChildBridgeToChair(exact)).resolves.toBe(true);
+      await expect(supervisor.lookupRetainedSuccessorBridge(exact)).resolves.toBe("chair");
+      await expect(supervisor.promoteRetainedChildBridgeToChair(exact)).resolves.toBe(true);
+      expect(childLoss).not.toHaveBeenCalled();
+      expect(await readFile(countPath, "utf8")).toBe("1");
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("refuses terminal success when the dedicated chair adapter tears down immediately", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-teardown-"));
     const countPath = join(directory, "starts.txt");
@@ -267,6 +362,111 @@ describe("persistent adapter supervision", () => {
       }, "retained adapter transport closed");
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(loss).toHaveBeenCalledOnce();
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects chair activation when the inner retained bridge is already closed", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-inner-chair-initial-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: {
+          SUPERVISOR_COUNT_PATH: countPath,
+          SUPERVISOR_INNER_BRIDGE_INITIAL_LIVE: "0",
+        },
+      },
+    }, { bridgeHealthIntervalMs: 10 });
+    try {
+      await expect(supervisor.launchChair("fake", {
+        schemaVersion: 1,
+        actionId: "chair-inner-closed-initial",
+        providerContractDigest: `sha256:${"4".repeat(64)}`,
+        payload: { cwd: "/workspace/project", modelFamily: "fixture", model: "provider-test" },
+      }, {
+        capability: "inner-chair-initial-capability",
+        socketPath: "/private/inner-chair-initial.sock",
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      })).rejects.toMatchObject({ code: "CHAIR_LAUNCH_FAILED" });
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports inner chair bridge loss while the wrapper process remains live and idle", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-inner-chair-live-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: {
+          SUPERVISOR_COUNT_PATH: countPath,
+          SUPERVISOR_INNER_BRIDGE_LOSS_DELAY_MS: "30",
+        },
+      },
+    }, { bridgeHealthIntervalMs: 5 });
+    const loss = vi.fn();
+    supervisor.setChairBridgeLossHandler(loss);
+    try {
+      await supervisor.launchChair("fake", {
+        schemaVersion: 1,
+        actionId: "chair-inner-loss-idle",
+        providerContractDigest: `sha256:${"5".repeat(64)}`,
+        payload: { cwd: "/workspace/project", modelFamily: "fixture", model: "provider-test" },
+      }, {
+        capability: "inner-chair-loss-capability",
+        socketPath: "/private/inner-chair-loss.sock",
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      });
+      await vi.waitFor(() => expect(loss).toHaveBeenCalledOnce(), { timeout: 1_000 });
+      expect(loss.mock.calls[0]?.[1]).toContain("inner retained chair bridge");
+      expect(await readFile(countPath, "utf8")).toBe("1");
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects and supervises the deep child bridge independently of the live wrapper", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-inner-child-live-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: {
+          SUPERVISOR_COUNT_PATH: countPath,
+          SUPERVISOR_INNER_BRIDGE_LOSS_DELAY_MS: "30",
+        },
+      },
+    }, { bridgeHealthIntervalMs: 5 });
+    const loss = vi.fn();
+    supervisor.setChildBridgeLossHandler(loss);
+    const expectedPrincipal = { agentId: "child", projectSessionId: "session-1", runId: "run-1", principalGeneration: 2 };
+    try {
+      await supervisor.provisionAgent("fake", {
+        schemaVersion: 1,
+        runId: "run-1",
+        operation: "spawn",
+        actionId: "child-inner-loss-idle",
+        targetAgentId: "child",
+        authorityId: "child-authority",
+        bridgeGeneration: 3,
+        bridgeContractDigest: `sha256:${"6".repeat(64)}`,
+        payload: {},
+      }, {
+        capability: "inner-child-loss-capability",
+        socketPath: "/private/inner-child-loss.sock",
+        expectedPrincipal,
+      });
+      await vi.waitFor(() => expect(loss).toHaveBeenCalledOnce(), { timeout: 1_000 });
+      expect(loss.mock.calls[0]?.[1]).toContain("inner retained child bridge");
+      expect(await readFile(countPath, "utf8")).toBe("1");
     } finally {
       await supervisor.close();
       await rm(directory, { recursive: true, force: true });

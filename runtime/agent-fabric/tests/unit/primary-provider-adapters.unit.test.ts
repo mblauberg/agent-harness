@@ -30,6 +30,7 @@ import {
   type CodexAppServerBoundary,
 } from "../../src/adapters/providers/codex-app-server.ts";
 import { createChairLaunchFabricBridge } from "../../src/adapters/providers/chair-launch-continuity.ts";
+import { AgentSessionFabricBridge } from "../../src/adapters/providers/agent-session-continuity.ts";
 import type { ProviderSessionProtocolTransport } from "../../src/adapters/providers/provider-session-fabric-surface.ts";
 import { SqliteAdapterActionJournal } from "../../src/adapters/providers/journal.ts";
 import * as providerTypes from "../../src/adapters/providers/types.ts";
@@ -73,7 +74,12 @@ async function journal(): Promise<SqliteAdapterActionJournal> {
   return new SqliteAdapterActionJournal(join(directory, "actions.sqlite3"));
 }
 
-async function fabricSocketFixture(): Promise<{
+async function fabricSocketFixture(principal: {
+  agentId: string;
+  projectSessionId: string;
+  runId: string;
+  principalGeneration: number;
+} = EXPECTED_CHAIR_PRINCIPAL): Promise<{
   socketPath: string;
   rpcCall: ReturnType<typeof vi.fn>;
   drop(): Promise<void>;
@@ -104,10 +110,7 @@ async function fabricSocketFixture(): Promise<{
             daemonInstanceGeneration: 1,
             principal: {
               kind: "agent",
-              agentId: "chair",
-              projectSessionId: "session-1",
-              runId: "run-1",
-              principalGeneration: 1,
+              ...principal,
             },
             clientNonce: request.input?.authentication?.clientNonce,
             connectionNonce: "provider-test-connection",
@@ -152,6 +155,7 @@ function provedChairLaunch(
   challengeDigest = ATTESTATION_CHALLENGE_DIGEST,
   providerInvocationRef = "provider-tool-call-1",
   providerTurnRef = "provider-turn-1",
+  providerSessionGeneration = 1,
 ) {
   const unsigned = {
     schemaVersion: 1 as const,
@@ -162,14 +166,14 @@ function provedChairLaunch(
     providerActionId,
     providerContractDigest,
     providerSessionRef: resumeReference,
-    providerSessionGeneration: 1,
+    providerSessionGeneration,
     providerTurnRef,
     challengeDigest,
     providerInvocationRef,
   };
   return {
     resumeReference,
-    providerSessionGeneration: 1,
+    providerSessionGeneration,
     fabricContinuity: {
       ...unsigned,
       attestationDigest: chairLaunchAttestationDigest(unsigned),
@@ -325,6 +329,133 @@ function codexBoundary(): CodexAppServerBoundary {
     hasLiveChairSession: vi.fn(() => true),
   };
 }
+
+describe("primary provider chair recovery adapter", () => {
+  it.each(["Claude", "Codex"] as const)(
+    "journals one fresh %s rebind, retains its exact live bridge and never replays provider I/O",
+    async (provider) => {
+      const actionJournal = await journal();
+      const boundary = provider === "Claude" ? claudeBoundary() : codexBoundary();
+      const recoveryPrincipal = { ...EXPECTED_CHAIR_PRINCIPAL, principalGeneration: 2 } as const;
+      const recoverChair = vi.fn(async (input: {
+        actionId: string;
+        providerAdapterId: string;
+        providerContractDigest: string;
+        nextProviderSessionGeneration: number;
+      }) => provedChairLaunch(
+        `${provider.toLowerCase()}-retained-chair`,
+        input.providerContractDigest,
+        input.providerAdapterId,
+        input.actionId,
+        ATTESTATION_CHALLENGE_DIGEST,
+        `${provider.toLowerCase()}-recovery-tool-call`,
+        `${provider.toLowerCase()}-recovery-turn`,
+        input.nextProviderSessionGeneration,
+      ));
+      Reflect.set(boundary, "recoverChair", recoverChair);
+      const capability = `${provider.toLowerCase()}-recovery-capability-canary`;
+      const socketPath = `/private/${provider.toLowerCase()}-recovery.sock`;
+      const adapter = provider === "Claude"
+        ? createClaudeAgentSdkAdapter({
+            boundary: boundary as ClaudeAgentSdkBoundary,
+            journal: actionJournal,
+            chairLaunchHandoff: {
+              capability,
+              socketPath,
+              attestationChallenge: ATTESTATION_CHALLENGE,
+              expectedPrincipal: recoveryPrincipal,
+            },
+          })
+        : createCodexAppServerAdapter({
+            boundary: boundary as CodexAppServerBoundary,
+            journal: actionJournal,
+            chairLaunchHandoff: {
+              capability,
+              socketPath,
+              attestationChallenge: ATTESTATION_CHALLENGE,
+              expectedPrincipal: recoveryPrincipal,
+            },
+          });
+      const request = {
+        schemaVersion: 1,
+        recoveryId: `${provider.toLowerCase()}-recovery-1`,
+        lossId: `${provider.toLowerCase()}-loss-1`,
+        actionId: `${provider.toLowerCase()}-recover-chair-1`,
+        providerContractDigest: `sha256:${"9".repeat(64)}`,
+        resumeReference: `${provider.toLowerCase()}-retained-chair`,
+        expectedProviderSessionGeneration: 1,
+        nextProviderSessionGeneration: 2,
+        bridgeGeneration: 2,
+        payload: { cwd: "/workspace/project", prompt: "recover reviewed work" },
+      };
+
+      await expect(adapter.request("recover_chair", request)).resolves.toMatchObject({
+        resumeReference: request.resumeReference,
+        providerSessionGeneration: 2,
+      });
+      await expect(adapter.request("recover_chair", request)).resolves.toMatchObject({
+        resumeReference: request.resumeReference,
+        providerSessionGeneration: 2,
+      });
+      expect(recoverChair).toHaveBeenCalledOnce();
+      await expect(adapter.request("lookup_action", { actionId: request.actionId })).resolves.toMatchObject({
+        operation: "recover_chair",
+        status: "terminal",
+        executionCount: 1,
+        effectCount: 1,
+      });
+      const persisted = await adapter.request("lookup_action", { actionId: request.actionId });
+      expect(JSON.stringify(persisted)).not.toContain(capability);
+      expect(JSON.stringify(persisted)).not.toContain(socketPath);
+      actionJournal.close();
+    },
+  );
+
+  it("redacts fresh recovery handoff material from provider failures", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const capability = "recovery-failure-capability-canary";
+    const socketPath = "/private/recovery-failure-socket-canary.sock";
+    Reflect.set(boundary, "recoverChair", vi.fn(async () => {
+      throw new Error(`provider echoed ${capability} at ${socketPath}`);
+    }));
+    const adapter = createClaudeAgentSdkAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability,
+        socketPath,
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: { ...EXPECTED_CHAIR_PRINCIPAL, principalGeneration: 2 },
+      },
+    });
+    const actionId = "claude-recovery-redacted-failure";
+    const error = await adapter.request("recover_chair", {
+      schemaVersion: 1,
+      recoveryId: "recovery-redacted-1",
+      lossId: "loss-redacted-1",
+      actionId,
+      providerContractDigest: `sha256:${"8".repeat(64)}`,
+      resumeReference: "claude-recovery-redacted-session",
+      expectedProviderSessionGeneration: 1,
+      nextProviderSessionGeneration: 2,
+      bridgeGeneration: 2,
+      payload: { cwd: "/workspace/project", prompt: "recover" },
+    }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({
+      code: "CHAIR_RECOVERY_FAILED",
+      message: "chair recovery provider handoff failed",
+      details: { actionId },
+    });
+    expect(JSON.stringify(error)).not.toContain(capability);
+    expect(JSON.stringify(error)).not.toContain(socketPath);
+    const persisted = await adapter.request("lookup_action", { actionId });
+    expect(persisted).toMatchObject({ status: "ambiguous", effectCount: 0 });
+    expect(JSON.stringify(persisted)).not.toContain(capability);
+    expect(JSON.stringify(persisted)).not.toContain(socketPath);
+    actionJournal.close();
+  });
+});
 
 describe("Claude Agent SDK fabric adapter", () => {
   it("translates the fabric boundary into explicit SDK plan and no-tools isolation", () => {
@@ -1107,6 +1238,198 @@ describe("installed Claude chair launch boundary", () => {
   });
 });
 
+describe("installed primary chair recovery boundaries", () => {
+  it("reattaches the exact Claude session through a fresh native MCP attestation", async () => {
+    const expectedPrincipal = { ...EXPECTED_CHAIR_PRINCIPAL, principalGeneration: 2 } as const;
+    let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
+    let mcp: ReturnType<typeof createClaudeChairMcpBridge> | undefined;
+    const rpcCall = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+    const queryFactory = vi.fn((input: unknown) => ({
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        yield { type: "system", subtype: "init", session_id: "claude-recovery-session" };
+        if (mcp === undefined || bridge === undefined) throw new Error("Claude recovery bridge missing");
+        yield {
+          type: "assistant",
+          session_id: "claude-recovery-session",
+          uuid: "claude-recovery-message",
+          request_id: "claude-recovery-turn",
+          parent_tool_use_id: null,
+          message: {
+            content: [{
+              type: "tool_use",
+              name: mcp.attestationToolName,
+              id: "claude-recovery-provider-call",
+              input: { challengeResponse: bridge.challengeResponse },
+            }],
+          },
+        };
+        await mcp.invokeTool(bridge.challengeToolName, { challengeResponse: bridge.challengeResponse });
+        yield {
+          type: "result",
+          subtype: "success",
+          session_id: "claude-recovery-session",
+          result: "recovered",
+          usage: {},
+          total_cost_usd: 0,
+        };
+      },
+      input,
+    }));
+    const boundary = new InstalledClaudeAgentSdkBoundary({
+      query: queryFactory as never,
+      bridgeFactory: async (input) => {
+        bridge = await createChairLaunchFabricBridge(input, {
+          connect: vi.fn(async () => providerSessionProtocolTransport(
+            rpcCall,
+            vi.fn(async () => undefined),
+            { kind: "agent", ...expectedPrincipal } as ProviderSessionProtocolTransport["principal"],
+          )),
+        });
+        return bridge;
+      },
+      mcpBridgeFactory: (session) => {
+        mcp = createClaudeChairMcpBridge(session);
+        return mcp;
+      },
+    });
+    const result = await boundary.recoverChair({
+      actionId: "claude-native-recovery",
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: `sha256:${"6".repeat(64)}`,
+      challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+      expectedPrincipal,
+      recoveryId: "claude-native-recovery-custody",
+      lossId: "claude-native-loss",
+      resumeReference: "claude-recovery-session",
+      expectedProviderSessionGeneration: 1,
+      nextProviderSessionGeneration: 2,
+      bridgeGeneration: 2,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "resume reviewed work",
+      },
+      environment: {
+        AGENT_FABRIC_CAPABILITY: "claude-native-recovery-capability",
+        AGENT_FABRIC_SOCKET_PATH: "/private/claude-native-recovery.sock",
+        AGENT_FABRIC_ATTESTATION_CHALLENGE: ATTESTATION_CHALLENGE,
+      },
+    });
+    expect(result).toMatchObject({
+      resumeReference: "claude-recovery-session",
+      providerSessionGeneration: 2,
+      fabricContinuity: {
+        providerActionId: "claude-native-recovery",
+        providerSessionGeneration: 2,
+      },
+    });
+    expect(boundary.hasLiveChairSession("claude-recovery-session", 2)).toBe(true);
+    expect(queryFactory).toHaveBeenCalledOnce();
+    await boundary.closeAll();
+  });
+
+  it("resumes the exact Codex thread through a fresh attributed dynamic-tool call", async () => {
+    const expectedPrincipal = { ...EXPECTED_CHAIR_PRINCIPAL, principalGeneration: 2 } as const;
+    let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
+    let handler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
+    let currentTurnId = "";
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const connection = {
+      get closed() { return false; },
+      initialize: vi.fn(async () => undefined),
+      setServerRequestHandler: vi.fn((_method: string, value: (params: Record<string, unknown>) => Promise<unknown>) => {
+        handler = value;
+      }),
+      request: vi.fn(async (method: string, params: Record<string, unknown>) => {
+        requests.push({ method, params });
+        if (method === "thread/resume") return { thread: { id: "codex-recovery-thread" } };
+        if (method === "turn/start") {
+          currentTurnId = "codex-recovery-turn";
+          return { turn: { id: currentTurnId, status: "inProgress" } };
+        }
+        if (method === "thread/read") {
+          return {
+            thread: {
+              id: "codex-recovery-thread",
+              turns: [{
+                id: currentTurnId,
+                status: "completed",
+                items: [{ type: "agentMessage", text: "recovered" }],
+              }],
+            },
+          };
+        }
+        throw new Error(`unexpected Codex recovery method ${method}`);
+      }),
+      waitForNotification: vi.fn(async () => {
+        if (handler === undefined || bridge === undefined) throw new Error("Codex recovery handler missing");
+        await handler({
+          arguments: { challengeResponse: bridge.challengeResponse },
+          callId: "codex-recovery-provider-call",
+          threadId: "codex-recovery-thread",
+          tool: bridge.challengeToolName,
+          turnId: currentTurnId,
+        });
+        return {
+          threadId: "codex-recovery-thread",
+          turn: { id: currentTurnId, status: "completed" },
+        };
+      }),
+      close: vi.fn(async () => undefined),
+    };
+    const boundary = new InstalledCodexAppServerBoundary(
+      vi.fn(() => connection) as never,
+      async (input) => {
+        bridge = await createChairLaunchFabricBridge(input, {
+          connect: vi.fn(async () => providerSessionProtocolTransport(
+            vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })),
+            vi.fn(async () => undefined),
+            { kind: "agent", ...expectedPrincipal } as ProviderSessionProtocolTransport["principal"],
+          )),
+        });
+        return bridge;
+      },
+    );
+    const result = await boundary.recoverChair({
+      actionId: "codex-native-recovery",
+      providerAdapterId: "codex-app-server",
+      providerContractDigest: `sha256:${"7".repeat(64)}`,
+      challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+      expectedPrincipal,
+      recoveryId: "codex-native-recovery-custody",
+      lossId: "codex-native-loss",
+      resumeReference: "codex-recovery-thread",
+      expectedProviderSessionGeneration: 1,
+      nextProviderSessionGeneration: 2,
+      bridgeGeneration: 2,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "openai",
+        model: "gpt-test",
+        prompt: "resume reviewed work",
+      },
+      environment: {
+        AGENT_FABRIC_CAPABILITY: "codex-native-recovery-capability",
+        AGENT_FABRIC_SOCKET_PATH: "/private/codex-native-recovery.sock",
+        AGENT_FABRIC_ATTESTATION_CHALLENGE: ATTESTATION_CHALLENGE,
+      },
+    });
+    expect(result).toMatchObject({
+      resumeReference: "codex-recovery-thread",
+      providerSessionGeneration: 2,
+      fabricContinuity: {
+        providerActionId: "codex-native-recovery",
+        providerSessionGeneration: 2,
+      },
+    });
+    expect(requests[0]).toMatchObject({ method: "thread/resume", params: { threadId: "codex-recovery-thread" } });
+    expect(boundary.hasLiveChairSession("codex-recovery-thread", 2)).toBe(true);
+    await boundary.closeAll();
+  });
+});
+
 describe("Codex app-server response validation", () => {
   it("extracts only the final agent message from a completed turn", () => {
     expect(codexCompletedTurnResult({
@@ -1647,8 +1970,146 @@ describe("Codex app-server fabric adapter", () => {
 });
 
 describe("primary provider retained child bridges", () => {
+  it.each(["claude", "codex"] as const)(
+    "rejects a public run substitution in the %s wrapper before provider or journal I/O",
+    async (provider) => {
+      const actionJournal = await journal();
+      const expectedPrincipal = {
+        agentId: `${provider}-child`,
+        projectSessionId: "session-1",
+        runId: "run-1",
+        principalGeneration: 2,
+      } as const;
+      const boundary = provider === "claude" ? claudeBoundary() : codexBoundary();
+      const providerIo = vi.fn();
+      Reflect.set(boundary, "provisionAgent", providerIo);
+      const adapter = provider === "claude"
+        ? createClaudeAgentSdkAdapter({
+            boundary: boundary as ClaudeAgentSdkBoundary,
+            journal: actionJournal,
+            agentBridgeHandoff: {
+              capability: `${provider}-child-capability-canary`,
+              socketPath: `/private/${provider}-child.sock`,
+              expectedPrincipal,
+            },
+          })
+        : createCodexAppServerAdapter({
+            boundary: boundary as CodexAppServerBoundary,
+            journal: actionJournal,
+            agentBridgeHandoff: {
+              capability: `${provider}-child-capability-canary`,
+              socketPath: `/private/${provider}-child.sock`,
+              expectedPrincipal,
+            },
+          });
+      const actionId = `${provider}-wrong-public-run`;
+      await expect(adapter.request("provision_agent", {
+        schemaVersion: 1,
+        runId: "foreign-run",
+        operation: "spawn",
+        actionId,
+        targetAgentId: expectedPrincipal.agentId,
+        authorityId: "child-authority",
+        bridgeGeneration: 1,
+        bridgeContractDigest: `sha256:${"0".repeat(64)}`,
+        payload: {},
+      })).rejects.toMatchObject({ code: "AGENT_BRIDGE_UNPROVEN" });
+      expect(providerIo).not.toHaveBeenCalled();
+      await expect(adapter.request("lookup_action", { actionId })).rejects.toMatchObject({ code: "ACTION_NOT_FOUND" });
+      actionJournal.close();
+    },
+  );
+
+  it.each([
+    ["agentId", { agentId: "wrong-agent" }],
+    ["projectSessionId", { projectSessionId: "wrong-session" }],
+    ["runId", { runId: "wrong-run" }],
+    ["principalGeneration", { principalGeneration: 99 }],
+  ] as const)("rejects a child bridge with the wrong %s before descriptor projection", (_field, changed) => {
+    const expectedPrincipal = {
+      agentId: "child",
+      projectSessionId: "session-1",
+      runId: "run-1",
+      principalGeneration: 2,
+    } as const;
+    const transport = providerSessionProtocolTransport(
+      vi.fn(),
+      vi.fn(async () => undefined),
+      { kind: "agent", ...expectedPrincipal, ...changed } as ProviderSessionProtocolTransport["principal"],
+    );
+    const construct = (): unknown => Reflect.construct(AgentSessionFabricBridge as unknown as new (...args: never[]) => unknown, [{
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "child-action",
+      targetAgentId: expectedPrincipal.agentId,
+      expectedPrincipal,
+      bridgeGeneration: 1,
+      bridgeContractDigest: `sha256:${"1".repeat(64)}`,
+      capability: `afc_${"1".repeat(43)}`,
+      socketPath: "/private/fabric.sock",
+    }, transport]);
+    expect(construct).toThrow(expect.objectContaining({ code: "AGENT_BRIDGE_UNPROVEN" }));
+    expect(transport.call).not.toHaveBeenCalled();
+  });
+
+  it.each(["claude", "codex"] as const)("performs zero provider I/O for a wrong-principal %s child bridge", async (provider) => {
+    const expectedPrincipal = {
+      agentId: `${provider}-child`,
+      projectSessionId: "session-1",
+      runId: "run-1",
+      principalGeneration: 2,
+    } as const;
+    const transport = providerSessionProtocolTransport(
+      vi.fn(),
+      vi.fn(async () => undefined),
+      { kind: "agent", ...expectedPrincipal, runId: "foreign-run" } as ProviderSessionProtocolTransport["principal"],
+    );
+    const agentBridgeFactory = vi.fn(async (input: Record<string, unknown>) => Reflect.construct(
+      AgentSessionFabricBridge as unknown as new (...args: never[]) => unknown,
+      [input, transport],
+    ) as never);
+    const input = {
+      schemaVersion: 1 as const,
+      runId: expectedPrincipal.runId,
+      operation: "spawn" as const,
+      actionId: `${provider}-wrong-principal-action`,
+      targetAgentId: expectedPrincipal.agentId,
+      authorityId: "child-authority",
+      bridgeGeneration: 1,
+      bridgeContractDigest: `sha256:${"2".repeat(64)}`,
+      expectedPrincipal,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: provider === "claude" ? "anthropic" : "openai",
+        model: "provider-test",
+        initialPrompt: "must not start provider I/O",
+      },
+      environment: {
+        AGENT_FABRIC_CAPABILITY: `afc_${"2".repeat(43)}`,
+        AGENT_FABRIC_SOCKET_PATH: "/private/fabric.sock",
+      },
+    };
+    if (provider === "claude") {
+      const query = vi.fn();
+      const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never, agentBridgeFactory });
+      await expect(boundary.provisionAgent(input)).rejects.toMatchObject({ code: "AGENT_BRIDGE_UNPROVEN" });
+      expect(query).not.toHaveBeenCalled();
+    } else {
+      const connectionFactory = vi.fn();
+      const boundary = new InstalledCodexAppServerBoundary(connectionFactory as never, undefined, agentBridgeFactory);
+      await expect(boundary.provisionAgent(input)).rejects.toMatchObject({ code: "AGENT_BRIDGE_UNPROVEN" });
+      expect(connectionFactory).not.toHaveBeenCalled();
+    }
+    expect(transport.call).not.toHaveBeenCalled();
+  });
+
   it("provisions and reuses the exact Claude SDK child MCP bridge", async () => {
-    const fabricServer = await fabricSocketFixture();
+    const childPrincipal = {
+      agentId: "claude-child",
+      projectSessionId: "session-1",
+      runId: "run-1",
+      principalGeneration: 1,
+    } as const;
+    const fabricServer = await fabricSocketFixture(childPrincipal);
     let mcp: ReturnType<typeof createClaudeChairMcpBridge> | undefined;
     let queryCount = 0;
     const queryFactory = vi.fn((input: unknown) => {
@@ -1699,12 +2160,14 @@ describe("primary provider retained child bridges", () => {
 
     const result = await boundary.provisionAgent({
       schemaVersion: 1,
+      runId: childPrincipal.runId,
       operation: "spawn",
       actionId: "claude-child-action",
       targetAgentId: "claude-child",
       authorityId: "claude-child-authority",
       bridgeGeneration: 3,
       bridgeContractDigest,
+      expectedPrincipal: childPrincipal,
       payload: {
         cwd: "/workspace/project",
         modelFamily: "anthropic",
@@ -1742,7 +2205,13 @@ describe("primary provider retained child bridges", () => {
   });
 
   it("provisions and reuses the exact Codex dynamic-tool child bridge", async () => {
-    const fabricServer = await fabricSocketFixture();
+    const childPrincipal = {
+      agentId: "codex-child",
+      projectSessionId: "session-1",
+      runId: "run-1",
+      principalGeneration: 1,
+    } as const;
+    const fabricServer = await fabricSocketFixture(childPrincipal);
     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
     let handler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
     let turn = 0;
@@ -1799,12 +2268,14 @@ describe("primary provider retained child bridges", () => {
 
     const result = await boundary.provisionAgent({
       schemaVersion: 1,
+      runId: childPrincipal.runId,
       operation: "spawn",
       actionId: "codex-child-action",
       targetAgentId: "codex-child",
       authorityId: "codex-child-authority",
       bridgeGeneration: 4,
       bridgeContractDigest,
+      expectedPrincipal: childPrincipal,
       payload: {
         cwd: "/workspace/project",
         modelFamily: "openai",

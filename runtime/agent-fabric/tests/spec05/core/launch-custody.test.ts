@@ -10,6 +10,7 @@ import {
   parseArtifactRef,
   parseProjectSessionLaunchIntent,
   parseSha256Digest,
+  type ChairBridgeRecoveryIntent,
   type OperatorActionCommitRequest,
   type OperatorActionPreviewRequest,
   type Sha256Digest,
@@ -20,9 +21,17 @@ import { openFabric } from "../../../src/index.ts";
 import { OperatorActionStore } from "../../../src/operator/action-store.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import {
+  chairLaunchAttestationDigest,
+  chairLaunchChallengeDigest,
+} from "../../../src/adapters/providers/types.ts";
+import {
   preflightProviderBridgeCustody,
   ProviderBridgeCustodyPreflightError,
 } from "../../../src/persistence/provider-bridge-custody-preflight.ts";
+import {
+  preflightLaunchedChairBridgeLoss,
+  LaunchedChairBridgeLossPreflightError,
+} from "../../../src/persistence/launched-chair-bridge-loss-preflight.ts";
 import {
   LaunchCustodyService,
   computeLaunchResourceStateDigest,
@@ -105,6 +114,10 @@ function createFixture(options: Readonly<{
   fault?: (label: string) => void;
   persistent?: boolean;
   retainedChairBridge?: boolean;
+  recoverChair?: (handle: Parameters<LaunchCustodyService["dispatchPreparedChairRecovery"]>[0]) => Promise<unknown>;
+  lookupChairRecovery?: (input: { adapterId: string; actionId: string }) => Promise<unknown>;
+  promoteSuccessor?: (input: Record<string, unknown>) => Promise<boolean>;
+  lookupSuccessor?: (input: Record<string, unknown>) => Promise<"child" | "chair" | "missing">;
 }> = {}): {
   database: Database.Database;
   databasePath: string;
@@ -224,6 +237,16 @@ function createFixture(options: Readonly<{
       dispatch: options.dispatch ?? (async () => { throw new Error("not expected during preparation"); }),
       lookup: options.lookup ?? (async () => { throw new Error("not expected during preparation"); }),
       hasRetainedChairBridge: () => options.retainedChairBridge ?? true,
+      ...(options.recoverChair === undefined ? {} : { recoverChair: options.recoverChair }),
+      ...(options.lookupChairRecovery === undefined
+        ? {}
+        : { lookupChairRecovery: options.lookupChairRecovery }),
+      ...(options.lookupSuccessor === undefined
+        ? {}
+        : { lookupRetainedSuccessorBridge: options.lookupSuccessor }),
+      ...(options.promoteSuccessor === undefined
+        ? {}
+        : { promoteRetainedSuccessorBridge: options.promoteSuccessor }),
     },
   });
   const intent: LaunchCustodyIntent = parseProjectSessionLaunchIntent({
@@ -286,6 +309,105 @@ afterEach(() => {
 });
 
 describe("launch custody", () => {
+  it.each([
+    ["revoked capability", (database: Database.Database) => database.prepare(`
+      UPDATE capabilities SET revoked_at=?
+       WHERE token_hash=(SELECT capability_hash FROM project_session_launch_custody)
+    `).run(now)],
+    ["missing provider state", (database: Database.Database) => database.prepare(`
+      DELETE FROM provider_state WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
+    `).run()],
+    ["malformed terminal result", (database: Database.Database) => database.prepare(`
+      UPDATE provider_actions SET result_json='{}'
+       WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
+    `).run()],
+  ] as const)("fails migration-9 preflight for active launch custody with %s", async (_case, corrupt) => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "migration-preflight-session",
+        providerSessionGeneration: 2,
+        effectDigest: digest("migration-preflight-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    expect(() => preflightLaunchedChairBridgeLoss(fixture.database)).not.toThrow();
+    corrupt(fixture.database);
+    expect(() => preflightLaunchedChairBridgeLoss(fixture.database)).toThrowError(
+      expect.objectContaining<Partial<LaunchedChairBridgeLossPreflightError>>({
+        code: "LAUNCHED_CHAIR_BRIDGE_LOSS_MIGRATION_PREFLIGHT_FAILED",
+      }),
+    );
+  });
+
+  it("applies migration 9 only after total preflight and backfills the exact active chair", async () => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "migration-backfill-session",
+        providerSessionGeneration: 4,
+        effectDigest: digest("migration-backfill-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    const triggerRows = fixture.database.prepare(`
+      SELECT name FROM sqlite_master
+       WHERE type='trigger' AND (
+         name GLOB 'chair_bridge_*' OR name GLOB 'launched_chair_bridge_*' OR
+         name GLOB 'global_revision_chair_bridge_*' OR
+         name GLOB 'global_revision_launched_chair_bridge_*'
+       )
+    `).all() as Array<{ name: string }>;
+    for (const { name } of triggerRows) {
+      fixture.database.exec(`DROP TRIGGER "${name.replaceAll('"', '""')}"`);
+    }
+    fixture.database.exec(`
+      DROP TABLE chair_bridge_loss_resolutions;
+      DROP TABLE chair_bridge_recovery_custody;
+      DROP TABLE chair_bridge_losses;
+      DROP TABLE launched_chair_bridge_state;
+      DELETE FROM schema_migrations WHERE version=9;
+    `);
+
+    expect(applyMigrations(fixture.database)).toEqual({ applied: [9], currentVersion: 9 });
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, provider_adapter_id, provider_action_id,
+             provider_contract_digest, provider_session_ref,
+             provider_session_generation, principal_generation,
+             bridge_generation, activation_evidence_digest, state
+        FROM launched_chair_bridge_state
+    `).get()).toEqual({
+      chair_agent_id: "chair_launch_01",
+      provider_adapter_id: "claude-agent-sdk",
+      provider_action_id: "provider_launch_01",
+      provider_contract_digest: contractDigest,
+      provider_session_ref: "migration-backfill-session",
+      provider_session_generation: 4,
+      principal_generation: 1,
+      bridge_generation: 1,
+      activation_evidence_digest: digest("migration-backfill-effect"),
+      state: "active",
+    });
+  });
+
   it.each(["dispatched", "accepted", "ambiguous"] as const)(
     "rejects a pre-challenge migration while legacy launch custody is %s",
     async (status) => {
@@ -617,6 +739,633 @@ describe("launch custody", () => {
       INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
       VALUES ('forbidden-authority-after-chair-loss', 'run_launch_01', NULL, '{}', 'hash', ${now})
     `).run()).toThrow(/INVARIANT_chair_bridge_loss_freezes_grants/u);
+  });
+
+  it("terminalises an exact lost chair through versioned abandon recovery custody", async () => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "claude-chair-abandon-01",
+        providerSessionGeneration: 3,
+        effectDigest: digest("provider-abandon-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    fixture.service.observeChairBridgeLoss({
+      projectSessionId: "session_launch_01",
+      runId: "run_launch_01",
+      agentId: "chair_launch_01",
+      principalGeneration: 1,
+      adapterId: "claude-agent-sdk",
+      actionId: "provider_launch_01",
+      providerSessionRef: "claude-chair-abandon-01",
+      providerSessionGeneration: 3,
+      bridgeGeneration: 1,
+      reason: "provider bridge closed",
+    });
+    const loss = fixture.database.prepare(`SELECT * FROM chair_bridge_losses`).get() as Record<string, unknown>;
+    const bridge = fixture.database.prepare(`SELECT * FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
+    const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, number>;
+    const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, number>;
+    const intent: ChairBridgeRecoveryIntent = {
+      kind: "chair-bridge-recovery",
+      schemaVersion: 1,
+      path: "abandon",
+      projectSessionId: "session_launch_01" as never,
+      coordinationRunId: "run_launch_01" as never,
+      lossId: String(loss.loss_id),
+      recoveryManifestDigest: String(loss.recovery_manifest_digest) as Sha256Digest,
+      expectedSessionRevision: Number(session.revision),
+      expectedSessionGeneration: Number(session.generation),
+      expectedRunRevision: Number(run.revision),
+      expectedChairGeneration: Number(run.chair_generation),
+      expectedPrincipalGeneration: Number(loss.principal_generation),
+      expectedBridgeRevision: Number(bridge.revision),
+      expectedLostBridgeGeneration: Number(loss.lost_bridge_generation),
+      expectedProviderSessionGeneration: Number(loss.provider_session_generation),
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: String(loss.provider_contract_digest) as Sha256Digest,
+      reason: "operator accepted terminal provider loss",
+    };
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at, handoff_digest,
+        old_chair_generation, expected_run_id, expected_run_revision,
+        expected_session_revision, cas_target_revision
+      ) VALUES (
+        'operator_cap_recovery_01', ?, 'operator_01', 'project_01', 'session_launch_01',
+        1, ?, 1, 'takeover', '["takeover","read"]', ?, ?, ?, ?,
+        'run_launch_01', ?, ?, ?
+      )
+    `).run(
+      sha256("operator-recovery-secret"),
+      intent.expectedSessionGeneration,
+      now - 1,
+      now + 60_000,
+      intent.recoveryManifestDigest,
+      intent.expectedChairGeneration,
+      intent.expectedRunRevision,
+      intent.expectedSessionRevision,
+      intent.expectedBridgeRevision,
+    );
+    const operatorStore = new OperatorStore({ database: fixture.database, clock: () => now });
+    let genericEffects = 0;
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore,
+      statePort: { read: async () => { throw new Error("generic state must not inspect recovery"); } },
+      effectPort: {
+        dispatch: async () => { genericEffects += 1; throw new Error("generic effect must not recover chair"); },
+        observe: async () => { genericEffects += 1; throw new Error("generic effect must not recover chair"); },
+      },
+      chairRecoveryCustody: fixture.service,
+      clock: () => now,
+    });
+    const context = {
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    } as never;
+    const previewCommand = {
+      credential: { capabilityId: "operator_cap_recovery_01", token: "operator-recovery-secret" },
+      commandId: "preview_recovery_abandon_01",
+      expectedRevision: intent.expectedBridgeRevision,
+      actor: "operator_01",
+      provenance: {
+        kind: "console-direct-input",
+        clientId: "console_recovery_01",
+        inputEventId: "input_recovery_preview_01",
+      },
+      evidenceRefs: [],
+    };
+    const preview = await actions.preview(context, {
+      command: previewCommand,
+      projectId: "project_01",
+      intent,
+    } as unknown as OperatorActionPreviewRequest);
+    const receipt = await actions.commit(context, {
+      command: {
+        ...previewCommand,
+        commandId: "recovery_abandon_01",
+        provenance: { ...previewCommand.provenance, inputEventId: "input_recovery_commit_01" },
+      },
+      projectId: "project_01",
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_recovery_abandon_01" },
+    } as unknown as OperatorActionCommitRequest);
+    expect(receipt.afterStateDigest).not.toEqual(receipt.beforeStateDigest);
+    expect(genericEffects).toBe(0);
+    expect(actions.status({
+      credential: previewCommand.credential,
+      projectId: "project_01",
+      commandId: "recovery_abandon_01",
+    } as never)).toMatchObject({ status: "committed" });
+    const reconcileRequest = {
+      command: {
+        ...previewCommand,
+        commandId: "reconcile_recovery_abandon_01",
+        provenance: { ...previewCommand.provenance, inputEventId: "input_recovery_reconcile_01" },
+      },
+      projectId: "project_01",
+      targetCommandId: "recovery_abandon_01",
+      expectedStatus: "committed" as const,
+      expectedAttemptGeneration: 1,
+      mode: "observe-only" as const,
+    };
+    const reconciled = await actions.reconcile(context, reconcileRequest as never);
+    expect(reconciled).toMatchObject({ status: "committed", commandId: "recovery_abandon_01" });
+    await expect(actions.reconcile(context, reconcileRequest as never)).resolves.toEqual(reconciled);
+    expect(genericEffects).toBe(0);
+    expect(fixture.database.prepare(`SELECT state FROM launched_chair_bridge_state`).get()).toEqual({ state: "abandoned" });
+    expect(fixture.database.prepare(`SELECT state FROM project_sessions`).get()).toEqual({ state: "cancelled" });
+    expect(fixture.database.prepare(`SELECT lifecycle_state FROM runs`).get()).toEqual({ lifecycle_state: "cancelled" });
+    expect(fixture.database.prepare(`SELECT path FROM chair_bridge_loss_resolutions`).get()).toEqual({ path: "abandon" });
+  });
+
+  it("rebinds a lost chair with fresh secret custody, native evidence and duplicate-safe settlement", async () => {
+    let recoveryEffects = 0;
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "claude-chair-rebind-01",
+        providerSessionGeneration: 3,
+        effectDigest: digest("provider-before-rebind-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      recoverChair: async (recovery) => {
+        recoveryEffects += 1;
+        expect(fixture.database.prepare(`
+          SELECT state FROM chair_bridge_recovery_custody WHERE recovery_id=?
+        `).get(recovery.recoveryId)).toEqual({ state: "dispatched" });
+        return {
+          schemaVersion: 1,
+          recoveryId: recovery.recoveryId,
+          providerAdapterId: "claude-agent-sdk",
+          providerActionId: "provider_rebind_01",
+          providerContractDigest: contractDigest,
+          providerSessionRef: "claude-chair-rebind-01",
+          providerSessionGeneration: 4,
+          activationEvidenceDigest: digest("provider-after-rebind-effect"),
+        };
+      },
+    });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    fixture.service.observeChairBridgeLoss({
+      projectSessionId: "session_launch_01",
+      runId: "run_launch_01",
+      agentId: "chair_launch_01",
+      principalGeneration: 1,
+      adapterId: "claude-agent-sdk",
+      actionId: "provider_launch_01",
+      providerSessionRef: "claude-chair-rebind-01",
+      providerSessionGeneration: 3,
+      bridgeGeneration: 1,
+      reason: "provider bridge closed",
+    });
+    const loss = fixture.database.prepare(`SELECT * FROM chair_bridge_losses`).get() as Record<string, unknown>;
+    const bridge = fixture.database.prepare(`SELECT * FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
+    const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, unknown>;
+    const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, unknown>;
+    const intent: ChairBridgeRecoveryIntent = {
+      kind: "chair-bridge-recovery",
+      schemaVersion: 1,
+      path: "rebind",
+      projectSessionId: "session_launch_01" as never,
+      coordinationRunId: "run_launch_01" as never,
+      lossId: String(loss.loss_id),
+      recoveryManifestDigest: String(loss.recovery_manifest_digest) as Sha256Digest,
+      expectedSessionRevision: Number(session.revision),
+      expectedSessionGeneration: Number(session.generation),
+      expectedRunRevision: Number(run.revision),
+      expectedChairGeneration: Number(run.chair_generation),
+      expectedPrincipalGeneration: 1,
+      expectedBridgeRevision: Number(bridge.revision),
+      expectedLostBridgeGeneration: 1,
+      expectedProviderSessionGeneration: 3,
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: contractDigest,
+      providerActionId: "provider_rebind_01" as never,
+    };
+    const inspection = await fixture.service.inspectChairRecovery(intent);
+    const recovery = fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
+      inspection,
+      operatorId: "operator_01",
+      operatorCommandId: "recovery_rebind_01",
+    }))();
+    expect(recovery).toMatchObject({
+      capability: "chair-secret-canary-02",
+      attestationChallenge,
+      socketPath: "/private/agent-fabric.sock",
+    });
+    const concurrentInspection = await fixture.service.inspectChairRecovery({
+      ...intent,
+      providerActionId: "provider_rebind_concurrent_01" as never,
+    });
+    expect(() => fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
+      inspection: concurrentInspection,
+      operatorId: "operator_01",
+      operatorCommandId: "recovery_rebind_concurrent_01",
+    }))()).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
+    expect(databaseContains(fixture.database, "chair-secret-canary-02")).toBe(false);
+    expect(databaseContains(fixture.database, attestationChallenge)).toBe(false);
+    const committed = await fixture.service.dispatchPreparedChairRecovery(recovery);
+    await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toEqual(committed);
+    expect(recoveryEffects).toBe(1);
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, provider_action_id, provider_session_generation,
+             principal_generation, bridge_generation, state
+        FROM launched_chair_bridge_state
+    `).get()).toEqual({
+      chair_agent_id: "chair_launch_01",
+      provider_action_id: "provider_rebind_01",
+      provider_session_generation: 4,
+      principal_generation: 2,
+      bridge_generation: 2,
+      state: "active",
+    });
+    expect(fixture.database.prepare(`SELECT state, generation FROM project_sessions`).get()).toEqual({
+      state: "active",
+      generation: Number(session.generation) + 1,
+    });
+    expect(fixture.database.prepare(`SELECT lifecycle_state, chair_generation FROM runs`).get()).toEqual({
+      lifecycle_state: "active",
+      chair_generation: Number(run.chair_generation) + 1,
+    });
+  });
+
+  it("journals takeover before promotion and reconciles a post-promotion crash by lookup only", async () => {
+    let promotions = 0;
+    let lookups = 0;
+    let crashAfterPromotion = true;
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "claude-chair-takeover-old",
+        providerSessionGeneration: 2,
+        effectDigest: digest("provider-before-takeover-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      fault: (label) => {
+        if (label === "chair-recovery:takeover:after-adapter" && crashAfterPromotion) {
+          crashAfterPromotion = false;
+          throw new Error("simulated daemon crash after bridge promotion");
+        }
+      },
+      lookupSuccessor: async (input) => {
+        lookups += 1;
+        expect(input).toMatchObject({
+          agentId: "successor_01",
+          providerSessionRef: "claude-successor-session",
+          sourceBridgeGeneration: 1,
+          chairBridgeGeneration: 2,
+        });
+        return "chair";
+      },
+      promoteSuccessor: async (input) => {
+        promotions += 1;
+        expect(fixture.database.prepare(`
+          SELECT state FROM chair_bridge_recovery_custody
+           WHERE operator_command_id='recovery_takeover_01'
+        `).get()).toEqual({ state: "dispatched" });
+        expect(input).toMatchObject({
+          agentId: "successor_01",
+          providerSessionRef: "claude-successor-session",
+          sourceBridgeGeneration: 1,
+          chairBridgeGeneration: 2,
+        });
+        return true;
+      },
+    });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    const authority = fixture.database.prepare(`
+      SELECT authority_id FROM agents WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
+    `).get() as { authority_id: string };
+    const successorCapabilityHash = sha256("successor-capability-secret");
+    const successorResult = canonicalJson({
+      agentId: "successor_01",
+      authorityId: authority.authority_id,
+      adapterId: "claude-agent-sdk",
+      actionId: "successor_action_01",
+      providerSessionRef: "claude-successor-session",
+      providerSessionGeneration: 1,
+      bridgeState: "active",
+      bridgeGeneration: 1,
+      evidenceDigest: digest("successor-activation"),
+    });
+    fixture.database.transaction(() => {
+      fixture.database.prepare(`
+        INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+        VALUES ('run_launch_01', 'successor_01', 'chair_launch_01', ?, 'claude-successor-session', 'ready')
+      `).run(authority.authority_id);
+      fixture.database.prepare(`INSERT INTO mailbox_state(run_id, recipient_id) VALUES ('run_launch_01', 'successor_01')`).run();
+      fixture.database.prepare(`
+        INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+        VALUES (?, 'run_launch_01', 'successor_01', 1, ?)
+      `).run(successorCapabilityHash, now + 60_000);
+      fixture.database.prepare(`
+        INSERT INTO provider_actions(
+          run_id, action_id, adapter_id, operation, target_agent_id,
+          provider_session_generation, turn_lease_generation, identity_hash,
+          payload_hash, payload_json, status, history_json, execution_count,
+          effect_count, idempotency_proven, result_json, updated_at
+        ) VALUES (
+          'run_launch_01', 'successor_action_01', 'claude-agent-sdk', 'spawn', 'successor_01',
+          1, NULL, ?, ?, '{}', 'terminal', '["prepared","dispatched","accepted","terminal"]',
+          1, 1, 1, ?, ?
+        )
+      `).run(sha256("successor-identity"), sha256("{}"), successorResult, now);
+      fixture.database.prepare(`
+        INSERT INTO provider_agent_custody(
+          run_id, action_id, operation, actor_agent_id, target_agent_id, authority_id,
+          adapter_id, bridge_contract_digest, bridge_capable, capability_hash,
+          capability_expires_at, principal_generation, requested_provider_session_ref,
+          intent_digest, created_at
+        ) VALUES (
+          'run_launch_01', 'successor_action_01', 'spawn', 'chair_launch_01', 'successor_01', ?,
+          'claude-agent-sdk', ?, 1, ?, ?, 1, NULL, ?, ?
+        )
+      `).run(authority.authority_id, digest("successor-bridge-contract"), successorCapabilityHash, now + 60_000, digest("successor-intent"), now);
+      fixture.database.prepare(`
+        INSERT INTO agent_bridge_state(
+          run_id, agent_id, adapter_id, action_id, provider_session_ref,
+          provider_session_generation, bridge_state, bridge_generation,
+          capability_hash, activation_evidence_digest, revision, created_at, updated_at
+        ) VALUES (
+          'run_launch_01', 'successor_01', 'claude-agent-sdk', 'successor_action_01',
+          'claude-successor-session', 1, 'active', 1, ?, ?, 1, ?, ?
+        )
+      `).run(successorCapabilityHash, digest("successor-activation"), now, now);
+    })();
+    fixture.service.observeChairBridgeLoss({
+      projectSessionId: "session_launch_01",
+      runId: "run_launch_01",
+      agentId: "chair_launch_01",
+      principalGeneration: 1,
+      adapterId: "claude-agent-sdk",
+      actionId: "provider_launch_01",
+      providerSessionRef: "claude-chair-takeover-old",
+      providerSessionGeneration: 2,
+      bridgeGeneration: 1,
+      reason: "provider bridge closed",
+    });
+    const loss = fixture.database.prepare(`SELECT * FROM chair_bridge_losses`).get() as Record<string, unknown>;
+    const bridge = fixture.database.prepare(`SELECT * FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
+    const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, unknown>;
+    const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, unknown>;
+    const intent: ChairBridgeRecoveryIntent = {
+      kind: "chair-bridge-recovery",
+      schemaVersion: 1,
+      path: "takeover",
+      projectSessionId: "session_launch_01" as never,
+      coordinationRunId: "run_launch_01" as never,
+      lossId: String(loss.loss_id),
+      recoveryManifestDigest: String(loss.recovery_manifest_digest) as Sha256Digest,
+      expectedSessionRevision: Number(session.revision),
+      expectedSessionGeneration: Number(session.generation),
+      expectedRunRevision: Number(run.revision),
+      expectedChairGeneration: Number(run.chair_generation),
+      expectedPrincipalGeneration: 1,
+      expectedBridgeRevision: Number(bridge.revision),
+      expectedLostBridgeGeneration: 1,
+      expectedProviderSessionGeneration: 2,
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: contractDigest,
+      successorAgentId: "successor_01",
+      expectedSuccessorPrincipalGeneration: 1,
+      expectedSuccessorBridgeGeneration: 1,
+      expectedSuccessorRevision: 1,
+    };
+    fixture.database.prepare(`UPDATE capabilities SET expires_at=? WHERE token_hash=?`)
+      .run(now, successorCapabilityHash);
+    await expect(fixture.service.inspectChairRecovery(intent)).rejects.toThrow();
+    fixture.database.prepare(`UPDATE capabilities SET expires_at=? WHERE token_hash=?`)
+      .run(now + 60_000, successorCapabilityHash);
+    const inspection = await fixture.service.inspectChairRecovery(intent);
+    const recovery = fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
+      inspection,
+      operatorId: "operator_01",
+      operatorCommandId: "recovery_takeover_01",
+    }))();
+    await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({
+      status: "ambiguous",
+      path: "takeover",
+    });
+    expect(fixture.database.prepare(`SELECT state FROM chair_bridge_recovery_custody`).get())
+      .toEqual({ state: "ambiguous" });
+    await expect(fixture.service.reconcileChairRecovery("operator_01", "recovery_takeover_01"))
+      .resolves.toMatchObject({ status: "committed", path: "takeover" });
+    expect(promotions).toBe(1);
+    expect(lookups).toBe(1);
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, provider_action_id, bridge_generation, state
+        FROM launched_chair_bridge_state
+    `).get()).toEqual({
+      chair_agent_id: "successor_01",
+      provider_action_id: "successor_action_01",
+      bridge_generation: 2,
+      state: "active",
+    });
+    expect(fixture.database.prepare(`SELECT chair_agent_id, lifecycle_state FROM runs`).get()).toEqual({
+      chair_agent_id: "successor_01",
+      lifecycle_state: "active",
+    });
+    expect(fixture.database.prepare(`SELECT bridge_state FROM agent_bridge_state WHERE agent_id='successor_01'`).get())
+      .toEqual({ bridge_state: "none" });
+  });
+
+  it("performs zero adapter I/O for prepared recovery after restart and revokes only the fresh capability", async () => {
+    let recoveryEffects = 0;
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "prepared-recovery-session",
+        providerSessionGeneration: 2,
+        effectDigest: digest("prepared-recovery-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      recoverChair: async () => { recoveryEffects += 1; throw new Error("must not dispatch"); },
+    });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    fixture.service.observeChairBridgeLoss({
+      projectSessionId: "session_launch_01", runId: "run_launch_01", agentId: "chair_launch_01",
+      principalGeneration: 1, adapterId: "claude-agent-sdk", actionId: "provider_launch_01",
+      providerSessionRef: "prepared-recovery-session", providerSessionGeneration: 2,
+      bridgeGeneration: 1, reason: "provider bridge closed",
+    });
+    const loss = fixture.database.prepare(`SELECT * FROM chair_bridge_losses`).get() as Record<string, unknown>;
+    const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, unknown>;
+    const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, unknown>;
+    const bridge = fixture.database.prepare(`SELECT revision FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
+    const intent: ChairBridgeRecoveryIntent = {
+      kind: "chair-bridge-recovery", schemaVersion: 1, path: "rebind",
+      projectSessionId: "session_launch_01" as never, coordinationRunId: "run_launch_01" as never,
+      lossId: String(loss.loss_id), recoveryManifestDigest: String(loss.recovery_manifest_digest) as Sha256Digest,
+      expectedSessionRevision: Number(session.revision), expectedSessionGeneration: Number(session.generation),
+      expectedRunRevision: Number(run.revision), expectedChairGeneration: Number(run.chair_generation),
+      expectedPrincipalGeneration: 1, expectedBridgeRevision: Number(bridge.revision),
+      expectedLostBridgeGeneration: 1, expectedProviderSessionGeneration: 2,
+      providerAdapterId: "claude-agent-sdk", providerContractDigest: contractDigest,
+      providerActionId: "prepared_recovery_action" as never,
+    };
+    const inspection = await fixture.service.inspectChairRecovery(intent);
+    fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
+      inspection, operatorId: "operator_01", operatorCommandId: "prepared_recovery_command",
+    }))();
+    const recovered = await fixture.service.recover();
+    expect(recoveryEffects).toBe(0);
+    expect(recovered).toMatchObject({ failed: expect.any(Number), recoveryRequired: expect.any(Number) });
+    expect(fixture.database.prepare(`SELECT state FROM chair_bridge_recovery_custody`).get()).toEqual({ state: "no-effect" });
+    expect(fixture.database.prepare(`SELECT state FROM launched_chair_bridge_state`).get()).toEqual({ state: "lost" });
+    expect(fixture.database.prepare(`
+      SELECT revoked_at FROM capabilities
+       WHERE token_hash=(SELECT new_capability_hash FROM chair_bridge_recovery_custody)
+    `).get()).toEqual({ revoked_at: now });
+  });
+
+  it("recovers an ambiguous rebind by pair-keyed lookup without a second provider effect", async () => {
+    let recoveryEffects = 0;
+    let lookups = 0;
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "ambiguous-recovery-session",
+        providerSessionGeneration: 2,
+        effectDigest: digest("ambiguous-recovery-before"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      recoverChair: async () => {
+        recoveryEffects += 1;
+        throw new Error("connection dropped after provider acceptance");
+      },
+      lookupChairRecovery: async ({ actionId }) => {
+        lookups += 1;
+        const unsigned = {
+          schemaVersion: 1 as const,
+          kind: "provider-session-fabric-attestation" as const,
+          method: "provider-session-random-challenge-v1" as const,
+          bridgeContract: "agent-fabric-session-bridge-v1" as const,
+          providerAdapterId: "claude-agent-sdk",
+          providerActionId: actionId,
+          providerContractDigest: contractDigest,
+          providerSessionRef: "ambiguous-recovery-session",
+          providerSessionGeneration: 3,
+          providerTurnRef: "ambiguous-recovery-turn",
+          challengeDigest: chairLaunchChallengeDigest(attestationChallenge),
+          providerInvocationRef: "ambiguous-recovery-tool-call",
+        };
+        return {
+          actionId,
+          operation: "recover_chair",
+          status: "terminal",
+          executionCount: 1,
+          effectCount: 1,
+          result: {
+            resumeReference: "ambiguous-recovery-session",
+            providerSessionGeneration: 3,
+            fabricContinuity: {
+              ...unsigned,
+              attestationDigest: chairLaunchAttestationDigest(unsigned),
+            },
+          },
+        };
+      },
+    });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    fixture.service.observeChairBridgeLoss({
+      projectSessionId: "session_launch_01", runId: "run_launch_01", agentId: "chair_launch_01",
+      principalGeneration: 1, adapterId: "claude-agent-sdk", actionId: "provider_launch_01",
+      providerSessionRef: "ambiguous-recovery-session", providerSessionGeneration: 2,
+      bridgeGeneration: 1, reason: "provider bridge closed",
+    });
+    const loss = fixture.database.prepare(`SELECT * FROM chair_bridge_losses`).get() as Record<string, unknown>;
+    const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, unknown>;
+    const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, unknown>;
+    const bridge = fixture.database.prepare(`SELECT revision FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
+    const intent: ChairBridgeRecoveryIntent = {
+      kind: "chair-bridge-recovery", schemaVersion: 1, path: "rebind",
+      projectSessionId: "session_launch_01" as never, coordinationRunId: "run_launch_01" as never,
+      lossId: String(loss.loss_id), recoveryManifestDigest: String(loss.recovery_manifest_digest) as Sha256Digest,
+      expectedSessionRevision: Number(session.revision), expectedSessionGeneration: Number(session.generation),
+      expectedRunRevision: Number(run.revision), expectedChairGeneration: Number(run.chair_generation),
+      expectedPrincipalGeneration: 1, expectedBridgeRevision: Number(bridge.revision),
+      expectedLostBridgeGeneration: 1, expectedProviderSessionGeneration: 2,
+      providerAdapterId: "claude-agent-sdk", providerContractDigest: contractDigest,
+      providerActionId: "ambiguous_recovery_action" as never,
+    };
+    const inspection = await fixture.service.inspectChairRecovery(intent);
+    const recovery = fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
+      inspection, operatorId: "operator_01", operatorCommandId: "ambiguous_recovery_command",
+    }))();
+    await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({ status: "ambiguous" });
+    await fixture.service.recover();
+    expect(recoveryEffects).toBe(1);
+    expect(lookups).toBe(1);
+    expect(fixture.database.prepare(`SELECT state FROM chair_bridge_recovery_custody`).get()).toEqual({ state: "terminal" });
+    expect(fixture.database.prepare(`
+      SELECT status, effect_count, idempotency_proven FROM provider_actions
+       WHERE action_id='ambiguous_recovery_action'
+    `).get()).toEqual({ status: "terminal", effect_count: 1, idempotency_proven: 1 });
+    expect(fixture.database.prepare(`SELECT state, provider_session_generation FROM launched_chair_bridge_state`).get())
+      .toEqual({ state: "active", provider_session_generation: 3 });
   });
 
   it("fences an activated launched chair on restart without a retained bridge or generic status call", async () => {

@@ -19310,6 +19310,365 @@
                       "additionalProperties": false,
                       "required": [
                         "kind",
+                        "schemaVersion",
+                        "path",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "lossId",
+                        "recoveryManifestDigest",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "expectedRunRevision",
+                        "expectedChairGeneration",
+                        "expectedPrincipalGeneration",
+                        "expectedBridgeRevision",
+                        "expectedLostBridgeGeneration",
+                        "expectedProviderSessionGeneration",
+                        "providerAdapterId",
+                        "providerContractDigest",
+                        "providerActionId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "chair-bridge-recovery"
+                        },
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "path": {
+                          "const": "rebind"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "lossId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "recoveryManifestDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedChairGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedBridgeRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedLostBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedProviderSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "providerActionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "schemaVersion",
+                        "path",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "lossId",
+                        "recoveryManifestDigest",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "expectedRunRevision",
+                        "expectedChairGeneration",
+                        "expectedPrincipalGeneration",
+                        "expectedBridgeRevision",
+                        "expectedLostBridgeGeneration",
+                        "expectedProviderSessionGeneration",
+                        "providerAdapterId",
+                        "providerContractDigest",
+                        "successorAgentId",
+                        "expectedSuccessorPrincipalGeneration",
+                        "expectedSuccessorBridgeGeneration",
+                        "expectedSuccessorRevision"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "chair-bridge-recovery"
+                        },
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "path": {
+                          "const": "takeover"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "lossId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "recoveryManifestDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedChairGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedBridgeRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedLostBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedProviderSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "successorAgentId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedSuccessorPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSuccessorBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSuccessorRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "schemaVersion",
+                        "path",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "lossId",
+                        "recoveryManifestDigest",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "expectedRunRevision",
+                        "expectedChairGeneration",
+                        "expectedPrincipalGeneration",
+                        "expectedBridgeRevision",
+                        "expectedLostBridgeGeneration",
+                        "expectedProviderSessionGeneration",
+                        "providerAdapterId",
+                        "providerContractDigest",
+                        "reason"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "chair-bridge-recovery"
+                        },
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "path": {
+                          "const": "abandon"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "lossId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "recoveryManifestDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedChairGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedBridgeRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedLostBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedProviderSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
                         "projectSessionId",
                         "expectedSessionRevision",
                         "expectedSessionGeneration",
@@ -60148,6 +60507,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -60158,7 +60518,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -60630,6 +60990,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -60640,7 +61001,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -61264,6 +61625,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -61274,7 +61636,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -61862,6 +62224,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -61872,7 +62235,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -62118,6 +62481,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -62128,7 +62492,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -62338,6 +62702,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -62348,7 +62713,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -62585,6 +62950,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -62595,7 +62961,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -62796,6 +63162,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -62806,7 +63173,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -63053,6 +63420,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -63063,7 +63431,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -63274,6 +63642,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -63284,7 +63653,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -63532,6 +63901,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -63542,7 +63912,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -63754,6 +64124,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -63764,7 +64135,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -64070,6 +64441,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -64080,7 +64452,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -64350,6 +64722,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -64360,7 +64733,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -64609,6 +64982,7 @@
                                                     "cancel",
                                                     "steer",
                                                     "project-session-launch",
+                                                    "chair-bridge-recovery",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -64619,7 +64993,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 12,
+                                                "maxItems": 13,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -64832,6 +65206,7 @@
                                                       "cancel",
                                                       "steer",
                                                       "project-session-launch",
+                                                      "chair-bridge-recovery",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -64842,7 +65217,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 12,
+                                                  "maxItems": 13,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -69422,6 +69797,365 @@
                               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                             }
                           }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "schemaVersion",
+                        "path",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "lossId",
+                        "recoveryManifestDigest",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "expectedRunRevision",
+                        "expectedChairGeneration",
+                        "expectedPrincipalGeneration",
+                        "expectedBridgeRevision",
+                        "expectedLostBridgeGeneration",
+                        "expectedProviderSessionGeneration",
+                        "providerAdapterId",
+                        "providerContractDigest",
+                        "providerActionId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "chair-bridge-recovery"
+                        },
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "path": {
+                          "const": "rebind"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "lossId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "recoveryManifestDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedChairGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedBridgeRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedLostBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedProviderSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "providerActionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "schemaVersion",
+                        "path",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "lossId",
+                        "recoveryManifestDigest",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "expectedRunRevision",
+                        "expectedChairGeneration",
+                        "expectedPrincipalGeneration",
+                        "expectedBridgeRevision",
+                        "expectedLostBridgeGeneration",
+                        "expectedProviderSessionGeneration",
+                        "providerAdapterId",
+                        "providerContractDigest",
+                        "successorAgentId",
+                        "expectedSuccessorPrincipalGeneration",
+                        "expectedSuccessorBridgeGeneration",
+                        "expectedSuccessorRevision"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "chair-bridge-recovery"
+                        },
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "path": {
+                          "const": "takeover"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "lossId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "recoveryManifestDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedChairGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedBridgeRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedLostBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedProviderSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "successorAgentId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedSuccessorPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSuccessorBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSuccessorRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "schemaVersion",
+                        "path",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "lossId",
+                        "recoveryManifestDigest",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "expectedRunRevision",
+                        "expectedChairGeneration",
+                        "expectedPrincipalGeneration",
+                        "expectedBridgeRevision",
+                        "expectedLostBridgeGeneration",
+                        "expectedProviderSessionGeneration",
+                        "providerAdapterId",
+                        "providerContractDigest",
+                        "reason"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "chair-bridge-recovery"
+                        },
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "path": {
+                          "const": "abandon"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "lossId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "recoveryManifestDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedChairGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedPrincipalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedBridgeRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedLostBridgeGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedProviderSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
                         }
                       }
                     },

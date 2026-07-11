@@ -28,6 +28,7 @@ import {
   type AgentProvisionProviderResult,
   type AdapterRequestHandler,
   type ChairLaunchBoundaryInput,
+  type ChairRecoveryBoundaryInput,
   type ChairLaunchHandoff,
   type ChairLaunchProviderResult,
   type ProviderAdapterCapabilities,
@@ -61,6 +62,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     "cancel_action",
     "release",
     "launch_chair",
+    "recover_chair",
   ],
   actionJournal: true,
   persistentSession: true,
@@ -520,11 +522,79 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     }
   }
 
+  async recoverChair(input: ChairRecoveryBoundaryInput): Promise<ChairLaunchProviderResult> {
+    const bridge = await this.#bridgeFactory({
+      providerAdapterId: input.providerAdapterId,
+      providerActionId: input.actionId,
+      providerContractDigest: input.providerContractDigest,
+      challengeDigest: input.challengeDigest,
+      capability: input.environment.AGENT_FABRIC_CAPABILITY,
+      socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+      attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+      expectedPrincipal: input.expectedPrincipal,
+    });
+    let connection: CodexConnection | undefined;
+    try {
+      connection = await this.#openConnection();
+      let session: CodexChairSession | undefined;
+      connection.setServerRequestHandler("item/tool/call", async (params) => {
+        if (
+          session === undefined || params.threadId !== session.providerSessionRef ||
+          params.turnId !== session.currentTurnId || typeof params.callId !== "string" ||
+          params.callId.length === 0 || Buffer.byteLength(params.callId, "utf8") > 512 ||
+          typeof params.tool !== "string" || (params.namespace !== undefined && params.namespace !== null) ||
+          !isRecord(params.arguments)
+        ) throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex recovery tool call is not attributable");
+        if (!consumeCodexNativeInvocation(session, String(params.threadId), String(params.turnId), params.callId)) {
+          throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "Codex recovery invocation capacity exceeded");
+        }
+        return dynamicToolResponse(await bridge.invokeTool(params.tool, params.arguments, {
+          providerSessionRef: session.providerSessionRef,
+          providerSessionGeneration: session.providerSessionGeneration,
+          providerTurnRef: String(params.turnId),
+          providerInvocationRef: params.callId,
+        }));
+      });
+      const response = await connection.request("thread/resume", {
+        threadId: input.resumeReference,
+        ...codexThreadConfiguration(input.payload),
+        dynamicTools: codexChairDynamicTools(bridge),
+      });
+      const thread = threadFromResponse(response, "thread/resume");
+      const resumeReference = String(thread.id);
+      if (resumeReference !== input.resumeReference) {
+        throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex recovery resumed another thread");
+      }
+      bridge.bindProviderSession(resumeReference, input.nextProviderSessionGeneration);
+      session = {
+        bridge,
+        providerSessionRef: resumeReference,
+        providerSessionGeneration: input.nextProviderSessionGeneration,
+        nativeInvocationKeys: new Set(),
+      };
+      await this.#completeTurn(connection, resumeReference, input.payload, session, bridge.challengeToolName);
+      const result = parseChairLaunchProviderResult(await bridge.result(), {
+        providerAdapterId: input.providerAdapterId,
+        providerActionId: input.actionId,
+        providerContractDigest: input.providerContractDigest,
+        challengeDigest: input.challengeDigest,
+      });
+      this.#connections.set(resumeReference, connection);
+      this.#chairSessions.set(resumeReference, session);
+      return result;
+    } catch (error: unknown) {
+      await connection?.close();
+      await bridge.close();
+      throw error;
+    }
+  }
+
   async provisionAgent(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult> {
     const bridge = await this.#agentBridgeFactory({
       providerAdapterId: "codex-app-server",
       providerActionId: input.actionId,
       targetAgentId: input.targetAgentId,
+      expectedPrincipal: input.expectedPrincipal,
       bridgeGeneration: input.bridgeGeneration,
       bridgeContractDigest: input.bridgeContractDigest,
       capability: input.environment.AGENT_FABRIC_CAPABILITY,

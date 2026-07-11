@@ -23,6 +23,12 @@ export type AgentSessionFabricBridgeInput = {
   providerAdapterId: string;
   providerActionId: string;
   targetAgentId: string;
+  expectedPrincipal: Readonly<{
+    agentId: string;
+    projectSessionId: string;
+    runId: string;
+    principalGeneration: number;
+  }>;
   bridgeGeneration: number;
   bridgeContractDigest: string;
   capability: string;
@@ -78,7 +84,7 @@ function bounded(value: string): boolean {
 export class AgentSessionFabricBridge {
   readonly descriptors: readonly McpToolDescriptor[];
   readonly activationToolName: McpToolDescriptor["name"];
-  readonly #binding: Omit<AgentSessionFabricBridgeInput, "capability" | "socketPath">;
+  readonly #binding: Omit<AgentSessionFabricBridgeInput, "capability" | "socketPath" | "expectedPrincipal">;
   readonly #transport: ProviderSessionProtocolTransport;
   readonly #surface: ProviderSessionFabricSurface;
   #session: { ref: string; generation: number } | undefined;
@@ -86,6 +92,20 @@ export class AgentSessionFabricBridge {
   #closed = false;
 
   private constructor(input: AgentSessionFabricBridgeInput, transport: ProviderSessionProtocolTransport) {
+    const principal = transport.principal;
+    if (
+      principal.kind !== "agent" ||
+      principal.agentId !== input.expectedPrincipal.agentId ||
+      principal.projectSessionId !== input.expectedPrincipal.projectSessionId ||
+      principal.runId !== input.expectedPrincipal.runId ||
+      principal.principalGeneration !== input.expectedPrincipal.principalGeneration ||
+      input.targetAgentId !== input.expectedPrincipal.agentId
+    ) {
+      throw new ProviderAdapterError(
+        "AGENT_BRIDGE_UNPROVEN",
+        "child Fabric principal does not match the exact custody binding",
+      );
+    }
     this.#binding = {
       providerAdapterId: input.providerAdapterId,
       providerActionId: input.providerActionId,

@@ -87,26 +87,45 @@ export function parseAgentBridgeCapability(value: unknown): AgentBridgeCapabilit
 export type AgentBridgeHandoff = {
   capability: string;
   socketPath: string;
+  expectedPrincipal: AgentFabricPrincipalBinding;
 };
 
 export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBridgeHandoff | undefined {
   if (environment.AGENT_FABRIC_HANDOFF_KIND !== "agent") return undefined;
   const capability = environment.AGENT_FABRIC_CAPABILITY;
   const socketPath = environment.AGENT_FABRIC_SOCKET_PATH;
+  const agentId = environment.AGENT_FABRIC_EXPECTED_AGENT_ID;
+  const projectSessionId = environment.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID;
+  const runId = environment.AGENT_FABRIC_EXPECTED_RUN_ID;
+  const principalGenerationValue = environment.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION;
   delete environment.AGENT_FABRIC_HANDOFF_KIND;
   delete environment.AGENT_FABRIC_CAPABILITY;
   delete environment.AGENT_FABRIC_SOCKET_PATH;
+  delete environment.AGENT_FABRIC_EXPECTED_AGENT_ID;
+  delete environment.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID;
+  delete environment.AGENT_FABRIC_EXPECTED_RUN_ID;
+  delete environment.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION;
+  const principalGeneration = Number(principalGenerationValue);
   if (
     typeof capability !== "string" || capability.length === 0 ||
-    typeof socketPath !== "string" || !isAbsolute(socketPath)
+    typeof socketPath !== "string" || !isAbsolute(socketPath) ||
+    !isBoundedProviderEvidenceRef(agentId) ||
+    !isBoundedProviderEvidenceRef(projectSessionId) ||
+    !isBoundedProviderEvidenceRef(runId) ||
+    !Number.isSafeInteger(principalGeneration) || principalGeneration < 1
   ) {
     throw new ProviderAdapterError("PRIVATE_HANDOFF_INVALID", "agent bridge private handoff is incomplete");
   }
-  return { capability, socketPath };
+  return {
+    capability,
+    socketPath,
+    expectedPrincipal: { agentId, projectSessionId, runId, principalGeneration },
+  };
 }
 
 export type AgentProvisionBoundaryInput = {
   schemaVersion: 1;
+  runId: string;
   operation: "spawn" | "attach";
   actionId: string;
   targetAgentId: string;
@@ -115,6 +134,7 @@ export type AgentProvisionBoundaryInput = {
   bridgeContractDigest: string;
   payload: Record<string, unknown>;
   providerSessionRef?: string;
+  expectedPrincipal: AgentFabricPrincipalBinding;
   environment: {
     AGENT_FABRIC_CAPABILITY: string;
     AGENT_FABRIC_SOCKET_PATH: string;
@@ -301,6 +321,15 @@ export type ChairLaunchBoundaryInput = {
     AGENT_FABRIC_SOCKET_PATH: string;
     AGENT_FABRIC_ATTESTATION_CHALLENGE: string;
   };
+};
+
+export type ChairRecoveryBoundaryInput = ChairLaunchBoundaryInput & {
+  recoveryId: string;
+  lossId: string;
+  resumeReference: string;
+  expectedProviderSessionGeneration: number;
+  nextProviderSessionGeneration: number;
+  bridgeGeneration: number;
 };
 
 export type ChairLaunchProviderResult = {

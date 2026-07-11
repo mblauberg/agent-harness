@@ -72,6 +72,16 @@ const bridgeContract = {
 };
 
 let retainedProtocol: Awaited<ReturnType<typeof NdjsonRpcTransport.connect>> | undefined;
+let retainedBinding: Readonly<{
+  actionId: string;
+  agentId: string;
+  projectSessionId: string;
+  runId: string;
+  principalGeneration: number;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+}> | undefined;
 
 async function provision(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const capability = process.env.AGENT_FABRIC_CAPABILITY;
@@ -86,6 +96,20 @@ async function provision(params: Record<string, unknown>): Promise<Record<string
     requiredFeatures: ["fabric-core.v1"],
     optionalFeatures: [],
   });
+  const expectedPrincipal = {
+    agentId: process.env.AGENT_FABRIC_EXPECTED_AGENT_ID,
+    projectSessionId: process.env.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID,
+    runId: process.env.AGENT_FABRIC_EXPECTED_RUN_ID,
+    principalGeneration: Number(process.env.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION),
+  };
+  if (
+    retainedProtocol.principal.kind !== "agent" ||
+    retainedProtocol.principal.agentId !== expectedPrincipal.agentId ||
+    retainedProtocol.principal.projectSessionId !== expectedPrincipal.projectSessionId ||
+    retainedProtocol.principal.runId !== expectedPrincipal.runId ||
+    retainedProtocol.principal.principalGeneration !== expectedPrincipal.principalGeneration ||
+    expectedPrincipal.agentId !== params.targetAgentId || expectedPrincipal.runId !== params.runId
+  ) throw new Error("private child principal binding changed");
   const activation = await retainedProtocol.call(FABRIC_OPERATIONS.getMailboxState, {});
   const providerSessionRef = typeof params.providerSessionRef === "string"
     ? params.providerSessionRef
@@ -96,6 +120,16 @@ async function provision(params: Record<string, unknown>): Promise<Record<string
     providerSessionRef,
     activation,
   })).digest("hex")}`;
+  retainedBinding = {
+    actionId: String(params.actionId),
+    agentId: expectedPrincipal.agentId,
+    projectSessionId: expectedPrincipal.projectSessionId,
+    runId: expectedPrincipal.runId,
+    principalGeneration: expectedPrincipal.principalGeneration,
+    providerSessionRef,
+    providerSessionGeneration: 1,
+    bridgeGeneration: Number(params.bridgeGeneration),
+  };
   return {
     schemaVersion: 1,
     adapterId: "agent-bridge-fake",
@@ -174,6 +208,18 @@ input.on("line", (line) => {
       else respond(request.id, action);
       return;
     }
+    if (request.method === "retained_bridge_health") {
+      const binding = retainedBinding;
+      const live = binding !== undefined && retainedProtocol !== undefined &&
+        request.params.kind === "child" && request.params.actionId === binding.actionId &&
+        request.params.agentId === binding.agentId && request.params.projectSessionId === binding.projectSessionId &&
+        request.params.runId === binding.runId && request.params.principalGeneration === binding.principalGeneration &&
+        request.params.providerSessionRef === binding.providerSessionRef &&
+        request.params.providerSessionGeneration === binding.providerSessionGeneration &&
+        request.params.bridgeGeneration === binding.bridgeGeneration;
+      respond(request.id, { schemaVersion: 1, kind: request.params.kind, live });
+      return;
+    }
     if (request.method === "status") {
       respond(request.id, { healthy: true, matches: true });
       return;
@@ -181,6 +227,7 @@ input.on("line", (line) => {
     if (request.method === "release") {
       await retainedProtocol?.close();
       retainedProtocol = undefined;
+      retainedBinding = undefined;
       respond(request.id, { released: true, deleted: false });
       return;
     }

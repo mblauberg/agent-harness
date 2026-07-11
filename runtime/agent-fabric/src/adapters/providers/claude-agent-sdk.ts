@@ -43,6 +43,7 @@ import {
   type AgentProvisionProviderResult,
   type AdapterRequestHandler,
   type ChairLaunchBoundaryInput,
+  type ChairRecoveryBoundaryInput,
   type ChairLaunchHandoff,
   type ChairLaunchProviderResult,
   type ProviderAdapterCapabilities,
@@ -64,6 +65,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     "cancel_action",
     "release",
     "launch_chair",
+    "recover_chair",
   ],
   actionJournal: true,
   persistentSession: true,
@@ -553,11 +555,60 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     }
   }
 
+  async recoverChair(input: ChairRecoveryBoundaryInput): Promise<ChairLaunchProviderResult> {
+    const bridge = await this.#bridgeFactory({
+      providerAdapterId: input.providerAdapterId,
+      providerActionId: input.actionId,
+      providerContractDigest: input.providerContractDigest,
+      challengeDigest: input.challengeDigest,
+      capability: input.environment.AGENT_FABRIC_CAPABILITY,
+      socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+      attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+      expectedPrincipal: input.expectedPrincipal,
+    });
+    const session: ClaudeChairSession = {
+      bridge,
+      providerSessionGeneration: input.nextProviderSessionGeneration,
+      nativeFabricInvocations: [],
+      seenNativeFabricInvocationKeys: new Set(),
+      seenNativeFabricInvocationOrder: [],
+    };
+    const mcp = this.#mcpBridgeFactory(session);
+    session.mcp = mcp;
+    try {
+      const completed = await consumeQuery(this.#query({
+        prompt: `Before continuing, invoke ${mcp.attestationToolName} exactly once with {"challengeResponse":"${bridge.challengeResponse}"}. Re-establish the retained Agent Fabric chair bridge.`,
+        options: claudeChairOptions(input.payload, this.#executable, input.resumeReference, mcp),
+      }), (sessionId) => {
+        if (sessionId !== input.resumeReference) {
+          throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude recovery resumed another provider session");
+        }
+        session.providerSessionRef = sessionId;
+        bridge.bindProviderSession(sessionId, input.nextProviderSessionGeneration);
+      }, (message) => observeClaudeFabricToolUses(session, message, mcp));
+      if (completed.resumeReference !== input.resumeReference) {
+        throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude recovery returned another provider session");
+      }
+      const result = parseChairLaunchProviderResult(await bridge.result(), {
+        providerAdapterId: input.providerAdapterId,
+        providerActionId: input.actionId,
+        providerContractDigest: input.providerContractDigest,
+        challengeDigest: input.challengeDigest,
+      });
+      this.#chairSessions.set(input.resumeReference, session);
+      return result;
+    } catch (error: unknown) {
+      await bridge.close();
+      throw error;
+    }
+  }
+
   async provisionAgent(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult> {
     const bridge = await this.#agentBridgeFactory({
       providerAdapterId: "claude-agent-sdk",
       providerActionId: input.actionId,
       targetAgentId: input.targetAgentId,
+      expectedPrincipal: input.expectedPrincipal,
       bridgeGeneration: input.bridgeGeneration,
       bridgeContractDigest: input.bridgeContractDigest,
       capability: input.environment.AGENT_FABRIC_CAPABILITY,

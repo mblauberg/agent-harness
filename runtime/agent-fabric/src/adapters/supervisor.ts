@@ -25,12 +25,26 @@ export type AdapterProcessDefinition = {
 export type AdapterSupervisorOptions = {
   controlTimeoutMs?: number;
   providerTurnTimeoutMs?: number;
+  bridgeHealthIntervalMs?: number;
 };
 
 export type AdapterChairLaunchRequest = {
   schemaVersion: 1;
   actionId: string;
   providerContractDigest: string;
+  payload: Record<string, unknown>;
+};
+
+export type AdapterChairRecoveryRequest = {
+  schemaVersion: 1;
+  recoveryId: string;
+  lossId: string;
+  actionId: string;
+  providerContractDigest: string;
+  resumeReference: string;
+  expectedProviderSessionGeneration: number;
+  nextProviderSessionGeneration: number;
+  bridgeGeneration: number;
   payload: Record<string, unknown>;
 };
 
@@ -71,6 +85,16 @@ export type RetainedChairBridge = Readonly<{
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 30_000;
 const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_BRIDGE_HEALTH_INTERVAL_MS = 250;
+
+function parseBridgeHealth(value: unknown, kind: "chair" | "child"): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value) &&
+    Object.keys(value).length === 3 &&
+    Reflect.get(value, "schemaVersion") === 1 &&
+    Reflect.get(value, "kind") === kind &&
+    typeof Reflect.get(value, "live") === "boolean" &&
+    Reflect.get(value, "live") === true;
+}
 
 function isLongProviderOperation(method: string, params: Record<string, unknown>): boolean {
   if (method === "spawn" || method === "compact") return true;
@@ -192,17 +216,28 @@ export class AdapterSupervisor {
   readonly #knownChildSessions = new Map<string, number>();
   readonly #childSessionByAction = new Map<string, string>();
   readonly #childEntryBySession = new Map<string, RetainedChildBridge>();
+  readonly #childPrincipalBySession = new Map<string, AgentFabricPrincipalBinding>();
   readonly #lostChildSessions = new Set<string>();
   readonly #consumedChildHandoffHashes = new Set<string>();
+  readonly #bridgeTransitions = new Set<string>();
   #chairLossHandler: ((entry: RetainedChairBridge, reason: string) => void) | undefined;
   #childLossHandler: ((entry: RetainedChildBridge, reason: string) => void) | undefined;
   readonly #controlTimeoutMs: number;
   readonly #providerTurnTimeoutMs: number;
+  readonly #bridgeHealthIntervalMs: number;
+  readonly #bridgeHealthTimer: NodeJS.Timeout;
+  #bridgeHealthAuditInFlight = false;
 
   constructor(definitions: Record<string, AdapterProcessDefinition>, options: AdapterSupervisorOptions = {}) {
     this.#definitions = definitions;
     this.#controlTimeoutMs = options.controlTimeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
     this.#providerTurnTimeoutMs = options.providerTurnTimeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
+    this.#bridgeHealthIntervalMs = options.bridgeHealthIntervalMs ?? DEFAULT_BRIDGE_HEALTH_INTERVAL_MS;
+    if (!Number.isFinite(this.#bridgeHealthIntervalMs) || this.#bridgeHealthIntervalMs <= 0) {
+      throw new TypeError("bridgeHealthIntervalMs must be positive");
+    }
+    this.#bridgeHealthTimer = setInterval(() => { void this.#auditRetainedBridgeHealth(); }, this.#bridgeHealthIntervalMs);
+    this.#bridgeHealthTimer.unref();
   }
 
   setChildBridgeLossHandler(handler: (entry: RetainedChildBridge, reason: string) => void): void {
@@ -211,6 +246,74 @@ export class AdapterSupervisor {
 
   setChairBridgeLossHandler(handler: (entry: RetainedChairBridge, reason: string) => void): void {
     this.#chairLossHandler = handler;
+  }
+
+  async #probeChairBridge(transport: AdapterProcessTransport, entry: RetainedChairBridge): Promise<boolean> {
+    const value = await transport.request("retained_bridge_health", {
+      schemaVersion: 1,
+      kind: "chair",
+      actionId: entry.actionId,
+      agentId: entry.agentId,
+      projectSessionId: entry.projectSessionId,
+      runId: entry.runId,
+      principalGeneration: entry.principalGeneration,
+      providerSessionRef: entry.providerSessionRef,
+      providerSessionGeneration: entry.providerSessionGeneration,
+      bridgeGeneration: entry.bridgeGeneration,
+    }, { timeoutMs: this.#controlTimeoutMs });
+    return parseBridgeHealth(value, "chair");
+  }
+
+  async #probeChildBridge(
+    transport: AdapterProcessTransport,
+    entry: RetainedChildBridge,
+    principal: AgentFabricPrincipalBinding,
+  ): Promise<boolean> {
+    const value = await transport.request("retained_bridge_health", {
+      schemaVersion: 1,
+      kind: "child",
+      actionId: entry.actionId,
+      agentId: principal.agentId,
+      projectSessionId: principal.projectSessionId,
+      runId: principal.runId,
+      principalGeneration: principal.principalGeneration,
+      providerSessionRef: entry.providerSessionRef,
+      providerSessionGeneration: entry.providerSessionGeneration,
+      bridgeGeneration: entry.bridgeGeneration,
+    }, { timeoutMs: this.#controlTimeoutMs });
+    return parseBridgeHealth(value, "child");
+  }
+
+  async #auditRetainedBridgeHealth(): Promise<void> {
+    if (this.#bridgeHealthAuditInFlight) return;
+    this.#bridgeHealthAuditInFlight = true;
+    try {
+      for (const [key, entry] of [...this.#chairEntryBySession.entries()]) {
+        if (this.#bridgeTransitions.has(key)) continue;
+        const transport = this.#chairTransports.get(key);
+        if (transport === undefined) continue;
+        let live = false;
+        try { live = await this.#probeChairBridge(transport, entry); } catch { live = false; }
+        if (!live && !this.#bridgeTransitions.has(key) && this.#chairTransports.get(key) === transport) {
+          this.#loseChairBridge(key, "inner retained chair bridge is unavailable");
+          await transport.close().catch(() => undefined);
+        }
+      }
+      for (const [key, entry] of [...this.#childEntryBySession.entries()]) {
+        if (this.#bridgeTransitions.has(key)) continue;
+        const transport = this.#childTransports.get(key);
+        const principal = this.#childPrincipalBySession.get(key);
+        if (transport === undefined || principal === undefined) continue;
+        let live = false;
+        try { live = await this.#probeChildBridge(transport, entry, principal); } catch { live = false; }
+        if (!live && !this.#bridgeTransitions.has(key) && this.#childTransports.get(key) === transport) {
+          this.#loseChildBridge(key, "inner retained child bridge is unavailable");
+          await transport.close().catch(() => undefined);
+        }
+      }
+    } finally {
+      this.#bridgeHealthAuditInFlight = false;
+    }
   }
 
   async request(adapterId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -345,7 +448,10 @@ export class AdapterSupervisor {
     if (definition === undefined) throw new Error(`adapter is not configured: ${adapterId}`);
     if (
       typeof handoff.capability !== "string" || handoff.capability.length === 0 ||
-      typeof handoff.socketPath !== "string" || !isAbsolute(handoff.socketPath)
+      typeof handoff.socketPath !== "string" || !isAbsolute(handoff.socketPath) ||
+      !validExpectedPrincipal(handoff.expectedPrincipal) ||
+      handoff.expectedPrincipal.agentId !== request.targetAgentId ||
+      handoff.expectedPrincipal.runId !== request.runId
     ) {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "agent bridge private handoff is invalid");
     }
@@ -362,11 +468,16 @@ export class AdapterSupervisor {
         AGENT_FABRIC_HANDOFF_KIND: "agent",
         AGENT_FABRIC_CAPABILITY: handoff.capability,
         AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+        AGENT_FABRIC_EXPECTED_AGENT_ID: handoff.expectedPrincipal.agentId,
+        AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: handoff.expectedPrincipal.projectSessionId,
+        AGENT_FABRIC_EXPECTED_RUN_ID: handoff.expectedPrincipal.runId,
+        AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(handoff.expectedPrincipal.principalGeneration),
       },
     });
     try {
       const publicRequest = {
         schemaVersion: request.schemaVersion,
+        runId: request.runId,
         operation: request.operation,
         actionId: request.actionId,
         targetAgentId: request.targetAgentId,
@@ -387,6 +498,17 @@ export class AdapterSupervisor {
         },
       );
       await transport.request("capabilities", {}, { timeoutMs: this.#controlTimeoutMs });
+      if (!await this.#probeChildBridge(transport, {
+        runId: request.runId,
+        agentId: request.targetAgentId,
+        adapterId,
+        actionId: request.actionId,
+        providerSessionRef: result.providerSessionRef,
+        providerSessionGeneration: result.providerSessionGeneration,
+        bridgeGeneration: result.bridgeGeneration,
+      }, handoff.expectedPrincipal)) {
+        throw new ProviderAdapterError("AGENT_BRIDGE_LOST", "inner child bridge closed before retention");
+      }
       if (transport.closed) throw new ProviderAdapterError("AGENT_BRIDGE_LOST", "agent bridge closed before retention");
       const key = chairTransportKey(adapterId, result.providerSessionRef);
       if (this.#childTransports.has(key) || this.#chairTransports.has(key)) {
@@ -406,6 +528,7 @@ export class AdapterSupervisor {
       this.#knownChildSessions.set(key, result.providerSessionGeneration);
       this.#childSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
       this.#childEntryBySession.set(key, entry);
+      this.#childPrincipalBySession.set(key, handoff.expectedPrincipal);
       transport.onClose(() => {
         if (this.#childTransports.get(key) === transport) this.#loseChildBridge(key, "retained adapter transport closed");
       });
@@ -431,6 +554,7 @@ export class AdapterSupervisor {
     this.#childTransports.delete(key);
     this.#knownChildSessions.delete(key);
     this.#childEntryBySession.delete(key);
+    this.#childPrincipalBySession.delete(key);
     if (entry !== undefined) this.#childSessionByAction.delete(chairActionKey(entry.adapterId, entry.actionId));
   }
 
@@ -509,6 +633,17 @@ export class AdapterSupervisor {
       // This is a liveness handshake only; the provider-originated attestation
       // above remains the sole continuity proof.
       await transport.request("capabilities", {}, { timeoutMs: this.#controlTimeoutMs });
+      const entry: RetainedChairBridge = Object.freeze({
+        ...handoff.expectedPrincipal,
+        adapterId,
+        actionId: request.actionId,
+        providerSessionRef: result.resumeReference,
+        providerSessionGeneration: result.providerSessionGeneration,
+        bridgeGeneration: 1,
+      });
+      if (!await this.#probeChairBridge(transport, entry)) {
+        throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} inner chair bridge closed before retention`);
+      }
       if (transport.closed) {
         throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} chair bridge closed before terminal handoff`);
       }
@@ -519,14 +654,6 @@ export class AdapterSupervisor {
       this.#chairTransports.set(key, transport);
       this.#knownChairSessions.set(key, result.providerSessionGeneration);
       this.#chairSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
-      const entry: RetainedChairBridge = Object.freeze({
-        ...handoff.expectedPrincipal,
-        adapterId,
-        actionId: request.actionId,
-        providerSessionRef: result.resumeReference,
-        providerSessionGeneration: result.providerSessionGeneration,
-        bridgeGeneration: 1,
-      });
       this.#chairEntryBySession.set(key, entry);
       transport.onClose(() => {
         if (this.#chairTransports.get(key) === transport) {
@@ -537,6 +664,223 @@ export class AdapterSupervisor {
     } catch {
       await transport.close().catch(() => undefined);
       throw new ProviderAdapterError("CHAIR_LAUNCH_FAILED", `${adapterId} chair launch adapter handoff failed`);
+    }
+  }
+
+  async recoverChair(
+    adapterId: string,
+    request: AdapterChairRecoveryRequest,
+    handoff: ChairLaunchHandoff,
+  ): Promise<ChairLaunchProviderResult> {
+    const definition = this.#definitions[adapterId];
+    if (definition === undefined) throw new Error(`adapter is not configured: ${adapterId}`);
+    if (
+      !validExpectedPrincipal(handoff.expectedPrincipal) ||
+      typeof handoff.capability !== "string" || handoff.capability.length === 0 ||
+      typeof handoff.socketPath !== "string" || !isAbsolute(handoff.socketPath) ||
+      !/^[0-9a-f]{64}$/u.test(handoff.attestationChallenge) ||
+      request.nextProviderSessionGeneration !== request.expectedProviderSessionGeneration + 1 ||
+      request.bridgeGeneration < 2
+    ) throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair recovery handoff is invalid");
+    const handoffHash = createHash("sha256").update(handoff.capability).digest("hex");
+    if (this.#consumedChairHandoffHashes.has(handoffHash)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair recovery handoff was already consumed");
+    }
+    this.#consumedChairHandoffHashes.add(handoffHash);
+    const transport = new AdapterProcessTransport({
+      ...definition,
+      environment: {
+        ...definition.environment,
+        AGENT_FABRIC_HANDOFF_KIND: "chair",
+        AGENT_FABRIC_CAPABILITY: handoff.capability,
+        AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+        AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.attestationChallenge,
+        AGENT_FABRIC_EXPECTED_AGENT_ID: handoff.expectedPrincipal.agentId,
+        AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: handoff.expectedPrincipal.projectSessionId,
+        AGENT_FABRIC_EXPECTED_RUN_ID: handoff.expectedPrincipal.runId,
+        AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(handoff.expectedPrincipal.principalGeneration),
+      },
+    });
+    try {
+      const result = parseChairLaunchProviderResult(await transport.request("recover_chair", request, {
+        timeoutMs: this.#providerTurnTimeoutMs,
+      }), {
+        providerAdapterId: adapterId,
+        providerActionId: request.actionId,
+        providerContractDigest: request.providerContractDigest,
+        challengeDigest: chairLaunchChallengeDigest(handoff.attestationChallenge),
+      });
+      if (
+        result.resumeReference !== request.resumeReference ||
+        result.providerSessionGeneration !== request.nextProviderSessionGeneration
+      ) throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "chair recovery returned a stale provider session");
+      await transport.request("capabilities", {}, { timeoutMs: this.#controlTimeoutMs });
+      const entry: RetainedChairBridge = Object.freeze({
+        ...handoff.expectedPrincipal,
+        adapterId,
+        actionId: request.actionId,
+        providerSessionRef: result.resumeReference,
+        providerSessionGeneration: result.providerSessionGeneration,
+        bridgeGeneration: request.bridgeGeneration,
+      });
+      if (!await this.#probeChairBridge(transport, entry)) {
+        throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "inner recovered chair bridge is unavailable");
+      }
+      const key = chairTransportKey(adapterId, result.resumeReference);
+      const prior = this.#chairTransports.get(key);
+      if (prior !== undefined && prior !== transport) {
+        this.#removeChairBridge(key);
+        await prior.close().catch(() => undefined);
+      }
+      this.#chairTransports.set(key, transport);
+      this.#knownChairSessions.set(key, result.providerSessionGeneration);
+      this.#chairSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
+      this.#chairEntryBySession.set(key, entry);
+      transport.onClose(() => {
+        if (this.#chairTransports.get(key) === transport) this.#loseChairBridge(key, "retained recovered chair transport closed");
+      });
+      return result;
+    } catch (error: unknown) {
+      await transport.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async promoteRetainedChildBridgeToChair(input: Readonly<{
+    projectSessionId: string;
+    runId: string;
+    agentId: string;
+    principalGeneration: number;
+    adapterId: string;
+    actionId: string;
+    providerSessionRef: string;
+    providerSessionGeneration: number;
+    sourceBridgeGeneration: number;
+    chairBridgeGeneration: number;
+  }>): Promise<boolean> {
+    const key = chairTransportKey(input.adapterId, input.providerSessionRef);
+    if (this.#bridgeTransitions.has(key)) return false;
+    this.#bridgeTransitions.add(key);
+    try {
+    const retainedChairTransport = this.#chairTransports.get(key);
+    const retainedChairEntry = this.#chairEntryBySession.get(key);
+    if (
+      retainedChairTransport !== undefined && retainedChairEntry !== undefined &&
+      retainedChairEntry.actionId === input.actionId && retainedChairEntry.runId === input.runId &&
+      retainedChairEntry.projectSessionId === input.projectSessionId && retainedChairEntry.agentId === input.agentId &&
+      retainedChairEntry.principalGeneration === input.principalGeneration &&
+      retainedChairEntry.providerSessionGeneration === input.providerSessionGeneration &&
+      retainedChairEntry.bridgeGeneration === input.chairBridgeGeneration &&
+      await this.#probeChairBridge(retainedChairTransport, retainedChairEntry)
+    ) return true;
+    const transport = this.#childTransports.get(key);
+    const entry = this.#childEntryBySession.get(key);
+    const principal = this.#childPrincipalBySession.get(key);
+    if (
+      transport === undefined || entry === undefined || principal === undefined ||
+      entry.actionId !== input.actionId || entry.runId !== input.runId || entry.agentId !== input.agentId ||
+      entry.providerSessionGeneration !== input.providerSessionGeneration ||
+      entry.bridgeGeneration !== input.sourceBridgeGeneration ||
+      principal.projectSessionId !== input.projectSessionId ||
+      principal.principalGeneration !== input.principalGeneration ||
+      !await this.#probeChildBridge(transport, entry, principal)
+    ) return false;
+    const promoted = await transport.request("promote_retained_bridge", {
+      schemaVersion: 1,
+      actionId: input.actionId,
+      agentId: input.agentId,
+      projectSessionId: input.projectSessionId,
+      runId: input.runId,
+      principalGeneration: input.principalGeneration,
+      providerSessionRef: input.providerSessionRef,
+      providerSessionGeneration: input.providerSessionGeneration,
+      sourceBridgeGeneration: input.sourceBridgeGeneration,
+      chairBridgeGeneration: input.chairBridgeGeneration,
+    }, { timeoutMs: this.#controlTimeoutMs });
+    if (
+      typeof promoted !== "object" || promoted === null ||
+      Reflect.get(promoted, "schemaVersion") !== 1 || Reflect.get(promoted, "promoted") !== true
+    ) return false;
+    this.#removeChildBridge(key);
+    const chairEntry: RetainedChairBridge = Object.freeze({
+      projectSessionId: input.projectSessionId,
+      runId: input.runId,
+      agentId: input.agentId,
+      principalGeneration: input.principalGeneration,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+      providerSessionRef: input.providerSessionRef,
+      providerSessionGeneration: input.providerSessionGeneration,
+      bridgeGeneration: input.chairBridgeGeneration,
+    });
+    this.#chairTransports.set(key, transport);
+    this.#knownChairSessions.set(key, input.providerSessionGeneration);
+    this.#chairSessionByAction.set(chairActionKey(input.adapterId, input.actionId), key);
+    this.#chairEntryBySession.set(key, chairEntry);
+    return await this.#probeChairBridge(transport, chairEntry);
+    } finally {
+      this.#bridgeTransitions.delete(key);
+    }
+  }
+
+  async lookupRetainedSuccessorBridge(input: Readonly<{
+    projectSessionId: string;
+    runId: string;
+    agentId: string;
+    principalGeneration: number;
+    adapterId: string;
+    actionId: string;
+    providerSessionRef: string;
+    providerSessionGeneration: number;
+    sourceBridgeGeneration: number;
+    chairBridgeGeneration: number;
+  }>): Promise<"child" | "chair" | "missing"> {
+    const key = chairTransportKey(input.adapterId, input.providerSessionRef);
+    const chairTransport = this.#chairTransports.get(key);
+    const chairEntry = this.#chairEntryBySession.get(key);
+    if (
+      chairTransport !== undefined && chairEntry !== undefined &&
+      chairEntry.projectSessionId === input.projectSessionId && chairEntry.runId === input.runId &&
+      chairEntry.agentId === input.agentId && chairEntry.principalGeneration === input.principalGeneration &&
+      chairEntry.actionId === input.actionId &&
+      chairEntry.providerSessionGeneration === input.providerSessionGeneration &&
+      chairEntry.bridgeGeneration === input.chairBridgeGeneration
+    ) {
+      try {
+        if (await this.#probeChairBridge(chairTransport, chairEntry)) return "chair";
+      } catch { /* an unobservable retained bridge remains ambiguous */ }
+      return "missing";
+    }
+    const childTransport = this.#childTransports.get(key);
+    const childEntry = this.#childEntryBySession.get(key);
+    const principal = this.#childPrincipalBySession.get(key);
+    if (
+      childTransport === undefined || childEntry === undefined || principal === undefined ||
+      childEntry.runId !== input.runId || childEntry.agentId !== input.agentId ||
+      childEntry.actionId !== input.actionId ||
+      childEntry.providerSessionGeneration !== input.providerSessionGeneration ||
+      childEntry.bridgeGeneration !== input.sourceBridgeGeneration ||
+      principal.projectSessionId !== input.projectSessionId || principal.principalGeneration !== input.principalGeneration
+    ) return "missing";
+    try {
+      if (await this.#probeChildBridge(childTransport, childEntry, principal)) return "child";
+      const recoveredChairEntry: RetainedChairBridge = Object.freeze({
+        ...principal,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        providerSessionRef: input.providerSessionRef,
+        providerSessionGeneration: input.providerSessionGeneration,
+        bridgeGeneration: input.chairBridgeGeneration,
+      });
+      if (!await this.#probeChairBridge(childTransport, recoveredChairEntry)) return "missing";
+      this.#removeChildBridge(key);
+      this.#chairTransports.set(key, childTransport);
+      this.#knownChairSessions.set(key, input.providerSessionGeneration);
+      this.#chairSessionByAction.set(chairActionKey(input.adapterId, input.actionId), key);
+      this.#chairEntryBySession.set(key, recoveredChairEntry);
+      return "chair";
+    } catch {
+      return "missing";
     }
   }
 
@@ -552,6 +896,7 @@ export class AdapterSupervisor {
   }
 
   async close(): Promise<void> {
+    clearInterval(this.#bridgeHealthTimer);
     const transports = [...new Set([...this.#transports.values(), ...this.#chairTransports.values(), ...this.#childTransports.values()])];
     this.#transports.clear();
     this.#chairTransports.clear();
@@ -559,6 +904,7 @@ export class AdapterSupervisor {
     this.#chairSessionByAction.clear();
     this.#chairEntryBySession.clear();
     this.#lostChildSessions.clear();
+    this.#childPrincipalBySession.clear();
     for (const key of [...this.#childTransports.keys()]) this.#removeChildBridge(key);
     await Promise.allSettled(transports.map((transport) => transport.close()));
   }

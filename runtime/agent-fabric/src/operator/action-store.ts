@@ -36,6 +36,10 @@ import type {
   LaunchCustodyIntent,
   LaunchDispatchHandle,
   LaunchInspection,
+  ChairRecoveryCurrentState,
+  ChairRecoveryDispatchHandle,
+  ChairRecoveryInspection,
+  ChairRecoveryCommit,
 } from "../project-session/launch-custody.js";
 import { canonicalJson, integer, isRow, nullableText, row, sha256, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
@@ -69,6 +73,7 @@ export type OperatorActionCurrentState =
       lifecycleState: string;
       drainReceiptRef: ArtifactRef | null;
     }
+  | { kind: "chair-bridge-recovery"; revision: number; state: ChairRecoveryCurrentState }
   | { kind: "git"; revision: number; state: GitCurrentState }
   | { kind: "registered-external-effect"; revision: number; state: RegisteredExternalEffectState }
   | { kind: "promotion"; revision: number; gate: ScopedGate };
@@ -118,11 +123,25 @@ export interface OperatorLaunchCustodyPort {
   providerActionRefForCommand(operatorId: string, commandId: string): ProviderActionRefV1;
 }
 
+export interface OperatorChairRecoveryCustodyPort {
+  readChairRecoveryCurrentState(intent: Extract<OperatorActionIntent, { kind: "chair-bridge-recovery" }>): Promise<ChairRecoveryCurrentState>;
+  inspectChairRecovery(intent: Extract<OperatorActionIntent, { kind: "chair-bridge-recovery" }>): Promise<ChairRecoveryInspection>;
+  prepareChairRecoveryInTransaction(input: Readonly<{
+    inspection: ChairRecoveryInspection;
+    operatorId: string;
+    operatorCommandId: string;
+  }>): ChairRecoveryDispatchHandle;
+  dispatchPreparedChairRecovery(handle: ChairRecoveryDispatchHandle): Promise<ChairRecoveryCommit>;
+  chairRecoveryStatus(operatorId: string, operatorCommandId: string): ChairRecoveryCommit;
+  reconcileChairRecovery(operatorId: string, operatorCommandId: string): Promise<ChairRecoveryCommit>;
+}
+
 export type OperatorActionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
   statePort: OperatorActionStatePort;
   effectPort: OperatorActionEffectPort;
   launchCustody?: OperatorLaunchCustodyPort;
+  chairRecoveryCustody?: OperatorChairRecoveryCustodyPort;
   previewTtlMs?: number;
 };
 
@@ -132,6 +151,7 @@ export class OperatorActionStore {
   readonly #statePort: OperatorActionStatePort;
   readonly #effectPort: OperatorActionEffectPort;
   readonly #launchCustody: OperatorLaunchCustodyPort | undefined;
+  readonly #chairRecoveryCustody: OperatorChairRecoveryCustodyPort | undefined;
   readonly #clock: () => number;
   readonly #previewTtlMs: number;
   readonly #inFlightCommits = new Map<string, { payloadHash: string; promise: Promise<OperatorActionReceipt> }>();
@@ -142,6 +162,7 @@ export class OperatorActionStore {
     this.#statePort = options.statePort;
     this.#effectPort = options.effectPort;
     this.#launchCustody = options.launchCustody;
+    this.#chairRecoveryCustody = options.chairRecoveryCustody;
     this.#clock = options.clock ?? Date.now;
     this.#previewTtlMs = options.previewTtlMs ?? 5 * 60_000;
     if (!Number.isSafeInteger(this.#previewTtlMs) || this.#previewTtlMs < 1) {
@@ -282,6 +303,17 @@ export class OperatorActionStore {
     }
     if (envelope.preview.intent.kind === "project-session-launch") {
       return await this.#commitLaunch(
+        context,
+        request,
+        envelope,
+        envelope.preview.intent,
+        authenticated,
+        payloadHash,
+        current,
+      );
+    }
+    if (envelope.preview.intent.kind === "chair-bridge-recovery") {
+      return await this.#commitChairRecovery(
         context,
         request,
         envelope,
@@ -469,6 +501,104 @@ export class OperatorActionStore {
     };
   }
 
+  async #commitChairRecovery(
+    context: AuthenticatedOperatorContext,
+    request: OperatorActionCommitRequest,
+    envelope: StoredPreviewEnvelope,
+    intent: Extract<OperatorActionIntent, { kind: "chair-bridge-recovery" }>,
+    authenticated: AuthenticatedOperatorCredential,
+    payloadHash: string,
+    current: OperatorActionCurrentState,
+  ): Promise<OperatorActionReceipt> {
+    const custody = this.#chairRecoveryCustody;
+    if (custody === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
+    }
+    const inspection = await custody.inspectChairRecovery(intent);
+    const provisionalState = {
+      status: "pending" as const,
+      commandId: request.command.commandId,
+      phase: "prepared" as const,
+      attemptGeneration: 1,
+    };
+    const provisionalReceipt: OperatorActionReceipt = {
+      commandId: request.command.commandId,
+      previewId: envelope.preview.previewId,
+      previewRevision: envelope.preview.previewRevision,
+      intentDigest: envelope.preview.intentDigest,
+      beforeStateDigest: envelope.preview.beforeStateDigest,
+      afterStateDigest: digestValue(provisionalState, "operatorChairRecoveryCommit.provisionalStateDigest"),
+      evidenceRefs: envelope.preview.evidenceRefs,
+      committedAt: toTimestamp(this.#clock(), "operatorChairRecoveryCommit.committedAt"),
+    };
+    const prepare = this.#database.transaction(():
+      | { kind: "replay"; receipt: OperatorActionReceipt }
+      | { kind: "prepared"; handle: ChairRecoveryDispatchHandle } => {
+      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
+      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
+      const latest = this.#previewRow(request.previewId);
+      this.#assertPreviewClaim(latest, request.command.commandId);
+      this.#database.prepare(`
+        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
+      `).run(
+        canonicalJson({ preview: envelope.preview, action: { ...provisionalState, receipt: provisionalReceipt } }),
+        request.command.commandId,
+        request.previewId,
+      );
+      this.#insertCommand(
+        context,
+        request.command,
+        request.projectId,
+        actionSessionId(authenticated, intent),
+        "takeover",
+        payloadHash,
+        current,
+        provisionalState,
+        provisionalReceipt,
+        "committed",
+      );
+      return {
+        kind: "prepared",
+        handle: custody.prepareChairRecoveryInTransaction({
+          inspection,
+          operatorId: context.operatorId,
+          operatorCommandId: request.command.commandId,
+        }),
+      };
+    });
+    const prepared = prepare();
+    if (prepared.kind === "replay") return prepared.receipt;
+    let outcome: ChairRecoveryCommit;
+    try {
+      outcome = await custody.dispatchPreparedChairRecovery(prepared.handle);
+    } catch {
+      return provisionalReceipt;
+    }
+    if (outcome.status !== "committed") return provisionalReceipt;
+    const receipt: OperatorActionReceipt = {
+      ...provisionalReceipt,
+      afterStateDigest: digestValue(outcome, "operatorChairRecoveryCommit.afterStateDigest"),
+    };
+    const terminal: StoredTerminalAction = {
+      status: "terminal",
+      commandId: request.command.commandId,
+      receipt,
+    };
+    this.#database.transaction(() => {
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, terminal);
+      this.#database.prepare(`
+        UPDATE operator_commands SET result_json=?, after_json=?
+         WHERE operator_id=? AND command_id=? AND status='committed'
+      `).run(
+        canonicalJson(receipt),
+        canonicalJson(outcome),
+        context.operatorId,
+        request.command.commandId,
+      );
+    })();
+    return receipt;
+  }
+
   status(request: OperatorActionStatusRequest): OperatorActionStatus {
     const authenticated = this.#operatorStore.authenticateCredential(request.credential.token);
     if (
@@ -512,7 +642,52 @@ export class OperatorActionStore {
         envelope,
       );
     }
+    if (envelope.preview.intent.kind === "chair-bridge-recovery") {
+      return this.#chairRecoveryStatus(
+        authenticated.context.operatorId,
+        request.commandId,
+        envelope,
+      );
+    }
     return statusFromAction(envelope.action, envelope.preview.intentDigest);
+  }
+
+  #chairRecoveryStatus(
+    operatorId: string,
+    commandId: string,
+    envelope: StoredPreviewEnvelope,
+  ): OperatorActionStatus {
+    const custody = this.#chairRecoveryCustody;
+    if (custody === undefined || envelope.action === null) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
+    }
+    const observed = custody.chairRecoveryStatus(operatorId, commandId);
+    if (observed.status === "committed") {
+      const receipt: OperatorActionReceipt = {
+        ...parseStoredReceipt(envelope.action),
+        afterStateDigest: digestValue(observed, "operatorChairRecoveryStatus.afterStateDigest"),
+      };
+      return { status: "committed", commandId, receipt };
+    }
+    if (observed.status === "no-effect") {
+      return {
+        status: "rejected",
+        commandId,
+        intentDigest: envelope.preview.intentDigest,
+        code: "state-changed",
+        evidenceRefs: [],
+      };
+    }
+    const attemptGeneration = envelope.action.status === "pending" || envelope.action.status === "ambiguous"
+      ? envelope.action.attemptGeneration
+      : 1;
+    return {
+      status: "pending",
+      commandId,
+      intentDigest: envelope.preview.intentDigest,
+      phase: observed.status === "ambiguous" ? "observing" : "prepared",
+      attemptGeneration,
+    };
   }
 
   #launchStatus(
@@ -567,6 +742,9 @@ export class OperatorActionStore {
         "CAPABILITY_FORBIDDEN",
         "public operator reconciliation cannot own a launch provider action",
       );
+    }
+    if (envelope.preview.intent.kind === "chair-bridge-recovery") {
+      return await this.#reconcileChairRecovery(context, request, stored, envelope);
     }
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
     this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
@@ -678,7 +856,92 @@ export class OperatorActionStore {
     return result;
   }
 
+  async #reconcileChairRecovery(
+    context: AuthenticatedOperatorContext,
+    request: OperatorActionReconcileRequest,
+    stored: Row,
+    envelope: StoredPreviewEnvelope,
+  ): Promise<OperatorActionStatus> {
+    const custody = this.#chairRecoveryCustody;
+    if (custody === undefined || envelope.action === null) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
+    }
+    const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
+    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
+    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+    if (replay !== null) return replay;
+    if (request.command.commandId === request.targetCommandId) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
+    }
+    const currentStatus = this.#chairRecoveryStatus(context.operatorId, request.targetCommandId, envelope);
+    if (
+      currentStatus.status !== request.expectedStatus ||
+      (currentStatus.status === "pending" || currentStatus.status === "ambiguous") &&
+        currentStatus.attemptGeneration !== request.expectedAttemptGeneration
+    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery reconciliation target changed");
+    const observed = await custody.reconcileChairRecovery(context.operatorId, request.targetCommandId);
+    const baseReceipt = parseStoredReceipt(envelope.action);
+    let result: OperatorActionStatus;
+    if (observed.status === "committed") {
+      const receipt: OperatorActionReceipt = {
+        ...baseReceipt,
+        afterStateDigest: digestValue(observed, "operatorChairRecoveryReconcile.afterStateDigest"),
+      };
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, {
+        status: "terminal",
+        commandId: request.targetCommandId,
+        receipt,
+      });
+      this.#database.prepare(`
+        UPDATE operator_commands SET result_json=?, after_json=?
+         WHERE operator_id=? AND command_id=?
+      `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
+      result = { status: "committed", commandId: request.targetCommandId, receipt };
+    } else if (observed.status === "no-effect") {
+      result = {
+        status: "rejected",
+        commandId: request.targetCommandId,
+        intentDigest: envelope.preview.intentDigest,
+        code: "state-changed",
+        evidenceRefs: [],
+      };
+    } else {
+      const pending: StoredPendingAction = {
+        status: "pending",
+        commandId: request.targetCommandId,
+        phase: "observing",
+        attemptGeneration: request.expectedAttemptGeneration + 1,
+        receipt: baseReceipt,
+      };
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, pending);
+      result = statusFromAction(pending, envelope.preview.intentDigest);
+    }
+    this.#database.transaction(() => {
+      this.#insertCommand(
+        context,
+        request.command,
+        request.projectId,
+        actionSessionId(authenticated, envelope.preview.intent),
+        "takeover",
+        payloadHash,
+        currentStatus,
+        result,
+        result,
+        "committed",
+      );
+    })();
+    return result;
+  }
+
   async #readCurrentState(intent: OperatorActionIntent): Promise<OperatorActionCurrentState> {
+    if (intent.kind === "chair-bridge-recovery") {
+      if (this.#chairRecoveryCustody === undefined) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
+      }
+      const state = await this.#chairRecoveryCustody.readChairRecoveryCurrentState(intent);
+      return { kind: "chair-bridge-recovery", revision: state.revision, state };
+    }
     if (intent.kind !== "project-session-launch") return await this.#statePort.read(intent);
     if (this.#launchCustody === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
@@ -725,6 +988,29 @@ export class OperatorActionStore {
         SELECT project_session_id FROM project_sessions WHERE project_session_id=? AND project_id=?
       `).get(intent.projectSessionId, projectId))) {
         throw new ProjectFabricCoreError("WRONG_PROJECT", "project launch session belongs to another project");
+      }
+    } else if (intent.kind === "chair-bridge-recovery") {
+      const binding = row(this.#database.prepare(`
+        SELECT kind, handoff_digest, old_chair_generation, expected_run_id,
+               expected_run_revision, expected_session_revision, cas_target_revision
+          FROM operator_capabilities WHERE capability_id=?
+      `).get(authenticated.capabilityId), "chair recovery operator capability");
+      if (
+        authenticated.kind !== "takeover" ||
+        authenticated.projectSessionId !== intent.projectSessionId ||
+        authenticated.sessionGeneration !== intent.expectedSessionGeneration ||
+        text(binding, "kind") !== "takeover" ||
+        text(binding, "handoff_digest") !== intent.recoveryManifestDigest ||
+        integer(binding, "old_chair_generation") !== intent.expectedChairGeneration ||
+        text(binding, "expected_run_id") !== intent.coordinationRunId ||
+        integer(binding, "expected_run_revision") !== intent.expectedRunRevision ||
+        integer(binding, "expected_session_revision") !== intent.expectedSessionRevision ||
+        integer(binding, "cas_target_revision") !== intent.expectedBridgeRevision
+      ) {
+        throw new ProjectFabricCoreError(
+          "CAPABILITY_FORBIDDEN",
+          "chair recovery requires exact loss-manifest takeover authority",
+        );
       }
     } else if (intentSessionId !== undefined && authenticated.projectSessionId !== intentSessionId) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator capability is bound to another session");
@@ -1212,6 +1498,15 @@ function validateCurrentState(
     }
     return;
   }
+  if (intent.kind === "chair-bridge-recovery") {
+    if (current.kind !== "chair-bridge-recovery") {
+      throw new TypeError("chair bridge recovery intent received another current-state family");
+    }
+    if (intent.expectedBridgeRevision !== current.revision) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "chair bridge recovery target revision changed");
+    }
+    return;
+  }
   if (current.kind !== "promotion") throw new TypeError("promotion intent received another current-state family");
   try {
     assertPromotionIntentGate(intent, current.gate);
@@ -1294,6 +1589,7 @@ function consequenceClass(intent: OperatorActionIntent): OperatorActionPreview["
   if (intent.kind === "promotion") return "promotion";
   if (intent.kind === "registered-external-effect") return "external";
   if (
+    (intent.kind === "chair-bridge-recovery" && intent.path === "abandon") ||
     intent.kind === "project-session-stop" ||
     intent.kind === "daemon-stop" ||
     (intent.kind === "control" && intent.action === "cancel") ||
@@ -1329,6 +1625,7 @@ function combinedEvidence(request: OperatorActionPreviewRequest): ArtifactRef[] 
 
 function sessionIdForIntent(intent: OperatorActionIntent): string | undefined {
   if (intent.kind === "project-session-launch") return intent.projectSessionId;
+  if (intent.kind === "chair-bridge-recovery") return intent.projectSessionId;
   if (intent.kind === "control") return intent.target.projectSessionId;
   if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop" || intent.kind === "promotion") {
     return intent.projectSessionId;
@@ -1338,6 +1635,7 @@ function sessionIdForIntent(intent: OperatorActionIntent): string | undefined {
 
 function actionSessionId(authenticated: AuthenticatedOperatorCredential, intent: OperatorActionIntent): string {
   if (intent.kind === "project-session-launch") return intent.projectSessionId;
+  if (intent.kind === "chair-bridge-recovery") return intent.projectSessionId;
   return requiredSession(authenticated);
 }
 
@@ -1390,6 +1688,7 @@ function rejectionForIntent(intent: OperatorActionIntent): OperatorActionRejecti
   if (intent.kind === "promotion") return "release-binding-mismatch";
   if (
     intent.kind === "project-session-launch" ||
+    intent.kind === "chair-bridge-recovery" ||
     intent.kind === "project-session-drain" ||
     intent.kind === "project-session-stop" ||
     intent.kind === "daemon-drain" ||
