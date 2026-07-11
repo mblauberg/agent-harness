@@ -8,6 +8,7 @@ import type {
   BudgetResult,
   CapabilityRotationResult,
   InterventionResult,
+  EventsAfterResult,
   LeaseResult,
   LifecycleCheckpoint,
   LifecycleResult,
@@ -126,6 +127,11 @@ export class FabricClient {
   async getMailboxState(): Promise<{ contiguousWatermark: number; acknowledgedAboveWatermark: number[] }> {
     this.#authorise(FABRIC_OPERATIONS.getMailboxState);
     return this.#fabric.getMailboxState(this.#runId, this.#agentId);
+  }
+
+  async eventsAfter(input: { cursor: number; limit: number }): Promise<EventsAfterResult> {
+    this.#authorise(FABRIC_OPERATIONS.observeEvents);
+    return this.#fabric.eventsAfter(this.#runId, input);
   }
 
   async createTask(input: {

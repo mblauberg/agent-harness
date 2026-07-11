@@ -44,10 +44,17 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
   const directory = await mkdtemp(join(tmpdir(), `agent-fabric-${adapterId}-`));
   const executablePath = join(directory, `${adapterId}-fixture`);
   const protocolSchemaPath = join(directory, `${adapterId}-protocol.json`);
+  const wrapperManifestPath = join(directory, `${adapterId}-wrapper-manifest.json`);
   const executableBytes = `${adapterId} deterministic fixture\n`;
   const schemaBytes = `${JSON.stringify({ schemaVersion: 1, protocolVersion: 1 })}\n`;
   await writeFile(executablePath, executableBytes, { mode: 0o700 });
   await writeFile(protocolSchemaPath, schemaBytes, { mode: 0o600 });
+  const wrapperManifest = `${JSON.stringify({
+    schema_version: 1,
+    entrypoint: executablePath,
+    files: [{ path: executablePath, sha256: sha256(executableBytes) }],
+  })}\n`;
+  await writeFile(wrapperManifestPath, wrapperManifest, { mode: 0o600 });
   const compatibilityPath = join(directory, "adapter-compatibility.yaml");
   await writeFile(
     compatibilityPath,
@@ -68,6 +75,8 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
             executable_sha256: sha256(executableBytes),
             wrapper_entrypoint: executablePath,
             wrapper_entrypoint_sha256: sha256(executableBytes),
+            wrapper_manifest: wrapperManifestPath,
+            wrapper_manifest_sha256: sha256(wrapperManifest),
           },
           contract: {
             adapter_version: 1,
@@ -104,6 +113,7 @@ export async function createEnabledUnresolvedCheckedInAdapter(adapterId: Stage4A
   const adapter = adapters[adapterId];
   if (!isRecord(adapter)) throw new Error(`checked-in adapter missing: ${adapterId}`);
   adapter.enabled = true;
+  adapter.unresolved_pins = ["test-only unresolved pin"];
   const compatibilityPath = join(directory, "adapter-compatibility.yaml");
   await writeFile(compatibilityPath, stringify(document));
   return { directory, compatibilityPath, schemaPath: stage4SchemaPath() };

@@ -1,6 +1,6 @@
 # Agent fabric operations
 
-Status: coordination-only daemon and five MCP client registrations active
+Status: five model-execution adapters and five MCP client registrations active
 Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 
 ## Human gates
@@ -15,10 +15,11 @@ The following remain separate approvals. One does not imply another:
 6. run a smoke that invokes a real provider adapter;
 7. release or publish Git state.
 
-The human authorised the current coordination-only daemon, five local MCP
-registrations and transport-only smoke tests. The checked-in compatibility
-registry still keeps every real provider adapter disabled. Registration does
-not authorise provider login, quota use, release or publication.
+The human authorised the current model-execution daemon, five local MCP
+registrations and bounded provider smokes. Claude, Codex, Agy, Cursor and Kiro
+are enabled; Pi remains disabled until a trusted open-weight provider/model is
+installed. Registration does not authorise provider login changes, release or
+publication.
 
 ## Preflight
 
@@ -40,10 +41,10 @@ The current project-scoped seat roster is:
 
 - project: `${AGENTS_HOME:-$HOME/.agents}`
 - project key: `5ae9d33e8601daeba039a34c`
-- run: `project-5ae9d33e8601daeba039a34c-fedfc9fe2f4eebb0`
+- run: `project-5ae9d33e8601daeba039a34c-a43bfdc81b81b192`
 - chair: Codex
 - peers: Agy, Claude Code, Cursor and Kiro
-- seat expiry: `2026-08-09T13:26:09.000Z`
+- seat expiry: `2026-08-10T03:17:58.000Z`
 - socket: `~/.local/state/agent-harness/fabric/runtime/fabric-v1.sock`
 - seat directory: `~/.local/state/agent-harness/fabric/seats/5ae9d33e8601daeba039a34c/`
 
@@ -71,8 +72,8 @@ paste capability values into a registry, log or document.
 
 ## Daemon supervision
 
-The current coordination daemon runs visibly in Herdr with provider adapters
-disabled:
+The current daemon runs in Herdr's infrastructure tab with the five activated
+provider adapters:
 
 ```sh
 env AGENT_FABRIC_RUNTIME_DIRECTORY="$HOME/.local/state/agent-harness/fabric/runtime" \
@@ -105,9 +106,9 @@ The chair creates the run. Peers receive narrowed authority and their own capabi
 
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 
-Herdr currently provides pane visibility and process supervision. Automatic
-fabric-event rendering into pane chat is not implemented; MCP tool responses
-are human-readable, and the SQLite-backed fabric remains authoritative.
+Herdr provides pane visibility and process supervision. Fabric events are
+rendered by the explicit least-privilege `fabric-events` observer described
+below; MCP tool responses and the SQLite-backed fabric remain authoritative.
 
 ## Verify registrations
 
@@ -135,7 +136,30 @@ printing the capability:
 scripts/agent-fabric mcp seat-path --project "$PWD" --seat codex
 ```
 
-Run the transport-only checks without enabling provider adapters:
+The daemon and every MCP proxy derive the same stable private socket at
+`$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Registry entries bind
+`AGENT_FABRIC_PROJECT_PATH` plus a seat; they do not hard-code credentials.
+
+Start a least-privilege observer after provisioning or renewal:
+
+```sh
+scripts/agent-fabric mcp observer-provision --project "$PWD"
+scripts/agent-fabric observe \
+  --socket "$HOME/.local/state/agent-harness/fabric/runtime/fabric-v1.sock" \
+  --capability-file "$HOME/.local/state/agent-harness/fabric/seats/<project-key>/observer.cap" \
+  --run-id '<current run id>' \
+  --cursor "$HOME/.local/state/agent-harness/fabric/observer/<project-key>.cursor.json"
+```
+
+Keep the quiet daemon process in a separate Herdr infrastructure tab. The
+`fabric-events` pane is the human surface: it renders terminal-safe one-line
+events in Brisbane time (`AEST`, UTC+10) and 160-character local message
+previews, never bearer credentials.
+The cursor is saved after rendering. Orderly restarts resume at the next event;
+a crash between rendering and cursor persistence can repeat the last event, so
+consumers must treat the stream as at-least-once.
+
+Run transport-only checks independently of provider execution:
 
 ```sh
 cd runtime/agent-fabric

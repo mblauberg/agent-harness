@@ -2,10 +2,11 @@
 
 Local coordination runtime shared by Claude Code, Codex and optional provider adapters. It keeps authority, tasks, leases, mailboxes, provider-action reconciliation, teams, receipts and lifecycle checkpoints in one SQLite/WAL store behind a private Unix socket.
 
-Status: Stages 1–5 are implemented. A coordination-only daemon is active for
-this checkout and the MCP proxy is registered globally for Agy, Claude Code,
-Codex, Cursor and Kiro. Real provider adapters remain disabled until their
-compatibility pins and separate activation gates are satisfied.
+Status: Stages 1–5 and the activation extension are implemented. The daemon is
+active for this checkout and the MCP proxy is registered globally for Agy,
+Claude Code, Codex, Cursor and Kiro. Their provider adapters are enabled behind
+pinned compatibility and runtime activation gates. Pi remains disabled until a
+trusted open-weight provider/model is available.
 
 ## Architecture
 
@@ -28,7 +29,7 @@ Important boundaries:
 - `src/core/read-policy.ts`: chair/owner/participant scoped projections
 - `src/daemon/`: single-instance process, trusted composition and socket transport
 - `src/mcp/`: one input/output schema surface for both primary clients
-- `src/adapters/providers/`: disabled-by-default provider adapters
+- `src/adapters/providers/`: isolated, pinned provider adapters
 - `src/exports/`: receipt projection, schema enforcement and link verification
 - `migrations/0001-core.sql`: unreleased canonical baseline; freeze at the first release
 
@@ -58,12 +59,14 @@ ancestor projects for the nearest matching provisioned seat and fails closed
 when none exists. Client labels never change the MCP schema or authority. The
 raw capability is stored only in its private `0600` `.cap` file; registry
 configuration contains neither the credential nor a fixed project seat path.
-Renewal stages a complete immutable seat generation and atomically switches a
+Seat rotation stages a complete immutable generation and atomically switches a
 single private `current.json` pointer. Existing flat seat files remain a
-read-only compatibility fallback until a successful renewal.
+read-only compatibility fallback until a successful rotation.
 
-The current daemon is a visible foreground process in Herdr, not an installed
-login service. A newly started client session loads its MCP registry entry; a
-session that predates registration may need to reconnect or restart.
+The current daemon is a foreground process in Herdr's infrastructure tab, not
+an installed login service. A separate least-privilege `fabric-events` pane
+renders bounded human-readable event summaries. A newly started client session
+loads its MCP registry entry; a session that predates registration may need to
+reconnect or restart.
 
 See [the operations runbook](../../docs/runbooks/agent-fabric-operations.md) before any live start or registration.

@@ -27,6 +27,7 @@ export async function resolveModelRouteReceipt(input: {
     adapter: string;
     alias: string;
     role: string;
+    model?: string;
     leadFamily: string;
     requireDistinct: boolean;
   };
@@ -42,6 +43,7 @@ export async function resolveModelRouteReceipt(input: {
     input.request.alias,
     "--role",
     input.request.role,
+    ...(input.request.model === undefined ? [] : ["--model", input.request.model]),
     "--lead-family",
     input.request.leadFamily,
     ...(input.request.requireDistinct ? ["--require-distinct"] : []),

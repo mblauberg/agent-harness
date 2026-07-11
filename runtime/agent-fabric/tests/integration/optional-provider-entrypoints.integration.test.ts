@@ -17,14 +17,23 @@ async function providerFixture(directory: string): Promise<string> {
   const path = join(directory, "provider-fixture.mjs");
   await writeFile(
     path,
-    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ conversationId: "provider-session-1", result: "done" }) + "\\n");\n`,
+    `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+const cursor = process.argv.includes("--output-format");
+const logIndex = process.argv.indexOf("--log-file");
+if (logIndex !== -1) writeFileSync(process.argv[logIndex + 1], "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\\n");
+const result = cursor
+  ? { type: "result", subtype: "success", is_error: false, session_id: "provider-session-1", result: "done" }
+  : "done";
+process.stdout.write((typeof result === "string" ? result : JSON.stringify(result)) + "\\n");
+`,
   );
   await chmod(path, 0o700);
   return path;
 }
 
 describe("optional provider executable wrappers", () => {
-  it("fails Kiro ACP capabilities closed without spawning the provider while the installed wire contract is unverified", async () => {
+  it("reports Kiro ACP capabilities without eagerly spawning the provider", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-kiro-entrypoint-"));
     temporaryDirectories.push(directory);
     const markerPath = join(directory, "provider-spawned");
@@ -50,8 +59,11 @@ describe("optional provider executable wrappers", () => {
       responseTimeoutMs: 2_000,
     });
     try {
-      await expect(transport.request("capabilities", {})).rejects.toMatchObject({
-        name: "KIRO_ACP_PROTOCOL_UNVERIFIED",
+      await expect(transport.request("capabilities", {})).resolves.toMatchObject({
+        adapterId: "kiro-acp",
+        operations: ["spawn", "send_turn", "release"],
+        persistentSession: false,
+        recoveryOperations: ["lookup_action"],
       });
       await expect(access(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
@@ -86,6 +98,8 @@ describe("optional provider executable wrappers", () => {
         directory,
         "--turn-timeout-ms",
         "30",
+        "--allowed-provider",
+        "fixture-provider",
       ],
       environment: {},
       responseTimeoutMs: 2_000,
@@ -103,6 +117,7 @@ describe("optional provider executable wrappers", () => {
             provider: "fixture-provider",
             model: "fixture-open-model",
             modelFamily: "open-weight",
+            cwd: directory,
           },
         }),
       ).resolves.toMatchObject({
@@ -117,6 +132,8 @@ describe("optional provider executable wrappers", () => {
             prompt: "bounded task",
             model: "fixture-open-model",
             modelFamily: "open-weight",
+            cwd: directory,
+            resumeReference: "/sessions/pi-session-1.jsonl",
           },
         }),
       ).resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
@@ -124,7 +141,7 @@ describe("optional provider executable wrappers", () => {
         transport.request("dispatch", {
           actionId: "pi-rpc:abort:1",
           operation: "interrupt",
-          payload: {},
+          payload: { resumeReference: "/sessions/pi-session-1.jsonl" },
         }),
       ).resolves.toMatchObject({ status: "terminal" });
       await expect(
@@ -135,6 +152,8 @@ describe("optional provider executable wrappers", () => {
             prompt: "hang",
             model: "fixture-open-model",
             modelFamily: "open-weight",
+            cwd: directory,
+            resumeReference: "/sessions/pi-session-1.jsonl",
           },
         }),
       ).rejects.toMatchObject({ name: "PROVIDER_RESPONSE_TIMEOUT" });
@@ -150,12 +169,14 @@ describe("optional provider executable wrappers", () => {
       source: "../../src/adapters/providers/optional/agy.ts",
       model: "gemini-fixture",
       modelFamily: "google",
+      expectedReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4",
     },
     {
       adapterId: "cursor-agent",
       source: "../../src/adapters/providers/optional/cursor-agent.ts",
       model: "composer-fixture",
       modelFamily: "cursor-composer",
+      expectedReference: "provider-session-1",
     },
   ])("serves the fabric NDJSON protocol for $adapterId around its bounded CLI boundary", async (fixture) => {
     const directory = await mkdtemp(join(tmpdir(), `fabric-${fixture.adapterId}-entrypoint-`));
@@ -193,7 +214,7 @@ describe("optional provider executable wrappers", () => {
             prompt: "bounded fixture task",
           },
         }),
-      ).resolves.toMatchObject({ resumeReference: "provider-session-1", result: "done" });
+      ).resolves.toMatchObject({ resumeReference: fixture.expectedReference, result: "done" });
       await expect(
         transport.request("lookup_action", { actionId: `${fixture.adapterId}:spawn:1` }),
       ).resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });

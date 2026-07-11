@@ -24,6 +24,7 @@ export const requiredSchemaFiles = [
   "command.schema.json",
   "event.schema.json",
   "fabric-receipt.schema.json",
+  "normalised-provider-output.v1.schema.json",
 ] as const;
 
 export function isJsonObject(value: unknown): value is JsonObject {

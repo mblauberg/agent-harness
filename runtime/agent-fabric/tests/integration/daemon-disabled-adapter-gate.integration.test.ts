@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,13 +12,15 @@ import { createPrimaryCompatibilityFixture } from "../support/primary-adapter-te
 const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 describe("daemon trusted adapter composition", () => {
-  it("composes a core-only daemon while every allow-listed real adapter remains disabled", async () => {
-    await expect(composeDaemonAdapters({
+  it("composes only the explicitly activated and pinned adapters", async () => {
+    const adapters = await composeDaemonAdapters({
       globalConfigPath: `${repositoryRoot}/config/agent-fabric.yaml`,
       compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
       compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
       agentsHome: repositoryRoot,
-    })).resolves.toEqual({});
+      stateDirectory: join(repositoryRoot, ".agent-run", "adapter-composition-test"),
+    });
+    expect(Object.keys(adapters).sort()).toEqual(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp"]);
   });
 
   it("expands the trusted AGENTS_HOME workspace root without binding config to one user", async () => {
@@ -38,6 +41,7 @@ describe("daemon trusted adapter composition", () => {
         compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
         compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
         agentsHome,
+        stateDirectory: join(directory, "state"),
       })).resolves.toMatchObject({ workspaceRoots: expectedRoots });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -62,6 +66,15 @@ describe("daemon trusted adapter composition", () => {
     codex.enabled = true;
     codex.implementation.wrapper_entrypoint = executable;
     codex.implementation.wrapper_entrypoint_sha256 = executableHash;
+    const manifestPath = join(fixture.directory, "codex-wrapper-manifest.json");
+    const manifest = `${JSON.stringify({
+      schema_version: 1,
+      entrypoint: executable,
+      files: [{ path: executable, sha256: executableHash }],
+    }, null, 2)}\n`;
+    await writeFile(manifestPath, manifest);
+    codex.implementation.wrapper_manifest = manifestPath;
+    codex.implementation.wrapper_manifest_sha256 = createHash("sha256").update(manifest).digest("hex");
     codex.model_family_constraints = {
       allowed: ["openai"],
       requires_explicit_model: true,

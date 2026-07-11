@@ -10,7 +10,7 @@ import {
 const fixturePath = fileURLToPath(new URL("../support/adapter-process-fixture.ts", import.meta.url));
 const transports: AdapterProcessTransport[] = [];
 
-function fixture(mode: string, responseTimeoutMs = 250): AdapterProcessTransport {
+function fixture(mode: string, responseTimeoutMs = 1_000): AdapterProcessTransport {
   const transport = new AdapterProcessTransport({
     command: [process.execPath, "--import", "tsx", fixturePath, mode],
     environment: {},

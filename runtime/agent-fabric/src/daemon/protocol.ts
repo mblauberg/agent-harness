@@ -487,6 +487,11 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
       });
     case "getMailboxState":
       return client.getMailboxState();
+    case "eventsAfter":
+      return client.eventsAfter({
+        cursor: requiredNumber(params, "cursor"),
+        limit: requiredNumber(params, "limit"),
+      });
     case "createTask":
       return client.createTask({
         taskId: requiredString(params, "taskId"),

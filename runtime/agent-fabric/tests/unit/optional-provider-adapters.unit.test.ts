@@ -13,6 +13,7 @@ import {
 import { createKiroAcpAdapter, type KiroAcpBoundary } from "../../src/adapters/providers/optional/kiro-acp.ts";
 import {
   createPiRpcAdapter,
+  createManagedPiRpcBoundary,
   createPiRpcBoundary,
   type PiRpcBoundary,
   type PiRpcClient,
@@ -46,6 +47,40 @@ function boundary(): PiRpcBoundary & AgyBoundary & CursorAgentBoundary & KiroAcp
 }
 
 describe("optional production provider wrappers", () => {
+  it("starts Pi per admitted cwd and rejects providers outside the trusted allow-list", async () => {
+    const clients: Array<PiRpcClient & { start(): Promise<void> }> = [];
+    const createClient = vi.fn((_cwd: string) => {
+      const id = clients.length + 1;
+      const client: PiRpcClient & { start(): Promise<void> } = {
+        start: vi.fn(async () => undefined),
+        getState: vi.fn(async () => ({ sessionId: `pi-${String(id)}`, sessionFile: `/sessions/pi-${String(id)}.jsonl`, isStreaming: false })),
+        newSession: vi.fn(async () => ({ cancelled: false })),
+        setModel: vi.fn(async () => ({})),
+        switchSession: vi.fn(async () => ({ cancelled: false })),
+        promptAndWait: vi.fn(async () => [{ type: "agent_end" }]),
+        getLastAssistantText: vi.fn(async () => "done"),
+        steer: vi.fn(async () => undefined),
+        abort: vi.fn(async () => undefined),
+        compact: vi.fn(async () => ({})),
+        stop: vi.fn(async () => undefined),
+      };
+      clients.push(client);
+      return client;
+    });
+    const provider = createManagedPiRpcBoundary({ createClient, allowedProviders: ["openrouter"] });
+
+    await expect(provider.spawn({ cwd: "/workspace/a", provider: "openrouter", model: "qwen3-coder" }))
+      .resolves.toMatchObject({ resumeReference: "/sessions/pi-1.jsonl" });
+    expect(createClient).toHaveBeenCalledWith("/workspace/a");
+    await expect(provider.sendTurn({ cwd: "/workspace/a", resumeReference: "/sessions/pi-1.jsonl", prompt: "read only" }))
+      .resolves.toMatchObject({ text: "done" });
+    expect(createClient).toHaveBeenCalledTimes(1);
+
+    await expect(provider.spawn({ cwd: "/workspace/b", provider: "untrusted", model: "qwen3-coder" }))
+      .rejects.toMatchObject({ code: "MODEL_NOT_ALLOWED" });
+    expect(createClient).toHaveBeenCalledTimes(1);
+  });
+
   it("serves the same correlated NDJSON contract as primary adapters", async () => {
     const actionJournal = await journal();
     const adapter = createAgyAdapter({ boundary: boundary(), journal: actionJournal });

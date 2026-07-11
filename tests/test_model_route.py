@@ -318,8 +318,8 @@ def test_agy_accepts_only_google_models_and_records_fabric_activation_metadata()
     assert allowed.returncode == 0
     assert allowed_route["status"] == "ok"
     assert allowed_route["model_family"] == "google"
-    assert allowed_route["adapter_enabled"] is False
-    assert allowed_route["adapter_unresolved_pins"]
+    assert allowed_route["adapter_enabled"] is True
+    assert allowed_route["adapter_unresolved_pins"] == []
     assert forbidden.returncode == 1
     assert forbidden_route["status"] == "adapter_family_forbidden"
 
@@ -390,7 +390,7 @@ def test_same_family_rejection_precedes_adapter_family_rejection():
     assert route["status"] == "same_family_forbidden"
 
 
-def test_require_distinct_broker_fails_closed_on_fabric_activation_but_direct_cli_can_route():
+def test_require_distinct_broker_routes_after_fabric_activation():
     arguments = (
         "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
         "--role", "reviewer", "--lead-family", "openai", "--require-distinct",
@@ -399,10 +399,10 @@ def test_require_distinct_broker_fails_closed_on_fabric_activation_but_direct_cl
     fabric, fabric_route = resolve(*arguments, adapter_gate="fabric")
     direct, direct_route = resolve(*arguments, "--adapter-gate", "direct-cli")
 
-    assert fabric.returncode == 1
-    assert fabric_route["status"] == "adapter_disabled"
-    assert fabric_route["adapter_enabled"] is False
-    assert fabric_route["adapter_unresolved_pins"]
+    assert fabric.returncode == 0
+    assert fabric_route["status"] == "ok"
+    assert fabric_route["adapter_enabled"] is True
+    assert fabric_route["adapter_unresolved_pins"] == []
     assert direct.returncode == 0
     assert direct_route["status"] == "ok"
     assert direct_route["adapter_gate"] == "direct-cli"
@@ -419,10 +419,10 @@ def test_primary_adapters_honour_fabric_activation_gate():
             "--adapter-gate", "direct-cli",
         )
 
-        assert fabric.returncode == 1
-        assert fabric_route["status"] == "adapter_disabled"
-        assert fabric_route["adapter_enabled"] is False
-        assert fabric_route["adapter_unresolved_pins"]
+        assert fabric.returncode == 0
+        assert fabric_route["status"] == "ok"
+        assert fabric_route["adapter_enabled"] is True
+        assert fabric_route["adapter_unresolved_pins"] == []
         assert direct.returncode == 0
         assert direct_route["status"] == "ok"
 
@@ -440,3 +440,32 @@ def test_fabric_gate_rejects_catalogue_adapter_without_compatibility_contract():
     assert fabric_route["status"] == "adapter_compatibility_unknown"
     assert direct.returncode == 0
     assert direct_route["status"] == "ok"
+
+
+def test_fabric_gate_rejects_compatibility_enabled_but_inactive_adapter(tmp_path):
+    fabric_config = tmp_path / "agent-fabric.yaml"
+    fabric_config.write_text("schemaVersion: 1\nactiveAdapters: []\n")
+
+    result, route = resolve(
+        "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
+        "--role", "reviewer", "--lead-family", "openai", "--require-distinct",
+        "--fabric-config", str(fabric_config), adapter_gate="fabric",
+    )
+
+    assert result.returncode == 1
+    assert route["status"] == "adapter_inactive"
+    assert route["adapter_enabled"] is True
+    assert route["adapter_active"] is False
+
+
+def test_fabric_gate_fails_closed_for_invalid_activation_config(tmp_path):
+    fabric_config = tmp_path / "agent-fabric.yaml"
+    fabric_config.write_text("schemaVersion: 1\nactiveAdapters: agy\n")
+
+    result, route = resolve(
+        "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
+        "--role", "worker", "--fabric-config", str(fabric_config), adapter_gate="fabric",
+    )
+
+    assert result.returncode == 2
+    assert route["status"] == "fabric_activation_invalid"

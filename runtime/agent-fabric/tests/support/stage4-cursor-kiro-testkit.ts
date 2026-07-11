@@ -35,6 +35,10 @@ function compatibilityEntry(input: {
   executableHash: string;
   schemaPath: string;
   schemaHash: string;
+  wrapperPath: string;
+  wrapperHash: string;
+  wrapperManifestPath: string;
+  wrapperManifestHash: string;
   unresolved: boolean;
 }): Record<string, unknown> {
   const cursor = input.adapterId === "cursor-agent";
@@ -46,8 +50,10 @@ function compatibilityEntry(input: {
       installed_version: "1.0.0-fixture",
       executable: fixtureAdapter,
       executable_sha256: input.executableHash,
-      wrapper_entrypoint: fixtureAdapter,
-      wrapper_entrypoint_sha256: input.executableHash,
+      wrapper_entrypoint: input.wrapperPath,
+      wrapper_entrypoint_sha256: input.wrapperHash,
+      wrapper_manifest: input.wrapperManifestPath,
+      wrapper_manifest_sha256: input.wrapperManifestHash,
     },
     contract: {
       adapter_version: 1,
@@ -84,8 +90,18 @@ export async function createCursorKiroCompatibilityFixture(options: {
 }> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-stage4-cursor-kiro-"));
   const protocolSchemaPath = join(directory, "fixture-protocol.json");
+  const wrapperPath = join(directory, "fixture-wrapper.js");
+  const wrapperManifestPath = join(directory, "fixture-wrapper-manifest.json");
   const protocolSchema = `${JSON.stringify({ schemaVersion: 1, adapterContractVersion: 1 })}\n`;
+  const wrapper = "export const fixtureWrapper = true;\n";
   await writeFile(protocolSchemaPath, protocolSchema, { mode: 0o600 });
+  await writeFile(wrapperPath, wrapper, { mode: 0o600 });
+  const wrapperManifest = `${JSON.stringify({
+    schema_version: 1,
+    entrypoint: wrapperPath,
+    files: [{ path: wrapperPath, sha256: digest(wrapper) }],
+  })}\n`;
+  await writeFile(wrapperManifestPath, wrapperManifest, { mode: 0o600 });
   const executableHash = digest(await readFile(fixtureAdapter));
   const schemaHash = digest(protocolSchema);
   const unresolved = new Set(options.unresolvedAdapters ?? []);
@@ -97,6 +113,10 @@ export async function createCursorKiroCompatibilityFixture(options: {
         executableHash,
         schemaPath: protocolSchemaPath,
         schemaHash,
+        wrapperPath,
+        wrapperHash: digest(wrapper),
+        wrapperManifestPath,
+        wrapperManifestHash: digest(wrapperManifest),
         unresolved: unresolved.has(adapterId),
       }),
     ]),

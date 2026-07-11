@@ -18,6 +18,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "config" / "model-routing.json"
 COMPATIBILITY_PATH = ROOT / "config" / "adapter-compatibility.yaml"
+FABRIC_CONFIG_PATH = ROOT / "config" / "agent-fabric.yaml"
 COMPATIBILITY_ADAPTER_IDS = {
     "claude": "claude-agent-sdk",
     "codex": "codex-app-server",
@@ -66,6 +67,19 @@ def load_adapter_compatibility(adapter: str) -> tuple[dict[str, Any] | None, str
         "allowed_families": allowed,
         "allowed_model_patterns": patterns,
     }, ""
+
+
+def load_active_adapters(path: Path) -> tuple[set[str], str]:
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError):
+        return set(), "fabric_activation_unavailable"
+    active = data.get("activeAdapters") if isinstance(data, dict) else None
+    if not isinstance(data, dict) or data.get("schemaVersion") != 1 or not isinstance(active, list) or any(
+        not isinstance(item, str) for item in active
+    ):
+        return set(), "fabric_activation_invalid"
+    return set(active), ""
 
 
 def check_adapter_compatibility(
@@ -244,6 +258,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     endpoint = adapter["endpoint_provider"]
     compatibility: dict[str, Any] | None = None
     compatibility_metadata: dict[str, Any] = {}
+    active_adapters: set[str] = set()
     if args.adapter_gate == "fabric" and args.adapter not in COMPATIBILITY_ADAPTER_IDS:
         return emit(
             {
@@ -269,6 +284,21 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             "adapter_enabled": compatibility["enabled"],
             "adapter_unresolved_pins": compatibility["unresolved_pins"],
         }
+        if args.adapter_gate == "fabric":
+            active_adapters, activation_status = load_active_adapters(Path(args.fabric_config))
+            if activation_status:
+                return emit(
+                    {
+                        **base,
+                        "status": activation_status,
+                        "endpoint_provider": endpoint,
+                        **compatibility_metadata,
+                    },
+                    2,
+                )
+            compatibility_metadata["adapter_active"] = (
+                compatibility["compatibility_adapter"] in active_adapters
+            )
     substitution = ""
     fallback_model = ""
     identity_source = ""
@@ -337,6 +367,47 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             fallback_model = candidates[1] if len(candidates) > 1 else ""
             identity_source = "dated-catalog"
 
+    compatibility_family = ""
+    if compatibility:
+        if args.adapter_gate == "fabric" and not compatibility["enabled"]:
+            return emit(
+                {
+                    **base,
+                    "status": "adapter_disabled",
+                    "endpoint_provider": endpoint,
+                    "model_family": family,
+                    "resolved_model": model,
+                    "identity_source": identity_source,
+                    **compatibility_metadata,
+                },
+                1,
+            )
+        if args.adapter_gate == "fabric" and not compatibility_metadata["adapter_active"]:
+            return emit(
+                {
+                    **base,
+                    "status": "adapter_inactive",
+                    "endpoint_provider": endpoint,
+                    "model_family": family,
+                    "resolved_model": model,
+                    "identity_source": identity_source,
+                    **compatibility_metadata,
+                },
+                1,
+            )
+        if args.adapter_gate == "fabric" and compatibility["unresolved_pins"]:
+            return emit(
+                {
+                    **base,
+                    "status": "adapter_unresolved_pins",
+                    "endpoint_provider": endpoint,
+                    "model_family": family,
+                    "resolved_model": model,
+                    "identity_source": identity_source,
+                    **compatibility_metadata,
+                },
+                1,
+            )
     distinct = bool(args.lead_family and family != args.lead_family)
     if compatibility and args.require_distinct and not args.lead_family:
         return emit(
@@ -366,7 +437,6 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             1,
         )
 
-    compatibility_family = ""
     if compatibility:
         compatibility_family, compatibility_status = check_adapter_compatibility(
             compatibility, family, model
@@ -376,34 +446,6 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 {
                     **base,
                     "status": compatibility_status,
-                    "endpoint_provider": endpoint,
-                    "model_family": family,
-                    "resolved_model": model,
-                    "identity_source": identity_source,
-                    "compatibility_model_family": compatibility_family,
-                    **compatibility_metadata,
-                },
-                1,
-            )
-        if args.adapter_gate == "fabric" and not compatibility["enabled"]:
-            return emit(
-                {
-                    **base,
-                    "status": "adapter_disabled",
-                    "endpoint_provider": endpoint,
-                    "model_family": family,
-                    "resolved_model": model,
-                    "identity_source": identity_source,
-                    "compatibility_model_family": compatibility_family,
-                    **compatibility_metadata,
-                },
-                1,
-            )
-        if args.adapter_gate == "fabric" and compatibility["unresolved_pins"]:
-            return emit(
-                {
-                    **base,
-                    "status": "adapter_unresolved_pins",
                     "endpoint_provider": endpoint,
                     "model_family": family,
                     "resolved_model": model,
@@ -496,6 +538,11 @@ def parser() -> argparse.ArgumentParser:
         choices=("fabric", "direct-cli"),
         default="fabric",
         help="Apply fabric activation pins (default) or defer activation to a direct CLI caller.",
+    )
+    command.add_argument(
+        "--fabric-config",
+        default=str(FABRIC_CONFIG_PATH),
+        help=argparse.SUPPRESS,
     )
     return root
 

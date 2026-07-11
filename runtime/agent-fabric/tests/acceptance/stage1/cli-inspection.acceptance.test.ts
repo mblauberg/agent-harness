@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -118,7 +118,7 @@ describe("Stage 1 command-line inspection", () => {
     expect(result.stdout).toContain(exported.sha256);
   });
 
-  it("uses private state and runtime fallbacks when XDG_RUNTIME_DIR is absent", async () => {
+  it("uses one private stable state/runtime root when XDG_RUNTIME_DIR is absent", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-cli-paths-"));
     cleanup.push(async () => rm(root, { recursive: true, force: true }));
     const home = join(root, "home");
@@ -156,8 +156,8 @@ describe("Stage 1 command-line inspection", () => {
     ) {
       throw new TypeError("CLI path inspection did not return string runtime paths");
     }
-    expect(relative(temporary, output.runtimeDirectory).startsWith(`..${sep}`)).toBe(false);
     expect(output.runtimeDirectory).not.toBe(temporary);
+    expect(output.runtimeDirectory).toBe(join(stateDirectory, "runtime"));
     expect(output.socketPath).toBe(join(output.runtimeDirectory, "fabric-v1.sock"));
     expect((await stat(stateDirectory)).mode & 0o777).toBe(0o700);
     expect((await stat(output.runtimeDirectory)).mode & 0o777).toBe(0o700);

@@ -1,7 +1,9 @@
+import { writeFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createAgyCliBoundary,
+  createCursorCliBoundary,
   runBoundedProviderCommand,
   type ProviderCommandRunner,
 } from "../../src/adapters/providers/optional/command-boundaries.ts";
@@ -13,6 +15,28 @@ import {
 } from "../../src/adapters/providers/optional/invocations.ts";
 
 describe("optional provider command boundaries", () => {
+  it("derives Agy's resumable conversation from its private invocation log when stdout is plain text", async () => {
+    const runner = vi.fn(async (invocation: { args: string[] }) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      expect(logIndex).toBeGreaterThanOrEqual(0);
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "I0711 printmode.go: Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return {
+        stdout: '{"conversationId":"forged-by-model","result":"model answer"}\n',
+        stderr: "",
+        exitCode: 0,
+      };
+    });
+    const boundary = createAgyCliBoundary({ executable: "/agy", cwd: "/workspace", runner });
+    await expect(boundary.spawn({ model: "Gemini 3.1 Pro (High)", prompt: "read only", cwd: "/workspace" }))
+      .resolves.toEqual({
+        resumeReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4",
+        result: '{"conversationId":"forged-by-model","result":"model answer"}',
+        providerRecordCount: 0,
+      });
+  });
+
   it("builds only the locally documented disabled-provider command forms", () => {
     expect(buildPiRpcLaunch({ executable: "/trusted/pi", cwd: "." })).toEqual({
       executable: "/trusted/pi",
@@ -44,7 +68,7 @@ describe("optional provider command boundaries", () => {
       }),
     ).toEqual({
       executable: "/trusted/cursor-agent",
-      args: ["--print", "--output-format", "stream-json", "--sandbox", "enabled", "--mode", "plan", "--model", "grok-4.5", "--workspace", ".", "review"],
+      args: ["--print", "--output-format", "stream-json", "--sandbox", "enabled", "--trust", "--mode", "plan", "--model", "grok-4.5", "--workspace", ".", "review"],
       cwd: ".",
     });
     expect(
@@ -56,11 +80,13 @@ describe("optional provider command boundaries", () => {
   });
 
   it("uses an injected runner and never shells out while unit tested", async () => {
-    const runner: ProviderCommandRunner = vi.fn(async (invocation) => ({
-      stdout: JSON.stringify({ conversationId: "agy-session-1", result: "done", invocation }),
-      stderr: "",
-      exitCode: 0,
-    }));
+    const runner: ProviderCommandRunner = vi.fn(async (invocation) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return { stdout: "done", stderr: "", exitCode: 0 };
+    });
     const boundary = createAgyCliBoundary({
       executable: "/trusted/agy",
       cwd: ".",
@@ -70,16 +96,113 @@ describe("optional provider command boundaries", () => {
 
     await expect(
       boundary.spawn({
+        cwd: "/admitted/project",
         model: "Gemini 3.5 Flash (High)",
         modelFamily: "google",
         prompt: "bounded task",
-        mode: "plan",
+        mode: "accept-edits",
       }),
-    ).resolves.toMatchObject({ resumeReference: "agy-session-1", result: "done" });
+    ).resolves.toMatchObject({ resumeReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4", result: "done" });
     expect(runner).toHaveBeenCalledOnce();
     expect(runner).toHaveBeenCalledWith(
-      expect.objectContaining({ executable: "/trusted/agy", timeoutMs: 60_000 }),
+      expect.objectContaining({
+        executable: "/trusted/agy",
+        cwd: "/admitted/project",
+        timeoutMs: 60_000,
+        args: expect.arrayContaining(["--mode", "plan"]),
+      }),
     );
+  });
+
+  it("uses the admitted cwd for each Cursor action and normalises provider output", async () => {
+    const runner: ProviderCommandRunner = vi.fn(async () => ({
+      stdout: [
+        { type: "system", subtype: "init", session_id: "cursor-session-1" },
+        { type: "user", message: {}, session_id: "cursor-session-1" },
+        { type: "thinking", subtype: "completed", session_id: "cursor-session-1" },
+        { type: "assistant", message: {}, session_id: "cursor-session-1" },
+        {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          session_id: "cursor-session-1",
+          result: "done",
+          resumeReference: "forged",
+          arbitrary: "drop-me",
+        },
+      ].map((record) => JSON.stringify(record)).join("\n"),
+      stderr: "",
+      exitCode: 0,
+    }));
+    const boundary = createCursorCliBoundary({ executable: "/trusted/cursor", cwd: "/fallback", runner });
+
+    await expect(boundary.spawn({
+      cwd: "/admitted/cursor-project",
+      model: "grok-4.5",
+      prompt: "review",
+      mode: "plan",
+    })).resolves.toEqual({
+      resumeReference: "cursor-session-1",
+      result: "done",
+      providerRecordCount: 5,
+    });
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/admitted/cursor-project",
+      args: expect.arrayContaining(["--mode", "ask"]),
+    }));
+  });
+
+  it.each([
+    {
+      name: "malformed middle line",
+      stdout: `${JSON.stringify({ type: "system" })}\nnot-json\n${JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "session-1", result: "done" })}\n`,
+    },
+    {
+      name: "unknown record type",
+      stdout: `${JSON.stringify({ type: "telemetry" })}\n${JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "session-1", result: "done" })}\n`,
+    },
+    {
+      name: "missing terminal result",
+      stdout: `${JSON.stringify({ type: "assistant", session_id: "session-1", result: "done" })}\n`,
+    },
+    {
+      name: "error terminal",
+      stdout: `${JSON.stringify({ type: "result", subtype: "error", is_error: true, session_id: "session-1", result: "failed" })}\n`,
+    },
+    {
+      name: "terminal without session id",
+      stdout: `${JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done" })}\n`,
+    },
+    {
+      name: "terminal without textual result",
+      stdout: `${JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "session-1" })}\n`,
+    },
+  ])("rejects Cursor output with $name", async ({ stdout }) => {
+    const boundary = createCursorCliBoundary({
+      executable: "/trusted/cursor",
+      cwd: "/workspace",
+      runner: async () => ({ stdout, stderr: "", exitCode: 0 }),
+    });
+
+    await expect(boundary.spawn({ model: "composer-2.5", prompt: "review" }))
+      .rejects.toMatchObject({ code: "PROVIDER_RESPONSE_INVALID" });
+  });
+
+  it("rejects Cursor session substitution while resuming", async () => {
+    const boundary = createCursorCliBoundary({
+      executable: "/trusted/cursor",
+      cwd: "/workspace",
+      runner: async () => ({
+        stdout: `${JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "substituted", result: "done" })}\n`,
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
+    await expect(boundary.sendTurn({
+      resumeReference: "admitted-session",
+      model: "composer-2.5",
+      prompt: "continue",
+    })).rejects.toMatchObject({ code: "PROVIDER_RESPONSE_INVALID" });
   });
 
   it("rejects leading-dash values before optional provider argv construction", () => {

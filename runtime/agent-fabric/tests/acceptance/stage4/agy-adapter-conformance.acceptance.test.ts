@@ -16,7 +16,7 @@ import {
 } from "../../support/stage4-pi-agy-testkit.ts";
 
 describe("Stage 4 Agy adapter", () => {
-  it("keeps the checked-in real adapter disabled", async () => {
+  it("accepts the checked-in pinned real adapter", async () => {
     await expect(
       verifyAdapterCompatibility({
         compatibilityPath: stage4RepositoryPath("config/adapter-compatibility.yaml"),
@@ -24,7 +24,7 @@ describe("Stage 4 Agy adapter", () => {
         adapterIds: ["agy"],
         requireEnabled: true,
       }),
-    ).rejects.toMatchObject({ code: "ADAPTER_DISABLED" });
+    ).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
   });
 
   it("uses the shared adapter protocol with deterministic Google-only fixture capabilities", async () => {
@@ -85,7 +85,7 @@ describe("Stage 4 Agy adapter", () => {
     }
   });
 
-  it("rejects activation while Agy source-build and headless-schema pins remain unresolved", async () => {
+  it("rejects an explicitly unresolved Agy fixture", async () => {
     const fixture = await createEnabledUnresolvedCheckedInAdapter("agy");
     try {
       await expect(

@@ -12,7 +12,7 @@ import {
 } from "../../support/stage4-cursor-kiro-testkit.ts";
 
 describe("Stage 4 Kiro ACP adapter public contract", () => {
-  it("keeps the checked-in real Kiro adapter disabled while ACP pins are unresolved", async () => {
+  it("accepts the checked-in pinned Kiro ACP adapter", async () => {
     await expect(
       verifyAdapterCompatibility({
         compatibilityPath: repositoryPath("config/adapter-compatibility.yaml"),
@@ -20,7 +20,7 @@ describe("Stage 4 Kiro ACP adapter public contract", () => {
         adapterIds: ["kiro-acp"],
         requireEnabled: true,
       }),
-    ).rejects.toMatchObject({ code: "ADAPTER_DISABLED" });
+    ).resolves.toMatchObject({ valid: true, adapterIds: ["kiro-acp"] });
   });
 
   it("runs a fixture through the same durable adapter protocol without invoking Kiro", async () => {

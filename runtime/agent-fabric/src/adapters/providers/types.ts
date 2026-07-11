@@ -23,11 +23,11 @@ export type ProviderAdapterCapabilities = {
   adapterId: string;
   operations: string[];
   actionJournal: true;
-  persistentSession: true;
+  persistentSession: boolean;
   ephemeralWorker: true;
   controlModes: ["managed"];
   inboxDeliveryModes: ["structured-push"];
-  recoveryOperations: ["resume_reference", "lookup_action"];
+  recoveryOperations: string[];
   compactInPlace: boolean;
   idempotencyEvidence: "per-action-fail-closed";
 };

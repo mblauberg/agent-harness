@@ -40,6 +40,99 @@ async function verifyHash(path: string, expected: string): Promise<void> {
   }
 }
 
+type WrapperManifest = {
+  schemaVersion: 1;
+  entrypoint: string;
+  files: Array<{ path: string; sha256: string }>;
+};
+
+function parseWrapperManifest(value: unknown, adapterId: string): WrapperManifest {
+  if (!isRecord(value) || value.schema_version !== 1 || typeof value.entrypoint !== "string" || !Array.isArray(value.files)) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest is invalid: ${adapterId}`);
+  }
+  const files: Array<{ path: string; sha256: string }> = [];
+  for (const member of value.files) {
+    if (
+      !isRecord(member) ||
+      typeof member.path !== "string" ||
+      member.path.length === 0 ||
+      typeof member.sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(member.sha256)
+    ) {
+      throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest member is invalid: ${adapterId}`);
+    }
+    files.push({ path: member.path, sha256: member.sha256 });
+  }
+  if (files.length === 0) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest has no members: ${adapterId}`);
+  }
+  return { schemaVersion: 1, entrypoint: value.entrypoint, files };
+}
+
+const LOCAL_IMPORT = /(?:\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?|\bimport\s*\(\s*)["'](\.{1,2}\/[^"']+)["']/gu;
+
+function localImports(source: string, sourcePath: string): string[] {
+  return [...source.matchAll(LOCAL_IMPORT)].map((match) => resolve(dirname(sourcePath), match[1] ?? ""));
+}
+
+async function discoverWrapperClosure(entrypoint: string): Promise<string[]> {
+  const pending = [entrypoint];
+  const discovered = new Set<string>();
+  while (pending.length > 0) {
+    const path = pending.pop();
+    if (path === undefined || discovered.has(path)) continue;
+    discovered.add(path);
+    let source: string;
+    try {
+      source = await readFile(path, "utf8");
+    } catch (error: unknown) {
+      throw new FabricError("ADAPTER_ARTIFACT_MISSING", `wrapper closure member is unavailable: ${path}`, {
+        cause: error,
+      });
+    }
+    for (const dependency of localImports(source, path)) {
+      if (!discovered.has(dependency)) pending.push(dependency);
+    }
+  }
+  return [...discovered].sort((left, right) => left.localeCompare(right));
+}
+
+async function verifyWrapperClosure(input: {
+  adapterId: string;
+  compatibilityPath: string;
+  wrapperEntrypoint: string;
+  manifestPath: string;
+}): Promise<number> {
+  let manifestValue: unknown;
+  try {
+    manifestValue = JSON.parse(await readFile(input.manifestPath, "utf8"));
+  } catch (error: unknown) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest cannot be read: ${input.adapterId}`, {
+      cause: error,
+    });
+  }
+  const manifest = parseWrapperManifest(manifestValue, input.adapterId);
+  const entrypoint = resolveCompatibilityArtifact(input.compatibilityPath, manifest.entrypoint);
+  if (entrypoint !== input.wrapperEntrypoint) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest entrypoint differs: ${input.adapterId}`);
+  }
+  const members = manifest.files.map((member) => ({
+    path: resolveCompatibilityArtifact(input.compatibilityPath, member.path),
+    sha256: member.sha256,
+  }));
+  const uniqueMembers = new Set(members.map((member) => member.path));
+  if (uniqueMembers.size !== members.length) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest contains duplicate members: ${input.adapterId}`);
+  }
+  const closure = await discoverWrapperClosure(entrypoint);
+  const declared = [...uniqueMembers].sort((left, right) => left.localeCompare(right));
+  if (JSON.stringify(closure) !== JSON.stringify(declared)) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest does not match import closure: ${input.adapterId}`);
+  }
+  for (const member of members) await verifyHash(member.path, member.sha256);
+  return members.length;
+}
+
 export async function verifyAdapterCompatibility(input: {
   compatibilityPath: string;
   schemaPath: string;
@@ -77,7 +170,9 @@ export async function verifyAdapterCompatibility(input: {
     if (
       input.requireEnabled &&
       (typeof adapter.implementation.wrapper_entrypoint !== "string" ||
-        typeof adapter.implementation.wrapper_entrypoint_sha256 !== "string")
+        typeof adapter.implementation.wrapper_entrypoint_sha256 !== "string" ||
+        typeof adapter.implementation.wrapper_manifest !== "string" ||
+        typeof adapter.implementation.wrapper_manifest_sha256 !== "string")
     ) {
       throw new FabricError(
         "ADAPTER_COMPATIBILITY_INVALID",
@@ -98,7 +193,10 @@ export async function verifyAdapterCompatibility(input: {
         );
       }
       const upstreamArtifactPins = Object.keys(adapter.implementation).filter(
-        (field) => field.endsWith("_sha256") && field !== "wrapper_entrypoint_sha256",
+        (field) =>
+          field.endsWith("_sha256") &&
+          field !== "wrapper_entrypoint_sha256" &&
+          field !== "wrapper_manifest_sha256",
       );
       if (upstreamArtifactPins.length === 0) {
         throw new FabricError(
@@ -115,6 +213,19 @@ export async function verifyAdapterCompatibility(input: {
       }
       await verifyHash(resolveCompatibilityArtifact(input.compatibilityPath, pathValue), expected);
       verifiedArtifactCount += 1;
+    }
+    const wrapperEntrypoint = adapter.implementation.wrapper_entrypoint;
+    const wrapperManifest = adapter.implementation.wrapper_manifest;
+    if (typeof wrapperEntrypoint === "string" || typeof wrapperManifest === "string") {
+      if (typeof wrapperEntrypoint !== "string" || typeof wrapperManifest !== "string") {
+        throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `adapter wrapper closure pin is incomplete: ${adapterId}`);
+      }
+      verifiedArtifactCount += await verifyWrapperClosure({
+        adapterId,
+        compatibilityPath: input.compatibilityPath,
+        wrapperEntrypoint: resolveCompatibilityArtifact(input.compatibilityPath, wrapperEntrypoint),
+        manifestPath: resolveCompatibilityArtifact(input.compatibilityPath, wrapperManifest),
+      });
     }
     if (typeof adapter.contract.schema_sha256 === "string") {
       const source = adapter.contract.schema_source ?? adapter.contract.schema_bundle;

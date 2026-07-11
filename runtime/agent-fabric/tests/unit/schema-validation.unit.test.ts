@@ -52,7 +52,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
     expect(unknown.keywords).toContain("additionalProperties");
   });
 
-  it("validates adapter compatibility and keeps every real adapter disabled", async () => {
+  it("validates adapter compatibility and exposes only explicitly gated adapters", async () => {
     const schema = await readSchema("adapter-compatibility.schema.json");
     const compatibility = await readYamlObject("adapter-compatibility.yaml");
 
@@ -66,13 +66,14 @@ describe("Stage 1 versioned JSON Schemas", () => {
       throw new TypeError("adapter compatibility must contain an adapters object");
     }
     expect(Object.keys(adapters).sort()).toEqual([...requiredRealAdapters].sort());
+    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp"]);
     for (const adapterId of requiredRealAdapters) {
       const adapter = adapters[adapterId];
       expect(isJsonObject(adapter), `${adapterId} must be an object`).toBe(true);
       if (!isJsonObject(adapter)) {
         throw new TypeError(`${adapterId} must be an object`);
       }
-      expect(adapter.enabled, `${adapterId} must remain disabled`).toBe(false);
+      expect(adapter.enabled, `${adapterId} activation state`).toBe(enabledAdapters.has(adapterId));
       const constraints = adapter.model_family_constraints;
       if (isJsonObject(constraints) && constraints.requires_explicit_model === true) {
         expect(

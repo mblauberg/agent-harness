@@ -73,20 +73,37 @@ function turnFromResponse(value: unknown): Record<string, unknown> {
   return value.turn;
 }
 
+export function codexCompletedTurnResult(turn: Record<string, unknown>): string {
+  if (turn.status !== "completed") {
+    const detail = isRecord(turn.error) && typeof turn.error.message === "string"
+      ? `: ${turn.error.message}`
+      : "";
+    throw new ProviderAdapterError("PROVIDER_TURN_FAILED", `Codex turn ended with status ${String(turn.status)}${detail}`);
+  }
+  if (!Array.isArray(turn.items)) {
+    throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex completed turn returned no item list");
+  }
+  const messages = turn.items.filter(
+    (item): item is Record<string, unknown> => isRecord(item) && item.type === "agentMessage" && typeof item.text === "string",
+  );
+  const result = messages.at(-1)?.text;
+  if (typeof result !== "string" || result.length === 0) {
+    throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex completed turn returned no agent message");
+  }
+  return result;
+}
+
 function copyString(payload: Record<string, unknown>, key: string, target: Record<string, unknown>): void {
   const value = optionalString(payload[key], key);
   if (value !== undefined) target[key] = value;
 }
 
 export function codexThreadConfiguration(payload: Record<string, unknown>): Record<string, unknown> {
-  const configuration: Record<string, unknown> = {};
-  for (const key of ["cwd", "model", "modelProvider", "developerInstructions", "baseInstructions", "sandbox", "serviceTier"]) {
+  const configuration: Record<string, unknown> = { sandbox: "read-only", approvalPolicy: "never" };
+  for (const key of ["cwd", "model", "modelProvider", "developerInstructions", "baseInstructions", "serviceTier"]) {
     copyString(payload, key, configuration);
   }
   if (typeof payload.ephemeral === "boolean") configuration.ephemeral = payload.ephemeral;
-  if (payload.approvalPolicy === "never" || payload.approvalPolicy === "on-request" || payload.approvalPolicy === "untrusted") {
-    configuration.approvalPolicy = payload.approvalPolicy;
-  }
   return configuration;
 }
 
@@ -94,6 +111,7 @@ type ConnectionFactory = () => CodexJsonRpcConnection;
 
 export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   readonly #connectionFactory: ConnectionFactory;
+  readonly #connections = new Map<string, CodexJsonRpcConnection>();
 
   constructor(connectionFactory: ConnectionFactory) {
     this.#connectionFactory = connectionFactory;
@@ -109,6 +127,32 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     }
   }
 
+  async #openConnection(): Promise<CodexJsonRpcConnection> {
+    const connection = this.#connectionFactory();
+    await connection.initialize();
+    return connection;
+  }
+
+  async #sessionConnection(resumeReference: string): Promise<CodexJsonRpcConnection> {
+    const existing = this.#connections.get(resumeReference);
+    if (existing !== undefined) return existing;
+    const connection = await this.#openConnection();
+    try {
+      await connection.request("thread/resume", { threadId: resumeReference });
+      this.#connections.set(resumeReference, connection);
+      return connection;
+    } catch (error: unknown) {
+      await connection.close();
+      throw error;
+    }
+  }
+
+  async closeAll(): Promise<void> {
+    const connections = [...this.#connections.values()];
+    this.#connections.clear();
+    await Promise.all(connections.map(async (connection) => await connection.close()));
+  }
+
   async status(input: { resumeReference?: string }): Promise<Record<string, unknown>> {
     if (input.resumeReference === undefined) return { healthy: true, providerSession: "unselected" };
     return await this.#withConnection(async (connection) => {
@@ -119,31 +163,41 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return await this.#withConnection(async (connection) => {
+    const connection = await this.#openConnection();
+    try {
       const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
       const response = prior === undefined
         ? await connection.request("thread/start", codexThreadConfiguration(payload))
         : await connection.request("thread/resume", { threadId: prior, ...codexThreadConfiguration(payload) });
       const thread = threadFromResponse(response, prior === undefined ? "thread/start" : "thread/resume");
+      this.#connections.set(String(thread.id), connection);
       return { resumeReference: thread.id };
-    });
+    } catch (error: unknown) {
+      await connection.close();
+      throw error;
+    }
   }
 
   async attach(input: { resumeReference: string; payload: Record<string, unknown> }): Promise<Record<string, unknown>> {
-    return await this.#withConnection(async (connection) => {
+    const connection = await this.#openConnection();
+    try {
       const response = await connection.request("thread/resume", {
         threadId: input.resumeReference,
         ...codexThreadConfiguration(input.payload),
       });
       const thread = threadFromResponse(response, "thread/resume");
+      this.#connections.set(String(thread.id), connection);
       return { resumeReference: thread.id, attached: true };
-    });
+    } catch (error: unknown) {
+      await connection.close();
+      throw error;
+    }
   }
 
   async sendTurn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = threadId(payload);
-    return await this.#withConnection(async (connection) => {
-      await connection.request("thread/resume", { threadId: resumeReference });
+    const connection = await this.#sessionConnection(resumeReference);
+    return await (async () => {
       const response = await connection.request("turn/start", {
         threadId: resumeReference,
         input: textInput(payload),
@@ -156,19 +210,29 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
         (params) => params.threadId === resumeReference && isRecord(params.turn) && params.turn.id === turn.id,
       );
       const completedTurn = isRecord(completed.turn) ? completed.turn : turn;
+      if (completedTurn.status !== "completed") codexCompletedTurnResult(completedTurn);
+      const readResponse = await connection.request("thread/read", { threadId: resumeReference, includeTurns: true });
+      const hydratedThread = threadFromResponse(readResponse, "thread/read");
+      const hydratedTurn = Array.isArray(hydratedThread.turns)
+        ? hydratedThread.turns.find((candidate) => isRecord(candidate) && candidate.id === turn.id)
+        : undefined;
+      if (!isRecord(hydratedTurn)) {
+        throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex thread/read returned no completed turn");
+      }
       return {
         resumeReference,
         turnId: turn.id,
-        status: completedTurn.status ?? "completed",
+        status: hydratedTurn.status,
+        result: codexCompletedTurnResult(hydratedTurn),
       };
-    });
+    })();
   }
 
   async steer(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = threadId(payload);
     const expectedTurnId = requiredString(payload.expectedTurnId ?? payload.turnId, "expectedTurnId");
-    return await this.#withConnection(async (connection) => {
-      await connection.request("thread/resume", { threadId: resumeReference });
+    const connection = await this.#sessionConnection(resumeReference);
+    return await (async () => {
       const response = await connection.request("turn/steer", {
         threadId: resumeReference,
         expectedTurnId,
@@ -178,34 +242,39 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
         throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex turn/steer returned no turn ID");
       }
       return { resumeReference, turnId: response.turnId, steered: true };
-    });
+    })();
   }
 
   async interrupt(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = threadId(payload);
     const turnIdValue = requiredString(payload.turnId, "turnId");
-    return await this.#withConnection(async (connection) => {
-      await connection.request("thread/resume", { threadId: resumeReference });
+    const connection = await this.#sessionConnection(resumeReference);
+    return await (async () => {
       await connection.request("turn/interrupt", { threadId: resumeReference, turnId: turnIdValue });
       return { resumeReference, turnId: turnIdValue, interrupted: true };
-    });
+    })();
   }
 
   async compact(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = threadId(payload);
-    return await this.#withConnection(async (connection) => {
-      await connection.request("thread/resume", { threadId: resumeReference });
+    const connection = await this.#sessionConnection(resumeReference);
+    return await (async () => {
       await connection.request("thread/compact/start", { threadId: resumeReference });
       await connection.waitForNotification(
         "thread/compacted",
         (params) => params.threadId === resumeReference,
       );
       return { resumeReference, compacted: true };
-    });
+    })();
   }
 
   async release(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = optionalString(payload.resumeReference, "resumeReference");
+    if (resumeReference !== undefined) {
+      const connection = this.#connections.get(resumeReference);
+      this.#connections.delete(resumeReference);
+      await connection?.close();
+    }
     return { released: true, deleted: false, ...(resumeReference === undefined ? {} : { resumeReference }) };
   }
 }
@@ -222,17 +291,19 @@ export async function runCodexAppServerAdapter(arguments_: string[] = process.ar
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
   if (providerExecutable === undefined) throw new Error("codex-app-server adapter requires --provider-executable");
+  const boundary = new InstalledCodexAppServerBoundary(
+    () => new CodexJsonRpcConnection(codexAppServerCommand(providerExecutable)),
+  );
   try {
     await serveAdapter(
       createCodexAppServerAdapter({
-        boundary: new InstalledCodexAppServerBoundary(
-          () => new CodexJsonRpcConnection(codexAppServerCommand(providerExecutable)),
-        ),
+        boundary,
         journal,
       }),
       { input: process.stdin, output: process.stdout },
     );
   } finally {
+    await boundary.closeAll();
     journal.close();
   }
 }

@@ -48,6 +48,7 @@ export const FABRIC_OPERATIONS = {
   publishArtifact: "fabric.v1.artifact.publish",
   closeBarrier: "fabric.v1.barrier.close",
   getRunStatus: "fabric.v1.run-status.read",
+  observeEvents: "fabric.v1.events.observe",
   listTasks: "fabric.v1.task.list",
   listAgents: "fabric.v1.agent.list",
   listReceipts: "fabric.v1.receipt.list",

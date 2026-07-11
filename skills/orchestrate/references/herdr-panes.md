@@ -59,8 +59,9 @@ and resolved model in the run receipt.
 
 ## Send work
 
-Use the bundled helper; it resolves the pane and calls Herdr's atomic
-`pane run` operation, which submits the text and Enter together. Its result is
+Use the bundled helper; it resolves the pane, calls Herdr's `pane run`, waits
+for paste settlement, then sends a harmless trailing Enter because Herdr 0.7.3
+can leave long Claude/Codex drafts unsubmitted. Its result is
 `dispatched-unconfirmed`, not proof that the target process consumed the prompt:
 
 ```sh
@@ -82,9 +83,9 @@ use the helper instead):
 - The pane buffer scrolls: output longer than the buffer is unrecoverable via
   `read` — ask the worker to re-emit only the missing span, or have it write
   findings to a file from the start.
-- Long split text/key submissions can race paste settlement and leave a draft
-  unsubmitted. `pane run` avoids that split operation; still read the pane after
-  dispatch because a successful transport call does not prove agent uptake.
+- `pane run` can still leave a long draft unsubmitted. The helper follows it
+  with a settled Enter; still read the pane after dispatch because successful
+  transport does not prove agent uptake.
 
 Prompts state source scope, artifact directory, allowed artifact classes, source
 write authority, output contract, evidence requirements and whether subagents

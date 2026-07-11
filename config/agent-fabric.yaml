@@ -8,10 +8,15 @@ allowedAdapters:
   - cursor-agent
   - kiro-acp
 
-# Provider adapters are activated only by a separate trusted edit after their
-# compatibility entry is enabled and fully pinned. Empty keeps the daemon
-# coordination-only while preserving the provider allow-list above.
-activeAdapters: []
+# Provider adapters join the daemon only after their compatibility entry is
+# enabled, fully pinned and listed here. Removing all entries restores the
+# coordination-only profile while preserving the provider allow-list above.
+activeAdapters:
+  - claude-agent-sdk
+  - codex-app-server
+  - agy
+  - cursor-agent
+  - kiro-acp
 
 allowedProfiles:
   - headless

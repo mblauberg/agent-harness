@@ -44,6 +44,7 @@ import type {
   CapabilityRotationResult,
   DiscussionGroupInput,
   ExistingTeamCreateInput,
+  EventsAfterResult,
   InterventionResult,
   LeaseResult,
   LifecycleCheckpoint,
@@ -873,7 +874,18 @@ export class Fabric {
       const runId = stringField(session, "run_id");
       const agentId = stringField(session, "agent_id");
       try {
-        await this.#requestAdapter(stringField(session, "adapter_id"), "status", { agentId, providerSessionRef: stringField(session, "provider_session_ref") });
+        const status = await this.#requestAdapter(stringField(session, "adapter_id"), "status", {
+          agentId,
+          providerSessionRef: stringField(session, "provider_session_ref"),
+        });
+        if (!isRow(status)) throw new Error("adapter returned an invalid provider session status");
+        if (status.healthy !== true) throw new Error("adapter did not prove the persisted provider session healthy");
+        if (status.matches !== undefined && typeof status.matches !== "boolean") {
+          throw new Error("adapter returned an invalid provider session match value");
+        }
+        if (status.matches === false) {
+          throw new Error("adapter no longer manages the persisted provider session");
+        }
       } catch (error: unknown) {
         this.#database.prepare("UPDATE agents SET lifecycle = 'context-unreconciled' WHERE run_id = ? AND agent_id = ?").run(runId, agentId);
         this.#event(runId, "startup-provider-session-degraded", null, { agentId, reason: error instanceof Error ? error.message : String(error) });
@@ -1016,9 +1028,13 @@ export class Fabric {
   }
 
   #event(runId: string, type: string, actorAgentId: string | null, payload: unknown): void {
-    this.#database
-      .prepare("INSERT INTO events(event_id, run_id, type, actor_agent_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(uuidv7(), runId, type, actorAgentId, canonicalJson(payload), this.#clock());
+    this.#database.transaction(() => {
+      const eventId = uuidv7();
+      this.#database
+        .prepare("INSERT INTO events(event_id, run_id, type, actor_agent_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(eventId, runId, type, actorAgentId, canonicalJson(payload), this.#clock());
+      this.#database.prepare("INSERT INTO observer_event_sequence(event_id) VALUES (?)").run(eventId);
+    })();
   }
 
   delegateAuthority(
@@ -3768,6 +3784,49 @@ export class Fabric {
         leasesActive: count("SELECT COUNT(*) AS count FROM leases WHERE run_id = ? AND status = 'active'"),
       },
     };
+  }
+
+  eventsAfter(runId: string, input: { cursor: number; limit: number }): EventsAfterResult {
+    if (!Number.isSafeInteger(input.cursor) || input.cursor < 0) {
+      throw new TypeError("event cursor must be a non-negative safe integer");
+    }
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new TypeError("event read limit must be an integer from 1 to 100");
+    }
+    const events = this.#database
+      .prepare("SELECT s.sequence AS cursor, e.event_id, e.type, e.actor_agent_id, e.created_at, e.payload_json FROM observer_event_sequence s JOIN events e ON e.event_id = s.event_id WHERE e.run_id = ? AND s.sequence > ? ORDER BY s.sequence LIMIT ?")
+      .all(runId, input.cursor, input.limit)
+      .map((value) => {
+        const row = rowOrNotFound(value, "event");
+        const actor = row.actor_agent_id;
+        if (actor !== null && typeof actor !== "string") throw new Error("stored event actor is invalid");
+        const type = stringField(row, "type");
+        let summary = actor === null ? type : `${type} by ${actor}`;
+        if (type === "message-persisted" && actor !== null && typeof row.payload_json === "string") {
+          const payload: unknown = JSON.parse(row.payload_json);
+          if (isRow(payload) && typeof payload.messageId === "string" && isStringArray(payload.recipients)) {
+            const message = rowOrNotFound(
+              this.#database.prepare("SELECT kind, body FROM messages WHERE run_id = ? AND message_id = ?").get(runId, payload.messageId),
+              "observer message",
+            );
+            const preview = stringField(message, "body")
+              .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
+              .replace(/\s+/gu, " ")
+              .trim()
+              .slice(0, 160);
+            summary = `${stringField(message, "kind")} ${actor} → ${payload.recipients.join(", ")}: ${preview}`;
+          }
+        }
+        return {
+          cursor: numberField(row, "cursor"),
+          eventId: stringField(row, "event_id"),
+          type,
+          actorAgentId: actor,
+          createdAt: numberField(row, "created_at"),
+          summary,
+        };
+      });
+    return { events, nextCursor: events.at(-1)?.cursor ?? input.cursor };
   }
 
   listTasks(runId: string, requesterId: string): { tasks: TaskResult[] } {

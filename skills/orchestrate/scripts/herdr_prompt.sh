@@ -54,4 +54,9 @@ print(value)
 ')" || { echo "could not resolve pane for Herdr agent: $target" >&2; exit 1; }
 
 herdr pane run "$pane_id" "$prompt" >/dev/null
+sleep 0.15
+# Herdr 0.7.3 can acknowledge pane-run after pasting into Claude/Codex while
+# leaving the draft unsubmitted. A trailing Enter is harmless after a
+# successful submit (empty composers do nothing) and closes that gap.
+herdr pane send-keys "$pane_id" enter >/dev/null
 printf 'dispatched-unconfirmed target=%s pane=%s bytes=%s\n' "$target" "$pane_id" "$prompt_bytes"

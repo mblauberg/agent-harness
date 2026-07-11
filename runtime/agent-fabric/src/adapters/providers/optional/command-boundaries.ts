@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { ProviderBoundary } from "../adapter.js";
 import { isRecord, ProviderAdapterError, requiredString } from "../types.js";
@@ -29,6 +32,7 @@ export const runBoundedProviderCommand: ProviderCommandRunner = async (invocatio
       env: {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         TMPDIR: process.env.TMPDIR ?? "/tmp",
+        ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
         ...(invocation.environment ?? {}),
       },
       shell: false,
@@ -87,43 +91,60 @@ export const runBoundedProviderCommand: ProviderCommandRunner = async (invocatio
   });
 };
 
-function outputRecords(stdout: string): Record<string, unknown>[] {
-  const records: Record<string, unknown>[] = [];
-  for (const line of stdout.split(/\r?\n/u).filter((item) => item.trim().length > 0)) {
-    try {
-      const value: unknown = JSON.parse(line);
-      if (isRecord(value)) records.push(value);
-    } catch {
-      // Agy may produce plain text. Its compatibility pin remains unresolved;
-      // callers cannot activate this boundary without a verified output shape.
-    }
-  }
-  return records;
-}
-
-function resumeReference(records: Record<string, unknown>[]): string | undefined {
-  for (const record of records.toReversed()) {
-    for (const key of ["conversationId", "conversation_id", "chatId", "chat_id", "sessionId", "session_id"]) {
-      const value = record[key];
-      if (typeof value === "string" && value.length > 0) return value;
-    }
-  }
-  return undefined;
-}
-
-function commandResult(result: ProviderCommandResult): Record<string, unknown> {
-  const records = outputRecords(result.stdout);
-  const reference = resumeReference(records);
-  if (reference === undefined) {
+function agyCommandResult(result: ProviderCommandResult, fallbackReference?: string): Record<string, unknown> {
+  if (fallbackReference === undefined) {
     throw new ProviderAdapterError(
       "PROVIDER_RESPONSE_INVALID",
-      "provider output did not contain a verified resumable session reference",
+      "Agy private invocation log did not contain a verified resumable session reference",
     );
   }
-  const terminal = records.at(-1);
   return {
-    resumeReference: reference,
-    ...(terminal ?? { result: result.stdout }),
+    resumeReference: fallbackReference,
+    result: result.stdout.trim(),
+    providerRecordCount: 0,
+  };
+}
+
+const CURSOR_RECORD_TYPES = new Set(["system", "user", "thinking", "assistant", "result"]);
+
+function cursorCommandResult(result: ProviderCommandResult): Record<string, unknown> {
+  const records: Record<string, unknown>[] = [];
+  for (const line of result.stdout.split(/\r?\n/u).filter((item) => item.trim().length > 0)) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch (error: unknown) {
+      throw new ProviderAdapterError(
+        "PROVIDER_RESPONSE_INVALID",
+        "Cursor stream contained malformed JSON",
+        {},
+        { cause: error },
+      );
+    }
+    if (!isRecord(value) || typeof value.type !== "string" || !CURSOR_RECORD_TYPES.has(value.type)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Cursor stream contained an unknown record type");
+    }
+    records.push(value);
+  }
+  const terminal = records.at(-1);
+  if (
+    terminal?.type !== "result" ||
+    terminal.subtype !== "success" ||
+    terminal.is_error !== false ||
+    typeof terminal.session_id !== "string" ||
+    terminal.session_id.length === 0 ||
+    typeof terminal.result !== "string" ||
+    terminal.result.length === 0
+  ) {
+    throw new ProviderAdapterError(
+      "PROVIDER_RESPONSE_INVALID",
+      "Cursor stream did not end with a validated successful result",
+    );
+  }
+  return {
+    resumeReference: terminal.session_id,
+    result: terminal.result,
+    providerRecordCount: records.length,
   };
 }
 
@@ -137,22 +158,40 @@ type OneShotBoundaryOptions = {
 export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
-    const result = await runner(
-      buildAgyInvocation({
-        executable: options.executable,
-        cwd: options.cwd,
-        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-        model: requiredString(payload.model, "model"),
-        prompt: requiredString(payload.prompt, "prompt"),
-        mode: payload.mode === "accept-edits" ? "accept-edits" : "plan",
-        ...(resume === undefined ? {} : { resumeReference: resume }),
-      }),
-    );
-    return commandResult(result);
+    const logDirectory = await mkdtemp(join(tmpdir(), "agent-fabric-agy-"));
+    const logFile = join(logDirectory, "provider.log");
+    try {
+      const result = await runner(
+        buildAgyInvocation({
+          executable: options.executable,
+          cwd: typeof payload.cwd === "string" ? payload.cwd : options.cwd,
+          ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          model: requiredString(payload.model, "model"),
+          prompt: requiredString(payload.prompt, "prompt"),
+          mode: "plan",
+          logFile,
+          ...(resume === undefined ? {} : { resumeReference: resume }),
+        }),
+      );
+      let loggedReference: string | undefined;
+      if (resume === undefined) {
+        try {
+          const log = await readFile(logFile, "utf8");
+          loggedReference = /\bCreated conversation ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b/iu.exec(log)?.[1];
+        } catch (error: unknown) {
+          if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") throw error;
+        }
+      }
+      return agyCommandResult(result, resume ?? loggedReference);
+    } finally {
+      await rm(logDirectory, { recursive: true, force: true });
+    }
   };
   return {
-    async status() {
-      return { configured: true, executable: options.executable, protocolVerified: false };
+    async status({ resumeReference }) {
+      return resumeReference === undefined
+        ? { healthy: true, configured: true, executable: options.executable }
+        : { healthy: false, matches: false, resumeReference, reason: "headless conversation cannot be verified after wrapper restart" };
     },
     async spawn(payload) {
       return await execute(payload);
@@ -178,19 +217,25 @@ export function createCursorCliBoundary(options: OneShotBoundaryOptions): Provid
     const result = await runner(
       buildCursorInvocation({
         executable: options.executable,
-        cwd: options.cwd,
+        cwd: typeof payload.cwd === "string" ? payload.cwd : options.cwd,
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         model: requiredString(payload.model, "model"),
         prompt: requiredString(payload.prompt, "prompt"),
-        mode: payload.mode === "ask" ? "ask" : "plan",
+        mode: "ask",
         ...(resume === undefined ? {} : { resumeReference: resume }),
       }),
     );
-    return commandResult(result);
+    const normalised = cursorCommandResult(result);
+    if (resume !== undefined && normalised.resumeReference !== resume) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Cursor returned a different resumed session reference");
+    }
+    return normalised;
   };
   return {
-    async status() {
-      return { configured: true, executable: options.executable, protocolVerified: false };
+    async status({ resumeReference }) {
+      return resumeReference === undefined
+        ? { healthy: true, configured: true, executable: options.executable }
+        : { healthy: false, matches: false, resumeReference, reason: "headless session cannot be verified after wrapper restart" };
     },
     async spawn(payload) {
       return await execute(payload);

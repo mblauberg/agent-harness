@@ -28,6 +28,18 @@ export type TaskResult = {
 };
 
 export type ReceiptResult = { relativePath: string; schemaVersion: 1; sha256: string };
+export type ObserverEvent = {
+  cursor: number;
+  eventId: string;
+  type: string;
+  actorAgentId: string | null;
+  createdAt: number;
+  summary: string;
+};
+export type EventsAfterResult = {
+  events: ObserverEvent[];
+  nextCursor: number;
+};
 export type ProofResult = { proofId: string };
 export type RevocationResult = { revoked: true };
 export type CapabilityRotationResult = { agentId: string; principalGeneration: number; capability: string };

@@ -76,6 +76,7 @@ export class PiJsonlRpcClient implements PiRpcClient {
       env: {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         TMPDIR: process.env.TMPDIR ?? "/tmp",
+        ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
         ...(this.#options.environment ?? {}),
       },
       shell: false,

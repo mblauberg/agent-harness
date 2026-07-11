@@ -54,7 +54,11 @@ async function readPrivateRegularFile(path: string): Promise<string> {
   }
 }
 
-async function resolveProjectSeatFile(environment: NodeJS.ProcessEnv, cwd: string): Promise<string> {
+async function resolveProjectSeatFile(
+  environment: NodeJS.ProcessEnv,
+  cwd: string,
+  warn: (message: string) => void,
+): Promise<string> {
   const seat = environment.AGENT_FABRIC_SEAT;
   const stateDirectory = environment.AGENT_FABRIC_STATE_DIRECTORY;
   if (seat === undefined || !(MCP_SEATS as readonly string[]).includes(seat)) {
@@ -63,7 +67,11 @@ async function resolveProjectSeatFile(environment: NodeJS.ProcessEnv, cwd: strin
   if (stateDirectory === undefined || !isAbsolute(stateDirectory)) {
     throw new Error("agent fabric MCP state directory must be absolute");
   }
-  let candidate = await realpath(resolve(cwd));
+  const configuredProject = environment.AGENT_FABRIC_PROJECT_PATH;
+  if (configuredProject !== undefined && !isAbsolute(configuredProject)) {
+    throw new Error("agent fabric MCP project path must be absolute");
+  }
+  let candidate = await realpath(resolve(configuredProject ?? cwd));
   for (;;) {
     try {
       const paths = await resolveSeatPaths({ stateDirectory, project: candidate, seat: seat as (typeof MCP_SEATS)[number] });
@@ -83,9 +91,17 @@ async function resolveProjectSeatFile(environment: NodeJS.ProcessEnv, cwd: strin
         !("seat" in metadata) ||
         metadata.seat !== seat ||
         !("credentialPath" in metadata) ||
-        metadata.credentialPath !== credentialPath
+        metadata.credentialPath !== credentialPath ||
+        !("expiresAt" in metadata) ||
+        typeof metadata.expiresAt !== "string" ||
+        !Number.isFinite(Date.parse(metadata.expiresAt))
       ) {
         throw new Error(`agent fabric MCP seat metadata is invalid for project ${candidate}`);
+      }
+      const remainingMs = Date.parse(metadata.expiresAt) - Date.now();
+      if (remainingMs <= 0) throw new Error(`agent fabric MCP seat ${seat} expired at ${metadata.expiresAt}`);
+      if (remainingMs <= 7 * 24 * 60 * 60 * 1_000) {
+        warn(`agent fabric MCP seat ${seat} expires at ${metadata.expiresAt}; coordinate a full-roster renewal`);
       }
       return credentialPath;
     } catch (error: unknown) {
@@ -101,6 +117,7 @@ async function resolveProjectSeatFile(environment: NodeJS.ProcessEnv, cwd: strin
 export async function resolveMcpCapability(
   environment: NodeJS.ProcessEnv,
   cwd = process.cwd(),
+  warn: (message: string) => void = () => undefined,
 ): Promise<string> {
   const inline = environment.AGENT_FABRIC_CAPABILITY;
   let file = environment.AGENT_FABRIC_CAPABILITY_FILE;
@@ -113,7 +130,7 @@ export async function resolveMcpCapability(
     if (!CAPABILITY_PATTERN.test(inline)) throw new Error("agent fabric MCP capability is invalid");
     return inline;
   }
-  if (projectSeat !== undefined) file = await resolveProjectSeatFile(environment, cwd);
+  if (projectSeat !== undefined) file = await resolveProjectSeatFile(environment, cwd, warn);
   if (file === undefined || !isAbsolute(file)) {
     throw new Error("agent fabric MCP capability file must be absolute");
   }

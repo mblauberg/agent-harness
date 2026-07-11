@@ -21,28 +21,29 @@ describe("FR-015 controlled model routing receipt", () => {
       routerPath,
       receiptPath,
       request: {
-        adapter: "claude",
+        adapter: "pi",
         alias: "workhorse",
         role: "worker",
-        leadFamily: "openai",
+        model: "qwen3-coder",
+        leadFamily: "anthropic",
         requireDistinct: true,
       },
     });
     await expect(resolution).rejects.toMatchObject({
       code: "MODEL_ROUTE_REJECTED",
-      receipt: { status: "adapter_disabled", adapter: "claude" },
+      receipt: { status: "adapter_disabled", adapter: "pi" },
     });
     const retained = await readJsonObject(receiptPath);
 
     expect(retained).toMatchObject({
       schema_version: 1,
       status: "adapter_disabled",
-      adapter: "claude",
+      adapter: "pi",
       alias: "workhorse",
       role: "worker",
-      lead_family: "openai",
-      model_family: "anthropic",
-      endpoint_provider: "anthropic",
+      lead_family: "anthropic",
+      model_family: "alibaba",
+      endpoint_provider: "configured",
       requested_effort: "medium",
       effort: "medium",
       adapter_enabled: false,

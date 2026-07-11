@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 
 import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
-import type { BudgetResult, TeamResult } from "../core/contracts.js";
+import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
 import { FabricRemoteError, TimedNdjsonTransport } from "../transport/ndjson-rpc.js";
 import { isRecord } from "./protocol.js";
 import { composeDaemonConfiguration } from "./composition.js";
@@ -640,6 +640,29 @@ export class FabricDaemonClient {
       throw new Error("daemon returned an invalid mailbox state");
     }
     return { contiguousWatermark: result.contiguousWatermark, acknowledgedAboveWatermark: result.acknowledgedAboveWatermark };
+  }
+
+  async eventsAfter(input: { cursor: number; limit: number }): Promise<EventsAfterResult> {
+    const result = await this.#call("eventsAfter", input);
+    if (!isRecord(result) || !Array.isArray(result.events) || typeof result.nextCursor !== "number") {
+      throw new Error("daemon returned an invalid event page");
+    }
+    const events = result.events.map((value) => {
+      if (
+        !isRecord(value) || typeof value.cursor !== "number" || typeof value.eventId !== "string" ||
+        typeof value.type !== "string" || (value.actorAgentId !== null && typeof value.actorAgentId !== "string") ||
+        typeof value.createdAt !== "number" || typeof value.summary !== "string"
+      ) throw new Error("daemon returned an invalid observer event");
+      return {
+        cursor: value.cursor,
+        eventId: value.eventId,
+        type: value.type,
+        actorAgentId: value.actorAgentId,
+        createdAt: value.createdAt,
+        summary: value.summary,
+      };
+    });
+    return { events, nextCursor: result.nextCursor };
   }
 
   async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string }): Promise<{

@@ -14,7 +14,9 @@ const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH
   ?? join(stateDirectory, "runtime", "fabric-v1.sock");
 const projectKey = process.env.AGENT_FABRIC_PROJECT_KEY;
 if (projectKey === undefined) throw new Error("AGENT_FABRIC_PROJECT_KEY is required");
-const seatDirectory = join(stateDirectory, "seats", projectKey);
+const seatRoot = join(stateDirectory, "seats", projectKey);
+const pointer = await readFile(join(seatRoot, "current.json"), "utf8").then(JSON.parse).catch(() => undefined);
+const seatDirectory = pointer?.generation === undefined ? seatRoot : join(seatRoot, "generations", pointer.generation);
 
 async function connect(seat) {
   const transport = new StdioClientTransport({

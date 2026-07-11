@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "entrypoint": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
+  "files": [
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
+      "sha256": "8306e956cc6494562a5426b6018a0989cf159a0d6a65ee17cb829bf6f6c6ef86"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
+      "sha256": "b0dc5b625acbe8781d7cc7776d1871148c34026575c7dc83904be78b78851116"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
+      "sha256": "fe942144b97c7248b68d00ddc48b9a5bdb159ec3ecb0c4dcf0b5b9db283ce4b2"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/server.js",
+      "sha256": "7f5cbe1c3bebf0880bce30334a59bcc83b111dde1a67372cc6c438275c817bf4"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
+      "sha256": "c8d2768f18013aa7559a525e11b227d5b6a2f1bc50d954923d99a8ebe8c7abac"
+    }
+  ]
+}

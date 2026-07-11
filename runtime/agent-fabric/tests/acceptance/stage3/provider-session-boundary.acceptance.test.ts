@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
-import { createLifecycleFixture } from "../../support/lifecycle-testkit.ts";
+import { createLifecycleFixture, reopenLifecycleFabric } from "../../support/lifecycle-testkit.ts";
 
 const lifecycleAdapter = fileURLToPath(
   new URL("../../support/lifecycle-fake-provider.ts", import.meta.url),
@@ -582,6 +582,46 @@ describe("provider session admission", () => {
     } finally {
       await fabric.close();
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("marks persisted provider sessions unreconciled when a restarted adapter reports them unmanaged", async () => {
+    const fixture = await createLifecycleFixture();
+    let reopened: Awaited<ReturnType<typeof reopenLifecycleFabric>> | undefined;
+    try {
+      await fixture.fabric.close();
+      reopened = await reopenLifecycleFabric(fixture, { providerStatus: "unmanaged" });
+
+      await expect(reopened.recoverStartupState()).resolves.toMatchObject({ sessionsDegraded: 2 });
+      const chair = reopened.connect(fixture.capabilities.chair);
+      await expect(chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
+        lifecycle: "context-unreconciled",
+      });
+      await expect(chair.getAgentLifecycle({ agentId: "child" })).resolves.toMatchObject({
+        lifecycle: "context-unreconciled",
+      });
+    } finally {
+      await reopened?.close();
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("marks persisted provider sessions unreconciled when health evidence is absent", async () => {
+    const fixture = await createLifecycleFixture();
+    let reopened: Awaited<ReturnType<typeof reopenLifecycleFabric>> | undefined;
+    try {
+      await fixture.fabric.close();
+      reopened = await reopenLifecycleFabric(fixture, { providerStatus: "missing-evidence" });
+      await expect(reopened.recoverStartupState()).resolves.toMatchObject({ sessionsDegraded: 2 });
+      const chair = reopened.connect(fixture.capabilities.chair);
+      await expect(chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
+        lifecycle: "context-unreconciled",
+      });
+    } finally {
+      await reopened?.close();
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
     }
   });
 });

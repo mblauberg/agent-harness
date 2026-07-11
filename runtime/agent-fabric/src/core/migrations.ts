@@ -30,7 +30,7 @@ type MigrationRow = {
   checksum: string | null;
 };
 
-const defaultMigrationFiles = ["0001-core.sql"] as const;
+const defaultMigrationFiles = ["0001-core.sql", "0002-observer-event-sequence.sql"] as const;
 
 function loadDefaultMigrations(): Migration[] {
   return defaultMigrationFiles.map((filename, index) => {

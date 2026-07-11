@@ -92,6 +92,8 @@ export class AdapterProcessTransport {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         TMPDIR: process.env.TMPDIR ?? "/tmp",
         ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
+        ...(process.env.USER === undefined ? {} : { USER: process.env.USER }),
+        ...(process.env.LOGNAME === undefined ? {} : { LOGNAME: process.env.LOGNAME }),
         ...options.environment,
       },
       stdio: ["pipe", "pipe", "pipe"],

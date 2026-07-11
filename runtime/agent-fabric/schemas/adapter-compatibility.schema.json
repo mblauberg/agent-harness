@@ -44,6 +44,8 @@
         "entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "wrapper_entrypoint": {"type": "string", "minLength": 1},
         "wrapper_entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "wrapper_manifest": {"type": "string", "minLength": 1},
+        "wrapper_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "executable": {"type": "string"},
         "executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "rpc_entrypoint": {"type": "string"},
@@ -124,9 +126,11 @@
                 "type": "object",
                 "properties": {
                   "wrapper_entrypoint": {"type": "string", "minLength": 1},
-                  "wrapper_entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                  "wrapper_entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "wrapper_manifest": {"type": "string", "minLength": 1},
+                  "wrapper_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
                 },
-                "required": ["wrapper_entrypoint", "wrapper_entrypoint_sha256"]
+                "required": ["wrapper_entrypoint", "wrapper_entrypoint_sha256", "wrapper_manifest", "wrapper_manifest_sha256"]
               },
               "contract": {
                 "type": "object",

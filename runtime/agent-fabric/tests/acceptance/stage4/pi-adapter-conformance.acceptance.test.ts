@@ -16,7 +16,7 @@ import {
 } from "../../support/stage4-pi-agy-testkit.ts";
 
 describe("Stage 4 Pi adapter", () => {
-  it("keeps the checked-in real adapter disabled", async () => {
+  it("keeps the checked-in adapter disabled without an available trusted open-model provider", async () => {
     await expect(
       verifyAdapterCompatibility({
         compatibilityPath: stage4RepositoryPath("config/adapter-compatibility.yaml"),
@@ -83,7 +83,7 @@ describe("Stage 4 Pi adapter", () => {
     }
   });
 
-  it("rejects activation when the real Pi wire-protocol pin remains unresolved", async () => {
+  it("rejects an explicitly unresolved Pi fixture", async () => {
     const fixture = await createEnabledUnresolvedCheckedInAdapter("pi-rpc");
     try {
       await expect(

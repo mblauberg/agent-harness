@@ -7,11 +7,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 
 import {
+  claudeReadOnlyOptions,
   createClaudeAgentSdkAdapter,
   type ClaudeAgentSdkBoundary,
 } from "../../src/adapters/providers/claude-agent-sdk.ts";
 import {
   codexAppServerCommand,
+  codexCompletedTurnResult,
   codexThreadConfiguration,
   createCodexAppServerAdapter,
   type CodexAppServerBoundary,
@@ -55,6 +57,26 @@ function codexBoundary(): CodexAppServerBoundary {
 }
 
 describe("Claude Agent SDK fabric adapter", () => {
+  it("translates the fabric boundary into explicit SDK plan and no-tools isolation", () => {
+    expect(claudeReadOnlyOptions({
+      cwd: "/workspace/src",
+      model: "claude-sonnet-4-5",
+      allowedTools: ["Bash"],
+      disallowedTools: [],
+      sandbox: "read-only",
+      approvalPolicy: "never",
+    }, undefined, "/trusted/claude")).toMatchObject({
+      cwd: "/workspace/src",
+      model: "claude-sonnet-4-5",
+      tools: [],
+      permissionMode: "plan",
+      settingSources: [],
+      skills: [],
+      plugins: [],
+      pathToClaudeCodeExecutable: "/trusted/claude",
+    });
+  });
+
   it("journals a provider effect before returning it and replays the terminal result without a second effect", async () => {
     const actionJournal = await journal();
     const boundary = claudeBoundary();
@@ -139,8 +161,28 @@ describe("Claude Agent SDK fabric adapter", () => {
   });
 });
 
+describe("Codex app-server response validation", () => {
+  it("extracts only the final agent message from a completed turn", () => {
+    expect(codexCompletedTurnResult({
+      id: "turn-1",
+      status: "completed",
+      items: [
+        { type: "userMessage", id: "user-1", content: [] },
+        { type: "agentMessage", id: "agent-1", text: "FABRIC_SMOKE_TURN_OK" },
+      ],
+    })).toBe("FABRIC_SMOKE_TURN_OK");
+  });
+
+  it("fails closed for failed turns or missing agent output", () => {
+    expect(() => codexCompletedTurnResult({ status: "failed", error: { message: "provider error" }, items: [] }))
+      .toThrow("provider error");
+    expect(() => codexCompletedTurnResult({ status: "completed", items: [] }))
+      .toThrow("no agent message");
+  });
+});
+
 describe("trusted primary adapter configuration", () => {
-  it("routes both primaries through built fabric wrappers while compatibility activation remains disabled", async () => {
+  it("routes both primaries through pinned built fabric wrappers after activation", async () => {
     const root = fileURLToPath(new URL("../../../../", import.meta.url));
     const config: unknown = parse(await readFile(join(root, "config/agent-fabric.yaml"), "utf8"));
     const compatibility: unknown = parse(await readFile(join(root, "config/adapter-compatibility.yaml"), "utf8"));
@@ -158,15 +200,12 @@ describe("trusted primary adapter configuration", () => {
       activation_policy: { default_enabled: false, real_adapters_require_separate_gate: true },
       adapters: {
         "claude-agent-sdk": {
-          enabled: false,
-          unresolved_pins: expect.arrayContaining([expect.stringContaining("wrapper build")]),
+          enabled: true,
+          unresolved_pins: [],
         },
         "codex-app-server": {
-          enabled: false,
-          unresolved_pins: expect.arrayContaining([
-            expect.stringContaining("wrapper build"),
-            expect.stringContaining("schema bundle"),
-          ]),
+          enabled: true,
+          unresolved_pins: [],
         },
       },
     });
@@ -178,11 +217,11 @@ describe("Codex app-server fabric adapter", () => {
     expect(codexAppServerCommand("/trusted/codex")).toEqual(["/trusted/codex", "app-server"]);
     expect(() => codexAppServerCommand("codex")).toThrow(/absolute/u);
   });
-  it("maps the trusted read-only sandbox field into thread configuration", () => {
+  it("forces read-only sandboxing regardless of caller-supplied permissions", () => {
     expect(codexThreadConfiguration({
       cwd: "/workspace/src",
-      sandbox: "read-only",
-      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
       permissions: "read-only",
     })).toEqual({ cwd: "/workspace/src", sandbox: "read-only", approvalPolicy: "never" });
   });

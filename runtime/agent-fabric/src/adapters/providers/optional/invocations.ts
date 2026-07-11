@@ -35,6 +35,7 @@ export function buildAgyInvocation(input: {
   prompt: string;
   mode: "plan" | "accept-edits";
   resumeReference?: string;
+  logFile?: string;
 }): ProviderInvocation {
   const model = safeCliValue(input.model, "model");
   const prompt = safeCliValue(input.prompt, "prompt");
@@ -46,6 +47,7 @@ export function buildAgyInvocation(input: {
     executable: input.executable,
     args: [
       "--sandbox",
+      ...(input.logFile === undefined ? [] : ["--log-file", input.logFile]),
       "--mode",
       input.mode,
       "--model",
@@ -82,6 +84,7 @@ export function buildCursorInvocation(input: {
       "stream-json",
       "--sandbox",
       "enabled",
+      "--trust",
       "--mode",
       input.mode,
       "--model",

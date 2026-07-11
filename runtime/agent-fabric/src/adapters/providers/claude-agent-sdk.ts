@@ -45,14 +45,6 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
   idempotencyEvidence: "per-action-fail-closed",
 };
 
-function stringArray(value: unknown, field: string): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new ProviderAdapterError("INVALID_PARAMS", `${field} must be a string array`);
-  }
-  return value;
-}
-
 function positiveInteger(value: unknown, field: string): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isInteger(value) || typeof value !== "number" || value <= 0) {
@@ -61,19 +53,21 @@ function positiveInteger(value: unknown, field: string): number | undefined {
   return value;
 }
 
-function claudeOptions(payload: Record<string, unknown>, resume?: string): Options {
+export function claudeReadOnlyOptions(payload: Record<string, unknown>, resume?: string, executable?: string): Options {
   const cwd = optionalString(payload.cwd, "cwd");
   const model = optionalString(payload.model, "model");
   const maxTurns = positiveInteger(payload.maxTurns, "maxTurns");
-  const allowedTools = stringArray(payload.allowedTools, "allowedTools");
-  const disallowedTools = stringArray(payload.disallowedTools, "disallowedTools");
   return {
     ...(cwd === undefined ? {} : { cwd }),
     ...(model === undefined ? {} : { model }),
     ...(maxTurns === undefined ? {} : { maxTurns }),
-    ...(allowedTools === undefined ? {} : { allowedTools }),
-    ...(disallowedTools === undefined ? {} : { disallowedTools }),
     ...(resume === undefined ? {} : { resume }),
+    ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
+    tools: [],
+    permissionMode: "plan",
+    settingSources: [],
+    skills: [],
+    plugins: [],
   };
 }
 
@@ -110,6 +104,12 @@ async function consumeQuery(active: Query): Promise<{ resumeReference: string; r
 }
 
 export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
+  readonly #executable: string | undefined;
+
+  constructor(executable?: string) {
+    this.#executable = executable;
+  }
+
   async status(input: { resumeReference?: string }): Promise<Record<string, unknown>> {
     if (input.resumeReference === undefined) return { healthy: true, providerSession: "unselected" };
     const info = await getSessionInfo(input.resumeReference);
@@ -126,7 +126,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
-    return await consumeQuery(query({ prompt: prompt(payload), options: claudeOptions(payload, prior) }));
+    return await consumeQuery(query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, prior, this.#executable) }));
   }
 
   async attach(input: { resumeReference: string; payload: Record<string, unknown> }): Promise<Record<string, unknown>> {
@@ -143,7 +143,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async sendTurn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = requiredString(payload.resumeReference, "resumeReference");
-    return await consumeQuery(query({ prompt: prompt(payload), options: claudeOptions(payload, resumeReference) }));
+    return await consumeQuery(query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, resumeReference, this.#executable) }));
   }
 
   async interrupt(): Promise<Record<string, unknown>> {
@@ -169,9 +169,11 @@ export function createClaudeAgentSdkAdapter(options: {
 
 export async function runClaudeAgentSdkAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("claude-agent-sdk", arguments_));
+  const providerIndex = arguments_.indexOf("--provider-executable");
+  const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
   try {
     await serveAdapter(
-      createClaudeAgentSdkAdapter({ boundary: new InstalledClaudeAgentSdkBoundary(), journal }),
+      createClaudeAgentSdkAdapter({ boundary: new InstalledClaudeAgentSdkBoundary(providerExecutable), journal }),
       { input: process.stdin, output: process.stdout },
     );
   } finally {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
 import {
   terminateTrackedTestProcess,
   trackTestProcess,
@@ -13,7 +14,7 @@ export const DAEMON_ROOT_AUTHORITY = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message"],
+  actions: ["read", "write", "delegate", "message", FABRIC_OPERATIONS.observeEvents],
   disclosure: ["local"],
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 128, "cost:USD": 128 },

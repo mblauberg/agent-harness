@@ -35,6 +35,7 @@ export class CodexJsonRpcConnection {
     method: string;
     predicate(params: Record<string, unknown>): boolean;
     resolve(params: Record<string, unknown>): void;
+    reject(error: Error): void;
   }>();
   #nextId = 1;
   #stderr = "";
@@ -102,8 +103,13 @@ export class CodexJsonRpcConnection {
     predicate: (params: Record<string, unknown>) => boolean,
     timeoutMs = 30 * 60 * 1000,
   ): Promise<Record<string, unknown>> {
-    const buffered = this.#notifications.find((notification) => notification.method === method && predicate(notification.params));
-    if (buffered !== undefined) return Promise.resolve(buffered.params);
+    const bufferedIndex = this.#notifications.findIndex(
+      (notification) => notification.method === method && predicate(notification.params),
+    );
+    if (bufferedIndex !== -1) {
+      const [buffered] = this.#notifications.splice(bufferedIndex, 1);
+      if (buffered !== undefined) return Promise.resolve(buffered.params);
+    }
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       let timer: NodeJS.Timeout;
       const waiter = {
@@ -113,6 +119,11 @@ export class CodexJsonRpcConnection {
           clearTimeout(timer);
           this.#waiters.delete(waiter);
           resolve(params);
+        },
+        reject: (error: Error): void => {
+          clearTimeout(timer);
+          this.#waiters.delete(waiter);
+          reject(error);
         },
       };
       timer = setTimeout(() => {
@@ -126,6 +137,7 @@ export class CodexJsonRpcConnection {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#rejectWaiters(new ProviderAdapterError("PROVIDER_CLOSED", "Codex app-server connection is closed"));
     this.#lines.close();
     this.#child.stdin.end();
     if (this.#child.exitCode === null && this.#child.signalCode === null) this.#child.kill("SIGTERM");
@@ -167,12 +179,14 @@ export class CodexJsonRpcConnection {
     }
     if (typeof value.method === "string" && isRecord(value.params)) {
       const notification = { method: value.method, params: value.params };
-      this.#notifications.push(notification);
-      if (this.#notifications.length > 256) this.#notifications.shift();
-      for (const waiter of [...this.#waiters]) {
-        if (waiter.method === notification.method && waiter.predicate(notification.params)) {
-          waiter.resolve(notification.params);
-        }
+      const waiter = [...this.#waiters].find(
+        (candidate) => candidate.method === notification.method && candidate.predicate(notification.params),
+      );
+      if (waiter !== undefined) {
+        waiter.resolve(notification.params);
+      } else {
+        this.#notifications.push(notification);
+        if (this.#notifications.length > 256) this.#notifications.shift();
       }
     }
   }
@@ -181,6 +195,12 @@ export class CodexJsonRpcConnection {
     this.#closed = true;
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
+    this.#rejectWaiters(error);
     this.#lines.close();
+  }
+
+  #rejectWaiters(error: Error): void {
+    for (const waiter of [...this.#waiters]) waiter.reject(error);
+    this.#waiters.clear();
   }
 }

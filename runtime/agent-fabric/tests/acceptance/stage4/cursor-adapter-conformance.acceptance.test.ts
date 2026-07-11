@@ -12,7 +12,7 @@ import {
 } from "../../support/stage4-cursor-kiro-testkit.ts";
 
 describe("Stage 4 Cursor adapter public contract", () => {
-  it("keeps the checked-in real Cursor adapter disabled", async () => {
+  it("accepts the checked-in pinned Cursor adapter", async () => {
     await expect(
       verifyAdapterCompatibility({
         compatibilityPath: repositoryPath("config/adapter-compatibility.yaml"),
@@ -20,7 +20,7 @@ describe("Stage 4 Cursor adapter public contract", () => {
         adapterIds: ["cursor-agent"],
         requireEnabled: true,
       }),
-    ).rejects.toMatchObject({ code: "ADAPTER_DISABLED" });
+    ).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
   });
 
   it("runs a fixture through the same durable adapter protocol without invoking Cursor", async () => {

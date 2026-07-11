@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { openFabric } from "../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
 
 import { ManualClock } from "./manual-clock.ts";
 
@@ -10,7 +11,7 @@ export const ROOT_AUTHORITY = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message"],
+  actions: ["read", "write", "delegate", "message", FABRIC_OPERATIONS.observeEvents],
   disclosure: ["local"],
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 20, "cost:USD": 10 },

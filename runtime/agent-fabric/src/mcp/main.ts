@@ -2,22 +2,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { createFabricMcpServer } from "./server.js";
 import { resolveMcpCapability } from "./credentials.js";
+import { resolveFabricPaths } from "../cli/paths.js";
 
 // Stdio MCP proxy entry point (spec section 14): one proxy process per client,
 // each connecting to the shared daemon socket with its own capability. The
 // proxy holds no fabric state and enforces no policy; the daemon derives the
 // principal from the capability, never from MCP arguments.
 
-const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH;
-
-if (socketPath === undefined) {
-  process.stderr.write("agent-fabric-mcp requires AGENT_FABRIC_SOCKET_PATH\n");
-  process.exit(2);
-}
+const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? resolveFabricPaths().socketPath;
 
 let capability: string;
 try {
-  capability = await resolveMcpCapability(process.env);
+  capability = await resolveMcpCapability(process.env, process.cwd(), (message) => process.stderr.write(`warning: ${message}\n`));
 } catch (error: unknown) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(2);

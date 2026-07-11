@@ -1,5 +1,5 @@
 import { chmodSync, mkdirSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export type FabricPaths = {
@@ -25,12 +25,9 @@ export function resolveFabricPaths(): FabricPaths {
     environmentPath("AGENT_FABRIC_STATE_DIRECTORY") ??
       join(environmentPath("XDG_STATE_HOME") ?? join(environmentPath("HOME") ?? homedir(), ".local", "state"), "agent-harness", "fabric"),
   );
-  const uid = typeof process.getuid === "function" ? process.getuid() : 0;
   const runtimeDirectory = privateDirectory(
     environmentPath("AGENT_FABRIC_RUNTIME_DIRECTORY") ??
-      (environmentPath("XDG_RUNTIME_DIR") === undefined
-        ? join(environmentPath("TMPDIR") ?? tmpdir(), `agent-harness-${uid}`, "fabric")
-        : join(environmentPath("XDG_RUNTIME_DIR") ?? tmpdir(), "agent-harness", "fabric")),
+      join(stateDirectory, "runtime"),
   );
   return {
     stateDirectory,

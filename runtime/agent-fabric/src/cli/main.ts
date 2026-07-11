@@ -5,7 +5,9 @@ import { dirname, isAbsolute } from "node:path";
 
 import { verifyFabricReceiptLink } from "../exports/receipt.js";
 import { runForegroundDaemon } from "./daemon-run.js";
+import { runEventObserver } from "./event-observer.js";
 import { mcpSeatPath, provisionMcpSeats } from "./mcp-provision.js";
+import { provisionObserverCredential } from "./observer-provision.js";
 import { resolveFabricPaths } from "./paths.js";
 
 function option(arguments_: string[], name: string): string | undefined {
@@ -86,6 +88,10 @@ async function main(arguments_: string[]): Promise<void> {
     await runForegroundDaemon(arguments_.slice(2));
     return;
   }
+  if (arguments_[0] === "observe") {
+    await runEventObserver(arguments_.slice(1));
+    return;
+  }
   if (arguments_[0] === "mcp" && arguments_[1] === "provision") {
     const output = await provisionMcpSeats(arguments_.slice(2), resolveFabricPaths());
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
@@ -96,8 +102,16 @@ async function main(arguments_: string[]): Promise<void> {
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
   }
+  if (arguments_[0] === "mcp" && arguments_[1] === "observer-provision") {
+    const projectIndex = arguments_.indexOf("--project");
+    const project = projectIndex === -1 ? undefined : arguments_[projectIndex + 1];
+    if (project === undefined || arguments_.length !== 4) throw new Error("mcp observer-provision requires --project <path>");
+    const output = await provisionObserverCredential({ project, paths: resolveFabricPaths() });
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    return;
+  }
   throw new Error(
-    "usage: agent-fabric inspect [--database PATH] [--json] | receipt verify --run-receipt PATH | daemon run (--no-adapters | --trusted-config PATH --compatibility PATH --compatibility-schema PATH --agents-home PATH) | mcp provision --project PATH --chair SEAT --seats SEAT,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
+    "usage: agent-fabric inspect [--database PATH] [--json] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | mcp provision --project PATH --chair SEAT --seats SEAT,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
   );
 }
 

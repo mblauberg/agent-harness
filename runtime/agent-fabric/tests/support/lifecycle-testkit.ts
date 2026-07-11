@@ -71,6 +71,7 @@ function adapterOptions(fixture: {
   directory: string;
   clock: ManualClock;
   providerJournalPath: string;
+  providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
 }): Stage3OpenOptions {
   return {
     databasePath: fixture.databasePath,
@@ -79,7 +80,10 @@ function adapterOptions(fixture: {
     adapters: {
       "fake-lifecycle": {
         command: [process.execPath, "--import", "tsx", fakeProvider],
-        environment: { LIFECYCLE_FAKE_JOURNAL: fixture.providerJournalPath },
+        environment: {
+          LIFECYCLE_FAKE_JOURNAL: fixture.providerJournalPath,
+          LIFECYCLE_FAKE_STATUS: fixture.providerStatus ?? "healthy",
+        },
       },
     },
   };
@@ -192,13 +196,17 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
   };
 }
 
-export async function reopenLifecycleFabric(fixture: LifecycleFixture): Promise<Fabric> {
+export async function reopenLifecycleFabric(
+  fixture: LifecycleFixture,
+  options: { providerStatus?: "healthy" | "unmanaged" | "missing-evidence" } = {},
+): Promise<Fabric> {
   return await openFabric(
     adapterOptions({
       databasePath: fixture.databasePath,
       directory: fixture.directory,
       clock: fixture.clock,
       providerJournalPath: fixture.providerJournalPath,
+      ...(options.providerStatus === undefined ? {} : { providerStatus: options.providerStatus }),
     }),
   );
 }

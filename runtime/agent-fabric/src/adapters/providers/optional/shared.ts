@@ -16,11 +16,11 @@ export type OptionalProviderCapabilities = {
   adapterId: string;
   operations: string[];
   actionJournal: true;
-  persistentSession: true;
+  persistentSession: boolean;
   ephemeralWorker: true;
   controlModes: ["managed"];
   inboxDeliveryModes: ["structured-push"];
-  recoveryOperations: ["resume_reference", "lookup_action"];
+  recoveryOperations: string[];
   compactInPlace: boolean;
   idempotencyEvidence: "per-action-fail-closed";
   adapterContractVersion: 1;
@@ -83,6 +83,8 @@ export function optionalCapabilities(input: {
   operations: string[];
   modelFamilies: string[];
   compactInPlace: boolean;
+  persistentSession?: boolean;
+  recoveryOperations?: string[];
 }): OptionalProviderCapabilities {
   return {
     protocolVersion: 1,
@@ -90,11 +92,11 @@ export function optionalCapabilities(input: {
     adapterId: input.adapterId,
     operations: input.operations,
     actionJournal: true,
-    persistentSession: true,
+    persistentSession: input.persistentSession ?? true,
     ephemeralWorker: true,
     controlModes: ["managed"],
     inboxDeliveryModes: ["structured-push"],
-    recoveryOperations: ["resume_reference", "lookup_action"],
+    recoveryOperations: input.recoveryOperations ?? ["resume_reference", "lookup_action"],
     compactInPlace: input.compactInPlace,
     idempotencyEvidence: "per-action-fail-closed",
     allowedModelFamilies: input.modelFamilies,

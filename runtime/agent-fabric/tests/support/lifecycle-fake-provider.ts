@@ -170,7 +170,12 @@ input.on("line", (line) => {
     return;
   }
   if (request.method === "status") {
-    respond(request.id, { healthy: true });
+    if (process.env.LIFECYCLE_FAKE_STATUS === "missing-evidence") {
+      respond(request.id, {});
+      return;
+    }
+    const managed = process.env.LIFECYCLE_FAKE_STATUS !== "unmanaged";
+    respond(request.id, { healthy: managed, matches: managed });
     return;
   }
   fail(request.id, "METHOD_NOT_FOUND", `unsupported method ${request.method}`);
