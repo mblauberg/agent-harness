@@ -1,13 +1,15 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.5
+Version: 1.6
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.5 closes the implementation-discovered current-agent MCP parity and
+Version 1.6 closes the review-discovered bridge recovery, provider-native
+attestation evidence, resource projection and lifecycle-surface gaps. Version
+1.5 closed the implementation-discovered current-agent MCP parity and
 retained provider-session tool-projection gap. Version 1.4 closes the provider-session continuity
 attestation and live-bridge gap. Version 1.3 closed atomic launch-custody,
 recovery, secret-handoff and global provider-action identity gaps. Version 1.2
@@ -567,14 +569,17 @@ prompt/model input, provider payload/history, operator JSON, event, discovery
 material, log or error detail. Adapter implementations shall redact the secret
 before propagating any failure.
 
-The provider session, not the adapter wrapper, proves continuity. Launch
-creates a one-use random challenge and configures the provider session with a
-secret-consuming local Fabric bridge. The exact session must invoke the bridge
-and satisfy that challenge; the adapter binds the invocation to the actual
-provider session reference/generation, adapter/action pair and contract digest.
-A wrapper-side mailbox/status call is not evidence. Only the canonical,
-non-secret attestation digest enters effect evidence; neither challenge nor
-attestation may carry the credential.
+The provider session, not an adapter-local probe, supplies continuity evidence.
+Launch custody creates a 32-byte one-use random challenge, persists only its
+digest and sends the raw value only in the volatile private handoff. The exact
+session must echo it in a native provider tool invocation. The provider contract
+declares its invocation-attribution mechanism; the shipped adapter returns the
+bounded provider-emitted session, turn and call identifiers plus response and
+launch bindings. The daemon verifies them against custody before accepting the
+canonical non-secret attestation digest. The adapter is the trusted translation
+boundary, so conformance exercises its real code against a fake native provider
+transport; adapter-local invocation with no provider event is rejected. Neither
+challenge nor attestation may carry the credential.
 
 On success the supervisor retains the owning adapter/session bridge for later
 turns. The adapter may keep the credential only in volatile bridge state and
@@ -714,8 +719,13 @@ Fabric tool. Release or supervisor shutdown closes it once. Unexpected loss
 before terminal launch is ambiguous; loss after activation journals provider-
 context/chair loss and fences normal delivery/turn authority.
 
-The runtime shall bound tool count, descriptor and argument size, request
-duration, concurrent calls, buffered output and error detail. It shall never
+The hard projection limits are 96 tools, 32 KiB canonical JSON per descriptor
+and 512 KiB for the complete descriptor set. The complete authorised set must
+fit and match across projections; exceeding any bound rejects MCP connection or
+chair launch with the exact excess descriptor names. It is never truncated.
+Arguments/results use the negotiated 1 MiB frame, 32 pending-call, 16 in-flight,
+30-second request and five-minute idle maxima from the public protocol. The
+runtime shall bound buffered output and error detail. It shall never
 forward terminal control, credentials, raw transport failures or unvalidated
 provider output. Duplicate tool calls retain the underlying protocol command
 identity and idempotency behavior; a proxy or provider crash cannot blindly
@@ -736,5 +746,43 @@ Deterministic acceptance adds:
   and concurrent-call coverage without daemon loss, duplicate external effect
   or false task/message completion; and
 - end-to-end MCP proxy and production Console/TUI dogfood against one real
-  elected daemon and canonical socket, without provider login or persistent
-  MCP registration during this implementation run.
+  elected daemon and canonical socket; real-provider later-turn dogfood uses an
+  already authenticated installation only when the run has explicit provider
+  authority, performs no login or persistent MCP registration, and otherwise
+  records a non-passing `not-run` gate rather than substituting a fake.
+
+### 9.12 Bridge-loss recovery and lifecycle retirement
+
+Startup and live adapter supervision compare every active launched chair with
+the volatile retained-bridge registry. A missing/closed bridge atomically
+persists one immutable loss row under the daemon generation, freezes the old
+chair lease/delivery/grants, revokes the old capability and CASes the run and
+session to `recovery_required`. The recovery manifest hashes current task,
+mailbox, lease, checkpoint, membership, provider and revision facts. Repeated
+observation is idempotent; absence of a bridge is never inferred as provider
+death or a safe retry.
+
+An operator-authorised recovery custody row binds the loss, manifest, selected
+path, expected generations/revisions, adapter contract and stable action ID.
+`rebind` prepares a new hash-only capability and daemon challenge under a higher
+generation, then dispatches once to the dedicated adapter reattach operation.
+The same provider resume reference is context only: fresh native tool-call
+attestation is mandatory. `takeover` requires a named successor whose live
+bridge and narrowed authority are current. `abandon` records the terminal loss
+path. Prepared restart performs zero adapter I/O; dispatched/accepted/ambiguous
+restart performs pair-keyed lookup only. Terminal success atomically activates
+the new generation and retains its bridge. Failure cleans only proved no-effect;
+ambiguity retains custody and remains fenced.
+
+The four direct lifecycle protocol operations are retired and never granted.
+Only `OperatorActionIntent` lifecycle variants may reach production state/effect
+ports because they bind preview, exact global state, session/run generation,
+consequence evidence and confirmation. Compatibility decoders may explain the
+replacement but cannot capture a current revision or execute.
+
+Verification adds crash points before/after every loss/recovery statement,
+daemon restart with an active launched chair, same-action lookup recovery,
+wrong loss/manifest/generation, stale resume reference, missing native callback,
+successor-without-live-bridge, explicit abandon and duplicate observation. It
+also asserts the direct lifecycle operations are absent from every grant/client
+and return retirement errors if sent manually.

@@ -1,14 +1,16 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.9
+Version: 0.10
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.9 closes the implementation-discovered current-agent MCP parity and
+Version 0.10 closes the review-discovered chair-bridge recovery, provider-native
+attestation evidence, MCP resource parity and duplicate lifecycle-surface gaps.
+Version 0.9 closed the implementation-discovered current-agent MCP parity and
 launched-chair tool-surface gap. Version 0.8 closes the provider-session continuity
 attestation and live-bridge gap. Version 0.7 closed launch-custody, artifact,
 secret-handoff and provider-action identity gaps. Version 0.6 closed the typed
@@ -674,6 +676,9 @@ tools_by_stage:
   stage_2:
     - fabric_run_create
     - fabric_run_status
+    - fabric_task_list
+    - fabric_agent_list
+    - fabric_receipt_list
     - fabric_task_assign
     - fabric_task_claim
     - fabric_task_complete
@@ -714,9 +719,11 @@ resources:
 ```
 
 Unshipped operations are absent rather than stubbed. Stage 2 contract tests
-verify resource round-trips from both MCP clients. If either client lacks the
-required resource behaviour, the facade supplies equivalent read-only
-`fabric_*_get` tools without changing the underlying resource schema.
+verify resource round-trips from both MCP clients. The four URI templates are
+MCP-native convenience projections of the same generated run-status, task-list,
+agent-list and receipt-list descriptors; they are not another schema owner.
+Every surface, including Codex dynamic tools, exposes those four generated read
+tools even when it has no resource-template channel.
 Subtree-barrier closure by a leader becomes available with teams in Stage 5;
 before then `fabric_barrier_close` accepts only chair-owned run or stage scope.
 
@@ -808,7 +815,7 @@ files are never pruned.
 
 | Failure | Required behaviour |
 |---|---|
-| Daemon restart | Replay committed events, restore cursors and reattach provider sessions |
+| Daemon restart | Replay committed events and restore cursors. Ordinary provider sessions follow their adapter recovery contract. A launched chair whose volatile bridge is lost is journalled and fenced as chair loss; never re-expose Fabric tools from its resume reference alone. Recovery uses the explicit generation-bound chair-bridge recovery custody below. |
 | Duplicate message | Deduplicate by message and action key |
 | Unknown provider turn | Reconcile adapter state before retrying any side-effecting action |
 | Worker loss | Expire its turn lease, preserve partial artifacts and notify its parent |
@@ -1841,14 +1848,26 @@ material, log or adapter error. The adapter accepts this handoff at most once
 for the exact launch attempt; replay cannot recover or redisclose the secret.
 
 Possession of that credential by the adapter wrapper is not provider-session
-continuity. Before returning terminal success, the exact launched provider
-session must originate a one-use, random-challenge attestation through the
-Fabric bridge configured in that session. The adapter binds the observed tool
-or protocol invocation to the exact provider session reference and generation,
-adapter/action pair and provider-contract digest. A wrapper-side Fabric read,
-an adapter-generated assertion or an invocation that is not attributable to
-the launched session cannot attest continuity. The attestation contains no
-credential; its canonical digest is covered by the terminal effect digest.
+continuity. Launch custody generates a 32-byte random challenge before adapter
+I/O, persists only its digest and passes the raw challenge once in the volatile
+private handle. Before returning terminal success, the exact launched provider
+session must echo that challenge through the Fabric tool configured in that
+session. The adapter contract, covered by `provider_contract_digest`, declares
+its provider-native invocation-attribution mechanism. The real adapter returns
+the verbatim bounded native invocation record: provider session reference and
+generation, provider-assigned turn and tool-call IDs, adapter/action pair,
+contract digest and challenge response. The daemon verifies the record against
+the custody challenge and terminal outcome before activation and stores only a
+canonical non-secret evidence digest.
+
+The provider adapter is a trusted translation boundary, not a cryptographic
+attestor against its own malicious code. The guarantee is narrower and
+testable: shipped adapter code has no terminal-success path without an
+attributable provider-native callback. A wrapper-side Fabric read, direct
+bridge method call, adapter-generated assertion, missing provider turn/call ID
+or wrong/replayed challenge cannot attest continuity. Conformance runs the real
+adapter against a fake provider transport that emits native events; a fixture
+with no provider tool event must remain unproved.
 
 The supervisor retains the secret-consuming adapter/session bridge after a
 successful launch. Later turns for that provider session reuse the same bridge;
@@ -2130,7 +2149,10 @@ The canonical MCP descriptor set is a projection of the active agent-principal
 operation registry and its closed protocol codecs. It includes the Stage 2-5
 tools and every Spec 05 agent operation listed in section 14. A descriptor owns
 one stable tool name, protocol operation, input codec, output codec, receipt
-renderer and required negotiated feature. Standalone proxies and provider-
+renderer, optional resource-template URI and required negotiated feature. The
+run-status, task-list, agent-list and receipt-list resource templates resolve
+through their generated read descriptors; every projection exposes the read
+tools even when it cannot expose MCP resources. Standalone proxies and provider-
 session bridges import those descriptors; neither copies schemas or accepts an
 arbitrary method name.
 
@@ -2159,8 +2181,72 @@ continuity.
 - **NFR-018:** MCP proxies and provider-session tool projections shall expose no
   generic arbitrary RPC, capability substitution, duplicated schema owner or
   wrapper-originated call evidence.
-- **AC-027:** schema parity tests cover standalone Claude/Codex proxies and
-  launched Claude/Codex provider surfaces; wrong-principal, wrong-generation,
-  missing-feature, malformed input/output, wrapper self-call and bridge-loss
-  fixtures fail closed, while a provider-originated later turn performs a real
-  current-agent Fabric operation through the original retained bridge.
+- **AC-027:** CI conformance uses the real Claude/Codex adapters against fake
+  provider transports and proves complete tool-name/schema/resource-read parity,
+  native provider invocation attribution, wrong-principal/generation/feature
+  rejection, malformed input/output handling, wrapper-self-call rejection and
+  bridge-loss fencing. A separate real-provider dogfood gate uses only an
+  already authenticated installation under explicit run authority, performs a
+  later-turn current-agent Fabric call through the original retained bridge and
+  records `not-run` rather than passing when login or provider access would be
+  required. No test may claim that fake transport proves provider authenticity.
+
+### 32.12 Chair-bridge recovery and one lifecycle mutation surface
+
+Loss of a retained bridge after activation atomically creates an immutable
+`chair_bridge_loss` record, freezes the old chair lease, delivery and new
+authority grants, revokes the old Fabric capability, advances the affected run
+and session to `recovery_required`, and captures a daemon-derived recovery
+manifest digest over current task, mailbox, lease, checkpoint, provider and
+membership revisions. This manifest is loss evidence, not a fabricated
+chair-authored handoff.
+
+Recovery requires an explicit operator command with `takeover` authority bound
+to that exact loss record, recovery manifest, run/session/chair generations,
+provider adapter/contract and target revision. The operator chooses one closed
+path:
+
+1. `rebind`: retain the same chair identity and provider resume reference under
+   a higher chair/principal/session generation. Recovery custody creates a new
+   random capability and challenge, invokes a dedicated stable adapter action,
+   and requires a fresh provider-native attestation before reactivation.
+2. `takeover`: promote an explicitly named existing successor only after its
+   live provider bridge and authority are proved; the loss manifest substitutes
+   for a chair handoff only for this operator-authorised crash-recovery path.
+3. `abandon`: preserve the loss evidence and enter the explicit cancel/failure
+   terminal path without deleting provider history.
+
+No path reconstructs or reissues the old credential. Rebind is a newly issued,
+generation-bound capability after atomic revocation, not derivation from a hash
+or resume reference. Its provider action uses the same prepare-before-I/O,
+lookup-only ambiguity and one-effect custody rules as initial launch. Restart
+discovers a missing live bridge and persists/fences the loss before admitting
+another chair mutation. If no operator acts, the session remains safely
+`recovery_required`; it is not silently resumed or promoted.
+
+The typed two-phase `OperatorActionIntent` is the sole production owner of
+project-session drain/stop and daemon drain/stop. The direct
+`fabric.v1.project-session.{drain,stop}` and `fabric.v1.daemon.{drain,stop}`
+operations are retired because their request shapes do not carry the complete
+preview/global-revision contract. They are absent from grants and negotiated
+clients; retained decoders return the typed retirement failure and point to
+`fabric.v1.operator-action.preview`.
+
+- **FR-034:** Post-activation bridge loss shall persist and fence one exact loss
+  generation, and only explicit recovery custody may rebind, take over or
+  abandon it.
+- **FR-035:** All production lifecycle mutations shall use the typed operator-
+  action preview/commit/status/reconcile path; incomplete direct lifecycle
+  operations shall be retired and ungranted.
+- **NFR-019:** Recovery shall never derive, reconstruct or reuse the old chair
+  credential, and ambiguous recovery shall never duplicate a provider effect.
+- **NFR-020:** The complete authorised MCP descriptor set shall be projected or
+  the connection/launch shall fail closed; no projection may silently truncate.
+- **AC-028:** daemon/adapter crash after activation creates one loss record and
+  freezes the old generation; rebind requires a fresh capability, challenge,
+  adapter action and native provider attestation, takeover requires an explicit
+  successor with a live bridge, and abandon remains available. Resume-reference-
+  only recovery and duplicate effects fail.
+- **AC-029:** protocol negotiation exposes no direct lifecycle shortcut, while
+  typed lifecycle preview/commit survives restart and preserves exact global,
+  session, run and consequence fences.
