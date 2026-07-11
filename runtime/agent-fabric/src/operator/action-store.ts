@@ -382,6 +382,12 @@ export class OperatorActionStore {
       SELECT * FROM operator_previews WHERE confirmed_command_id=? AND operator_id=?
     `).get(request.targetCommandId, context.operatorId), "operator action target");
     const envelope = parseStoredPreview(text(stored, "preview_json"));
+    if (envelope.preview.intent.kind === "project-session-launch") {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "public operator reconciliation cannot own a launch provider action",
+      );
+    }
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
     this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));

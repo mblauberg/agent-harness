@@ -144,3 +144,60 @@ describe("project-session migration 0004", () => {
     });
   });
 });
+
+describe("launch-custody migration 0005", () => {
+  it("adds immutable custody and enforces daemon-global provider action identity", () => {
+    const database = new Database(":memory:");
+    databases.push(database);
+
+    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3, 4, 5], currentVersion: 5 });
+    expect(database.prepare(`
+      SELECT name FROM sqlite_master
+       WHERE type='table' AND name='project_session_launch_custody'
+    `).get()).toEqual({ name: "project_session_launch_custody" });
+    expect(database.prepare(`
+      SELECT name FROM sqlite_master
+       WHERE type='trigger' AND name='launch_custody_immutable_update'
+    `).get()).toEqual({ name: "launch_custody_immutable_update" });
+    expect(database.prepare(`
+      SELECT name FROM sqlite_master
+       WHERE type='trigger' AND name='launch_custody_immutable_delete'
+    `).get()).toEqual({ name: "launch_custody_immutable_delete" });
+
+    const insertAction = database.prepare(`
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, updated_at
+      ) VALUES (?, 'shared-action', 'shared-adapter', 'spawn', NULL, NULL, NULL,
+                ?, ?, '{}', 'prepared', '["prepared"]', 0, 0, 0, 1)
+    `);
+    insertAction.run("run-one", "identity-one", "payload-one");
+    expect(() => insertAction.run("run-two", "identity-two", "payload-two"))
+      .toThrow(/UNIQUE constraint failed: provider_actions\.adapter_id, provider_actions\.action_id/u);
+  });
+
+  it("fails migration before mutation when legacy rows reuse an adapter/action pair across runs", () => {
+    const database = new Database(":memory:");
+    databases.push(database);
+    applyMigrations(database, migrations());
+    const insertAction = database.prepare(`
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, updated_at
+      ) VALUES (?, 'duplicate-action', 'duplicate-adapter', 'spawn', NULL, NULL, NULL,
+                ?, ?, '{}', 'prepared', '["prepared"]', 0, 0, 0, 1)
+    `);
+    insertAction.run("run-one", "identity-one", "payload-one");
+    insertAction.run("run-two", "identity-two", "payload-two");
+
+    expect(() => applyMigrations(database)).toThrowError(
+      expect.objectContaining({ code: "LAUNCH_CUSTODY_MIGRATION_PREFLIGHT_FAILED" }),
+    );
+    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version=5").get())
+      .toEqual({ count: 0 });
+  });
+});

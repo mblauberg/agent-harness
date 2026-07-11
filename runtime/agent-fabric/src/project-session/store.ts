@@ -124,6 +124,17 @@ export class ProjectSessionStore {
     request: ProjectSessionTransitionRequest,
   ): ProjectSession {
     const identity = this.#sessionIdentity(request.projectSessionId);
+    if (
+      identity.state === "launching" ||
+      identity.state === "launch_ambiguous" ||
+      request.transition.to === "launching" ||
+      request.transition.to === "launch_ambiguous"
+    ) {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "public project-session transition cannot enter or leave a launch-custody-owned state",
+      );
+    }
     return this.#operatorStore.executeCommand(
       context,
       request.command,

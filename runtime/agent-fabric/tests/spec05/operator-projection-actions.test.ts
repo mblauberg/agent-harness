@@ -11,6 +11,7 @@ import {
   type OperatorActionIntent,
   type OperatorActionPreview,
   type OperatorActionPreviewRequest,
+  type OperatorActionReconcileRequest,
   type OperatorCapabilityCredential,
   type OperatorDetailReadRequest,
   type OperatorViewPageRequest,
@@ -1200,6 +1201,23 @@ describe("operator action store", () => {
       projectId,
       commandId: receipt.commandId,
     })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+
+    await expect(actions.reconcile(fixture.context, {
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("reconcile_launch_public_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_reconcile_launch_public_01",
+        },
+      },
+      projectId,
+      targetCommandId: receipt.commandId,
+      expectedStatus: "pending",
+      expectedAttemptGeneration: 1,
+      mode: "observe-only",
+    } as OperatorActionReconcileRequest)).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
 
     current = {
       ...current,

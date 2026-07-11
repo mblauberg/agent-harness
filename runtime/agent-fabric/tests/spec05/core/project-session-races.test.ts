@@ -135,9 +135,26 @@ describe("project-session store", () => {
     } as unknown as ProjectSessionTransitionRequest;
     const transitioned = sessions.transitionProjectSession(context, transitionRequest);
     expect(transitioned).toMatchObject({ state: "awaiting_launch", revision: 2 });
+
+    const publicLaunchTransition = {
+      ...transitionRequest,
+      command: {
+        ...transitionRequest.command,
+        commandId: "command_public_launch",
+        expectedRevision: 2,
+        provenance: { kind: "console-direct-input", clientId: "console_01", inputEventId: "input_public_launch" },
+      },
+      transition: { to: "launching", reason: "public path must not own launch custody" },
+    } as unknown as ProjectSessionTransitionRequest;
+    expect(() => sessions.transitionProjectSession(context, publicLaunchTransition)).toThrowError(
+      expect.objectContaining({ code: "LIFECYCLE_PRECONDITION_FAILED" }),
+    );
+    expect(database.prepare("SELECT state, revision FROM project_sessions WHERE project_session_id='session_01'").get())
+      .toEqual({ state: "awaiting_launch", revision: 2 });
+
     const changedRetry = {
       ...transitionRequest,
-      transition: { to: "launching", reason: "changed after commit" },
+      transition: { to: "cancelled", reason: "changed after commit" },
     } as unknown as ProjectSessionTransitionRequest;
     expect(() => sessions.transitionProjectSession(context, changedRetry)).toThrowError(
       expect.objectContaining({ code: "DEDUPE_CONFLICT" }),

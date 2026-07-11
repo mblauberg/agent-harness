@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 
 import { preflightAdditiveInvariants } from "../persistence/invariants.js";
+import { preflightLaunchCustody } from "../persistence/launch-custody-preflight.js";
 import { preflightProjectSessionOperations } from "../persistence/project-session-preflight.js";
 
 export type Migration = {
@@ -39,6 +40,7 @@ const defaultMigrationFiles = [
   "0002-observer-event-sequence.sql",
   "0003-integrity-and-query-plans.sql",
   "0004-project-session-operations.sql",
+  "0005-launch-custody.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {
@@ -59,7 +61,9 @@ function loadDefaultMigrations(): Migration[] {
         ? { preflight: preflightAdditiveInvariants }
         : index === 3
           ? { preflight: preflightProjectSessionOperations }
-          : {}),
+          : index === 4
+            ? { preflight: preflightLaunchCustody }
+            : {}),
     };
   });
 }
