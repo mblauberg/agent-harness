@@ -14,8 +14,22 @@ export type DaemonHandshakeResult<Client> =
       daemonInstanceGeneration: number;
       features: readonly string[];
     }
-  | { status: "unavailable"; reason: "absent" | "stale" | "unreachable" | "timeout"; message: string }
+  | {
+      status: "unavailable";
+      reason: "absent" | "stale" | "unreachable" | "timeout";
+      message: string;
+      terminalEvidence?: DaemonTerminalEvidence;
+      reconciliationRequired?: boolean;
+    }
   | { status: "incompatible"; responsive: true; message: string };
+
+export type DaemonTerminalEvidence = {
+  state: "stopped" | "crashed";
+  actionId: string;
+  electionGeneration: number;
+  daemonInstanceGeneration: number;
+  socketPath: string;
+};
 
 export class BootstrapClientError extends Error {
   readonly code: string;
@@ -115,6 +129,16 @@ function validateReadyReceipt(
   }
 }
 
+function terminalEvidenceMatchesReady(
+  evidence: DaemonTerminalEvidence,
+  receipt: BootstrapReadyReceipt,
+): boolean {
+  return evidence.actionId === receipt.actionId
+    && evidence.electionGeneration === receipt.electionGeneration
+    && evidence.daemonInstanceGeneration === receipt.daemonInstanceGeneration
+    && evidence.socketPath === receipt.socketPath;
+}
+
 function validateSpawnReady<Client>(ready: BootstrapSpawnReady, options: AttachOrStartOptions<Client>): void {
   if (!Number.isSafeInteger(ready.daemonInstanceGeneration) || ready.daemonInstanceGeneration < 1) {
     throw new BootstrapClientError("BOOTSTRAP_READY_INVALID", "spawn ready generation is invalid");
@@ -177,13 +201,24 @@ export async function attachOrStartDaemon<Client>(options: AttachOrStartOptions<
     if (recheck.status === "incompatible") {
       throw new BootstrapClientError("BOOTSTRAP_INCOMPATIBLE_INCUMBENT", recheck.message);
     }
+    if (recheck.reconciliationRequired === true) {
+      throw new BootstrapClientError("BOOTSTRAP_RECONCILIATION_REQUIRED", recheck.message);
+    }
 
     const priorOutcome = await held.readCurrentOutcome();
     if (priorOutcome?.kind === "ready") {
-      throw new BootstrapClientError(
-        "BOOTSTRAP_READY_UNREACHABLE",
-        "a successful bootstrap generation exists but its daemon is not reachable",
-      );
+      if (recheck.terminalEvidence === undefined) {
+        throw new BootstrapClientError(
+          "BOOTSTRAP_READY_UNREACHABLE",
+          "a successful bootstrap generation exists but its daemon is not reachable",
+        );
+      }
+      if (!terminalEvidenceMatchesReady(recheck.terminalEvidence, priorOutcome.receipt)) {
+        throw new BootstrapClientError(
+          "BOOTSTRAP_TERMINAL_EVIDENCE_MISMATCH",
+          "daemon terminal evidence does not own the confirmed ready generation",
+        );
+      }
     }
     if (priorOutcome?.kind === "terminal" && priorOutcome.receipt.status === "ambiguous") {
       throw new BootstrapClientError(

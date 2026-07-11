@@ -156,6 +156,30 @@ describe("attachOrStartDaemon", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("blocks blind spawn when private discovery makes unreachability ambiguous", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-ambiguous-discovery-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    const socketPath = join(runtimeDirectory, "fabric.sock");
+    const spawn = vi.fn();
+
+    await expect(attachOrStartDaemon({
+      actionId: "bootstrap_ambiguous_discovery_01",
+      socketPath,
+      requiredProtocolVersion: 1,
+      requiredFeatures: ["project-sessions.v1"],
+      election: new BootstrapElection({ runtimeDirectory }),
+      handshake: async () => ({
+        status: "unavailable",
+        reason: "unreachable",
+        message: "active discovery cannot be reconciled",
+        reconciliationRequired: true,
+      }),
+      spawn,
+    })).rejects.toMatchObject({ code: "BOOTSTRAP_RECONCILIATION_REQUIRED" });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("coalesces twelve simultaneous first reads onto one spawned generation", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-concurrent-"));
     cleanup.push(root);
@@ -211,5 +235,95 @@ describe("attachOrStartDaemon", () => {
     expect(attached.filter((item) => item.started)).toHaveLength(1);
     expect(new Set(attached.map((item) => item.daemonInstanceGeneration))).toEqual(new Set([23]));
     expect(new Set(attached.map((item) => item.electionGeneration))).toEqual(new Set([1]));
+  });
+
+  it("advances a confirmed ready generation only after exact stopped ownership proof", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-stopped-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    const socketPath = join(runtimeDirectory, "fabric.sock");
+    const election = new BootstrapElection({ runtimeDirectory });
+    let runningGeneration: number | undefined;
+    let stoppedGeneration: number | undefined;
+    let terminalActionId = "bootstrap_stopped_01";
+    const handshake = vi.fn().mockImplementation(async () => {
+      if (runningGeneration !== undefined) {
+        return {
+          status: "compatible",
+          client: { generation: runningGeneration },
+          protocolVersion: 1,
+          daemonInstanceGeneration: runningGeneration,
+          features: ["project-sessions.v1"],
+        };
+      }
+      return {
+        status: "unavailable",
+        reason: stoppedGeneration === undefined ? "absent" : "stale",
+        message: stoppedGeneration === undefined ? "missing" : "proved stopped",
+        ...(stoppedGeneration === undefined ? {} : {
+          terminalEvidence: {
+            state: "stopped",
+            actionId: terminalActionId,
+            electionGeneration: stoppedGeneration,
+            daemonInstanceGeneration: stoppedGeneration,
+            socketPath,
+          },
+        }),
+      };
+    });
+    const spawn = vi.fn().mockImplementation(async (input: { electionGeneration: number; socketPath: string }) => {
+      runningGeneration = input.electionGeneration;
+      return {
+        ready: Promise.resolve({
+          daemonInstanceGeneration: input.electionGeneration,
+          socketPath: input.socketPath,
+          protocolVersion: 1,
+          features: ["project-sessions.v1"],
+          evidence: {
+            databaseOwned: true,
+            migrationsComplete: true,
+            recoveryComplete: true,
+            socketBound: true,
+          },
+        }),
+      };
+    });
+    const options = {
+      actionId: "bootstrap_stopped_01",
+      socketPath,
+      requiredProtocolVersion: 1,
+      requiredFeatures: ["project-sessions.v1"],
+      election,
+      handshake,
+      spawn,
+    } as const;
+
+    await expect(attachOrStartDaemon(options)).resolves.toMatchObject({
+      daemonInstanceGeneration: 1,
+      electionGeneration: 1,
+      started: true,
+    });
+    const priorGeneration = runningGeneration;
+    runningGeneration = undefined;
+
+    await expect(attachOrStartDaemon(options)).rejects.toMatchObject({
+      code: "BOOTSTRAP_READY_UNREACHABLE",
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    stoppedGeneration = priorGeneration;
+
+    terminalActionId = "wrong_bootstrap_action";
+    await expect(attachOrStartDaemon(options)).rejects.toMatchObject({
+      code: "BOOTSTRAP_TERMINAL_EVIDENCE_MISMATCH",
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    terminalActionId = "bootstrap_stopped_01";
+
+    await expect(attachOrStartDaemon(options)).resolves.toMatchObject({
+      daemonInstanceGeneration: 2,
+      electionGeneration: 2,
+      started: true,
+    });
+    expect(spawn).toHaveBeenCalledTimes(2);
   });
 });

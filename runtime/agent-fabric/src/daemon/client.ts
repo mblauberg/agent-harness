@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
-import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { chmod, open, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, normalize, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,20 @@ import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
 import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
 import { FabricRemoteError, TimedNdjsonTransport } from "../transport/ndjson-rpc.js";
-import { isRecord, type DaemonInitializeResult } from "./protocol.js";
+import { attachOrStartDaemon, BootstrapSpawnPhaseError, type DaemonHandshakeResult } from "./bootstrap-client.js";
+import { BootstrapElection, type BootstrapReadyReceipt } from "./bootstrap-election.js";
+import {
+  ensurePrivateDirectory,
+  markPrivateDiscoveryTerminal,
+  privateDiscoveryPaths,
+  publishPrivateDiscovery,
+  readPrivateDiscovery,
+  type LegacyDiscoveryReceipt,
+  type PrivateDiscoveryIdentity,
+  type PrivateDiscoveryOwner,
+  type PrivateDiscoveryPaths,
+} from "./private-discovery.js";
+import { FABRIC_PROTOCOL_VERSION, isRecord, type DaemonInitializeResult } from "./protocol.js";
 import { composeDaemonConfiguration } from "./composition.js";
 
 export { FabricRemoteError } from "../transport/ndjson-rpc.js";
@@ -127,6 +140,7 @@ export type FabricDaemonHandle = {
   bootstrapCapability: string;
   address: { transport: "unix"; path: string };
   pid: number;
+  ownsProcess: boolean;
   stop(): Promise<void>;
   waitForExit(): Promise<void>;
 };
@@ -164,13 +178,30 @@ function safeDatabasePath(path: string): string {
   return canonicalDaemonPath(requested);
 }
 
-function childEnvironment(options: DaemonStartOptions, bootstrapCapability: string, lockPaths: string[], capabilityKey: string): NodeJS.ProcessEnv {
+type DaemonBootstrapEnvironment = {
+  mode: "production-election" | "test-forced-process-locks";
+  actionId: string;
+  electionGeneration: number;
+  daemonInstanceGeneration: number;
+};
+
+function childEnvironment(
+  options: DaemonStartOptions,
+  bootstrapCapability: string,
+  lockPaths: string[],
+  capabilityKey: string,
+  bootstrap: DaemonBootstrapEnvironment,
+): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     AGENT_FABRIC_DATABASE_PATH: options.databasePath,
     AGENT_FABRIC_SOCKET_PATH: options.socketPath,
     AGENT_FABRIC_STATE_DIRECTORY: options.stateDirectory,
     AGENT_FABRIC_RUNTIME_DIRECTORY: options.runtimeDirectory,
     AGENT_FABRIC_BOOTSTRAP_CAPABILITY: bootstrapCapability,
+    AGENT_FABRIC_BOOTSTRAP_MODE: bootstrap.mode,
+    AGENT_FABRIC_BOOTSTRAP_ACTION_ID: bootstrap.actionId,
+    AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION: String(bootstrap.electionGeneration),
+    AGENT_FABRIC_DAEMON_INSTANCE_GENERATION: String(bootstrap.daemonInstanceGeneration),
     AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON: JSON.stringify(lockPaths),
     AGENT_FABRIC_CAPABILITY_KEY: capabilityKey,
     AGENT_FABRIC_EXECUTION_PROFILE: options.executionProfile ?? "headless",
@@ -206,9 +237,30 @@ async function loadOrCreateCapabilityKey(stateDirectory: string): Promise<string
   }
 }
 
-export type DaemonLock = { database: Database.Database; path: string; token: string };
+export type DaemonLock =
+  | { kind: "production-election-proof"; database: null; path: string; token: string }
+  | { kind: "test-forced-process-lock"; database: Database.Database; path: string; token: string };
+
+function productionElectionProof(): { actionId: string; electionGeneration: number; daemonInstanceGeneration: number } | undefined {
+  if (process.env.AGENT_FABRIC_BOOTSTRAP_MODE !== "production-election") return undefined;
+  const actionId = process.env.AGENT_FABRIC_BOOTSTRAP_ACTION_ID;
+  const electionGeneration = Number(process.env.AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION);
+  const daemonInstanceGeneration = Number(process.env.AGENT_FABRIC_DAEMON_INSTANCE_GENERATION);
+  if (
+    actionId === undefined
+    || actionId.trim().length === 0
+    || !Number.isSafeInteger(electionGeneration)
+    || electionGeneration < 1
+    || !Number.isSafeInteger(daemonInstanceGeneration)
+    || daemonInstanceGeneration < 1
+  ) {
+    throw new FabricRemoteError("DAEMON_ELECTION_PROOF_INVALID", "production daemon election proof is incomplete");
+  }
+  return { actionId, electionGeneration, daemonInstanceGeneration };
+}
 
 export async function writeDaemonLockReceipt(path: string, owner: { pid: number; token: string; socketPath?: string }): Promise<void> {
+  if (productionElectionProof() !== undefined) return;
   const temporaryPath = `${path}.tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
   const handle = await open(temporaryPath, "wx", 0o600);
   try {
@@ -237,7 +289,7 @@ async function acquireDaemonLock(path: string): Promise<DaemonLock> {
     database.exec("BEGIN EXCLUSIVE");
     database.prepare("INSERT OR REPLACE INTO daemon_lock_owner(singleton, pid, token) VALUES (1, ?, ?)").run(process.pid, token);
     await writeDaemonLockReceipt(path, { pid: process.pid, token });
-    return { database, path, token };
+    return { kind: "test-forced-process-lock", database, path, token };
   } catch (error: unknown) {
     if (database !== undefined) {
       try { database.exec("ROLLBACK"); } catch { /* no active transaction */ }
@@ -251,6 +303,15 @@ async function acquireDaemonLock(path: string): Promise<DaemonLock> {
 }
 
 export async function acquireDaemonLocks(paths: string[]): Promise<DaemonLock[]> {
+  const proof = productionElectionProof();
+  if (proof !== undefined) {
+    return [...new Set(paths)].sort().map((path) => ({
+      kind: "production-election-proof" as const,
+      database: null,
+      path,
+      token: `election-${proof.electionGeneration}-${proof.daemonInstanceGeneration}`,
+    }));
+  }
   const locks: DaemonLock[] = [];
   try {
     for (const path of [...new Set(paths)].sort()) locks.push(await acquireDaemonLock(path));
@@ -262,6 +323,7 @@ export async function acquireDaemonLocks(paths: string[]): Promise<DaemonLock[]>
 }
 
 async function releaseDaemonLock(lock: DaemonLock): Promise<void> {
+  if (lock.kind === "production-election-proof") return;
   let record: unknown;
   try {
     record = JSON.parse(await readFile(lock.path, "utf8"));
@@ -279,18 +341,49 @@ export async function releaseDaemonLocks(locks: DaemonLock[]): Promise<void> {
   await Promise.all(locks.map(releaseDaemonLock));
 }
 
-export async function startFabricDaemon(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
-  await Promise.all([
-    mkdir(options.stateDirectory, { recursive: true, mode: 0o700 }),
-    mkdir(options.runtimeDirectory, { recursive: true, mode: 0o700 }),
-  ]);
-  await Promise.all([chmod(options.stateDirectory, 0o700), chmod(options.runtimeDirectory, 0o700)]);
+type PreparedDaemonStart = DaemonStartOptions & {
+  adapters: NonNullable<FabricOpenOptions["adapters"]>;
+  executionProfile: string;
+  maximumConcurrentProviderTurns: number;
+  workspaceRoots: string[];
+};
+
+type ChildExit = { code: number | null; signal: NodeJS.Signals | null };
+
+type SpawnedDaemonChild = {
+  bootstrapCapability: string;
+  pid: number;
+  ready: Promise<void>;
+  exit: Promise<ChildExit>;
+  isRunning(): boolean;
+  terminate(): Promise<void>;
+};
+
+type ProductionSpawn = {
+  bootstrapCapability: string;
+  pid: number;
+  identity: Promise<PrivateDiscoveryIdentity>;
+  exit: Promise<void>;
+  stop(clean: boolean): Promise<void>;
+};
+
+type PrivateDaemonAttachment = {
+  receipt: LegacyDiscoveryReceipt;
+  owner: PrivateDiscoveryOwner;
+};
+
+function normalizedStartOptions(options: DaemonStartOptions): DaemonStartOptions {
+  return {
+    ...options,
+    databasePath: resolve(options.databasePath),
+    stateDirectory: resolve(options.stateDirectory),
+    runtimeDirectory: resolve(options.runtimeDirectory),
+    socketPath: resolve(options.socketPath),
+  };
+}
+
+async function prepareDaemonStart(options: DaemonStartOptions): Promise<PreparedDaemonStart> {
   const databasePath = safeDatabasePath(options.databasePath);
-  const lockPaths = [
-    `${options.socketPath}.lock`,
-    `${databasePath}.daemon.lock`,
-  ];
-  const capabilityKey = await loadOrCreateCapabilityKey(options.stateDirectory);
   let adapters = options.adapters ?? {};
   let executionProfile = options.executionProfile ?? "headless";
   let maximumConcurrentProviderTurns = options.maximumConcurrentProviderTurns ?? 8;
@@ -306,6 +399,31 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
     workspaceRoots = composition.workspaceRoots;
   }
   workspaceRoots = [...new Set(workspaceRoots.map(canonicalDaemonPath))].sort();
+  return {
+    ...options,
+    databasePath,
+    adapters,
+    executionProfile,
+    maximumConcurrentProviderTurns,
+    workspaceRoots,
+  };
+}
+
+function stableBootstrapActionId(options: Pick<DaemonStartOptions, "databasePath" | "socketPath">): string {
+  return `daemon-bootstrap-${createHash("sha256")
+    .update(JSON.stringify({ databasePath: options.databasePath, socketPath: options.socketPath }))
+    .digest("hex")}`;
+}
+
+async function spawnDaemonChild(
+  options: PreparedDaemonStart,
+  bootstrap: DaemonBootstrapEnvironment,
+): Promise<SpawnedDaemonChild> {
+  const capabilityKey = await loadOrCreateCapabilityKey(options.stateDirectory);
+  const lockPaths = [
+    `${options.socketPath}.lock`,
+    `${options.databasePath}.daemon.lock`,
+  ];
   const bootstrapCapability = `afb_${randomBytes(32).toString("base64url")}`;
   const sourceMode = import.meta.url.endsWith(".ts");
   const processUrl = new URL(sourceMode ? "./process.ts" : "./process.js", import.meta.url);
@@ -316,10 +434,11 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
   const child = spawn(process.execPath, args, {
     cwd: packageRoot,
     env: childEnvironment(
-      { ...options, databasePath, adapters, executionProfile, maximumConcurrentProviderTurns, workspaceRoots },
+      options,
       bootstrapCapability,
       lockPaths,
       capabilityKey,
+      bootstrap,
     ),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -332,16 +451,9 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
   child.stderr.on("data", (chunk: string) => {
     stderr = `${stderr}${chunk}`.slice(-8192);
   });
-  const exitPromise = new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
+  const exitPromise = new Promise<ChildExit>((resolvePromise) => {
+    child.once("exit", (code, signal) => resolvePromise({ code, signal }));
   });
-  try {
-    await waitUntilReady(child, () => stderr);
-  } catch (error: unknown) {
-    child.kill("SIGKILL");
-    await exitPromise;
-    throw error;
-  }
   const pid = child.pid;
   let stopPromise: Promise<void> | undefined;
   const stopChild = async (): Promise<void> => {
@@ -362,16 +474,386 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
     }
     await exitPromise;
   };
+  const ready = (async (): Promise<void> => {
+    try {
+      await waitUntilReady(child, () => stderr);
+    } catch (error: unknown) {
+      child.kill("SIGKILL");
+      await exitPromise;
+      if (error instanceof FabricRemoteError) throw error;
+      throw new BootstrapSpawnPhaseError(
+        "spawn",
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+      );
+    }
+  })();
   return {
     bootstrapCapability,
-    address: { transport: "unix", path: options.socketPath },
     pid,
-    stop(): Promise<void> {
+    ready,
+    exit: exitPromise,
+    isRunning(): boolean {
+      return child.exitCode === null && child.signalCode === null;
+    },
+    terminate(): Promise<void> {
       stopPromise ??= stopChild();
       return stopPromise;
     },
+  };
+}
+
+function identityMatchesOwner(identity: PrivateDiscoveryIdentity, owner: PrivateDiscoveryOwner): boolean {
+  return identity.actionId === owner.actionId
+    && identity.electionGeneration === owner.electionGeneration
+    && identity.daemonInstanceGeneration === owner.daemonInstanceGeneration
+    && identity.socketPath === owner.socketPath
+    && identity.pid === owner.pid
+    && identity.bootstrapCapabilityHash === owner.bootstrapCapabilityHash;
+}
+
+function readyMatchesOwner(receipt: BootstrapReadyReceipt, owner: PrivateDiscoveryOwner): boolean {
+  return receipt.actionId === owner.actionId
+    && receipt.electionGeneration === owner.electionGeneration
+    && receipt.daemonInstanceGeneration === owner.daemonInstanceGeneration
+    && receipt.socketPath === owner.socketPath;
+}
+
+function socketEntryExists(socketPath: string): boolean {
+  try {
+    lstatSync(socketPath);
+    return true;
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function privateDaemonHandshake(
+  paths: PrivateDiscoveryPaths,
+  election: BootstrapElection,
+  socketPath: string,
+  provisional: PrivateDiscoveryIdentity | undefined,
+): Promise<DaemonHandshakeResult<PrivateDaemonAttachment>> {
+  const discovery = await readPrivateDiscovery(paths, socketPath);
+  if (discovery.status === "absent") {
+    if (socketEntryExists(socketPath)) {
+      return {
+        status: "unavailable",
+        reason: "unreachable",
+        message: "trusted socket exists without generation-bound private discovery",
+        reconciliationRequired: true,
+      };
+    }
+    return { status: "unavailable", reason: "absent", message: "private daemon discovery is absent" };
+  }
+  if (discovery.status === "terminal") {
+    return {
+      status: "unavailable",
+      reason: "stale",
+      message: `daemon generation ${String(discovery.owner.daemonInstanceGeneration)} is proved ${discovery.owner.state}`,
+      terminalEvidence: {
+        state: discovery.owner.state === "stopped" ? "stopped" : "crashed",
+        actionId: discovery.owner.actionId,
+        electionGeneration: discovery.owner.electionGeneration,
+        daemonInstanceGeneration: discovery.owner.daemonInstanceGeneration,
+        socketPath: discovery.owner.socketPath,
+      },
+    };
+  }
+  if (discovery.status === "ambiguous") {
+    return {
+      status: "unavailable",
+      reason: "unreachable",
+      message: discovery.message,
+      reconciliationRequired: true,
+    };
+  }
+
+  let client: FabricDaemonClient;
+  try {
+    client = await FabricDaemonClient.connect(discovery.receipt.socketPath, discovery.receipt.bootstrapCapability);
+  } catch (error: unknown) {
+    return {
+      status: "unavailable",
+      reason: error instanceof FabricRemoteError && error.code === "DAEMON_CONNECT_TIMEOUT" ? "timeout" : "unreachable",
+      message: error instanceof Error ? error.message : String(error),
+      reconciliationRequired: true,
+    };
+  }
+  const initialized = client.initializeResult;
+  await client.close();
+  if (initialized.protocolVersion !== FABRIC_PROTOCOL_VERSION || !initialized.capabilities.includes("rpc")) {
+    return { status: "incompatible", responsive: true, message: "daemon private protocol is incompatible" };
+  }
+
+  const provisionallyOwned = provisional !== undefined
+    && identityMatchesOwner(provisional, discovery.owner);
+  if (!provisionallyOwned) {
+    let outcome;
+    try {
+      outcome = await election.readGenerationOutcome(discovery.owner.electionGeneration);
+    } catch (error: unknown) {
+      if (isRecord(error) && error.code === "BOOTSTRAP_GENERATION_SUPERSEDED") {
+        return {
+          status: "unavailable",
+          reason: "stale",
+          message: "daemon discovery generation was superseded",
+          reconciliationRequired: true,
+        };
+      }
+      throw error;
+    }
+    if (outcome?.kind !== "ready") {
+      return {
+        status: "unavailable",
+        reason: "unreachable",
+        message: "responsive daemon discovery has no confirmed ready generation",
+        reconciliationRequired: true,
+      };
+    }
+    if (!readyMatchesOwner(outcome.receipt, discovery.owner)) {
+      throw new FabricRemoteError(
+        "DAEMON_DISCOVERY_GENERATION_MISMATCH",
+        "daemon discovery owner does not match the authoritative ready receipt",
+      );
+    }
+  }
+  return {
+    status: "compatible",
+    client: { receipt: discovery.receipt, owner: discovery.owner },
+    protocolVersion: initialized.protocolVersion,
+    daemonInstanceGeneration: discovery.owner.daemonInstanceGeneration,
+    features: initialized.capabilities,
+  };
+}
+
+async function markSpawnTerminal(
+  election: BootstrapElection,
+  paths: PrivateDiscoveryPaths,
+  identity: PrivateDiscoveryIdentity,
+  state: "stopped" | "crashed",
+  exit: ChildExit,
+): Promise<void> {
+  const result = await election.withExclusiveLock(`terminal-${identity.actionId}`, async () => {
+    await markPrivateDiscoveryTerminal({
+      paths,
+      expected: identity,
+      state,
+      exitCode: exit.code,
+      signal: exit.signal,
+    });
+  });
+  if (result.role === "observer") {
+    const discovery = await readPrivateDiscovery(paths, identity.socketPath);
+    if (discovery.status !== "terminal" || !identityMatchesOwner(identity, discovery.owner)) {
+      throw new FabricRemoteError(
+        "DAEMON_DISCOVERY_TERMINAL_UNCONFIRMED",
+        "daemon exit could not confirm its generation-bound discovery transition",
+      );
+    }
+  }
+}
+
+async function spawnProductionDaemon(input: {
+  options: DaemonStartOptions;
+  actionId: string;
+  electionGeneration: number;
+  paths: PrivateDiscoveryPaths;
+  election: BootstrapElection;
+}): Promise<ProductionSpawn> {
+  const prepared = await prepareDaemonStart(input.options);
+  const daemonInstanceGeneration = input.electionGeneration;
+  const child = await spawnDaemonChild(prepared, {
+    mode: "production-election",
+    actionId: input.actionId,
+    electionGeneration: input.electionGeneration,
+    daemonInstanceGeneration,
+  });
+  let cleanStopRequested = false;
+  const identity = (async (): Promise<PrivateDiscoveryIdentity> => {
+    await child.ready;
+    return await publishPrivateDiscovery({
+      paths: input.paths,
+      actionId: input.actionId,
+      electionGeneration: input.electionGeneration,
+      daemonInstanceGeneration,
+      socketPath: prepared.socketPath,
+      pid: child.pid,
+      bootstrapCapability: child.bootstrapCapability,
+    });
+  })();
+  const publishedIdentity = identity.then(
+    (value) => value,
+    () => undefined,
+  );
+  const exit = Promise.all([child.exit, publishedIdentity]).then(async ([childExit, owner]) => {
+    if (owner === undefined) return;
+    await markSpawnTerminal(
+      input.election,
+      input.paths,
+      owner,
+      cleanStopRequested ? "stopped" : "crashed",
+      childExit,
+    );
+  });
+  void exit.catch(() => undefined);
+  let stopPromise: Promise<void> | undefined;
+  return {
+    bootstrapCapability: child.bootstrapCapability,
+    pid: child.pid,
+    identity,
+    exit,
+    stop(clean: boolean): Promise<void> {
+      if (clean && child.isRunning()) cleanStopRequested = true;
+      stopPromise ??= child.terminate().then(async () => await exit);
+      return stopPromise;
+    },
+  };
+}
+
+function ownerHandle(spawned: ProductionSpawn, socketPath: string): FabricDaemonHandle {
+  let stopPromise: Promise<void> | undefined;
+  return {
+    bootstrapCapability: spawned.bootstrapCapability,
+    address: { transport: "unix", path: socketPath },
+    pid: spawned.pid,
+    ownsProcess: true,
+    stop(): Promise<void> {
+      stopPromise ??= spawned.stop(true);
+      return stopPromise;
+    },
     waitForExit(): Promise<void> {
-      return exitPromise;
+      return spawned.exit;
+    },
+  };
+}
+
+function attachedHandle(
+  attachment: PrivateDaemonAttachment,
+  paths: PrivateDiscoveryPaths,
+): FabricDaemonHandle {
+  let detach: (() => void) | undefined;
+  const detached = new Promise<void>((resolvePromise) => { detach = resolvePromise; });
+  const incumbentExit = (async (): Promise<void> => {
+    for (;;) {
+      const current = await readPrivateDiscovery(paths, attachment.owner.socketPath);
+      if (current.status !== "active" || !identityMatchesOwner(attachment.owner, current.owner)) return;
+      await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
+    }
+  })();
+  const localExit = Promise.race([incumbentExit, detached]);
+  void localExit.catch(() => undefined);
+  return {
+    bootstrapCapability: attachment.receipt.bootstrapCapability,
+    address: { transport: "unix", path: attachment.receipt.socketPath },
+    pid: attachment.receipt.pid,
+    ownsProcess: false,
+    async stop(): Promise<void> {
+      detach?.();
+    },
+    waitForExit(): Promise<void> {
+      return localExit;
+    },
+  };
+}
+
+export async function startFabricDaemon(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
+  const normalized = normalizedStartOptions(options);
+  await Promise.all([
+    ensurePrivateDirectory(normalized.stateDirectory),
+    ensurePrivateDirectory(normalized.runtimeDirectory),
+  ]);
+  normalized.databasePath = safeDatabasePath(normalized.databasePath);
+  const paths = privateDiscoveryPaths(normalized.runtimeDirectory);
+  const election = new BootstrapElection({ runtimeDirectory: normalized.runtimeDirectory });
+  const actionId = stableBootstrapActionId(normalized);
+  let provisional: PrivateDiscoveryIdentity | undefined;
+  let spawned: ProductionSpawn | undefined;
+  let attached;
+  try {
+    attached = await attachOrStartDaemon<PrivateDaemonAttachment>({
+      actionId,
+      socketPath: normalized.socketPath,
+      requiredProtocolVersion: FABRIC_PROTOCOL_VERSION,
+      requiredFeatures: ["rpc"],
+      election,
+      handshake: async () => await privateDaemonHandshake(paths, election, normalized.socketPath, provisional),
+      spawn: async (bootstrap) => {
+        spawned = await spawnProductionDaemon({
+          options: normalized,
+          actionId: bootstrap.actionId,
+          electionGeneration: bootstrap.electionGeneration,
+          paths,
+          election,
+        });
+        return {
+          ready: (async () => {
+            provisional = await spawned.identity;
+            return {
+              daemonInstanceGeneration: provisional.daemonInstanceGeneration,
+              socketPath: provisional.socketPath,
+              protocolVersion: FABRIC_PROTOCOL_VERSION,
+              features: ["rpc"],
+              evidence: {
+                databaseOwned: true,
+                migrationsComplete: true,
+                recoveryComplete: true,
+                socketBound: true,
+              },
+            };
+          })(),
+        };
+      },
+    });
+  } catch (error: unknown) {
+    await spawned?.stop(false).catch(() => undefined);
+    throw error;
+  }
+  if (attached.started) {
+    if (spawned === undefined) {
+      throw new FabricRemoteError("DAEMON_BOOTSTRAP_INVALID", "bootstrap reported a started daemon without an owned child");
+    }
+    return ownerHandle(spawned, normalized.socketPath);
+  }
+  return attachedHandle(attached.client, paths);
+}
+
+/**
+ * Test-only raw process launcher for process-lock cleanup and alias regression
+ * coverage. Production callers must use startFabricDaemon's flock election.
+ */
+export async function forceStartFabricDaemonForTests(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
+  const normalized = normalizedStartOptions(options);
+  await Promise.all([
+    ensurePrivateDirectory(normalized.stateDirectory),
+    ensurePrivateDirectory(normalized.runtimeDirectory),
+  ]);
+  const prepared = await prepareDaemonStart(normalized);
+  const child = await spawnDaemonChild(prepared, {
+    mode: "test-forced-process-locks",
+    actionId: `test-forced-${randomBytes(16).toString("hex")}`,
+    electionGeneration: 1,
+    daemonInstanceGeneration: 1,
+  });
+  try {
+    await child.ready;
+  } catch (error: unknown) {
+    await child.terminate().catch(() => undefined);
+    throw error;
+  }
+  let stopPromise: Promise<void> | undefined;
+  return {
+    bootstrapCapability: child.bootstrapCapability,
+    address: { transport: "unix", path: prepared.socketPath },
+    pid: child.pid,
+    ownsProcess: true,
+    stop(): Promise<void> {
+      stopPromise ??= child.terminate();
+      return stopPromise;
+    },
+    async waitForExit(): Promise<void> {
+      await child.exit;
     },
   };
 }
