@@ -1,14 +1,16 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.16
+Version: 0.17
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.16 closes the implementation-discovered notification-projection
+Version 0.17 closes the implementation-discovered scoped-operation target,
+generic operator-effect custody and optional Herdr composition gaps. Version
+0.16 closes the implementation-discovered notification-projection
 wire-compatibility gap. Version 0.15 closes the implementation-discovered evidence-registration,
 accepted-scope and bounded artifact-content read gaps required for truthful
 Console review. Version 0.14 closes the review-discovered destroyed-conflict
@@ -1460,7 +1462,8 @@ obligations, gates and scoped barriers to the project session. `quiescing`
 freezes new membership. A transition to `awaiting_acceptance` rechecks in the
 same transaction that every run, workstream and task is terminal or explicitly
 abandoned with reason; every required message and artifact obligation is
-reconciled; no active lease or provider action remains; every typed Git
+reconciled; no active lease, provider action or unresolved operator-effect
+custody remains; every typed Git
 custody/reservation is machine-terminal or has the exact human-resolution
 record in section 32.13; and every applicable scoped barrier is closed.
 `closed` additionally needs the exact acceptance or
@@ -1563,6 +1566,17 @@ before each named consequential operation; and before the matching scoped
 barrier closes. Dependent descendants block only where the persisted scope and
 dependency revision require it. Unrelated siblings remain runnable. A timeout
 may alert or defer but never approves.
+
+An operation enforcement check is always target-bound. Its closed target is
+either `{kind: run}` for an operation whose effect belongs to the exact
+`coordinationRunId`, or `{kind: task, taskId}` for an operation whose effect
+belongs to one exact task in that run. The request also carries the current
+run-owned `dependencyRevision`. A task/subtree gate matches only the task form
+when that task occurs in the gate's affected-task binding at the same dependency
+revision; it never blocks a run target or an unrelated sibling. A run/release
+gate may match either form inside its exact run. Omission, a task from another
+run, a stale dependency revision and substitution of the run form for a
+task-owned effect fail closed rather than widening or bypassing the gate.
 
 `dependency_revision` is the owning coordination run's dependency-graph
 revision. Every dependency-edge or affected-set mutation increments it and, in
@@ -3428,3 +3442,63 @@ Acceptance additionally requires:
   without an unrelated Fabric event while resize/resnapshot preserves stable UI
   state and bounded load. No notification state change
   acknowledges, approves, focuses or otherwise mutates its Attention item.
+
+### 32.16 Exact scoped-operation targets and optional Herdr composition
+
+The public `fabric.v1.scoped-gate.check` operation form is extended to require
+this closed target in addition to its existing exact project session,
+coordination run, dependency revision and protocol operation ID:
+
+```yaml
+operationTarget:
+  kind: run
+```
+
+or:
+
+```yaml
+operationTarget:
+  kind: task
+  taskId: exact-task-in-coordination-run
+```
+
+No legacy target-less operation check is accepted. This is an enforcement
+target, not authority: the daemon still derives identity, reauthorises the
+operation and checks the current dependency graph. The stored gate operation
+kind and the exact current affected-task bindings form one predicate; neither
+may be checked alone.
+
+The optional Herdr boundary is one daemon-owned integration seam, not a direct
+Console-to-pane mutation path. It accepts only the closed operations
+`console.ensure-pane`, `agent.ensure-pane`, `panes.arrange`,
+`agent.project-metadata`, `attention.project`, `target.focus`, `agent.wake`,
+`notification.show` and the separately reference-validated
+`steer.inject-fire-and-forget`. Every effect has one stable Fabric action ID,
+is durably prepared before Herdr I/O, is marked dispatched before the call and
+uses evidence-only lookup after ambiguity or restart. Prepared actions are
+never dispatched by recovery. A missing, disabled or incompatible Herdr
+integration exposes typed unavailability/`visibility-degraded`; all Fabric and
+Console coordination remains portable without it. Pane/process presence,
+absence, focus or scrollback never proves provider identity, task state,
+message/result delivery or effect outcome.
+
+Added requirements are:
+
+- **FR-047:** Operation gate checks shall bind one exact run/task target and
+  current dependency revision, and task/subtree gates shall block only matching
+  affected tasks while unrelated siblings remain runnable.
+- **FR-048:** Optional Herdr effects shall use one stable daemon-owned action
+  preparation/dispatch/recovery seam with closed operation variants and honest
+  disabled/degraded behaviour; pane state shall confer no Fabric truth.
+
+Acceptance additionally requires:
+
+- **AC-039:** closed-codec fixtures reject a missing, extra, malformed,
+  cross-run or stale operation target. Runtime matrices cover task, subtree,
+  run and release gates against task and run targets, including two sibling
+  tasks invoking the same protocol operation at one dependency revision; only
+  the affected target blocks. Dependency rebinding changes the answer
+  atomically. Herdr fixtures cover every closed operation, disabled
+  portability, stable replay, prepare/dispatch crash points, lookup-only
+  ambiguity recovery and absence of every pane-derived authority, delivery or
+  completion claim.

@@ -1,13 +1,15 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.12
+Version: 1.13
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.12 owns negotiated native-notification projection compatibility and
+Version 1.13 owns exact scoped-operation target enforcement, unresolved
+operator-effect custody in closure/liveness/recovery and composition of the
+optional Herdr action/presence seam. Version 1.12 owns negotiated native-notification projection compatibility and
 revision invalidation. Version 1.11 owns the evidence-registry migration, accepted-scope persistence,
 root/digest compatibility and bounded no-follow artifact-content read required
 by Spec 01 v0.15. Version 1.10 closes the review-discovered destroyed-conflict
@@ -291,7 +293,8 @@ owner.
 While holding the daemon-election lock, the daemon shall stop only after one
 SQLite transaction proves there is no liveness-contributing project session or
 coordination run, active current-generation task/agent lease, unresolved
-provider action or unexpired current-generation operator client. Required
+provider action, unresolved operator-effect custody or unexpired
+current-generation operator client. Required
 result delivery remains a project-session closure blocker. Pending best-effort
 notification delivery alone does not keep the daemon alive. An attached Console
 intentionally keeps it alive. Closing the final Console permits, but does not
@@ -306,6 +309,11 @@ corresponding launching/active/quiescing/acceptance, ambiguity, recovery and
 quarantine states; draft and terminal closed/cancelled/failed history does not.
 Provider actions contribute only while `prepared`, `dispatched`, `accepted`,
 `ambiguous` or `quarantined`. Historical terminal rows never block shutdown.
+Generic `operator_effect_custody` contributes while `prepared`, `dispatching`,
+`ambiguous` or `failed`; `terminal`, `no-effect` and `rejected` do not. A typed
+launch, Git, bridge-recovery, registered external-effect or Herdr owner remains
+the sole recovery owner for its joined generic row; liveness may count that
+row only once, but it may never omit it because another projection also blocks.
 Typed Git custody contributes while its four-owner mapping is `prepared`,
 `dispatching`, `conflict`, `ambiguous` or `quarantined`; an operation draft
 alone never contributes. Machine or human terminalisation removes only the
@@ -440,6 +448,11 @@ transactionally:
   deliveries without regression, reinjection or reassignment;
 - marks expired response deadlines `overdue` without redispatch;
 - resumes notification attempts from their durable dedupe keys; and
+- assigns every unresolved generic operator-effect custody to exactly one
+  recovery owner: an unowned `prepared` row may become `no-effect` only after
+  proving dispatch never began; `dispatching`, `ambiguous` and `failed` use
+  lookup/observe only, never redispatch, and remain blocking when no complete
+  proof is available; and
 - quarantines ambiguous provider, Git, Herdr or notification effects until
   lookup/reconciliation proves their outcome.
 
@@ -493,6 +506,9 @@ Acceptance requires deterministic tests for:
 - restart through every project-session and result-delivery state;
 - migration preflight, rollback, trigger and query-plan enforcement;
 - global-idle false positives for every liveness predicate;
+- every unresolved generic operator-effect state blocking idle stop and
+  project-session closure until its exact recovery owner proves a terminal
+  outcome, including an unknown/missing owner failing closed;
 - detached draft sessions and terminal historical rows not blocking idle stop;
 - election racing quiesce/stop through the canonical lock order;
 - Console crash/restart without task cancellation or duplicate commands;
@@ -2118,3 +2134,56 @@ Deterministic verification additionally covers:
   and
 - migration restart/checksum behavior and absence of any notification-caused
   Attention acknowledgement, approval, focus or other authority effect.
+
+### 9.16 Scoped-operation enforcement, operator-effect custody and Herdr seam
+
+The additive persistence change for operation enforcement shall bind each
+gate-operation predicate to the gate's exact project session and coordination
+run. The public check supplies the Spec 01 section 32.16 `operationTarget` and
+current dependency revision. For `{kind: task}`, the transaction proves the
+task belongs to that run and joins the operation kind to the gate's current
+`scoped_gate_tasks` row at the same bound dependency revision. For
+`{kind: run}`, task/subtree gates never match. Run/release gates remain bounded
+to their exact run. Preparation triggers and service checks use the same
+predicate, so a target-less call, same-kind sibling substitution, stale graph
+or cross-run task cannot authorise or block an effect accidentally.
+
+Project-session closure and global idle-stop use one exhaustive classification
+of `operator_effect_custody`. `prepared`, `dispatching`, `ambiguous` and
+`failed` are unresolved; `terminal`, `no-effect` and `rejected` are terminal.
+Every unresolved row is a closure blocker for its exact project session and a
+daemon-liveness contributor. Each row maps to exactly one daemon recovery
+owner. Specialised launch, Git, chair/child bridge, registered external-effect
+and Herdr owners exclude their rows from generic mutation while retaining the
+blocker. An unowned prepared row may be terminalised as no-effect only with
+durable proof that dispatch never began. Every post-dispatch or failed row uses
+bounded evidence-only lookup; an absent port, unknown owner, malformed outcome
+or incomplete evidence remains ambiguous/quarantined and moves the owning
+session/run to the corresponding existing recovery state. Recovery never
+replays an effect merely to permit acceptance or daemon shutdown.
+
+The optional Herdr package composes through one daemon-owned
+`herdr-control-v1` action owner. The daemon prepares one stable action for only
+the closed Spec 01 operation family, persists dispatch before Herdr I/O and
+completes it only from a closed receipt matching the prepared intent. Restart
+leaves prepared actions undispatched and performs lookup only for dispatched or
+ambiguous actions. Herdr presence is a separate bounded observation with
+`available`, `unavailable` or `stale` freshness; loss records
+`visibility_degraded` without inferring provider death, task state, delivery or
+completion. When the optional package is disabled or unavailable, action calls
+return typed unavailability and the daemon, Console and all non-Herdr protocol
+paths remain fully operable.
+
+Deterministic verification additionally covers:
+
+- same-operation sibling tasks under task/subtree gates, exact run targets,
+  cross-run task rejection and atomic dependency-revision rebinding through
+  both public checks and preparation triggers;
+- every operator-effect state in idle and closure queries, single-owner
+  classification, typed-owner exclusion, unknown-owner fail-closed behaviour
+  and crash points before prepare, before/after dispatch and before terminal
+  evidence commit; and
+- every closed Herdr action, disabled/unavailable portability, separate
+  presence degradation, stable replay, prepared-with-zero-I/O restart,
+  lookup-only dispatched/ambiguous recovery and negative pane-inference
+  canaries.
