@@ -1,13 +1,14 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.3
+Version: 1.4
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.3 closes the implementation-discovered atomic launch-custody,
+Version 1.4 closes the implementation-discovered provider-session continuity
+attestation and live-bridge gap. Version 1.3 closed atomic launch-custody,
 recovery, secret-handoff and global provider-action identity gaps. Version 1.2
 closed the private operator bootstrap and generation-bound chair-launch
 boundary required by Spec 05.
@@ -565,6 +566,24 @@ prompt/model input, provider payload/history, operator JSON, event, discovery
 material, log or error detail. Adapter implementations shall redact the secret
 before propagating any failure.
 
+The provider session, not the adapter wrapper, proves continuity. Launch
+creates a one-use random challenge and configures the provider session with a
+secret-consuming local Fabric bridge. The exact session must invoke the bridge
+and satisfy that challenge; the adapter binds the invocation to the actual
+provider session reference/generation, adapter/action pair and contract digest.
+A wrapper-side mailbox/status call is not evidence. Only the canonical,
+non-secret attestation digest enters effect evidence; neither challenge nor
+attestation may carry the credential.
+
+On success the supervisor retains the owning adapter/session bridge for later
+turns. The adapter may keep the credential only in volatile bridge state and
+must not redisclose it or place it in model input/history. Pre-terminal bridge
+loss is ambiguous. Post-terminal bridge loss is explicit context/chair loss:
+the persisted resume reference alone cannot recreate continuity, and recovery
+must fence or take over the chair under the existing generation/handoff rules.
+Providers that cannot originate the attestation remain unproved and cannot
+produce terminal success.
+
 Dispatch return and lookup both parse the closed
 `launch_adapter_outcome_v1` union from Spec 01. Only `terminal-success` with the
 exact action pair, usable resume reference, positive provider generation and
@@ -636,6 +655,9 @@ Deterministic fake-adapter and crash-injection gates shall prove:
 - provider acceptance before core outcome persistence activates the same run
   exactly once after lookup only when terminal success includes the exact
   resume reference and provider generation;
+- wrapper-only probes, wrong-session or replayed challenges and a bridge closed
+  at launch return cannot produce terminal success; the exact provider session
+  must originate attestation and remain reachable through its owning bridge;
 - accepted-only, missing-resume, absent, error, malformed and conflicting
   lookup fixtures remain ambiguous, while a contract-valid no-effect proof
   alone produces failed cleanup;

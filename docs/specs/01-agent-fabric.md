@@ -1,14 +1,15 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.7
+Version: 0.8
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.7 closes the implementation-discovered launch-custody, artifact,
+Version 0.8 closes the implementation-discovered provider-session continuity
+attestation and live-bridge gap. Version 0.7 closed launch-custody, artifact,
 secret-handoff and provider-action identity gaps. Version 0.6 closed the typed
 Git-read and Activity message-body binding gaps. Version 0.5 closed local
 operator provisioning and reviewed chair launch. None of these amendments
@@ -1804,6 +1805,25 @@ history, operator result, preview, projection, event, receipt, discovery
 material, log or adapter error. The adapter accepts this handoff at most once
 for the exact launch attempt; replay cannot recover or redisclose the secret.
 
+Possession of that credential by the adapter wrapper is not provider-session
+continuity. Before returning terminal success, the exact launched provider
+session must originate a one-use, random-challenge attestation through the
+Fabric bridge configured in that session. The adapter binds the observed tool
+or protocol invocation to the exact provider session reference and generation,
+adapter/action pair and provider-contract digest. A wrapper-side Fabric read,
+an adapter-generated assertion or an invocation that is not attributable to
+the launched session cannot attest continuity. The attestation contains no
+credential; its canonical digest is covered by the terminal effect digest.
+
+The supervisor retains the secret-consuming adapter/session bridge after a
+successful launch. Later turns for that provider session reuse the same bridge;
+the credential is not reissued, reconstructed or copied into model input or
+history. Loss of the bridge before terminal evidence is ambiguous. Loss after
+activation is explicit provider-context/chair loss and requires normal fencing,
+handoff or takeover recovery; restart never fabricates continuity from the
+resume reference alone. An adapter that cannot obtain session-originated
+attestation must fail closed and cannot return terminal success.
+
 The dispatch return and `lookup_action` response use the same closed
 `launch_adapter_outcome_v1` union. A terminal success has this shape:
 
@@ -1861,7 +1881,8 @@ launch_adapter_outcome_v1:
 
 Each variant and nested object rejects unknown or missing fields and must match
 the custody adapter/action pair and contract digest. Terminal success requires
-a usable exact resume reference, positive provider-session generation and
+a usable exact resume reference, positive provider-session generation,
+session-originated continuity attestation under the live bridge and
 resource-usage key for every and only reserved dimension. `accepted` without
 that complete terminal evidence is an interim journal state and cannot activate
 the session. Only an adapter-contract-validated proof that no provider session
@@ -1944,10 +1965,15 @@ Added requirements are:
   and terminal success shall reconcile every reserved resource dimension.
 - **FR-031:** A proved-failure retry shall atomically replace the session launch
   packet while advancing the failed session under the next custody generation.
+- **FR-032:** Terminal chair launch shall require a provider-session-originated,
+  challenge-bound Fabric continuity attestation and a retained owning bridge;
+  adapter-wrapper possession alone shall never attest continuity.
 - **NFR-015:** Chair launch credentials shall be random, hash-only at rest and
   disclosed once only through the dedicated adapter secret handoff.
 - **NFR-016:** Provider adapter/action identity shall be daemon-global, and
   crash recovery shall never duplicate a launch effect.
+- **NFR-017:** A chair bridge shall retain credential material only in volatile
+  session state and shall fail closed on bridge loss without reissuing it.
 
 Acceptance additionally requires:
 
@@ -1968,7 +1994,8 @@ Acceptance additionally requires:
   before adapter I/O, and secret-canary scans find no durable or model-visible
   credential copy. Terminal-outcome fixtures also prove resume-reference,
   no-effect-proof, typed status-reference and exact/unknown resource settlement
-  behaviour.
+  behaviour. Session-attestation fixtures prove that wrapper self-probes,
+  wrong-session challenges and immediate bridge teardown cannot activate.
 
 ### 32.10 Typed repository reads and Activity message binding
 
