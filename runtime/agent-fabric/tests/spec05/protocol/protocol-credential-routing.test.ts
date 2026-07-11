@@ -95,6 +95,7 @@ describe("public protocol credential routing", () => {
       FABRIC_OPERATIONS.projectSessionGet,
       FABRIC_OPERATIONS.projectionViewPage,
       FABRIC_OPERATIONS.operatorActionStatus,
+      FABRIC_OPERATIONS.operatorRepositoryRead,
     ]));
     expect(read).not.toContain(FABRIC_OPERATIONS.projectSessionCreate);
     expect(read).not.toContain(FABRIC_OPERATIONS.operatorActionCommit);
@@ -111,8 +112,8 @@ describe("public protocol credential routing", () => {
       FABRIC_OPERATIONS.operatorActionPreview,
       FABRIC_OPERATIONS.operatorActionCommit,
       FABRIC_OPERATIONS.operatorActionReconcile,
-      FABRIC_OPERATIONS.operatorRepositoryRead,
     ]));
+    expect(consequential).not.toContain(FABRIC_OPERATIONS.operatorRepositoryRead);
     expect(consequential.every((operation) => operationsForPrincipal("operator").has(operation as never))).toBe(true);
   });
 

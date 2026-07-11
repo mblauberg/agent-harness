@@ -126,7 +126,7 @@ async function setupFixture(options: {
       kind: "session",
       projectSessionId,
       sessionGeneration: identity.generation,
-      actions: ["git"],
+      actions: ["read"],
     }), "git-read-secret");
     if (options.worktree !== undefined) {
       const worktreeParent = join(repositoryRoot, ".worktrees");

@@ -206,8 +206,8 @@ export class GitRepositoryReadService {
     if (authenticated.context.projectId !== request.projectId) {
       throw new ProjectFabricCoreError("WRONG_PROJECT", "operator credential is bound to another project");
     }
-    if (!authenticated.actions.includes("git")) {
-      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator capability lacks git");
+    if (!authenticated.actions.includes("read")) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator capability lacks read");
     }
     if (authenticated.projectSessionId !== request.projectSessionId) {
       throw new ProjectFabricCoreError(

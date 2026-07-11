@@ -34,6 +34,7 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
     FABRIC_OPERATIONS.projectionDetailRead,
     FABRIC_OPERATIONS.operatorActionStatus,
     FABRIC_OPERATIONS.messageBodyRead,
+    FABRIC_OPERATIONS.operatorRepositoryRead,
   ],
   decide: [
     FABRIC_OPERATIONS.projectSessionTransition,
@@ -65,10 +66,7 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
     FABRIC_OPERATIONS.daemonStop,
     ...operatorActionMutations,
   ],
-  git: [
-    FABRIC_OPERATIONS.operatorRepositoryRead,
-    ...operatorActionMutations,
-  ],
+  git: operatorActionMutations,
   "external-effect": operatorActionMutations,
 });
 
