@@ -287,6 +287,57 @@ function composeFields(
     .join("|");
 }
 
+function writeFixedCells(
+  row: string,
+  start: number,
+  width: number,
+  value: string,
+): string {
+  if (start < 1 || width < 1 || start > cellWidth(row)) {
+    return row;
+  }
+  const fitted = fitCells(value, width);
+  const startIndex = start - 1;
+  return `${row.slice(0, startIndex)}${fitted}${row.slice(startIndex + width)}`;
+}
+
+function renderTabRow(
+  columns: number,
+  state: ConsoleState,
+  regions: readonly HitRegion[],
+): string {
+  let row = " ".repeat(columns);
+  for (const region of regions) {
+    if (region.kind !== "tab") {
+      continue;
+    }
+    const view = viewForTab(region.id);
+    if (view === null) {
+      continue;
+    }
+    const focused = state.focusedRegionId === region.id;
+    const label = focused ? `>${view.slice(1)}` : view;
+    row = writeFixedCells(
+      row,
+      region.rect.x1,
+      region.rect.x2 - region.rect.x1 + 1,
+      label,
+    );
+    if (state.activeView === view && region.rect.x2 < columns) {
+      row = writeFixedCells(row, region.rect.x2 + 1, 1, "*");
+    }
+  }
+  if (columns >= 70) {
+    row = writeFixedCells(
+      row,
+      61,
+      Math.min(10, columns - 60),
+      `MOUSE:${state.mouseCapture ? "ON" : "OFF"}`,
+    );
+  }
+  return row;
+}
+
 export function renderConsoleFrame(
   _projection: ConsoleProjection,
   _state: ConsoleState,
@@ -369,7 +420,7 @@ export function renderConsoleFrame(
       [5, 6, 4],
       [0, 1, 2],
     ),
-    `Attention Project Runs Work Agents Evidence Activity System |MOUSE:${_state.mouseCapture ? "ON" : "OFF"}`,
+    "",
   ];
   for (const [index, text] of sourceRows.entries()) {
     if (index >= rowCount) {
@@ -412,8 +463,10 @@ export function renderConsoleFrame(
     minSplitter + (maxSplitter - minSplitter) * _state.splitterRatio,
   );
   if (splitterRow >= 5) {
+    const splitterPrefix =
+      _state.focusedRegionId === "splitter" ? ">" : "=";
     rows[splitterRow - 1] = fitCells(
-      `====[ drag split: row ${splitterRow} ]====`,
+      `${splitterPrefix}===[ drag split: row ${splitterRow} ]====`,
       columns,
     );
     hitRegions.push({
@@ -442,7 +495,9 @@ export function renderConsoleFrame(
         ? actionWidth - assigned
         : Math.max(1, Math.round((referenceWidth / 64) * actionWidth));
       const x2 = Math.min(columns, x1 + width - 1);
-      line += fitCells(` ${label}`, x2 - x1 + 1);
+      const focusMarker =
+        _state.focusedRegionId === `action:${id}` ? ">" : " ";
+      line += fitCells(`${focusMarker}${label}`, x2 - x1 + 1);
       hitRegions.push({
         id: `action:${id}`,
         kind: "action",
@@ -457,13 +512,12 @@ export function renderConsoleFrame(
     rows[actionRow - 1] = fitCells("Actions hidden: grow terminal", columns);
   }
 
-  rows[statusRow - 1] = fitCells(
-    _state.pendingCommandId === null
-      ? `READY | focus ${_state.focus}`
-      : chromeText(`PENDING | ${_state.pendingCommandId}`),
+  rows[helpRow - 1] = fitCells(
+    _state.focusedRegionId === "detach"
+      ? "? help | q>detach"
+      : "? help | q detach",
     columns,
   );
-  rows[helpRow - 1] = fitCells("? help | q detach", columns);
   if (columns >= 17) {
     hitRegions.push({
       id: "detach",
@@ -472,6 +526,27 @@ export function renderConsoleFrame(
       enabled: true,
     });
   }
+  const focusedRegion =
+    _state.focusedRegionId === null
+      ? null
+      : hitRegions.find(
+          ({ enabled, id }) => enabled && id === _state.focusedRegionId,
+        );
+  const focusToken =
+    _state.focusedRegionId === null
+      ? _state.focus
+      : focusedRegion === undefined
+        ? `!${_state.focusedRegionId}`
+        : _state.focusedRegionId;
+  const pendingToken =
+    _state.pendingCommandId === null
+      ? "READY"
+      : chromeText(`P:${_state.pendingCommandId}`);
+  rows[statusRow - 1] = fitCells(
+    `V:${_state.activeView} F:${focusToken} M:${_state.mouseCapture ? "ON" : "OFF"} | ${pendingToken}`,
+    columns,
+  );
+  rows[3] = renderTabRow(columns, _state, hitRegions);
 
   return {
     columns,
