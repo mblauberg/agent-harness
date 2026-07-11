@@ -51,12 +51,20 @@ export type LaunchAdapterContract = Readonly<{
   inputSchemaId: string;
   publicPayloadSchema: Record<string, unknown>;
   noEffectProofSchemas: Readonly<Record<string, Record<string, unknown>>>;
+  attestation: Readonly<{
+    method: "provider-session-random-challenge-v1";
+    bridgeContract: "agent-fabric-session-bridge-v1";
+    origin: "provider-session-tool-call";
+    oneUse: true;
+    bridgeLifetime: "provider-session";
+    digestAlgorithm: "sha256";
+  }>;
 }>;
 
 export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContract {
   const contract = exactRecord(value, "chairLaunch", [
     "schemaVersion", "method", "oneUse", "secretTransport", "environment",
-    "inputSchemaId", "publicPayloadSchema", "noEffectProofSchemas",
+    "inputSchemaId", "publicPayloadSchema", "noEffectProofSchemas", "attestation",
   ]);
   if (
     contract.schemaVersion !== 1 ||
@@ -77,6 +85,17 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
     if (!isRow(schema)) protocol(`chairLaunch no-effect proof schema ${schemaId} must be an object`);
     noEffectProofSchemas[schemaId] = schema;
   }
+  const attestation = exactRecord(contract.attestation, "chairLaunch.attestation", [
+    "method", "bridgeContract", "origin", "oneUse", "bridgeLifetime", "digestAlgorithm",
+  ]);
+  if (
+    attestation.method !== "provider-session-random-challenge-v1" ||
+    attestation.bridgeContract !== "agent-fabric-session-bridge-v1" ||
+    attestation.origin !== "provider-session-tool-call" ||
+    attestation.oneUse !== true ||
+    attestation.bridgeLifetime !== "provider-session" ||
+    attestation.digestAlgorithm !== "sha256"
+  ) protocol("chairLaunch attestation contract is invalid");
   return {
     schemaVersion: 1,
     method: "launch_chair",
@@ -89,6 +108,14 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
     inputSchemaId: nonEmptyString(contract.inputSchemaId, "chairLaunch.inputSchemaId"),
     publicPayloadSchema: contract.publicPayloadSchema,
     noEffectProofSchemas,
+    attestation: {
+      method: "provider-session-random-challenge-v1",
+      bridgeContract: "agent-fabric-session-bridge-v1",
+      origin: "provider-session-tool-call",
+      oneUse: true,
+      bridgeLifetime: "provider-session",
+      digestAlgorithm: "sha256",
+    },
   };
 }
 
