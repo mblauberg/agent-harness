@@ -864,6 +864,7 @@ export class Fabric {
     this.#projectSessions = new ProjectSessionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
+      commandJournal: this.#commandJournal,
       clock: this.#clock,
     });
     this.#results = new AtomicDeliveryStore({ database: this.#database, clock: this.#clock });
@@ -1355,6 +1356,19 @@ export class Fabric {
         principalGeneration: context.principal.principalGeneration,
       };
       switch (operation) {
+        case FABRIC_OPERATIONS.membershipBind: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
+          if (request.origin !== "chair") {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding requires chair origin");
+          }
+          this.assertCapability(
+            context.principal.runId,
+            context.principal.agentId,
+            context.credentialHash,
+            FABRIC_OPERATIONS.membershipBind,
+          );
+          return this.#projectSessions.bindMembership(agent, request);
+        }
         case FABRIC_OPERATIONS.intakeRevise: {
           const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRevise];
           if (request.origin !== "chair") {

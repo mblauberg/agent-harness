@@ -1,5 +1,10 @@
 import {
+  assertChairMutationAuthority,
+  parseIdentifier,
+  parseMembershipBindRequest,
+  parseMembershipBindResult,
   parseProjectSession,
+  type ChairMutationContext,
   type MembershipBindRequest,
   type MembershipBindResult,
   type ProjectSession,
@@ -16,9 +21,11 @@ import {
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
+import { CommandJournal } from "../application/command-journal.js";
 import { OperatorStore } from "../operator/store.js";
 import {
   ProjectFabricCoreError,
+  type AuthenticatedAgentContext,
   type AuthenticatedOperatorContext,
   type CoreServiceOptions,
 } from "./contracts.js";
@@ -44,14 +51,19 @@ const legalTransitions: Readonly<Record<ProjectSessionState, readonly ProjectSes
 export class ProjectSessionStore {
   readonly #database: Database.Database;
   readonly #operatorStore: OperatorStore;
+  readonly #commandJournal: CommandJournal;
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
 
-  constructor(options: CoreServiceOptions & { operatorStore: OperatorStore }) {
+  constructor(options: CoreServiceOptions & {
+    operatorStore: OperatorStore;
+    commandJournal?: CommandJournal;
+  }) {
     this.#database = options.database;
     this.#operatorStore = options.operatorStore;
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
+    this.#commandJournal = options.commandJournal ?? new CommandJournal(this.#database, this.#clock);
   }
 
   createProjectSession(
@@ -247,11 +259,18 @@ export class ProjectSessionStore {
   }
 
   bindMembership(
-    context: AuthenticatedOperatorContext,
-    request: MembershipBindRequest,
+    context: AuthenticatedOperatorContext | AuthenticatedAgentContext,
+    input: MembershipBindRequest,
   ): MembershipBindResult {
-    if (request.origin !== "operator") {
-      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair membership wiring is integrated by the serial chair");
+    const request = parseMembershipBindRequest(input);
+    if (request.origin === "chair") {
+      if (!("agentId" in context)) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair membership binding requires an agent principal");
+      }
+      return this.#executeChairMembership(context, request);
+    }
+    if (!("operatorId" in context)) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator membership binding requires an operator principal");
     }
     const identity = this.#sessionIdentity(request.projectSessionId);
     return this.#operatorStore.executeCommand(
@@ -270,53 +289,89 @@ export class ProjectSessionStore {
         },
       },
       () => this.#membershipRevision(request.projectSessionId),
-      () => {
-        const session = this.#sessionIdentity(request.projectSessionId);
-        if (session.state === "quiescing" || session.state === "awaiting_acceptance" || session.state === "closed") {
-          throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "project-session membership is frozen");
-        }
-        if (session.membershipRevision !== request.expectedMembershipRevision) {
-          throw new ProjectFabricCoreError("STALE_REVISION", "membership revision changed");
-        }
-        this.#assertRun(request.projectSessionId, request.coordinationRunId);
-        for (const member of request.members) {
-          this.#assertMemberTarget(request.coordinationRunId, member);
-          const disposition = member.state === "terminal" ? "reconciled" : member.state;
-          this.#database.prepare(`
-            INSERT INTO project_session_memberships(
-              project_session_id, coordination_run_id, member_kind, member_id,
-              required, state, revision, abandoned_reason, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 1, ?, 1, ?, ?, ?)
-            ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id)
-            DO UPDATE SET state=excluded.state,
-                          revision=project_session_memberships.revision+1,
-                          abandoned_reason=excluded.abandoned_reason,
-                          updated_at=excluded.updated_at
-          `).run(
-            request.projectSessionId,
-            request.coordinationRunId,
-            member.kind,
-            this.#memberId(member),
-            disposition,
-            member.state === "abandoned" ? member.reason : null,
-            this.#clock(),
-            this.#clock(),
-          );
-        }
-        this.#fault("session:membership");
-        this.#database.prepare(`
-          UPDATE project_sessions
-             SET membership_revision=membership_revision+1, revision=revision+1, updated_at=?
-           WHERE project_session_id=? AND membership_revision=?
-        `).run(this.#clock(), request.projectSessionId, request.expectedMembershipRevision);
-        return {
-          projectSessionId: request.projectSessionId,
-          coordinationRunId: request.coordinationRunId,
-          membershipRevision: request.expectedMembershipRevision + 1,
-          members: request.members,
-        };
-      },
+      () => this.#applyMembership(request),
     );
+  }
+
+  #executeChairMembership(
+    context: AuthenticatedAgentContext,
+    request: Extract<MembershipBindRequest, { origin: "chair" }>,
+  ): MembershipBindResult {
+    const execute = this.#database.transaction(() => {
+      this.#assertChairMembershipAuthority(context, request.command);
+      return this.#commandJournal.execute(
+        context.coordinationRunId,
+        context.agentId,
+        request.command.commandId,
+        request,
+        (value): value is MembershipBindResult => {
+          try {
+            parseMembershipBindResult(value);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        () => this.#applyMembership(request),
+      );
+    });
+    return execute();
+  }
+
+  #applyMembership(request: MembershipBindRequest): MembershipBindResult {
+    const session = this.#sessionIdentity(request.projectSessionId);
+    if (
+      session.state === "quiescing" ||
+      session.state === "awaiting_acceptance" ||
+      session.state === "closed" ||
+      session.state === "cancelled"
+    ) {
+      throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "project-session membership is frozen");
+    }
+    if (session.membershipRevision !== request.expectedMembershipRevision) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "membership revision changed");
+    }
+    this.#assertRun(request.projectSessionId, request.coordinationRunId);
+    for (const member of request.members) {
+      this.#assertMemberTarget(request.projectSessionId, request.coordinationRunId, member);
+      const disposition = member.state === "terminal" ? "reconciled" : member.state;
+      const timestamp = this.#clock();
+      this.#database.prepare(`
+        INSERT INTO project_session_memberships(
+          project_session_id, coordination_run_id, member_kind, member_id,
+          required, state, revision, abandoned_reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 1, ?, 1, ?, ?, ?)
+        ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id)
+        DO UPDATE SET state=excluded.state,
+                      revision=project_session_memberships.revision+1,
+                      abandoned_reason=excluded.abandoned_reason,
+                      updated_at=excluded.updated_at
+      `).run(
+        request.projectSessionId,
+        request.coordinationRunId,
+        member.kind,
+        this.#memberId(member),
+        disposition,
+        member.state === "abandoned" ? member.reason : null,
+        timestamp,
+        timestamp,
+      );
+    }
+    this.#fault("session:membership");
+    const changed = this.#database.prepare(`
+      UPDATE project_sessions
+         SET membership_revision=membership_revision+1, revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND membership_revision=?
+    `).run(this.#clock(), request.projectSessionId, request.expectedMembershipRevision);
+    if (changed.changes !== 1) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "membership revision changed before commit");
+    }
+    return {
+      projectSessionId: request.projectSessionId,
+      coordinationRunId: request.coordinationRunId,
+      membershipRevision: request.expectedMembershipRevision + 1,
+      members: request.members,
+    };
   }
 
   takeoverChair(
@@ -570,22 +625,152 @@ export class ProjectSessionStore {
     }
   }
 
-  #assertMemberTarget(runId: string, member: ProjectSessionMember): void {
-    const exists = member.kind === "coordination-run"
-      ? this.#database.prepare("SELECT 1 FROM runs WHERE run_id=?").get(member.runId)
-      : member.kind === "task"
-        ? this.#database.prepare("SELECT 1 FROM tasks WHERE run_id=? AND task_id=?").get(runId, member.taskId)
-        : member.kind === "lease"
-          ? this.#database.prepare("SELECT 1 FROM leases WHERE run_id=? AND lease_id=?").get(runId, member.leaseId)
-          : member.kind === "provider-action"
-            ? this.#database.prepare("SELECT 1 FROM provider_actions WHERE run_id=? AND action_id=?").get(runId, member.providerActionId)
-            : member.kind === "required-message"
-              ? this.#database.prepare("SELECT 1 FROM messages WHERE run_id=? AND message_id=?").get(runId, member.messageId)
-              : member.kind === "workstream"
-                ? this.#database.prepare("SELECT 1 FROM workstreams WHERE coordination_run_id=? AND workstream_id=?").get(runId, member.workstreamId)
-                : member.kind === "gate"
-                  ? this.#database.prepare("SELECT 1 FROM scoped_gates WHERE coordination_run_id=? AND gate_id=?").get(runId, member.gateId)
-                  : 1;
+  #assertChairMembershipAuthority(
+    context: AuthenticatedAgentContext,
+    command: ChairMutationContext,
+  ): void {
+    if (
+      context.projectSessionId !== command.projectSessionId ||
+      context.coordinationRunId !== command.coordinationRunId
+    ) {
+      throw new ProjectFabricCoreError("WRONG_PROJECT", "agent context is bound to another project session or run");
+    }
+    const runValue = this.#database.prepare(`
+      SELECT project_session_id, chair_agent_id, chair_generation, chair_lease_id, revision
+        FROM runs WHERE run_id=?
+    `).get(context.coordinationRunId);
+    if (runValue === undefined) {
+      throw new ProjectFabricCoreError("NOT_FOUND", "membership coordination run was not found");
+    }
+    const run = row(runValue, "membership coordination run");
+    if (text(run, "project_session_id") !== context.projectSessionId) {
+      throw new ProjectFabricCoreError("WRONG_PROJECT", "coordination run is outside the authenticated project session");
+    }
+    if (text(run, "chair_agent_id") !== context.agentId) {
+      throw new ProjectFabricCoreError("TASK_NOT_OWNER", "authenticated agent is not the active membership chair");
+    }
+    const leaseValue = this.#database.prepare(`
+      SELECT lease_id, holder_agent_id, generation, status
+        FROM run_chair_leases
+       WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+    `).get(
+      context.projectSessionId,
+      context.coordinationRunId,
+      text(run, "chair_lease_id"),
+      integer(run, "chair_generation"),
+    );
+    if (leaseValue === undefined) {
+      throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "active chair lease binding was not found");
+    }
+    const lease = row(leaseValue, "membership chair lease");
+    if (text(lease, "holder_agent_id") !== context.agentId || text(lease, "status") !== "active") {
+      throw new ProjectFabricCoreError("TASK_NOT_OWNER", "authenticated agent does not hold the active chair lease");
+    }
+    const capabilityValue = this.#database.prepare(`
+      SELECT 1 FROM capabilities
+       WHERE run_id=? AND agent_id=? AND principal_generation=?
+         AND revoked_at IS NULL AND expires_at>?
+       LIMIT 1
+    `).get(context.coordinationRunId, context.agentId, context.principalGeneration, this.#clock());
+    if (capabilityValue === undefined) {
+      throw new ProjectFabricCoreError(
+        "STALE_PRINCIPAL_GENERATION",
+        "chair principal generation is stale, expired or revoked",
+      );
+    }
+    const current = {
+      agentId: context.agentId,
+      projectSessionId: context.projectSessionId,
+      coordinationRunId: context.coordinationRunId,
+      principalGeneration: context.principalGeneration,
+      chairLeaseId: parseIdentifier<"LeaseId">(text(lease, "lease_id"), "membership.chairLeaseId"),
+      chairLeaseGeneration: integer(lease, "generation"),
+      runRevision: integer(run, "revision"),
+    };
+    if (command.agentId !== current.agentId) {
+      throw new ProjectFabricCoreError("TASK_NOT_OWNER", "chair command authenticated agent is not the current chair");
+    }
+    if (command.principalGeneration !== current.principalGeneration) {
+      throw new ProjectFabricCoreError("STALE_PRINCIPAL_GENERATION", "chair command principal generation is stale");
+    }
+    if (
+      command.chairLeaseId !== current.chairLeaseId ||
+      command.chairLeaseGeneration !== current.chairLeaseGeneration
+    ) {
+      throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "chair command lease generation is stale");
+    }
+    if (command.expectedRunRevision !== current.runRevision) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "chair command run revision is stale");
+    }
+    assertChairMutationAuthority(command, current);
+  }
+
+  #assertMemberTarget(
+    projectSessionId: string,
+    runId: string,
+    member: ProjectSessionMember,
+  ): void {
+    let exists: unknown;
+    switch (member.kind) {
+      case "coordination-run":
+        exists = this.#database.prepare(`
+          SELECT 1 FROM runs WHERE project_session_id=? AND run_id=?
+        `).get(projectSessionId, member.runId);
+        break;
+      case "workstream":
+        exists = this.#database.prepare(`
+          SELECT 1 FROM workstreams
+           WHERE project_session_id=? AND coordination_run_id=? AND workstream_id=?
+        `).get(projectSessionId, runId, member.workstreamId);
+        break;
+      case "task":
+        exists = this.#database.prepare("SELECT 1 FROM tasks WHERE run_id=? AND task_id=?")
+          .get(runId, member.taskId);
+        break;
+      case "lease":
+        exists = this.#database.prepare("SELECT 1 FROM leases WHERE run_id=? AND lease_id=?")
+          .get(runId, member.leaseId);
+        break;
+      case "provider-action":
+        exists = this.#database.prepare("SELECT 1 FROM provider_actions WHERE run_id=? AND action_id=?")
+          .get(runId, member.providerActionId);
+        break;
+      case "required-message":
+        exists = this.#database.prepare("SELECT 1 FROM messages WHERE run_id=? AND message_id=?")
+          .get(runId, member.messageId);
+        break;
+      case "artifact-obligation":
+        exists = this.#database.prepare("SELECT 1 FROM artifacts WHERE run_id=? AND artifact_id=?")
+          .get(runId, member.artifactObligationId);
+        break;
+      case "gate":
+        exists = this.#database.prepare(`
+          SELECT 1 FROM scoped_gates
+           WHERE project_session_id=? AND coordination_run_id=? AND gate_id=?
+        `).get(projectSessionId, runId, member.gateId);
+        break;
+      case "scoped-barrier":
+        exists = this.#database.prepare(`
+          SELECT 1
+            FROM task_request_barriers b
+            JOIN task_requests r ON r.request_id=b.request_id
+           WHERE r.project_session_id=? AND r.run_id=? AND b.barrier_id=?
+          UNION ALL
+          SELECT 1
+            FROM scoped_gate_barriers b
+            JOIN scoped_gates g ON g.gate_id=b.gate_id
+           WHERE g.project_session_id=? AND g.coordination_run_id=? AND b.barrier_id=?
+          LIMIT 1
+        `).get(
+          projectSessionId,
+          runId,
+          member.barrierId,
+          projectSessionId,
+          runId,
+          member.barrierId,
+        );
+        break;
+    }
     if (exists === undefined) throw new ProjectFabricCoreError("NOT_FOUND", `${member.kind} membership target was not found`);
   }
 
