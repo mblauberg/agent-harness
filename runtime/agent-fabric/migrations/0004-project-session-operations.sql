@@ -622,7 +622,9 @@ CREATE TABLE daemon_runtime_epochs (
   instance_generation INTEGER PRIMARY KEY CHECK (instance_generation >= 1),
   instance_id TEXT NOT NULL UNIQUE,
   state TEXT NOT NULL CHECK (state IN ('starting','running','quiescing','stopped','crashed')),
-  observed_global_revision INTEGER NOT NULL CHECK (observed_global_revision >= 1),
+  observed_global_revision INTEGER CHECK (
+    observed_global_revision IS NULL OR observed_global_revision >= 1
+  ),
   started_at INTEGER NOT NULL,
   heartbeat_at INTEGER NOT NULL,
   stopped_at INTEGER
