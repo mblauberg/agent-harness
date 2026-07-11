@@ -10,6 +10,40 @@ import { openFabric } from "../../../src/index.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
 describe("schema-v4 compatibility run creation", () => {
+  it("preserves a legacy empty budget as three scopes with no configured dimensions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-v4-empty-budget-"));
+    const databasePath = join(directory, "fabric.sqlite3");
+    try {
+      const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
+      await fabric.createRun({
+        runId: "run-v4-empty-budget",
+        chair: {
+          agentId: "chair",
+          authority: { ...ROOT_AUTHORITY, budget: {} },
+        },
+      });
+      await fabric.close();
+
+      const database = new Database(databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT scope_kind, count(*) AS count
+            FROM resource_scopes GROUP BY scope_kind ORDER BY scope_kind
+        `).all()).toEqual([
+          { scope_kind: "coordination-run", count: 1 },
+          { scope_kind: "project", count: 1 },
+          { scope_kind: "project-session", count: 1 },
+        ]);
+        expect(database.prepare("SELECT count(*) AS count FROM resource_dimensions").get())
+          .toEqual({ count: 0 });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("persists an independent recovery session before its legacy facade run without inventing an operator", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-v4-run-"));
     const databasePath = join(directory, "fabric.sqlite3");

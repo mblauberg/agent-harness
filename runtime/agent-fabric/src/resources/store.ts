@@ -85,9 +85,10 @@ export class HierarchicalAdmissionStore {
   ): readonly ResourceScopeProjection[] {
     const execute = this.#database.transaction((): readonly ResourceScopeProjection[] => {
       this.#assertHierarchyContext(context);
-      this.#validateLimits(request.project.limits, "project");
-      this.#validateLimits(request.session.limits, "project-session");
-      this.#validateLimits(request.run.limits, "coordination-run");
+      const legacyEmptyBudget = context.actor.kind === "compatibility-import";
+      this.#validateLimits(request.project.limits, "project", legacyEmptyBudget);
+      this.#validateLimits(request.session.limits, "project-session", legacyEmptyBudget);
+      this.#validateLimits(request.run.limits, "coordination-run", legacyEmptyBudget);
       this.#assertNarrowing(request.project.limits, request.session.limits, "project-session");
       this.#assertNarrowing(request.session.limits, request.run.limits, "coordination-run");
       const definitions = [
@@ -472,8 +473,10 @@ export class HierarchicalAdmissionStore {
     }
   }
 
-  #validateLimits(limits: ScopeLimits, label: string): void {
-    if (Object.keys(limits).length === 0) throw new ProjectFabricCoreError("PROTOCOL_INVALID", `${label} limits are empty`);
+  #validateLimits(limits: ScopeLimits, label: string, allowEmpty = false): void {
+    if (!allowEmpty && Object.keys(limits).length === 0) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", `${label} limits are empty`);
+    }
     for (const [unit, limit] of Object.entries(limits)) {
       if (!Number.isSafeInteger(limit) || limit < 0 || unit.length === 0) {
         throw new ProjectFabricCoreError("PROTOCOL_INVALID", `${label} limit ${unit} is invalid`);

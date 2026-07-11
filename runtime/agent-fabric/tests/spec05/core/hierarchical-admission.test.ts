@@ -73,6 +73,15 @@ describe("hierarchical resource admission", () => {
       SELECT limit_value FROM resource_dimensions
        WHERE scope_id='scope_session' AND unit_key='provider_calls'
     `).get()).toEqual({ limit_value: 8 });
+
+    expect(() => store.ensureRunHierarchy(
+      hierarchyContext,
+      {
+        project: { scopeId: "scope_project_empty", limits: {} },
+        session: { scopeId: "scope_session_empty", limits: {} },
+        run: { scopeId: "scope_run_empty", limits: {} },
+      },
+    )).toThrowError(/limits are empty/iu);
   });
 
   it("reserves every ancestor without overbooking, releases unused capacity, and freezes unknown usage", () => {
