@@ -1,10 +1,15 @@
+import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runWorkspaceTrust, trustedWorkspaceRoots } from "../../src/cli/workspace-trust.ts";
+import {
+  runWorkspaceTrust,
+  trustedWorkspaceIdentity,
+  trustedWorkspaceRoots,
+} from "../../src/cli/workspace-trust.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -34,6 +39,48 @@ afterEach(async () => {
 });
 
 describe("machine-local workspace trust", () => {
+  it("exports the exact live normalized entry with a deterministic sha256 binding", async () => {
+    const value = await fixture();
+    const now = new Date("2026-07-11T04:00:00.000Z");
+    await runWorkspaceTrust([
+      "trust", value.workspace, "--profiles", "observed,headless", "--expires-at", "2026-07-12T04:00:00.000Z",
+    ], value.paths, now);
+
+    const identity = await trustedWorkspaceIdentity({
+      stateDirectory: value.paths.stateDirectory,
+      canonicalRoot: value.workspace,
+      now,
+    });
+    const canonicalEntry = JSON.stringify({
+      allowedProfiles: ["headless", "observed"],
+      approvedAt: now.toISOString(),
+      approvedBy: "local-operator",
+      canonicalPath: await realpath(value.workspace),
+      device: identity.entry.device,
+      expiresAt: "2026-07-12T04:00:00.000Z",
+      inode: identity.entry.inode,
+    });
+    expect(identity).toEqual({
+      canonicalRoot: await realpath(value.workspace),
+      trustRecordDigest: `sha256:${createHash("sha256").update(canonicalEntry).digest("hex")}`,
+      entry: {
+        canonicalPath: await realpath(value.workspace),
+        approvedAt: now.toISOString(),
+        approvedBy: "local-operator",
+        device: identity.entry.device,
+        inode: identity.entry.inode,
+        expiresAt: "2026-07-12T04:00:00.000Z",
+        allowedProfiles: ["headless", "observed"],
+      },
+    });
+    await expect(trustedWorkspaceIdentity({
+      stateDirectory: value.paths.stateDirectory,
+      canonicalRoot: value.workspace,
+      executionProfile: "paired-visible",
+      now,
+    })).rejects.toThrow(/profile/u);
+  });
+
   it("atomically records exact roots and filters them by profile and expiry", async () => {
     const value = await fixture();
     const now = new Date("2026-07-11T04:00:00.000Z");
