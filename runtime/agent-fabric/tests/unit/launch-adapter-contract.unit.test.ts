@@ -10,6 +10,7 @@ const contract = {
   environment: {
     capability: "AGENT_FABRIC_CAPABILITY",
     socketPath: "AGENT_FABRIC_SOCKET_PATH",
+    attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE",
   },
   inputSchemaId: "chair-launch-input.v1",
   publicPayloadSchema: {
@@ -26,6 +27,7 @@ const contract = {
     oneUse: true,
     bridgeLifetime: "provider-session",
     digestAlgorithm: "sha256",
+    nativeAttribution: "claude-sdk-assistant-request-tool-use-v1",
   },
 } as const;
 
@@ -40,5 +42,9 @@ describe("launch adapter contract", () => {
       ...contract,
       attestation: { ...contract.attestation, wrapperMayAttest: true },
     })).toThrow(/unknown field/u);
+    expect(() => parseLaunchAdapterContract({
+      ...contract,
+      attestation: { ...contract.attestation, nativeAttribution: "wrapper-generated-call-v1" },
+    })).toThrow(/attestation/u);
   });
 });

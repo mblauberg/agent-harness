@@ -47,6 +47,7 @@ export type LaunchAdapterContract = Readonly<{
   environment: Readonly<{
     capability: "AGENT_FABRIC_CAPABILITY";
     socketPath: "AGENT_FABRIC_SOCKET_PATH";
+    attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE";
   }>;
   inputSchemaId: string;
   publicPayloadSchema: Record<string, unknown>;
@@ -58,6 +59,9 @@ export type LaunchAdapterContract = Readonly<{
     oneUse: true;
     bridgeLifetime: "provider-session";
     digestAlgorithm: "sha256";
+    nativeAttribution:
+      | "claude-sdk-assistant-request-tool-use-v1"
+      | "codex-app-server-thread-turn-call-v1";
   }>;
 }>;
 
@@ -72,10 +76,13 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
     contract.oneUse !== true ||
     contract.secretTransport !== "private-environment"
   ) protocol("chairLaunch contract version or private handoff semantics are invalid");
-  const environment = exactRecord(contract.environment, "chairLaunch.environment", ["capability", "socketPath"]);
+  const environment = exactRecord(contract.environment, "chairLaunch.environment", [
+    "capability", "socketPath", "attestationChallenge",
+  ]);
   if (
     environment.capability !== "AGENT_FABRIC_CAPABILITY" ||
-    environment.socketPath !== "AGENT_FABRIC_SOCKET_PATH"
+    environment.socketPath !== "AGENT_FABRIC_SOCKET_PATH" ||
+    environment.attestationChallenge !== "AGENT_FABRIC_ATTESTATION_CHALLENGE"
   ) protocol("chairLaunch environment contract is invalid");
   if (!isRow(contract.publicPayloadSchema)) protocol("chairLaunch public payload schema must be an object");
   if (!isRow(contract.noEffectProofSchemas)) protocol("chairLaunch no-effect proof schemas must be an object");
@@ -86,7 +93,7 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
     noEffectProofSchemas[schemaId] = schema;
   }
   const attestation = exactRecord(contract.attestation, "chairLaunch.attestation", [
-    "method", "bridgeContract", "origin", "oneUse", "bridgeLifetime", "digestAlgorithm",
+    "method", "bridgeContract", "origin", "oneUse", "bridgeLifetime", "digestAlgorithm", "nativeAttribution",
   ]);
   if (
     attestation.method !== "provider-session-random-challenge-v1" ||
@@ -94,7 +101,11 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
     attestation.origin !== "provider-session-tool-call" ||
     attestation.oneUse !== true ||
     attestation.bridgeLifetime !== "provider-session" ||
-    attestation.digestAlgorithm !== "sha256"
+    attestation.digestAlgorithm !== "sha256" ||
+    (
+      attestation.nativeAttribution !== "claude-sdk-assistant-request-tool-use-v1" &&
+      attestation.nativeAttribution !== "codex-app-server-thread-turn-call-v1"
+    )
   ) protocol("chairLaunch attestation contract is invalid");
   return {
     schemaVersion: 1,
@@ -104,6 +115,7 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
     environment: {
       capability: "AGENT_FABRIC_CAPABILITY",
       socketPath: "AGENT_FABRIC_SOCKET_PATH",
+      attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE",
     },
     inputSchemaId: nonEmptyString(contract.inputSchemaId, "chairLaunch.inputSchemaId"),
     publicPayloadSchema: contract.publicPayloadSchema,
@@ -115,6 +127,7 @@ export function parseLaunchAdapterContract(value: unknown): LaunchAdapterContrac
       oneUse: true,
       bridgeLifetime: "provider-session",
       digestAlgorithm: "sha256",
+      nativeAttribution: attestation.nativeAttribution,
     },
   };
 }
