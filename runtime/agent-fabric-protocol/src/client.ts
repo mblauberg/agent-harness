@@ -1,5 +1,8 @@
 import type { ProtocolFeature } from "./features.js";
 import type {
+  OperationInputForPrincipal,
+} from "./operation-codecs.js";
+import type {
   ScopedGate,
   ScopedGateCheckRequest,
   ScopedGateCheckResult,
@@ -93,7 +96,7 @@ export interface ProjectSessionClient {
   get(input: ProjectSessionGetRequest): Promise<ProjectSession>;
   transition(input: ProjectSessionTransitionRequest): Promise<ProjectSession>;
   close(input: ProjectSessionCloseRequest): Promise<ProjectSession>;
-  bindMembership(input: MembershipBindRequest): Promise<MembershipBindResult>;
+  bindMembership(input: Extract<MembershipBindRequest, { origin: "operator" }>): Promise<MembershipBindResult>;
 }
 
 export interface BaselineFabricClient {
@@ -112,7 +115,7 @@ export interface OperatorControlClient {
 
 export interface IntakeClient {
   submit(input: IntakeSubmission): Promise<Intake>;
-  revise(input: IntakeRevisionRequest): Promise<Intake>;
+  revise(input: Extract<IntakeRevisionRequest, { origin: "operator" }>): Promise<Intake>;
 }
 
 export interface ScopedGateClient {
@@ -121,7 +124,10 @@ export interface ScopedGateClient {
   check(input: ScopedGateCheckRequest): Promise<ScopedGateCheckResult>;
 }
 
-export type OperatorScopedGateClient = Pick<ScopedGateClient, "create" | "resolve">;
+export type OperatorScopedGateClient = {
+  create(input: Extract<ScopedGateCreateRequest, { origin: "operator" }>): Promise<ScopedGate>;
+  resolve(input: ScopedGateResolveRequest): Promise<ScopedGate>;
+};
 
 export interface ResourceReservationClient {
   reserve(input: ResourceReservationRequest): Promise<ResourceReservation>;
@@ -144,7 +150,7 @@ export type AgentRequestResultClient = Omit<RequestResultClient, "providerAccept
 
 export type PrincipalOperationFacade<Principal extends OperationPrincipalKind> = {
   readonly [Operation in PrincipalOperation<Principal> & keyof OperationInputMap]?: (
-    input: OperationInputMap[Operation],
+    input: OperationInputForPrincipal<Operation, Principal>,
   ) => Promise<OperationResultMap[Operation]>;
 };
 

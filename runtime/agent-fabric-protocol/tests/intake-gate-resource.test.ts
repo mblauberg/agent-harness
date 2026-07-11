@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   parseIntakeSubmission,
@@ -137,6 +141,10 @@ describe("scoped gate schema", () => {
   });
 });
 
+const repositoryRoot = realpathSync(mkdtempSync(join(tmpdir(), "protocol-resource-")));
+mkdirSync(join(repositoryRoot, ".worktrees"));
+afterAll(() => rmSync(repositoryRoot, { recursive: true, force: true }));
+
 const reservationRequest = {
   commandId: "command_reserve_01",
   reservationId: "reservation_01",
@@ -161,8 +169,8 @@ const reservationRequest = {
     "input_tokens:openai": 1000,
   },
   writerAdmission: {
-    repositoryRoot: "/workspace/project",
-    worktreePath: "/workspace/project/.worktrees/spec05-protocol",
+    repositoryRoot,
+    worktreePath: join(repositoryRoot, ".worktrees", "spec05-protocol"),
     sourcePrefixes: ["runtime/agent-fabric-protocol"],
     writerGeneration: 1,
   },
@@ -183,7 +191,7 @@ describe("hierarchical resource reservation schema", () => {
   it("rejects a writer path outside the repository-owned worktree directory", () => {
     expect(() => parseResourceReservationRequest({
       ...reservationRequest,
-      writerAdmission: { ...reservationRequest.writerAdmission, worktreePath: "/tmp/writer" },
-    })).toThrowError(/must be under repositoryRoot.*\.worktrees/);
+      writerAdmission: { ...reservationRequest.writerAdmission, worktreePath: join(repositoryRoot, "writer") },
+    })).toThrowError(/direct child under repositoryRoot.*\.worktrees/);
   });
 });

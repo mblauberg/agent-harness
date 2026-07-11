@@ -3,7 +3,9 @@ import {
   isActiveFabricOperation,
   isRetiredOperation,
   OPERATION_REGISTRY,
+  operationsForPrincipal,
   type FabricOperation,
+  type OperationPrincipalKind,
 } from "./operations.js";
 import {
   arrayOf,
@@ -27,11 +29,13 @@ import {
   type Codec,
 } from "./codec.js";
 import {
+  parseChairMutationContext,
   parseIntegrationInputAttestationRequest,
   parseOperatorInputAttestation,
   parseOperatorMutationContext,
 } from "./operator.js";
 import { parseIntakeRevisionRequest, parseIntakeSubmission } from "./intake.js";
+import { parseMembershipBindRequest } from "./membership.js";
 import {
   parseScopedGate,
   parseScopedGateCheckRequest,
@@ -125,15 +129,15 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectId", "projectSessionId", "expectedGeneration"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["command", "projectSessionId", "expectedGeneration", "transition"]),
   [FABRIC_OPERATIONS.projectSessionClose]: object(["command", "projectSessionId", "expectedGeneration", "terminalPath"]),
-  [FABRIC_OPERATIONS.membershipBind]: object(["command", "projectSessionId", "expectedMembershipRevision", "members"]),
+  [FABRIC_OPERATIONS.membershipBind]: object(["origin", "command", "projectSessionId", "expectedMembershipRevision", "members"]),
   [FABRIC_OPERATIONS.operatorAttach]: object(["command", "projectId", "requestedExpiresAt"], ["projectSessionId", "expectedAttachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["command", "attachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorHeartbeat]: object(["command", "attachmentGeneration", "extendUntil"]),
   [FABRIC_OPERATIONS.operatorCommand]: object(["command", "action", "payload"], ["targetTaskId"]),
   [FABRIC_OPERATIONS.integrationInputAttest]: object(["context", "attestation"]),
   [FABRIC_OPERATIONS.intakeSubmit]: object(["command", "intake", "chairRequest"]),
-  [FABRIC_OPERATIONS.intakeRevise]: object(["origin", "command", "intakeId", "expectedRevision", "state", "summary", "artifactRefs", "gateIds"], ["chairRequest"]),
-  [FABRIC_OPERATIONS.scopedGateCreate]: object(["command", "intent"]),
+  [FABRIC_OPERATIONS.intakeRevise]: object(["origin", "command", "intakeId", "projectSessionId", "expectedRevision", "state", "summary", "artifactRefs", "gateIds"], ["chairRequest"]),
+  [FABRIC_OPERATIONS.scopedGateCreate]: object(["origin", "command", "intent"]),
   [FABRIC_OPERATIONS.scopedGateResolve]: object(["command", "gateId", "status", "decisionEvidence"]),
   [FABRIC_OPERATIONS.scopedGateCheck]: object(["projectSessionId", "coordinationRunId", "dependencyRevision", "enforcementPoint"], ["taskId", "operationId", "barrierId"]),
   [FABRIC_OPERATIONS.resourceReserve]: object(["commandId", "reservationId", "projectSessionId", "path", "amounts"], ["writerAdmission"]),
@@ -258,11 +262,43 @@ const positiveInteger = integer({ minimum: 1 });
 const stringList = arrayOf(identifier, { maximum: 256, unique: true });
 const textList = arrayOf(text, { maximum: 256 });
 const integerList = arrayOf(integer(), { maximum: 256, unique: true });
-const numberRecord = recordOf(integer(), { maximum: 128 });
-const nonEmptyNumberRecord = recordOf(integer(), { minimum: 1, maximum: 128 });
-const nullableNumberRecord = recordOf(nullable(integer()), { minimum: 1, maximum: 128 });
+const resourceUnitPattern = "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$";
+const numberRecord = recordOf(integer(), { maximum: 128, keyPattern: resourceUnitPattern });
+const nonEmptyNumberRecord = recordOf(integer(), {
+  minimum: 1,
+  maximum: 128,
+  keyPattern: resourceUnitPattern,
+  exampleKey: "concurrent_turns",
+});
+const nullableNumberRecord = recordOf(nullable(integer()), {
+  minimum: 1,
+  maximum: 128,
+  keyPattern: resourceUnitPattern,
+  exampleKey: "concurrent_turns",
+});
 const stringRecord = recordOf(text, { maximum: 128 });
 const jsonRecord = recordOf(jsonValue, { maximum: 128 });
+const activeOperationValues = Object.keys(OPERATION_REGISTRY).filter(isActiveFabricOperation);
+const activeOperationCodec = defineCodec<FabricOperation>({
+  type: "string",
+  enum: activeOperationValues,
+}, FABRIC_OPERATIONS.acknowledgeDelivery, (value, path) => {
+  if (typeof value !== "string" || !isActiveFabricOperation(value)) {
+    throw new TypeError(`${path} must be an active protocol operation`);
+  }
+  return value;
+});
+const agentAuthorityOperationValues = [...operationsForPrincipal("agent")].sort();
+const agentAuthorityOperationSet: ReadonlySet<string> = new Set(agentAuthorityOperationValues);
+const agentAuthorityOperationCodec = defineCodec<FabricOperation>({
+  type: "string",
+  enum: agentAuthorityOperationValues,
+}, FABRIC_OPERATIONS.acknowledgeDelivery, (value, path) => {
+  if (typeof value !== "string" || !agentAuthorityOperationSet.has(value)) {
+    throw new TypeError(`${path} must be an active agent protocol operation`);
+  }
+  return value as FabricOperation;
+});
 
 const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
 const artifactRefsCodec = arrayOf(artifactRefCodec, { maximum: 128 });
@@ -292,6 +328,17 @@ const operatorMutationCodec = parserBacked(
   parseOperatorMutationContext,
   parseOperatorMutationContext(operatorMutationBaseCodec.example),
 );
+const chairMutationBaseCodec = objectCodec({
+  commandId: identifier,
+  ownerLeaseId: identifier,
+  ownerLeaseGeneration: positiveInteger,
+  expectedRevision: positiveInteger,
+});
+const chairMutationCodec = parserBacked(
+  chairMutationBaseCodec,
+  parseChairMutationContext,
+  parseChairMutationContext(chairMutationBaseCodec.example),
+);
 
 const disclosureCodec = unionOf([
   objectCodec({ level: literal("allowed") }),
@@ -307,16 +354,16 @@ const disclosureCodec = unionOf([
   arrayOf(enumeration(["local", "approved-provider", "external"]), { maximum: 3, unique: true }),
 ]);
 const authorityCodec = objectCodec({
-  workspaceRoots: arrayOf(text, { minimum: 1, maximum: 64, unique: true }),
-  sourcePaths: arrayOf(text, { maximum: 256, unique: true }),
-  artifactPaths: arrayOf(text, { maximum: 256, unique: true }),
-  actions: arrayOf(text, { maximum: 256, unique: true }),
+  workspaceRoots: arrayOf(relativePath, { minimum: 1, maximum: 64, unique: true }),
+  sourcePaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  artifactPaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  actions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
   disclosure: disclosureCodec,
   expiresAt: timestamp,
   budget: numberRecord,
 }, {
-  deniedPaths: arrayOf(text, { maximum: 256, unique: true }),
-  deniedActions: arrayOf(text, { maximum: 256, unique: true }),
+  deniedPaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  deniedActions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
 });
 
 const messageAudienceCodec = unionOf([
@@ -456,9 +503,10 @@ const resourceScopeCodec = unionOf([
   objectCodec({ kind: literal("team"), scopeId: identifier, coordinationRunId: identifier, teamId: identifier }),
   objectCodec({ kind: literal("agent"), scopeId: identifier, teamId: identifier, agentId: identifier }),
 ]);
+const absoluteFilesystemPathCodec = boundedString({ maxBytes: 4096, pattern: "^/" });
 const writerAdmissionCodec = objectCodec({
-  repositoryRoot: text,
-  worktreePath: text,
+  repositoryRoot: absoluteFilesystemPathCodec,
+  worktreePath: absoluteFilesystemPathCodec,
   sourcePrefixes: arrayOf(relativePath, { minimum: 1, maximum: 128, unique: true }),
   writerGeneration: positiveInteger,
 });
@@ -507,7 +555,7 @@ const budgetResultCodec = objectCodec({
   budgetId: identifier,
   parentBudgetId: nullable(identifier),
   state: enumeration(["active", "usage-unknown", "released"]),
-  dimensions: recordOf(budgetDimensionCodec, { maximum: 128 }),
+  dimensions: recordOf(budgetDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern }),
   returned: numberRecord,
 });
 const teamResultCodec = objectCodec({
@@ -687,16 +735,6 @@ const releaseBindingCodec = objectCodec({
   promotionAction: text,
   target: text,
 });
-const activeOperationValues = Object.keys(OPERATION_REGISTRY).filter(isActiveFabricOperation);
-const activeOperationCodec = defineCodec<FabricOperation>({
-  type: "string",
-  enum: activeOperationValues,
-}, FABRIC_OPERATIONS.acknowledgeDelivery, (value, path) => {
-  if (typeof value !== "string" || !isActiveFabricOperation(value)) {
-    throw new TypeError(`${path} must be an active protocol operation`);
-  }
-  return value;
-});
 const gateIntentCodec = objectCodec({
   projectSessionId: identifier,
   coordinationRunId: identifier,
@@ -715,6 +753,31 @@ const gateIntentCodec = objectCodec({
   consequences: textList,
   evidenceRefs: artifactRefsCodec,
 }, { deadline: timestamp, default: text, releaseBinding: releaseBindingCodec });
+const intakeRevisionCommonFields = {
+  intakeId: identifier,
+  projectSessionId: identifier,
+  expectedRevision: positiveInteger,
+  state: enumeration(["draft", "awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
+  summary: text,
+  artifactRefs: artifactRefsCodec,
+  gateIds: stringList,
+};
+const intakeRevisionCodec = unionOf([
+  objectCodec({
+    origin: literal("operator"),
+    command: operatorMutationCodec,
+    ...intakeRevisionCommonFields,
+  }, { chairRequest: taskRequestCodec }),
+  objectCodec({
+    origin: literal("chair"),
+    command: chairMutationCodec,
+    ...intakeRevisionCommonFields,
+  }, { chairRequest: taskRequestCodec }),
+]);
+const gateCreateCodec = unionOf([
+  objectCodec({ origin: literal("operator"), command: operatorMutationCodec, intent: gateIntentCodec }),
+  objectCodec({ origin: literal("chair"), command: chairMutationCodec, intent: gateIntentCodec }),
+]);
 const typedDecisionEvidenceCodec = objectCodec({
   kind: literal("typed-console"),
   confirmationCommandId: identifier,
@@ -769,6 +832,22 @@ const projectSessionMemberCodec = unionOf([
   ...memberVariants("gate", "gateId"),
   ...memberVariants("scoped-barrier", "barrierId"),
 ] as [Codec<unknown>, ...Codec<unknown>[]]);
+const membershipBindCodec = unionOf([
+  objectCodec({
+    origin: literal("operator"),
+    command: operatorMutationCodec,
+    projectSessionId: identifier,
+    expectedMembershipRevision: integer(),
+    members: arrayOf(projectSessionMemberCodec, { maximum: 256 }),
+  }),
+  objectCodec({
+    origin: literal("chair"),
+    command: chairMutationCodec,
+    projectSessionId: identifier,
+    expectedMembershipRevision: positiveInteger,
+    members: arrayOf(projectSessionMemberCodec, { maximum: 256 }),
+  }),
+]);
 
 const resourceDimensionCodec = unionOf([
   objectCodec({ unknown: literal(false), used: integer(), reserved: integer(), remaining: integer() }),
@@ -850,21 +929,23 @@ const systemViewItemCodec = objectCodec({
   expiresAt: nullable(timestamp),
   detail: text,
 });
-const projectionPageItemCodec = unionOf([
-  attentionItemCodec,
-  projectViewItemCodec,
-  runProjectionCodec,
-  workViewItemCodec,
-  agentViewItemCodec,
-  evidenceViewItemCodec,
-  activityViewItemCodec,
-  systemViewItemCodec,
+function projectionPageDataCodec(itemCodec: Codec<unknown>): Codec<unknown> {
+  return projectionFact(objectCodec({
+    items: arrayOf(itemCodec, { maximum: 256 }),
+    nextCursor: integer(),
+    hasMore: boolean,
+  }));
+}
+const projectionPageResultCodec = unionOf([
+  objectCodec({ view: literal("attention"), page: projectionPageDataCodec(attentionItemCodec) }),
+  objectCodec({ view: literal("project"), page: projectionPageDataCodec(projectViewItemCodec) }),
+  objectCodec({ view: literal("runs"), page: projectionPageDataCodec(runProjectionCodec) }),
+  objectCodec({ view: literal("work"), page: projectionPageDataCodec(workViewItemCodec) }),
+  objectCodec({ view: literal("agents"), page: projectionPageDataCodec(agentViewItemCodec) }),
+  objectCodec({ view: literal("evidence"), page: projectionPageDataCodec(evidenceViewItemCodec) }),
+  objectCodec({ view: literal("activity"), page: projectionPageDataCodec(activityViewItemCodec) }),
+  objectCodec({ view: literal("system"), page: projectionPageDataCodec(systemViewItemCodec) }),
 ]);
-const projectionPageCodec = projectionFact(objectCodec({
-  items: arrayOf(projectionPageItemCodec, { maximum: 256 }),
-  nextCursor: integer(),
-  hasMore: boolean,
-}));
 const projectionEventCodec = objectCodec({
   cursor: positiveInteger,
   projectSessionId: identifier,
@@ -977,6 +1058,9 @@ const integerFields = new Set([
 ]);
 
 function enumField(operation: ProtocolOperation, field: string, direction: CodecDirection): Codec<unknown> | undefined {
+  if (field === "schemaVersion" && operation === FABRIC_OPERATIONS.projectionSnapshot && direction === "result") {
+    return literal(1);
+  }
   if (field === "mode") return enumeration(["coordinated", "independent"]);
   if (field === "view") return enumeration(["attention", "project", "runs", "work", "agents", "evidence", "activity", "system"]);
   if (field === "enforcementPoint") return enumeration(["task-readiness", "operation", "scoped-barrier"]);
@@ -1086,12 +1170,19 @@ function semanticFieldCodec(
     return field === "amounts" || field === "consumed" ? nonEmptyNumberRecord : numberRecord;
   }
   if (field === "usage") return nullableNumberRecord;
-  if (field === "observedUsage") return recordOf(unionOf([integer(), literal("unknown")]), { minimum: 1, maximum: 128 });
-  if (field === "dimensions") return direction === "input" ? nonEmptyNumberRecord : recordOf(budgetDimensionCodec, { maximum: 128 });
+  if (field === "observedUsage") return recordOf(unionOf([integer(), literal("unknown")]), {
+    minimum: 1,
+    maximum: 128,
+    keyPattern: resourceUnitPattern,
+    exampleKey: "concurrent_turns",
+  });
+  if (field === "dimensions") return direction === "input"
+    ? nonEmptyNumberRecord
+    : recordOf(budgetDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern });
   if (field === "returned") return numberRecord;
   if (field === "capacity") return operation === FABRIC_OPERATIONS.projectionSnapshot
     ? projectionFact(jsonRecord)
-    : recordOf(resourceDimensionCodec, { maximum: 128 });
+    : recordOf(resourceDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern });
   if (field === "checkedGateRevisions") return recordOf(positiveInteger, { maximum: 128 });
   if (field === "task") return taskRequestTaskCodec;
   if (field === "reply") return replyCodec;
@@ -1101,7 +1192,6 @@ function semanticFieldCodec(
   if (field === "session") return projectionFact(nullable(projectSessionCodec));
   if (field === "runs") return projectionFact(arrayOf(runProjectionCodec, { maximum: 256 }));
   if (field === "attention") return projectionFact(arrayOf(attentionItemCodec, { maximum: 256 }));
-  if (field === "page") return projectionPageCodec;
   if (field === "sessions") return discoveredSessionsCodec;
   if (field === "events") return operation === FABRIC_OPERATIONS.projectionEvents
     ? arrayOf(projectionEventCodec, { maximum: 256 })
@@ -1225,7 +1315,7 @@ const resourceReservationResultCodec = objectCodec({
   state: enumeration(["active", "released", "ambiguous", "reconciled"]),
   path: arrayOf(resourceScopeCodec, { minimum: 2, maximum: 5 }),
   amounts: nonEmptyNumberRecord,
-  capacity: recordOf(resourceDimensionCodec, { maximum: 128 }),
+  capacity: recordOf(resourceDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern }),
 });
 
 export type OperationCodecPair = {
@@ -1282,13 +1372,14 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.sendMessage) return legacyMessageCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateCodec;
   if (operation === FABRIC_OPERATIONS.scopedGateCheck) return parsedBy(scopedGateCheckCodec, parseScopedGateCheckRequest);
+  if (operation === FABRIC_OPERATIONS.membershipBind) return parsedBy(membershipBindCodec, parseMembershipBindRequest);
+  if (operation === FABRIC_OPERATIONS.intakeRevise) return parsedBy(intakeRevisionCodec, parseIntakeRevisionRequest);
+  if (operation === FABRIC_OPERATIONS.scopedGateCreate) return parsedBy(gateCreateCodec, parseScopedGateCreateRequest);
   if (operation === FABRIC_OPERATIONS.taskRequest) return parsedBy(taskRequestCodec, parseTaskRequest);
   if (operation === FABRIC_OPERATIONS.taskCompleteWithReply) return parsedBy(taskCompletionCodec, parseTaskCompleteWithReply);
   const base = semanticShapeCodec(operation, "input", OPERATION_INPUT_SHAPES[operation]);
   if (operation === FABRIC_OPERATIONS.integrationInputAttest) return parsedBy(base, parseIntegrationInputAttestationRequest);
   if (operation === FABRIC_OPERATIONS.intakeSubmit) return parsedBy(base, parseIntakeSubmission);
-  if (operation === FABRIC_OPERATIONS.intakeRevise) return parsedBy(base, parseIntakeRevisionRequest);
-  if (operation === FABRIC_OPERATIONS.scopedGateCreate) return parsedBy(base, parseScopedGateCreateRequest);
   if (operation === FABRIC_OPERATIONS.scopedGateResolve) return parsedBy(base, parseScopedGateResolveRequest);
   if (operation === FABRIC_OPERATIONS.resourceReserve) return parsedBy(base, parseResourceReservationRequest);
   return base;
@@ -1335,6 +1426,7 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
     return objectCodec({ taskRevision: positiveInteger, replyRevision: positiveInteger, resultDelivery: resultDeliveryCodec });
   }
   if (operation === FABRIC_OPERATIONS.projectionEvents) return projectionEventsResultCodec;
+  if (operation === FABRIC_OPERATIONS.projectionPage) return projectionPageResultCodec;
   if (operation === FABRIC_OPERATIONS.messageBodyRead) return messageBodyResultCodec;
   return semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
 }
@@ -1357,6 +1449,43 @@ export function parseOperationInput<Operation extends ProtocolOperation>(
     throw new TypeError(`${operation} is retired; use daemon-owned scoped-gate operations`);
   }
   return OPERATION_CODECS[operation].input.parse(value, `${operation}.input`) as OperationInputMap[Operation];
+}
+
+type PrincipalBoundOperation =
+  | typeof FABRIC_OPERATIONS.membershipBind
+  | typeof FABRIC_OPERATIONS.intakeRevise
+  | typeof FABRIC_OPERATIONS.scopedGateCreate;
+
+export type OperationInputForPrincipal<
+  Operation extends ProtocolOperation,
+  Principal extends OperationPrincipalKind,
+> = Operation extends PrincipalBoundOperation
+  ? Extract<OperationInputMap[Operation], { origin: Principal extends "agent" ? "chair" : "operator" }>
+  : OperationInputMap[Operation];
+
+export function parseOperationInputForPrincipal<
+  Operation extends ProtocolOperation,
+  Principal extends OperationPrincipalKind,
+>(
+  operation: Operation,
+  principal: Principal,
+  value: unknown,
+): OperationInputForPrincipal<Operation, Principal> {
+  if (!OPERATION_REGISTRY[operation].principals.includes(principal)) {
+    throw new TypeError(`${principal} principal cannot invoke ${operation}`);
+  }
+  const parsed = parseOperationInput(operation, value);
+  if (([
+    FABRIC_OPERATIONS.membershipBind,
+    FABRIC_OPERATIONS.intakeRevise,
+    FABRIC_OPERATIONS.scopedGateCreate,
+  ] as readonly ProtocolOperation[]).includes(operation)) {
+    const expectedOrigin = principal === "agent" ? "chair" : "operator";
+    if (typeof parsed !== "object" || parsed === null || Reflect.get(parsed, "origin") !== expectedOrigin) {
+      throw new TypeError(`${principal} principal cannot submit an ${expectedOrigin === "chair" ? "operator" : "chair"} command`);
+    }
+  }
+  return parsed as OperationInputForPrincipal<Operation, Principal>;
 }
 
 export function parseOperationResult<Operation extends ProtocolOperation>(

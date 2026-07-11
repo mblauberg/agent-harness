@@ -1,5 +1,10 @@
 import { isActiveFabricOperation, type FabricOperation } from "./operations.js";
-import { parseOperatorMutationContext, type OperatorMutationContext } from "./operator.js";
+import {
+  parseChairMutationContext,
+  parseOperatorMutationContext,
+  type ChairMutationContext,
+  type OperatorMutationContext,
+} from "./operator.js";
 import {
   oneOf,
   parseArtifactRef,
@@ -102,9 +107,11 @@ export type ScopedGateIntent = {
 };
 
 export type ScopedGateCreateRequest = {
-  command: OperatorMutationContext;
   intent: ScopedGateIntent;
-};
+} & (
+  | { origin: "operator"; command: OperatorMutationContext }
+  | { origin: "chair"; command: ChairMutationContext }
+);
 export type ScopedGateResolveRequest = {
   command: OperatorMutationContext;
   gateId: GateId;
@@ -132,7 +139,7 @@ export type ScopedGateCheckResult =
   | { allowed: false; blockingGateIds: readonly GateId[]; checkedGateRevisions: Readonly<Record<string, number>> };
 
 export function parseScopedGateCreateRequest(value: unknown): ScopedGateCreateRequest {
-  const record = strictRecord(value, "scopedGateCreate", ["command", "intent"]);
+  const record = strictRecord(value, "scopedGateCreate", ["origin", "command", "intent"]);
   const intentRecord = strictRecord(record.intent, "scopedGateCreate.intent", [
     "projectSessionId",
     "coordinationRunId",
@@ -164,39 +171,51 @@ export function parseScopedGateCreateRequest(value: unknown): ScopedGateCreateRe
     : intentRecord.releaseBinding === undefined
       ? undefined
       : (() => { throw new TypeError("scopedGateCreate.intent.releaseBinding is forbidden outside release scope"); })();
-  return {
-    command: parseOperatorMutationContext(record.command, "scopedGateCreate.command"),
-    intent: {
-      projectSessionId: parseIdentifier<"ProjectSessionId">(
-        intentRecord.projectSessionId,
-        "scopedGateCreate.intent.projectSessionId",
-      ),
-      coordinationRunId: parseIdentifier<"CoordinationRunId">(
-        intentRecord.coordinationRunId,
-        "scopedGateCreate.intent.coordinationRunId",
-      ),
-      dedupeKey: requiredString(intentRecord.dedupeKey, "scopedGateCreate.intent.dedupeKey"),
-      scope,
-      blockedOperationIds,
-      enforcementPoints,
-      question: requiredString(intentRecord.question, "scopedGateCreate.intent.question"),
-      reason: requiredString(intentRecord.reason, "scopedGateCreate.intent.reason"),
-      options: stringArray(intentRecord.options, "scopedGateCreate.intent.options", 1),
-      recommendation: typeof intentRecord.recommendation === "string" ? intentRecord.recommendation : "",
-      consequences: stringArray(intentRecord.consequences, "scopedGateCreate.intent.consequences"),
-      evidenceRefs: intentRecord.evidenceRefs.map((entry, index) => parseArtifactRef(
-        entry,
-        `scopedGateCreate.intent.evidenceRefs[${String(index)}]`,
-      )),
-      ...(intentRecord.deadline === undefined
-        ? {}
-        : { deadline: parseTimestamp(intentRecord.deadline, "scopedGateCreate.intent.deadline") }),
-      ...(intentRecord.default === undefined
-        ? {}
-        : { default: requiredString(intentRecord.default, "scopedGateCreate.intent.default") }),
-      ...(releaseBinding === undefined ? {} : { releaseBinding }),
-    },
+  const parsedIntent = {
+    projectSessionId: parseIdentifier<"ProjectSessionId">(
+      intentRecord.projectSessionId,
+      "scopedGateCreate.intent.projectSessionId",
+    ),
+    coordinationRunId: parseIdentifier<"CoordinationRunId">(
+      intentRecord.coordinationRunId,
+      "scopedGateCreate.intent.coordinationRunId",
+    ),
+    dedupeKey: requiredString(intentRecord.dedupeKey, "scopedGateCreate.intent.dedupeKey"),
+    scope,
+    blockedOperationIds,
+    enforcementPoints,
+    question: requiredString(intentRecord.question, "scopedGateCreate.intent.question"),
+    reason: requiredString(intentRecord.reason, "scopedGateCreate.intent.reason"),
+    options: stringArray(intentRecord.options, "scopedGateCreate.intent.options", 1),
+    recommendation: typeof intentRecord.recommendation === "string" ? intentRecord.recommendation : "",
+    consequences: stringArray(intentRecord.consequences, "scopedGateCreate.intent.consequences"),
+    evidenceRefs: intentRecord.evidenceRefs.map((entry, index) => parseArtifactRef(
+      entry,
+      `scopedGateCreate.intent.evidenceRefs[${String(index)}]`,
+    )),
+    ...(intentRecord.deadline === undefined
+      ? {}
+      : { deadline: parseTimestamp(intentRecord.deadline, "scopedGateCreate.intent.deadline") }),
+    ...(intentRecord.default === undefined
+      ? {}
+      : { default: requiredString(intentRecord.default, "scopedGateCreate.intent.default") }),
+    ...(releaseBinding === undefined ? {} : { releaseBinding }),
   };
+  if (record.origin === "operator") {
+    return {
+      origin: "operator",
+      command: parseOperatorMutationContext(record.command, "scopedGateCreate.command"),
+      intent: parsedIntent,
+    };
+  }
+  if (record.origin === "chair") {
+    return {
+      origin: "chair",
+      command: parseChairMutationContext(record.command, "scopedGateCreate.command"),
+      intent: parsedIntent,
+    };
+  }
+  throw new TypeError("scopedGateCreate.origin must be operator or chair");
 }
 
 export function parseScopedGateResolveRequest(value: unknown): ScopedGateResolveRequest {

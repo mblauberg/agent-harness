@@ -1,4 +1,5 @@
 import {
+  JSON_VALUE_LIMITS,
   parseCanonicalRelativePath,
   parseJsonValue,
   parseSha256Digest,
@@ -47,6 +48,8 @@ export function boundedString(options: {
     type: "string",
     minLength: minBytes === 0 ? 0 : 1,
     maxLength: maxBytes,
+    "x-minUtf8Bytes": minBytes,
+    "x-maxUtf8Bytes": maxBytes,
     ...(options.pattern === undefined ? {} : { pattern: options.pattern }),
   }, options.example ?? "value_01", (value, path) => {
     if (typeof value !== "string") throw new TypeError(`${path} must be a string`);
@@ -206,18 +209,22 @@ export function unionOf<const Codecs extends readonly [Codec<unknown>, ...Codec<
 
 export function recordOf<T>(
   valueCodec: Codec<T>,
-  options: { minimum?: number; maximum?: number; keyPattern?: string } = {},
+  options: { minimum?: number; maximum?: number; keyPattern?: string; exampleKey?: string } = {},
 ): Codec<Readonly<Record<string, T>>> {
   const minimum = options.minimum ?? 0;
   const maximum = options.maximum ?? 256;
   const pattern = options.keyPattern === undefined ? undefined : new RegExp(options.keyPattern, "u");
+  const exampleKey = options.exampleKey ?? "key_01";
+  if (minimum > 0 && pattern !== undefined && !pattern.test(exampleKey)) {
+    throw new TypeError("record codec exampleKey must satisfy keyPattern");
+  }
   return defineCodec({
     type: "object",
     minProperties: minimum,
     maxProperties: maximum,
     ...(options.keyPattern === undefined ? {} : { propertyNames: { pattern: options.keyPattern } }),
     additionalProperties: valueCodec.schema,
-  }, minimum > 0 ? { key_01: valueCodec.example } : {}, (value, path) => {
+  }, minimum > 0 ? { [exampleKey]: valueCodec.example } : {}, (value, path) => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${path} must be an object`);
     const entries = Object.entries(value);
     if (entries.length < minimum || entries.length > maximum) {
@@ -232,9 +239,43 @@ export function recordOf<T>(
   });
 }
 
-export const jsonValue = defineCodec<JsonValue>({
-  type: ["object", "array", "string", "number", "boolean", "null"],
-}, {}, parseJsonValue);
+export const JSON_VALUE_NODE_SCHEMA: JsonSchema = Object.freeze({
+  oneOf: [
+    { type: "null" },
+    { type: "boolean" },
+    { type: "number" },
+    {
+      type: "string",
+      maxLength: JSON_VALUE_LIMITS.maximumStringBytes,
+      "x-maxUtf8Bytes": JSON_VALUE_LIMITS.maximumStringBytes,
+    },
+    {
+      type: "array",
+      maxItems: JSON_VALUE_LIMITS.maximumArrayItems,
+      items: { "$ref": "#/$defs/jsonValueNode" },
+    },
+    {
+      type: "object",
+      maxProperties: JSON_VALUE_LIMITS.maximumObjectProperties,
+      propertyNames: {
+        maxLength: JSON_VALUE_LIMITS.maximumPropertyNameBytes,
+        "x-maxUtf8Bytes": JSON_VALUE_LIMITS.maximumPropertyNameBytes,
+      },
+      additionalProperties: { "$ref": "#/$defs/jsonValueNode" },
+    },
+  ],
+});
+
+export const BOUNDED_JSON_VALUE_SCHEMA: JsonSchema = Object.freeze({
+  "x-boundedJson": true,
+  "$ref": "#/$defs/jsonValueNode",
+});
+
+export const jsonValue = defineCodec<JsonValue>(
+  { "$ref": "#/$defs/boundedJsonValue" },
+  {},
+  parseJsonValue,
+);
 
 export function refined<T>(
   codec: Codec<T>,

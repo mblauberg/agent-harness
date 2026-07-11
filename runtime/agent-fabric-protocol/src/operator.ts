@@ -104,6 +104,13 @@ export type OperatorMutationContext = {
   evidenceRefs: readonly ArtifactRef[];
 };
 
+export type ChairMutationContext = {
+  commandId: CommandId;
+  ownerLeaseId: string;
+  ownerLeaseGeneration: number;
+  expectedRevision: number;
+};
+
 export type GateDecision = "approve" | "reject" | "defer" | "request-changes";
 
 export type OperatorInputAttestation = {
@@ -156,6 +163,21 @@ export type OperatorCommandAudit = {
   evidenceRefs: readonly ArtifactRef[];
   committedAt: Timestamp;
 };
+
+export function parseChairMutationContext(value: unknown, path = "chairCommand"): ChairMutationContext {
+  const record = strictRecord(value, path, [
+    "commandId",
+    "ownerLeaseId",
+    "ownerLeaseGeneration",
+    "expectedRevision",
+  ]);
+  return {
+    commandId: parseIdentifier<"CommandId">(record.commandId, `${path}.commandId`),
+    ownerLeaseId: parseIdentifier<"LeaseId">(record.ownerLeaseId, `${path}.ownerLeaseId`),
+    ownerLeaseGeneration: safeInteger(record.ownerLeaseGeneration, `${path}.ownerLeaseGeneration`, 1),
+    expectedRevision: safeInteger(record.expectedRevision, `${path}.expectedRevision`, 1),
+  };
+}
 
 export type ChairTakeoverRequest = {
   command: OperatorMutationContext;

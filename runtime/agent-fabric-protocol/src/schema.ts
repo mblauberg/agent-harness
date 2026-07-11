@@ -1,7 +1,11 @@
 import { PROTOCOL_FEATURES } from "./features.js";
+import {
+  BOUNDED_JSON_VALUE_SCHEMA,
+  JSON_VALUE_NODE_SCHEMA,
+} from "./codec.js";
 import { OPERATION_CODECS } from "./operation-codecs.js";
 import { OPERATION_REGISTRY } from "./operations.js";
-import type { JsonValue } from "./primitives.js";
+import { parseJsonValue, type JsonValue } from "./primitives.js";
 import { PROTOCOL_ERROR_CODES, PROTOCOL_LIMITS, type ProtocolOperation } from "./rpc-contract.js";
 
 type JsonSchema = Readonly<Record<string, JsonValue>>;
@@ -11,6 +15,10 @@ const timestampSchema = { type: "string", format: "date-time" } as const;
 const digestSchema = { type: "string", pattern: "^sha256:[a-f0-9]{64}$" } as const;
 const operations = Object.keys(OPERATION_REGISTRY) as ProtocolOperation[];
 const activeOperations = operations.filter((operation) => OPERATION_REGISTRY[operation].kind !== "retired");
+const boundedJsonDefinitions = {
+  boundedJsonValue: BOUNDED_JSON_VALUE_SCHEMA,
+  jsonValueNode: JSON_VALUE_NODE_SCHEMA,
+} as const;
 
 const principalSchemas = {
   operator: {
@@ -57,7 +65,7 @@ const protocolFailureSchema = {
     code: { type: "string", enum: PROTOCOL_ERROR_CODES },
     message: { type: "string", minLength: 1, maxLength: 4096 },
     retryable: { type: "boolean" },
-    details: { type: ["object", "array", "string", "number", "boolean", "null"] },
+    details: { "$ref": "#/$defs/boundedJsonValue" },
   },
 } as const;
 
@@ -259,6 +267,7 @@ export const PROTOCOL_SCHEMA = {
     { "$ref": "#/$defs/rpcResponse" },
   ],
   "$defs": {
+    ...boundedJsonDefinitions,
     fabricOperation: { type: "string", enum: operations },
     activeFabricOperation: { type: "string", enum: activeOperations },
     operatorPrincipal: principalSchemas.operator,
@@ -279,29 +288,78 @@ export const PROTOCOL_SCHEMA = {
     initializeRequest: initializeRequestEnvelope,
     initializeSuccess: initializeSuccessEnvelope,
     initializeFailure: failureVariant("initialize"),
-    rpcRequest: { oneOf: operations.map(requestVariant) },
+    rpcRequest: { oneOf: operations.map(requestVariant), "$defs": boundedJsonDefinitions },
     rpcResponse: { oneOf: operations.flatMap((operation) => (
       OPERATION_REGISTRY[operation].kind === "retired"
         ? [failureVariant(operation)]
         : [successVariant(operation), failureVariant(operation)]
-    )) },
+    )), "$defs": boundedJsonDefinitions },
   },
 } as const satisfies Readonly<Record<string, JsonValue>>;
 
 export function protocolRequestSchemaFor(operation: ProtocolOperation): JsonSchema {
-  return requestVariant(operation);
+  return { ...requestVariant(operation), "$defs": boundedJsonDefinitions };
 }
 
 export function protocolResponseSchemasFor(operation: ProtocolOperation): readonly JsonSchema[] {
-  return OPERATION_REGISTRY[operation].kind === "retired"
+  const variants = OPERATION_REGISTRY[operation].kind === "retired"
     ? [failureVariant(operation)]
     : [successVariant(operation), failureVariant(operation)];
+  return variants.map((variant) => ({ ...variant, "$defs": boundedJsonDefinitions }));
 }
 
 export function initializeRequestSchema(): JsonSchema {
-  return initializeRequestEnvelope;
+  return { ...initializeRequestEnvelope, "$defs": boundedJsonDefinitions };
 }
 
 export function initializeResponseSchemas(): readonly JsonSchema[] {
-  return [initializeSuccessEnvelope, failureVariant("initialize")];
+  return [initializeSuccessEnvelope, failureVariant("initialize")]
+    .map((variant) => ({ ...variant, "$defs": boundedJsonDefinitions }));
+}
+
+type SchemaKeywordDefinition = {
+  keyword: string;
+  schemaType: "boolean" | "number";
+  type?: "string";
+  errors: false;
+  validate(schema: unknown, data: unknown): boolean;
+};
+
+export type ProtocolSchemaKeywordTarget = {
+  addKeyword(definition: SchemaKeywordDefinition): unknown;
+};
+
+export function addProtocolSchemaKeywords(target: ProtocolSchemaKeywordTarget): void {
+  target.addKeyword({
+    keyword: "x-minUtf8Bytes",
+    schemaType: "number",
+    type: "string",
+    errors: false,
+    validate: (minimum, data) => (
+      typeof minimum === "number" && typeof data === "string" && Buffer.byteLength(data, "utf8") >= minimum
+    ),
+  });
+  target.addKeyword({
+    keyword: "x-maxUtf8Bytes",
+    schemaType: "number",
+    type: "string",
+    errors: false,
+    validate: (maximum, data) => (
+      typeof maximum === "number" && typeof data === "string" && Buffer.byteLength(data, "utf8") <= maximum
+    ),
+  });
+  target.addKeyword({
+    keyword: "x-boundedJson",
+    schemaType: "boolean",
+    errors: false,
+    validate: (enabled, data) => {
+      if (enabled !== true) return true;
+      try {
+        parseJsonValue(data, "jsonValue");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }

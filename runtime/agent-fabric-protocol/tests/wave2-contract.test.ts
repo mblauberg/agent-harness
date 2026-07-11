@@ -33,6 +33,7 @@ describe("daemon-derived scoped-gate records", () => {
   it("rejects gate creation that authors persisted identity, graph, revision, creator or approver fields", () => {
     const oldFixture = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateCreate];
     expect(() => parseOperationInput(FABRIC_OPERATIONS.scopedGateCreate, {
+      origin: "operator",
       command: operatorCommand,
       gate: oldFixture.result,
     })).toThrowError(
@@ -42,6 +43,7 @@ describe("daemon-derived scoped-gate records", () => {
 
   it("rejects an operation enforcement point without a blocked operation target", () => {
     expect(() => parseOperationInput(FABRIC_OPERATIONS.scopedGateCreate, {
+      origin: "operator",
       command: operatorCommand,
       intent: {
         projectSessionId: "ps_01",

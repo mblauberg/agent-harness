@@ -7,6 +7,7 @@ import {
 } from "./features.js";
 import {
   isFabricOperation,
+  isActiveFabricOperation,
   OPERATION_REGISTRY,
   operationsForPrincipal,
   type FabricOperation,
@@ -39,6 +40,11 @@ export class ProtocolAuthenticationError extends Error {
 }
 
 const clientField = boundedString({ maxBytes: 128 });
+
+export type VerifiedProtocolCredential = {
+  readonly principal: ProtocolPrincipal;
+  readonly grantedOperations: readonly FabricOperation[];
+};
 
 function parseFeatureArray(value: unknown, path: string): ProtocolFeature[] {
   if (!Array.isArray(value)) throw new TypeError(`${path} must be an array`);
@@ -158,23 +164,33 @@ export function allowedOperationsForPrincipal(
 
 export function authorizeProtocolInitialize(
   request: ProtocolInitializeRequest,
-  verifiedPrincipal: ProtocolPrincipal,
+  verifiedCredential: VerifiedProtocolCredential,
+  negotiatedFeatures: readonly ProtocolFeature[] = [...request.requiredFeatures, ...request.optionalFeatures],
 ): { principal: ProtocolPrincipal; allowedOperations: FabricOperation[] } {
+  const verifiedPrincipal = verifiedCredential.principal;
   if (verifiedPrincipal.kind !== request.expectedPrincipalKind) {
     throw new ProtocolAuthenticationError(
       `credential resolved to ${verifiedPrincipal.kind}, expected ${request.expectedPrincipalKind}`,
     );
   }
-  const requestedFeatures = [...request.requiredFeatures, ...request.optionalFeatures];
+  const featureOperations = operationsForFeatures(negotiatedFeatures);
+  const principalOperations = operationsForPrincipal(verifiedPrincipal.kind);
+  const allowedOperations = [...new Set(verifiedCredential.grantedOperations)]
+    .filter((operation) => (
+      isActiveFabricOperation(operation) &&
+      featureOperations.has(operation) &&
+      principalOperations.has(operation as never)
+    ))
+    .sort();
   return {
     principal: verifiedPrincipal,
-    allowedOperations: allowedOperationsForPrincipal(verifiedPrincipal, requestedFeatures),
+    allowedOperations,
   };
 }
 
 export function createProtocolInitializeResult(options: {
   request: ProtocolInitializeRequest;
-  verifiedPrincipal: ProtocolPrincipal;
+  verifiedCredential: VerifiedProtocolCredential;
   daemonVersion: string;
   daemonInstanceGeneration: number;
   offeredFeatures: readonly ProtocolFeature[];
@@ -186,8 +202,11 @@ export function createProtocolInitializeResult(options: {
     features: options.offeredFeatures,
   });
   if (!negotiation.ok) throw new TypeError(`protocol negotiation failed: ${negotiation.reason}`);
-  const authorization = authorizeProtocolInitialize(options.request, options.verifiedPrincipal);
-  const negotiatedOperations = new Set(allowedOperationsForPrincipal(options.verifiedPrincipal, negotiation.features));
+  const authorization = authorizeProtocolInitialize(
+    options.request,
+    options.verifiedCredential,
+    negotiation.features,
+  );
   return {
     protocolVersion: 1,
     daemonVersion: clientField.parse(options.daemonVersion, "daemonVersion"),
@@ -196,7 +215,7 @@ export function createProtocolInitializeResult(options: {
     clientNonce: options.request.authentication.clientNonce,
     connectionNonce: parseIdentifier<"ConnectionNonce">(options.connectionNonce, "connectionNonce"),
     features: negotiation.features,
-    allowedOperations: authorization.allowedOperations.filter((operation) => negotiatedOperations.has(operation)),
+    allowedOperations: authorization.allowedOperations,
     limits: options.limits,
   };
 }

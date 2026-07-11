@@ -114,7 +114,7 @@ export function parseCanonicalRelativePath(value: unknown, path: string): Canoni
     /^[A-Za-z]:/u.test(candidate) ||
     candidate.includes("\\") ||
     segments.some((segment) => segment === "" || segment === "." || segment === "..") ||
-    /[*?\[\]]/u.test(candidate) ||
+    /[*?\[\]{}]/u.test(candidate) ||
     candidate.includes("\0")
   ) {
     throw new ProtocolValidationError(path, "must be a canonical workspace-relative path");
@@ -193,17 +193,128 @@ export function stringArray(value: unknown, path: string, minimumLength = 0): st
   return value.map((entry, index) => requiredString(entry, `${path}[${String(index)}]`));
 }
 
+export const JSON_VALUE_LIMITS = Object.freeze({
+  maximumDepth: 64,
+  maximumNodes: 4_096,
+  maximumArrayItems: 256,
+  maximumObjectProperties: 256,
+  maximumPropertyNameBytes: 256,
+  maximumStringBytes: 1_048_576,
+});
+
+type JsonWorkItem = {
+  value: unknown;
+  path: string;
+  depth: number;
+  assign(parsed: JsonValue): void;
+};
+
 export function parseJsonValue(value: unknown, path: string): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new ProtocolValidationError(path, "must contain only finite JSON numbers");
-    return value;
+  let result: JsonValue | undefined;
+  let assigned = false;
+  let nodes = 0;
+  const work: JsonWorkItem[] = [{
+    value,
+    path,
+    depth: 0,
+    assign: (parsed) => {
+      result = parsed;
+      assigned = true;
+    },
+  }];
+
+  while (work.length > 0) {
+    const current = work.pop();
+    if (current === undefined) break;
+    nodes += 1;
+    if (nodes > JSON_VALUE_LIMITS.maximumNodes) {
+      throw new ProtocolValidationError(path, `must contain at most ${String(JSON_VALUE_LIMITS.maximumNodes)} JSON nodes`);
+    }
+    if (current.value === null || typeof current.value === "boolean") {
+      current.assign(current.value);
+      continue;
+    }
+    if (typeof current.value === "string") {
+      if (Buffer.byteLength(current.value, "utf8") > JSON_VALUE_LIMITS.maximumStringBytes) {
+        throw new ProtocolValidationError(
+          current.path,
+          `must be at most ${String(JSON_VALUE_LIMITS.maximumStringBytes)} UTF-8 bytes`,
+        );
+      }
+      current.assign(current.value);
+      continue;
+    }
+    if (typeof current.value === "number") {
+      if (!Number.isFinite(current.value)) {
+        throw new ProtocolValidationError(current.path, "must contain only finite JSON numbers");
+      }
+      current.assign(current.value);
+      continue;
+    }
+    if (current.depth >= JSON_VALUE_LIMITS.maximumDepth) {
+      throw new ProtocolValidationError(
+        current.path,
+        `exceeds maximum JSON depth ${String(JSON_VALUE_LIMITS.maximumDepth)}`,
+      );
+    }
+    if (Array.isArray(current.value)) {
+      if (current.value.length > JSON_VALUE_LIMITS.maximumArrayItems) {
+        throw new ProtocolValidationError(
+          current.path,
+          `must be an array with at most ${String(JSON_VALUE_LIMITS.maximumArrayItems)} items`,
+        );
+      }
+      const parsed: JsonValue[] = new Array(current.value.length);
+      current.assign(parsed);
+      for (let index = current.value.length - 1; index >= 0; index -= 1) {
+        work.push({
+          value: current.value[index],
+          path: `${current.path}[${String(index)}]`,
+          depth: current.depth + 1,
+          assign: (entry) => { parsed[index] = entry; },
+        });
+      }
+      continue;
+    }
+    if (typeof current.value === "object") {
+      const entries = Object.entries(current.value);
+      if (entries.length > JSON_VALUE_LIMITS.maximumObjectProperties) {
+        throw new ProtocolValidationError(
+          current.path,
+          `must be an object with at most ${String(JSON_VALUE_LIMITS.maximumObjectProperties)} properties`,
+        );
+      }
+      const parsed: Record<string, JsonValue> = {};
+      current.assign(parsed);
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        if (entry === undefined) continue;
+        const [key, child] = entry;
+        if (Buffer.byteLength(key, "utf8") > JSON_VALUE_LIMITS.maximumPropertyNameBytes) {
+          throw new ProtocolValidationError(
+            `${current.path}.${key}`,
+            `property name must be at most ${String(JSON_VALUE_LIMITS.maximumPropertyNameBytes)} UTF-8 bytes`,
+          );
+        }
+        work.push({
+          value: child,
+          path: `${current.path}.${key}`,
+          depth: current.depth + 1,
+          assign: (entryValue) => {
+            Object.defineProperty(parsed, key, {
+              value: entryValue,
+              enumerable: true,
+              configurable: true,
+              writable: true,
+            });
+          },
+        });
+      }
+      continue;
+    }
+    throw new ProtocolValidationError(current.path, "must be a JSON value");
   }
-  if (Array.isArray(value)) return value.map((entry, index) => parseJsonValue(entry, `${path}[${String(index)}]`));
-  if (typeof value === "object") {
-    const parsed: Record<string, JsonValue> = {};
-    for (const [key, entry] of Object.entries(value)) parsed[key] = parseJsonValue(entry, `${path}.${key}`);
-    return parsed;
-  }
-  throw new ProtocolValidationError(path, "must be a JSON value");
+
+  if (!assigned || result === undefined) throw new ProtocolValidationError(path, "must be a JSON value");
+  return result;
 }

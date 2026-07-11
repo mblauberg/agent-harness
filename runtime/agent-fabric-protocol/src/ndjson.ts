@@ -6,9 +6,9 @@ import {
   parseProtocolInitializeResult,
   ProtocolAuthenticationError,
 } from "./authentication.js";
-import { negotiateProtocol, type ProtocolFeature } from "./features.js";
+import { negotiateProtocol, operationsForFeatures, type ProtocolFeature } from "./features.js";
 import { isFabricOperation, type FabricOperation } from "./operations.js";
-import { parseOperationInput, parseOperationResult } from "./operation-codecs.js";
+import { parseOperationInputForPrincipal, parseOperationResult } from "./operation-codecs.js";
 import { parseJsonValue, strictRecord, type JsonValue } from "./primitives.js";
 import {
   PROTOCOL_LIMITS,
@@ -331,6 +331,13 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       if (!negotiation.ok) {
         throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", `protocol negotiation failed: ${negotiation.reason}`);
       }
+      const negotiatedOperations = operationsForFeatures(negotiation.features);
+      const invalidGrant = initialized.allowedOperations.find((operation) => !negotiatedOperations.has(operation));
+      if (invalidGrant !== undefined) {
+        throw new ProtocolAuthenticationError(
+          `allowed operation ${invalidGrant} is outside the client's negotiated feature set`,
+        );
+      }
       transport.#features = negotiation.features;
       transport.#principal = initialized.principal;
       transport.#allowedOperations = new Set(initialized.allowedOperations);
@@ -371,7 +378,7 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
         `operation was not negotiated: ${operation}`,
       );
     }
-    const parsedInput = parseOperationInput(operation, input);
+    const parsedInput = parseOperationInputForPrincipal(operation, this.principal.kind, input);
     const value = await this.#wireCall(operation, parsedInput);
     return parseOperationResult(operation, value);
   }

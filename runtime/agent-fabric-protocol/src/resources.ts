@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
   parseIdentifier,
@@ -171,12 +172,48 @@ function parseWriterAdmission(value: unknown): WriterAdmission {
     "sourcePrefixes",
     "writerGeneration",
   ]);
-  const repositoryRoot = resolve(requiredString(record.repositoryRoot, "resourceReservation.writerAdmission.repositoryRoot"));
-  const worktreePath = resolve(requiredString(record.worktreePath, "resourceReservation.writerAdmission.worktreePath"));
+  const repositoryInput = requiredString(
+    record.repositoryRoot,
+    "resourceReservation.writerAdmission.repositoryRoot",
+  );
+  if (!isAbsolute(repositoryInput)) {
+    throw new TypeError("resourceReservation.writerAdmission.repositoryRoot must be absolute");
+  }
+  const repositoryRoot = resolve(repositoryInput);
+  const repositoryStat = lstatSync(repositoryRoot);
+  if (!repositoryStat.isDirectory() || repositoryStat.isSymbolicLink() || realpathSync(repositoryRoot) !== repositoryRoot) {
+    throw new TypeError("resourceReservation.writerAdmission.repositoryRoot must be a canonical non-symlink directory");
+  }
+  const worktreeInput = requiredString(record.worktreePath, "resourceReservation.writerAdmission.worktreePath");
+  if (!isAbsolute(worktreeInput)) {
+    throw new TypeError("resourceReservation.writerAdmission.worktreePath must be absolute");
+  }
+  const worktreePath = resolve(worktreeInput);
   const worktreesRoot = resolve(repositoryRoot, ".worktrees");
   const worktreeRelative = relative(worktreesRoot, worktreePath);
-  if (worktreeRelative === "" || worktreeRelative.startsWith(`..${sep}`) || isAbsolute(worktreeRelative)) {
-    throw new TypeError("resourceReservation.writerAdmission.worktreePath must be under repositoryRoot/.worktrees");
+  if (
+    worktreeRelative === "" ||
+    worktreeRelative === ".." ||
+    worktreeRelative.startsWith(`..${sep}`) ||
+    isAbsolute(worktreeRelative) ||
+    worktreeRelative.includes(sep)
+  ) {
+    throw new TypeError("resourceReservation.writerAdmission.worktreePath must be one direct child under repositoryRoot/.worktrees");
+  }
+  if (existsSync(worktreesRoot)) {
+    const worktreesStat = lstatSync(worktreesRoot);
+    if (!worktreesStat.isDirectory() || worktreesStat.isSymbolicLink() || realpathSync(worktreesRoot) !== worktreesRoot) {
+      throw new TypeError("resourceReservation.writerAdmission .worktrees root must not be a symlink escape");
+    }
+  }
+  if (existsSync(worktreePath)) {
+    const worktreeStat = lstatSync(worktreePath);
+    if (!worktreeStat.isDirectory() || worktreeStat.isSymbolicLink()) {
+      throw new TypeError("resourceReservation.writerAdmission.worktreePath must not be a symlink escape");
+    }
+    if (dirname(realpathSync(worktreePath)) !== realpathSync(worktreesRoot)) {
+      throw new TypeError("resourceReservation.writerAdmission.worktreePath escapes repositoryRoot/.worktrees");
+    }
   }
   if (!Array.isArray(record.sourcePrefixes) || record.sourcePrefixes.length === 0) {
     throw new TypeError("resourceReservation.writerAdmission.sourcePrefixes must not be empty");

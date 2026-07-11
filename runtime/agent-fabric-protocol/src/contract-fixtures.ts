@@ -221,6 +221,7 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     origin: "operator",
     command: operatorCommand,
     intakeId: "intake_01",
+    projectSessionId: "ps_01",
     expectedRevision: 1,
     state: "discussing",
     summary: "Discuss protocol.",
@@ -237,6 +238,7 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     gateIds: ["gate_01"],
   });
   set(FABRIC_OPERATIONS.scopedGateCreate, {
+    origin: "operator",
     command: operatorCommand,
     intent: {
       projectSessionId: "ps_01",

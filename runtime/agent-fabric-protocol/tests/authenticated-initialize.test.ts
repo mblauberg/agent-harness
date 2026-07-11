@@ -88,10 +88,13 @@ describe("authenticated initialize", () => {
     } as const satisfies ProtocolInitializeRequest;
 
     expect(() => authorizeProtocolInitialize(request, {
-      kind: "integration",
-      integrationId: "integration_01" as never,
-      projectId: "project_01" as never,
-      principalGeneration: 1,
+      principal: {
+        kind: "integration",
+        integrationId: "integration_01" as never,
+        projectId: "project_01" as never,
+        principalGeneration: 1,
+      },
+      grantedOperations: ["fabric.v1.integration.input-attest"],
     })).toThrow(/credential resolved to integration/);
   });
 
@@ -105,11 +108,19 @@ describe("authenticated initialize", () => {
         requiredFeatures: ["operator-projection.v1"],
         optionalFeatures: [],
       },
-      verifiedPrincipal: {
-        kind: "operator",
-        operatorId: "operator_01" as never,
-        projectId: "project_01" as never,
-        principalGeneration: 1,
+      verifiedCredential: {
+        principal: {
+          kind: "operator",
+          operatorId: "operator_01" as never,
+          projectId: "project_01" as never,
+          principalGeneration: 1,
+        },
+        grantedOperations: [
+          "fabric.v1.project.discover",
+          "fabric.v1.operator-projection.snapshot",
+          "fabric.v1.operator-projection.page",
+          "fabric.v1.operator-projection.events",
+        ],
       },
       daemonVersion: "1.0.0",
       daemonInstanceGeneration: 1,
