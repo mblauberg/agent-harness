@@ -1,4 +1,5 @@
 import type { OperatorCapabilityCredential, OperatorMutationContext } from "./operator.js";
+import type { OperatorActionAvailability } from "./operator-actions.js";
 import type {
   AgentId,
   ArtifactRef,
@@ -233,6 +234,161 @@ export type ProjectionPageResult<View extends ConsoleView = ConsoleView> = View 
       }>;
     }
   : never;
+
+export type OperatorDetailRef =
+  | { kind: "project"; projectId: ProjectId; expectedRevision: number }
+  | { kind: "session"; projectSessionId: ProjectSessionId; expectedRevision: number }
+  | { kind: "run"; coordinationRunId: CoordinationRunId; expectedRevision: number }
+  | { kind: "task"; taskId: TaskId; expectedRevision: number }
+  | { kind: "agent"; agentId: AgentId; expectedRevision: number }
+  | { kind: "evidence"; evidenceId: string; expectedRevision: number }
+  | { kind: "activity"; eventId: string; expectedRevision: number }
+  | { kind: "system"; componentId: string; expectedRevision: number };
+
+export type OperatorViewSummaryMap = {
+  attention: {
+    kind: "attention";
+    label: AttentionItem["label"];
+    priority: AttentionItem["priority"];
+    title: string;
+  };
+  project: { kind: "project"; goal: string; repositoryRevision: string };
+  runs: { kind: "run"; phase: string; health: RunProjection["health"]; nextMilestone: string };
+  work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
+  agents: {
+    kind: "agent";
+    role: AgentViewItem["role"];
+    lifecycle: string;
+    contextPressure: AgentViewItem["contextPressure"];
+  };
+  evidence: {
+    kind: "evidence";
+    evidenceKind: EvidenceViewItem["kind"];
+    status: EvidenceViewItem["status"];
+    provenance: string;
+  };
+  activity: { kind: "activity"; activityKind: ActivityViewItem["kind"]; summary: string; occurredAt: Timestamp };
+  system: { kind: "system"; systemKind: SystemViewItem["kind"]; state: SystemViewItem["state"]; detail: string };
+};
+
+export type OperatorViewDetailRefMap = {
+  attention: OperatorDetailRef;
+  project: Extract<OperatorDetailRef, { kind: "project" }>;
+  runs: Extract<OperatorDetailRef, { kind: "run" }>;
+  work: Extract<OperatorDetailRef, { kind: "task" }>;
+  agents: Extract<OperatorDetailRef, { kind: "agent" }>;
+  evidence: Extract<OperatorDetailRef, { kind: "evidence" }>;
+  activity: Extract<OperatorDetailRef, { kind: "activity" }>;
+  system: Extract<OperatorDetailRef, { kind: "system" }>;
+};
+
+export type OperatorViewRow<View extends ConsoleView = ConsoleView> = View extends ConsoleView
+  ? {
+      itemId: string;
+      itemRevision: number;
+      fact: ProjectionFact<{
+        summary: OperatorViewSummaryMap[View];
+        detailRef: OperatorViewDetailRefMap[View];
+        actionAvailability: OperatorActionAvailability;
+      }>;
+    }
+  : never;
+
+export type OperatorViewPageRequest<View extends ConsoleView = ConsoleView> = {
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  projectSessionId?: ProjectSessionId;
+  view: View;
+  snapshotRevision: number;
+  cursor: number;
+  limit: number;
+};
+
+export type OperatorViewPageResult<View extends ConsoleView = ConsoleView> = View extends ConsoleView
+  ?
+      | {
+          status: "page";
+          view: View;
+          rows: readonly OperatorViewRow<View>[];
+          nextCursor: number;
+          hasMore: boolean;
+          snapshotRevision: number;
+          readTransactionId: string;
+        }
+      | {
+          status: "resnapshot-required";
+          view: View;
+          reason: "snapshot-mismatch" | "retention-gap" | "project-cursor-mismatch" | "cursor-overflow";
+          currentSnapshotRevision: number;
+          snapshotCursor: number;
+        }
+  : never;
+
+export type OperatorDetail =
+  | { kind: "project"; projectId: ProjectId; canonicalRoot: string; goal: string; repositoryRevision: string }
+  | {
+      kind: "session";
+      projectSessionId: ProjectSessionId;
+      mode: ProjectSession["mode"];
+      state: ProjectSession["state"];
+      generation: number;
+      membershipRevision: number;
+    }
+  | {
+      kind: "run";
+      coordinationRunId: CoordinationRunId;
+      phase: string;
+      chairAgentId: AgentId;
+      chairGeneration: number;
+      health: RunProjection["health"];
+    }
+  | { kind: "task"; taskId: TaskId; objective: string; state: string; ownerAgentId: AgentId | null }
+  | {
+      kind: "agent";
+      agentId: AgentId;
+      role: AgentViewItem["role"];
+      lifecycle: string;
+      provider: string;
+      providerSessionGeneration: number;
+    }
+  | {
+      kind: "evidence";
+      evidenceId: string;
+      evidenceKind: EvidenceViewItem["kind"];
+      artifactRef: ArtifactRef;
+      status: EvidenceViewItem["status"];
+    }
+  | { kind: "activity"; eventId: string; activityKind: ActivityViewItem["kind"]; summary: string; occurredAt: Timestamp }
+  | {
+      kind: "system";
+      componentId: string;
+      systemKind: SystemViewItem["kind"];
+      state: SystemViewItem["state"];
+      generation: number;
+      detail: string;
+    };
+
+export type OperatorDetailReadRequest = {
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  projectSessionId?: ProjectSessionId;
+  snapshotRevision: number;
+  detailRef: OperatorDetailRef;
+};
+
+export type OperatorDetailReadResult =
+  | {
+      status: "current";
+      detailRef: OperatorDetailRef;
+      detail: ProjectionFact<OperatorDetail>;
+      snapshotRevision: number;
+      readTransactionId: string;
+    }
+  | {
+      status: "resnapshot-required";
+      reason: "snapshot-mismatch" | "detail-revision-changed";
+      currentSnapshotRevision: number;
+    };
 
 export type MessageBodyReadRequest = {
   credential: OperatorCapabilityCredential;

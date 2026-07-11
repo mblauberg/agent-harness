@@ -5,6 +5,8 @@ import type {
   ScopedGateCheckRequest,
   ScopedGateCheckResult,
   ScopedGateCreateRequest,
+  ScopedGateReadRequest,
+  ScopedGateReadResult,
   ScopedGateResolveRequest,
 } from "./gates.js";
 import type {
@@ -24,6 +26,15 @@ import type {
   OperatorInputAttestation,
 } from "./operator.js";
 import type {
+  OperatorActionCommitRequest,
+  OperatorActionPreview,
+  OperatorActionPreviewRequest,
+  OperatorActionReceipt,
+  OperatorActionReconcileRequest,
+  OperatorActionStatus,
+  OperatorActionStatusRequest,
+} from "./operator-actions.js";
+import type {
   MessageBodyReadRequest,
   MessageBodyReadResult,
   OperatorAttachRequest,
@@ -32,6 +43,10 @@ import type {
   OperatorDetachRequest,
   OperatorHeartbeatRequest,
   OperatorProjectionSnapshot,
+  OperatorDetailReadRequest,
+  OperatorDetailReadResult,
+  OperatorViewPageRequest,
+  OperatorViewPageResult,
   ProjectDiscoveryRequest,
   ProjectDiscoveryResult,
   ProjectionPageRequest,
@@ -162,6 +177,7 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.scopedGateCreate]: ScopedGateCreateRequest;
   [FABRIC_OPERATIONS.scopedGateResolve]: ScopedGateResolveRequest;
   [FABRIC_OPERATIONS.scopedGateCheck]: ScopedGateCheckRequest;
+  [FABRIC_OPERATIONS.scopedGateRead]: ScopedGateReadRequest;
   [FABRIC_OPERATIONS.resourceReserve]: ResourceReservationRequest;
   [FABRIC_OPERATIONS.resourceRelease]: ResourceReleaseRequest;
   [FABRIC_OPERATIONS.resourceReconcile]: ResourceReconcileRequest;
@@ -178,6 +194,12 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.projectionSnapshot]: ProjectionSnapshotRequest;
   [FABRIC_OPERATIONS.projectionPage]: ProjectionPageRequest;
   [FABRIC_OPERATIONS.projectionEvents]: ProjectionEventsRequest;
+  [FABRIC_OPERATIONS.projectionViewPage]: OperatorViewPageRequest;
+  [FABRIC_OPERATIONS.projectionDetailRead]: OperatorDetailReadRequest;
+  [FABRIC_OPERATIONS.operatorActionPreview]: OperatorActionPreviewRequest;
+  [FABRIC_OPERATIONS.operatorActionCommit]: OperatorActionCommitRequest;
+  [FABRIC_OPERATIONS.operatorActionStatus]: OperatorActionStatusRequest;
+  [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionReconcileRequest;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadRequest;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSessionDrainRequest;
   [FABRIC_OPERATIONS.projectSessionStop]: ProjectSessionStopRequest;
@@ -233,6 +255,7 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.scopedGateCreate]: ScopedGate;
   [FABRIC_OPERATIONS.scopedGateResolve]: ScopedGate;
   [FABRIC_OPERATIONS.scopedGateCheck]: ScopedGateCheckResult;
+  [FABRIC_OPERATIONS.scopedGateRead]: ScopedGateReadResult;
   [FABRIC_OPERATIONS.resourceReserve]: ResourceReservation;
   [FABRIC_OPERATIONS.resourceRelease]: ResourceReservation;
   [FABRIC_OPERATIONS.resourceReconcile]: ResourceReservation;
@@ -249,6 +272,12 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.projectionSnapshot]: OperatorProjectionSnapshot;
   [FABRIC_OPERATIONS.projectionPage]: ProjectionPageResult;
   [FABRIC_OPERATIONS.projectionEvents]: ProjectionEventsResult;
+  [FABRIC_OPERATIONS.projectionViewPage]: OperatorViewPageResult;
+  [FABRIC_OPERATIONS.projectionDetailRead]: OperatorDetailReadResult;
+  [FABRIC_OPERATIONS.operatorActionPreview]: OperatorActionPreview;
+  [FABRIC_OPERATIONS.operatorActionCommit]: OperatorActionReceipt;
+  [FABRIC_OPERATIONS.operatorActionStatus]: OperatorActionStatus;
+  [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionStatus;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadResult;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionStop]: ProjectSession;

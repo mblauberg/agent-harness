@@ -8,10 +8,13 @@ export type OperationFeature =
   | "input-attestation.v1"
   | "intakes.v1"
   | "scoped-gates.v1"
+  | "scoped-gate-read.v1"
   | "resource-reservations.v1"
   | "request-results.v1"
   | "chair-takeover.v1"
   | "operator-projection.v1"
+  | "operator-projection.v2"
+  | "operator-actions.v1"
   | "message-body-read.v1"
   | "lifecycle-control.v1";
 
@@ -110,6 +113,7 @@ const DEFINITIONS = defineOperations({
   scopedGateCreate: { operation: "fabric.v1.scoped-gate.create", feature: "scoped-gates.v1", principals: ["operator", "agent"], kind: "extension", gateOwner: "scoped-gate" },
   scopedGateResolve: { operation: "fabric.v1.scoped-gate.resolve", feature: "scoped-gates.v1", principals: ["operator"], kind: "extension", gateOwner: "scoped-gate" },
   scopedGateCheck: { operation: "fabric.v1.scoped-gate.check", feature: "scoped-gates.v1", principals: ["agent"], kind: "extension", gateOwner: "scoped-gate" },
+  scopedGateRead: { operation: "fabric.v1.scoped-gate.read", feature: "scoped-gate-read.v1", principals: ["operator"], kind: "extension", gateOwner: "scoped-gate" },
   resourceReserve: { operation: "fabric.v1.resource.reserve", feature: "resource-reservations.v1", principals: ["agent"], kind: "extension" },
   resourceRelease: { operation: "fabric.v1.resource.release", feature: "resource-reservations.v1", principals: ["agent"], kind: "extension" },
   resourceReconcile: { operation: "fabric.v1.resource.reconcile", feature: "resource-reservations.v1", principals: ["agent", "integration"], kind: "extension" },
@@ -126,6 +130,12 @@ const DEFINITIONS = defineOperations({
   projectionSnapshot: { operation: "fabric.v1.operator-projection.snapshot", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },
   projectionPage: { operation: "fabric.v1.operator-projection.page", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },
   projectionEvents: { operation: "fabric.v1.operator-projection.events", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },
+  projectionViewPage: { operation: "fabric.v1.operator-projection.view-page", feature: "operator-projection.v2", principals: ["operator"], kind: "extension" },
+  projectionDetailRead: { operation: "fabric.v1.operator-projection.detail.read", feature: "operator-projection.v2", principals: ["operator"], kind: "extension" },
+  operatorActionPreview: { operation: "fabric.v1.operator-action.preview", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
+  operatorActionCommit: { operation: "fabric.v1.operator-action.commit", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
+  operatorActionStatus: { operation: "fabric.v1.operator-action.status", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
+  operatorActionReconcile: { operation: "fabric.v1.operator-action.reconcile", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   messageBodyRead: { operation: "fabric.v1.message-body.read", feature: "message-body-read.v1", principals: ["operator"], kind: "extension" },
   projectSessionDrain: { operation: "fabric.v1.project-session.drain", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
   projectSessionStop: { operation: "fabric.v1.project-session.stop", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },

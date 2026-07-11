@@ -7,6 +7,8 @@ import type {
   ScopedGateCheckRequest,
   ScopedGateCheckResult,
   ScopedGateCreateRequest,
+  ScopedGateReadRequest,
+  ScopedGateReadResult,
   ScopedGateResolveRequest,
 } from "./gates.js";
 import type {
@@ -33,6 +35,15 @@ import type {
   OperatorInputAttestation,
 } from "./operator.js";
 import type {
+  OperatorActionCommitRequest,
+  OperatorActionPreview,
+  OperatorActionPreviewRequest,
+  OperatorActionReceipt,
+  OperatorActionReconcileRequest,
+  OperatorActionStatus,
+  OperatorActionStatusRequest,
+} from "./operator-actions.js";
+import type {
   MessageBodyReadRequest,
   MessageBodyReadResult,
   OperatorAttachRequest,
@@ -41,6 +52,10 @@ import type {
   OperatorDetachRequest,
   OperatorHeartbeatRequest,
   OperatorProjectionSnapshot,
+  OperatorDetailReadRequest,
+  OperatorDetailReadResult,
+  OperatorViewPageRequest,
+  OperatorViewPageResult,
   ProjectDiscoveryRequest,
   ProjectDiscoveryResult,
   ProjectionPageRequest,
@@ -117,6 +132,7 @@ export interface OperatorControlClient {
   attach(input: OperatorAttachRequest): Promise<OperatorAttachment>;
   detach(input: OperatorDetachRequest): Promise<{ detached: true; revision: number }>;
   heartbeat(input: OperatorHeartbeatRequest): Promise<OperatorAttachment>;
+  /** @deprecated Legacy generic surface. New Console clients use the closed two-phase action service. */
   command(input: OperatorCommandRequest): Promise<OperatorCommandAudit>;
 }
 
@@ -174,6 +190,26 @@ export interface ProjectionClient {
   events(input: ProjectionEventsRequest): Promise<ProjectionEventsResult>;
 }
 
+export interface OperatorActionClient {
+  preview(input: OperatorActionPreviewRequest): Promise<OperatorActionPreview>;
+  commit(input: OperatorActionCommitRequest): Promise<OperatorActionReceipt>;
+  status(input: OperatorActionStatusRequest): Promise<OperatorActionStatus>;
+  reconcile(input: OperatorActionReconcileRequest): Promise<OperatorActionStatus>;
+}
+
+type OperatorConsoleReadSurface = {
+  gates: { read(input: ScopedGateReadRequest): Promise<ScopedGateReadResult> };
+  projection: {
+    viewPage(input: OperatorViewPageRequest): Promise<OperatorViewPageResult>;
+    readDetail(input: OperatorDetailReadRequest): Promise<OperatorDetailReadResult>;
+  };
+};
+
+export type OperatorConsoleClient = OperatorConsoleReadSurface & (
+  | { readOnly: true; actions?: undefined }
+  | { readOnly: false; actions: OperatorActionClient }
+);
+
 export interface InputAttestationClient {
   attestInput(input: IntegrationInputAttestationRequest): Promise<OperatorInputAttestation>;
 }
@@ -201,6 +237,7 @@ export type NegotiatedOperatorClient = {
   projection?: ProjectionClient;
   messages?: MessageBodyClient;
   lifecycle?: LifecycleControlClient;
+  console?: OperatorConsoleClient;
   close(): Promise<void>;
 };
 
@@ -297,6 +334,34 @@ function lifecycle(transport: ProtocolRpcTransport): LifecycleControlClient {
   };
 }
 
+function operatorActions(transport: ProtocolRpcTransport): OperatorActionClient {
+  return {
+    preview: (input) => transport.call(FABRIC_OPERATIONS.operatorActionPreview, input),
+    commit: (input) => transport.call(FABRIC_OPERATIONS.operatorActionCommit, input),
+    status: (input) => transport.call(FABRIC_OPERATIONS.operatorActionStatus, input),
+    reconcile: (input) => transport.call(FABRIC_OPERATIONS.operatorActionReconcile, input),
+  };
+}
+
+function operatorConsole(transport: ProtocolRpcTransport): OperatorConsoleClient {
+  const reads: OperatorConsoleReadSurface = {
+    gates: { read: (input) => transport.call(FABRIC_OPERATIONS.scopedGateRead, input) },
+    projection: {
+      viewPage: (input) => transport.call(FABRIC_OPERATIONS.projectionViewPage, input),
+      readDetail: (input) => transport.call(FABRIC_OPERATIONS.projectionDetailRead, input),
+    },
+  };
+  const actionOperations = [
+    FABRIC_OPERATIONS.operatorActionPreview,
+    FABRIC_OPERATIONS.operatorActionCommit,
+    FABRIC_OPERATIONS.operatorActionStatus,
+    FABRIC_OPERATIONS.operatorActionReconcile,
+  ] as const;
+  return hasFeature(transport, "operator-actions.v1") && hasOperations(transport, actionOperations)
+    ? { ...reads, readOnly: false, actions: operatorActions(transport) }
+    : { ...reads, readOnly: true };
+}
+
 export function createOperatorClient(transport: ProtocolRpcTransport): NegotiatedOperatorClient {
   return {
     kind: "operator",
@@ -357,6 +422,15 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
       FABRIC_OPERATIONS.daemonDrain,
       FABRIC_OPERATIONS.daemonStop,
     ]) ? { lifecycle: lifecycle(transport) } : {}),
+    ...(hasFeature(transport, "scoped-gate-read.v1") &&
+      hasFeature(transport, "operator-projection.v2") &&
+      hasOperations(transport, [
+        FABRIC_OPERATIONS.scopedGateRead,
+        FABRIC_OPERATIONS.projectionViewPage,
+        FABRIC_OPERATIONS.projectionDetailRead,
+      ])
+      ? { console: operatorConsole(transport) }
+      : {}),
     close: () => transport.close(),
   };
 }

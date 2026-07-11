@@ -9,6 +9,7 @@ export * from "./membership.js";
 export * from "./ndjson.js";
 export * from "./operations.js";
 export * from "./operator.js";
+export * from "./operator-actions.js";
 export * from "./operation-codecs.js";
 export * from "./primitives.js";
 export * from "./project-session.js";

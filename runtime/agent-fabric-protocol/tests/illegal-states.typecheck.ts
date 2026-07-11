@@ -1,5 +1,10 @@
 import type {
   OperatorCapabilityGrant,
+  OperatorActionIntent,
+  OperatorActionReconcileRequest,
+  OperatorGitIntent,
+  OperatorMutationContext,
+  OperatorRevisionTarget,
   ProjectSession,
   ProjectionFact,
   ResultDelivery,
@@ -19,6 +24,12 @@ declare const claimedBase: Omit<
   "state" | "claimedByAgentId" | "claimDeadline"
 >;
 declare const unavailableFact: Omit<Extract<ProjectionFact<string>, { freshness: "unavailable" }>, "freshness">;
+declare const actionTarget: OperatorRevisionTarget;
+declare const gitIntent: OperatorGitIntent;
+declare const reconcileBase: Omit<OperatorActionReconcileRequest, "mode">;
+declare const promotionBase: Omit<Extract<OperatorActionIntent, { kind: "promotion" }>, "releaseBinding">;
+declare const externalIntent: Extract<OperatorActionIntent, { kind: "registered-external-effect" }>;
+declare const operatorMutation: OperatorMutationContext;
 
 type RequestUnion = ProtocolRequest<"fabric.v1.task.read" | "fabric.v1.task.list">;
 type ResponseUnion = ProtocolResponse<"fabric.v1.task.read" | "fabric.v1.task.list">;
@@ -64,6 +75,30 @@ export function compileTimeIllegalStateWitnesses(): void {
     result: { tasks: [] },
   };
 
+  // @ts-expect-error cancel intents require an explicit reason
+  const cancelWithoutReason: OperatorActionIntent = { kind: "control", action: "cancel", target: actionTarget };
+
+  const shellGit: OperatorActionIntent = {
+    ...gitIntent,
+    // @ts-expect-error Git effects are a closed union with no shell or argv escape hatch
+    operation: { effect: "shell", shell: "git push" },
+  };
+
+  // @ts-expect-error promotion always carries the exact release binding
+  const promotionWithoutRelease: OperatorActionIntent = { ...promotionBase };
+
+  const externalWithRelease: typeof externalIntent = {
+    ...externalIntent,
+    // @ts-expect-error broad external effects cannot carry or satisfy a release binding
+    releaseBinding: { artifactDigest: "sha256:invalid" },
+  };
+
+  const redispatchReconcile: OperatorActionReconcileRequest = {
+    ...reconcileBase,
+    // @ts-expect-error reconciliation is observe-only and cannot redispatch
+    mode: "redispatch",
+  };
+
   void closedWithoutEvidence;
   void unboundTakeover;
   void fireAndForget;
@@ -71,4 +106,10 @@ export function compileTimeIllegalStateWitnesses(): void {
   void unavailableWithValue;
   void mismatchedRequest;
   void mismatchedResponse;
+  void cancelWithoutReason;
+  void shellGit;
+  void promotionWithoutRelease;
+  void externalWithRelease;
+  void redispatchReconcile;
+  void operatorMutation;
 }

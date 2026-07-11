@@ -13,10 +13,13 @@ export const PROTOCOL_FEATURES = [
   "input-attestation.v1",
   "intakes.v1",
   "scoped-gates.v1",
+  "scoped-gate-read.v1",
   "resource-reservations.v1",
   "request-results.v1",
   "chair-takeover.v1",
   "operator-projection.v1",
+  "operator-projection.v2",
+  "operator-actions.v1",
   "message-body-read.v1",
   "lifecycle-control.v1",
 ] as const;

@@ -3,6 +3,7 @@ import {
   parseChairMutationContext,
   parseOperatorMutationContext,
   type ChairMutationContext,
+  type OperatorCapabilityCredential,
   type OperatorMutationContext,
 } from "./operator.js";
 import {
@@ -22,6 +23,7 @@ import {
   type GateId,
   type InputAttestationId,
   type OperatorId,
+  type ProjectId,
   type ProjectSessionId,
   type Sha256Digest,
   type TaskId,
@@ -137,6 +139,29 @@ export type ScopedGateCheckRequest = ScopedGateCheckBase & (
 export type ScopedGateCheckResult =
   | { allowed: true; checkedGateRevisions: Readonly<Record<string, number>> }
   | { allowed: false; blockingGateIds: readonly GateId[]; checkedGateRevisions: Readonly<Record<string, number>> };
+
+export type ScopedGateReadRequest = {
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  projectSessionId: ProjectSessionId;
+  gateId: GateId;
+  expectedRevision?: number;
+};
+
+export type ScopedGateReadResult =
+  | {
+      status: "current";
+      gate: ScopedGate;
+      readTransactionId: string;
+      stateDigest: Sha256Digest;
+    }
+  | {
+      status: "changed";
+      expectedRevision: number;
+      gate: ScopedGate;
+      readTransactionId: string;
+      stateDigest: Sha256Digest;
+    };
 
 export function parseScopedGateCreateRequest(value: unknown): ScopedGateCreateRequest {
   const record = strictRecord(value, "scopedGateCreate", ["origin", "command", "intent"]);
@@ -344,7 +369,7 @@ function parseScope(value: unknown): GateScope {
   throw new TypeError("scopedGate.scope.kind is invalid");
 }
 
-function parseReleaseBinding(value: unknown): ReleaseBinding {
+export function parseReleaseBinding(value: unknown): ReleaseBinding {
   if (value === undefined) throw new TypeError("scopedGate.releaseBinding is required for release scope");
   const record = strictRecord(value, "scopedGate.releaseBinding", [
     "acceptedDeliveryReceiptRef",
