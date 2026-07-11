@@ -1,5 +1,8 @@
 import type { TerminalInputEvent } from "./input.js";
-import type { ConsoleControllerState } from "./controller.js";
+import {
+  consoleFailureFromUnknown,
+  type ConsoleControllerState,
+} from "./controller.js";
 import type {
   FabricConsoleFrame,
   FabricHitBinding,
@@ -42,6 +45,7 @@ export type FabricConsoleRuntimeOptions = Readonly<{
   activate: (activation: FabricRuntimeActivation) => Promise<void>;
   eventId: () => string;
   setMouseCapture?: (enabled: boolean) => void;
+  setEditorActive?: (enabled: boolean) => void;
   render: (
     dataset: FabricConsoleDataset,
     controller: ConsoleControllerState,
@@ -56,10 +60,12 @@ export type FabricConsoleRuntimeOptions = Readonly<{
   ) => Readonly<{
     state: FabricPointerState;
     intents: readonly Readonly<{
-      kind: "activate-region" | "scroll";
+      kind: "activate-region" | "scroll" | "move-splitter";
       regionId: string | null;
       binding: FabricHitBinding | null;
       direction?: -1 | 1;
+      x?: number;
+      y?: number;
       provenance: "mouse";
     }>[];
   }>;
@@ -96,6 +102,7 @@ export class FabricConsoleRuntime {
   readonly #activate: FabricConsoleRuntimeOptions["activate"];
   readonly #eventId: () => string;
   readonly #setMouseCapture: ((enabled: boolean) => void) | undefined;
+  readonly #setEditorActive: ((enabled: boolean) => void) | undefined;
   readonly #render: FabricConsoleRuntimeOptions["render"];
   readonly #reducePointer: FabricConsoleRuntimeOptions["reducePointer"];
   readonly #maxDraftBytes: number;
@@ -116,6 +123,7 @@ export class FabricConsoleRuntime {
     this.#activate = options.activate;
     this.#eventId = options.eventId;
     this.#setMouseCapture = options.setMouseCapture;
+    this.#setEditorActive = options.setEditorActive;
     this.#render = options.render;
     this.#reducePointer = options.reducePointer;
     this.#maxDraftBytes = maxDraftBytes(options.maxDraftBytes);
@@ -167,6 +175,7 @@ export class FabricConsoleRuntime {
   setInputMode(mode: FabricConsoleUiState["inputMode"]): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
     this.#ui = { ...this.#ui, inputMode: mode, notice: null };
+    this.#setEditorActive?.(mode === "editor");
     return this.repaint();
   }
 
@@ -229,6 +238,7 @@ export class FabricConsoleRuntime {
     }
     if (event.key === "escape") {
       this.#ui = { ...this.#ui, inputMode: "browse", notice: null };
+      this.#setEditorActive?.(false);
       this.repaint();
       return;
     }
@@ -331,6 +341,15 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "home" || event.key === "end") {
+      if (this.#controller.state.review !== null) {
+        this.#ui = {
+          ...this.#ui,
+          reviewScrollOffset: event.key === "home" ? 0 : 10_000,
+          notice: null,
+        };
+        this.repaint();
+        return;
+      }
       const rows = this.#controller.dataset.pages[this.#controller.state.activeView].rows;
       const selected = event.key === "home" ? rows[0] : rows.at(-1);
       if (selected !== undefined) {
@@ -341,7 +360,24 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "up" || event.key === "down") {
+      if (this.#ui.focusId?.startsWith("splitter:") === true) {
+        this.#moveSplitter(event.key === "up" ? -0.05 : 0.05);
+        return;
+      }
       this.#moveSelection(event.key === "up" ? -1 : 1);
+      return;
+    }
+    if (event.key === "left" || event.key === "right") {
+      if (this.#ui.focusId?.startsWith("splitter:") === true) {
+        this.#moveSplitter(event.key === "left" ? -0.05 : 0.05);
+      } else if (this.#frame.mode === "compact") {
+        this.#ui = {
+          ...this.#ui,
+          compactPane: event.key === "left" ? "master" : "detail",
+          notice: null,
+        };
+        this.repaint();
+      }
       return;
     }
     if (event.key === "tab" || event.key === "shift-tab") {
@@ -385,6 +421,14 @@ export class FabricConsoleRuntime {
         this.#page(intent.direction ?? 1);
         continue;
       }
+      if (intent.kind === "move-splitter") {
+        const ratio =
+          this.#frame.mode === "wide"
+            ? (intent.x ?? 1) / Math.max(1, this.#frame.columns)
+            : (intent.y ?? 1) / Math.max(1, this.#frame.rows.length);
+        this.#setSplitterRatio(ratio);
+        continue;
+      }
       const region =
         intent.regionId === null
           ? undefined
@@ -404,6 +448,18 @@ export class FabricConsoleRuntime {
   }
 
   #page(direction: -1 | 1): void {
+    if (this.#controller.state.review !== null) {
+      this.#ui = {
+        ...this.#ui,
+        reviewScrollOffset: Math.min(
+          10_000,
+          Math.max(0, this.#ui.reviewScrollOffset + direction * 5),
+        ),
+        notice: null,
+      };
+      this.repaint();
+      return;
+    }
     const view = this.#controller.state.activeView;
     const current = Math.max(0, Math.trunc(this.#ui.scrollOffsetByView[view] ?? 0));
     const maximum = Math.max(0, this.#controller.dataset.pages[view].rows.length - 1);
@@ -448,6 +504,19 @@ export class FabricConsoleRuntime {
     this.repaint();
   }
 
+  #moveSplitter(delta: number): void {
+    this.#setSplitterRatio(this.#ui.splitterRatio + delta);
+  }
+
+  #setSplitterRatio(value: number): void {
+    this.#ui = {
+      ...this.#ui,
+      splitterRatio: Math.min(0.75, Math.max(0.25, value)),
+      notice: null,
+    };
+    this.repaint();
+  }
+
   async #activateRegion(
     region: FabricHitRegion,
     provenance: "keyboard" | "mouse",
@@ -463,6 +532,9 @@ export class FabricConsoleRuntime {
     if (region.kind === "row" && region.binding !== null) {
       this.#controller.select(region.binding.view, region.binding.itemId);
       this.#controller.setScrollAnchor(region.binding.view, region.binding.itemId);
+      if (this.#frame.mode === "compact") {
+        this.#ui = { ...this.#ui, compactPane: "detail" };
+      }
       this.repaint();
       return;
     }
@@ -471,12 +543,17 @@ export class FabricConsoleRuntime {
       return;
     }
     if (region.kind === "splitter") return;
-    await this.#activate({
-      regionId: region.id,
-      binding: region.binding,
-      provenance,
-      eventId: this.#eventId(),
-    });
+    try {
+      await this.#activate({
+        regionId: region.id,
+        binding: region.binding,
+        provenance,
+        eventId: this.#eventId(),
+      });
+    } catch (error) {
+      const failure = consoleFailureFromUnknown(error);
+      this.#ui = { ...this.#ui, notice: `Action failed: ${failure.code}` };
+    }
     this.repaint();
   }
 }

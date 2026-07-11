@@ -79,6 +79,7 @@ export async function runConsoleCli(arguments_: readonly string[]): Promise<void
     render: renderFabricConsoleFrame,
     reducePointer: reduceFabricPointer,
     setMouseCapture: (enabled) => terminal?.setMouseCapture(enabled),
+    setEditorActive: (enabled) => terminal?.setEditorActive(enabled),
   });
   let finish: (() => void) | undefined;
   const finished = new Promise<void>((resolveFinished) => {

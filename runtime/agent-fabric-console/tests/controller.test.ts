@@ -402,6 +402,33 @@ describe("Console controller and two-phase actions", () => {
     expect(service.commit).not.toHaveBeenCalled();
   });
 
+  it("preserves capability failure classes without retaining messages or tokens", async () => {
+    const failure = Object.assign(
+      new Error("credential-secret must never reach the screen"),
+      { code: "CAPABILITY_EXPIRED" },
+    );
+    const service = actions({ preview: vi.fn(async () => Promise.reject(failure)) });
+    const controller = new ConsoleController({
+      dataset: dataset(),
+      actions: service,
+      credential,
+      projectId,
+      projectSessionId: sessionId,
+      confirmationId: () => "confirmation-1",
+    });
+    controller.select("attention", "attention:task-1");
+
+    await expect(controller.beginAction(actionRequest())).rejects.toBe(failure);
+    expect(controller.state.lastFailure).toStrictEqual({
+      code: "CAPABILITY_EXPIRED",
+      name: "Error",
+    });
+    expect(JSON.stringify(controller.state)).not.toContain("credential-secret");
+    expect(JSON.stringify(controller.state)).not.toContain(
+      "must never reach the screen",
+    );
+  });
+
   it("loads gate scope, exact revision, evidence and consequences into Review", async () => {
     const gateId = "gate-1" as never;
     const gatePreview: OperatorActionPreview = {

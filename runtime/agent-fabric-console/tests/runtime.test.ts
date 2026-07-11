@@ -186,6 +186,7 @@ class FakeController implements FabricRuntimeController {
 describe("Fabric Console runtime routing", () => {
   it("routes all eight views and paging without stealing editor digits", async () => {
     const controller = new FakeController();
+    const setEditorActive = vi.fn();
     const runtime = new FabricConsoleRuntime({
       controller,
       viewport: { columns: 80, rows: 24 },
@@ -198,6 +199,7 @@ describe("Fabric Console runtime routing", () => {
       })(),
       render: renderFabricConsoleFrame,
       reducePointer: reduceFabricPointer,
+      setEditorActive,
     });
 
     for (const [index, view] of FABRIC_VIEWS.entries()) {
@@ -216,6 +218,9 @@ describe("Fabric Console runtime routing", () => {
     await runtime.handleInput({ kind: "key", key: "page-down" });
     expect(controller.state.activeView).toBe("attention");
     expect(runtime.ui.draft).toBe("8");
+    expect(setEditorActive).toHaveBeenCalledWith(true);
+    await runtime.handleInput({ kind: "key", key: "escape" });
+    expect(setEditorActive).toHaveBeenLastCalledWith(false);
   });
 
   it("keeps bounded raw drafts, makes paste inert for actions and surfaces input drops", async () => {
@@ -352,6 +357,77 @@ describe("Fabric Console runtime routing", () => {
     expect(detach).not.toHaveBeenCalled();
   });
 
+  it("uses local keyboard and mouse paths for split resizing without commands", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 140, rows: 36 },
+      ui: createFabricUiState({
+        focusId: "splitter:master-detail",
+        mouseCapture: true,
+        splitterRatio: 0.45,
+        draft: "split-safe",
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "event-split",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "right" });
+    const keyboardRatio = runtime.ui.splitterRatio;
+    const splitter = runtime.frame.hitRegions.find(
+      ({ id }) => id === "splitter:master-detail",
+    );
+    expect(splitter).toBeDefined();
+    if (splitter === undefined) return;
+    await runtime.handleInput({
+      kind: "mouse",
+      phase: "press",
+      button: "left",
+      x: splitter.rect.x1,
+      y: splitter.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    });
+    await runtime.handleInput({
+      kind: "mouse",
+      phase: "drag",
+      button: "left",
+      x: splitter.rect.x1 + 12,
+      y: splitter.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    });
+
+    expect(keyboardRatio).toBeCloseTo(0.5);
+    expect(runtime.ui.splitterRatio).toBeGreaterThan(keyboardRatio);
+    expect(runtime.ui.draft).toBe("split-safe");
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it("keeps compact master and detail reachable without hiding state", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 60, rows: 18 },
+      ui: createFabricUiState({ compactPane: "master", draft: "compact-safe" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-compact",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "right" });
+    expect(runtime.ui.compactPane).toBe("detail");
+    expect(runtime.frame.rows.join("\n")).toContain("ID: attention:1");
+    await runtime.handleInput({ kind: "key", key: "left" });
+    expect(runtime.ui.compactPane).toBe("master");
+    expect(runtime.frame.rows.join("\n")).toContain("Resume blocked task");
+    expect(runtime.ui.draft).toBe("compact-safe");
+  });
+
   it("detaches exactly once, never stops work, and ignores late input", async () => {
     const detach = vi.fn(async () => {});
     const activate = vi.fn(async () => {});
@@ -374,6 +450,33 @@ describe("Fabric Console runtime routing", () => {
     expect(detach).toHaveBeenCalledWith({ reason: "operator" });
     expect(activate).not.toHaveBeenCalled();
     expect(runtime.closed).toBe(true);
+  });
+
+  it("shows only a bounded failure code when an action callback rejects", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "action:resume" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () =>
+        Promise.reject(
+          Object.assign(new Error("token-never-render"), {
+            code: "WRONG_PROJECT",
+          }),
+        ),
+      eventId: () => "event-failure",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "enter" });
+
+    expect(runtime.ui.notice).toBe("Action failed: WRONG_PROJECT");
+    expect(runtime.frame.rows.join("\n")).toContain(
+      "Action failed: WRONG_PROJECT",
+    );
+    expect(runtime.frame.rows.join("\n")).not.toContain("token-never-render");
   });
 
   it("fatal decoder quarantine takes the same idempotent safety detach path", async () => {

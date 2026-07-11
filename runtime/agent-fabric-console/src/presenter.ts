@@ -41,11 +41,14 @@ export type FabricConsoleUiState = Readonly<{
   scrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
   rejectedInputCount: number;
   notice: string | null;
+  splitterRatio: number;
+  reviewScrollOffset: number;
 }>;
 
 export function createFabricUiState(
   overrides: Partial<FabricConsoleUiState> = {},
 ): FabricConsoleUiState {
+  const requestedSplitter = overrides.splitterRatio;
   return {
     focusId: overrides.focusId ?? null,
     compactPane: overrides.compactPane ?? "master",
@@ -55,6 +58,15 @@ export function createFabricUiState(
     scrollOffsetByView: overrides.scrollOffsetByView ?? {},
     rejectedInputCount: overrides.rejectedInputCount ?? 0,
     notice: overrides.notice ?? null,
+    splitterRatio:
+      requestedSplitter === undefined || !Number.isFinite(requestedSplitter)
+        ? 0.45
+        : Math.min(0.75, Math.max(0.25, requestedSplitter)),
+    reviewScrollOffset:
+      overrides.reviewScrollOffset === undefined ||
+      !Number.isSafeInteger(overrides.reviewScrollOffset)
+        ? 0
+        : Math.max(0, overrides.reviewScrollOffset),
   };
 }
 
@@ -186,6 +198,7 @@ export type FabricConsolePresentation = Readonly<{
   views: readonly PresentedView[];
   activeView: FabricView;
   masterRows: readonly PresentedRow[];
+  topAttention: PresentedRow | null;
   detail: PresentedDetail | null;
   actions: readonly PresentedAction[];
   review: PresentedReview | null;
@@ -195,6 +208,8 @@ export type FabricConsolePresentation = Readonly<{
   mouseCapture: boolean;
   rejectedInputCount: number;
   notice: string | null;
+  failureCode: string | null;
+  reviewScrollOffset: number;
 }>;
 
 function titleCase(view: FabricView): string {
@@ -496,7 +511,11 @@ function presentIntent(
       { label: "Gate status", value: intent.expectedGateStatus },
       {
         label: "Accepted receipt",
-        value: `${release.acceptedDeliveryReceiptRef.path}@${release.acceptedDeliveryReceiptRef.digest}`,
+        value: release.acceptedDeliveryReceiptRef.path,
+      },
+      {
+        label: "Accepted receipt digest",
+        value: release.acceptedDeliveryReceiptRef.digest,
       },
       { label: "Artifact digest", value: release.artifactDigest },
       { label: "Promotion action", value: release.promotionAction },
@@ -613,6 +632,15 @@ export function presentFabricConsole(
         dataset.canMutate && dataset.connection.state === "live",
       ),
     ),
+    topAttention:
+      dataset.pages.attention.rows[0] === undefined
+        ? null
+        : presentRow(
+            dataset.pages.attention.rows[0],
+            controller.selectionByView.attention?.stableId ===
+              dataset.pages.attention.rows[0].stableId,
+            dataset.canMutate && dataset.connection.state === "live",
+          ),
     detail: selectedRow === null ? null : detailLines(selectedRow),
     actions:
       review === null
@@ -628,5 +656,7 @@ export function presentFabricConsole(
     mouseCapture: ui.mouseCapture,
     rejectedInputCount: ui.rejectedInputCount,
     notice: ui.notice,
+    failureCode: controller.lastFailure?.code ?? null,
+    reviewScrollOffset: ui.reviewScrollOffset,
   };
 }

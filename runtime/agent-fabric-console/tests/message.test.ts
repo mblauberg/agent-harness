@@ -66,9 +66,9 @@ describe("full normal message reads", () => {
     const allLines = windows.flatMap(({ lines }) => lines);
 
     expect(first.totalLines).toBeGreaterThan(3);
-    expect(allLines.join(" ")).toContain("Normal prose remains readable in full.");
-    expect(allLines.join(" ")).toContain("你好 👩🏽‍💻");
-    expect(allLines.join(" ")).toContain("Final paragraph.");
+    expect(allLines.join("")).toContain("Normal prose remains readable in full.");
+    expect(allLines.join("")).toContain("你好 👩🏽‍💻");
+    expect(allLines.join("")).toContain("Final paragraph.");
     expect(allLines.every((line) => cellWidth(line) <= 24)).toBe(true);
   });
 

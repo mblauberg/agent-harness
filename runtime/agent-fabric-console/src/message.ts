@@ -78,34 +78,7 @@ function wrapLine(
   columns: number,
   dependencies: MessageDisplayDependencies,
 ): readonly string[] {
-  if (line.length === 0) return [""];
-  const tokens = line.split(/(\s+)/u).filter((token) => token.length > 0);
-  const output: string[] = [];
-  let current = "";
-  for (const token of tokens) {
-    const whitespace = /^\s+$/u.test(token);
-    if (whitespace) {
-      if (current.length > 0 && !current.endsWith(" ")) current += " ";
-      continue;
-    }
-    const tokenWidth = dependencies.cellWidth(token);
-    if (tokenWidth > columns) {
-      if (current.trimEnd().length > 0) output.push(current.trimEnd());
-      const pieces = splitLongToken(token, columns, dependencies);
-      output.push(...pieces.slice(0, -1));
-      current = pieces.at(-1) ?? "";
-      continue;
-    }
-    const candidate = current.length === 0 ? token : `${current.trimEnd()} ${token}`;
-    if (dependencies.cellWidth(candidate) > columns) {
-      output.push(current.trimEnd());
-      current = token;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current.length > 0) output.push(current.trimEnd());
-  return output.length === 0 ? [""] : output;
+  return splitLongToken(line, columns, dependencies);
 }
 
 export function presentMessageBodyWindow(

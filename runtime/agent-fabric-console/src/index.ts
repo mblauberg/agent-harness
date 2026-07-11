@@ -1292,14 +1292,20 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
     `REVIEW ${review.stage.toUpperCase()} — ${review.consequenceClass}`,
     `Item: ${review.itemId}`,
     `Projection revision: ${review.projectionRevision} | Item revision: ${review.itemRevision} | Preview revision: ${review.previewRevision}`,
-    "Preview digest:",
-    review.previewDigest,
-    "Intent digest:",
-    review.intentDigest,
-    "Before-state digest:",
-    review.beforeStateDigest,
+    `Preview:${review.previewDigest}`,
+    `Intent:${review.intentDigest}`,
+    `Before:${review.beforeStateDigest}`,
     `Confirmation: ${review.confirmationMode}`,
-    ...review.intent.map((item) => `Intent ${item.label}: ${item.value}`),
+    ...review.intent.map((item) => {
+      const prefixes: Readonly<Record<string, string>> = {
+        "Accepted receipt": "Receipt",
+        "Accepted receipt digest": "RcptDig",
+        "Artifact digest": "Artifact",
+        "Promotion action": "Action",
+        "Promotion target": "Target",
+      };
+      return `${prefixes[item.label] ?? `Intent ${item.label}`}:${item.value}`;
+    }),
   ];
   for (const gate of review.gates) {
     lines.push(
@@ -1336,8 +1342,13 @@ function renderFabricReview(
   bounds: Rect,
 ): void {
   const lines = reviewLines(presentation);
+  const visibleCount = bounds.y2 - bounds.y1 + 1;
+  const offset = Math.min(
+    presentation.reviewScrollOffset,
+    Math.max(0, lines.length - visibleCount),
+  );
   for (const [index, line] of lines
-    .slice(0, bounds.y2 - bounds.y1 + 1)
+    .slice(offset, offset + visibleCount)
     .entries()) {
     setFabricRow(rows, bounds.y1 + index, columns, line);
   }
@@ -1415,7 +1426,9 @@ function renderFabricFooter(
     statusRow,
     columns,
     presentation.notice ??
-      `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}`,
+      (presentation.failureCode === null
+        ? `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}${presentation.review === null ? "" : ` REVIEW+${String(presentation.reviewScrollOffset)}`}`
+        : `Action failed: ${presentation.failureCode}`),
   );
   const help = "? help | [ ] views | PgUp/PgDn | q detach";
   setFabricRow(rows, helpRow, columns, help);
@@ -1452,7 +1465,7 @@ function renderFabricStrip(
     columns,
     `P:${header.project} R:${header.run} ${presentation.connection}`,
   );
-  const top = presentation.masterRows[0];
+  const top = presentation.topAttention ?? presentation.masterRows[0];
   if (top !== undefined && rows.length >= 2) {
     setFabricRow(rows, 2, columns, rowText(top, false));
     hitRegions.push({
@@ -1569,7 +1582,10 @@ export function renderFabricConsoleFrame(
   if (presentation.review !== null) {
     renderFabricReview(rows, dimensions.columns, presentation, body);
   } else if (mode === "wide") {
-    const masterWidth = Math.max(32, Math.floor(dimensions.columns * 0.45));
+    const masterWidth = Math.min(
+      dimensions.columns - 32,
+      Math.max(32, Math.round(dimensions.columns * ui.splitterRatio)),
+    );
     const master = { ...body, x2: masterWidth };
     const detail = { ...body, x1: masterWidth + 2 };
     renderFabricMaster(
@@ -1600,7 +1616,13 @@ export function renderFabricConsoleFrame(
     });
     renderFabricDetail(rows, dimensions.columns, presentation, detail);
   } else if (mode === "reference") {
-    const splitRow = Math.min(body.y2 - 2, body.y1 + 7);
+    const splitRow = Math.min(
+      body.y2 - 2,
+      Math.max(
+        body.y1 + 2,
+        Math.round(body.y1 + (body.y2 - body.y1) * ui.splitterRatio),
+      ),
+    );
     renderFabricMaster(
       rows,
       dimensions.columns,
@@ -1673,10 +1695,12 @@ export type FabricPointerState = Readonly<{
 }>;
 
 export type FabricPointerIntent = Readonly<{
-  kind: "activate-region" | "scroll";
+  kind: "activate-region" | "scroll" | "move-splitter";
   regionId: string | null;
   binding: FabricHitBinding | null;
   direction?: -1 | 1;
+  x?: number;
+  y?: number;
   provenance: "mouse";
 }>;
 
@@ -1748,6 +1772,29 @@ export function reduceFabricPointer(
             : { regionId: region.id, geometryKey: frame.geometryKey },
       },
       intents: [],
+    };
+  }
+  if (event.phase === "drag" && state.pressed !== null) {
+    const pressedRegion = frame.hitRegions.find(
+      (candidate) => candidate.id === state.pressed?.regionId,
+    );
+    const move =
+      pressedRegion?.kind === "splitter" &&
+      state.pressed.geometryKey === frame.geometryKey;
+    return {
+      state,
+      intents: move
+        ? [
+            {
+              kind: "move-splitter",
+              regionId: pressedRegion.id,
+              binding: null,
+              x: event.x,
+              y: event.y,
+              provenance: "mouse",
+            },
+          ]
+        : [],
     };
   }
   if (event.phase === "release") {

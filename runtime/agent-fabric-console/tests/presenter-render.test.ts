@@ -421,6 +421,15 @@ describe("structured presenter and responsive Fabric renderer", () => {
         availableAction: null,
       },
     ]);
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(review()),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(frame.rows.join("\n")).toContain(
+      "Consequence: Task execution may continue.",
+    );
   });
 
   it("presents exact accepted artifact, action and target for promotion", () => {
@@ -476,7 +485,8 @@ describe("structured presenter and responsive Fabric renderer", () => {
 
     expect(presentation.review?.intent).toEqual(
       expect.arrayContaining([
-        { label: "Accepted receipt", value: `receipts/accepted.json@${digestA}` },
+        { label: "Accepted receipt", value: "receipts/accepted.json" },
+        { label: "Accepted receipt digest", value: digestA },
         { label: "Artifact digest", value: digestB },
         { label: "Promotion action", value: "publish" },
         { label: "Promotion target", value: "registry:stable" },
@@ -488,6 +498,17 @@ describe("structured presenter and responsive Fabric renderer", () => {
       effect: `effects/promotion.json@${digestA}`,
       committedAt: timestamp,
     });
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(promotion),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    const text = frame.rows.join("\n");
+    expect(text).toContain(`RcptDig:${digestA}`);
+    expect(text).toContain(`Artifact:${digestB}`);
+    expect(text).toContain("Action:publish");
+    expect(text).toContain("Target:registry:stable");
   });
 
   it("keeps optional GitHub failure explicit without degrading local projection", () => {
@@ -532,6 +553,20 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect(frame.rows.every((line) => cellWidth(line) === columns)).toBe(true);
       expect(ui).toStrictEqual(before);
     }
+  });
+
+  it("retains the authoritative top attention item in strip mode from every view", () => {
+    const state = { ...controllerState(), activeView: "system" as const };
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      state,
+      createFabricUiState(),
+      { columns: 30, rows: 6 },
+    );
+    expect(frame.mode).toBe("strip");
+    expect(frame.presentation.activeView).toBe("system");
+    expect(frame.presentation.topAttention?.stableId).toBe("attention:safety");
+    expect(frame.rows[1]).toContain("Approve quarantine");
   });
 
   it("binds row and action hit geometry to item and projection revisions", () => {

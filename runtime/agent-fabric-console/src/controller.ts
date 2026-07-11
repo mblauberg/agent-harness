@@ -116,7 +116,32 @@ export type ConsoleControllerState = Readonly<{
   pendingCommandIds: readonly string[];
   lastActionStatus: OperatorActionStatus | null;
   lastReceipt: OperatorActionReceipt | null;
+  lastFailure?: ConsoleActionFailure | null;
 }>;
+
+export type ConsoleActionFailure = Readonly<{
+  code: string;
+  name: string;
+}>;
+
+function safeFailureToken(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(value)
+    ? value
+    : fallback;
+}
+
+export function consoleFailureFromUnknown(error: unknown): ConsoleActionFailure {
+  if (typeof error !== "object" || error === null) {
+    return { code: "OPERATOR_ACTION_FAILED", name: "Error" };
+  }
+  return {
+    code: safeFailureToken(
+      Reflect.get(error, "code"),
+      "OPERATOR_ACTION_FAILED",
+    ),
+    name: safeFailureToken(Reflect.get(error, "name"), "Error"),
+  };
+}
 
 export type ConsoleControllerOptions = Readonly<{
   dataset: FabricConsoleDataset;
@@ -215,6 +240,7 @@ export class ConsoleController {
       pendingCommandIds: [],
       lastActionStatus: null,
       lastReceipt: null,
+      lastFailure: null,
     };
   }
 
@@ -351,11 +377,20 @@ export class ConsoleController {
       throw new Error("typed action intent does not match the selected action");
     }
 
-    const preview = await this.#actions.preview({
-      command: request.command,
-      projectId: this.#projectId,
-      intent: request.intent,
-    });
+    let preview: OperatorActionPreview;
+    try {
+      preview = await this.#actions.preview({
+        command: request.command,
+        projectId: this.#projectId,
+        intent: request.intent,
+      });
+    } catch (error) {
+      this.#state = {
+        ...this.#state,
+        lastFailure: consoleFailureFromUnknown(error),
+      };
+      throw error;
+    }
     if (structuralKey(preview.intent) !== structuralKey(request.intent)) {
       throw new Error("action preview intent does not match the requested intent");
     }
@@ -511,12 +546,25 @@ export class ConsoleController {
       };
       this.#applyStatus(status);
       return status;
-    } catch {
-      const status = await this.#actions.status({
-        credential: this.#credential,
-        projectId: this.#projectId,
-        commandId: command.commandId,
-      });
+    } catch (error) {
+      this.#state = {
+        ...this.#state,
+        lastFailure: consoleFailureFromUnknown(error),
+      };
+      let status: OperatorActionStatus;
+      try {
+        status = await this.#actions.status({
+          credential: this.#credential,
+          projectId: this.#projectId,
+          commandId: command.commandId,
+        });
+      } catch (statusError) {
+        this.#state = {
+          ...this.#state,
+          lastFailure: consoleFailureFromUnknown(statusError),
+        };
+        throw statusError;
+      }
       this.#applyStatus(status);
       return status;
     }
@@ -656,6 +704,8 @@ export class ConsoleController {
         status.status === "committed"
           ? status.receipt
           : this.#state.lastReceipt,
+      lastFailure:
+        status.status === "committed" ? null : this.#state.lastFailure ?? null,
       review:
         this.#state.review === null
           ? null

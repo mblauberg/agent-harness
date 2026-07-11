@@ -98,6 +98,7 @@ export type ConsoleApplicationOptions = Readonly<{
   render: FabricConsoleRuntimeOptions["render"];
   reducePointer: FabricConsoleRuntimeOptions["reducePointer"];
   setMouseCapture?: (enabled: boolean) => void;
+  setEditorActive?: (enabled: boolean) => void;
 }>;
 
 function viewRecord<Value>(value: Value): Record<FabricView, Value> {
@@ -385,6 +386,9 @@ export async function startFabricConsoleApplication(
     ...(options.setMouseCapture === undefined
       ? {}
       : { setMouseCapture: options.setMouseCapture }),
+    ...(options.setEditorActive === undefined
+      ? {}
+      : { setEditorActive: options.setEditorActive }),
     activate: async (activation) => {
       await application?.handleActivation(activation);
     },
