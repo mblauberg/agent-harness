@@ -68,7 +68,12 @@ export const identifier = boundedString({
   example: "id_01",
 });
 
-export const secret = boundedString({ minBytes: 16, maxBytes: 4096, example: "secret-token-0001" });
+const secretString = boundedString({ minBytes: 16, maxBytes: 4096, example: "secret-token-0001" });
+export const secret = defineCodec<string>(
+  { ...secretString.schema, "x-agent-fabric-sensitive": true },
+  secretString.example,
+  (value, path) => secretString.parse(value, path),
+);
 export const protocolClientField = boundedString({ maxBytes: 128, example: "client-v1" });
 export const protocolFailureMessage = boundedString({ maxBytes: 4096, example: "protocol failure" });
 

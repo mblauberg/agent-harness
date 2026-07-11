@@ -27,6 +27,7 @@ import {
   timestamp,
   unionOf,
   type Codec,
+  type JsonSchema,
 } from "./codec.js";
 import {
   parseChairMutationContext,
@@ -74,7 +75,6 @@ const object = (required: readonly string[], optional: readonly string[] = []): 
   required,
   optional,
 });
-const array: WireShape = { kind: "array" };
 const nil: WireShape = { kind: "null" };
 
 export const OPERATION_INPUT_SHAPES = {
@@ -190,8 +190,8 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.attachAgent]: object(["capability", "providerSessionRef", "adapterId", "actionId"]),
   [FABRIC_OPERATIONS.sendMessage]: object(["messageId"]),
   [FABRIC_OPERATIONS.createDiscussionGroup]: object(["groupId", "memberAgentIds"]),
-  [FABRIC_OPERATIONS.receiveMessages]: array,
-  [FABRIC_OPERATIONS.acknowledgeDelivery]: nil,
+  [FABRIC_OPERATIONS.receiveMessages]: object(["deliveries"]),
+  [FABRIC_OPERATIONS.acknowledgeDelivery]: object(["acknowledged"]),
   [FABRIC_OPERATIONS.abandonDelivery]: object(["deliveryId", "status", "reason"]),
   [FABRIC_OPERATIONS.getMailboxState]: object(["contiguousWatermark", "acknowledgedAboveWatermark"]),
   [FABRIC_OPERATIONS.createTask]: object(["taskId", "ownerAgentId", "state", "revision", "ownerLeaseGeneration", "proposedOwnerAgentId", "dependencies"]),
@@ -765,7 +765,7 @@ const providerActionResultCodec = objectCodec({
   history: textList,
   executionCount: integer(),
   effectCount: integer(),
-}, { result: jsonValue });
+}, { resultDigest: sha256 });
 const budgetDimensionCodec = objectCodec({
   granted: integer(),
   reserved: integer(),
@@ -796,6 +796,24 @@ const teamResultCodec = objectCodec({
   reservedBudget: numberRecord,
 }, {
   leader: objectCodec({ agentId: identifier, authorityId: identifier, capability: secret }),
+  rootTask: taskResultCodec,
+  initialMemberAgentIds: stringList,
+});
+const visibleTeamResultCodec = objectCodec({
+  teamId: identifier,
+  parentTeamId: nullable(identifier),
+  depth: integer(),
+  leaderAgentId: identifier,
+  rootTaskId: identifier,
+  ownedTaskIds: stringList,
+  memberAgentIds: stringList,
+  budgetId: identifier,
+  state: enumeration(["active", "frozen", "barrier-closed"]),
+  generation: positiveInteger,
+  successorAgentId: nullable(identifier),
+  discussionGroups: arrayOf(discussionGroupCodec, { maximum: 64 }),
+  reservedBudget: numberRecord,
+}, {
   rootTask: taskResultCodec,
   initialMemberAgentIds: stringList,
 });
@@ -2101,6 +2119,9 @@ function semanticFieldCodec(
     deliveriesUnacknowledged: integer(), leasesActive: integer(),
   });
   if (field === "receipt") return receiptCodec;
+  if (field === "deliveries" && operation === FABRIC_OPERATIONS.receiveMessages && direction === "result") {
+    return arrayOf(deliveryItemCodec, { maximum: 256 });
+  }
   if (field === "rotation") return objectCodec({
     kind: enumeration(["in-place", "replacement-session"]),
     priorResumeReference: identifier,
@@ -2248,7 +2269,6 @@ const providerActionResultOperations: ReadonlySet<ProtocolOperation> = new Set([
   FABRIC_OPERATIONS.getProviderAction,
 ]);
 const teamResultOperations: ReadonlySet<ProtocolOperation> = new Set([
-  FABRIC_OPERATIONS.createTeam,
   FABRIC_OPERATIONS.getTeam,
   FABRIC_OPERATIONS.freezeSubtree,
   FABRIC_OPERATIONS.adoptSubtree,
@@ -2294,7 +2314,8 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (leaseResultOperations.has(operation)) return leaseResultCodec;
   if (lifecycleResultOperations.has(operation)) return lifecycleResultCodec;
   if (providerActionResultOperations.has(operation)) return providerActionResultCodec;
-  if (teamResultOperations.has(operation)) return teamResultCodec;
+  if (operation === FABRIC_OPERATIONS.createTeam) return teamResultCodec;
+  if (teamResultOperations.has(operation)) return visibleTeamResultCodec;
   if (budgetResultOperations.has(operation)) return budgetResultCodec;
   if (([
     FABRIC_OPERATIONS.projectSessionCreate,
@@ -2394,6 +2415,35 @@ function buildOperationCodecs(): Readonly<Record<ProtocolOperation, OperationCod
 }
 
 export const OPERATION_CODECS = buildOperationCodecs();
+
+export function operationInputSchemaForPrincipal(
+  operation: ProtocolOperation,
+  principal: OperationPrincipalKind,
+): JsonSchema {
+  if (!OPERATION_REGISTRY[operation].principals.includes(principal)) {
+    throw new TypeError(`${principal} principal cannot invoke ${operation}`);
+  }
+  const schema = OPERATION_CODECS[operation].input.schema;
+  if (!(new Set<ProtocolOperation>([
+    FABRIC_OPERATIONS.membershipBind,
+    FABRIC_OPERATIONS.intakeRevise,
+    FABRIC_OPERATIONS.scopedGateCreate,
+  ])).has(operation)) return schema;
+  const variants = schema.oneOf;
+  if (!Array.isArray(variants)) throw new Error(`${operation} principal-bound input schema has no variants`);
+  const expectedOrigin = principal === "agent" ? "chair" : "operator";
+  const matched = variants.find((variant) => {
+    if (typeof variant !== "object" || variant === null || Array.isArray(variant)) return false;
+    const properties = Reflect.get(variant, "properties");
+    if (typeof properties !== "object" || properties === null || Array.isArray(properties)) return false;
+    const origin = Reflect.get(properties, "origin");
+    return typeof origin === "object" && origin !== null && Reflect.get(origin, "const") === expectedOrigin;
+  });
+  if (matched === undefined || typeof matched !== "object" || matched === null || Array.isArray(matched)) {
+    throw new Error(`${operation} has no ${principal} input schema`);
+  }
+  return matched as JsonSchema;
+}
 
 export function parseOperationInput<Operation extends ProtocolOperation>(
   operation: Operation,

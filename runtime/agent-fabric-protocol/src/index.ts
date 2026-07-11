@@ -7,6 +7,7 @@ export * from "./gates.js";
 export * from "./intake.js";
 export * from "./launch.js";
 export * from "./membership.js";
+export * from "./mcp-projection.js";
 export * from "./ndjson.js";
 export * from "./operations.js";
 export * from "./operator.js";

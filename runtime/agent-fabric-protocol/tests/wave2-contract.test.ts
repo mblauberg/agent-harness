@@ -152,10 +152,6 @@ describe("semantic operation boundaries", () => {
         expect(() => parseOperationResult(operation, {})).toThrow();
         return;
       }
-      if (shape.kind === "array") {
-        expect(() => parseOperationResult(operation, {})).toThrow();
-        return;
-      }
       const field = shape.required[0];
       if (field === undefined) return;
       expect(() => parseOperationResult(operation, { ...(fixture.result as object), [field]: null })).toThrow();

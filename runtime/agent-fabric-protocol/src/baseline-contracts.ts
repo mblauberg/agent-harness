@@ -94,7 +94,7 @@ export type LegacyProviderActionResult = {
   history: readonly string[];
   executionCount: number;
   effectCount: number;
-  result?: JsonValue;
+  resultDigest?: string;
 };
 export type LegacyTeamCreateInput =
   | {
@@ -230,8 +230,8 @@ export type BaselineOperationResultMap = {
   [FABRIC_OPERATIONS.attachAgent]: { capability: string; providerSessionRef: string; adapterId: string; actionId: string };
   [FABRIC_OPERATIONS.sendMessage]: { messageId: string };
   [FABRIC_OPERATIONS.createDiscussionGroup]: { groupId: string; memberAgentIds: readonly string[] };
-  [FABRIC_OPERATIONS.receiveMessages]: readonly { deliveryId: string; messageId: string; sequence: number; body: string; attempt: number; senderId: string; kind: LegacyMessageInput["kind"]; requiresAck: boolean }[];
-  [FABRIC_OPERATIONS.acknowledgeDelivery]: null;
+  [FABRIC_OPERATIONS.receiveMessages]: { deliveries: readonly { deliveryId: string; messageId: string; sequence: number; body: string; attempt: number; senderId: string; kind: LegacyMessageInput["kind"]; requiresAck: boolean }[] };
+  [FABRIC_OPERATIONS.acknowledgeDelivery]: { acknowledged: true };
   [FABRIC_OPERATIONS.abandonDelivery]: { deliveryId: string; status: "abandoned"; reason: string };
   [FABRIC_OPERATIONS.getMailboxState]: { contiguousWatermark: number; acknowledgedAboveWatermark: readonly number[] };
   [FABRIC_OPERATIONS.createTask]: LegacyTaskResult;

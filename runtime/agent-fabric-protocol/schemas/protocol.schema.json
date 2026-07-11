@@ -2184,7 +2184,8 @@
               "minLength": 1,
               "maxLength": 4096,
               "x-minUtf8Bytes": 16,
-              "x-maxUtf8Bytes": 4096
+              "x-maxUtf8Bytes": 4096,
+              "x-agent-fabric-sensitive": true
             },
             "clientNonce": {
               "type": "string",
@@ -2627,7 +2628,8 @@
                   "minLength": 1,
                   "maxLength": 4096,
                   "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096
+                  "x-maxUtf8Bytes": 4096,
+                  "x-agent-fabric-sensitive": true
                 },
                 "clientNonce": {
                   "type": "string",
@@ -7656,7 +7658,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -7947,7 +7950,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -8249,7 +8253,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -8517,7 +8522,8 @@
                               "minLength": 1,
                               "maxLength": 4096,
                               "x-minUtf8Bytes": 16,
-                              "x-maxUtf8Bytes": 4096
+                              "x-maxUtf8Bytes": 4096,
+                              "x-agent-fabric-sensitive": true
                             }
                           }
                         },
@@ -11315,7 +11321,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -11520,7 +11527,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -11706,7 +11714,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -11896,7 +11905,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -12347,7 +12357,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -12577,7 +12588,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -12657,7 +12669,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -13150,7 +13163,8 @@
                               "minLength": 1,
                               "maxLength": 4096,
                               "x-minUtf8Bytes": 16,
-                              "x-maxUtf8Bytes": 4096
+                              "x-maxUtf8Bytes": 4096,
+                              "x-agent-fabric-sensitive": true
                             }
                           }
                         },
@@ -14053,7 +14067,8 @@
                               "minLength": 1,
                               "maxLength": 4096,
                               "x-minUtf8Bytes": 16,
-                              "x-maxUtf8Bytes": 4096
+                              "x-maxUtf8Bytes": 4096,
+                              "x-agent-fabric-sensitive": true
                             }
                           }
                         },
@@ -15053,7 +15068,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -15538,7 +15554,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -16910,7 +16927,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -17145,7 +17163,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -17214,7 +17233,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -17286,7 +17306,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -17378,7 +17399,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -17459,7 +17481,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -17556,7 +17579,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -17854,7 +17878,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -20658,7 +20683,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -20898,7 +20924,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -20983,7 +21010,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -21184,7 +21212,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -21263,7 +21292,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -21417,7 +21447,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -21610,7 +21641,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -21831,7 +21863,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -22069,7 +22102,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -22260,7 +22294,8 @@
                           "minLength": 1,
                           "maxLength": 4096,
                           "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096
+                          "x-maxUtf8Bytes": 4096,
+                          "x-agent-fabric-sensitive": true
                         }
                       }
                     },
@@ -22641,7 +22676,8 @@
                   "minLength": 1,
                   "maxLength": 4096,
                   "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096
+                  "x-maxUtf8Bytes": 4096,
+                  "x-agent-fabric-sensitive": true
                 }
               }
             }
@@ -22794,7 +22830,8 @@
                   "minLength": 1,
                   "maxLength": 4096,
                   "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096
+                  "x-maxUtf8Bytes": 4096,
+                  "x-agent-fabric-sensitive": true
                 },
                 "providerSessionRef": {
                   "type": "string",
@@ -22971,7 +23008,8 @@
                   "minLength": 1,
                   "maxLength": 4096,
                   "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096
+                  "x-maxUtf8Bytes": 4096,
+                  "x-agent-fabric-sensitive": true
                 },
                 "providerSessionRef": {
                   "type": "string",
@@ -23451,79 +23489,88 @@
               "const": true
             },
             "result": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "deliveryId",
-                  "messageId",
-                  "sequence",
-                  "body",
-                  "attempt",
-                  "senderId",
-                  "kind",
-                  "requiresAck"
-                ],
-                "properties": {
-                  "deliveryId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deliveries"
+              ],
+              "properties": {
+                "deliveries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "deliveryId",
+                      "messageId",
+                      "sequence",
+                      "body",
+                      "attempt",
+                      "senderId",
+                      "kind",
+                      "requiresAck"
+                    ],
+                    "properties": {
+                      "deliveryId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "messageId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "body": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 4096
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "senderId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "request",
+                          "response",
+                          "event",
+                          "steer",
+                          "cancel",
+                          "escalate",
+                          "ack"
+                        ]
+                      },
+                      "requiresAck": {
+                        "type": "boolean"
+                      }
+                    }
                   },
-                  "messageId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "sequence": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "body": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 4096
-                  },
-                  "attempt": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "senderId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "request",
-                      "response",
-                      "event",
-                      "steer",
-                      "cancel",
-                      "escalate",
-                      "ack"
-                    ]
-                  },
-                  "requiresAck": {
-                    "type": "boolean"
-                  }
+                  "minItems": 0,
+                  "maxItems": 256
                 }
-              },
-              "minItems": 0,
-              "maxItems": 256
+              }
             }
           }
         },
@@ -23660,7 +23707,16 @@
               "const": true
             },
             "result": {
-              "const": null
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "acknowledged"
+              ],
+              "properties": {
+                "acknowledged": {
+                  "const": true
+                }
+              }
             }
           }
         },
@@ -26328,7 +26384,8 @@
                   "minLength": 1,
                   "maxLength": 4096,
                   "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096
+                  "x-maxUtf8Bytes": 4096,
+                  "x-agent-fabric-sensitive": true
                 }
               }
             }
@@ -27995,8 +28052,9 @@
                   "type": "integer",
                   "minimum": 0
                 },
-                "result": {
-                  "$ref": "#/$defs/boundedJsonValue"
+                "resultDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
                 }
               }
             }
@@ -28184,8 +28242,9 @@
                   "type": "integer",
                   "minimum": 0
                 },
-                "result": {
-                  "$ref": "#/$defs/boundedJsonValue"
+                "resultDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
                 }
               }
             }
@@ -28373,8 +28432,9 @@
                   "type": "integer",
                   "minimum": 0
                 },
-                "result": {
-                  "$ref": "#/$defs/boundedJsonValue"
+                "resultDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
                 }
               }
             }
@@ -29036,7 +29096,8 @@
                       "minLength": 1,
                       "maxLength": 4096,
                       "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -29450,40 +29511,6 @@
                     "minimum": 0
                   }
                 },
-                "leader": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "agentId",
-                    "authorityId",
-                    "capability"
-                  ],
-                  "properties": {
-                    "agentId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "capability": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
-                    }
-                  }
-                },
                 "rootTask": {
                   "type": "object",
                   "additionalProperties": false,
@@ -29894,40 +29921,6 @@
                     "minimum": 0
                   }
                 },
-                "leader": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "agentId",
-                    "authorityId",
-                    "capability"
-                  ],
-                  "properties": {
-                    "agentId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "capability": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
-                    }
-                  }
-                },
                 "rootTask": {
                   "type": "object",
                   "additionalProperties": false,
@@ -30336,40 +30329,6 @@
                   "additionalProperties": {
                     "type": "integer",
                     "minimum": 0
-                  }
-                },
-                "leader": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "agentId",
-                    "authorityId",
-                    "capability"
-                  ],
-                  "properties": {
-                    "agentId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "capability": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096
-                    }
                   }
                 },
                 "rootTask": {

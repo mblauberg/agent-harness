@@ -5,6 +5,18 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import type { FabricClient } from "../core/client.js";
+import type { ProviderActionResult } from "../core/contracts.js";
+import { digest } from "../project-session/store-support.js";
+
+function publicProviderAction(action: ProviderActionResult): Omit<ProviderActionResult, "result"> & {
+  resultDigest?: `sha256:${string}`;
+} {
+  const { result, ...metadata } = action;
+  return {
+    ...metadata,
+    ...(result === undefined ? {} : { resultDigest: digest(result) }),
+  };
+}
 
 /**
  * Keep the public baseline protocol closed over the established FabricClient.
@@ -30,10 +42,10 @@ export async function dispatchAgentProtocol(
     case FABRIC_OPERATIONS.createDiscussionGroup:
       return client.createDiscussionGroup(input as never);
     case FABRIC_OPERATIONS.receiveMessages:
-      return client.receiveMessages(input as never);
+      return { deliveries: await client.receiveMessages(input as never) };
     case FABRIC_OPERATIONS.acknowledgeDelivery:
       await client.acknowledgeDelivery(input as never);
-      return null;
+      return { acknowledged: true };
     case FABRIC_OPERATIONS.abandonDelivery:
       return client.abandonDelivery(input as never);
     case FABRIC_OPERATIONS.getMailboxState:
@@ -80,11 +92,11 @@ export async function dispatchAgentProtocol(
     case FABRIC_OPERATIONS.reportProviderState:
       return client.reportProviderState(input as never);
     case FABRIC_OPERATIONS.dispatchProviderAction:
-      return client.dispatchProviderAction(input as never);
+      return publicProviderAction(await client.dispatchProviderAction(input as never));
     case FABRIC_OPERATIONS.reconcileProviderAction:
-      return client.reconcileProviderAction(input as never);
+      return publicProviderAction(await client.reconcileProviderAction(input as never));
     case FABRIC_OPERATIONS.getProviderAction:
-      return client.getProviderAction(input as never);
+      return publicProviderAction(await client.getProviderAction(input as never));
     case FABRIC_OPERATIONS.recordOperatorIntervention:
       return client.recordOperatorIntervention(input as never);
     case FABRIC_OPERATIONS.recordVisibilityFailure:
