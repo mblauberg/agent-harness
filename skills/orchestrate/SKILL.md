@@ -1,12 +1,6 @@
 ---
 name: orchestrate
-description: >
-  Use when the task benefits from many agents, fan-out, native subagents, Claude Code
-  workflows/ultracode, deep/web research, multi-angle audits, repo-wide sweeps, large migrations,
-  independent second opinions, red-team/adversarial review, review-refine loops, cross-family
-  verification, model-output synthesis, or high-stakes low-oracle work. Skip tiny edits, simple Q&A,
-  tightly coupled debugging, and unpartitionable shared-state writes. Also use for explicit Herdr
-  pane, agent, workspace, tab or session inspection/control requests.
+description: "Use when bounded fan-out, multi-agent research, cross-family review, parallel audits, or Herdr control improves coverage. Not for tiny work, tightly coupled debugging, or run-until-STOP jobs; use diagnose or autonomous-lab."
 ---
 
 # Multi-agent orchestration
@@ -22,6 +16,9 @@ Use `autonomous-lab` instead for a standing run-until-STOP job.
 - Once triggered, **default to fan-out** across bounded, independently useful
   slices. If safe decomposition fails, use a read-only audit fan-out or one
   worker.
+- Preflight decomposability, sequential dependencies, tool density and shared
+  error sources. Keep sequential or coordination-heavy reasoning with one
+  owner; never use agent count as a quality target.
 - **No concurrent shared-state writes.** Partition source scopes; otherwise
   workers are read-only or patch-only with namespaced artifacts.
 - Choose and record each worker's task-relevant cwd. Never assume one global
@@ -58,12 +55,15 @@ tightly coupled or unpartitionable tasks.
 
 ## Worker Contract
 
-State objective, authority, inputs, owned paths, prohibited actions, output,
-checks and stop condition. Forbid source edits unless explicitly partitioned;
-forbid git restore/checkout/stash outside scope. Handoffs preserve claim,
-source, confidence, unresolved issues, prohibited actions and validation.
-Independent certification requires a non-authoring reviewer and verified
-evidence. Best-effort routes scout only.
+State worker identity, objective, inherited authority, inputs, owned paths,
+prohibited actions, typed output, checks, stop condition and per-wave
+agent/turn/tool/time/retry budget. Validate worker payloads before reduction;
+never infer permission from another agent. Forbid source edits unless explicitly
+partitioned and forbid git restore/checkout/stash outside scope. Stop a lane at
+its budget or repeated invariant failure; record the circuit break and residual
+work. Handoffs preserve claim, source, confidence, unresolved issues,
+prohibited actions and validation. Independent certification requires a
+non-authoring reviewer and verified evidence. Best-effort routes scout only.
 
 ## References
 

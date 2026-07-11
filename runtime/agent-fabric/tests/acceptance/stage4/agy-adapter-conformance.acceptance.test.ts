@@ -17,14 +17,22 @@ import {
 
 describe("Stage 4 Agy adapter", () => {
   it("accepts the checked-in pinned real adapter", async () => {
-    await expect(
-      verifyAdapterCompatibility({
-        compatibilityPath: stage4RepositoryPath("config/adapter-compatibility.yaml"),
-        schemaPath: stage4SchemaPath(),
-        adapterIds: ["agy"],
-        requireEnabled: true,
-      }),
-    ).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
+    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
+      ? await createResolvedStage4Compatibility("agy")
+      : undefined;
+    try {
+      await expect(
+        verifyAdapterCompatibility({
+          compatibilityPath: fixture?.compatibilityPath
+            ?? stage4RepositoryPath("config/adapter-compatibility.yaml"),
+          schemaPath: fixture?.schemaPath ?? stage4SchemaPath(),
+          adapterIds: ["agy"],
+          requireEnabled: true,
+        }),
+      ).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
+    } finally {
+      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
+    }
   });
 
   it("uses the shared adapter protocol with deterministic Google-only fixture capabilities", async () => {

@@ -125,7 +125,10 @@ Keep implementation detail tied to review value.
 
 ## Commit Message
 
-Use imperative mood in the subject.
+Follow the repository's established convention. Where it uses Conventional
+Commits, prefer `<type>(<scope>): <imperative summary>` with a narrow optional
+scope. Keep the subject specific and normally within 50 characters when that
+does not hide meaning; never exceed a project/provider limit.
 
 Good:
 
@@ -133,7 +136,10 @@ Good:
 Validate token expiry before refresh
 ```
 
-Add a body when the reason is not obvious.
+Add a body only when the reason is not obvious or the change is breaking,
+security-sensitive, a migration, or a revert. Preserve required issue and
+attribution trailers. The writing skill returns a message; staging, committing
+or amending requires separate authority.
 
 ## Changelog and Release Notes
 

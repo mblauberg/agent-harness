@@ -29,16 +29,15 @@ Render to SVG:
 d2 diagrams/diagram.d2 diagrams/diagram.svg
 ```
 
-Render to PDF for publication figure workflows — go via SVG to get a TRUE VECTOR PDF (native
-`d2 … .pdf` is vector text over a 144 ppi raster of every shape; never ship it):
+When a venue requires vector shapes/text, go via SVG and an installed converter.
+D2's native PDF is PNG-derived and can still be appropriate for multi-board or
+raster-acceptable workflows:
 
 ```bash
 d2 diagrams/diagram.d2 diagrams/diagram.svg
 rsvg-convert -f pdf -o figures/diagram.pdf diagrams/diagram.svg
-pdffonts  figures/diagram.pdf   # must list EMBEDDED fonts (text is vector)
+pdffonts figures/diagram.pdf
 pdfimages -list figures/diagram.pdf
-# PASS = no full-page RGB image. Many tiny gray smask tiles (~72 ppi, a few KB) are NORMAL for
-# rsvg opacity handling, NOT a failure. (cairosvg is a fallback; it often errors on d2 0.7.x SVGs.)
 ```
 
 Watch during iterative editing:
@@ -59,7 +58,8 @@ List available themes:
 d2 themes
 ```
 
-Open a file in the hosted playground when local iteration is awkward:
+The hosted playground is an external disclosure surface. Use it only with
+explicit authority for the diagram's contents:
 
 ```bash
 d2 play diagrams/diagram.d2
@@ -68,7 +68,8 @@ d2 play diagrams/diagram.d2
 ## Practical Defaults
 
 - Default export: `svg`
-- Document or manuscript attachment export: vector `pdf` via `svg` → `rsvg-convert` (NOT native `d2 … .pdf`)
+- Document or manuscript attachment: follow the venue profile; use SVG plus a
+  verified converter when vector shapes/text are required
 - Slide deck or document image export when vector is not suitable: `png`
 - Default layout engine: `dagre`
 - Try `elk` for crowded dependency or architecture views
@@ -85,4 +86,8 @@ d2 diagrams/diagram.d2 diagrams/diagram.svg
 
 - `d2` defaults to SVG output if no output path is given.
 - `--watch` opens a local browser view unless browser opening is disabled.
+- Stop run-owned watch processes after use.
+- Do not install D2, a layout plugin or a converter without dependency/tooling
+  authority.
+- Native PDF behaviour is documented at <https://www.d2lang.com/tour/exports/>.
 - Keep command examples concrete and project-relative when writing instructions for other agents.

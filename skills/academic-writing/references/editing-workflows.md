@@ -120,8 +120,15 @@ If editing files, run the local checker script when available. Treat its silence
 Use for full-chapter rewrites, whole-thesis rewrites, final-polish passes, or any rewrite where the user asks for slow, thorough, high-accuracy work.
 
 1. Plan first. Identify target chapters, locked evidence, source-closure files, validation commands, and known no-go claims.
-2. Exploration pass. Send small independent agents to inspect source-closure notes, chapter structure, citation risks, LaTeX risks, and claim-strength risks. Use lighter models such as Haiku for bounded extraction and inventory tasks; use stronger models such as Sonnet for chapter-level judgment, argument flow, and risk review.
-3. External second opinions. When available and authorised, send Codex and Gemini separate whole-thesis or whole-diff review tasks. Keep their prompts independent so they do not anchor on each other's conclusions.
+2. Exploration pass. Send small independent agents to inspect source-closure
+   notes, chapter structure, citation risks, LaTeX risks, and claim-strength
+   risks. Load `orchestrate`; route bounded extraction to scout capacity and
+   chapter-level judgement to the risk-appropriate workhorse or flagship at
+   runtime.
+3. Independent second opinions. Follow the harness risk tier and use fresh,
+   non-authoring reviewers from the available primary families. Keep prompts
+   independent so reviewers do not anchor on each other's conclusions. Record
+   unavailable or skipped bonus-family lanes without making them blockers.
 4. Rewrite slowly. Apply one coherent chapter or section slice at a time. Preserve labels, macros, result commands, citation keys, equations, tables, and file paths unless the user explicitly approves structural changes.
 5. Chapter-specific review. After each chapter rewrite, assign subagents to review that chapter for unsupported claims, citation misuse, lost technical meaning, concision failures, AI-sounding prose, LaTeX breakage, and chapter-boundary drift.
 6. Whole-work review. After all chapter edits, send separate agents for:
@@ -129,9 +136,13 @@ Use for full-chapter rewrites, whole-thesis rewrites, final-polish passes, or an
    - source-grounding and citation-risk audit;
    - LaTeX/build and cross-reference risk;
    - diff review against the pre-rewrite version;
-   - independent Codex and Gemini whole-thesis second opinions where available.
-7. Integrate only actionable findings. Fix concrete defects. Do not churn prose because a reviewer merely prefers a different style.
-8. Validate before completion. Run the project citation, budget, style, and build checks that fit the touched files. Report skipped checks explicitly.
+   - risk-proportional independent whole-work second opinions.
+7. Integrate only verified, actionable findings. Reviewer conclusions are
+   evidence claims, not votes. Fix concrete defects; do not churn prose because
+   a reviewer merely prefers a different style.
+8. Validate before completion. Run the project citation, budget, style, and
+   build checks that fit the touched files. Report skipped checks explicitly and
+   obey the enclosing delivery run's repair cap.
 
 For this protocol, "review" means defect-finding: unsupported claims, overclaiming, stale citations, missing caveats, broken LaTeX, wrong terminology, inflated prose, chapter-boundary errors, and loss of evidence. Praise and broad summaries are not useful review output.
 

@@ -8,39 +8,55 @@ import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
 import { runWorkspaceTrust } from "../../src/cli/workspace-trust.ts";
-import { createPrimaryCompatibilityFixture } from "../support/primary-adapter-testkit.ts";
+import {
+  createPortableActivatedPrimaryFixture,
+  createPrimaryCompatibilityFixture,
+} from "../support/primary-adapter-testkit.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 describe("daemon trusted adapter composition", () => {
   it("composes only the explicitly activated and pinned adapters", async () => {
-    const adapters = await composeDaemonAdapters({
-      globalConfigPath: `${repositoryRoot}/config/agent-fabric.yaml`,
-      compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
-      compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
-      agentsHome: repositoryRoot,
-      stateDirectory: join(repositoryRoot, ".agent-run", "adapter-composition-test"),
-    });
-    expect(Object.keys(adapters).sort()).toEqual(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp"]);
+    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
+      ? await createPortableActivatedPrimaryFixture()
+      : undefined;
+    try {
+      const adapters = await composeDaemonAdapters({
+        globalConfigPath: fixture?.configPath ?? `${repositoryRoot}/config/agent-fabric.yaml`,
+        compatibilityPath: fixture?.compatibilityPath
+          ?? `${repositoryRoot}/config/adapter-compatibility.yaml`,
+        compatibilitySchemaPath: fixture?.schemaPath
+          ?? `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
+        agentsHome: fixture?.directory ?? repositoryRoot,
+        ...(fixture === undefined
+          ? { stateDirectory: join(repositoryRoot, ".agent-run", "adapter-composition-test") }
+          : {}),
+      });
+      expect(Object.keys(adapters).sort()).toEqual(
+        fixture === undefined
+          ? ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp"]
+          : ["claude-agent-sdk", "codex-app-server"],
+      );
+    } finally {
+      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
+    }
   });
 
   it("expands the trusted AGENTS_HOME workspace root without binding config to one user", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "fabric-portable-config-"));
+    const fixture = await createPortableActivatedPrimaryFixture();
+    const directory = fixture.directory;
     const agentsHome = join(directory, "agents-home");
     const literalRoot = join(directory, "literal-root");
-    const globalConfigPath = join(directory, "agent-fabric.yaml");
     await Promise.all([mkdir(agentsHome), mkdir(literalRoot)]);
-    const source = await readFile(`${repositoryRoot}/config/agent-fabric.yaml`, "utf8");
-    await writeFile(
-      globalConfigPath,
-      source.replace('  - "${AGENTS_HOME}"', `  - "\${AGENTS_HOME}"\n  - ${JSON.stringify(literalRoot)}`),
-    );
+    const config = parse(await readFile(fixture.configPath, "utf8")) as Record<string, unknown>;
+    config.workspaceRoots = ["${AGENTS_HOME}", literalRoot];
+    await writeFile(fixture.configPath, stringify(config));
     try {
       const expectedRoots = [await realpath(agentsHome), await realpath(literalRoot)];
       await expect(composeDaemonConfiguration({
-        globalConfigPath,
-        compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
-        compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
+        globalConfigPath: fixture.configPath,
+        compatibilityPath: fixture.compatibilityPath,
+        compatibilitySchemaPath: fixture.schemaPath,
         agentsHome,
         stateDirectory: join(directory, "state"),
       })).resolves.toMatchObject({ workspaceRoots: expectedRoots });

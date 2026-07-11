@@ -16,7 +16,9 @@ Run the shared loader first so you know what already exists:
 node "${AGENTS_HOME:-$HOME/.agents}/skills/frontend-design/scripts/load-context.mjs"
 ```
 
-The output tells you whether PRODUCT.md and/or DESIGN.md already exist. If `migrated: true`, legacy `.impeccable.md` was auto-renamed to `PRODUCT.md`. Mention this once to the user.
+The output tells you whether PRODUCT.md and/or DESIGN.md already exist. Legacy
+`.impeccable.md` is read in place; the loader never renames it. Propose any
+migration separately and perform it only with explicit file-edit authority.
 
 Decision tree:
 - **Neither file exists (empty project or no context yet)**: do Steps 2-4 (write PRODUCT.md), then decide on DESIGN.md based on whether there's code to analyze.
@@ -150,7 +152,10 @@ Summarize:
 - The 3-5 strategic principles from PRODUCT.md that will guide future work
 - If DESIGN.md is pending, remind the user how to generate it later
 
-**Critical: re-run the loader to refresh session context.** After writing PRODUCT.md, run `node "${AGENTS_HOME:-$HOME/.agents}/skills/frontend-design/scripts/load-context.mjs"` one final time and let its full JSON output land in conversation. This ensures subsequent commands in this session use the freshly-written PRODUCT.md, not a stale earlier version.
+**Critical: refresh the context index.** After writing PRODUCT.md, re-run the
+loader once to refresh its bounded path/heading/size summary. Read only the
+sections needed by the next command; do not inject the full file into the
+conversation.
 
 If teach was invoked as a blocker by another impeccable command (e.g. the user ran `$frontend-design polish` with no PRODUCT.md), resume that original task now with the fresh context.
 

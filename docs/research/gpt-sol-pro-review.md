@@ -1,10 +1,11 @@
 # Comprehensive review of `mblauberg/agent-harness`
 
 > Historical snapshot: reviewed on 11 July 2026 at commit `2e7770f`.
-> Operational claims do not describe the current tree after `f7a3240`. See the
-> [live adjudication](gpt-sol-pro-review-adjudication.md). The generating model
-> and reasoning mode were not recorded, so the filename is not model
-> provenance.
+> Operational claims do not describe the current tree. See the
+> [historical `f7a3240` adjudication](gpt-sol-pro-review-adjudication.md) and the
+> [implemented operational-hardening specification](../specs/04-agent-fabric-operational-hardening.md)
+> for the post-`9f8abce` disposition. The generating model and reasoning mode
+> were not recorded, so the filename is not model provenance.
 
 I reviewed the repository on `main` at commit `2e7770fc31fe3d9fa725392fe2b1e87de38d9e38`, covering the fabric runtime, database schema, provider adapters, MCP façade, model routing, skills, installation scripts, security checks, tests, CI, documentation and operational runbooks.
 
@@ -1066,7 +1067,7 @@ Introduce a machine-local, human-managed trust store:
 
 ```yaml
 trusted_workspaces:
-  - canonical_path: /Users/anese/projects/example
+  - canonical_path: /workspace/example
     approved_by: human
     approved_at: 2026-07-11T10:00:00+10:00
     expires_at: 2026-10-11T10:00:00+10:00

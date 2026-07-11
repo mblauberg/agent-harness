@@ -2,7 +2,12 @@
 
 Use this as a scrub list before filing-facing work or correspondence leaves the workspace.
 
-The deterministic lint in `scripts/lint_legal_style.py` enforces only a subset of this list as hard failures (em dashes, US legalese, banned evidence paths, internal markers, internal leak tokens hidden in HTML comments, and the PPN/DVO overstatement pattern) and flags the rest as warnings (en dashes, AI tells, email tells, dated wording, hedges, overstatement intensifiers, modal hedge stacks, ceremonial doublets, self-narration openers, long sentences over 60 words, US and relative dates, placeholders, affidavit advocacy). Treat this whole reference as the standard and the lint as a fast partial check, not a complete one; the Tier 3 structural tells below are largely invisible to it.
+The deterministic lint in `scripts/lint_legal_style.py` enforces only a subset
+of this list as hard failures, including em dashes, US legalese, internal
+markers, internal-path leaks and unsupported safety-instrument overstatement.
+It flags style and affidavit risks as warnings. Treat this reference as the
+standard and the lint as a partial check; it cannot verify sources, document
+function, forum rules or most structural writing defects.
 
 For repair procedures, use `legal-concision-and-anti-ai.md`. This file identifies patterns; the concision
 reference tells agents how to fix them without losing legal precision.
@@ -29,7 +34,7 @@ Remove or relocate to submissions unless quoting a source:
 - `bad faith`;
 - `abuse of process`;
 - `dishonest`;
-- `coercive control was proven`;
+- `coercive control was proven` where no authorised finding or source supports it;
 - `the tribunal had no jurisdiction`;
 - `the Court should find`;
 - `is an error` or `is wrong` applied to another court or tribunal's order (collateral attack; use `disputed`, `under appeal`, `unable to reconcile`);
@@ -102,8 +107,9 @@ not excuse them).
   paragraph is machine rhythm;
 - ceremonial doublets (`null and void`, `each and every`, `any and all`): collapse to the operative word unless
   the pair carries distinct legal content or is quoted/statutory (repairs in `legal-concision-and-anti-ai.md`);
-- legal noun towers such as `cross-proceeding enforcement prejudice context`, `source-boundary filing-facing
-  assertion risk`, or `family-violence safety-context material`. Keep the defined legal term, then move
+- legal noun towers such as `multi-forum procedural consequence context`,
+  `source-boundary filing-facing assertion risk`, or `family-violence
+  safety-context material`. Keep the defined legal term, then move
   qualifiers into a clause;
 - empty `-ing` phrases such as `ensuring fairness`, `highlighting concerns`, `showcasing evidence` without a
   concrete actor and action;
@@ -180,12 +186,17 @@ common offenders (`pursuant to`, `prior to`, `whilst`, `utilise`, `hereby`/`ther
 
 Check for:
 
-- family-law merits in Magistrates Court stay material;
-- Magistrates Court enforcement relief in QCAT orders;
-- QCAT debt findings stated as FCFCOA property conclusions;
-- another forum's subsisting order asserted as wrong, especially while it is under appeal (collateral attack);
-- DVO/PPN material framed as a final judicial finding;
-- source-backed analysis and user instruction points left in filing-facing text.
+- another forum's labels, powers, forms, deadlines, address conventions or
+  service rules copied into the present document;
+- relief sought from a decision-maker who cannot grant it;
+- a pleading, submission or allegation from one proceeding stated as proof in
+  another;
+- a subsisting order characterised as wrong without a verified procedural and
+  legal basis, especially while review or appeal is pending;
+- a protective, police-issued or interim safety instrument framed as a final
+  finding; and
+- internal analysis, unresolved instructions or verification notes left in
+  filing-facing text.
 
 ## Safer Replacements
 
@@ -195,7 +206,7 @@ Check for:
 | `obviously` | omit |
 | `bad faith` | conduct described by date and source |
 | `abuse` | alleged conduct, unless supported by source and forum strategy |
-| `proved family violence` | PPN/DVO document dated ... |
+| `proved family violence` | `[SAFETY SOURCE] dated [DATE] records ...`, at the source's true status |
 | `currently` | as at [date] |
 | `recent` | dated [date] |
 | `for the avoidance of doubt` | state the precise ambiguity, or omit |

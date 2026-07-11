@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Use when the user wants to design, redesign, shape, critique, audit, polish, clarify, distill, harden, optimize, adapt, animate, colorize, extract, or otherwise improve a frontend interface. Covers websites, landing pages, dashboards, product UI, app shells, components, forms, settings, onboarding, and empty states. Handles UX review, visual hierarchy, information architecture, cognitive load, accessibility, performance, responsive behavior, theming, anti-patterns, typography, fonts, spacing, layout, alignment, color, motion, micro-interactions, UX copy, error states, edge cases, i18n, and reusable design systems or tokens. Also use for bland designs that need to become bolder or more delightful, loud designs that should become quieter, live browser iteration on UI elements, or ambitious visual effects that should feel technically extraordinary. Not for backend-only or non-UI tasks.
+description: "Use for authorised design, implementation, redesign, or polish of frontend interfaces and design systems. Not for read-only UX review or React profiling; use frontend-review or react-performance."
 ---
 
 <!-- Modified from Impeccable for this harness; see NOTICE.md. -->
@@ -20,15 +20,17 @@ Before design or file edits:
    node "${AGENTS_HOME:-$HOME/.agents}/skills/frontend-design/scripts/load-context.mjs"
    ```
 
-   Consume the complete JSON; never truncate or filter it. The loader resolves
+   The default output contains paths, headings and sizes only. Read just the
+   required sections with the host's bounded file tools; do not invoke
+   `--full` merely to preload context. The loader resolves
    case-insensitive `PRODUCT.md` and optional `DESIGN.md` from the project root,
    then `.agents/context/` or `docs/`. Override with
    `IMPECCABLE_CONTEXT_DIR=path`. Do not reload context already present unless
    `teach`, `document`, or the user changed it. `live.mjs` already loads it.
-2. If `PRODUCT.md` is missing, empty, placeholder-filled, or under 200
-   characters, run `teach`, reload, then resume the original task. A blocked
-   `craft` resumes through `shape`. If `DESIGN.md` is missing, suggest
-   `document` once, then continue.
+2. If product context is missing, continue from code and existing project docs
+   when the task is review-only or otherwise bounded, and report the limitation.
+   Run `teach` or `document` only for design/build work with authority to create
+   those artifacts; neither is an automatic prerequisite for critique or audit.
 3. Classify the surface as **brand** (design is the product) or **product**
    (design serves the product). Prefer the task cue, then focused surface, then
    PRODUCT.md `register`. For legacy context, infer once from Users and Product

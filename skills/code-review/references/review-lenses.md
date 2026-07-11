@@ -39,6 +39,30 @@ change depends on it, worsens it, or makes it newly dangerous.
 - Is the proposed simplification local enough to validate, or speculative
   redesign outside the dependency cone?
 
+### Design-principle probes, not verdicts
+
+Use SOLID and related principles to generate hypotheses, never as standalone
+findings:
+
+- **Single responsibility/cohesion:** do state and behaviour that change for the
+  same reason have one clear owner, or are policy and effects scattered?
+- **Open/closed:** does a recurring extension require distributed conditionals,
+  or would one proven seam remove them? Do not add an abstraction for a
+  hypothetical extension.
+- **Liskov substitution:** can each implementation preserve the caller-visible
+  preconditions, postconditions, errors and invariants of its contract?
+- **Interface segregation:** are clients forced to depend on methods, data or
+  permissions they do not use, or is the interface small and deep?
+- **Dependency inversion/information hiding:** does stable policy depend directly
+  on volatile infrastructure detail, and does the proposed boundary actually
+  hide complexity rather than relocate it?
+
+Also test simplicity/YAGNI, duplication of knowledge rather than mere text,
+coupling, idempotency, explicit state/invariants, failure atomicity,
+concurrency/cancellation, observability and operational ownership. Report only
+when evidence ties the principle to a present defect, regression or material
+risk with a validation route.
+
 ## Verification
 
 - Map acceptance criteria to tests, checks or inspected evidence.
@@ -49,6 +73,39 @@ change depends on it, worsens it, or makes it newly dangerous.
   unknown, not passing.
 - For delegated work, verify the trajectory: the worker ran the stated checks,
   used the permitted authority, and did not silently skip failed lanes.
+
+## Generated and dependency surfaces
+
+- Verify newly named packages, APIs, flags and platform features exist in the
+  installed or authoritative version; generated-looking confidence is not proof.
+- Inspect manifest and lockfile deltas for maintenance, licence, provenance and
+  unexpected transitive or install-script risk when dependencies changed.
+- Check for weakened, deleted, skipped or assertion-light tests; compatibility
+  shims and comments must describe live behaviour, not an imagined migration.
+- Record unsupported binary, generated, vendored or platform-specific surfaces
+  as excluded/unknown rather than implying full coverage.
+
+## Security and privacy overlay
+
+Activate for changed trust, identity, data, execution, dependency or external
+boundaries. Review both the delta and the unchanged enforcement path it relies
+on; a secure-looking diff can still bypass a weak baseline.
+
+- Trace untrusted input through parsing, validation, authorisation, effects,
+  persistence, logging and output encoding.
+- Separate authentication from object/action authorisation; test tenant,
+  ownership, role and confused-deputy boundaries on every mutation path.
+- Check secret sources, redaction, error/log/trace exposure, retention and
+  least-privilege scope. Access to a credential is not authority to use it.
+- Inspect injection, traversal, deserialisation, command/template/query
+  construction, unsafe evaluation and generated-code execution boundaries.
+- Verify dependency provenance, install scripts, integrity/lock state, licence
+  and known-advisory evidence when the supply chain changes.
+- For agents, include prompt/tool injection, memory poisoning, delegated
+  permission inheritance, inter-agent payload validation, budget/circuit-break
+  enforcement and human-trust overclaims.
+- Require safe partial failure, idempotent retry where applicable, containment
+  and audit evidence. Never label an untested threat surface secure.
 
 ## Optional overlays
 

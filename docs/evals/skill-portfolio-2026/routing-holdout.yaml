@@ -1,0 +1,100 @@
+schema_version: 1
+dataset_id: skill-portfolio-routing-holdout-20260711-v2
+split: fresh-holdout
+cases:
+  - id: r01
+    category: authority-boundary
+    critical: true
+    prompt: Review the local diff read-only for correctness, regressions, architecture, and maintainability. Report findings with evidence; do not edit anything.
+    expected:
+      primary_skill: code-review
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: r02
+    category: structural-method
+    critical: true
+    prompt: Simplify this module's structure without changing observable behaviour. Establish characterisation evidence, migrate callers in small slices, and remove the old path only after proving it unreachable.
+    expected:
+      primary_skill: refactor
+      required_companion_skills: []
+      allowed_companion_skills: [tdd]
+  - id: r03
+    category: lifecycle-owner
+    critical: true
+    prompt: Take the approved software specification through code changes, deterministic verification, independent review, bounded repair, and final human acceptance. Do not deploy it.
+    expected:
+      primary_skill: implement
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, evaluate, orchestrate, tdd]
+  - id: r04
+    category: authority-boundary
+    critical: true
+    prompt: Investigate why this test is failing and return the root cause with evidence. This is diagnosis only; do not make a permanent fix.
+    expected:
+      primary_skill: diagnose
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: r05
+    category: promotion-authority
+    critical: true
+    prompt: The artifact is already accepted. With the human's explicit promotion authority, publish the pinned digest to the named external audience, verify visibility, and retain reversal and observation evidence.
+    expected:
+      primary_skill: release
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: r06
+    category: presentation-overlay
+    critical: false
+    prompt: "Use caveman mode for the next low-risk status update: aggressively compressed chat, but preserve commands, numbers, uncertainty, and evidence qualifiers."
+    expected:
+      primary_skill: caveman
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: r07
+    category: frontend-boundary
+    critical: true
+    prompt: Audit the existing checkout UI read-only across source and browser evidence for hierarchy, accessibility, responsive states, errors, and interaction clarity. Return findings only; do not redesign or edit it.
+    expected:
+      primary_skill: frontend-review
+      required_companion_skills: []
+      allowed_companion_skills: [playwright]
+  - id: r08
+    category: frontend-owner
+    critical: false
+    prompt: Redesign and implement the existing settings screen in the repository, including responsive, accessible, loading, empty, validation, and error states.
+    expected:
+      primary_skill: frontend-design
+      required_companion_skills: []
+      allowed_companion_skills: [implement, playwright]
+  - id: r09
+    category: skill-maintenance
+    critical: true
+    prompt: Audit this existing agent skill for missed triggers, false triggers, overlap, token cost, and unsafe instructions. Diagnose it and report recommendations without changing the files.
+    expected:
+      primary_skill: skill-audit
+      required_companion_skills: []
+      allowed_companion_skills: [evaluate]
+  - id: r10
+    category: skill-creation
+    critical: true
+    prompt: Create a new portable agent skill from this approved workflow, including its SKILL.md, progressive-disclosure references, trigger fixtures, and provider sidecar.
+    expected:
+      primary_skill: skill-authoring
+      required_companion_skills: []
+      allowed_companion_skills: [evaluate]
+  - id: r11
+    category: topology
+    critical: false
+    prompt: Fan out this bounded repository-wide audit across several independent agents, give them non-overlapping scopes, and centrally adjudicate their evidence before returning one answer.
+    expected:
+      primary_skill: orchestrate
+      required_companion_skills: []
+      allowed_companion_skills: [code-review]
+  - id: r12
+    category: persistent-topology
+    critical: true
+    prompt: Run a large multi-session autonomous research lab with durable recovery state and human gates. Keep progressing across crashes and compactions until I explicitly write STOP.
+    expected:
+      primary_skill: autonomous-lab
+      required_companion_skills: []
+      allowed_companion_skills: [orchestrate]

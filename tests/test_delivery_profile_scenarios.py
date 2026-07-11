@@ -36,6 +36,10 @@ def test_held_out_dataset_covers_positive_negative_and_boundary_cases():
         assert any(case["expected"] == "fail" for case in profile_cases)
     assert sum(bool(case["high_stakes"]) for case in cases) >= 2
     assert any(case["repetitions"] > 1 for case in cases)
+    agent_cases = [case for case in cases if case["profile"] == "agent-product"]
+    assert any("evaluation_id" in case.get("expected_error", "") for case in agent_cases)
+    assert any("digest mismatch" in case.get("expected_error", "") for case in agent_cases)
+    assert all("/repetitions" not in patch.get("path", "") for case in cases for patch in case.get("patches", []))
 
 
 def test_held_out_scenarios_meet_the_explicit_pass_threshold():
@@ -69,3 +73,5 @@ def test_evaluator_does_not_import_the_production_reference_generator():
     source = SCRIPT.read_text()
     assert "reference_runs" not in source
     assert "make_reference_run" not in source
+    assert "verify_hashes=True" in source
+    assert "materialise_reference_run" in source

@@ -1,10 +1,11 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 
 import {
   createPrimaryCompatibilityFixture,
+  createPortableActivatedPrimaryFixture,
   repositoryPath,
   requirePublicFunction,
 } from "../../support/primary-adapter-testkit.ts";
@@ -23,17 +24,25 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
 
   it("accepts pinned primary adapters and keeps the visibility-only Herdr entry disabled", async () => {
     const verify = requirePublicFunction("verifyAdapterCompatibility");
-    const compatibilityPath = repositoryPath("config/adapter-compatibility.yaml");
-    const schemaPath = repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json");
+    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
+      ? await createPortableActivatedPrimaryFixture()
+      : undefined;
+    const compatibilityPath = fixture?.compatibilityPath ?? repositoryPath("config/adapter-compatibility.yaml");
+    const schemaPath = fixture?.schemaPath
+      ?? repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json");
 
-    for (const adapterId of ["claude-agent-sdk", "codex-app-server"]) {
+    try {
+      for (const adapterId of ["claude-agent-sdk", "codex-app-server"]) {
+        await expect(
+          verify({ compatibilityPath, schemaPath, adapterIds: [adapterId], requireEnabled: true }),
+        ).resolves.toMatchObject({ valid: true, adapterIds: [adapterId] });
+      }
       await expect(
-        verify({ compatibilityPath, schemaPath, adapterIds: [adapterId], requireEnabled: true }),
-      ).resolves.toMatchObject({ valid: true, adapterIds: [adapterId] });
+        verify({ compatibilityPath, schemaPath, adapterIds: ["herdr"], requireEnabled: true }),
+      ).rejects.toMatchObject({ code: "ADAPTER_DISABLED" });
+    } finally {
+      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
     }
-    await expect(
-      verify({ compatibilityPath, schemaPath, adapterIds: ["herdr"], requireEnabled: true }),
-    ).rejects.toMatchObject({ code: "ADAPTER_DISABLED" });
   });
 
   it("validates Claude, Codex and Herdr fixture hashes without executing them", async () => {

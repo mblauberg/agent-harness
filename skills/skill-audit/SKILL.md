@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Use when auditing or improving existing Agent Skills, diagnosing missed or false triggers, checking skill quality, overlap or token cost, or running /skill-audit or /optimize-skill. Not for authoring a new skill or changing skills without separate implementation authority.
+description: "Use for read-only audit of existing Agent Skills: triggers, overlap, portability, token cost, security, and effectiveness evidence. Not for a new skill or edits; use skill-authoring or implement."
 ---
 
 # Skill audit
@@ -34,7 +34,9 @@ Use `scripts/validate_telemetry.py` before relying on a telemetry artifact.
 1. Resolve target skills from the canonical catalogue and deduplicate links.
 2. Run static checks: frontmatter/YAML, trigger and exclusion clarity,
    adjacent-skill conflicts, broken paths/tools, instruction density, body size,
-   progressive disclosure and deterministic fixtures.
+   progressive disclosure, complete provider-rendered catalogue budget,
+   provider-sidecar parity, provenance/licence, authority/state writes, scripts,
+   hooks/MCP/network surfaces and deterministic fixtures.
 3. If authorised telemetry exists, verify its scope and privacy receipt, then
    calculate trigger, completion, correction and cost signals. Never infer
    invocation from a skill being loaded into context.
@@ -42,6 +44,13 @@ Use `scripts/validate_telemetry.py` before relying on a telemetry artifact.
    claims. A raw keyword match is only a candidate, not ground truth.
 5. Report all dimensions from `references/method.md`; mark missing evidence
    `N/A` and keep static facts separate from behavioural estimates.
+
+For a plugin/package intake, pin source and commit, inventory every component
+and digest, inspect manifests, installers, hooks, binaries, MCP/app endpoints,
+network/data retention, permissions, update/rollback and licence boundaries.
+Do not execute third-party code during static intake. Recommend a plugin only
+for a coherent distribution/runtime boundary; otherwise extract small licensed
+mechanisms into existing local owners.
 
 ## Output
 

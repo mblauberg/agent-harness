@@ -43,7 +43,8 @@ Create context-appropriate strategy:
 - Bottom navigation instead of top/side navigation
 
 **Interaction Strategy**:
-- Touch targets 44x44px minimum (not hover-dependent)
+- Aim for 44x44px touch comfort where layout permits; verify WCAG 2.2 AA's
+  24x24px minimum and exceptions separately (not hover-dependent)
 - Swipe gestures where appropriate (lists, carousels)
 - Bottom sheets instead of dropdowns
 - Thumbs-first design (controls within thumb reach)
@@ -53,7 +54,8 @@ Create context-appropriate strategy:
 - Progressive disclosure (don't show everything at once)
 - Prioritize primary content (secondary content in tabs/accordions)
 - Shorter text (more concise)
-- Larger text (16px minimum)
+- Readable text (16px is a common ergonomic default; test the actual font,
+  audience, density, zoom and viewport rather than treating it as a WCAG floor)
 
 **Navigation Strategy**:
 - Hamburger menu or bottom navigation
@@ -71,7 +73,8 @@ Create context-appropriate strategy:
 
 **Interaction Strategy**:
 - Support both touch and pointer
-- Touch targets 44x44px but allow denser layouts than phone
+- Prefer 44x44px touch comfort but permit denser layouts that still satisfy the
+  applicable target-size rule and spacing exceptions
 - Side navigation drawers
 - Multi-column forms where appropriate
 
@@ -145,7 +148,8 @@ Choose appropriate breakpoints:
 
 ### Touch Adaptation
 
-- Increase touch target sizes (44x44px minimum)
+- Increase touch targets toward a 44x44px ergonomic default; do not mislabel
+  every smaller target as an AA failure
 - Add more spacing between interactive elements
 - Remove hover-dependent interactions
 - Add touch feedback (ripples, highlights)

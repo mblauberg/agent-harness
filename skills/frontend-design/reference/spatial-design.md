@@ -75,7 +75,9 @@ Text at `margin-left: 0` looks indented due to letterform whitespace; use negati
 
 ### Touch Targets vs Visual Size
 
-Buttons can look small but need large touch targets (44px minimum). Use padding or pseudo-elements:
+Buttons can look small while offering a larger target. Prefer 44px for touch
+comfort; verify the applicable WCAG 2.2 target-size rule and exceptions. Use
+padding or pseudo-elements without overlapping adjacent targets:
 
 ```css
 .icon-button {

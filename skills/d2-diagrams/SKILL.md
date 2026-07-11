@@ -1,47 +1,55 @@
 ---
 name: d2-diagrams
-description: Use when creating, editing, formatting, validating, or rendering D2 diagrams in any project — architecture, pipeline, flow, component, class, schema, or publication-quality figures — needing D2 syntax, CLI usage, layout, or vector-PDF export guidance. Not for Mermaid, Graphviz, or PlantUML source.
+description: "Use for creating, validating, rendering, or exporting D2 source, including fixed-layout and vector-PDF publication figures. Not for Mermaid, Graphviz, or PlantUML requirements diagrams; use engineering-docs or uml-diagrams."
 ---
 
 # D2 diagrams
 
 Use D2 when fixed layout, repeatable exports or publication quality justify
-maintaining source plus a rendered asset. Prefer native Mermaid for GitHub
-READMEs and living operational docs. Simplify or split an overloaded Mermaid
-graph before converting it; a tool change cannot fix mixed conceptual levels.
+maintaining source plus a rendered asset. The project's diagram conventions,
+source/render owners and terminology are authoritative. Where the project is
+silent, prefer native Mermaid for GitHub READMEs and living operational docs.
+Simplify or split an overloaded Mermaid graph before converting it; a tool
+change cannot fix mixed conceptual levels. A review or validation request is
+read-only unless edits or exports are explicitly authorised.
 
 ## Publication figures (anything in a written document)
 
 For a paper, thesis, report or manuscript:
 
-1. Use reader concepts, not filenames, commands, code symbols, schema versions
-   or raw thresholds.
-2. Render SVG, then convert with `rsvg-convert -f pdf`. Native D2 PDF output
-   rasterises shapes at 144 ppi; do not use it for publication.
+1. Match labels to the intended reader. Use implementation names only when
+   exact reproducibility is the figure's purpose.
+2. Match the target venue's output requirements. D2's native PDF path is
+   PNG-derived; when vector shapes/text are required, render SVG and use a
+   project-approved converter, then inspect the PDF.
 
 Read [publication-figures.md](references/publication-figures.md) before editing
 a publication figure.
 
 ## Where To Put Things
 
-- Use the project's diagram directory and naming convention.
-- Export only when requested or required by the workflow.
+- Use the project's diagram directory and naming convention when writes are
+  authorised; otherwise use an assigned run-owned temporary path.
+- Export only when requested or required by the authorised workflow.
 - Never overwrite unrelated Mermaid or Structurizr artefacts.
 
 ## Default Workflow
 
 1. Choose the reader question and diagram type.
 2. Draft concise labels and stable identifiers.
-3. Run `d2 fmt` on the file.
-4. Run `d2 validate` on the file.
-5. Render SVG by default; use PNG only when raster is required.
+3. For authorised edits, run `d2 fmt`; for read-only review, use `d2 --check`.
+4. Run `d2 validate` when the installed CLI supports it. If D2 or a required
+   converter is unavailable, report the skipped check rather than installing it.
+5. Render SVG by default to an authorised path; use PNG only when raster is
+   required.
 6. Open the render and inspect labels, edges, grouping, whitespace and page fit.
 
 ## Defaults
 
 - Prefer `dagre` for directed flows; try `elk` for dense architecture.
 - Group related systems; distinguish roles only when it aids the argument.
-- Keep detail in prose, use Australian English and exclude real PII.
+- Keep detail in prose, follow the project's language convention (otherwise
+  Australian English), and exclude real PII.
 
 ## Syntax And CLI References
 
@@ -54,6 +62,11 @@ a publication figure.
 - Prefer plain nodes and edges; avoid themes, icons and flourishes by default.
 - Do not commit batches of exports without authority.
 - Split crowded diagrams instead of forcing one canvas.
+- `d2 play` uses a hosted viewer. Do not invoke it for private or undisclosed
+  source without explicit external-disclosure authority.
+- Close run-owned watch processes and remove only assigned temporary outputs.
+- For high-stakes review, load `orchestrate`; let runtime routing choose review
+  families and adjudicate findings against render/build evidence.
 
 ## Official Sources
 

@@ -1,12 +1,14 @@
 ---
 name: session
-description: Use when starting substantial work in any project, when a long session risks compaction or handoff to a fresh session, or when ending a session that changed project state. Covers session start reads, mid-session handoff files, session-end state updates, and graduating session findings into durable docs. Project-specific variants (e.g. project-session) override this skill in their own workspace.
+description: "Use for start, checkpoint, handoff, compaction, or end-of-session continuity on substantial work. Not for a multi-session route map or read-only write authority; use work-map for effort state."
 ---
 
 # Session
 
-Continuity lives on disk, not in conversation. A project variant overrides
-this protocol. Defaults: state `docs/STATE.md` (about 120 lines), handoffs
+Durable continuity belongs in the project's canonical owner when artifact
+authority exists. Otherwise return a proposed handoff/state delta in chat. A
+project variant overrides this protocol. Fallbacks, never competing owners:
+state `docs/STATE.md` (about 120 lines), handoffs
 `docs/handoffs/`, friction `docs/FRICTION.md`, archive `docs/archive/`.
 Project instructions may override `STATE_FILE`, `HANDOFF_DIR`, `FRICTION_LOG`
 and `ARCHIVE_DIR`.
@@ -19,7 +21,8 @@ gates remain unanswered until a human decides them.
 
 ## Checkpoint
 
-Before compaction or handoff, write
+Before compaction or handoff, update the canonical handoff when authorised, or
+return the same content without writing. Use
 `HANDOFF-YYYY-MM-DD-<slug>.md` with:
 
 - `Status: active`, effort/leg IDs, superseded path and `Consumed-at: pending`;

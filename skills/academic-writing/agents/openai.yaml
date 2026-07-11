@@ -1,3 +1,4 @@
-display_name: Academic Writing
-short_description: Writes concise Australian English academic prose with LaTeX-safe, citation-safe, anti-AI style discipline.
-default_prompt: Polish this academic passage for clear Australian academic engineering style. Preserve all citations, LaTeX commands, labels, result macros, numbers, and technical identifiers exactly. Remove AI-sounding language and flag unsupported claims.
+interface:
+  display_name: Academic Writing
+  short_description: Citation-safe, LaTeX-safe academic prose
+  default_prompt: Use $academic-writing to polish this academic passage while preserving claims, citations, LaTeX, numbers, and technical identifiers.

@@ -6,7 +6,7 @@ Performance is a feature. Identify the actual bottleneck for THIS interface, fix
 Understand current performance and identify problems:
 
 1. **Measure current state**:
-   - **Core Web Vitals**: LCP, FID/INP, CLS scores
+   - **Core Web Vitals**: LCP, INP, CLS; distinguish field and lab evidence
    - **Load time**: Time to interactive, first contentful paint
    - **Bundle size**: JavaScript, CSS, image sizes
    - **Runtime performance**: Frame rate, memory usage, CPU usage
@@ -197,7 +197,7 @@ const observer = new IntersectionObserver((entries) => {
 - Use CDN
 - Server-side rendering
 
-### First Input Delay (FID < 100ms) / INP (< 200ms)
+### Interaction to Next Paint (INP <= 200ms at the 75th percentile)
 - Break up long tasks
 - Defer non-critical JavaScript
 - Use web workers for heavy computation
@@ -227,14 +227,16 @@ const observer = new IntersectionObserver((entries) => {
 - Performance monitoring (Sentry, DataDog, New Relic)
 
 **Key metrics**:
-- LCP, FID/INP, CLS (Core Web Vitals)
+- LCP, INP, CLS (field Core Web Vitals where sufficient data exists)
 - Time to Interactive (TTI)
 - First Contentful Paint (FCP)
 - Total Blocking Time (TBT)
 - Bundle size
 - Request count
 
-**IMPORTANT**: Measure on real devices with real network conditions. Desktop Chrome with fast connection isn't representative.
+**IMPORTANT**: Measure on representative devices and networks. Lighthouse is
+lab evidence and cannot directly measure field INP; do not turn a single local
+run into a field-performance claim.
 
 **NEVER**:
 - Optimize without measuring (premature optimization)

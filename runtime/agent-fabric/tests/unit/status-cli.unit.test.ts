@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fabricDoctor, fabricStatus } from "../../src/cli/status.ts";
 import type { FabricPaths } from "../../src/cli/paths.ts";
 import { openFabric, startFabricDaemon } from "../../src/index.ts";
+import { createPortableActivatedPrimaryFixture } from "../support/primary-adapter-testkit.ts";
 
 const cleanup: string[] = [];
 afterEach(async () => Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -40,8 +41,14 @@ describe("machine status and doctor", () => {
 
   it("returns typed checks and fails only the unavailable daemon in an isolated state root", async () => {
     const value = await paths();
-    const agentsHome = resolve(import.meta.dirname, "../../../..");
-    const result = await fabricDoctor(["--agents-home", agentsHome], value);
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    const result = await fabricDoctor([
+      "--agents-home", fixture.directory,
+      "--trusted-config", fixture.configPath,
+      "--compatibility", fixture.compatibilityPath,
+      "--compatibility-schema", fixture.schemaPath,
+    ], value);
     expect(result).toMatchObject({ schemaVersion: 1, healthy: false });
     const checks = result.checks as Array<{ id: string; status: string }>;
     expect(checks.find((item) => item.id === "configuration")?.status).toBe("pass");

@@ -107,6 +107,60 @@ describe("Stage 1 chair receipt link", () => {
     }
   });
 
+  it("verifies accepted stochastic assurance and rejects a tampered nested evaluation artifact", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-stochastic-receipt-link-"));
+    const runDirectory = join(root, ".agent-run", "run-stochastic-link");
+    await mkdir(runDirectory, { recursive: true });
+    const fabric = await openFabric({ databasePath: join(root, "fabric.sqlite3"), workspaceRoots: [root] });
+    try {
+      const run = await fabric.createRun({
+        runId: "run-stochastic-link",
+        projectRunDirectory: runDirectory,
+        chair: {
+          agentId: "chair",
+          authority: {
+            workspaceRoots: ["."],
+            sourcePaths: ["."],
+            artifactPaths: [".agent-run/run-stochastic-link"],
+            actions: ["read", "write", "message"],
+            disclosure: ["local"],
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            budget: { turns: 4, "cost:USD": 4 },
+          },
+        },
+      });
+      const exported = await fabric.connect(run.chairCapability).exportReceipt({
+        commandId: "receipt-link:stochastic-export",
+      });
+      const artifactPath = `.agent-run/run-stochastic-link/${exported.relativePath}`;
+      const runReceiptPath = await writeDeliveryRunFixture({
+        runDirectory,
+        runId: "run-stochastic-link",
+        artifactPath,
+        artifactSha256: exported.sha256,
+        profile: "agent-product",
+        accepted: true,
+      });
+
+      await expect(verifyFabricReceiptLink({ runReceiptPath })).resolves.toMatchObject({
+        valid: true,
+        relativePath: artifactPath,
+        schemaVersion: 2,
+        sha256: exported.sha256,
+      });
+
+      const nestedOutput = join(root, "evaluation", "evidence", "output.json");
+      await writeFile(nestedOutput, `${await readFile(nestedOutput, "utf8")}tampered\n`);
+      await expect(verifyFabricReceiptLink({ runReceiptPath })).rejects.toMatchObject({
+        code: "RECEIPT_LINK_INVALID",
+        message: expect.stringContaining("artifact output digest mismatch"),
+      });
+    } finally {
+      await fabric.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects the removed RUN_RECEIPT fabric_receipt link", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-legacy-receipt-link-"));
     const runDirectory = join(root, ".agent-run", "run-legacy-link");

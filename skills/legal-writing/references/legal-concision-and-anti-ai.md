@@ -80,9 +80,9 @@ Repair method:
 
 | Weak stack | Better legal phrasing |
 |---|---|
-| `cross-proceeding enforcement prejudice context` | `The QCAT appeal affects enforcement because ...` |
+| `multi-forum procedural consequence context` | `The earlier order matters here because ...` |
 | `source-boundary filing-facing assertion risk` | `The draft would overstate the source if it said ...` |
-| `family-violence safety-context material` | `The PPN/DVO material is relied on as safety context only.` |
+| `family-violence safety-context material` | `The dated safety document is relied on as context only.` |
 | `protected-address disclosure framework` | `The draft asks the Court to manage address disclosure.` |
 | `document-function boundary issue` | `The paragraph argues the point, so it belongs in submissions.` |
 
@@ -131,7 +131,7 @@ Use positive form to make the legal position direct. Do not convert an honest ab
 | `does not seek to avoid disclosure` | `seeks court-managed disclosure` |
 | `is not a court order` | keep this if the absence of an order is the point |
 | `does not admit liability` | keep this if non-admission is the legal status |
-| `is not relied on to prove family violence` | keep this if non-reliance defines the evidentiary boundary |
+| `is not relied on to prove the underlying allegation` | keep this if non-reliance defines the evidentiary boundary |
 
 Positive form is a style rule, not a licence to soften. Keep negatives for non-service, non-filing,
 non-payment, non-admission, no order, no finding, no concession, no current authority, inability to reconcile
@@ -162,7 +162,7 @@ condition, a disputed status, a human-authority gap. Cut the repetition around i
 | Anxious over-qualification (cut to one clean limit) | Necessary boundary (keep) |
 |---|---|
 | `X does not assert he was 'ordered' or 'forced'; the records are silent as to motive; X asserts none and puts it no higher than ...` | `X relies on the records only for what they independently establish.` |
-| a redaction recital re-listing the order text, court, registry, file number, magistrate, dates and initiating line that stay legible | `the footer address will be redacted before service.` |
+| a redaction recital re-listing every field that stays legible | `the footer address will be redacted before service, subject to the verified forum process.` |
 | `premature, and is neither admitted nor answered here` | `premature.` (the non-admission is already stated once elsewhere) |
 | `the records cut both ways` | the limited-purpose sentence that already states what the records are and are not relied on for |
 
@@ -181,14 +181,16 @@ language with losing merits votes (Long & Christensen 2008; Black et al 2016 - c
 `argument-structure-and-paragraphing.md`, Sources). Claim the conclusion cleanly and let the evidence chain
 carry it.
 
-- **Assert the proposition, pin it to a source, drop the intensifier.** "The order was not served. The registry
-  record shows no service entry, and the respondent's email asks whether it has issued ([SOURCE PINPOINT])."
+- **Assert the proposition, pin it to a source, drop the intensifier.** "The
+  notice was received at 4:00 pm ([SOURCE PINPOINT]). The response period had
+  already ended."
   Not "it is respectfully submitted that, arguably, the order may not have been served …", and not "the
   evidence overwhelmingly proves beyond doubt …".
 - **Argumentative point-headings, not topic labels.** "The reasons disclose no finding on the agreed date"
   beats "The reasons".
-- **Subordinate the opponent's point; keep your answer in the main clause.** "Although the figure appears in
-  the written claim, the claimant's own calculation shows it embeds interest; the component was not open."
+- **Subordinate the opponent's point; keep your answer in the main clause.**
+  "Although the report states the conclusion, its appendix records the contrary
+  result; the conclusion does not follow."
 - **One located concession beats a fog of caveats.** Make the assertion cleanly; put the single necessary
   qualification in the next sentence, not stacked onto the assertion.
 - **Confront the obvious weakness and meet it**: volunteering and distinguishing an adverse point is stronger
@@ -214,7 +216,8 @@ cannot decide) or anxiety (re-hedging a point already put), and it hands the oth
 
 - Leave/threshold documents argue that grounds are `reasonably arguable` or that a question `warrants leave`;
   they do not declare contested facts proved. State the contention with full force inside that register: "it is
-  reasonably arguable the figure embedded interest" can still be developed with every pinpoint and consequence.
+  reasonably arguable the party had no opportunity to answer the report" can
+  still be developed with every pinpoint and consequence.
 - A merits or final submission may assert `is established`, `the record shows`, `the only available inference`,
   where the record carries it.
 - The two registers may coexist in one document only where the document genuinely does two jobs (a leave

@@ -1,58 +1,81 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "release_id": "REL-000",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ",
   "status": "planning",
-  "target": "staging|production|shared-environment",
+  "action_type": "deploy|publish|share|send|activate",
+  "target": {
+    "id": "authorised-target-id",
+    "kind": "environment|recipient|audience",
+    "environment_tier": "development|test|staging|production|not-applicable",
+    "disclosure": "private|restricted|internal|public"
+  },
   "artifact": {
-    "id": "immutable-version-or-digest",
-    "source_revision": "git-sha-or-equivalent",
-    "change_receipt": "path/to/accepted/RUN.json"
+    "id": "accepted-artifact-id",
+    "digest": "sha256:immutable-digest",
+    "acceptance_receipt": "path/to/accepted/RUN.json"
   },
   "owner": "named-human-or-authorised-operator",
   "release_authority": {
     "approved_by": "",
     "expires_at": "YYYY-MM-DDTHH:MM:SSZ",
-    "targets": [],
+    "action_types": [],
+    "target_ids": [],
+    "target_environment_tiers": [],
     "artifact_ids": [],
+    "allowed_execution_modes": ["connector"],
+    "allowed_operations": [],
     "allowed_command_prefixes": [],
     "secrets_access": "none",
     "external_communication": false,
-    "irreversible_migration": false
+    "public_disclosure": false,
+    "irreversible_action": false
   },
-  "readiness_checks": [],
-  "migration": {
-    "required": false,
-    "type": "none",
-    "plan": "",
-    "order": "",
-    "backward_compatible": true,
-    "compatibility_window": "",
-    "recovery_point": "",
-    "approved_by": ""
+  "data_policy": {
+    "classification": "project-defined-classification",
+    "allowed_disclosure": "what may cross the target boundary",
+    "secret_handling": "none or use-without-disclosure",
+    "retention_or_expiry": "target retention, expiry, or deletion rule"
   },
-  "rollout": {
-    "plan": "",
-    "blast_radius_cap": "",
+  "change_impact": {
+    "state_change": "none|reversible|destructive",
+    "compatibility": "not-applicable|backward-compatible|non-backward-compatible",
+    "ordered_steps": [],
+    "compatibility_window": "not-applicable or verified mixed-version window",
+    "recovery_point": "not-applicable or passing readiness check/evidence reference",
+    "readiness_evidence": ["passing readiness check/evidence references"]
+  },
+  "readiness_checks": [
+    {
+      "id": "unique-check-id",
+      "purpose": "general|state-change|compatibility|recovery",
+      "status": "pass|fail|not-run",
+      "evidence": [],
+      "checked_at": "YYYY-MM-DDTHH:MM:SSZ"
+    }
+  ],
+  "promotion_plan": {
+    "plan": "ordered promotion steps",
+    "exposure_cap": "bounded initial environment, recipients, or audience",
     "stop_conditions": []
   },
-  "rollback": {
+  "reversal": {
+    "mode": "rollback|revoke|recall|deactivate|replace|contain|none",
     "tested": false,
-    "plan": "",
-    "owner": "",
-    "time_bound": ""
+    "irreversible": false,
+    "plan": "approved reversal or containment plan",
+    "owner": "named-reversal-owner",
+    "time_bound": "time to reverse, revoke, or contain",
+    "limitations": "what reversal cannot undo"
   },
-  "observability": {
-    "baseline": "",
-    "window": "24h",
+  "proof": {
+    "plan": "how successful promotion and target-visible outcome will be proved",
+    "owner": "named-proof-owner",
+    "close_condition": "all requirements pass",
+    "observation_window": "",
     "window_started_at": "",
     "window_ended_at": "",
-    "signals": ["error-rate"],
-    "owner": "named-observation-owner",
-    "rollback_or_containment": "path/to/runbook-or-plan",
-    "sampling_and_privacy": "aggregate-redacted",
-    "close_condition": "all thresholds pass for the declared window",
-    "success_thresholds": [{"id": "error-rate", "direction": "lte", "limit": 0.01, "unit": "ratio"}],
+    "requirements": [],
     "checks": []
   },
   "human_promotion": {
@@ -61,15 +84,11 @@
     "approved_at": ""
   },
   "execution": {
-    "commands": [],
-    "started_at": "",
-    "finished_at": ""
+    "operations": []
   },
-  "rollback_execution": {
-    "commands": [],
-    "restoration_checks": [],
-    "started_at": "",
-    "finished_at": ""
+  "reversal_execution": {
+    "operations": [],
+    "checks": []
   },
   "outcome": {
     "status": "pending",

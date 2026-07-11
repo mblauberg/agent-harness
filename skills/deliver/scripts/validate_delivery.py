@@ -46,6 +46,10 @@ AGENTIC_RISKS = {
     "code-execution", "memory-context-poisoning", "insecure-inter-agent-communication",
     "cascading-failures", "human-trust-exploitation",
 }
+EVALUATION_BINDING_FIELDS = {
+    "status", "anchored_at", "evidence_id", "evaluation_artifact_id",
+    "evaluation_id", "evaluation_digest", "plan_digest",
+}
 
 
 class Invalid(ValueError):
@@ -110,6 +114,32 @@ def _retrospect_validator():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _evaluate_validator():
+    path = ROOT / "skills" / "evaluate" / "scripts" / "validate_evaluation.py"
+    spec = importlib.util.spec_from_file_location("delivery_evaluate_validator", path)
+    fail(not spec or not spec.loader, "evaluation validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    fail(not callable(getattr(module, "validate", None)), "evaluation validator API is unavailable")
+    return module
+
+
+def _load_bound_json(raw: bytes, field: str) -> dict[str, Any]:
+    def no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            fail(key in result, f"{field} contains duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=no_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Invalid(f"{field} is not readable JSON: {exc}") from exc
+    fail(not isinstance(value, dict), f"{field} root must be an object")
+    return value
 
 
 def _apply_project_policy(
@@ -615,7 +645,9 @@ def _validate_high_stakes(run: dict[str, Any], registry: dict[str, Any], evidenc
 
 
 def _validate_measures_assurance(
-    run: dict[str, Any], profile: dict[str, Any], evidence: dict[str, dict[str, Any]], artifacts: dict[str, dict[str, Any]], *, required: bool,
+    run: dict[str, Any], profile: dict[str, Any], evidence: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]], *, required: bool,
+    artifact_root: Path | None, verify_hashes: bool,
 ) -> None:
     measures = _mapping(run.get("measures"), "measures")
     for kind in ("outcome", "trajectory"):
@@ -640,17 +672,152 @@ def _validate_measures_assurance(
     evaluations = _list(assurance.get("evaluations"), "assurance.evaluations")
     if required and assurance["stochastic_required"]:
         fail(not evaluations, "stochastic assurance requires evaluations")
+    seen_evaluation_ids: set[str] = set()
+    seen_artifact_ids: set[str] = set()
+    history_times = [
+        _utc(item.get("at"), f"state_history[{index}].at")
+        for index, item in enumerate(run["state_history"])
+    ]
+    complete_count = 0
     for index, raw in enumerate(evaluations):
         item = _mapping(raw, f"assurance.evaluations[{index}]")
+        fail(
+            set(item) != EVALUATION_BINDING_FIELDS,
+            f"evaluation {index} must contain only the schema-v2 receipt binding fields",
+        )
+        binding_status = item.get("status")
+        fail(
+            binding_status not in {"planned", "complete", "failed", "incomplete"},
+            f"evaluation {index}.status must be planned, complete, failed or incomplete",
+        )
+        anchored_at = _utc(item.get("anchored_at"), f"evaluation {index}.anchored_at")
+        fail(anchored_at > max(history_times), f"evaluation {index}.anchored_at is after the current checkpoint")
+        evaluation_id = item.get("evaluation_id")
+        fail(not isinstance(evaluation_id, str) or not evaluation_id, f"evaluation {index}.evaluation_id is required")
+        fail(evaluation_id in seen_evaluation_ids, f"evaluation {index}.evaluation_id is duplicate")
+        seen_evaluation_ids.add(evaluation_id)
+        plan_digest = item.get("plan_digest")
+        _digest(plan_digest, f"evaluation {index}.plan_digest")
+
+        if binding_status == "planned":
+            fail(
+                any(item.get(field) != "" for field in ("evaluation_artifact_id", "evaluation_digest", "evidence_id")),
+                f"evaluation {index} planned binding must leave artifact, digest and evidence empty",
+            )
+            fail(
+                required and assurance["stochastic_required"],
+                f"evaluation {index} must be complete before stochastic acceptance",
+            )
+            continue
+
         linked = evidence.get(item.get("evidence_id"))
-        fail(not linked or linked.get("kind") != "judgement" or linked.get("status") != "pass", f"evaluation {index} must link passing judgement evidence")
-        fail(not item.get("dataset_version") or not item.get("aggregation") or not item.get("threshold"), f"evaluation {index} lacks reproducibility metadata")
-        for field in ("repetitions", "sample_size"):
-            value = item.get(field)
-            minimum = stochastic_policy["minimum_repetitions"] if field == "repetitions" else stochastic_policy["minimum_sample_size"]
-            fail(isinstance(value, bool) or not isinstance(value, int) or value < minimum, f"evaluation {index} {field} is below minimum")
-        _digest(item.get("rubric_digest"), f"evaluation {index}.rubric_digest")
-        fail(item.get("raw_evidence_artifact_id") not in artifacts, f"evaluation {index} raw evidence artifact is missing")
+        if binding_status == "complete":
+            complete_count += 1
+            fail(
+                not linked or linked.get("kind") != "judgement" or linked.get("status") != "pass",
+                f"evaluation {index} complete binding must link passing judgement evidence",
+            )
+        else:
+            fail(
+                not linked or linked.get("kind") != "deterministic" or linked.get("status") != "pass",
+                f"evaluation {index} terminal nonpass must link passing deterministic evidence",
+            )
+        artifact_id = item.get("evaluation_artifact_id")
+        fail(not isinstance(artifact_id, str) or not artifact_id, f"evaluation {index}.evaluation_artifact_id is required")
+        fail(artifact_id in seen_artifact_ids, f"evaluation {index}.evaluation_artifact_id is duplicate")
+        seen_artifact_ids.add(artifact_id)
+        evaluation_digest = item.get("evaluation_digest")
+        _digest(evaluation_digest, f"evaluation {index}.evaluation_digest")
+        artifact = artifacts.get(artifact_id)
+        fail(not artifact, f"evaluation {index} references an unknown evaluation artifact")
+        fail(
+            not artifact.get("path") or artifact.get("class") != "evidence"
+            or artifact.get("artifact_type") != "evidence"
+            or artifact.get("media_type") != "application/json",
+            f"evaluation {index} must reference a local JSON evidence artifact",
+        )
+        fail(evaluation_digest != artifact.get("digest"), f"evaluation {index}.evaluation_digest must match its artifact digest")
+
+        if not required and not verify_hashes:
+            continue
+        fail(not verify_hashes, "accepted materialised evaluation assurance requires --verify-hashes")
+        fail(artifact_root is None, "materialised evaluation assurance requires workspace_root or receipt_dir")
+        assert artifact_root is not None
+        try:
+            root = artifact_root.resolve()
+            target = (root / artifact["path"]).resolve(strict=True)
+            target.relative_to(root)
+            raw_receipt = target.read_bytes()
+        except (OSError, ValueError) as exc:
+            raise Invalid(f"evaluation {index} artifact is unreadable or outside the artifact root: {exc}") from exc
+        actual_digest = "sha256:" + hashlib.sha256(raw_receipt).hexdigest()
+        fail(actual_digest != evaluation_digest, f"evaluation {index} artifact digest does not match live bytes")
+        receipt = _load_bound_json(raw_receipt, f"evaluation {index} artifact")
+        validator = _evaluate_validator()
+        try:
+            errors = validator.validate(
+                receipt,
+                receipt_dir=target.parent,
+                verify_hashes=True,
+                require_pass=binding_status == "complete",
+                expected_evaluation_id=evaluation_id,
+                expected_plan_digest=plan_digest,
+                expected_delivery_run_id=run["run_id"],
+            )
+        except Exception as exc:  # The subordinate validator must fail closed.
+            raise Invalid(f"evaluation {index} validator failed: {exc}") from exc
+        fail(not isinstance(errors, list), f"evaluation {index} validator returned an invalid result")
+        fail(
+            bool(errors),
+            f"evaluation {index} failed its schema-v2 machine gate: "
+            + "; ".join(str(error) for error in errors[:5]),
+        )
+        expected_receipt_status = {
+            "complete": "pass", "failed": "fail", "incomplete": "incomplete",
+        }[binding_status]
+        fail(
+            receipt.get("status") != expected_receipt_status,
+            f"evaluation {index} binding status does not match its receipt status",
+        )
+        receipt_updated_at = _utc(
+            receipt.get("updated_at"), f"evaluation {index}.updated_at",
+        )
+        fail(
+            receipt_updated_at > max(history_times),
+            f"evaluation {index} receipt completes after the current delivery checkpoint",
+        )
+        plan = _mapping(receipt.get("plan"), f"evaluation {index}.plan")
+        frozen_at = _utc(plan.get("frozen_at"), f"evaluation {index}.plan.frozen_at")
+        fail(frozen_at > anchored_at, f"evaluation {index} plan was frozen after its delivery anchor")
+        execution_starts = [
+            _utc(row.get("started_at"), f"evaluation {index}.{section}[{row_index}].started_at")
+            for section in ("preflight", "attempts")
+            for row_index, row in enumerate(_list(receipt.get(section), f"evaluation {index}.{section}"))
+            if isinstance(row, dict) and row.get("started_at")
+        ]
+        fail(not execution_starts, f"evaluation {index} receipt lacks an execution start timestamp")
+        fail(
+            anchored_at >= min(execution_starts),
+            f"evaluation {index} anchor must precede its nested evaluation execution",
+        )
+        if binding_status == "complete":
+            schedule = _mapping(plan.get("schedule"), f"evaluation {index}.plan.schedule")
+            repetitions = schedule.get("repetitions")
+            fail(
+                isinstance(repetitions, bool) or not isinstance(repetitions, int)
+                or repetitions < stochastic_policy["minimum_repetitions"],
+                f"evaluation {index} bound plan repetitions are below the profile minimum",
+            )
+            cases = _list(schedule.get("cases"), f"evaluation {index}.plan.schedule.cases")
+            fail(
+                len(cases) < stochastic_policy["minimum_sample_size"],
+                f"evaluation {index} bound plan sample size is below the profile minimum",
+            )
+    if required and assurance["stochastic_required"]:
+        fail(
+            complete_count == 0,
+            "stochastic acceptance requires at least one complete passing evaluation",
+        )
 
 
 def validate(
@@ -737,7 +904,10 @@ def validate(
         review_ids = {item.get("evidence_id") for item in run["reviews"] if item.get("status") == "pass" and item.get("role") in {"native-review", "other-primary"}}
         fail(not (profile_ids | review_ids) <= set(final_transition["evidence_ids"]), "awaiting_acceptance transition lacks profile or review evidence")
     _validate_security(run, registry, profile, artifacts, evidence, required=acceptance_reached)
-    _validate_measures_assurance(run, profile, evidence, artifacts, required=acceptance_reached)
+    _validate_measures_assurance(
+        run, profile, evidence, artifacts, required=acceptance_reached,
+        artifact_root=workspace_root or receipt_dir, verify_hashes=verify_hashes,
+    )
     _validate_gates_observation(run, evidence)
     if acceptance_reached:
         _validate_high_stakes(run, registry, evidence)

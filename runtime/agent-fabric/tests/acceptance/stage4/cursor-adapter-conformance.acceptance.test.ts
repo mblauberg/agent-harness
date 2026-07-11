@@ -13,14 +13,23 @@ import {
 
 describe("Stage 4 Cursor adapter public contract", () => {
   it("accepts the checked-in pinned Cursor adapter", async () => {
-    await expect(
-      verifyAdapterCompatibility({
-        compatibilityPath: repositoryPath("config/adapter-compatibility.yaml"),
-        schemaPath: repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
-        adapterIds: ["cursor-agent"],
-        requireEnabled: true,
-      }),
-    ).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
+    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
+      ? await createCursorKiroCompatibilityFixture()
+      : undefined;
+    try {
+      await expect(
+        verifyAdapterCompatibility({
+          compatibilityPath: fixture?.compatibilityPath
+            ?? repositoryPath("config/adapter-compatibility.yaml"),
+          schemaPath: fixture?.schemaPath
+            ?? repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
+          adapterIds: ["cursor-agent"],
+          requireEnabled: true,
+        }),
+      ).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
+    } finally {
+      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
+    }
   });
 
   it("runs a fixture through the same durable adapter protocol without invoking Cursor", async () => {

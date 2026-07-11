@@ -1,6 +1,6 @@
 ---
 name: web-stack-conventions
-description: Use when configuring or upgrading Vite (Vite 8, Rolldown, Oxc, vite.config), auditing web accessibility against WCAG 2.2, interpreting Lighthouse v13 scores, or generating OpenAPI 3.1 specs. Captures only the post-2025 deltas that are easy to get wrong from memory — Rolldown/Oxc config renames, the nine new WCAG 2.2 success criteria (24px target size, focus-not-obscured, dragging alternatives, accessible auth), Lighthouse Insight-Audit renames, and OpenAPI 3.1 nullable/type-array and webhooks gotchas.
+description: "Use for current deltas in Vite 8/Rolldown/Oxc, WCAG 2.2, Lighthouse 13, or OpenAPI 3.1. Not for full frontend design, React performance, or generic API implementation; use the relevant owner."
 ---
 
 # Web stack conventions

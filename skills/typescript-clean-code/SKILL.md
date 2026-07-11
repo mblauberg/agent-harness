@@ -1,6 +1,6 @@
 ---
 name: typescript-clean-code
-description: Use when writing or reviewing TypeScript/JavaScript — type-level modelling, tsconfig strictness, discriminated unions, error/null handling, async, and test structure. Bright-line rules beyond generic clean-code sense.
+description: "Use as a TypeScript or JavaScript correctness lens for type modelling, strictness, null/error boundaries, async ownership, and tests. Not a lifecycle owner or reason to rewrite stable conventions; combine with the task owner."
 ---
 
 # TypeScript clean code
@@ -12,8 +12,8 @@ Generic clean-code sense is assumed. Apply these TypeScript-specific rules. See
 
 - **Make illegal states unrepresentable.** Prefer a discriminated union to
   optional fields plus a flag.
-- **`unknown`, never `any`.** Use `unknown` at boundaries and narrow. Ban `any`
-  via lint; if unavoidable, isolate and explain it.
+- **Prefer `unknown` to `any`.** Narrow unknown input. Isolate and explain `any`
+  required by untyped interop, compatibility work or deliberate escape hatches.
 - **Do not launder types with assertions.** Narrow with guards, `in`, `typeof`
   or `instanceof`, or validate boundaries. Avoid `as` and `as unknown as`;
   `as const` and `satisfies` are fine.
@@ -21,31 +21,40 @@ Generic clean-code sense is assumed. Apply these TypeScript-specific rules. See
   union switches.
 - **Derive, do not duplicate.** Use `z.infer`, `keyof`, `typeof`, mapped types,
   `Pick` or `Omit`; keep one source for each shape.
-- **Prefer `type` for unions/functions/mapped types.** Use `interface` only for object shapes meant to be `extend`ed/merged.
+- Use `type` for unions/functions/mapped types and follow the repository's
+  established `type`/`interface` convention for object shapes.
 - **Brand primitives that must not be interchanged**, such as `UserId` and
   `OrderId`.
 
 ## tsconfig
 
-- Require `strict`, `noUncheckedIndexedAccess` (indexed access can be
+- Target `strict`, `noUncheckedIndexedAccess` (indexed access can be
   undefined), `exactOptionalPropertyTypes`,
   `noImplicitOverride`, `noFallthroughCasesInSwitch` and
-  `useUnknownInCatchVariables`.
+  `useUnknownInCatchVariables`. For an existing codebase, stage flags with an
+  explicit migration and no silent public-type changes.
 - Run `tsc --noEmit` in CI.
 
 ## Errors & null
 
 - **`catch` binds `unknown`.** Narrow before accessing it.
 - Wrap lower-layer errors in caller-meaningful classes with `{ cause: err }`.
-- Prefer `T | undefined` to `null`; return `[]` for empty collections and a
+- Prefer the repository/API convention for `null` versus `undefined`; do not
+  churn a stable boundary for taste alone. Return `[]` for empty collections and a
   Result/union for expected failure. Throw only for exceptional cases. Prefer
   `?.` and `??` to scattered null checks.
 - Never widen a function's return to include `null`/`undefined` "just in case" — that pushes a guard onto every caller.
 
 ## Async
 
-- `await` every promise or explicitly `void` it — a floating promise swallows rejections. Enable `no-floating-promises`.
-- Parallelise independent awaits with `Promise.all`; don't `await` in a loop when the iterations are independent.
+- Give every promise an owner and rejection path. Await it, return it, supervise
+  it in a task group/queue, or use `void task().catch(report)`. A bare `void`
+  only acknowledges a linter; it does not handle rejection. Enable
+  `no-floating-promises` with project-appropriate options.
+- Parallelise only independent work within measured socket, memory, rate-limit,
+  cancellation and failure-aggregation bounds. `Promise.all` suits a small
+  fixed set; use a bounded pool/queue for large collections and deliberate
+  sequential awaits when ordering or backpressure matters.
 - Type async functions `Promise<T>`; do not add `async` only for a caller.
 
 ## Tests

@@ -21,13 +21,15 @@ import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { parseDesignMd } from './design-parser.mjs';
-import { resolveContextDir } from './load-context.mjs';
+import { loadContext, resolveContextDir } from './load-context.mjs';
+import { resolveFiles } from './live-inject.mjs';
 import { createLiveSessionStore } from './live-session-store.mjs';
 import {
   getDesignSidecarPath,
   getLiveAnnotationsDir,
   readLiveServerInfo,
   removeLiveServerInfo,
+  resolveLiveConfigPath,
   resolveDesignSidecarPath,
   writeLiveServerInfo,
 } from './impeccable-paths.mjs';
@@ -39,6 +41,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTEXT_DIR = resolveContextDir(process.cwd());
 const DEFAULT_POLL_TIMEOUT = 600_000;   // 10 min — agent re-polls on timeout anyway
 const SSE_HEARTBEAT_INTERVAL = 30_000;  // keepalive ping every 30s
+const SAFE_SOURCE_EXTENSIONS = new Set([
+  '.astro', '.htm', '.html', '.jsx', '.svelte', '.tsx', '.vue',
+]);
 
 // ---------------------------------------------------------------------------
 // Port detection
@@ -74,6 +79,7 @@ const state = {
 // Cap per-annotation upload size. A full 1920×1080 PNG is typically <1 MB;
 // cap at 10 MB to guard against runaway writes from a misbehaving client.
 const MAX_ANNOTATION_BYTES = 10 * 1024 * 1024;
+const MAX_JSON_BODY_BYTES = 256 * 1024;
 
 function enqueueEvent(event) {
   if (!event || (event.id && state.pendingEvents.some((entry) => entry.event?.id === event.id && entry.event?.type === event.type))) return;
@@ -185,14 +191,9 @@ function loadBrowserScripts() {
 }
 
 function hasProjectContext() {
-  // PRODUCT.md carries brand voice / anti-references — that's what determines
-  // whether variants are brand-aware. DESIGN.md (visual tokens) is a separate
-  // concern, surfaced by the design panel's own empty state. Legacy
-  // .impeccable.md is auto-migrated to PRODUCT.md by load-context.mjs.
-  try {
-    fs.accessSync(path.join(CONTEXT_DIR, 'PRODUCT.md'), fs.constants.R_OK);
-    return true;
-  } catch { return false; }
+  // Keep the live signal identical to the shared loader, including legacy
+  // `.impeccable.md`, fallback directories and unusual filename case.
+  return loadContext(process.cwd()).hasProduct;
 }
 
 function statOrNull(filePath) {
@@ -259,22 +260,212 @@ function validateEvent(msg) {
   }
 }
 
+function readBoundedJsonBody(req, res, onMessage) {
+  const declaredLength = req.headers['content-length'];
+  if (declaredLength !== undefined) {
+    const parsedLength = Number(declaredLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid Content-Length' }));
+      req.resume();
+      return;
+    }
+    if (parsedLength > MAX_JSON_BODY_BYTES) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Payload too large' }));
+      // Drain rather than destroy the socket so the deliberate 413 does not
+      // become a client-side connection reset on a keep-alive connection.
+      req.resume();
+      return;
+    }
+  }
+
+  const chunks = [];
+  let total = 0;
+  let settled = false;
+  req.on('data', (chunk) => {
+    if (settled) return;
+    total += chunk.length;
+    if (total > MAX_JSON_BODY_BYTES) {
+      settled = true;
+      chunks.length = 0;
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Payload too large' }));
+      req.resume();
+      return;
+    }
+    chunks.push(chunk);
+  });
+  req.on('end', () => {
+    if (settled) return;
+    settled = true;
+    let message;
+    try {
+      message = JSON.parse(Buffer.concat(chunks, total).toString('utf-8'));
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      return;
+    }
+    onMessage(message);
+  });
+  req.on('error', () => {
+    if (settled || res.writableEnded) return;
+    settled = true;
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Request body failed' }));
+  });
+}
+
 // ---------------------------------------------------------------------------
 // HTTP request handler
 // ---------------------------------------------------------------------------
 
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (!origin) return;
+  // Reflect the requesting project origin only on CORS-authorised responses.
+  // Bearer-protected handlers call this after authentication; public
+  // preflight contains no session data. Never publish a wildcard origin.
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+function authenticateQuery(req, res, url) {
+  if (url.searchParams.get('token') !== state.token) {
+    res.writeHead(401);
+    res.end('Unauthorized');
+    return false;
+  }
+  applyCors(req, res);
+  return true;
+}
+
+function isContainedPath(rootPath, candidatePath) {
+  const rel = path.relative(rootPath, candidatePath);
+  return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`));
+}
+
+function resolveProjectSource(rootDir, requestedPath) {
+  if (!requestedPath || requestedPath.includes('\0') || path.isAbsolute(requestedPath)
+      || path.win32.isAbsolute(requestedPath)) {
+    const error = new Error('Bad path');
+    error.code = 'BAD_PATH';
+    throw error;
+  }
+  const rootReal = fs.realpathSync.native(path.resolve(rootDir));
+  const lexicalPath = path.resolve(rootReal, requestedPath);
+  if (!isContainedPath(rootReal, lexicalPath)) {
+    const error = new Error('Forbidden');
+    error.code = 'OUTSIDE_ROOT';
+    throw error;
+  }
+
+  let sourceReal;
+  try {
+    sourceReal = fs.realpathSync.native(lexicalPath);
+  } catch (cause) {
+    const error = new Error('File not found', { cause });
+    error.code = 'NOT_FOUND';
+    throw error;
+  }
+  if (!isContainedPath(rootReal, sourceReal)) {
+    const error = new Error('Forbidden');
+    error.code = 'OUTSIDE_ROOT';
+    throw error;
+  }
+  const stat = fs.statSync(sourceReal);
+  if (!stat.isFile()) {
+    const error = new Error('File not found');
+    error.code = 'NOT_FOUND';
+    throw error;
+  }
+  return sourceReal;
+}
+
+function resolveConfiguredProjectSource(rootDir, requestedPath) {
+  // Validate containment and existence before consulting the allowlist so
+  // malformed absolute/traversal paths retain their explicit 400/403 result.
+  // This resolves metadata only; no source content is read here.
+  const sourceReal = resolveProjectSource(rootDir, requestedPath);
+  const portablePath = typeof requestedPath === 'string'
+    ? requestedPath.split(path.sep).join('/')
+    : '';
+  if (!SAFE_SOURCE_EXTENSIONS.has(path.extname(portablePath).toLowerCase())) {
+    const error = new Error('Forbidden');
+    error.code = 'NOT_CONFIGURED_SOURCE';
+    throw error;
+  }
+
+  const configPath = resolveLiveConfigPath({ cwd: rootDir, scriptsDir: __dirname });
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch (cause) {
+    const error = new Error('Live config unavailable', { cause });
+    error.code = 'CONFIG_UNAVAILABLE';
+    throw error;
+  }
+  if (!Array.isArray(config.files)) {
+    const error = new Error('Live config unavailable');
+    error.code = 'CONFIG_UNAVAILABLE';
+    throw error;
+  }
+
+  let configuredFiles;
+  try {
+    configuredFiles = new Set(resolveFiles(rootDir, config).map((file) => file.split(path.sep).join('/')));
+  } catch (cause) {
+    const error = new Error('Live config unavailable', { cause });
+    error.code = 'CONFIG_UNAVAILABLE';
+    throw error;
+  }
+  if (!configuredFiles.has(portablePath)) {
+    const error = new Error('Forbidden');
+    error.code = 'NOT_CONFIGURED_SOURCE';
+    throw error;
+  }
+
+  const rootReal = fs.realpathSync.native(path.resolve(rootDir));
+  const lexicalPath = path.resolve(rootReal, requestedPath);
+  // The endpoint returns source text. Even an in-project symlink can disguise
+  // a secret file behind an allowlisted extension, so configured targets must
+  // resolve to themselves rather than through a link.
+  if (sourceReal !== lexicalPath) {
+    const error = new Error('Forbidden');
+    error.code = 'SYMLINK_SOURCE';
+    throw error;
+  }
+  if (!SAFE_SOURCE_EXTENSIONS.has(path.extname(sourceReal).toLowerCase())) {
+    const error = new Error('Forbidden');
+    error.code = 'NOT_CONFIGURED_SOURCE';
+    throw error;
+  }
+  return sourceReal;
+}
+
 function createRequestHandler({ detectScript, sessionPath, livePath }) {
   return (req, res) => {
     const url = new URL(req.url, `http://localhost:${state.port}`);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
     const p = url.pathname;
+    if (req.method === 'OPTIONS') {
+      applyCors(req, res);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     // --- Scripts ---
     if (p === '/live.js') {
+      // The script URL carries the bearer token. Refuse unauthenticated loads
+      // and do not echo that secret into a CORS-readable response body.
+      if (url.searchParams.get('token') !== state.token) {
+        res.writeHead(401, { 'Content-Type': 'text/plain' });
+        res.end('Unauthorized');
+        return;
+      }
       // Re-read from disk each request so edits to live-browser.js land on
       // the next tab reload. No-store headers prevent browser caching across
       // sessions — during iteration, a cached old script silently breaks
@@ -290,7 +481,7 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
         return;
       }
       const body =
-        `window.__IMPECCABLE_TOKEN__ = '${state.token}';\n` +
+        "window.__IMPECCABLE_TOKEN__ = new URL(document.currentScript.src).searchParams.get('token');\n" +
         `window.__IMPECCABLE_PORT__ = ${state.port};\n` +
         sessionScript + '\n' +
         liveScript;
@@ -331,8 +522,7 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
     // event with screenshotPath already set. Keeps bytes out of the SSE/poll
     // bridge and preserves the "one shot from the user's POV" UX.
     if (p === '/annotation' && req.method === 'POST') {
-      const token = url.searchParams.get('token');
-      if (token !== state.token) { res.writeHead(401); res.end('Unauthorized'); return; }
+      if (!authenticateQuery(req, res, url)) return;
       const eventId = url.searchParams.get('eventId');
       if (!eventId || !/^[A-Za-z0-9_-]{1,64}$/.test(eventId)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -388,8 +578,7 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
 
     // --- Health ---
     if (p === '/status') {
-      const token = url.searchParams.get('token');
-      if (token !== state.token) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+      if (!authenticateQuery(req, res, url)) return;
       const sessions = state.sessionStore ? state.sessionStore.listActiveSessions() : [];
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -429,8 +618,7 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
     //                            extensions + components + narrative.
     //   /design-system/raw     returns DESIGN.md markdown verbatim
     if (p === '/design-system.json' || p === '/design-system/raw') {
-      const token = url.searchParams.get('token');
-      if (token !== state.token) { res.writeHead(401); res.end('Unauthorized'); return; }
+      if (!authenticateQuery(req, res, url)) return;
 
       const mdPath = path.join(CONTEXT_DIR, 'DESIGN.md');
       const jsonPath = resolveDesignSidecarPath(process.cwd(), CONTEXT_DIR) || getDesignSidecarPath(process.cwd());
@@ -480,15 +668,24 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
 
     // --- Source file (no-HMR fallback) ---
     if (p === '/source') {
-      const token = url.searchParams.get('token');
-      if (token !== state.token) { res.writeHead(401); res.end('Unauthorized'); return; }
+      if (!authenticateQuery(req, res, url)) return;
       const filePath = url.searchParams.get('path');
-      if (!filePath || filePath.includes('..')) { res.writeHead(400); res.end('Bad path'); return; }
-      const absPath = path.resolve(process.cwd(), filePath);
-      if (!absPath.startsWith(process.cwd())) { res.writeHead(403); res.end('Forbidden'); return; }
-      let content;
-      try { content = fs.readFileSync(absPath, 'utf-8'); }
-      catch { res.writeHead(404); res.end('File not found'); return; }
+      let absPath;
+      try {
+        absPath = resolveConfiguredProjectSource(process.cwd(), filePath);
+      } catch (err) {
+        const status = err.code === 'BAD_PATH'
+          ? 400
+          : err.code === 'CONFIG_UNAVAILABLE'
+            ? 503
+            : err.code === 'NOT_FOUND'
+              ? 404
+              : 403;
+        res.writeHead(status);
+        res.end(err.message);
+        return;
+      }
+      const content = fs.readFileSync(absPath, 'utf-8');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(content);
       return;
@@ -496,8 +693,7 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
 
     // --- SSE: server→browser push (replaces WebSocket) ---
     if (p === '/events' && req.method === 'GET') {
-      const token = url.searchParams.get('token');
-      if (token !== state.token) { res.writeHead(401); res.end('Unauthorized'); return; }
+      if (!authenticateQuery(req, res, url)) return;
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -531,20 +727,13 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
 
     // --- Browser→server events (replaces WebSocket messages) ---
     if (p === '/events' && req.method === 'POST') {
-      let body = '';
-      req.on('data', (c) => { body += c; });
-      req.on('end', () => {
-        let msg;
-        try { msg = JSON.parse(body); } catch {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
-          return;
-        }
+      readBoundedJsonBody(req, res, (msg) => {
         if (msg.token !== state.token) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
         }
+        applyCors(req, res);
         const error = validateEvent(msg);
         if (error) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -569,8 +758,7 @@ function createRequestHandler({ detectScript, sessionPath, livePath }) {
 
     // --- Stop ---
     if (p === '/stop') {
-      const token = url.searchParams.get('token');
-      if (token !== state.token) { res.writeHead(401); res.end('Unauthorized'); return; }
+      if (!authenticateQuery(req, res, url)) return;
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end('stopping');
       shutdown();
@@ -632,15 +820,7 @@ function handlePollGet(req, res, url) {
 }
 
 function handlePollPost(req, res) {
-  let body = '';
-  req.on('data', (c) => { body += c; });
-  req.on('end', () => {
-    let msg;
-    try { msg = JSON.parse(body); } catch {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid JSON' }));
-      return;
-    }
+  readBoundedJsonBody(req, res, (msg) => {
     if (msg.token !== state.token) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Unauthorized' }));
@@ -830,7 +1010,7 @@ httpServer.listen(state.port, '127.0.0.1', () => {
   const url = `http://localhost:${state.port}`;
   console.log(`\nImpeccable live server running on ${url}`);
   console.log(`Token: ${state.token}\n`);
-  console.log(`Inject: <script src="${url}/live.js"><\/script>`);
+  console.log(`Inject: <script src="${url}/live.js?token=${encodeURIComponent(state.token)}"><\/script>`);
   console.log(`Stop:   node ${path.basename(fileURLToPath(import.meta.url))} stop`);
 });
 

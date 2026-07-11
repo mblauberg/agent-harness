@@ -1,6 +1,6 @@
 ---
 name: engineering-docs
-description: Use when creating, updating, or archiving engineering documentation in any project — specs, stories, diagrams, runbooks, threat models, READMEs, context digests, state files, or any markdown deliverable (not ADRs where a project has its own ADR process). Also use when setting up a new project's docs layout. Project-specific variants override this skill in their own workspace.
+description: "Use for creating, placing, indexing, updating, or archiving engineering docs and docs structures. Not for prose-only rewriting or session continuity; use engineering-writing or session."
 ---
 
 # Engineering docs
@@ -10,6 +10,10 @@ docs, use Australian English and load `engineering-writing` for substantial
 prose.
 
 ## Default homes
+
+Resolve project instructions and existing canonical owners first. The table is
+a fallback only when project-write authority includes documentation setup. In
+advisory mode, propose paths without creating them.
 
 | Type | Home | Convention |
 |---|---|---|

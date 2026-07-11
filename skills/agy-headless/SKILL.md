@@ -1,6 +1,6 @@
 ---
 name: agy-headless
-description: "Use when the user explicitly asks for Gemini, Antigravity, agy, or a Gemini-family analyst, or for a single Gemini-family scout on authorised long-context, multimodal, whole-repo, or breadth-first review via the agy CLI. Use orchestrate for fan-out/synthesis. Do not trigger on passive mentions."
+description: "Use when the user explicitly requests Gemini, Antigravity, agy, or one Gemini-family scout through the agy CLI. Not for fan-out, synthesis, or passive mentions; use orchestrate."
 ---
 
 # Agy headless

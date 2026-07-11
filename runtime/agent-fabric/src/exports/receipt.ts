@@ -55,9 +55,19 @@ function validationFailureDetail(error: unknown): string {
 
 async function assertCanonicalDeliveryRun(runReceiptPath: string, workspaceRoot: string): Promise<void> {
   try {
-    await execFileAsync("python3", [deliveryValidatorPath, runReceiptPath, "--workspace-root", workspaceRoot]);
+    await execFileAsync("python3", [
+      deliveryValidatorPath,
+      runReceiptPath,
+      "--workspace-root",
+      workspaceRoot,
+      "--verify-hashes",
+    ]);
   } catch (error: unknown) {
-    throw new FabricReceiptError("RECEIPT_LINK_INVALID", `delivery run receipt is invalid: ${validationFailureDetail(error)}`);
+    const detail = validationFailureDetail(error);
+    if (detail.includes(`artifact ${FABRIC_RECEIPT_ARTIFACT_ID} digest does not match live bytes`)) {
+      throw new FabricReceiptError("RECEIPT_HASH_MISMATCH", "fabric receipt SHA-256 does not match the run receipt");
+    }
+    throw new FabricReceiptError("RECEIPT_LINK_INVALID", `delivery run receipt is invalid: ${detail}`);
   }
 }
 

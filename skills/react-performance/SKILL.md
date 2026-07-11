@@ -1,6 +1,6 @@
 ---
 name: react-performance
-description: Use when profiling, reviewing, or improving React performance in Next.js, Vite, or another React stack — slow rendering, re-render churn, request waterfalls, large client bundles, hydration cost, Server Component boundaries, lazy loading, or Core Web Vitals regressions. Not for general UI design, TanStack Query cache semantics, generic TypeScript/JavaScript cleanup, or Vite configuration alone.
+description: "Use for measuring or improving React rendering, hydration, bundles, waterfalls, Server Components, or Core Web Vitals. Not for general UI design, TanStack cache semantics, or Vite config; use the matching specialist."
 ---
 
 # React performance

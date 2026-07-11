@@ -1,18 +1,28 @@
 # Australian English House Style
 
-Use this reference for prose-level editing. Use the forum skill for law, procedure, forms, fees, deadlines and filing method.
+Use this reference for prose-level editing. Use the verified forum adapter for
+law, procedure, forms, fees, deadlines, layout and filing method.
 
-This reference follows mainstream Australian usage (the Australian Government Style Manual, the Macquarie Dictionary and the *Australian Guide to Legal Citation* (AGLC4)) except where a rule is marked **(skill default)**. A skill default is a deliberate drafting convention, not a national standard; project or forum rules may override it. Defaults current as at 1 June 2026; re-check cited public guidance if it is more than about 12 months old.
+This reference follows mainstream Australian usage (the Australian Government
+Style Manual, the Macquarie Dictionary and the current *Australian Guide to
+Legal Citation* (AGLC)) except where a rule is marked **(skill default)**. A skill
+default is a drafting convention, not a national standard or a claim of forum
+compliance. Project instructions, current official requirements and the supplied
+form or template override it.
 
 ## Baseline
 
 - Write in Australian English.
 - Use day-month-year order for dates in prose, for example `25 May 2025`.
 - Use exact times where they matter, for example `4:00 pm on 9 June 2025`.
-- Use `Qld`, `Cth`, `s`, `ss`, `r`, `rr`, `para`, `paras`, `p`, `pp` where ordinary Australian legal shorthand is appropriate.
+- Use jurisdiction abbreviations and `s`, `ss`, `r`, `rr`, `para`, `paras`,
+  `p`, `pp` only where ordinary Australian legal citation style and the forum
+  permit them.
 - Use `judgment`, not `judgement`, when referring to a court judgment.
 - Use `filed`, `served`, `lodged`, `affirmed`, `sworn`, `annexure`, `exhibit`, `applicant`, `respondent`, `plaintiff`, `defendant`, `enforcement creditor`, and `enforcement debtor` only where the forum or form uses those labels.
-- For a party acting without a lawyer, write `self-represented litigant` (Queensland courts and QCAT) or `litigant in person` (FCFCOA and other federal courts). Never write the American `pro se`.
+- For a party acting without a lawyer, use the current term adopted by the
+  forum, commonly `self-represented litigant` or `litigant in person`. Never
+  substitute the American `pro se` unless it appears in quoted source text.
 
 ## Current Plain Terms
 
@@ -23,7 +33,7 @@ extract.
 | Prefer | Avoid in new drafting | Note |
 |---|---|---|
 | `phone` | `telephone` | Use `phone` in requests, orders and correspondence. Preserve `telephone` only in exact rule titles or quoted source text. |
-| `under` | `pursuant to` | `under r 800` is shorter and still legally precise. |
+| `under` | `pursuant to` | `under r [NUMBER]` is shorter and still legally precise. |
 | `before` | `prior to` | Keep `prior` only where it is part of a defined legal phrase or source title. |
 | `after` | `subsequent to` | Prefer the ordinary time word. |
 | `use` | `utilise` | Prefer the direct verb. |
@@ -32,13 +42,32 @@ extract.
 
 ## Punctuation
 
-- Do not use the em dash character (U+2014) in legal output **(skill default, lint-enforced)**. Mainstream Australian style permits it. For a parenthetical break in prose, use a comma, colon, semicolon, full stop or parentheses; in a document title, use a spaced hyphen (`Orders Sought - Stay, Extension and Directions`). Reserve the en dash for number, date or page ranges only.
+- Do not use the em dash character (U+2014) in legal output **(skill default,
+  lint-enforced)**. Mainstream Australian style permits it. For a parenthetical
+  break, use a comma, colon, semicolon, full stop or parentheses. In a document
+  title, follow the verified template or use a spaced hyphen (`Orders Sought -
+  Extension and Directions`) as a house default. Reserve the en dash for number,
+  date or page ranges only.
 - The en dash (`–`, U+2013) is permitted but used sparingly **(skill default)**. Its clearest use is a closed number, date or page range (`pp 12–18`, `2024–2025`). Do not use a spaced en dash as a habitual parenthetical; restructure or use other punctuation first. The deterministic lint warns on every en dash so a human keeps the count low.
-- The **spaced hyphen** (` - `, a hyphen with a space each side) is **not** caught by the lint (it is neither the em nor the en dash character), so it must be policed by eye. It is acceptable in a **document title or running header** (`Orders Sought - Stay, Extension and Directions`), where sibling-document consistency favours it, but **avoid it as a clause separator in body prose, section headings or bold paragraph labels**. Prefer a colon for a heading or label gloss (`B. The Form 40 default direction: opposed`), and a comma, parentheses or semicolon for an in-sentence break. A document carrying many spaced-hyphen breaks reads as dash-overuse and an AI tell; sweep them before finalising.
-- Prefer full stops for clarity. Where a semicolon or colon joins two grammatically complete, independent clauses, a full stop is usually better and reads cleaner. Reach for a comma plus a real connective (`, so`, `, and`, `, but`, `, while`, `, rather`) only where the two clauses carry a logical relation worth naming. For example, `not its scope; if a stay is granted` is better as `not its scope. If a stay is granted`, and `answers it: by declining` as `answers it. By declining`.
+- The **spaced hyphen** (` - `, a hyphen with a space each side) is **not**
+  caught by the lint. Use it only where the governing template or sibling-title
+  convention requires it, such as `Orders Sought - Extension and Directions`.
+  Avoid it as a clause separator in body prose, section headings or paragraph
+  labels. Prefer a colon for a label gloss (`B. The requested direction:
+  opposed`) and normal punctuation in a sentence.
+- Prefer full stops for clarity. Where a semicolon or colon joins two complete,
+  independent clauses, a full stop is usually cleaner. Use a comma plus a real
+  connective only where the logical relation matters. For example, `the form
+  records receipt; it does not prove agreement` is better as `The form records
+  receipt. It does not prove agreement.`
 - Use a colon before a short list, a genuine explanation that completes the lead clause, or a label gloss (`[LABEL]: official transcript of reasons`). Do not use a colon merely to splice on a second free-standing sentence. Use a full stop.
 - Use parentheses sparingly for true parenthetical detail.
-- Use semicolons for their two reliable jobs: separating list or citation items that themselves contain commas (a series semicolon, for example `[2009] QCA 66; [2009] 2 Qd R 219`), and, occasionally, binding two short balanced clauses in a deliberate antithesis (`Submissions argue; they do not prove`). Default to a full stop for two ordinary independent clauses, especially where the first already carries internal commas. A submission peppered with clause-joining semicolons reads as machine rhythm. Sweep them before finalising.
+- Use semicolons for their two reliable jobs: separating list or citation items
+  that themselves contain commas (for example `[AUTHORITY 1]; [AUTHORITY 2]`),
+  and, occasionally, binding two short balanced clauses in a deliberate
+  antithesis (`Submissions argue; they do not prove`). Default to a full stop for
+  ordinary independent clauses. A submission peppered with clause-joining
+  semicolons reads as machine rhythm.
 - Use single quotation marks (`'...'`) for quoted words, phrases and document-field names; this is the Australian and AGLC convention. Use double quotation marks only for a quotation inside a quotation. Be consistent within a document and do not mix. Set a long quotation (more than about three lines) as an indented block without quotation marks.
 
 ## Spelling
@@ -53,16 +82,23 @@ extract.
 
 ## Capitalisation And Defined Terms
 
-- Capitalise a defined party or instrument and then use it consistently: `the Applicant`, `the Respondent`, `the Tribunal`, `the Court`, `the QCAT Act`, `the PPP Financial Summary`.
-- Define the short form once in parentheses, for example *Queensland Civil and Administrative Tribunal Act 2009* (Qld) (`the QCAT Act`), then use the short form.
+- Capitalise a defined party or instrument and then use it consistently: `the
+  Applicant`, `the Respondent`, `the Tribunal`, `the Court`, `the Act`, `the
+  Agreement`.
+- Define a short form once in parentheses, for example *[Act title]*
+  ([jurisdiction]) (`the Act`), then use it consistently.
 - Introduce a person the same way, with single quotes and not bold: `the respondent, [FULL NAME] ('[SHORT FORM]')`, then use the defined short form in plain text. Where two people share a surname, distinguish by given name or defined short form and keep it consistent. Do not bold a party short-form in running text (see *Headings, Numbering And Document Structure*).
 - Do not capitalise a generic reference (`a tribunal member`, `the parties`, `a court of competent jurisdiction`).
 
 ## Citations And Emphasis In Running Text
 
-- Italicise case names and legislation titles: *[CASE NAME] v [CASE NAME]*, *Family Law Act 1975* (Cth), *Queensland Civil and Administrative Tribunal Act 2009* (Qld).
-- Keep the jurisdiction tag and pinpoint outside the italics: *Family Law Act 1975* (Cth) s 90SM.
-- Use AGLC4 style where a formal authority citation is needed; see `source-boundary-and-citations.md`.
+- Italicise case names and legislation titles: *[CASE NAME] v [CASE NAME]* and
+  *[Act title]* ([jurisdiction]).
+- Keep the jurisdiction tag and pinpoint outside the italics: *[Act title]*
+  ([jurisdiction]) s [section].
+- Use the current AGLC edition where a formal authority citation is needed and
+  the forum has not prescribed another style; see
+  `source-boundary-and-citations.md`.
 - Use italics only for citation and genuine emphasis. Do not use bold or capitals to argue a point.
 
 ## Numbers, Money And Dates
@@ -74,40 +110,35 @@ extract.
 
 ## Headings, Numbering And Document Structure
 
-This is the consolidated cross-forum house style for affidavits and submissions. It is built **up to the
-strictest forum** so one shape is compliant everywhere. Verified 2026-06-08 against FCFCOA *Family Law
-Rules 2021* (Cth) **r 8.15(1)(a)** (affidavit divided into consecutively numbered paragraphs, each confined
-to a distinct part of the subject), **r 2.14(1)** (typed, ≥12pt Times New Roman or equivalent, 1.5 line
-spacing, ~2.5cm margins, A4, consecutive page numbers) and **r 8.16(3)** (dates, numbers and money in
-figures); UCPR 1999 (Qld) **r 431(5)** (affidavit body divided into paragraphs numbered consecutively, each
-as far as possible confined to a distinct portion of the subject); and QCAT **Practice Direction 3 of 2024**
-(≥12pt Times New Roman / 11pt Arial, ≥1.5 spacing, A4, sequential page numbers; QCAT prescribes no
-paragraph scheme. *QCAT Act* s 28 minimal formality means the court rules govern by consolidation).
+The following are neutral drafting defaults only. They do not establish that one
+shape is compliant across Australian forums. Before applying them, inspect the
+current official form, rules, practice directions and filing specification. If
+the forum is silent, use a stable, readable structure and record that the choice
+is a house-style default.
 
 - **Headings**: use short, stable, descriptive headings. Lettered topic headings (`A. Purpose`,
   `B. Background`: letter, full stop, space, then Title Case) are the skill default for affidavits and
   submissions. The heading letter is a label only; it never resets paragraph numbering.
-- **Paragraph numbering**: number affidavit and submission paragraphs **continuously `1` to `N` across the
-  whole document**. Do **not** restart numbering under a heading. Do not use multi-level decimal numbering
-  (`1.1`, `1.1.1`); no forum requires it and it splits the affidavit and submission styles. Keep one
-  proposition (or one small factual cluster, in an affidavit) per numbered paragraph.
+- **Paragraph numbering**: if the forum or form requires numbered paragraphs,
+  follow its scheme exactly. If it is silent, continuously number substantive
+  affidavit, witness-statement or submission paragraphs `1` to `N` and do not
+  restart under headings **(skill default)**. Keep one proposition or small
+  factual cluster per numbered paragraph.
 - **Sub-paragraphs**: one hierarchy only: `(a)`, `(b)`, `(c)`, then `(i)`, `(ii)`, `(iii)`. Use **block**
   sub-paragraphs (each on its own indented line) when a paragraph enumerates three or more discrete items,
   sets out relief or orders, or lists anything that will be cross-referenced. Keep a brief two-item aside
   **inline** in the sentence (`to address (a) X and (b) Y`). In Markdown source, write the literal marker
   `(a)` (not `a.`) and indent the sub-list four spaces so it renders as `(a)`.
-- **Bolding**: bold only: section headings; the deponent's name at the formal commencement
-  (`I, **[FULL NAME]**,`) and in the jurat; and an exhibit or annexure label on its **first**
-  introduction (`**[ANNEXURE LABEL]**`), plain after that. Do **not** bold a party short-form in running text: define
-  it once with single quotes, `('Mr Lee')`, then use it plain. Do not bold money amounts, and never use
-  bold or capitals to argue a point (see *Citations And Emphasis*).
+- **Bolding**: follow the official form or template. If it is silent, use bold
+  for headings only **(skill default)**. Do not bold party short forms, money or
+  argumentative words in running text.
 - **Cross-references**: if prose cites a paragraph number (`paragraph 66`), remember the rendered number is
   the continuous one. Adding or removing a whole paragraph shifts every later number and breaks the
   reference: prefer sentence-level edits, or keep the paragraph count fixed, or fix every reference.
-- **Forum divergence kept**: the Queensland Magistrates Court affidavit is built into the official Form 46
-  template, which flattens Markdown bold and renders paragraphs as `n.` with a hanging indent; the official
-  form governs there, but the source-level rules above (single-quote short forms, continuous numbering,
-  block sub-paragraphs) still apply.
+- **Template precedence**: an official template may impose numbering, hanging
+  indents, typography, labels or emphasis that differs from these defaults. The
+  template governs. Verify the rendered result rather than assuming Markdown
+  source shape survives conversion.
 
 ## Sentence Style
 

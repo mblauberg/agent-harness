@@ -13,6 +13,8 @@ Run every dimension. `N/A` is the correct result when the evidence is absent.
 | Cross-skill conflict | Confusion pairs with overlapping triggers, contradictory authority or competing completion gates. |
 | Environment | Referenced paths, tools, adapters and platform assumptions verified live. |
 | Token economics | Always-loaded metadata and triggered body cost against evidenced use and information gain. |
+| Catalogue exposure | Canonical and provider-rendered characters/tokens, omitted or truncated skills, duplicate triggers and sidecar drift. |
+| Supply chain and authority | Source/version/licence, scripts/hooks/binaries, MCP/network/data flows, state writes, approval inheritance, update and rollback. |
 
 ## Scoring
 
@@ -32,6 +34,10 @@ qualitative unless a versioned dataset defines a denominator.
 - positive, negative and boundary fixtures cover adjacent skills;
 - paths and CLIs exist or are capability-gated; and
 - narrative history and dated change logs are absent from the operational body.
+- the complete canonical/provider-rendered catalogue stays within its documented
+  budget and proves which skills were exposed; and
+- third-party provenance, licence, executable surfaces and data flows are
+  inventoried without running untrusted installers or hooks.
 
 ## Research basis
 

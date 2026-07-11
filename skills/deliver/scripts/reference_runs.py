@@ -139,6 +139,7 @@ def make_reference_run(profile_name: str, root: Path = ROOT, *, high_stakes: boo
         "artifacts": [
             {"id": "intent", "path": "intent.md", "media_type": "text/markdown", "artifact_type": profile["artifact_types"][0], "digest": digest_a, "class": "canonical", "owner": "human-maintainer", "retention": "project-policy"},
             {"id": "evidence-bundle", "path": "evidence.json", "media_type": "application/json", "artifact_type": "evidence", "digest": digest_b, "class": "evidence", "owner": "delivery-chair", "retention": "risk-policy"},
+            *([{"id": "evaluation-receipt", "path": "evaluation/EVALUATION.json", "media_type": "application/json", "artifact_type": "evidence", "digest": digest_b, "class": "evidence", "owner": "evaluation-chair", "retention": "risk-policy"}] if profile_name == "agent-product" else []),
         ],
         "design": {
             "status": "approved",
@@ -172,14 +173,13 @@ def make_reference_run(profile_name: str, root: Path = ROOT, *, high_stakes: boo
             "stochastic_required": profile_name == "agent-product",
             "reason": "agent behaviour is judgement-bearing" if profile_name == "agent-product" else "profile reference uses deterministic and independent-review evidence",
             "evaluations": ([{
+                "status": "complete",
+                "anchored_at": "2026-07-10T00:02:30Z",
                 "evidence_id": judgement_by_family["openai"][0],
-                "dataset_version": "reference-v1",
-                "repetitions": 3,
-                "sample_size": 10,
-                "aggregation": "pass-rate",
-                "threshold": "gte-0.9",
-                "rubric_digest": digest_b,
-                "raw_evidence_artifact_id": "evidence-bundle",
+                "evaluation_artifact_id": "evaluation-receipt",
+                "evaluation_id": "EVAL-REFERENCE",
+                "evaluation_digest": digest_b,
+                "plan_digest": digest_b,
             }] if profile_name == "agent-product" else []),
         },
         "reviews": [

@@ -1,12 +1,12 @@
-positive:
-  - create a persistent map for this multi-session migration
-  - resume this long effort and show which leg is active
-  - coordinate several agents across separate legs of the same programme
-negative:
-  - answer this short question
-  - create a one-session task checklist
-  - archive this consumed handoff only
-boundary:
-  - this may span contexts; decide whether it needs an effort map
-  - three handoffs exist for one effort and nobody knows the current leg
-  - update the route only when this leg is complete
+schema_version: 2
+target_skill: work-map
+cases:
+  - {id: q298, relation: positive, prompt: "Create the persistent effort map for this multi-session migration with legs, blockers, and next work.", tags: [direct], expected: {primary_skill: work-map, companion_skills: []}}
+  - {id: q299, relation: positive, prompt: "Resume this long effort by reopening its current route and identifying the active leg.", tags: [direct], expected: {primary_skill: work-map, companion_skills: []}}
+  - {id: q300, relation: positive, prompt: "Update the effort route after this leg completes and record the next dependency without logging chatter.", tags: [direct], expected: {primary_skill: work-map, companion_skills: []}}
+  - {id: q301, relation: negative, prompt: "Make a checklist for this one-session edit.", tags: [no-skill], expected: {primary_skill: null, companion_skills: []}}
+  - {id: q302, relation: negative, prompt: "Write the current session handoff before compaction.", tags: [adjacent], expected: {primary_skill: session, companion_skills: []}}
+  - {id: q303, relation: negative, prompt: "Set up the project documentation directories and indexes.", tags: [adjacent], expected: {primary_skill: engineering-docs, companion_skills: []}}
+  - {id: q304, relation: boundary, prompt: "Checkpoint this multi-session effort by updating the handoff and its claimed map leg.", tags: [composition], expected: {primary_skill: session, companion_skills: [work-map]}}
+  - {id: q305, relation: boundary, prompt: "Scope the multi-session migration, then create a route whose legs map to its accepted outcomes.", tags: [composition], expected: {primary_skill: scope, companion_skills: [work-map]}}
+  - {id: q306, relation: boundary, prompt: "Coordinate the multi-agent effort while one chair serially owns its persistent work map.", tags: [composition], expected: {primary_skill: orchestrate, companion_skills: [work-map]}}

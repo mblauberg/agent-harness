@@ -42,8 +42,18 @@ Fix: smallest safe remedy and validation route.
 Evidence: test, command, caller, schema, or source anchor.
 ```
 
+When the human asks for compact findings, keep the same fields on one line:
+
+```text
+[P1][introduced] path/file.ts:42 — problem; mechanism/impact; fix; evidence.
+```
+
+Compression changes presentation, never the proof threshold or coverage.
+
 After findings, add only if useful:
 
+- a compact review-surface receipt: inspected diff/files/callers/contracts and
+  excluded or unavailable surfaces;
 - unresolved questions that prevent a verdict;
 - verification lanes that did not run;
 - non-blocking structural opportunities with their proof burden met.

@@ -1,40 +1,48 @@
 ---
 name: release
-description: Use when promoting an accepted software change to a shared, staged, or production environment — release readiness, versioning, migration sequencing, rollout, rollback, post-release verification, or “deploy this”. Requires explicit human promotion authority; not for implementation (`implement`) or provider-specific deployment mechanics.
+description: "Use for human-authorised promotion of an accepted artifact: deploy, publish, send, roll out, or observe. Not for implementation or drafting; use implement or the domain owner."
 ---
 
 # Release
 
-Promote a human-accepted change through a reversible, observable release. This
-skill owns the gate and evidence; project runbooks and provider tools own the
-commands.
+Promote one pinned, human-accepted artifact to an authorised target. This skill
+owns the authority gate and evidence; runbooks and tools own mechanics.
 
 ## Entry gate
 
-Require an accepted change receipt or equivalent evidence, a named target and
-artifact identity, explicit release owner, data/secrets policy, and project
-deployment instructions. Missing production authority stops before mutation.
+Require the accepted delivery receipt, artifact digest, typed action (`deploy`,
+`publish`, `share`, `send` or `activate`), target, owner, disclosure/data policy
+and project instructions.
+Implementation acceptance is not promotion authority.
 
-Start `RELEASE.json` from [RELEASE.template.json](templates/RELEASE.template.json).
+Start new work from the schema-v2
+[RELEASE.template.json](templates/RELEASE.template.json). The validator keeps
+schema v1 readable; do not create new v1 receipts. Because v1 lacks typed tiers,
+every legacy target requires tested rollback.
 
 ## Readiness
 
 Record and verify:
 
-- immutable artifact/version and source revision;
-- compatibility, schema/data migration order and backward-compatibility window;
-- backups or recovery point where state changes;
-- staged rollout/canary plan, blast-radius cap and stop conditions;
-- tested rollback or forward-fix path with an owner and time bound;
-- observation window, signals, owner, privacy/sampling, containment, close
-  condition, expected baseline and post-release success thresholds;
-- user-facing docs, changelog and operator communication when relevant.
+- action, target ID/kind, provider-independent tier and disclosure boundary;
+- authority covering the target, artifact, operations, expiry, secrets,
+  communication, public disclosure and irreversibility;
+- typed state/data impact: ordered steps, compatibility window, and
+  purpose-typed evidence bound to passing readiness checks;
+- bounded promotion plan, exposure cap and stop conditions;
+- realistic rollback, revocation, recall, deactivation, replacement or
+  containment plan with owner and time bound;
+- proof requirements, evidence source, owner, close condition and observation
+  window when outcome needs time;
+- recipient/audience validation, retention and required communications.
 
-Release authority is separate from change authority. It pins the artifact,
-target, expiry, allowed command prefixes, secrets posture, communication and
-irreversible-migration permission. Destructive or non-backward-compatible
-migrations require an explicit human authority field plus order, compatibility
-window and recovery point.
+Public distribution can be copied after deletion. Mark that residual risk as
+irreversible, document reversal limits and require explicit authority. A `none`
+reversal mode needs the same gate. Production reversal must be tested regardless
+of provider naming.
+Domain-specific migration or publication checks remain in the project runbook
+and readiness evidence, but destructive or non-backward-compatible change
+cannot bypass the global impact and authority gate.
 
 Run the read-only gate before asking for promotion:
 
@@ -42,27 +50,29 @@ Run the read-only gate before asking for promotion:
 ${AGENTS_HOME:-$HOME/.agents}/skills/release/scripts/validate_release.py --gate ready RELEASE.json
 ```
 
+The CLI binds the artifact to the live delivery receipt. Unit-policy tests may
+call `validate(..., structural_only=True)` without a root; that mode cannot
+authorise promotion.
+
 ## Promote and verify
 
-1. Obtain explicit human approval for this artifact, target and plan. Approval
-   for implementation is not deployment authority.
-2. Use one release owner/serial operator. Do not let parallel agents issue
-   overlapping infrastructure or migration commands.
-3. Record every external command, actor, timestamp and result. Never invent or
-   expose credentials; pause for missing authority.
-4. Verify health, behaviour, migrations, telemetry and user-visible outcome
-   against predeclared thresholds.
-5. On a stop condition, contain blast radius and execute the approved rollback
-   or escalate. Do not improvise a destructive recovery.
-6. Preserve the receipt, update runbooks/state, and route defects to `diagnose`
-   or the project incident process.
+1. Obtain explicit human approval for this artifact, target and plan.
+2. Use one serial operator; parallel reviewers cannot issue external actions.
+3. Execute only authorised command, connector or named human operations. Record
+   operation, actor, UTC interval, result and evidence; never expose secrets.
+4. Prove the target-visible outcome against every predeclared requirement.
+5. On a stop condition, contain exposure and run the approved reversal or
+   escalate. Do not improvise an irreversible recovery.
+6. Preserve the receipt, update project state and route defects to `diagnose` or
+   the domain incident process.
 
 Validate terminal evidence with `--gate complete`. `complete` means the release
-was observed healthy; a command exiting zero is not enough. `rolled-back` and
-`failed` remain explicit terminal outcomes with follow-up owners.
+outcome was proved, not merely that an operation returned success. `reversed`
+and `failed` remain explicit terminal outcomes with evidence and follow-up
+owners.
 
 ## Human gates
 
-Humans own production promotion, destructive migrations, irreversible data
-changes, public communication and acceptance of degraded safeguards. The agent
-may prepare and verify; it may execute only within explicit granted authority.
+Humans own production promotion, external sending, public publication,
+irreversible disclosure or data changes, and acceptance of degraded safeguards.
+The agent may prepare and verify; it may execute only within explicit authority.

@@ -1,6 +1,6 @@
 ---
 name: retrospect
-description: Use when a delivery, release, incident, evaluation, or long agent run has finished and the user wants a retrospective, lessons learned, harness review, process optimisation, or continuous-improvement pass across skills, routing, memory, context, docs, evals, tools, cost, or agent effectiveness. Not for session cleanup alone, a single-skill audit, or fixing without evidence.
+description: "Use after delivery, release, incident, evaluation, or a long run to derive evidence-backed process improvements and regression gates. Not for session cleanup, one skill audit, or an active defect; use session, skill-audit, or implement."
 ---
 
 # Retrospect

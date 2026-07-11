@@ -1,6 +1,7 @@
 # PlantUML Patterns
 
-Use these exact patterns unless there is a strong reason to vary them.
+Use these as neutral fallbacks only when the project has no template. Preserve
+existing project notation, fonts, palette and identifiers.
 
 ## Shared header
 
@@ -8,8 +9,6 @@ Use these exact patterns unless there is a strong reason to vary them.
 @startuml
 ' Diagram generated from structured requirements.
 skinparam shadowing false
-skinparam handwritten false
-skinparam defaultFontName Arial
 skinparam actorStyle stickman
 skinparam ArrowColor #333333
 skinparam BorderColor #333333
@@ -24,7 +23,6 @@ skinparam BackgroundColor #FFFFFF
 left to right direction
 skinparam shadowing false
 skinparam actorStyle stickman
-skinparam packageStyle folder
 skinparam package {
   BackgroundColor #FFF2B8
   BorderColor #333333
@@ -33,10 +31,8 @@ skinparam package {
 frame "uc System Name" {
   actor "Actor Role" as A_Role
 
-  package "Package A" as P_A {
-  }
-  package "Package B" as P_B {
-  }
+  folder "Package A" as P_A
+  folder "Package B" as P_B
 
   A_Role ..> P_A
   P_A ..> P_B : <<use>>
@@ -98,7 +94,7 @@ skinparam activity {
   BorderColor #333333
 }
 
-title Activity Diagram — Use Case Name\nPackage: Package Name\nAuthor: Author Name
+title Activity Diagram — Use Case Name
 
 |Actor|
 start
@@ -130,10 +126,12 @@ fork again
 end fork
 ```
 
-## Activity invoke node
+## Optional project-defined call marker
 
 ```plantuml
 :<<invoke>> Validate Payment;
 ```
 
-Use invoke nodes only when the invoked use case is separately documented.
+`<<invoke>>` is not a universal UML requirement. Use it only when the project
+defines that convention and the target behaviour is separately documented;
+otherwise use the project's call-activity notation.

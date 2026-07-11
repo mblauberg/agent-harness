@@ -1,6 +1,6 @@
 ---
 name: academic-writing
-description: Use when drafting, rewriting, diagnosing, or polishing academic prose — theses, dissertations, journal or conference papers, literature reviews, abstracts, methods, results, discussion, reviewer rebuttals, captions, or academic LaTeX — or when academic writing sounds AI-generated, overclaims results, risks breaking citations or macros, or needs Australian-English engineering style. Use in place of generic humanising or plain-language writing skills.
+description: "Use for drafting, rewriting, condensing, or checking academic prose and LaTeX while preserving claims and citations. Not for general, engineering, or Australian legal prose; use the matching writing skill."
 ---
 
 # Academic writing
@@ -12,37 +12,39 @@ invented citations, integrity adjudication or assessment-permission advice.
 AI-use disclosure wording and placement are in scope; permission and policy are
 not.
 
+The target venue, institution, supervisor-approved style, project glossary and
+local LaTeX/citation conventions take precedence over these defaults. Diagnosis
+is read-only. Edit only assigned files and do not restructure a work, change a
+bibliography or replace citations without explicit authority.
+
 ## Workflow
 
 1. Identify the section and mode: `draft`, `rewrite`, `condense`, `diagnose`,
    `section-polish`, `match-voice`, `citation-safe` or `final-scrub`.
 2. Lock claims, numbers, units, citations, quotations, LaTeX commands, equations,
    labels, cross-references, result macros, paths and technical names.
-3. For prose, always load [academic-style-au.md](references/academic-style-au.md),
-   [anti-ai-thesis-patterns.md](references/anti-ai-thesis-patterns.md) and
-   [concision-and-structure.md](references/concision-and-structure.md). Load the
-   matching section/mode from [editing-workflows.md](references/editing-workflows.md),
-   then add only the relevant references: [chapter patterns](references/chapter-patterns.md),
+3. For prose, load [academic style](references/academic-style-au.md) and the
+   matching [workflow mode](references/editing-workflows.md). Add
+   [anti-AI patterns](references/anti-ai-thesis-patterns.md) only for voice
+   diagnosis/final scrub, and [concision](references/concision-and-structure.md)
+   only for rewrite, condense or structural polish. Select the needed overlay:
+   [chapter patterns](references/chapter-patterns.md),
    [claim discipline](references/claim-discipline-and-evidence.md),
    [engineering voice](references/engineering-thesis-voice.md), or
-   [citation and LaTeX safety](references/citation-and-latex-safety.md).
-   If the project supplies a domain-term keep-list or writing adapter, load it
-   with the core references.
-   Use chapter patterns for section drafting/polish; claim discipline for
-   evidence claims, results, discussion and conclusions; engineering voice for
-   drafts, rewrites and literature reviews; and citation/LaTeX safety for
-   citations, literature reviews, captions, tables, equations, macros, labels
-   and final scrub. For a LaTeX-only change, load citation/LaTeX safety first
-   and add the core only if prose changes.
+   [citation/LaTeX safety](references/citation-and-latex-safety.md). A project
+   adapter or keep-list takes precedence. For LaTeX-only work, start with the
+   safety reference and load prose guidance only if prose changes.
 4. Preserve meaning and evidence altitude. Separate observation, interpretation,
    limitation and future work. Flag unsupported claims; never strengthen them.
-5. Use Australian English, concrete verbs and varied sentence structure. Cut
-   noun stacks, inflated phrasing, empty meta-discourse, em dashes, decorative
-   negative parallelism and instruction-leaking absence tombstones. Keep honest
-   negatives and defined technical terms. Do not edit to beat an AI detector.
-6. For a full chapter, paper or document rewrite or final polish, run the
-   independent multi-agent review in `editing-workflows.md`. Preserve labels,
-   macros and citation keys, then validate the whole work.
+5. Follow the target language style (otherwise Australian English). Use concrete
+   verbs and purposeful sentence variety. Cut noun stacks, inflation, empty
+   meta-discourse and instruction-leaking absence tombstones; apply punctuation
+   defaults only where the project is silent. Keep honest negatives and defined
+   technical terms. Do not edit to beat an AI detector.
+6. For a full chapter, paper or document rewrite or final polish, use the
+   risk-proportional independent review in `editing-workflows.md`. Load
+   `orchestrate` for runtime routing; do not select providers or model IDs here.
+   Preserve labels, macros and citation keys, then validate the whole work.
 7. Run one adversarial final scrub: name and repair only a real remaining tell.
 
 For condensation, follow the reference stop rule, report words before/after and

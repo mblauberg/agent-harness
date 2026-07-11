@@ -34,7 +34,7 @@
       "additionalProperties": false,
       "required": ["maximumConcurrentProviderTurns"],
       "properties": {
-        "maximumConcurrentProviderTurns": {"type": "integer", "minimum": 0, "maximum": 8}
+        "maximumConcurrentProviderTurns": {"type": "integer", "minimum": 1, "maximum": 8}
       }
     },
     "projectLimits": {
@@ -42,7 +42,7 @@
       "additionalProperties": false,
       "required": ["maximumConcurrentProviderTurns"],
       "properties": {
-        "maximumConcurrentProviderTurns": {"type": "integer", "minimum": 0}
+        "maximumConcurrentProviderTurns": {"type": "integer", "minimum": 1}
       }
     },
     "projectConfig": {

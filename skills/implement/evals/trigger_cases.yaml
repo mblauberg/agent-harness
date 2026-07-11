@@ -1,16 +1,12 @@
-positive:
-  - implement this approved specification autonomously and review until clean
-  - take this feature through implementation, tests, review and final handoff
-  - review and fix this refactor until its acceptance criteria pass
-  - carry this dependency upgrade to verified completion
-negative:
-  - help me decide what this feature should do
-  - why is this test failing
-  - review this pull request without making changes
-  - run a multi-week autonomous research lab until I stop it
-  - implement only the failing regression test before any production code
-  - what should we implement next quarter
-boundary:
-  - deliver this software change through the software profile
-  - diagnose the regression first then continue the approved implementation loop
-  - implement locally but stop before production release
+schema_version: 2
+target_skill: implement
+cases:
+  - {id: q127, relation: positive, prompt: "Implement this approved feature end-to-end, verify it, obtain independent review, and stop for acceptance.", tags: [direct], expected: {primary_skill: implement, companion_skills: []}}
+  - {id: q128, relation: positive, prompt: "Apply the approved bug fix, run the relevant checks, repair review findings, and update owned docs.", tags: [direct], expected: {primary_skill: implement, companion_skills: []}}
+  - {id: q129, relation: positive, prompt: "Complete this approved dependency upgrade through migration, verification, review, and human handoff.", tags: [direct], expected: {primary_skill: implement, companion_skills: []}}
+  - {id: q130, relation: negative, prompt: "Requirements are still ambiguous; decide options and produce acceptance criteria first.", tags: [adjacent], expected: {primary_skill: scope, companion_skills: []}}
+  - {id: q131, relation: negative, prompt: "Tell me why this service is crashing; do not make a permanent change.", tags: [adjacent], expected: {primary_skill: diagnose, companion_skills: []}}
+  - {id: q132, relation: negative, prompt: "Promote the accepted build to production under the approved rollout plan.", tags: [adjacent], expected: {primary_skill: release, companion_skills: []}}
+  - {id: q133, relation: boundary, prompt: "Implement this approved observable behaviour with a witnessed right-reason failing test first.", tags: [composition], expected: {primary_skill: implement, companion_skills: [tdd]}}
+  - {id: q134, relation: boundary, prompt: "Implement this approved behaviour-preserving module simplification with equivalence evidence.", tags: [composition], expected: {primary_skill: implement, companion_skills: [refactor]}}
+  - {id: q135, relation: boundary, prompt: "Implement and verify the approved React performance fix against the recorded baseline.", tags: [composition], expected: {primary_skill: implement, companion_skills: [react-performance]}}

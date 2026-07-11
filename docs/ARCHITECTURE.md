@@ -62,6 +62,27 @@ and retrospective linkage. Domain skills own methods; the kernel owns state
 and proof. `implement` remains the software front door and uses the same
 canonical receipt; there is no parallel implementation schema or adapter.
 
+Software execution composes bounded techniques rather than duplicating
+lifecycle owners: `tdd` for new or changed observable behaviour, `refactor` for
+approved behaviour-preserving structural work, and `diagnose` when root cause is
+unknown. `code-review` remains source-read-only and independent. SOLID,
+information hiding, cohesion, coupling, simplicity, idempotency and similar
+principles are hypothesis generators; a finding still needs a concrete failure
+mechanism, impact, evidence and validation route.
+
+Frontend authority is similarly split: `frontend-design` owns authorised design
+mutation, while `frontend-review` owns read-only UX, visual, accessibility and
+responsive evidence. `playwright`, `web-stack-conventions` and
+`react-performance` provide tool or standards evidence without taking over the
+UI finding contract. `caveman` is a presentation overlay only; it cannot narrow
+evidence, authority, high-stakes clarity or an artifact's domain-writing rules.
+
+`release` promotes one digest-pinned, human-accepted artifact through a separately
+authorised `deploy`, `publish`, `share`, `send` or `activate` action. Targets are
+typed as environments, recipients or audiences; execution may use an approved
+command, connector or named human operation. Completion requires target-visible
+proof and an observation/reversal contract, not merely a successful command.
+
 ## Equal primaries, accountable ownership
 
 Claude Code and Codex are equal primary orchestrators. Whichever harness the
@@ -142,6 +163,14 @@ directory. Unmanaged paths are never claimed or overwritten; changed managed
 targets fail for human resolution and link
 mutations roll back if the manifest commit fails.
 Provider bootstraps remain small and share the same precedence sentence.
+
+The canonical skill catalogue is also a constrained interface. Every skill has
+balanced positive, negative and boundary routes; descriptions place the trigger
+and nearest exclusion early and the complete rendered catalogue stays inside
+the provider discovery budget. A skill carries occasional judgement-rich
+procedure, a script/hook enforces deterministic policy, an MCP/app adds an
+external capability, and a plugin distributes a stable coherent bundle. Public
+packs are research inputs, not wholesale imports.
 
 ## Completion evidence
 

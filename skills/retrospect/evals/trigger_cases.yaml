@@ -1,16 +1,12 @@
-positive:
-  - the release is complete; retrospect on whether the harness helped or hindered
-  - review this agent cycle and turn repeated failures into durable improvements
-  - close the quality flywheel across skills, routing, docs, memory and evals
-  - assess our human rework and orchestration effectiveness after this long run
-  - run a post-cycle harness review before we scope the next iteration
-negative:
-  - end this session and clean up its scratch files
-  - audit why the natural-writing skill does not trigger
-  - build an eval benchmark for this stochastic agent
-  - diagnose this failing deployment without making changes
-  - implement the already approved refactor and run its tests
-boundary:
-  - the cycle ended; determine whether evidence supports a harness change or no-change
-  - review recurrence only after a later comparable cycle exists
-  - close the session now and run a retrospective only if the delivery evidence warrants it
+schema_version: 2
+target_skill: retrospect
+cases:
+  - {id: q208, relation: positive, prompt: "Run an evidence-backed retrospective on this completed delivery and propose regression gates.", tags: [direct], expected: {primary_skill: retrospect, companion_skills: []}}
+  - {id: q209, relation: positive, prompt: "Review the finished agent run for lessons in routing, context, cost, tools, and human rework.", tags: [direct], expected: {primary_skill: retrospect, companion_skills: []}}
+  - {id: q210, relation: positive, prompt: "After this completed evaluation, identify supported process improvements and how to verify them next cycle.", tags: [direct], expected: {primary_skill: retrospect, companion_skills: []}}
+  - {id: q211, relation: negative, prompt: "Clean up this session handoff and context before compaction.", tags: [adjacent], expected: {primary_skill: session, companion_skills: []}}
+  - {id: q212, relation: negative, prompt: "Audit this one skill for false triggers and token cost.", tags: [adjacent], expected: {primary_skill: skill-audit, companion_skills: []}}
+  - {id: q213, relation: negative, prompt: "The active service defect still reproduces; find its root cause now.", tags: [adjacent], expected: {primary_skill: diagnose, companion_skills: []}}
+  - {id: q214, relation: boundary, prompt: "Retrospect on the completed migration and promote durable lessons into the owned engineering docs.", tags: [composition], expected: {primary_skill: retrospect, companion_skills: [engineering-docs]}}
+  - {id: q215, relation: boundary, prompt: "Use completed run evidence to retrospect on recurring skill misroutes, then perform a focused skill audit.", tags: [composition], expected: {primary_skill: retrospect, companion_skills: [skill-audit]}}
+  - {id: q216, relation: boundary, prompt: "The release has failed and impact is ongoing; diagnose the incident before holding the retrospective.", tags: [adjacent], expected: {primary_skill: diagnose, companion_skills: []}}

@@ -1,18 +1,21 @@
 ---
 name: tdd
-description: Use when writing the first failing test for a feature, bugfix, refactor, or behaviour change — "write a test", "TDD this", red-green-refactor. Covers vertical slices, public-interface tests and boundary mocking. Not the end-to-end delivery owner; use implement when verification, review, repair and human acceptance are also requested.
+description: "Use for writing the first right-reason failing test for new or changed observable behaviour, then red-green-refactor. Not for behaviour-preserving structure, diagnosis-only, or delivery; use refactor, diagnose, or implement."
 ---
 
 # Test-driven development
 
 ```text
-NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+NO NEW OR CHANGED OBSERVABLE BEHAVIOUR WITHOUT A RIGHT-REASON FAILURE FIRST
 ```
 
-If production code came first, delete it and reconstruct it from the test; do
-not retain it as reference. This applies to features, bug fixes and behaviour
-changes. Deliberate throwaway prototypes, generated code and configuration may
-use an explicitly recorded exception; deadline pressure is not one.
+Never delete or overwrite unknown, pre-existing or user-authored work to create
+a red state. If this run wrote production code before the test, preserve its
+patch, remove only the exact run-owned hunks when authorised, witness the
+right-reason failure, then reapply and minimise them. Existing code gets a
+regression or characterisation seam before repair. Deliberate throwaway
+prototypes, generated code and configuration may use an explicitly recorded
+exception; deadline pressure is not one.
 
 ## Red -> green -> refactor
 
@@ -21,8 +24,9 @@ use an explicitly recorded exception; deadline pressure is not one.
    the behaviour is missing, not from setup, import or typo. A test that passes
    immediately needs sharpening.
 2. **Green:** write only the simplest production change that passes. Avoid
-   speculative options and unrelated cleanup. Run the focused test and whole
-   suite; output must be clean.
+   speculative options and unrelated cleanup. Run the focused test each cycle,
+   affected checks at tranche boundaries, and the full required suite at the
+   enclosing verification gate; output must be clean.
 3. **Refactor:** only while green, remove duplication, improve names and deepen
    modules. Rerun tests after each structural step.
 

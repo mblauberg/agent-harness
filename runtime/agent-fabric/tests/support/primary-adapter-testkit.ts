@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 
 import * as publicApi from "../../src/index.ts";
 import { openFabric } from "../../src/index.ts";
@@ -116,6 +116,62 @@ export async function createPrimaryCompatibilityFixture(): Promise<{
     compatibilityPath,
     schemaPath: repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
     artifactPaths: [executablePath, protocolSchemaPath],
+  };
+}
+
+export async function createPortableActivatedPrimaryFixture(): Promise<{
+  directory: string;
+  compatibilityPath: string;
+  schemaPath: string;
+  configPath: string;
+  artifactPaths: string[];
+}> {
+  const fixture = await createPrimaryCompatibilityFixture();
+  const wrapperPath = join(fixture.directory, "fixture-wrapper.js");
+  const wrapperManifestPath = join(fixture.directory, "fixture-wrapper-manifest.json");
+  const wrapperBytes = "export const portableFixtureWrapper = true;\n";
+  const wrapperManifest = `${JSON.stringify({
+    schema_version: 1,
+    entrypoint: wrapperPath,
+    files: [{ path: wrapperPath, sha256: sha256(wrapperBytes) }],
+  }, null, 2)}\n`;
+  await writeFile(wrapperPath, wrapperBytes, { mode: 0o600 });
+  await writeFile(wrapperManifestPath, wrapperManifest, { mode: 0o600 });
+
+  const value: unknown = parse(await readFile(fixture.compatibilityPath, "utf8"));
+  if (!isRecord(value) || !isRecord(value.adapters)) {
+    throw new TypeError("portable compatibility fixture is invalid");
+  }
+  for (const adapterId of ["claude-agent-sdk", "codex-app-server"]) {
+    const adapter = value.adapters[adapterId];
+    if (!isRecord(adapter) || !isRecord(adapter.implementation)) {
+      throw new TypeError(`portable compatibility entry is invalid: ${adapterId}`);
+    }
+    adapter.enabled = true;
+    adapter.implementation.wrapper_entrypoint = wrapperPath;
+    adapter.implementation.wrapper_entrypoint_sha256 = sha256(wrapperBytes);
+    adapter.implementation.wrapper_manifest = wrapperManifestPath;
+    adapter.implementation.wrapper_manifest_sha256 = sha256(wrapperManifest);
+  }
+  await writeFile(fixture.compatibilityPath, stringify(value));
+
+  const configPath = join(fixture.directory, "agent-fabric.yaml");
+  await writeFile(configPath, stringify({
+    schemaVersion: 1,
+    allowedAdapters: ["claude-agent-sdk", "codex-app-server"],
+    activeAdapters: ["claude-agent-sdk", "codex-app-server"],
+    allowedProfiles: ["headless", "paired-visible"],
+    adapters: {
+      "claude-agent-sdk": { command: [process.execPath, wrapperPath] },
+      "codex-app-server": { command: [process.execPath, wrapperPath] },
+    },
+    workspaceRoots: [fixture.directory],
+    limits: { maximumConcurrentProviderTurns: 2 },
+  }));
+  return {
+    ...fixture,
+    configPath,
+    artifactPaths: [...fixture.artifactPaths, wrapperPath, wrapperManifestPath],
   };
 }
 

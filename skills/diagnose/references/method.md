@@ -37,5 +37,5 @@ that prevents it.
 - original reproduction no longer fails;
 - regression passes or the missing seam is documented;
 - unique debug prefixes are absent;
-- throwaway artifacts are deleted; and
+- run-owned throwaway artifacts are retired under their manifest/authority;
 - the root cause and prevention opportunity are recorded.

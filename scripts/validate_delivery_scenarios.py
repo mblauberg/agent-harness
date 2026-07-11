@@ -10,6 +10,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any
 
 import yaml
@@ -32,6 +33,16 @@ def load_kernel():
     spec = importlib.util.spec_from_file_location("held_out_delivery_kernel", path)
     if not spec or not spec.loader:
         raise ValueError("delivery kernel is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_evaluation_materializer():
+    path = ROOT / "skills" / "deliver" / "scripts" / "reference_evaluation.py"
+    spec = importlib.util.spec_from_file_location("held_out_evaluation_materializer", path)
+    if not spec or not spec.loader:
+        raise ValueError("evaluation materializer is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -152,6 +163,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
         "artifacts": [
             {"id": "outcome", "path": "outcome.bin", "media_type": "application/octet-stream", "artifact_type": fixture["artifact_type"], "digest": DIGEST_A, "class": "canonical", "owner": "human-owner", "retention": "project-policy"},
             {"id": "evidence-bundle", "path": "evidence.json", "media_type": "application/json", "artifact_type": "evidence", "digest": DIGEST_B, "class": "evidence", "owner": "delivery-chair", "retention": "risk-policy"},
+            *([{"id": "evaluation-receipt", "path": "evaluation/EVALUATION.json", "media_type": "application/json", "artifact_type": "evidence", "digest": DIGEST_B, "class": "evidence", "owner": "evaluation-chair", "retention": "risk-policy"}] if fixture["stochastic"] else []),
         ],
         "design": {
             "status": "approved", "artifact_id": "outcome", "digest": DIGEST_A,
@@ -175,10 +187,12 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
             "stochastic_required": fixture["stochastic"],
             "reason": "held-out stochastic behaviour gate" if fixture["stochastic"] else "deterministic profile with independent review",
             "evaluations": ([{
-                "evidence_id": first_judgement, "dataset_version": "held-out-2026-07-10",
-                "repetitions": 3, "sample_size": 10, "aggregation": "pass-rate",
-                "threshold": "gte-0.9", "rubric_digest": DIGEST_B,
-                "raw_evidence_artifact_id": "evidence-bundle",
+                "status": "complete", "anchored_at": "2026-07-10T00:02:30Z",
+                "evidence_id": first_judgement,
+                "evaluation_artifact_id": "evaluation-receipt",
+                "evaluation_id": "EVAL-REFERENCE",
+                "evaluation_digest": DIGEST_B,
+                "plan_digest": DIGEST_B,
             }] if fixture["stochastic"] else []),
         },
         "reviews": [
@@ -244,6 +258,24 @@ def _apply_patches(receipt: dict[str, Any], patches: list[dict[str, Any]]) -> No
             del parent[index]
 
 
+def _apply_tamper(workspace_root: Path, tamper: Any) -> None:
+    if tamper is None:
+        return
+    if not isinstance(tamper, dict) or set(tamper) != {"path", "append"}:
+        raise ValueError("scenario tamper instruction is invalid")
+    path, append = tamper["path"], tamper["append"]
+    if not isinstance(path, str) or not path or not isinstance(append, str) or not append:
+        raise ValueError("scenario tamper instruction requires path and append text")
+    target = (workspace_root / path).resolve()
+    try:
+        target.relative_to(workspace_root.resolve())
+    except ValueError as exc:
+        raise ValueError("scenario tamper path escapes its workspace") from exc
+    if not target.is_file():
+        raise ValueError("scenario tamper target does not exist")
+    target.write_bytes(target.read_bytes() + append.encode())
+
+
 def _validate_dataset(data: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise ValueError("invalid scenario dataset")
@@ -272,6 +304,10 @@ def _validate_dataset(data: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         repetitions = case.get("repetitions")
         if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
             raise ValueError(f"case {case['id']} repetitions must be positive")
+        if case.get("tamper") is not None:
+            tamper = case["tamper"]
+            if not isinstance(tamper, dict) or set(tamper) != {"path", "append"}:
+                raise ValueError(f"case {case['id']} tamper instruction is invalid")
     for profile in PROFILES:
         profile_cases = [case for case in cases if case["profile"] == profile]
         if len(profile_cases) < minimum_cases or not {"pass", "fail"} <= {case["expected"] for case in profile_cases}:
@@ -288,6 +324,7 @@ def validate(dataset: Path) -> dict[str, Any]:
         raise ValueError(f"scenario dataset is unreadable: {exc}") from exc
     fixtures, cases = _validate_dataset(data)
     kernel = load_kernel()
+    materializer = load_evaluation_materializer()
     matched = 0
     attempted = 0
     for case in cases:
@@ -295,12 +332,19 @@ def validate(dataset: Path) -> dict[str, Any]:
         fixture.update(copy.deepcopy(case.get("fixture_overrides", {})))
         for repetition in range(case["repetitions"]):
             receipt = _compile_receipt(case, fixture)
-            _apply_patches(receipt, copy.deepcopy(case.get("patches", [])))
             error = ""
-            try:
-                kernel.validate(receipt, ROOT)
-            except kernel.Invalid as exc:
-                error = str(exc)
+            with tempfile.TemporaryDirectory(prefix="delivery-scenario-") as temporary:
+                workspace_root = Path(temporary)
+                materializer.materialise_reference_run(receipt, workspace_root, ROOT)
+                _apply_patches(receipt, copy.deepcopy(case.get("patches", [])))
+                _apply_tamper(workspace_root, copy.deepcopy(case.get("tamper")))
+                try:
+                    kernel.validate(
+                        receipt, ROOT, workspace_root=workspace_root,
+                        verify_hashes=True,
+                    )
+                except kernel.Invalid as exc:
+                    error = str(exc)
             actual = "fail" if error else "pass"
             expected_error = case.get("expected_error", "")
             matches = actual == case["expected"] and (actual == "pass" or expected_error in error)

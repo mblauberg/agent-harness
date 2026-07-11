@@ -177,16 +177,28 @@ cases:
     risk_tier: substantial
     repetitions: 3
     patches: []
-  - id: agent-product-repetition-negative
+  - id: agent-product-evaluation-id-negative
     profile: agent-product
     case_type: negative
     expected: fail
-    expected_error: evaluation 0 repetitions is below minimum
+    expected_error: evaluation_id does not match expected_evaluation_id
     high_stakes: false
     risk_tier: substantial
     repetitions: 1
     patches:
-      - {op: replace, path: /assurance/evaluations/0/repetitions, value: 2}
+      - {op: replace, path: /assurance/evaluations/0/evaluation_id, value: EVAL-FORGED}
+  - id: agent-product-nested-hash-negative
+    profile: agent-product
+    case_type: negative
+    expected: fail
+    expected_error: artifact output digest mismatch
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    patches: []
+    tamper:
+      path: evaluation/evidence/output.json
+      append: "tampered\n"
   - id: agent-product-security-boundary
     profile: agent-product
     case_type: boundary

@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Use when implementing an approved feature, bugfix, refactor, migration, or dependency upgrade end-to-end through verification, independent review, bounded repair, documentation, and final human acceptance — especially "implement this autonomously", "take this spec to completion", or "review and fix until clean". Not for deciding requirements (scope), test-first coding alone (tdd), diagnosis only, or review without edits.
+description: "Use for an approved software change through verified implementation, independent review, bounded repair, and human acceptance. Not for unsettled scope, diagnosis-only, read-only review, or release."
 ---
 
 # Implement
@@ -29,8 +29,11 @@ waives authority or gates and must name a normal follow-up reconciliation run.
 1. Create the single canonical `delivery-run` receipt from
    `../deliver/templates/RUN.template.json`, set profile `software`, and follow
    [run-contract.md](references/run-contract.md).
-2. Implement vertical slices with `tdd`. Use `diagnose` for discovered failures
-   and `orchestrate` only when decomposition or independent coverage helps.
+2. Select the execution method per slice: `tdd` for new or changed observable
+   behaviour; `refactor` for approved behaviour-preserving structural work;
+   `diagnose` when root cause is unknown. Migrations may require both behaviour
+   tests and refactor equivalence evidence. Use `orchestrate` only when
+   decomposition or independent coverage helps.
 3. Run deterministic checks and map every acceptance criterion to evidence.
    When scope requires assurance, run `evaluate` and attach its passing receipt.
 4. Invoke `code-review` read-only. Reviewer coverage follows the risk tier in

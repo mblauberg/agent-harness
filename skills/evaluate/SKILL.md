@@ -1,6 +1,6 @@
 ---
 name: evaluate
-description: Use when an AI, agent, prompt, retrieval system, heuristic, ranking, generated artifact, or other stochastic/judgement-bearing behaviour needs a repeatable quality or safety gate — datasets, rubrics, benchmarks, red-team cases, regression thresholds, or model comparisons. Not for deterministic unit tests or ordinary code review.
+description: "Use for repeatable quality or safety evaluation of stochastic or judgement-bearing systems, prompts, agents, rankings, or artifacts. Not for deterministic tests or ordinary code review; use tdd or code-review."
 ---
 
 # Evaluate
@@ -11,40 +11,52 @@ an exit code alone.
 
 ## Contract
 
-Before implementation or comparison, record:
+Freeze a schema-v2 plan before seeing results:
 
 - decision the evaluation informs and unacceptable failure modes;
-- dataset/corpus version, provenance, consent/data policy and holdout boundary;
-- sampling method, seeds and model/runtime versions;
-- metrics and thresholds chosen before results are seen;
-- human rubric, evaluator independence and disagreement handling;
+- hash-bound dataset/corpus, provenance, consent or licence, data policy and
+  holdout boundary;
+- candidate and applicable comparator manifests, paired sampling, seeds,
+  repetitions, timeouts, retries and exclusions;
+- metric ranges, aggregation, thresholds and per-metric regression margins;
+- deterministic preflight, rubric, blinded independent graders and
+  disagreement handling;
 - safety, bias, privacy and adversarial cases proportionate to risk;
-- baseline and regression budget.
+- enclosing delivery run when this evidence supports a non-trivial outcome.
 
-Use [EVALUATION.template.json](templates/EVALUATION.template.json). Keep raw
-examples outside the hot receipt; link bounded failure cases and hashes.
+Use [EVALUATION.template.json](templates/EVALUATION.template.json) and the
+[receipt contract](references/receipt-v2.md). Keep raw examples outside the hot
+receipt; link safe relative artifacts and SHA-256 digests.
 
 ## Run
 
-1. Validate fixtures and prevent train/test or prompt/holdout leakage.
-2. Run the pinned configuration more than once where variance matters.
-3. Report distributions and failure clusters, not only averages. Never hide
-   empty, skipped, timed-out or manually excluded cases.
-4. Have a fresh-context evaluator inspect a blinded sample for high-risk
-   judgement. Cross-family review can expose rubric blind spots but does not
-   replace evidence.
-5. Compare against predeclared thresholds and baseline. A post-hoc threshold
-   change is a new evaluation version with a reason and owner.
-6. Preserve representative failures and route product defects to `implement`,
-   unclear requirements to `scope`, and operational regressions to `diagnose`.
+1. Validate fixtures, hashes, schemas and leakage controls before any judgement
+   attempt. Deterministic failure stops or explicitly skips the frozen schedule.
+2. Run each planned arm/family/repetition. Retain every attempt, retry and case
+   row with actual adapter/provider/model/effort lineage and usage disposition.
+3. Account for passes, failures, omissions, skips, exclusions, timeouts, invalid
+   output and tool/provider errors. A retry appends; it never erases its parent.
+4. Aggregate from retained rows. Report raw numerators/denominators,
+   distributions and failure clusters, not only averages.
+5. Blind independent graders to treatment identity. Record criterion evidence;
+   send disagreements to a fresh adjudicator rather than majority vote.
+6. Compare with frozen thresholds and applicable arms. A post-hoc change creates
+   a new plan/version; it does not rewrite the run.
+7. Preserve bounded failures and route product defects to `implement`, unclear
+   requirements to `scope`, and operational regressions to `diagnose`.
 
 Validate the receipt with:
 
 ```sh
-${AGENTS_HOME:-$HOME/.agents}/skills/evaluate/scripts/validate_evaluation.py EVALUATION.json
+${AGENTS_HOME:-$HOME/.agents}/skills/evaluate/scripts/validate_evaluation.py \
+  EVALUATION.json --verify-hashes --require-pass \
+  --expected-evaluation-id "$EVALUATION_ID" \
+  --expected-plan-digest "$FROZEN_PLAN_DIGEST" \
+  --expected-delivery-run-id "$DELIVERY_RUN_ID"
 ```
 
-`pass` means the named version met its declared thresholds. It does not prove
-general safety outside the evaluated distribution. Human approval remains
-required where the evaluation informs a one-way-door, legal, safety, release or
-public claim.
+`pass` is a machine assurance result for the named distribution, not general
+safety or human acceptance. Attach it to the canonical delivery receipt; only
+that lifecycle's human gate can mark the outcome accepted. Schema v1 can be
+inspected with `--legacy-v1`, but is permanently non-gating and must be rerun
+from a frozen v2 plan.

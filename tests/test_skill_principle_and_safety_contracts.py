@@ -1,0 +1,66 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def text(path: str) -> str:
+    return (ROOT / path).read_text()
+
+
+def squash(value: str) -> str:
+    return " ".join(value.split())
+
+
+def test_solid_is_a_probe_not_a_standalone_review_finding():
+    lenses = squash(text("skills/code-review/references/review-lenses.md"))
+    for principle in (
+        "Single responsibility",
+        "Open/closed",
+        "Liskov substitution",
+        "Interface segregation",
+        "Dependency inversion",
+    ):
+        assert principle in lenses
+    assert "generate hypotheses, never as standalone" in lenses
+    assert "evidence ties the principle to a present defect" in lenses
+    assert "both the delta and the unchanged enforcement path" in lenses
+    assert "delegated permission inheritance" in lenses
+
+
+def test_refactor_preserves_behaviour_and_rejects_acronym_compliance():
+    skill = squash(text("skills/refactor/SKILL.md"))
+    assert "behaviour-preserving" in skill
+    assert "Use SOLID and related principles as probes, not success metrics" in skill
+    assert "acronym compliance" in skill
+    assert "Changed behaviour is a separate TDD slice" in skill
+    assert "Unknown, user-owned and unrelated files stay untouched" in skill
+
+
+def test_tdd_and_lab_cleanup_never_delete_unknown_or_preexisting_work():
+    tdd = text("skills/tdd/SKILL.md")
+    recovery = text("skills/autonomous-lab/references/recovery-and-cadence.md")
+    filesystem = text("skills/autonomous-lab/references/filesystem-memory.md")
+    combined = squash("\n".join((tdd, recovery, filesystem))).lower()
+    assert "delete it and reconstruct" not in combined
+    assert "delete cruft" not in combined
+    assert "unknown, pre-existing or user-authored work" in combined
+    assert "unknown or user-owned material stays untouched" in combined
+
+
+def test_caveman_preserves_evidence_altitude_and_never_grants_authority():
+    skill = text("skills/caveman/SKILL.md")
+    assert "presentation overlay, not authority" in skill
+    assert "governing harness or project instruction may enable adaptive mode" in skill
+    assert "Full and ultra remain user-explicit" in skill
+    assert "evidence relationships" in skill
+    assert "Never imply that an unverified source confirms a claim" in skill
+    assert "Suspend compression" in skill
+
+
+def test_typescript_parallelism_is_bounded_not_automatic():
+    skill = squash(text("skills/typescript-clean-code/SKILL.md"))
+    patterns = squash(text("skills/typescript-clean-code/references/typescript-patterns.md"))
+    assert "`Promise.all` suits a small fixed set" in skill
+    assert "bounded pool/queue for large collections" in skill
+    assert "Do not map an unbounded input straight into Promise.all" in patterns

@@ -186,7 +186,10 @@ evidence; raw returns remain sidecars when auditability requires them. Thin or
 filled. Persist the synthesis before compaction so it does not live only in
 transient context.
 
-Reviews are persisted **verbatim** as `adr/_reviews/<id>-<family>.md` sidecars — especially independent cross-family reviews, which are **authoritative over any worker's self-claim** (gotcha §10.1). When a worker's self-report and the independent review disagree, persist and act on the independent review; correct the worker's claim in the record.
+Reviews are persisted **verbatim** as `adr/_reviews/<id>-<family>.md` sidecars.
+Worker and reviewer verdicts are claims, not authority. When they disagree,
+persist both, verify their cited evidence or rerun the objective gate, then let
+the named decision owner adjudicate and correct the record.
 
 **Dirty-ADR normalize-on-persist note.** Delegated ADRs arrive dirty more often than not. Delegated agents *usually* self-write the ADR file, but **not always** — so always **verify the dir exists after a delegated run.** If the file is absent or wrapped, persist it via a clean-up pass:
 - keep the `# <id> ...` heading;

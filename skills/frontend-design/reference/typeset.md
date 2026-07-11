@@ -27,7 +27,7 @@ Analyze what's weak or generic about the current type:
 
 3. **Sizing & scale**:
    - Is there a consistent type scale, or are sizes arbitrary?
-   - Does body text meet minimum readability? (16px+)
+   - Is body text readable for the actual font, audience, density, zoom and viewport? (16px is a common default, not a compliance threshold)
    - Is the sizing strategy appropriate for the context? (Fixed `rem` scales for app UIs; fluid `clamp()` for marketing/content page headings)
 
 4. **Readability**:
@@ -76,7 +76,8 @@ Build a clear type scale:
 - Set `max-width` on text containers using `ch` units (`max-width: 65ch`)
 - Adjust line-height per context: tighter for headings (1.1-1.2), looser for body (1.5-1.7)
 - Increase line-height slightly for light-on-dark text
-- Ensure body text is at least 16px / 1rem
+- Start from 16px / 1rem as a common ergonomic default, then adjust only with
+  evidence from the actual font, density, audience, zoom and viewport
 
 ### Refine Details
 
@@ -94,10 +95,10 @@ Build a clear type scale:
 **NEVER**:
 - Use more than 2-3 font families
 - Pick sizes arbitrarily; commit to a scale
-- Set body text below 16px
+- Reduce body text below the product's tested readable default without evidence
 - Use decorative/display fonts for body text
 - Disable browser zoom (`user-scalable=no`)
-- Use `px` for font sizes; use `rem` to respect user settings
+- Use fixed units in ways that prevent user font settings, zoom or reflow
 - Default to Inter/Roboto/Open Sans when personality matters
 - Pair fonts that are similar but not identical (two geometric sans-serifs)
 

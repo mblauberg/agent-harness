@@ -1,0 +1,4 @@
+interface:
+  display_name: Frontend Review
+  short_description: Read-only evidence-bearing UI and UX review
+  default_prompt: Use $frontend-review to inspect this interface read-only and report findings with tested and untested coverage.

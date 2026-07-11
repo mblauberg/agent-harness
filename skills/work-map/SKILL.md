@@ -1,6 +1,6 @@
 ---
 name: work-map
-description: Use when work spans multiple sessions — a feature, migration, or investigation too big for one context window — and the project needs a persistent map of where the effort is, what's done, what's blocked, and what comes next. Also use when resuming multi-session work ("where were we"), or when several agents work the same effort in parallel. Complements the session skill's per-session handoffs with an effort-level map.
+description: "Use when a multi-session effort needs one persistent route showing current leg, blockers, dependencies, and next work. Not for one-session checklists or handoffs; use session."
 ---
 
 # work-map — the map for multi-session efforts
@@ -12,7 +12,9 @@ complete, read first on every resume.
 
 ## The map file
 
-`docs/efforts/EFFORT-<slug>.md` (or the project's equivalent dir). Structure:
+Use the project's canonical effort file. If no owner exists, propose
+`docs/efforts/EFFORT-<slug>.md` only when project-write authority allows it;
+otherwise return the map without writing. Structure:
 
 ```markdown
 # EFFORT: <name>        Updated: YYYY-MM-DD  Status: active|blocked|done
@@ -44,14 +46,14 @@ Rules no session may break, with links — not restated content.
   this map → the claimed leg's handoff only → start. Never reconstruct the
   route from old transcripts or piled-up handoffs — consumed handoffs should
   already be archived.
-- **Update on leg completion, not continuously** — the map is curated tier-2
-  memory (see `~/.agents/HARNESS.md`); the trail line is one sentence, not a
+- **Update on leg completion, not continuously** — the map is curated durable
+  project state; the trail line is one sentence, not a
   log. Session-level detail stays in handoffs.
-- **Parallel agents claim a leg** by marking it `[>]` with their handoff file
-  named — the path must exist and carry `Status: active` for that effort/leg;
-  two agents on one leg is a coordination failure. Completing `[x]` consumes
-  and archives that handoff in the same update, so finished legs never retain
-  an apparently-current baton.
+- **One chair/map owner writes the map.** Parallel workers write namespaced
+  claim or handoff artifacts; the chair serially records `[>]` and `[x]` after
+  checking the leg is unclaimed. Do not let workers race on the shared file.
+  Completing `[x]` consumes and archives that handoff in the same update, so
+  finished legs never retain an apparently-current baton.
 - **Effort done** → status `done`, then archive the map with the project's
   move-never-delete rule (`engineering-docs`).
 

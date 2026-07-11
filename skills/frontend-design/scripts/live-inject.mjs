@@ -8,7 +8,7 @@
  * with zero LLM involvement.
  *
  * Usage:
- *   node live-inject.mjs --port PORT   # Insert the live script tag
+ *   node live-inject.mjs --port PORT --token TOKEN   # Insert the live script tag
  *   node live-inject.mjs --remove      # Remove the live script tag
  *   node live-inject.mjs --check       # Check whether live config exists
  */
@@ -44,6 +44,7 @@ Reads configuration from .impeccable/live/config.json.
 
 Modes:
   --port PORT   Insert script tag pointing at http://localhost:PORT/live.js
+  --token TOKEN Authenticate the injected script with the current live server
   --remove      Remove the script tag (if present)
   --check       Print whether .impeccable/live/config.json exists and its content
 
@@ -83,10 +84,15 @@ Output (JSON):
   validateConfig(config);
 
   const resolvedFiles = resolveFiles(process.cwd(), config);
+  // Resolve and validate the complete target set before changing any file. A
+  // later escaping target must not leave earlier project files half-mutated.
+  const targets = resolvedFiles.map((relFile) => ({
+    relFile,
+    absFile: resolveProjectFileTarget(process.cwd(), relFile),
+  }));
 
   if (args.includes('--remove')) {
-    const results = resolvedFiles.map((relFile) => {
-      const absFile = path.resolve(process.cwd(), relFile);
+    const results = targets.map(({ relFile, absFile }) => {
       if (!fs.existsSync(absFile)) return { file: relFile, error: 'file_not_found' };
       const content = fs.readFileSync(absFile, 'utf-8');
       const detagged = removeTag(content, config.commentSyntax);
@@ -106,17 +112,22 @@ Output (JSON):
   // Insert mode — need --port
   const portIdx = args.indexOf('--port');
   const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) : NaN;
-  if (!Number.isFinite(port)) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || String(port) !== args[portIdx + 1]) {
     console.error(JSON.stringify({ ok: false, error: 'missing_port' }));
     process.exit(1);
   }
+  const tokenIdx = args.indexOf('--token');
+  const token = tokenIdx !== -1 ? args[tokenIdx + 1] : '';
+  if (!isValidServerToken(token)) {
+    console.error(JSON.stringify({ ok: false, error: 'missing_or_invalid_token' }));
+    process.exit(1);
+  }
 
-  const results = resolvedFiles.map((relFile) => {
-    const absFile = path.resolve(process.cwd(), relFile);
+  const results = targets.map(({ relFile, absFile }) => {
     if (!fs.existsSync(absFile)) return { file: relFile, error: 'file_not_found' };
     const content = fs.readFileSync(absFile, 'utf-8');
     const withoutOld = revertCspMeta(removeTag(content, config.commentSyntax));
-    const withTag = insertTag(withoutOld, config, port);
+    const withTag = insertTag(withoutOld, config, port, token);
     if (withTag === withoutOld) {
       return { file: relFile, error: 'insertion_point_not_found', anchor: config.insertBefore || config.insertAfter };
     }
@@ -152,6 +163,7 @@ export function resolveFiles(rootDir, config) {
   const seen = new Set();
   const out = [];
   for (const pat of patterns) {
+    validateProjectRelativePath(pat, 'config.files');
     if (!isGlob(pat)) {
       // Literal path — include even if it doesn't exist yet; the caller
       // reports file_not_found per-entry. Exclude list doesn't apply to
@@ -178,7 +190,60 @@ export function resolveFiles(rootDir, config) {
       out.push(rel);
     }
   }
+  // Validate every expanded path as a project-local target as well. This
+  // catches glob matches reached through symlinked directories.
+  for (const relFile of out) resolveProjectFileTarget(rootDir, relFile);
   return out;
+}
+
+function isContainedPath(rootPath, candidatePath) {
+  const rel = path.relative(rootPath, candidatePath);
+  return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`));
+}
+
+function validateProjectRelativePath(value, field) {
+  if (value.includes('\0')) throw new Error(`${field} entries must not contain NUL bytes`);
+  const portable = value.replaceAll('\\', '/');
+  if (path.isAbsolute(value) || path.posix.isAbsolute(portable) || path.win32.isAbsolute(value)) {
+    throw new Error(`${field} entries must be project-relative paths`);
+  }
+  if (portable.split('/').includes('..')) {
+    throw new Error(`${field} entries must not traverse an ancestor directory`);
+  }
+}
+
+/**
+ * Resolve a literal file target without permitting lexical or symlink escape.
+ * Missing files are allowed so the CLI can retain its per-file
+ * `file_not_found` result, but their nearest existing ancestor must still be
+ * inside the project root.
+ */
+function resolveProjectFileTarget(rootDir, relFile) {
+  validateProjectRelativePath(relFile, 'config.files');
+  const rootAbs = path.resolve(rootDir);
+  const rootReal = fs.realpathSync.native(rootAbs);
+  const candidateAbs = path.resolve(rootAbs, relFile);
+  if (!isContainedPath(rootAbs, candidateAbs)) {
+    throw new Error(`config.files target escapes project root: ${relFile}`);
+  }
+
+  let existing = candidateAbs;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    existing = parent;
+  }
+  const existingReal = fs.realpathSync.native(existing);
+  if (!isContainedPath(rootReal, existingReal)) {
+    throw new Error(`config.files target escapes project root through a symlink: ${relFile}`);
+  }
+
+  if (!fs.existsSync(candidateAbs)) return candidateAbs;
+  const candidateReal = fs.realpathSync.native(candidateAbs);
+  if (!isContainedPath(rootReal, candidateReal)) {
+    throw new Error(`config.files target escapes project root through a symlink: ${relFile}`);
+  }
+  return candidateReal;
 }
 
 /**
@@ -234,6 +299,7 @@ function validateConfig(cfg) {
   if (!cfg.files.every((f) => typeof f === 'string' && f.length > 0)) {
     throw new Error('config.files must contain only non-empty strings');
   }
+  for (const file of cfg.files) validateProjectRelativePath(file, 'config.files');
   if (cfg.exclude !== undefined) {
     if (!Array.isArray(cfg.exclude)) {
       throw new Error('config.exclude, if present, must be a string array');
@@ -256,18 +322,23 @@ function validateConfig(cfg) {
 function commentOpen(syntax) { return syntax === 'jsx' ? '{/*' : '<!--'; }
 function commentClose(syntax) { return syntax === 'jsx' ? '*/}' : '-->'; }
 
-function buildTagBlock(syntax, port) {
+function isValidServerToken(token) {
+  return typeof token === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token);
+}
+
+function buildTagBlock(syntax, port, token) {
   const open = commentOpen(syntax);
   const close = commentClose(syntax);
   return (
     open + ' ' + MARKER_OPEN_TEXT + ' ' + close + '\n' +
-    '<script src="http://localhost:' + port + '/live.js"></script>\n' +
+    '<script src="http://localhost:' + port + '/live.js?token=' + encodeURIComponent(token) + '"></script>\n' +
     open + ' ' + MARKER_CLOSE_TEXT + ' ' + close + '\n'
   );
 }
 
-function insertTag(content, config, port) {
-  const block = buildTagBlock(config.commentSyntax, port);
+function insertTag(content, config, port, token) {
+  const block = buildTagBlock(config.commentSyntax, port, token);
   // insertBefore: match the LAST occurrence. Anchors like `</body>` naturally
   // belong at the end, and the same literal can appear earlier in code blocks
   // within rendered documentation pages.

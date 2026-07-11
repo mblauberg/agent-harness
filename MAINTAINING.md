@@ -17,18 +17,33 @@ is a harness invariant, not an agent-platform preference.
 2. Use `skill-audit` for an existing skill or `skill-authoring` for a new one.
 3. Write a consistent kebab-case capability name. Related writing skills use
    parallel names: `engineering-writing`, `academic-writing`, `legal-writing`.
-4. Put trigger terms and exclusions in the frontmatter description. Keep it
-   under 1024 characters and optimise the first 250 characters for discovery.
-5. Keep `SKILL.md` roughly 500 words or less. Move depth into narrowly named
+4. This harness's portable frontmatter profile contains only `name` and
+   `description`; provenance lives in a notice and provider UI metadata in a
+   validated sidecar. Metadata or tool lists may narrow invocation but never
+   grant authority.
+5. Put trigger terms and the nearest exclusion in the first 250 description
+   characters. Keep the complete canonical catalogue at or below 8,000
+   characters, targeting 7,600 for wrapper/version headroom; per-entry brevity
+   cannot compensate for an omitted skill.
+6. Keep `SKILL.md` roughly 500 words or less. Move depth into narrowly named
    references loaded only when needed; put deterministic behaviour in scripts.
-6. Add positive, negative and boundary trigger fixtures plus contract tests for
-   any machine-enforceable invariant.
-7. Re-run the public-safety and full harness gates.
+7. Add schema-v2 positive, negative and boundary fixtures with exact primary
+   and companion routes plus contract tests for machine-enforceable invariants.
+8. For material changes, freeze held-out cases and compare candidate,
+   without-skill and previous-package arms on current primary families. Retain
+   every invalid, omitted, timed-out and failed attempt with model lineage.
+9. Re-run the public-safety and full harness gates.
 
 Split a skill when its triggers, authority, artifacts or completion gates are
 meaningfully different. Merge skills when they compete for the same request and
 cannot explain a stable boundary. Condense duplicated model knowledge; retain
 only rules that change behaviour or prevent observed failures.
+
+Choose the smallest correct container: always-loaded project rule, occasional
+skill, deterministic script/hook, external MCP/app capability, or stable
+independently versioned plugin. Do not import popular packs wholesale. Extract
+only licensed, evidence-backed mechanisms into the nearest local owner; create a
+new skill only when trigger, authority, artifact and gate remain distinct.
 
 The writing parity set shares a tiered anti-AI base. Structural changes to one
 of `engineering-writing`, `academic-writing` or `legal-writing` must be checked
@@ -57,8 +72,8 @@ validator. New domains should first compose an existing base profile plus a
 domain skill. Add a base profile only when its artifacts, deterministic gates,
 judgement gates and release meaning are materially distinct.
 
-Every lifecycle/core skill needs positive, negative and boundary trigger
-fixtures. Changes to routing descriptions also run the held-out lifecycle
+Every skill needs positive, negative and boundary trigger fixtures. Changes to
+routing descriptions also run the held-out portfolio/lifecycle
 dataset with repeated trials and record raw numerator/denominator, model and
 harness versions.
 
@@ -70,6 +85,9 @@ harness versions.
   licence, copyright, notice and modification requirements beside the component.
 - Prefer source links and small adaptations over vendoring large generated
   bundles. Record why a third-party component is present.
+- Treat plugins as supply-chain packages: pin source/ref, inventory manifests,
+  scripts, hooks, binaries, MCP/app endpoints, network/data flows, permissions,
+  update/rollback and component licences before execution or installation.
 - Keep runtime examples synthetic and visibly placeholder-based.
 
 ## Verify

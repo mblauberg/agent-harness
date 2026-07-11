@@ -114,12 +114,19 @@ function getUsers(): User[] {           // [] when none — safe to map/filter
 // Bad — floating promise: rejection is swallowed, ordering unclear
 sendEmail(user);
 
-// Good — await, or explicitly discard
+// Good — await, or detach only with an explicit rejection owner
 await sendEmail(user);
-void fireAndForget();                    // intent is explicit
+void fireAndForget().catch(reportBackgroundFailure);
 
-// Sequential awaits that don't depend on each other → parallelise
+// `void fireAndForget()` only silences some linters. A rejected promise is
+// still unhandled unless the called API supervises rejection internally.
+
+// A small fixed independent set can run together.
 const [a, b] = await Promise.all([fetchA(), fetchB()]);
+
+// Do not map an unbounded input straight into Promise.all. Use the repository's
+// bounded worker pool/queue, or keep deliberate sequential backpressure when
+// rate, memory, cancellation, ordering or partial-failure semantics require it.
 ```
 
 ## Type-level tests

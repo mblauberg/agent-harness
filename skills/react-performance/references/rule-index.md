@@ -8,7 +8,7 @@ whole corpus.
 |---|---|---|
 | Sequential requests or slow server response | `async-`, `server-` | `async-parallel.md`, `server-parallel-fetching.md`, `server-cache-react.md` |
 | Large client/server bundle | `bundle-` | `bundle-barrel-imports.md`, `bundle-dynamic-imports.md`, `bundle-defer-third-party.md` |
-| Duplicate client fetching or global listeners | `client-` | `client-swr-dedup.md`, `client-event-listeners.md` |
+| Duplicate client fetching or global listeners | `client-` | `client-request-dedup.md`, `client-event-listeners.md` |
 | Expensive or repeated React renders | `rerender-` | `rerender-derived-state-no-effect.md`, `rerender-dependencies.md`, `rerender-memo.md` |
 | Hydration, DOM, SVG or paint cost | `rendering-` | `rendering-hydration-no-flicker.md`, `rendering-content-visibility.md` |
 | Effect callback or lifecycle edge | `advanced-` | `advanced-effect-events.md`, `advanced-init-once.md` |

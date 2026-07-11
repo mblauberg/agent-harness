@@ -1,6 +1,6 @@
 ---
 name: tanstack-query
-description: Use when building, debugging, testing, or reviewing TanStack Query (React Query) v5 server-state code — query keys, queryOptions, cache freshness, mutations, invalidation, optimistic updates, pagination, cancellation, SSR/hydration, or request waterfalls. Not for generic React state, TanStack Router/Start, or backend caching.
+description: "Use for TanStack Query v5 server-state code: keys, options, freshness, mutations, invalidation, optimistic updates, pagination, cancellation, or SSR. Not for generic React state, performance, routers, or backend caches."
 ---
 
 # TanStack Query

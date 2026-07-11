@@ -88,17 +88,18 @@ trade an honest legal negative for elegance.
   recitation. Synthesise WITHIN one issue; never fuse distinct legal questions (jurisdiction,
   reasons, procedural fairness) into one "errors" block to save space - that destroys the
   separate-CRAC structure and makes each ground unwinnable.
-- Embed the decisive fact in the issue itself: "whether the adjudicator erred by accepting a $X
-  figure that embedded interest the claimant denied and later conceded", not "whether the
-  adjudicator erred as to interest". One concrete issue line does the marshalling several
+- Embed the decisive fact in the issue itself: "whether the decision-maker
+  denied procedural fairness by relying on a report disclosed after the hearing
+  without inviting a response", not "whether procedural fairness was denied".
+  One concrete issue line does the marshalling several
   abstract paragraphs attempt.
 
 ## State It Once; The One Allowed Echo
 
-- Front-load once: state each shared premise, rule, figure and chronology once, in the
-  framework or umbrella block, and have later sections cite it by name. (See the SKILL Concision
-  Pass "one document does one job"; for the QCAT/QCATA gamma structure see the matter skill's
-  `document-structures.md`.)
+- Front-load once: state each shared premise, rule, figure and chronology once,
+  in the framework or umbrella block, and have later sections cite it by name.
+  See the SKILL concision rule that one document does one job; a project-specific
+  document structure may define the stable cross-reference nodes.
 - Emphasis is not redundancy. Deliberate restatement is legitimate only at a structural
   primacy point - the opening frame and one close - and only as reinforcement that carries new
   evidence or stakes. Every other repeat is redundancy: cut it to a cross-reference.
@@ -119,8 +120,9 @@ trade an honest legal negative for elegance.
   cross-refers to it. A cross-reference must name the target document and a stable locus (its
   heading, paragraph or schedule number, not a page number that re-flows on rebuild), and it must
   resolve to something that exists. The same figure, defined term, date or label must read
-  identically in every document in the pack; reconcile them before filing, because a reader who
-  finds the award total stated two ways in the one pack discounts both.
+  identically in every document in the pack; reconcile them before filing,
+  because a reader who finds the same defined term or total stated two ways
+  discounts both.
 
 ## Select And Aim
 
@@ -149,13 +151,14 @@ trade an honest legal negative for elegance.
 - Primacy: lead with the strongest ground, and within a multi-limb ground lead with the
   strongest limb. Order threshold-first, then strongest-to-weakest - a potentially dispositive
   jurisdiction/nullity ground leads regardless of when it arose in the hearing.
-- Cap live grounds at three, at most four; fold a weaker or overlapping complaint in as a
-  sub-point of a stronger ground rather than as a co-equal heading. Over-issuing signals
-  under-confidence.
+- Prefer a small set of distinct, supportable grounds. Three or four is an
+  editing heuristic, not a procedural limit **(skill default)**. Do not merge
+  legally distinct grounds merely to hit it; do fold a genuinely overlapping
+  complaint into its stronger owner.
 - Cut versus relocate - keep the two distinct. Cut a genuinely weak point outright (a hedged
   "in the alternative" makeweight dilutes the strong grounds and signals they needed padding).
-  But do NOT cut strong, cited figure or quantum substance to hit a page target: relocate it to a
-  schedule or annexure with a pinpoint cross-reference. Cutting substance guts the evidentiary
+  But do NOT cut strong, cited analysis or evidence to hit a page target:
+  relocate genuinely schedular detail with a pinpoint cross-reference. Cutting substance guts the evidentiary
   spine; relocating keeps the force and saves the page. Sentence-level trimming alone floors at a
   few pages - a large page cut comes from homing repeated analysis and relocating cited working,
   not from shortening sentences.
@@ -189,8 +192,9 @@ trade an honest legal negative for elegance.
 
 ## Adverse Authority And Candour
 
-- Adverse authority must be disclosed: bringing contrary authority to the tribunal's attention
-  is an ethical duty, not a tactical choice. The persuasive question is only how it is met.
+- Verify and comply with the current professional-conduct, candour and forum
+  duties concerning adverse authority. Where disclosure is required, it is not
+  a tactical choice; identify the authority accurately and meet it fairly.
 - Distinguish on the facts first: argue the facts of this case sit outside the adverse
   precedent's reasoning. Attack the correctness of an adverse decision only as a last resort,
   and never attack an authority's worth or the opponent's motives - attack applicability and
@@ -199,8 +203,9 @@ trade an honest legal negative for elegance.
   weak point projects command of the case; side-stepping it persuades the reader there is no
   answer. Concede a genuinely non-essential point cleanly - candour is a weapon, and a
   located concession buys credibility for every contested point that follows.
-- Anticipate, never attribute. An expected answer is framed as expected ("the claimant may
-  answer that ..."), sourced to the record where he has actually said it, and never put into
+- Anticipate, never attribute. An expected answer is framed as expected ("the
+  other party may answer that ..."), sourced to the record where it has
+  actually been said, and never put into
   the opponent's mouth as a position the record does not contain (see the integrity rules in
   `source-boundary-and-citations.md`).
 - Do not take an isolated sentence of the decision below out of context: identify the impugned
@@ -280,15 +285,12 @@ trade an honest legal negative for elegance.
   don't assert, the four-flaws gold standard); J D Heydon, "Reciprocal Duties of Bench and Bar"
   (2007) 81 ALJ 23 (judgment-ready standard, whole argument in writing, restraint); Pepper/Jagot,
   "A Basic Guide to Good Written and Oral Advocacy" (adverse-authority duty, write-the-decision
-  test); M D Kirby, "Ten Rules of Appellate Advocacy" (1995) 69 ALJ 964; Supreme Court of
-  Queensland PD 3 of 2013 (outlines of argument, 10-page norm); QCAT, "Submissions" (clear,
-  concise, relevant).
+  test); M D Kirby, "Ten Rules of Appellate Advocacy" (1995) 69 ALJ 964.
 - Brief-writing canon: Bryan A. Garner, "The Deep Issue" (Scribes Journal of Legal Writing,
   vol 5) and *The Winning Brief*; Scalia & Garner, *Making Your Case*; Ross Guberman, *Point
   Made* (synthesis, topic sentences, issue framing); Ruggero J. Aldisert, *Winning on Appeal*
   (ground selection, do not drown good arguments); Columbia Law School Writing Center,
-  "IRAC/CRAC/CREAC" and "Headings and Umbrella Sections"; Bar Association of Queensland, "The
-  Art of Written Submissions".
+  "IRAC/CRAC/CREAC" and "Headings and Umbrella Sections".
 - Empirical: Long & Christensen (2008) 45 Idaho L Rev 171 (frequent intensifiers correlate with
   losing appeals); Black, Hall, Owens & Ringsmuth (2016) 4 J Law & Courts 377 (emotional
   language costs merits votes); Flammer (2010) 16 J Legal Writing Inst 183 (judges prefer plain

@@ -157,7 +157,8 @@ Every interactive element needs all states:
 ### Responsiveness
 
 - **All breakpoints**: Test mobile, tablet, desktop
-- **Touch targets**: 44x44px minimum on touch devices
+- **Touch targets**: prefer 44x44px comfort; verify WCAG 2.2 AA's 24x24px rule
+  and exceptions separately
 - **Readable text**: No text smaller than 14px on mobile
 - **No horizontal scroll**: Content fits viewport
 - **Appropriate reflow**: Content adapts logically
@@ -196,7 +197,7 @@ Go through systematically:
 - [ ] Error states are helpful
 - [ ] Loading states are clear
 - [ ] Empty states are welcoming
-- [ ] Touch targets are 44x44px minimum
+- [ ] Touch targets meet the declared product target and applicable WCAG rule
 - [ ] Contrast ratios meet WCAG AA
 - [ ] Keyboard navigation works
 - [ ] Focus indicators visible

@@ -25,6 +25,30 @@ actual model lineage. Non-human evidence lists the source paths it consumed,
 all within authority. A digest-bound `--project-policy` may add a complete
 project profile or add requirements to a built-in profile, never remove them.
 
+Stochastic assurance uses a lifecycle binding with exactly `status`,
+`anchored_at`, `evidence_id`, `evaluation_artifact_id`, `evaluation_id`,
+`evaluation_digest` and `plan_digest`. Before execution, a `planned` row binds
+the evaluation ID and frozen plan digest; artifact, evaluation digest and
+evidence fields stay empty. `complete`, `failed` and `incomplete` rows keep
+that anchor and fill the three live-result fields. Complete rows link passing
+judgement evidence. Terminal nonpasses link deterministic receipt-validation
+evidence and remain in the history; they never satisfy stochastic assurance.
+Awaiting acceptance requires at least one complete passing row and no planned
+row.
+
+The referenced local JSON artifact must be declared as evidence. With
+`--verify-hashes`, the delivery validator checks its live digest and invokes
+the `evaluation-run` schema-v2 validator with the anchored evaluation ID,
+frozen plan digest and enclosing delivery run ID. It also verifies every
+artifact inside that evaluation receipt and checks profile minima against the
+bound plan for complete candidates. Terminal nonpasses may fall below those
+minima because they are retained evidence, not acceptance candidates. For
+every materialised row, the plan must be frozen no later than `anchored_at`,
+and the anchor must precede that nested evaluation's earliest preflight or
+attempt. A retry may therefore be freshly anchored after an earlier evaluation
+fails, even while the enclosing delivery remains in execution. Copied dataset,
+sample, repetition, threshold or score fields cannot satisfy this gate.
+
 Security checks are selected by changed surface. Crucial software and
 agent-product runs cannot reach acceptance without matching passing
 deterministic results. Agent products disposition the OWASP agentic risk

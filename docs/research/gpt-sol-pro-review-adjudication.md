@@ -1,9 +1,11 @@
 # Adjudication of the external agent-harness review
 
-Status: Current as at 11 July 2026
+Status: Historical adjudication at `f7a3240`; operational findings superseded by
+the implementation at `9f8abce`
 Reviewed source: [`gpt-sol-pro-review.md`](gpt-sol-pro-review.md)
 Source baseline: `2e7770fc31fe3d9fa725392fe2b1e87de38d9e38`
-Live baseline: `f7a3240`
+Adjudicated baseline: `f7a3240`
+Post-adjudication baseline: `9f8abce`
 
 ## Verdict
 
@@ -16,6 +18,16 @@ Herdr status and much of its roadmap are now stale.
 
 The filename is also misleading: the document is a repository review, not an
 analysis of a GPT Sol or Pro model.
+
+## Post-`9f8abce` disposition
+
+The table and programme below preserve the decisions made at `f7a3240`; they
+are not a current gap list. Spec 04 subsequently implemented the accepted CI,
+bounded transport, exact workspace trust, database enforcement, retention and
+archive preview, deterministic receipt, status/doctor, security and invariant
+work. Its current status is “implementation complete; final human acceptance
+pending”. Re-open individual findings only against live source and current gate
+evidence, not this historical triage.
 
 External citations were checked against current primary sources. The cited
 protocol and platform claims are generally sound: MCP puts orchestration and
@@ -36,7 +48,11 @@ supported by the official SQLite documentation
 
 ## Section-by-section disposition
 
-| Review section | Disposition | Current judgement |
+The following table is the adjudication recorded at `f7a3240`, before Spec 04.
+Present-tense wording in its final column describes that historical baseline;
+the post-`9f8abce` disposition above is authoritative for the current tree.
+
+| Review section | Disposition | Judgement at `f7a3240` (historical) |
 | --- | --- | --- |
 | 1. Fundamental architecture | Retain | Fabric below both primaries, MCP as façade, project artifacts outside SQLite and Herdr as non-authoritative visibility remain correct. |
 | 2. Operational status | Closed/stale | `f7a3240` enables and pins Claude, Codex, Agy, Cursor and Kiro; five provider smokes and a live two-way MCP round trip passed. Pi alone remains deliberately disabled. Conformance vocabulary is still useful for future adapters. |
@@ -58,7 +74,7 @@ supported by the official SQLite documentation
 | 18. Target architecture | Retain as direction | The layered diagram is compatible with the live system. Keep one daemon and one SQLite transaction boundary; do not turn logical modules into network microservices. |
 | 19. Roadmap | Superseded | Reorder around the remaining gaps. Activation, primary-pair proof, Codex schema pinning and durable Herdr observation are complete. |
 
-## Accepted remaining programme
+## Programme accepted at `f7a3240` (implemented at `9f8abce`)
 
 The remaining high-confidence work becomes
 [`Spec 04 — Agent fabric operational hardening`](../specs/04-agent-fabric-operational-hardening.md):

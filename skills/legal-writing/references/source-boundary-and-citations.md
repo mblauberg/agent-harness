@@ -15,8 +15,8 @@ Ask:
 4. Where exactly is the fact found?
 5. Is the source permitted for filing-facing use?
 6. Does the fact need redaction, qualification, official-source verification or user instruction?
-7. Does the evidence index or matter register need updating because I found useful evidence, a stale path, an
-   index error, an overlap or a new matter copy?
+7. Does the project's canonical evidence register need updating because the
+   source route, status or duplication record is stale?
 
 ## Preferred Source Cues
 
@@ -49,26 +49,23 @@ that status in the rewrite.
 | Limitation or source boundary | `does not establish`, `is not relied on for`, `proves notice but not truth` |
 | Unresolved issue | `requires verification`, `requires user instruction`, or omit from filing-facing text |
 
-Do not upgrade an email accusation, another proceeding's submission, a PPN/DVO document, an internal note, a user
-instruction or an unresolved issue into an established fact. Do not turn a contention into affidavit evidence.
+Do not upgrade an email accusation, another proceeding's submission, a
+protective or police-issued safety document, an internal note, a user
+instruction or an unresolved issue into an established fact. Do not turn a
+contention into affidavit evidence.
 
-## Banned Evidence Sources
+## Locator And Derivative Layers Are Not Evidence
 
-Do not cite these as evidence:
+Do not cite an index, manifest, OCR layer, automated transcript, render,
+generated summary, internal working note or filename-only description
+as if it were the underlying evidence. These layers may locate or help inspect a
+source. They do not prove a filing fact.
 
-- global or matter evidence indexes;
-- `.work/`;
-- `docs/audits/`;
-- OCR scratch;
-- machine transcripts (e.g. an unofficial ASR/faster-whisper transcript) unless verified and deliberately exhibited. This does **not** bar citing the official audio recording at a checked timestamp: the official recording is the authoritative record and is citable, and a party's own good-faith transcription of the audible words at a cited official-audio timestamp is permitted when framed as her transcription (not a certified verbatim quote) with an invitation to listen, per *Butera v DPP (Vic)* (1987) 164 CLR 180 and QCAT Act 2009 (Qld) s 28;
-- render-check pages or images;
-- generated summaries;
-- agent notes;
-- internal notes;
-- draft reasoning notes;
-- filename-only descriptions.
-
-Internal notes may help locate a source. They do not prove a filing fact.
+For audio or video, cite the authoritative recording and a checked timestamp.
+Treat a machine transcript as a locator until its words, speaker and timing have
+been verified under the project's protocol and the forum permits the proposed
+use. Describe any party-prepared transcription honestly; do not call it an
+official or certified transcript unless it is one.
 
 ## Filing-Facing Citation Style
 
@@ -125,15 +122,16 @@ instruments and silently altered rule titles are recurring drafting-agent failur
   machine-drafted filings, and it is checkable.
 - Never invent an instrument, declaration, statutory notice, order term or finding that the baseline document
   or record does not contain, however plausible the form suggests it should exist.
-- Never silently alter a rule title, statute name, court or decision-maker label while paraphrasing
-  (`QCAT Rules` is not `QCATA Rules`; an adjudicator is not `the Member`). Preserve exactly; if the source
-  looks wrong, flag it, do not fix it in place.
-- Court AI rules bind this work and self-represented litigants expressly. Queensland courts and QCAT
-  (PD 5/2025 and the generative-AI guidelines) require every legislative and authority reference to be checked
-  for accuracy, with the verification itself not done by AI, and expose a party to costs where fake or
-  inaccurate AI content causes delay; NSW (PN SC Gen 23) and the Federal Court (GPN-AI) are to the same
-  effect. Never feed private, confidential, suppressed or privileged material to an external tool. Verify the
-  current practice direction before filing in a new forum.
+- Never silently alter a rule title, statute name, court, tribunal or
+  decision-maker label while paraphrasing. Preserve the source's exact term; if
+  it appears wrong or obsolete, flag it rather than correcting the record.
+- Before using an AI-assisted draft externally, verify the forum's current AI,
+  authorship, certification, confidentiality and authority-checking
+  requirements from official sources. Do not use AI to attest that its own
+  authorities are accurate. A human must open and check every authority and
+  quotation required by the forum. Never send private, confidential,
+  suppressed or privileged material to a tool whose disclosure boundary does
+  not permit it.
 
 ## Working With Uncertainty
 

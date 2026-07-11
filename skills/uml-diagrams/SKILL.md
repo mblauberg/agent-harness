@@ -1,17 +1,24 @@
 ---
 name: uml-diagrams
-description: "Use when creating or editing requirements-spec UML deliverables in PlantUML: use-case package overviews, per-package use case diagrams, activity diagrams, include/extend notation, swimlanes, and SRS-style diagram sets. Do not use for C4, Structurizr, Mermaid, or unrelated .puml work."
+description: "Use for requirements-spec UML in PlantUML: use-case, package, activity, include/extend, and swimlane diagrams. Not for D2, Mermaid, C4, Structurizr, or unrelated PlantUML; use the matching diagram owner."
 ---
 
 # Requirements-Spec UML Diagrams
 
-Create requirements-specification UML diagrams. Prefer PlantUML source (`.puml`) and render SVG/PNG before finalising.
+Create or review requirements-specification UML diagrams. The target project's
+diagram profile, terminology, document structure and source/render ownership are
+authoritative. Use the neutral rules here only where the project is silent.
+Prefer PlantUML source (`.puml`) and inspect a render before finalising.
 
 ## Platform choice
 
-1. PlantUML first: use cases, packages, actors, include/extend, swimlanes, decisions, forks, joins, and finals auto-route reliably.
-2. Manual SVG/Python only when an existing project already uses it. Read `references/manual-rendering-quality.md`.
-3. Excalidraw/D2 only when explicitly requested.
+1. PlantUML first when the project has no established diagram tool: use cases,
+   packages, actors, include/extend, swimlanes, decisions, forks, joins, and
+   finals auto-route reliably.
+2. Preserve an established project tool. For manual SVG/Python, read
+   `references/manual-rendering-quality.md`.
+3. Otherwise use Excalidraw or D2 only when explicitly requested; route D2 to
+   `d2-diagrams`.
 
 ## Workflow
 
@@ -20,34 +27,46 @@ Create requirements-specification UML diagrams. Prefer PlantUML source (`.puml`)
    - activity diagram: `references/activity-rules.md`
    - before finalising: `references/common-mistakes.md`
    - high-stakes deliverable: `references/multi-agent-review-loop.md`
-2. Start from the matching template:
+2. If no project template exists, start from the matching skill template:
    - `templates/use_case_package_template.puml`
    - `templates/use_case_diagram_template.puml`
    - `templates/activity_diagram_template.puml`
-3. Use stable aliases: `UC_BookTrip`, `A_RegisteredUser`, `P_Booking`.
-4. Lint:
+3. Use stable aliases consistent with the project.
+4. Lint with the skill-relative script (the linter is heuristic, not a project
+   conformance oracle):
    ```bash
-   python scripts/lint_plantuml_diagram.py path/to/diagram.puml --type auto
+   python3 "${AGENTS_HOME:-$HOME/.agents}/skills/uml-diagrams/scripts/lint_plantuml_diagram.py" path/to/diagram.puml --type auto
    ```
 5. Render:
    ```bash
-   python scripts/render_plantuml.py path/to/diagram.puml --format svg
+   python3 "${AGENTS_HOME:-$HOME/.agents}/skills/uml-diagrams/scripts/render_plantuml.py" path/to/diagram.puml --format svg
    ```
-6. Inspect the image using `references/rendering-quality-checklist.md`; fix and re-render until clean.
+6. Inspect the image using `references/rendering-quality-checklist.md`; fix and
+   re-render until the objective gates pass. For a read-only request, write only
+   to an assigned run-owned temporary output and report proposed source changes.
 
-## Mark-Critical Rules
+## UML correctness and consistency
 
 - `<<include>>`: base -> included, arrowhead at included.
-- `<<extend>>`: extension -> base, arrowhead at base, condition note required.
+- `<<extend>>`: extension -> base, arrowhead at base; record its condition in
+  the diagram or linked requirement according to the project profile.
 - No solid use-case-to-use-case associations; only include, extend, or generalisation.
-- Package overview shows packages and actors only, not individual use cases.
-- Cross-package use cases need `(defined in P<n>)`.
-- Transitive includes are not direct includes; document chains in Notes.
+- A package-only overview does not also carry the detailed per-package use-case
+  view; split conceptual levels unless the project explicitly combines them.
+- Cross-package references use the project's traceability convention; do not
+  invent package numbers, section numbers or table names.
+- Transitive includes are not direct includes; trace chains using the project's
+  requirements convention.
 - Activity diagrams show workflow for one use case; use swimlanes when roles/systems participate.
 - Alternate flows that reconverge need merge nodes. Separate terminating flows may have separate finals, but never stacked finals.
-- Every swimlane contains at least one action. Request/provide actions belong in their real actor/system lanes.
-- Keep actors, the actor table, the detailed use-case descriptions, and diagram associations consistent.
+- Omit empty swimlanes and place actions with the participant that performs them.
+- Keep actors, the project's requirements register, detailed use-case
+  descriptions and diagram associations consistent.
 - Leave enough canvas margin so labels do not clip.
+
+For high-stakes review, load `orchestrate`; runtime routing and the harness risk
+tier choose reviewers. Objective lint, render, document-build and traceability
+evidence outrank reviewer votes.
 
 ## Resources
 

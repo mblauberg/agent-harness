@@ -1,0 +1,43 @@
+# Deterministic doctrine/reference cases for orchestrate.
+# Behavioural routing lives in schema-v2 fixtures and retained clean-context
+# model receipts; this file makes no trigger-pass claim.
+
+schema_version: 1
+
+doctrine_invariants:
+  - "Cross-family follows the HARNESS risk ladder"
+  - "No concurrent shared-state writes"
+  - "Workers write full output to files"
+  - "Objective checks outrank opinions"
+  - "You own the final call"
+  - "Discover current model/tool options at runtime"
+  - "default to fan-out"
+  - "native same-session subagents"
+  - "Use same-family CLI only for auth/preflight smoke tests"
+  - "cross-family broad review"
+  - "CROSS-FAMILY-NOT-RUN"
+  - "Final gate"
+  - "auth/preflight smoke tests"
+  - "Document update wave"
+
+reference_invariants:
+  - "trigger-boundary.md"
+  - "retrieval-and-tool-routing.md"
+  - "evaluation-and-observability.md"
+  - "debate-and-panels.md"
+  - "codex-subagents.md"
+  - "Claude-only layer"
+  - "read_only_guarantee"
+  - "status=ok"
+  - "same_family_forbidden"
+  - "invalid_orchestrator_family"
+  - "orchestrator_family_required"
+  - "cross_family=true"
+  - "P0/P1 findings triaged"
+  - "best_effort routes may scout but not certify"
+  - "source-anchoring"
+  - "MANIFEST"
+  - "FINAL_GATE"
+  - "dynamic-workflows.md"
+  - "ultracode"
+  - "paired-primary.md"

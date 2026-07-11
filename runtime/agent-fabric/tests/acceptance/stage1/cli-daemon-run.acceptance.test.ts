@@ -7,9 +7,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { runSourceCli } from "../../support/cli-process.ts";
+import { createPrimaryCompatibilityFixture } from "../../support/primary-adapter-testkit.ts";
 
 const packageRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const repositoryRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
 const sourceCli = fileURLToPath(new URL("../../../src/cli/main.ts", import.meta.url));
 
 async function waitForFile(path: string): Promise<void> {
@@ -72,13 +72,21 @@ describe("foreground daemon CLI", () => {
   });
 
   it("fails closed when explicit trusted configuration selects disabled adapters", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fabric-cli-disabled-adapters-"));
+    const fixture = await createPrimaryCompatibilityFixture();
+    const root = fixture.directory;
     try {
       const trustedConfigPath = join(root, "agent-fabric.yaml");
-      const trustedConfig = (await readFile(join(repositoryRoot, "config", "agent-fabric.yaml"), "utf8"))
-        .replace("activeAdapters: []", "activeAdapters:\n  - claude-agent-sdk")
-        .replace("workspaceRoots: []", `workspaceRoots:\n  - ${JSON.stringify(root)}`);
-      await writeFile(trustedConfigPath, trustedConfig, "utf8");
+      await writeFile(trustedConfigPath, `${JSON.stringify({
+        schemaVersion: 1,
+        allowedAdapters: ["claude-agent-sdk"],
+        activeAdapters: ["claude-agent-sdk"],
+        allowedProfiles: ["headless"],
+        adapters: {
+          "claude-agent-sdk": { command: [process.execPath, fixture.artifactPaths[0]] },
+        },
+        workspaceRoots: [root],
+        limits: { maximumConcurrentProviderTurns: 1 },
+      }, null, 2)}\n`, "utf8");
       const result = await runSourceCli(
         [
           "daemon",
@@ -86,11 +94,11 @@ describe("foreground daemon CLI", () => {
           "--trusted-config",
           trustedConfigPath,
           "--compatibility",
-          join(repositoryRoot, "config", "adapter-compatibility.yaml"),
+          fixture.compatibilityPath,
           "--compatibility-schema",
-          join(repositoryRoot, "runtime", "agent-fabric", "schemas", "adapter-compatibility.schema.json"),
+          fixture.schemaPath,
           "--agents-home",
-          repositoryRoot,
+          root,
         ],
         {
           environment: {

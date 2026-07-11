@@ -1,12 +1,12 @@
-positive:
-  - diagnose why this test is failing without implementing a permanent fix
-  - debug this startup crash and report the evidence-backed cause
-  - investigate this performance regression read-only
-negative:
-  - implement the approved fix and review until clean
-  - review this diff for regressions
-  - write the first failing test for this known bug
-boundary:
-  - find the cause first and wait before changing production code
-  - reproduce this intermittent failure with temporary instrumentation
-  - diagnose and then fix it under the enclosing implement run
+schema_version: 2
+target_skill: diagnose
+cases:
+  - {id: q064, relation: positive, prompt: "Reproduce this crash and identify the root cause without making a permanent fix.", tags: [direct], expected: {primary_skill: diagnose, companion_skills: []}}
+  - {id: q065, relation: positive, prompt: "Find why this test flakes by building a repeatable signal and testing falsifiable hypotheses.", tags: [direct], expected: {primary_skill: diagnose, companion_skills: []}}
+  - {id: q066, relation: positive, prompt: "Profile this regression, establish the baseline, and tell me which mechanism causes the slowdown.", tags: [direct], expected: {primary_skill: diagnose, companion_skills: []}}
+  - {id: q067, relation: negative, prompt: "The root cause is confirmed; implement the approved fix and verify it end-to-end.", tags: [adjacent], expected: {primary_skill: implement, companion_skills: []}}
+  - {id: q068, relation: negative, prompt: "Review this pull request for defects without reproducing a reported failure.", tags: [adjacent], expected: {primary_skill: code-review, companion_skills: []}}
+  - {id: q069, relation: negative, prompt: "Compare two ranking prompts with a repeatable held-out benchmark.", tags: [adjacent], expected: {primary_skill: evaluate, companion_skills: []}}
+  - {id: q070, relation: boundary, prompt: "Use a real browser to reproduce this checkout failure and isolate its root cause; do not fix it.", tags: [composition], expected: {primary_skill: diagnose, companion_skills: [playwright]}}
+  - {id: q071, relation: boundary, prompt: "Find the cause of this React rendering regression using production measurements only.", tags: [composition], expected: {primary_skill: diagnose, companion_skills: [react-performance]}}
+  - {id: q072, relation: boundary, prompt: "Reproduce the bug, confirm its root cause, then implement the authorised repair behind a regression test.", tags: [composition], expected: {primary_skill: implement, companion_skills: [diagnose, tdd]}}

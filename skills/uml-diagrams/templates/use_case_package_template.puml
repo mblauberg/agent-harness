@@ -1,13 +1,10 @@
 @startuml
-' Template: use-case package overview (requirements specification §2.1)
+' Template: use-case package overview.
 ' Replace the example packages, actors, and dependencies.
 
 left to right direction
 skinparam shadowing false
-skinparam handwritten false
-skinparam defaultFontName Arial
 skinparam actorStyle stickman
-skinparam packageStyle folder
 skinparam ArrowColor #333333
 skinparam BorderColor #333333
 skinparam package {
@@ -21,14 +18,11 @@ frame "uc System Name" {
   actor "External System" as A_External
 
   ' Use-case packages: folder-shaped packages only. No use-case ovals here.
-  package "Package One" as P_One {
-  }
-  package "Package Two" as P_Two {
-  }
-  package "Package Three" as P_Three {
-  }
+  folder "Package One" as P_One
+  folder "Package Two" as P_Two
+  folder "Package Three" as P_Three
 
-  ' Actor-to-package usage: dashed directed dependency.
+  ' Actor-to-package usage shown with a dependency. Adapt to the project profile.
   A_Primary ..> P_One
   A_Primary ..> P_Two
   A_External ..> P_Three

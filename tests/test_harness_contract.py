@@ -2,8 +2,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,10 +214,53 @@ def test_readme_catalogue_contains_every_portable_skill():
         "<!-- skill-catalogue:end -->", 1
     )[0]
     listed = set(re.findall(r"`([a-z0-9-]+)`", catalogue))
-    assert len(skills) == 31
     assert listed == skills
     for name in skills:
         assert f"(skills/{name}/SKILL.md)" in catalogue
+
+
+def test_openai_skill_sidecar_descriptions_fit_provider_contract():
+    for path in (ROOT / "skills").glob("*/agents/openai.yaml"):
+        value = yaml.safe_load(path.read_text())
+        description = value["interface"]["short_description"]
+        assert 25 <= len(description) <= 64, path
+
+
+def test_orchestrate_static_checker_does_not_claim_model_routing_passes():
+    checker = ROOT / "skills" / "orchestrate" / "evals" / "check_skill_triggers.py"
+    result = subprocess.run(
+        [sys.executable, str(checker)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "SKILL DOCTRINE CHECK: PASS" in result.stdout
+    assert "routing evidence is external" in result.stdout
+    assert " explicit" not in result.stdout
+    assert " inferred" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "content",
+    (
+        "schema_version: 1\ndoctrine_invariants: []\nreference_invariants: []\n",
+        "schema_version: 1\ndoctrine_invariants:\n  - only one\n",
+        "[]\n",
+    ),
+)
+def test_orchestrate_doctrine_checker_rejects_empty_or_malformed_contracts(
+    tmp_path, content
+):
+    cases = tmp_path / "contract_cases.yaml"
+    cases.write_text(content)
+    checker = ROOT / "skills" / "orchestrate" / "evals" / "check_skill_triggers.py"
+    result = subprocess.run(
+        [sys.executable, str(checker), "--cases", str(cases)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "SKILL CHECK: FAIL" in result.stdout
 
 
 def test_readme_is_concise_public_facing_and_free_of_process_commentary():

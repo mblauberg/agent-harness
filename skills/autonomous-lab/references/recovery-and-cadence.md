@@ -31,7 +31,10 @@ The heartbeat file (`STATE`) is your single **recover-after-compaction anchor**:
 Provider degradation — `{{TRANSIENT_FAILURE_SIGNALS}}` (e.g. an "overloaded" 5xx, rate-limit, session-cap reset) — is a **fact of long runs, not a reason to abort.** A multi-hour run *will* hit it. When a background job dies mid-run, follow this protocol in order:
 
 1. **Preserve survivors first.** Before anything else, write every completed and partial sub-result to disk verbatim. A 26-agent workflow that dies at stage 4 still produced real, valuable stage-1..3 findings. Losing them to a panic-restart is the expensive mistake.
-2. **Do no-API-safe deterministic work.** While the API is degraded, spend the wall on housekeeping that needs zero model calls: delete cruft, reconcile ledgers, tidy the tree, re-verify counts, preserve findings. The outage costs nothing if you spend it on local work.
+2. **Do no-API-safe deterministic work.** While the API is degraded, reconcile
+   ledgers, re-verify counts and preserve findings. Remove or reorganise files
+   only when the run manifest proves ownership and the existing authority allows
+   that exact action; unknown or user-owned material stays untouched.
 3. **Resume, do not restart.** Re-invoke the *same* workflow with its resume handle: `{{WORKFLOW_RUNNER}}({ scriptPath, resumeFromRunId: <prior-run-id> })`. Cached/completed sub-agents return **instantly from the journal**; only the failed-or-new sub-agents actually re-run. A resumed multi-stage pipeline re-runs only the killed stages, not the whole thing. (Codex substrate: same rule via the ledger — diff expected outputs vs on-disk files, re-dispatch only the missing items; `codex-operator.md`.)
 4. **Lean on cross-family stages during a primary outage.** Stages that call a *different* model family (`{{CROSS_FAMILY_VERIFIER}}`, e.g. a non-primary CLI) are unaffected by the primary provider's overload and resume cleanly. They are your overload-immune capacity.
 

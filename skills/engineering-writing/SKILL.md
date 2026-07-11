@@ -1,6 +1,6 @@
 ---
 name: engineering-writing
-description: "Use when writing, drafting, reviewing, condensing, or tightening software-engineering prose in clear Australian English: technical documentation, READMEs, pull requests, commit messages, changelogs and release notes, code comments, docstrings, error messages, UI text, bug reports, incident postmortems, runbooks, migration guides, design notes, reports, or the formal engineering deliverables written when scoping and starting a project (requirements/SRS, user stories, scoping, stakeholder analysis, business cases, development plans, architecture and ADRs, roadmaps, estimates, presentations, meeting briefs). Also use when engineering text sounds AI-generated, padded, or overpolished. Preserve technical meaning, identifiers, facts, numbers, and behaviour."
+description: "Use for drafting or condensing software-engineering prose such as requirements/specs, READMEs, commits, PRs, runbooks, errors, and design notes. Not for general, academic, or Australian legal prose."
 ---
 
 # Engineering writing
@@ -12,22 +12,22 @@ Cut first. Add only what serves the reader's job and belongs in this document.
 
 1. Name the audience, prior knowledge, required action or decision, and format
    constraint. If the reader's job is unclear, flag it before drafting.
-2. Choose the document type from that job. Use [document patterns](references/document-patterns.md)
-   for codebase and short-form prose, [requirements and planning](references/requirements-and-planning.md)
-   for pre-build deliverables, or [architecture and communication](references/architecture-and-presentations.md)
-   for designs, ADRs, presentations and briefs. Separate documents with
-   different jobs; cross-reference rather than merge or repeat them.
+2. Choose one relevant pattern: [document patterns](references/document-patterns.md)
+   for codebase/short-form prose, [requirements and planning](references/requirements-and-planning.md)
+   for already-decided pre-build content, or [architecture and communication](references/architecture-and-presentations.md)
+   for approved designs, ADRs, presentations and briefs. Do not load all three.
 3. Structure before sentences: front-load the point, use decision-oriented
    headings and one idea or requirement per unit, then move wrong-home material.
 4. Lock facts, logic, stance, evidence, obligations, behaviour, identifiers,
    paths, commands, flags, parameters, keys, error codes, numbers, units, dates,
    citations and quoted terms.
 5. Revise in separate structure, accuracy, clarity/concision, voice and
-   Australian-English passes using [process](references/process.md),
-   [style standard](references/style-standard.md), [engineer voice](references/engineer-voice.md)
-   and [Australian English](references/australian-english.md). Load
+   Australian-English passes. Load only the needed section from
+   [process](references/process.md), [style standard](references/style-standard.md),
+   [engineer voice](references/engineer-voice.md) or
+   [Australian English](references/australian-english.md); use
    [sentence mechanics](references/strunk-mechanics.md) or [sources](references/sources.md)
-   only when needed.
+   only for a specific problem.
 
 Preserve technical meaning and evidence altitude. Distinguish observation from
 interpretation; attach numbers to comparatives. Verify every package, API,

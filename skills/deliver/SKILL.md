@@ -1,6 +1,6 @@
 ---
 name: deliver
-description: Use when taking an approved non-trivial outcome end-to-end across software, research, analysis, documents or agent products — especially “deliver this autonomously”, “complete this report and verify it”, or work needing typed evidence, independent review and human acceptance. Not for deciding requirements (scope), a tiny one-shot task, software-only implementation already routed to implement, or production promotion (release).
+description: "Use for taking an approved research, analysis, document, or agent-product outcome through evidence, review, and human acceptance. Not for software-only work, unsettled scope, or release; use implement, scope, or release."
 ---
 
 # Deliver
@@ -29,7 +29,10 @@ may strengthen a profile, never weaken kernel gates silently.
    `implement`; stochastic behaviour routes through `evaluate`; failures use
    `diagnose`; substantial parallel work may use `orchestrate`.
 4. Produce profile-required deterministic evidence before judgement evidence.
-   Every gate links to a typed artifact or receipt.
+   Every gate links to a typed artifact or receipt. At acceptance, a stochastic
+   gate must bind and hash-verify a passing `evaluation-run` schema-v2 receipt;
+   copied scores or sampling metadata are not evidence. Retain failed or
+   incomplete evaluation receipts as non-gating history.
 5. Review independently with lenses selected from the dependency cone.
    Substantial+ requires a fresh native reviewer and the other primary family.
    Bonus-family failures are recorded and non-blocking.

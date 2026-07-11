@@ -1,12 +1,12 @@
-positive:
-  - humanise this general email without changing any facts
-  - make this sound less like ChatGPT and more like my writing sample
-  - remove the robotic tone and padding from this personal statement
-  - match this mixed-purpose draft to my voice while preserving the citations
-  - clean up this salesy announcement without inventing product claims
-negative:
-  - rewrite this technical README in concise Australian English
-  - polish this thesis discussion without weakening the citations
-  - draft this Australian court affidavit
-  - refactor this TypeScript module for readability
-  - redesign this interface and improve its UX copy
+schema_version: 2
+target_skill: natural-writing
+cases:
+  - {id: q145, relation: positive, prompt: "Humanise this general email without changing names, dates, facts, or intent.", tags: [direct], expected: {primary_skill: natural-writing, companion_skills: []}}
+  - {id: q146, relation: positive, prompt: "Rewrite this mixed-audience note so it sounds direct rather than robotic.", tags: [direct], expected: {primary_skill: natural-writing, companion_skills: []}}
+  - {id: q147, relation: positive, prompt: "Match this supplied personal voice sample while preserving every citation and number.", tags: [direct], expected: {primary_skill: natural-writing, companion_skills: []}}
+  - {id: q148, relation: negative, prompt: "Condense this API migration guide while preserving commands and identifiers.", tags: [adjacent], expected: {primary_skill: engineering-writing, companion_skills: []}}
+  - {id: q149, relation: negative, prompt: "Rewrite the dissertation conclusion without strengthening its claims.", tags: [adjacent], expected: {primary_skill: academic-writing, companion_skills: []}}
+  - {id: q150, relation: negative, prompt: "Make this Australian solicitor letter less formal before filing.", tags: [adjacent], expected: {primary_skill: legal-writing, companion_skills: []}}
+  - {id: q151, relation: boundary, prompt: "Rewrite this customer onboarding email naturally while preserving its exact API setup steps.", tags: [composition], expected: {primary_skill: natural-writing, companion_skills: [engineering-writing]}}
+  - {id: q152, relation: boundary, prompt: "Draft a public-facing software release announcement that is technically exact but not robotic.", tags: [composition], expected: {primary_skill: engineering-writing, companion_skills: [natural-writing]}}
+  - {id: q153, relation: boundary, prompt: "Summarise this affidavit for a friend, but preserve contested status and every legal qualification.", tags: [composition], expected: {primary_skill: natural-writing, companion_skills: [legal-writing]}}

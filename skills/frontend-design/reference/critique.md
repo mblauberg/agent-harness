@@ -175,11 +175,14 @@ Codex Run Notes are final-chat only. Do not include this section in the persiste
 - Prioritize ruthlessly. If everything is important, nothing is.
 - Don't soften criticism. Developers need honest feedback to ship great design.
 
-### Persist the Snapshot
+### Persist the Snapshot (only when authorised)
 
-Once the report above is finalized, write it to `.impeccable/critique/` so the user can refer back, and so `$frontend-design polish` can pick up the priority issues without a copy-paste.
+Return the report in chat by default. Persist it only when the user or an
+enclosing delivery run assigned an artifact path. Do not create
+`.impeccable/critique/` merely because critique was invoked.
 
-Skip this step if the Setup slug was null (vague or root-level target).
+Skip this step if no artifact authority exists or the Setup slug was null
+(vague or root-level target).
 
 1. **Write the body to a temp file** so you can pipe it to the helper. Use the full critique report (heuristic table, anti-patterns verdict, priority issues, persona red flags, minor observations, and questions), but stop before the "Ask the User" / "Recommended Actions" sections that come later.
 

@@ -13,14 +13,23 @@ import {
 
 describe("Stage 4 Kiro ACP adapter public contract", () => {
   it("accepts the checked-in pinned Kiro ACP adapter", async () => {
-    await expect(
-      verifyAdapterCompatibility({
-        compatibilityPath: repositoryPath("config/adapter-compatibility.yaml"),
-        schemaPath: repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
-        adapterIds: ["kiro-acp"],
-        requireEnabled: true,
-      }),
-    ).resolves.toMatchObject({ valid: true, adapterIds: ["kiro-acp"] });
+    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
+      ? await createCursorKiroCompatibilityFixture()
+      : undefined;
+    try {
+      await expect(
+        verifyAdapterCompatibility({
+          compatibilityPath: fixture?.compatibilityPath
+            ?? repositoryPath("config/adapter-compatibility.yaml"),
+          schemaPath: fixture?.schemaPath
+            ?? repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
+          adapterIds: ["kiro-acp"],
+          requireEnabled: true,
+        }),
+      ).resolves.toMatchObject({ valid: true, adapterIds: ["kiro-acp"] });
+    } finally {
+      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
+    }
   });
 
   it("runs a fixture through the same durable adapter protocol without invoking Kiro", async () => {

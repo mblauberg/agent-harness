@@ -1,6 +1,6 @@
 ---
 name: autonomous-lab
-description: "Use when LARGE, open-ended, multi-agent work must run autonomously across sessions, crashes or compactions to a traceable human-gated finish and never self-halt until a human writes STOP — research synthesis, migration, literature review, architecture, security audit, market analysis, or another sprawling deliverable. Trigger on 'spin up an agent lab', 'run a long multi-agent job', 'explore the whole space', or 'keep going until I stop you'. Not for ordinary changes or one-shot fan-out."
+description: "Use for open-ended multi-agent work that must survive sessions or crashes and continue until human STOP. Not for bounded delivery or one-shot fan-out; use deliver or orchestrate."
 ---
 
 # Autonomous lab

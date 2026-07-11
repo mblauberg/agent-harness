@@ -25,6 +25,7 @@ function validGlobal(root: string): Record<string, unknown> {
 
 describe("runtime configuration schema validation", () => {
   it.each([
+    ["a zero global limit", { limits: { maximumConcurrentProviderTurns: 0 } }, "/limits/maximumConcurrentProviderTurns"],
     ["a limit above the hard cap", { limits: { maximumConcurrentProviderTurns: 9 } }, "/limits/maximumConcurrentProviderTurns"],
     ["a fractional limit", { limits: { maximumConcurrentProviderTurns: 1.5 } }, "/limits/maximumConcurrentProviderTurns"],
     ["an unknown limits field", { limits: { maximumConcurrentProviderTurns: 8, unlimited: true } }, "/limits/unlimited"],
@@ -55,6 +56,23 @@ describe("runtime configuration schema validation", () => {
     await expect(loadFabricConfig({ globalPath, projectPath })).rejects.toMatchObject({
       code: "CONFIG_UNTRUSTED_FIELD",
       field: "/limits/surprise",
+    });
+  });
+
+  it("rejects a zero project limit consistently with the runtime minimum", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-runtime-project-zero-limit-"));
+    const projectRoot = join(root, "project");
+    const globalPath = join(root, "global.yaml");
+    const projectPath = join(projectRoot, ".agents", "agent-fabric.yaml");
+    await writeJson(globalPath, validGlobal(projectRoot));
+    await writeJson(projectPath, {
+      schemaVersion: 1,
+      limits: { maximumConcurrentProviderTurns: 0 },
+    });
+
+    await expect(loadFabricConfig({ globalPath, projectPath })).rejects.toMatchObject({
+      code: "CONFIG_UNTRUSTED_FIELD",
+      field: "/limits/maximumConcurrentProviderTurns",
     });
   });
 

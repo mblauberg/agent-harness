@@ -9,13 +9,14 @@ A useful project diagram should:
 - be readable without a live demo
 - avoid jargon-heavy labels when a simpler term will do
 
-## Recommended File Naming
+## File naming examples
 
-- Main figure sequence: `diagrams/07_memory_architecture.d2`
-- Supporting or exploratory figure: `diagrams/scratch_ablation_map.d2`
+- Main figure sequence: `diagrams/07_system_overview.d2`
+- Supporting or exploratory figure: `diagrams/scratch_flow_options.d2`
 - Shared imported fragment: `diagrams/shared/<name>.d2`
 
-If you add new numbered figures, preserve the existing numeric ordering convention already used in the diagrams directory.
+Use the project's diagram directory and naming convention. The paths above are
+examples, not defaults. If the project numbers figures, preserve its ordering.
 
 ## Recommended Diagram Shapes By Use Case
 
@@ -41,13 +42,11 @@ SQL-table view:
 ## Labelling Guidance
 
 - Prefer `Reviewed Dataset` over `Reviewed Dataset Builder Final Output Stage`.
-- **For figures in a written document, never put filenames, CLI commands, type/class names, or
-  schema versions in a node** — they read as codebase jargon to a reader. Put the artefact
-  name in the caption instead, and label the node with the concept (`Pattern library`, not
-  `pattern_index.jsonl`; `Released dataset`, not `reviewed.jsonl`). See
-  [publication-figures.md](publication-figures.md) for the full rule and a translation table.
-- Use filenames/script/command names only in working or appendix-internal diagrams where exact
-  reproducibility is the figure's explicit purpose — and even then prefer the concept.
+- For reader-facing figures, prefer concepts over filenames, commands, types or
+  schema fields. Exact implementation names are appropriate when reproducibility
+  or a contract is the figure's explicit purpose. See
+  [publication-figures.md](publication-figures.md).
+- Follow the surrounding document's terminology and disclosure boundary.
 
 ## Example Patterns
 

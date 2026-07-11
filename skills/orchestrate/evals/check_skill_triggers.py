@@ -4,17 +4,20 @@
 This is not a live behaviour eval. It checks that the skill remains routable,
 bounded, progressively disclosed, and backed by the expected reference files.
 """
+import argparse
 import os
 import re
 import subprocess
 import sys
+
+import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(HERE)
 SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
 REF_DIR = os.path.join(SKILL_DIR, "references")
 SCRIPT_DIR = os.path.join(SKILL_DIR, "scripts")
-CASES = os.path.join(HERE, "trigger_cases.yaml")
+CASES = os.path.join(HERE, "contract_cases.yaml")
 
 STOP = set(
     "the a an of to and or for with this that in on is be use when it as your you "
@@ -47,21 +50,38 @@ REQUIRED_REFS = [
     "trigger-boundary.md",
     "verification.md",
 ]
+CASE_SCHEMA_VERSION = 1
+CASE_GROUP_MINIMUMS = {
+    "doctrine_invariants": 10,
+    "reference_invariants": 10,
+}
 
 
 def parse_cases(path):
-    out, key = {}, None
-    for line in open(path, encoding="utf-8"):
-        line = line.rstrip("\n")
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if re.match(r"^[A-Za-z_]+:\s*$", line):
-            key = line.split(":")[0].strip()
-            out[key] = []
-        elif line.lstrip().startswith("- ") and key:
-            item = line.lstrip()[2:].strip().strip('"')
-            prompt, _, why = item.partition(" | ")
-            out[key].append({"prompt": prompt.strip(), "why": why.strip()})
+    try:
+        raw = yaml.safe_load(open(path, encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"contract cases are unreadable: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("contract cases root must be a mapping")
+    expected_keys = {"schema_version", *CASE_GROUP_MINIMUMS}
+    if set(raw) != expected_keys:
+        raise ValueError(
+            "contract cases require exactly: " + ", ".join(sorted(expected_keys))
+        )
+    if raw.get("schema_version") != CASE_SCHEMA_VERSION:
+        raise ValueError(f"contract cases schema_version must be {CASE_SCHEMA_VERSION}")
+    out = {}
+    for group, minimum in CASE_GROUP_MINIMUMS.items():
+        values = raw.get(group)
+        if not isinstance(values, list) or len(values) < minimum:
+            raise ValueError(f"{group} requires at least {minimum} cases")
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError(f"{group} cases must be non-empty strings")
+        normalized = [value.strip() for value in values]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(f"{group} cases must be unique")
+        out[group] = [{"prompt": value, "why": ""} for value in normalized]
     return out
 
 
@@ -94,7 +114,10 @@ def description_from_frontmatter(fm):
     return re.sub(r"\s+", " ", m.group(1)).strip().strip('"')
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cases", default=CASES)
+    args = parser.parse_args(argv)
     fails = []
     if not os.path.exists(SKILL_MD):
         print("FAIL: SKILL.md missing")
@@ -104,7 +127,11 @@ def main():
     fm = frontmatter(text)
     desc = description_from_frontmatter(fm)
     body = text[len(fm):] if fm else text
-    cases = parse_cases(CASES)
+    try:
+        cases = parse_cases(args.cases)
+    except ValueError as exc:
+        cases = {group: [] for group in CASE_GROUP_MINIMUMS}
+        fails.append(str(exc))
 
     if not fm:
         fails.append("no YAML frontmatter")
@@ -146,32 +173,9 @@ def main():
         if result.returncode != 0:
             fails.append(f"script does not parse: {script}: {result.stderr.strip()}")
 
-    desc_tokens = tokens(desc)
-    weak_explicit = []
-    for case in cases.get("should_trigger_explicit", []):
-        if not (tokens(case["prompt"]) & desc_tokens):
-            weak_explicit.append(case["prompt"])
-    if weak_explicit:
-        fails.append("explicit trigger cases with no description token overlap: " + "; ".join(weak_explicit))
-
-    weak_inferred = []
-    for case in cases.get("should_trigger_inferred", []):
-        overlap = tokens(case["prompt"]) & desc_tokens
-        if len(overlap) < 2:
-            weak_inferred.append(case["prompt"])
-    if weak_inferred:
-        fails.append("inferred trigger cases with weak description overlap: " + "; ".join(weak_inferred))
-
-    for case in cases.get("should_not_trigger", []):
-        overlap = tokens(case["prompt"]) & desc_tokens
-        # Tool names alone must not be treated as trigger coverage.
-        meaningful = overlap - {"codex", "agy", "cursor", "kiro", "claude", "file", "high", "stake"}
-        if len(meaningful) >= 2:
-            fails.append(f"non-trigger case overlaps description too strongly: {case['prompt']} ({sorted(meaningful)})")
-
-    for case in cases.get("ambiguous_confirm_first", []):
-        if case["prompt"].lower() in desc.lower():
-            fails.append(f"ambiguous phrase appears directly in description: {case['prompt']}")
+    # Prompt/description token overlap is not routing ground truth. Balanced
+    # schema-v2 fixtures and repeated blind model trials own selection evidence;
+    # this checker retains only deterministic doctrine/reference contracts.
 
     ntext = norm(text)
     for inv in cases.get("doctrine_invariants", []):
@@ -204,10 +208,10 @@ def main():
         return 1
 
     print(
-        "SKILL CHECK: PASS "
-        f"({len(cases.get('should_trigger_explicit', []))} explicit, "
-        f"{len(cases.get('should_trigger_inferred', []))} inferred, "
-        f"{word_count} words)"
+        "SKILL DOCTRINE CHECK: PASS "
+        f"({len(cases.get('doctrine_invariants', []))} doctrine, "
+        f"{len(cases.get('reference_invariants', []))} reference, "
+        f"{word_count} words; routing evidence is external)"
     )
     return 0
 

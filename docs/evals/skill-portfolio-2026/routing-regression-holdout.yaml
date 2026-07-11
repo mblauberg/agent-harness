@@ -1,0 +1,100 @@
+schema_version: 1
+dataset_id: skill-portfolio-routing-regression-holdout-20260711-v5
+split: fresh-post-failure-holdout
+cases:
+  - id: s01
+    category: review-versus-edit
+    critical: true
+    prompt: Inspect the proposed patch and its callers for concrete defects, architectural regressions, and weakened tests. Return evidence-backed findings only and leave the worktree unchanged.
+    expected:
+      primary_skill: code-review
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: s02
+    category: behaviour-preserving-change
+    critical: true
+    prompt: Reorganise this subsystem around one policy owner while preserving APIs, errors, ordering, schemas, and performance. Use equivalence evidence and prove obsolete registrations are unreachable before deletion.
+    expected:
+      primary_skill: refactor
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, tdd]
+  - id: s03
+    category: implementation-lifecycle
+    critical: true
+    prompt: Implement the already approved bugfix through tests, code, verification, independent review, bounded repairs, documentation, and a human acceptance handoff. Do not release it.
+    expected:
+      primary_skill: implement
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, diagnose, evaluate, orchestrate, refactor, tdd]
+  - id: s04
+    category: diagnosis-only
+    critical: true
+    prompt: Trace this intermittent crash to a reproducible mechanism and report the cause, confidence, and evidence gaps. Permanent source edits are not authorised.
+    expected:
+      primary_skill: diagnose
+      required_companion_skills: []
+      allowed_companion_skills: [orchestrate]
+  - id: s05
+    category: accepted-artifact-promotion
+    critical: true
+    prompt: Human acceptance is recorded for this exact digest. Carry out the separately authorised external publication, verify the audience-visible result, and retain rollback, recall, and observation evidence.
+    expected:
+      primary_skill: release
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: s06
+    category: explicit-presentation-policy
+    critical: false
+    prompt: Switch this low-risk chat response to caveman full mode. Keep every identifier, number, command, condition, and uncertainty qualifier while removing filler.
+    expected:
+      primary_skill: caveman
+      required_companion_skills: []
+      allowed_companion_skills: []
+  - id: s07
+    category: frontend-read-only
+    critical: true
+    prompt: Review the current onboarding interface without modifying it. Cover keyboard and screen-reader behaviour, responsive layouts, loading and failure states, hierarchy, copy, and tested versus untested evidence.
+    expected:
+      primary_skill: frontend-review
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, playwright, react-performance, web-stack-conventions]
+  - id: s08
+    category: frontend-design-change
+    critical: false
+    prompt: Rework and implement the account dashboard so its visual hierarchy, responsive system, accessibility, empty and error states, and interactions are production-ready.
+    expected:
+      primary_skill: frontend-design
+      required_companion_skills: []
+      allowed_companion_skills: [implement, playwright, react-performance, typescript-clean-code, web-stack-conventions]
+  - id: s09
+    category: existing-skill-audit
+    critical: true
+    prompt: Diagnose an existing skill's trigger misses, false positives, overlap, authority leaks, instruction cost, and evaluation gaps. This pass is read-only and should end with an evidence-backed audit.
+    expected:
+      primary_skill: skill-audit
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, evaluate, orchestrate]
+  - id: s10
+    category: new-skill-authoring
+    critical: true
+    prompt: Build a new cross-agent skill for the approved workflow, with a compact entrypoint, progressive references, deterministic helpers where warranted, schema-v2 routing cases, and provider metadata.
+    expected:
+      primary_skill: skill-authoring
+      required_companion_skills: []
+      allowed_companion_skills: [engineering-docs, engineering-writing, evaluate]
+  - id: s11
+    category: bounded-multi-agent-topology
+    critical: false
+    prompt: Coordinate a finite multi-angle audit using several agents with disjoint read-only scopes, typed returns, one chair, and central evidence adjudication. Finish when the bounded audit is synthesised.
+    expected:
+      primary_skill: orchestrate
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, evaluate]
+  - id: s12
+    category: persistent-autonomous-topology
+    critical: true
+    prompt: Start a crash-resilient, multi-session autonomous lab for this open-ended investigation. Maintain durable recovery and work state, use human gates, and continue until I explicitly send STOP.
+    expected:
+      primary_skill: autonomous-lab
+      required_companion_skills: []
+      allowed_companion_skills: [evaluate, orchestrate, session, work-map]

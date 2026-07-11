@@ -1,6 +1,6 @@
 ---
 name: diagnose
-description: "Use when debugging broken behaviour, errors, crashes, test failures, or performance regressions — 'diagnose this', 'debug this', 'why is this failing', 'it is not working'. Diagnosis is read-only/temporary-instrumentation by default; permanent repair requires explicit fix authority or an enclosing implement run."
+description: "Use to reproduce and find the root cause of broken behaviour, crashes, test failures, flakes, or performance regressions. Not for a known-cause repair or change review; use implement or code-review."
 ---
 
 # Diagnose
@@ -38,9 +38,11 @@ requires an explicit user request or an authorised `implement` scope.
    make one root-cause fix and rerun the regression, original loop and suite.
    An absent correct seam is an architectural finding, not permission for a
    shallow test.
-6. **Clean up.** Remove tagged instrumentation and throwaway harnesses; record
-   the winning hypothesis and prevention opportunity. Never bundle unrelated
-   refactoring.
+6. **Clean up.** Remove only instrumentation/harnesses proven run-owned and
+   covered by authority; preserve unknown, pre-existing and user-authored work.
+   Record the winning hypothesis and prevention opportunity. Never bundle
+   unrelated refactoring.
 
-After three failed fixes, stop and question the architecture with the user.
+After three failed fix attempts, stop and question the architecture with the
+user. An enclosing lifecycle's stricter repair-cycle cap always wins.
 Detailed loop choices and cleanup checks: [references/method.md](references/method.md).

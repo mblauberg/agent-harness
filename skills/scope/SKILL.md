@@ -1,6 +1,6 @@
 ---
 name: scope
-description: Use when scoping a feature or milestone, stress-testing a plan or design, adjudicating between approaches, or turning a vague requirement into a spec, stories, acceptance criteria and decision records — in any project. The grill-first front door for anything not yet well-specified. Project-specific variants override this skill in their own workspace.
+description: "Use when unsettled requirements or decisions need a spec, options, acceptance criteria, authority bounds, or decision record. Not for implementing approved scope or writing files during read-only advice; use implement."
 ---
 
 # Scope
@@ -33,7 +33,8 @@ unresolved branch appears explicitly in the spec.
 Research only surviving evidence questions; use `orchestrate` for useful
 fan-out and attach a source to every retained claim. Use `prototype` when a
 timeboxed throwaway build can answer feasibility; harvest the result and delete
-the spike. Neither lane exists for curiosity.
+or quarantine only manifest-owned scratch under its authority. Neither lane
+exists for curiosity.
 
 For multiple viable options, compare cost, reversibility, risk and prior
 decision fit through distinct correctness/cost/operations lenses. Use
@@ -44,7 +45,10 @@ audits evidence; record authorship for later independence.
 
 ## Land outputs
 
-Nothing stays only in chat:
+First resolve artifact authority and the project's canonical owners. In
+advisory/read-only mode, return a proposed scope and named open decisions in
+chat; do not create or update project files. In project-write mode, land only
+the approved artifacts:
 
 | Output | Owner |
 |---|---|
@@ -54,11 +58,13 @@ Nothing stays only in chat:
 | Work items | project tracker |
 | Durable context | project context/state owners |
 
-Write acceptance criteria as observable Given/When/Then behaviour so `tdd` can
-name a failing test for each. If that is impossible, scope is incomplete.
-Markdown holds narrative; flat YAML blocks hold nested config/schemas. Pin every
-named dependency version; use YAML, not JSON, and vendor authoritative docs
-beside the spec for post-cutoff APIs.
+Write acceptance criteria in the clearest observable, verifiable form;
+Given/When/Then is useful for behavioural cases but not mandatory for every
+research, document or operational outcome. Preserve the project's established
+Markdown/YAML/JSON schema. Pin only decision-critical external interfaces in
+the project-native lock or constraint mechanism. Link or cache permitted
+authoritative material with source, version/date and digest; do not vendor it
+without licence and redistribution authority.
 
 Before handoff confirm all branches are decided or parked, exclusions and
 failure modes are explicit, authority/risk are machine-readable, evidence is

@@ -68,7 +68,10 @@ The agent should then:
   }
 
   // 3. Inject the script tag at the current port
-  const injectOut = runScript('live-inject.mjs', ['--port', String(serverInfo.port)]);
+  const injectOut = runScript('live-inject.mjs', [
+    '--port', String(serverInfo.port),
+    '--token', String(serverInfo.token || ''),
+  ]);
   const injectResult = safeParse(injectOut);
   if (!injectResult || !injectResult.ok) {
     console.log(JSON.stringify({
@@ -80,7 +83,7 @@ The agent should then:
     process.exit(1);
   }
 
-  // 4. Load PRODUCT.md + DESIGN.md context (auto-migrates legacy .impeccable.md)
+  // 4. Load PRODUCT.md + DESIGN.md context without mutating legacy files.
   const ctx = loadContext(process.cwd());
 
   // 5. Compute drift-heal: compare resolved inject targets against the

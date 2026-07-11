@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: Use when a design or feasibility question is answerable by building rather than debating — "will this library work", "is this approach fast enough", "what does this UX feel like" — when scoping stalls on an assumption nobody can verify from docs, or when asked to productionise, ship, or "wire in" existing spike/prototype code (the skill forbids it). Builds a timeboxed, throwaway spike to harvest a learning, then deletes the code. Not for production code (use tdd) and not for requirements questions (use grill-me/scope).
+description: "Use for an authorised, timeboxed throwaway build that answers one feasibility question. Not for production code, settled requirements, or debugging known breakage; use implement, scope, or diagnose."
 ---
 
 # prototype — spike to learn, then throw it away
@@ -16,25 +16,25 @@ answer, never the code.
 2. **Timebox** — default 30–60 min of agent work. Hit the box with no answer
    → that IS a finding (question too big; split it or grill further).
 3. **Kill criteria** — what result answers the question either way.
-4. **Where it lives** — scratch dir or `spikes/<slug>/` outside production
-   source. Never on the production path, never imported by real code.
+4. **Where it lives** — an authorised, manifest-owned scratch dir outside
+   production source. Never import it from real code or touch external systems,
+   credentials or user data without separate authority.
 
 ## Rules
 
-- **Vibe freely inside the box.** No tests, no review tiers, no style rules —
-  this is the one place structure is waste. The discipline is the boundary,
-  not the code.
+- Build only the checks needed to answer the question. Production quality gates
+  do not apply to disposable scratch code; evidence, authority and containment do.
 - **Cheat aggressively**: hardcode data, stub auth, fake the network. Only
   the question's variable needs to be real.
 - **One question per spike.** A second question mid-spike → note it, finish,
   spike it separately if it still matters.
-- **Harvest, then delete.** The learning graduates (memory policy in
-  `~/.agents/HARNESS.md`): finding + evidence into the spec, decision record,
-  or scoping thread that spawned the question. Code is deleted or archived
-  same session — a lingering spike becomes accidental production.
-- **Prototype code never "graduates" to production.** Rebuild under tdd with
-  the learning in hand; the spike's value was the answer, and porting vibe
-  code smuggles its shortcuts in with it.
+- **Harvest, then retire.** Put the finding and evidence in the owning spec,
+  decision record or scoping thread when artifact authority exists. Remove only
+  paths proven run-owned and explicitly authorised; otherwise quarantine or
+  hand them back with a named cleanup action.
+- **Prototype code never "graduates" to production.** Productionisation routes
+  through `scope` when decisions changed, then `implement`; rebuild the smallest
+  production solution with the appropriate test/refactor method.
 
 ## Harvest format (into the owning doc/thread)
 
@@ -47,7 +47,8 @@ answer, never the code.
 
 ## Red flags
 
-- "The spike works, let's ship it" → rebuild under tdd; delete the spike.
+- "The spike works, let's ship it" → scope any changed decision, then use
+  `implement`; do not wire the spike into production.
 - Spike touching production files or secrets → wrong dir, stop.
 - No timebox agreed → not a spike, just unscoped wandering.
 - Answer known from docs/a search in <10 min → didn't need a spike.

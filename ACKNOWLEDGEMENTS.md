@@ -46,6 +46,10 @@ record.
   and source. [DeckardGer's TanStack agent skills](https://github.com/DeckardGer/tanstack-agent-skills)
   prompted this clean-room replacement; no text or rule structure from that
   skill is redistributed.
+- `caveman` is an original, safety-bounded cross-agent rewrite informed by
+  [Julius Brussee's Caveman](https://github.com/JuliusBrussee/caveman), audited
+  at commit `0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0`. No upstream savings claim,
+  hook, compressor, worker agent or substantial wording is incorporated.
 
 Thank you to these authors and maintainers for making their work inspectable and
 reusable.

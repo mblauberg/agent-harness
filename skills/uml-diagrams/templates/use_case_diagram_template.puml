@@ -1,11 +1,9 @@
 @startuml
-' Template: per-package use case diagram (requirements specification §3)
+' Template: scoped use case diagram.
 ' Shows actors, use cases, associations, include/extend, and the system boundary.
 
 left to right direction
 skinparam shadowing false
-skinparam handwritten false
-skinparam defaultFontName Arial
 skinparam actorStyle stickman
 skinparam ArrowColor #333333
 skinparam BorderColor #333333
@@ -33,7 +31,8 @@ frame "uc Package Name" {
   ' Include: base use case -> mandatory included use case.
   UC_Main .> UC_Included : <<include>>
 
-  ' Extend: optional/conditional extension -> base use case. Condition note required.
+  ' Extend: optional/conditional extension -> base use case. Record the condition
+  ' here or in the project's linked textual requirement.
   UC_Extension .> UC_Main : <<extend>>
   note on link
     <<Condition>>

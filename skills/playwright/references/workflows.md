@@ -2,7 +2,7 @@
 
 Use the wrapper script and snapshot often.
 Assume `PWCLI` is set and `pwcli` is an alias for `"$PWCLI"`.
-In this repo, run commands from `output/playwright/<label>/` to keep artifacts contained.
+Use an assigned run-owned artifact directory and declare sensitivity/retention.
 
 ## Standard interaction loop
 
@@ -18,8 +18,8 @@ pwcli snapshot
 ```bash
 pwcli open https://example.com/form --headed
 pwcli snapshot
-pwcli fill e1 "user@example.com"
-pwcli fill e2 "password123"
+pwcli fill e1 "synthetic-user@example.invalid"
+pwcli fill e2 "synthetic-test-value"
 pwcli click e3
 pwcli snapshot
 pwcli screenshot

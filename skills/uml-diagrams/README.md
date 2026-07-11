@@ -1,21 +1,8 @@
-# Requirements-Spec UML Diagrams Skill
+# Requirements-spec UML diagrams
 
-This skill helps an agent create requirements-specification UML diagrams (use-case package
-overviews, per-package use case diagrams, and activity diagrams) using PlantUML.
-
-## Install in a Claude Code-style skill directory
-
-```bash
-mkdir -p ~/.claude/skills
-cp -R uml-diagrams ~/.claude/skills/
-```
-
-Project-local install:
-
-```bash
-mkdir -p .claude/skills
-cp -R uml-diagrams .claude/skills/
-```
+This cross-harness skill creates and checks requirements-specification UML
+diagrams in PlantUML. Install it through the harness's normal skill-management
+workflow; do not copy it into provider-specific directories by hand.
 
 ## Use
 
@@ -28,24 +15,28 @@ Ask for diagrams such as:
 
 ## Render diagrams
 
-Install the PlantUML CLI or download `plantuml.jar`, then run:
+Use the project's existing PlantUML installation. From any project directory:
 
 ```bash
-python scripts/render_plantuml.py templates/use_case_package_template.puml --format svg
-python scripts/render_plantuml.py templates/use_case_diagram_template.puml --format svg
-python scripts/render_plantuml.py templates/activity_diagram_template.puml --format svg
+UML_SKILL="${AGENTS_HOME:-$HOME/.agents}/skills/uml-diagrams"
+python3 "$UML_SKILL/scripts/render_plantuml.py" "$UML_SKILL/templates/use_case_package_template.puml" --format svg
+python3 "$UML_SKILL/scripts/render_plantuml.py" "$UML_SKILL/templates/use_case_diagram_template.puml" --format svg
+python3 "$UML_SKILL/scripts/render_plantuml.py" "$UML_SKILL/templates/activity_diagram_template.puml" --format svg
 ```
 
 With a JAR:
 
 ```bash
-PLANTUML_JAR=/path/to/plantuml.jar python scripts/render_plantuml.py diagram.puml --format png
+PLANTUML_JAR=/path/to/plantuml.jar python3 "$UML_SKILL/scripts/render_plantuml.py" diagram.puml --format png
 ```
 
 ## Lint diagrams
 
 ```bash
-python scripts/lint_plantuml_diagram.py templates/use_case_package_template.puml --type package
-python scripts/lint_plantuml_diagram.py templates/use_case_diagram_template.puml --type usecase
-python scripts/lint_plantuml_diagram.py templates/activity_diagram_template.puml --type activity
+python3 "$UML_SKILL/scripts/lint_plantuml_diagram.py" "$UML_SKILL/templates/use_case_package_template.puml" --type package
+python3 "$UML_SKILL/scripts/lint_plantuml_diagram.py" "$UML_SKILL/templates/use_case_diagram_template.puml" --type usecase
+python3 "$UML_SKILL/scripts/lint_plantuml_diagram.py" "$UML_SKILL/templates/activity_diagram_template.puml" --type activity
 ```
+
+These templates are neutral starting points. Project-local templates, naming,
+traceability and document structure take precedence.

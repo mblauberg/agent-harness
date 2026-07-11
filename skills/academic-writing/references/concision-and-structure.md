@@ -8,7 +8,10 @@ Concision does not mean short at any cost. It means every word earns its place. 
 
 ## Condense Pass
 
-Use this when prose is AI-authored or over-long and the job is to cut its length while keeping the meaning; rewrite mode improves a passage in place, condense mode makes it shorter. Aim to cut 20 to 50 per cent on a first-draft chapter. Cut first; add only where a real fact is missing.
+Use this when prose is over-long and the job is to cut its length while keeping
+the meaning; rewrite mode improves a passage in place, while condense mode makes
+it shorter. Agree any target with the user or project. Do not force a percentage
+cut when the source is already tight.
 
 Procedure:
 
@@ -16,7 +19,7 @@ Procedure:
 2. Reverse-outline. Write one phrase per paragraph stating its single point (the Paragraph Test below is the per-paragraph form). A paragraph that resists a one-line summary, or repeats another line, is the cut or merge target.
 3. De-duplicate to one home. State each fact, caveat, definition, decision-rule, and number once, in its primary chapter. Replace every other copy with a short cross-reference or an interpretive summary. Relocate detail to an appendix or a table rather than delete it: moved is not lost.
 4. Fold and collapse. Turn padded enumerations into prose. Merge table columns that mostly restate each other. Drop a list item that paraphrases its sibling. Merge two sentences that state one mechanism, keeping the sharper qualifier.
-5. Cut fluff. Remove throat-clearing, decorative tails, absence tombstones, and long hypothetical `would` passages that re-explain a point already made. Throat-clearing to cut on sight: `This chapter discusses`, `This section provides an overview`, `It is worth noting`, `As previously mentioned`, `In conclusion`, `Overall`, `The following section will`. Replace vague signposting with a specific pointer (`The next section defines the decision-turn scope used in all primary metrics`), not a decorative one.
+5. Cut fluff. Remove throat-clearing, decorative tails, absence tombstones, and long hypothetical `would` passages that re-explain a point already made. Throat-clearing to cut on sight: `This chapter discusses`, `This section provides an overview`, `It is worth noting`, `As previously mentioned`, `In conclusion`, `Overall`, `The following section will`. Replace vague signposting with a specific pointer (`The next section defines the sampling frame used in the primary analysis`), not a decorative one.
 6. Narrow, do not soften. Replace a sweeping claim with the precise claim the evidence supports; it is shorter and safer. Delete an unbacked presumption outright. Never soften an honest negative.
 
 STOP RULE: stop the moment a further cut would remove a fact, number, unit, caveat, scope condition, honest negative, or defined term, break a cross-reference, or force awkward phrasing. When unsure whether something is load-bearing, keep it, and prefer compressing to deleting whenever a fact is involved. If the prose is already tight, say so and stop. Forced cuts that sound weird are a failure, not a win.
@@ -64,18 +67,18 @@ Dense thesis prose often separates subject and verb with too many qualifiers.
 Weak:
 
 ```text
-The hierarchical detector, after filtering context-only turns and applying the strict evidence gate, and after excluding pilot artefacts, reports AUPRC over decision turns.
+The primary model, after filtering incomplete records and excluding pilot data, reports F1 score on the held-out test set.
 ```
 
 Better:
 
 ```text
-The hierarchical detector reports AUPRC over decision turns. Before aggregation, the evaluator filters context-only turns, applies the strict evidence gate, and excludes pilot artefacts.
+The primary model reports F1 score on the held-out test set. Before aggregation, the evaluator filters incomplete records and excludes pilot data.
 ```
 
 ## Positive Form
 
-This is Strunk's Rule 11 (1918 edition), put statements in positive form. `Not` is weak as mere evasion (`not honest` for `dishonest`), but other negatives are strong: `No federated result table is presented` is direct and correct where the absence is the claim. Positive form is a style rule, not a licence to spin; see Positive Form Is Not Positive Spin in anti-ai-thesis-patterns.md for the integrity guard.
+This is Strunk's Rule 11 (1918 edition), put statements in positive form. `Not` is weak as mere evasion (`not honest` for `dishonest`), but other negatives are strong: `No subgroup estimate is reported` is direct and correct where the absence is the claim. Positive form is a style rule, not a licence to spin; see Positive Form Is Not Positive Spin in anti-ai-thesis-patterns.md for the integrity guard.
 
 Prefer direct positive statements where they are precise.
 
@@ -88,7 +91,7 @@ Prefer direct positive statements where they are precise.
 Do not force positive form when the absence is the claim:
 
 ```text
-No federated result table is presented because the extension lacks a claimable artefact.
+No subgroup estimate is reported because the sample does not support it.
 ```
 
 ## Parallel Structure
@@ -122,13 +125,13 @@ When a dense sentence is dense because premodifiers are stacked on an abstract h
 Before:
 
 ```text
-The reviewed implementation evaluates the full hierarchical detector and all comparator systems on the 500-conversation benchmark with five paired seeds and paired bootstrap intervals, while current pilot artefacts are retained only as workflow-refinement evidence and do not constitute final inferential evidence.
+The study evaluates the primary and comparator methods on two datasets with five paired runs and confidence intervals, while pilot observations are retained only as protocol-refinement evidence and do not support the final inference.
 ```
 
 After:
 
 ```text
-The reviewed implementation evaluates the full hierarchical detector and comparator systems on the 500-conversation benchmark. Claimable comparisons use five paired seeds and paired bootstrap intervals. Pilot artefacts remain workflow-refinement evidence and do not constitute final inferential evidence.
+The study evaluates the primary and comparator methods on two datasets. Comparisons use five paired runs and confidence intervals. Pilot observations support protocol refinement only, not the final inference.
 ```
 
 ## Transition Discipline
@@ -157,13 +160,13 @@ Place the most important word or idea at the end of the sentence. That position 
 Weak (emphasis lost mid-sentence):
 
 ```text
-The hierarchical detector, across five paired seeds, records a higher mean AUPRC than the baselines, which is what the comparison set out to test.
+Method A, across five paired runs, records a higher mean F1 score than the comparators, which is the planned comparison.
 ```
 
 Stronger (the result lands last):
 
 ```text
-Across five paired seeds, the hierarchical detector attains the highest mean decision-turn AUPRC.
+Across five paired runs, Method A attains the highest mean F1 score.
 ```
 
 ## Endings
@@ -179,7 +182,7 @@ This is important for future research in this area.
 Better:
 
 ```text
-The result therefore supports the decision-turn scope, but it does not establish performance on context-only turns.
+The result supports the laboratory comparison, but it does not establish field performance.
 ```
 
 The Condense Pass STOP RULE and its verify-and-report step are the concision checklist; do not maintain a second one.

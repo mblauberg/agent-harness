@@ -61,6 +61,11 @@ def valid_receipt(status="awaiting-promotion"):
     return receipt
 
 
+def validate_policy(receipt, gate):
+    """Exercise legacy receipt policy without certifying the live artifact."""
+    return MODULE.validate(receipt, gate, structural_only=True)
+
+
 def write_delivery(tmp_path, status="awaiting_release"):
     reference_path = ROOT / "skills" / "deliver" / "scripts" / "reference_runs.py"
     spec = importlib.util.spec_from_file_location("delivery_reference_fixture", reference_path)
@@ -95,14 +100,14 @@ def write_delivery(tmp_path, status="awaiting_release"):
 
 
 def test_ready_gate_passes_with_scoped_release_authority():
-    assert MODULE.validate(valid_receipt(), "ready") == []
+    assert validate_policy(valid_receipt(), "ready") == []
 
 
 def test_ready_gate_requires_rollback_and_stop_conditions():
     receipt = valid_receipt()
     receipt["rollback"]["plan"] = ""
     receipt["rollout"]["stop_conditions"] = []
-    errors = MODULE.validate(receipt, "ready")
+    errors = validate_policy(receipt, "ready")
     assert "rollback.plan is required" in errors
     assert "rollout.stop_conditions must not be empty" in errors
 
@@ -112,18 +117,18 @@ def test_ready_gate_requires_complete_observation_contract():
     for field in ("window", "signals", "owner", "rollback_or_containment", "sampling_and_privacy", "close_condition"):
         candidate = valid_receipt()
         candidate["observability"][field] = [] if field == "signals" else ""
-        assert f"observability.{field} is required" in MODULE.validate(candidate, "ready")
+        assert f"observability.{field} is required" in validate_policy(candidate, "ready")
 
 
 def test_boolean_exit_code_is_not_zero():
     receipt = valid_receipt()
     receipt["readiness_checks"][0]["exit_code"] = False
-    assert "readiness_checks[0] must record command and exit_code 0" in MODULE.validate(receipt, "ready")
+    assert "readiness_checks[0] must record command and exit_code 0" in validate_policy(receipt, "ready")
 
 
 def test_complete_gate_requires_human_approval_and_observed_health():
     receipt = valid_receipt("complete")
-    errors = MODULE.validate(receipt, "complete")
+    errors = validate_policy(receipt, "complete")
     assert "human_promotion must be approved by a named human" in errors
     assert "observability.checks must not be empty" in errors
 
@@ -140,12 +145,12 @@ def test_complete_and_rollback_receipts_are_explicit():
     }
     receipt["observability"]["checks"] = [{"command": "health", "exit_code": 0, "threshold_id": "error-rate", "measured_value": 0.005, "evidence": ["dashboard"], "observed_at": "2026-07-11T04:03:00Z"}]
     receipt["outcome"] = {"status": "complete", "evidence": ["health pass"], "follow_up_owner": ""}
-    assert MODULE.validate(receipt, "complete") == []
+    assert validate_policy(receipt, "complete") == []
     receipt["observability"]["window_ended_at"] = "2026-07-10T04:04:00Z"
-    assert "observability window is shorter than declared" in MODULE.validate(receipt, "complete")
+    assert "observability window is shorter than declared" in validate_policy(receipt, "complete")
     receipt["observability"]["window_ended_at"] = "2026-07-11T04:03:00Z"
     receipt["status"] = receipt["outcome"]["status"] = "rolled-back"
-    assert "non-success terminal outcome requires follow_up_owner" in MODULE.validate(receipt, "complete")
+    assert "non-success terminal outcome requires follow_up_owner" in validate_policy(receipt, "complete")
     receipt["outcome"]["follow_up_owner"] = "team"
     receipt["execution"]["commands"][0]["exit_code"] = 1
     receipt["observability"]["checks"][0]["exit_code"] = 1
@@ -154,7 +159,7 @@ def test_complete_and_rollback_receipts_are_explicit():
         "restoration_checks": [{"command": "health", "exit_code": 0}],
         "started_at": "2026-07-10T04:04:00Z", "finished_at": "2026-07-10T04:05:00Z",
     }
-    assert MODULE.validate(receipt, "complete") == []
+    assert validate_policy(receipt, "complete") == []
 
 
 def test_cli_ready_gate_requires_an_accepted_change_receipt(tmp_path):
@@ -226,7 +231,7 @@ def test_release_command_scope_and_ordering_are_enforced():
     }
     receipt["observability"]["checks"] = [{"command": "health", "exit_code": 0, "threshold_id": "error-rate", "measured_value": 0.005, "evidence": ["dashboard"], "observed_at": "2026-07-11T04:03:00Z"}]
     receipt["outcome"] = {"status": "complete", "evidence": ["health pass"], "follow_up_owner": ""}
-    errors = MODULE.validate(receipt, "complete")
+    errors = validate_policy(receipt, "complete")
     assert "execution.commands[0] is outside release authority" in errors
     assert "release execution cannot start before promotion approval" in errors
     assert "release execution cannot finish before it starts" in errors
@@ -243,13 +248,13 @@ def test_release_command_prefixes_are_token_bound_and_shell_free():
     }
     receipt["observability"]["checks"] = [{"command": "health", "exit_code": 0, "threshold_id": "error-rate", "measured_value": 0.005, "evidence": ["dashboard"], "observed_at": "2026-07-11T04:03:00Z"}]
     receipt["outcome"] = {"status": "complete", "evidence": ["claimed"], "follow_up_owner": ""}
-    assert "execution.commands[0] must be argv or shell-free text" in MODULE.validate(receipt, "complete")
+    assert "execution.commands[0] must be argv or shell-free text" in validate_policy(receipt, "complete")
 
 
 def test_stateful_migration_cannot_hide_behind_required_false():
     receipt = valid_receipt()
     receipt["migration"].update({"type": "stateful", "required": False})
-    errors = MODULE.validate(receipt, "ready")
+    errors = validate_policy(receipt, "ready")
     assert "migration.required must agree with migration.type" in errors
     assert "required migration needs plan" in errors
 
@@ -260,6 +265,6 @@ def test_complete_release_must_measure_each_health_threshold():
     receipt["execution"] = {"commands": [{"command": "deploy", "exit_code": 0}], "started_at": "2026-07-10T04:02:00Z", "finished_at": "2026-07-10T04:03:00Z"}
     receipt["observability"]["checks"] = [{"command": "health", "exit_code": 0, "threshold_id": "error-rate", "measured_value": 0.02, "evidence": ["dashboard"], "observed_at": "2026-07-11T04:03:00Z"}]
     receipt["outcome"] = {"status": "complete", "evidence": ["claimed"], "follow_up_owner": ""}
-    assert "observability threshold error-rate was not met" in MODULE.validate(receipt, "complete")
+    assert "observability threshold error-rate was not met" in validate_policy(receipt, "complete")
     receipt["observability"]["checks"][0]["measured_value"] = float("-inf")
-    assert "observability threshold error-rate needs a measured value and evidence" in MODULE.validate(receipt, "complete")
+    assert "observability threshold error-rate needs a measured value and evidence" in validate_policy(receipt, "complete")

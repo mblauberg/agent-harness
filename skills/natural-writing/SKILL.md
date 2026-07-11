@@ -1,6 +1,6 @@
 ---
 name: natural-writing
-description: Use when general or mixed prose needs a natural, direct voice, including requests to humanise AI-sounding, robotic, formulaic, padded, salesy, or off-voice text, without changing facts, citations, numbers, or meaning. Defer engineering, academic, and Australian legal prose to their specialist writing skills.
+description: "Use for making general or mixed prose natural and direct while preserving facts, citations, numbers, and intent. Not for engineering, academic, or Australian legal prose; use its specialist."
 ---
 
 # Natural writing

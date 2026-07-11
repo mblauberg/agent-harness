@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "delivery_run_id": "SKILLS-20260711",
+  "evidence_cutoff": "2026-07-11",
+  "final_gate": {
+    "evaluation_id": "skill-portfolio-routing-20260711-v6",
+    "status": "pass",
+    "families": ["anthropic", "openai"],
+    "repetitions": 3,
+    "cases": 12,
+    "attempts": 6,
+    "case_rows": 72,
+    "primary_accuracy": 1.0,
+    "primary_threshold": 1.0,
+    "companion_fidelity": 1.0,
+    "companion_threshold": 0.9,
+    "plan_digest": "sha256:5f6ab44ad7aee8b67fc4ab0b6e011081d772f9ca47fa6acf8b135be0e1bddb55",
+    "receipt_digest": "sha256:9879b06f02866bbded4c6917c317e013056bae2aa8812fc67652816019fd4555",
+    "dataset_digest": "sha256:0653255c89c8eedc98d7a97bb774a3606e046746cebad3af552fdb5686772593",
+    "human_acceptance": "external"
+  },
+  "retained_nonpasses": [
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-v2",
+      "status": "incomplete",
+      "model_calls": 0,
+      "reason": "preflight interpreter lacked pytest",
+      "receipt_digest": "sha256:6fb081ea45d08bdf8d20f0b340d30882699030955c8787a706eb7029cc81964e"
+    },
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-v3",
+      "status": "incomplete",
+      "model_calls": 0,
+      "reason": "plan was below the profile repetition minimum",
+      "receipt_digest": "sha256:0e534a369cec5a8e90aadf9ccba0bfc849152b3553f321e7f942b7db5aab3908"
+    },
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-v4",
+      "status": "fail",
+      "primary_accuracy": 1.0,
+      "exact_route_accuracy": 0.9861111111111112,
+      "reason": "undeclared but legitimate work-map companion",
+      "receipt_digest": "sha256:696091cd34f9b20d8eebba075a608209991904371df016611fd3f0312732a36f"
+    },
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-v5",
+      "status": "fail",
+      "primary_accuracy": 1.0,
+      "exact_route_accuracy": 0.9861111111111112,
+      "reason": "undeclared but legitimate engineering-writing companion",
+      "receipt_digest": "sha256:7b09dc603770038a1aed87605285350b577bba1c33f14f7ffa9c805cf8434647"
+    }
+  ]
+}

@@ -59,7 +59,7 @@ Smith et al. did X. Jones et al. did Y. Lee et al. did Z.
 Better pattern:
 
 ```text
-Prior scam-detection studies commonly frame the task as supervised text classification. This framing supports benchmark comparison, but it weakens temporal evaluation because many systems classify complete conversations rather than early-risk prefixes \cite{...}.
+Prior short-term forecasting studies commonly report aggregate error. This supports benchmark comparison, but it can hide calibration differences across low-volume regions \cite{...}.
 ```
 
 Each paragraph should make a synthesis claim and use sources as support.
@@ -126,7 +126,7 @@ Avoid:
 Good pattern:
 
 ```text
-Table~\ref{...} reports decision-turn AUPRC for the reviewed split. The full hierarchical system records \result{...}, compared with \result{...} for the sliding-window baseline. This comparison is conditional on the paired-seed evidence bundle.
+Table~\ref{...} reports the primary outcome on the held-out dataset. Method A records \result{...}, compared with \result{...} for Method B. This comparison remains provisional until the declared paired analysis is complete.
 ```
 
 Default to separate Results and Discussion for quantitative work: report in one, interpret in the other. Combining them per research question (present, then discuss, then state the takeaway under one subsection) is acceptable under a tight page limit or a very long results section, common in empirical software-engineering writing. Choose one mode and hold it.

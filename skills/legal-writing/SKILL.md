@@ -1,6 +1,6 @@
 ---
 name: legal-writing
-description: "Use when drafting, reviewing, condensing, final-scrubbing or source-boundary checking Australian court forms, affidavits, submissions, correspondence, orders or annexures."
+description: "Use for drafting, reviewing, condensing, or source-checking Australian forms, affidavits, submissions, orders, annexures, or legal correspondence. Not for academic, engineering, or general prose; use its specialist."
 ---
 
 # Australian legal writing
@@ -26,9 +26,10 @@ official sources and retain qualified or human review for filing-facing work.
    [validation](references/validation-checklists.md) reference. Use
    [verification and escalation](references/verification-and-escalation.md)
    for current-source and human-authority gates.
-3. Classify each sentence by legal function before polishing. Affidavits prove
-   facts; submissions argue; orders command; chronologies organise; internal
-   notes analyse; correspondence communicates. Move wrong-home material first.
+3. Classify each sentence by legal function before polishing. Affidavits and
+   witness statements give evidence; submissions argue; orders command;
+   chronologies organise; internal notes analyse; correspondence communicates.
+   Move wrong-home material first.
 4. Lock legal status, source anchors, exact quotations, authorities, labels,
    offer terms, non-admission/non-waiver wording, deadlines, attachments,
    redactions and human-authority conditions.
@@ -44,8 +45,9 @@ changing forum wording.
 Never invent or silently alter an authority, instrument, finding, rule title,
 forum term or decision-maker label. Verify canonical sources, not indexes,
 summaries, OCR, renders or agent notes. Preserve contentions as contentions and
-hold the register required by the procedural stage. PPN/DVO material remains
-dated document or safety context unless another source supports more. Keep
+hold the register required by the procedural stage. Protective-order,
+police-issued or other safety material remains a dated source with the legal
+effect its verified text supports; do not convert it into a finding. Keep
 source files, renders, OCR/transcripts, field maps and QA reports separate.
 
 For substantial condensation or relocation, run the deterministic token

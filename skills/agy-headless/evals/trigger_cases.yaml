@@ -1,0 +1,12 @@
+schema_version: 2
+target_skill: agy-headless
+cases:
+  - {id: q010, relation: positive, prompt: "Use agy for one read-only breadth-first scan of this repository.", tags: [direct], expected: {primary_skill: agy-headless, companion_skills: []}}
+  - {id: q011, relation: positive, prompt: "Ask a Gemini-family analyst to inspect these diagrams and return anchored findings.", tags: [direct], expected: {primary_skill: agy-headless, companion_skills: []}}
+  - {id: q012, relation: positive, prompt: "Run one Antigravity long-context scout over the named corpus; do not edit anything.", tags: [direct], expected: {primary_skill: agy-headless, companion_skills: []}}
+  - {id: q013, relation: negative, prompt: "Fix the typo in this sentence that happens to mention Gemini.", tags: [no-skill], expected: {primary_skill: null, companion_skills: []}}
+  - {id: q014, relation: negative, prompt: "Fan out a repository audit across several available agents and synthesise the results.", tags: [adjacent], expected: {primary_skill: orchestrate, companion_skills: []}}
+  - {id: q015, relation: negative, prompt: "Review this small diff source-read-only and report real defects.", tags: [adjacent], expected: {primary_skill: code-review, companion_skills: []}}
+  - {id: q016, relation: boundary, prompt: "Use agy as one scout, then synthesise its findings with Claude and Codex reviewers.", tags: [composition], expected: {primary_skill: orchestrate, companion_skills: [agy-headless]}}
+  - {id: q017, relation: boundary, prompt: "Use Gemini to inspect this UI screenshot for UX problems; make no edits.", tags: [composition], expected: {primary_skill: agy-headless, companion_skills: [frontend-review]}}
+  - {id: q018, relation: boundary, prompt: "Use agy and a real browser to find the root cause of this failing UI flow; do not fix it.", tags: [composition], expected: {primary_skill: diagnose, companion_skills: [agy-headless, playwright]}}

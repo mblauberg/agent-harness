@@ -111,7 +111,7 @@ direction: right
 Use comments for provenance or assumptions:
 
 ```d2
-# Reviewed against the runtime code as of 2026-04-16.
+# Reviewed against the runtime code at <revision>.
 # Inferred: episodic retrieval happens after the note-memory update.
 ```
 

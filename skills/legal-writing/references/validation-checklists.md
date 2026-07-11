@@ -82,8 +82,9 @@ For submissions and written advocacy; see `references/argument-structure-and-par
 
 ## Integrity Check
 
-- Every cited authority is on the matter's verified authorities list or was pinpoint-verified against a
-  primary source this session; no authority was introduced that cannot be located.
+- Every cited authority is in the project's verified authority register or was
+  opened and pinpoint-verified against an authorised primary source for this
+  task; no authority was introduced that cannot be located.
 - Holdings are stated at their true fact-specific altitude; no narrow ruling inflated into sweeping support.
 - No instrument, declaration, order term or finding appears that the baseline record does not contain; no rule
   title, statute name or decision-maker label was altered in paraphrase.
@@ -150,11 +151,14 @@ For submissions and written advocacy; see `references/argument-structure-and-par
 - Direct personal-knowledge facts are preserved or quarantined for corroboration; they are not deleted merely
   because no external document is attached.
 - Producibility is stated once as a blanket; conditional reserves are deliberate, not repeated filler.
-- The affidavit body is within the forum page cap (verify by render); paragraph cross-references still resolve after edits.
+- The affidavit or witness statement satisfies the current verified form,
+  length, layout and signing requirements; paragraph cross-references still
+  resolve after editing and rendering.
 
 ## Safety Check
 
-- PPN and DVO material is framed as document or safety context unless another source supports stronger wording.
+- Protective, police-issued, interim and final safety material is named at its
+  exact source status; allegation, order and finding are not conflated.
 - Sensitive material is targeted and proportionate.
 - Residential address and unsafe contact details are excluded or handled under the forum rules.
 - Medical, reproductive-health, third-party and broad message-history material is not filed unless necessary and settled.

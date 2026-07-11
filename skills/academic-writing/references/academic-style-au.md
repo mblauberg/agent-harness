@@ -9,7 +9,7 @@ Thesis prose should be formal enough for examination and direct enough to read e
 Prefer:
 
 ```text
-The reviewed corpus constrains the evaluation to decision turns. Context-only turns update memory but do not enter the primary AUPRC denominator.
+The evaluation uses records collected at two sites. The findings therefore do not establish performance at unobserved sites.
 ```
 
 Avoid:
@@ -50,7 +50,7 @@ Do not use em dashes. In thesis prose they often create synthetic rhythm and ove
 
 Avoid prose `---` in LaTeX text. It renders as an em dash. Preserve `--` only where it is a legitimate en dash in a range or label and the surrounding style expects it.
 
-Banning the em dash does not license moving its rhythm into a colon. Use a colon only to introduce a list or a definition, never as a dramatic pivot or reveal (`the detector takes a different position: it retains...`). For a pivot, use a full stop or a plain clause. Modern detection keys on the qualifying-pivot pattern, not just the dash character, so displacing the same beat into a colon or a double hyphen leaves the tell intact.
+Banning the em dash does not license moving its rhythm into a colon. Use a colon only to introduce a list or a definition, never as a dramatic pivot or reveal (`the method differs in one respect: it retains...`). For a pivot, use a full stop or a plain clause. Judge the sentence by clarity and project style, not by an authorship-detector heuristic.
 
 ## Hyphenation (Australian English)
 
@@ -60,15 +60,15 @@ Be sparing. The hyphen is a clarity tool, not decoration. Australian usage (Styl
 - Never hyphenate an `-ly` adverb plus adjective or participle, in any position (`fully connected layer`, `randomly sampled subset`, `clearly defined cue`, not `fully-connected`, `clearly-defined`). This is the strongest American/AI over-hyphenation tell; keep it at zero. The only fixed exceptions are `fully-fledged` and `fully-fashioned`.
 - Prefer the closed form for established compounds: `dataset`, `baseline`, `runtime`, `preprocessing`, `online`, `codebase`, `metadata`, `coordinate`, `cooperate`, `revictimisation`. Note the split for cash flow (noun) / cashflow (verb): Macquarie lists `cash flow` as the noun and `cashflow` only as the verb, and a thesis mostly uses the noun. Follow your chosen dictionary when unsure.
 - Hyphenate to prevent a misreading (`re-cover` vs `recover`), and keep one prefixed spelling throughout: do not write both `re-victimisation` and `revictimisation`.
-- Do not stack three-or-more-word hyphen chains or `versus`-joined modifiers (`IID-versus-non-IID`, `financial-romance-fraud`, `detector-claim-manifest`); recast as a prepositional phrase. Repeat the base word instead of hanging hyphens (`full-time and part-time`, not `full- and part-time`).
+- Do not stack three-or-more-word hyphen chains or `versus`-joined modifiers (`urban-versus-rural`, `pre-and-post-intervention`); recast as a prepositional phrase. Repeat the base word instead of hanging hyphens (`full-time and part-time`, not `full- and part-time`).
 
 ## Tense
 
 Use tense deliberately:
 
-- Present tense for established knowledge, thesis structure, equations, and system properties: `The detector rejects invalid outputs.`
-- Past tense for completed experiments: `The model was trained on the reviewed split.`
-- Present perfect for work that remains relevant: `Prior work has treated scam detection as a text classification problem.`
+- Present tense for established knowledge, thesis structure, equations, and system properties: `The validator rejects malformed records.`
+- Past tense for completed experiments: `The model was trained on the development split.`
+- Present perfect for work that remains relevant: `Prior work has treated the task as supervised classification.`
 - Future tense for actual future work only. Avoid using future tense to hide missing results.
 
 ## Person And Voice
@@ -93,7 +93,9 @@ Avoid uniform paragraph architecture across a whole chapter. Not every paragraph
 
 ### Sentence Rhythm (Operational Test)
 
-Flat, uniform sentence length is the strongest signal a modern reader or detector keys on. Model output clusters tightly around one length; human prose is bursty and mixes short with long, a well-documented stylometric contrast. Grammatical correctness does not fix this: a passage where every sentence runs 31 to 38 words reads as generated even when each sentence is sound.
+Flat, uniform sentence length can make a passage monotonous even when every
+sentence is grammatical. Use sentence length and structure to match the
+argument, not to imitate or evade a purported authorship signature.
 
 Apply a concrete test to any multi-sentence passage (abstract, paragraph, results block):
 
@@ -117,7 +119,7 @@ Replace ambition with evidence:
 
 Use strong language only when the evidence is strong and specific.
 
-Use minimal capitalisation: sentence case for headings (capitalise the first word and proper nouns only), and reserve initial capitals for formal names and titles, lower case for generic references (the detector, the corpus, federated learning). Do not use a serial (Oxford) comma by default; add one only where a list would otherwise be ambiguous.
+Use minimal capitalisation: sentence case for headings (capitalise the first word and proper nouns only), and reserve initial capitals for formal names and titles, lower case for generic references (the model, the corpus, distributed learning). Follow the target style on the serial (Oxford) comma; where it is optional, add it only when it removes ambiguity.
 
 ## Final Style Checklist
 

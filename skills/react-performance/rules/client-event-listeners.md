@@ -1,15 +1,18 @@
 ---
-title: Deduplicate Global Event Listeners
+title: Consolidate Material Global Subscriptions
 impact: LOW
 impactDescription: single listener for N components
-tags: client, swr, event-listeners, subscription
+tags: client, event-listeners, subscription
 ---
 
-## Deduplicate Global Event Listeners
+## Consolidate material global subscriptions
 
-Use `useSWRSubscription()` to share global event listeners across component instances.
+Multiple listeners are not automatically a performance problem. Consolidate only
+when a profile shows material duplicated work or when the event source has an
+explicit single-subscriber contract. Prefer the repository's existing event or
+subscription owner; do not add a server-state library just for this pattern.
 
-**Incorrect (N instances = N listeners):**
+**Simple per-instance subscription (profile before replacing):**
 
 ```tsx
 function useKeyboardShortcut(key: string, callback: () => void) {
@@ -27,48 +30,35 @@ function useKeyboardShortcut(key: string, callback: () => void) {
 
 When using the `useKeyboardShortcut` hook multiple times, each instance will register a new listener.
 
-**Correct (N instances = 1 listener):**
+**One dependency-free option when consolidation is justified:**
 
 ```tsx
-import useSWRSubscription from 'swr/subscription'
+type KeyHandler = (event: KeyboardEvent) => void
+const handlers = new Set<KeyHandler>()
+let listening = false
 
-// Module-level Map to track callbacks per key
-const keyCallbacks = new Map<string, Set<() => void>>()
-
-function useKeyboardShortcut(key: string, callback: () => void) {
-  // Register this callback in the Map
-  useEffect(() => {
-    if (!keyCallbacks.has(key)) {
-      keyCallbacks.set(key, new Set())
-    }
-    keyCallbacks.get(key)!.add(callback)
-
-    return () => {
-      const set = keyCallbacks.get(key)
-      if (set) {
-        set.delete(callback)
-        if (set.size === 0) {
-          keyCallbacks.delete(key)
-        }
-      }
-    }
-  }, [key, callback])
-
-  useSWRSubscription('global-keydown', () => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && keyCallbacks.has(e.key)) {
-        keyCallbacks.get(e.key)!.forEach(cb => cb())
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  })
+function dispatch(event: KeyboardEvent) {
+  for (const handler of handlers) handler(event)
 }
 
-function Profile() {
-  // Multiple shortcuts will share the same listener
-  useKeyboardShortcut('p', () => { /* ... */ }) 
-  useKeyboardShortcut('k', () => { /* ... */ })
-  // ...
+export function subscribeKeydown(handler: KeyHandler) {
+  handlers.add(handler)
+  if (!listening) {
+    window.addEventListener('keydown', dispatch)
+    listening = true
+  }
+
+  return () => {
+    handlers.delete(handler)
+    if (listening && handlers.size === 0) {
+      window.removeEventListener('keydown', dispatch)
+      listening = false
+    }
+  }
 }
 ```
+
+Subscribe from an Effect and return the disposer. Preserve callback freshness,
+server-rendering boundaries, Strict Mode remount behaviour and hot-reload cleanup.
+Re-profile after the change; a shared registry adds state and failure modes, so
+keep the simpler per-component listener when the measured gain is negligible.

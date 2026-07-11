@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = ROOT / "skills" / "deliver" / "scripts" / "validate_delivery.py"
 REFERENCE_RUNS_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_runs.py"
+REFERENCE_EVALUATION_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_evaluation.py"
 
 
 def load_validator():
@@ -20,9 +21,15 @@ def load_validator():
     return module
 
 
-def fixture(profile="software"):
+def fixture(profile="software", workspace_root=None, **materialise_kwargs):
     module = load(REFERENCE_RUNS_PATH, f"reference_runs_{profile}")
-    return module.make_reference_run(profile, ROOT)
+    run = module.make_reference_run(profile, ROOT)
+    if workspace_root is not None:
+        materialiser = load(REFERENCE_EVALUATION_PATH, f"reference_evaluation_{profile}")
+        materialiser.materialise_reference_run(
+            run, workspace_root, ROOT, **materialise_kwargs,
+        )
+    return run
 
 
 def load(path: Path, name: str):
@@ -33,10 +40,38 @@ def load(path: Path, name: str):
     return module
 
 
-def test_reference_run_for_every_profile_passes():
+def terminalise_reference_evaluation(run, status="failed"):
+    binding = run["assurance"]["evaluations"][0]
+    evidence_id = f"evaluation-{status}-receipt"
+    binding.update({
+        "status": status,
+        "evaluation_id": f"EVAL-{status.upper()}",
+        "evidence_id": evidence_id,
+    })
+    run["evidence"].append({
+        "id": evidence_id,
+        "kind": "deterministic",
+        "gate": f"evaluation-{status}",
+        "status": "pass",
+        "method": "schema-v2 terminal receipt validation",
+        "artifact_id": binding["evaluation_artifact_id"],
+        "source_paths": ["input"],
+        "result": {
+            "exit_code": 0,
+            "receipt_digest": "sha256:" + "f" * 64,
+        },
+    })
+    return binding
+
+
+def test_reference_run_for_every_profile_passes(tmp_path):
     module = load_validator()
     for profile in ("software", "research", "analysis", "document", "agent-product"):
-        module.validate(fixture(profile), ROOT)
+        workspace_root = tmp_path / profile
+        module.validate(
+            fixture(profile, workspace_root), ROOT,
+            workspace_root=workspace_root, verify_hashes=True,
+        )
 
 
 def test_approved_intent_requires_bound_artifact_digest_owner_and_evidence():
@@ -291,9 +326,10 @@ def test_security_checks_are_exact_policy_selected_deterministic_evidence():
         module.validate(candidate, ROOT)
 
 
-def test_optional_family_failure_is_recorded_but_non_blocking():
+def test_optional_family_failure_is_recorded_but_non_blocking(tmp_path):
     module = load_validator()
-    candidate = fixture("agent-product")
+    workspace_root = tmp_path / "agent-product"
+    candidate = fixture("agent-product", workspace_root)
     candidate["reviews"].append({
         "role": "bonus",
         "provider_family": "google",
@@ -304,7 +340,7 @@ def test_optional_family_failure_is_recorded_but_non_blocking():
         "evidence_id": "",
         "reason": "quota",
     })
-    module.validate(candidate, ROOT)
+    module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
 
 
 def test_primary_reviews_require_distinct_matching_judgement_evidence():
@@ -361,9 +397,10 @@ def test_observation_not_applicable_requires_profile_justification():
         module.validate(candidate, ROOT)
 
 
-def test_closed_crucial_or_incident_cycle_requires_retrospective_linkage():
+def test_closed_crucial_or_incident_cycle_requires_retrospective_linkage(tmp_path):
     module = load_validator()
-    candidate = fixture("agent-product")
+    workspace_root = tmp_path / "agent-product"
+    candidate = fixture("agent-product", workspace_root)
     candidate["risk_tier"] = "crucial"
     candidate["status"] = "closed"
     candidate["checkpoint"].update({"current_slice": "closed", "next_action": "cycle closed", "in_flight": []})
@@ -381,12 +418,12 @@ def test_closed_crucial_or_incident_cycle_requires_retrospective_linkage():
     candidate["observation"].update({"started_at": "2026-07-10T00:11:00Z", "ended_at": "2026-07-11T00:11:00Z", "observed_events": 1, "evidence_ids": ["observation-result"]})
     candidate["retrospective"] = None
     with pytest.raises(module.Invalid, match="retrospective"):
-        module.validate(candidate, ROOT)
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
 
 
 def test_required_retrospective_cannot_borrow_another_delivery_cycle(tmp_path):
     module = load_validator()
-    candidate = fixture("agent-product")
+    candidate = fixture("agent-product", tmp_path)
     candidate["risk_tier"] = "crucial"
     candidate["status"] = "closed"
     candidate["checkpoint"].update({"current_slice": "closed", "next_action": "cycle closed", "in_flight": []})
@@ -437,7 +474,7 @@ def test_required_retrospective_cannot_borrow_another_delivery_cycle(tmp_path):
     })
     candidate["retrospective"] = {"status": "no-change", "artifact_id": "retrospective", "digest": retro_digest}
     with pytest.raises(module.Invalid, match="current delivery cycle"):
-        module.validate(candidate, ROOT, workspace_root=tmp_path)
+        module.validate(candidate, ROOT, workspace_root=tmp_path, verify_hashes=True)
 
 
 def test_checkpoint_and_observation_substates_follow_lifecycle_state():
@@ -487,20 +524,280 @@ def test_high_stakes_overlay_requires_source_authority_privacy_and_qualified_rev
         module.validate(candidate, ROOT)
 
 
-def test_awaiting_acceptance_requires_outcome_trajectory_and_reproducible_stochastic_evidence():
+def test_awaiting_acceptance_requires_outcome_trajectory_and_bound_stochastic_evidence(tmp_path):
     module = load_validator()
     candidate = fixture("agent-product")
     candidate["measures"]["trajectory"] = []
     with pytest.raises(module.Invalid, match="trajectory"):
         module.validate(candidate, ROOT)
-    candidate = fixture("agent-product")
-    candidate["assurance"]["evaluations"][0]["repetitions"] = 1
-    with pytest.raises(module.Invalid, match="repetitions"):
-        module.validate(candidate, ROOT)
+
+    workspace_root = tmp_path / "agent-product"
+    candidate = fixture("agent-product", workspace_root)
+    with pytest.raises(module.Invalid, match="requires --verify-hashes"):
+        module.validate(candidate, ROOT, workspace_root=workspace_root)
+    module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
+
+    candidate["assurance"]["evaluations"][0]["repetitions"] = 3
+    with pytest.raises(module.Invalid, match="schema-v2 receipt binding fields"):
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
+
     candidate = fixture("software")
     candidate["measures"]["outcome"][0].pop("target")
     with pytest.raises(module.Invalid, match="value, target and aggregation"):
         module.validate(candidate, ROOT)
+
+
+def test_stochastic_binding_anchors_plan_before_execution_then_completes(tmp_path):
+    module = load_validator()
+    workspace_root = tmp_path / "two-phase"
+    complete = fixture("agent-product", workspace_root)
+    complete_row = complete["assurance"]["evaluations"][0]
+    anchored_values = (complete_row["evaluation_id"], complete_row["plan_digest"])
+
+    planned = copy.deepcopy(complete)
+    planned["status"] = "executing"
+    planned["state_history"] = planned["state_history"][:4]
+    planned["checkpoint"].update({
+        "current_slice": "executing", "next_action": "run frozen evaluation",
+        "in_flight": ["evaluation"],
+    })
+    planned["reviews"] = []
+    planned["measures"] = {"outcome": [], "trajectory": []}
+    planned["evidence"] = [
+        item for item in planned["evidence"] if item["kind"] != "judgement"
+    ]
+    planned["artifacts"] = [
+        item for item in planned["artifacts"] if item["id"] != "evaluation-receipt"
+    ]
+    planned_row = planned["assurance"]["evaluations"][0]
+    planned_row.update({
+        "status": "planned", "evaluation_artifact_id": "",
+        "evaluation_digest": "", "evidence_id": "",
+    })
+    module.validate(planned, ROOT)
+    assert (planned_row["evaluation_id"], planned_row["plan_digest"]) == anchored_values
+
+    transitioned = copy.deepcopy(complete)
+    transitioned_row = copy.deepcopy(planned_row)
+    transitioned_row.update({
+        field: complete_row[field]
+        for field in ("status", "evaluation_artifact_id", "evaluation_digest", "evidence_id")
+    })
+    transitioned["assurance"]["evaluations"][0] = transitioned_row
+    assert (transitioned_row["evaluation_id"], transitioned_row["plan_digest"]) == anchored_values
+    module.validate(
+        transitioned, ROOT, workspace_root=workspace_root, verify_hashes=True,
+    )
+
+    awaiting = copy.deepcopy(complete)
+    awaiting_row = awaiting["assurance"]["evaluations"][0]
+    awaiting_row.update({
+        "status": "planned", "evaluation_artifact_id": "",
+        "evaluation_digest": "", "evidence_id": "",
+    })
+    awaiting["artifacts"] = [
+        item for item in awaiting["artifacts"] if item["id"] != "evaluation-receipt"
+    ]
+    with pytest.raises(module.Invalid, match="must be complete before stochastic acceptance"):
+        module.validate(awaiting, ROOT)
+
+    assert (complete_row["evaluation_id"], complete_row["plan_digest"]) == anchored_values
+
+
+def test_stochastic_anchor_must_precede_nested_evaluation_execution(tmp_path):
+    module = load_validator()
+    workspace_root = tmp_path / "late-anchor"
+    candidate = fixture("agent-product", workspace_root)
+    candidate["assurance"]["evaluations"][0]["anchored_at"] = "2026-07-10T00:03:00Z"
+    with pytest.raises(module.Invalid, match="precede its nested evaluation execution"):
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
+
+
+@pytest.mark.parametrize("terminal_status", ["failed", "incomplete"])
+def test_terminal_evaluation_is_retained_but_cannot_satisfy_acceptance(
+    tmp_path, terminal_status,
+):
+    module = load_validator()
+    materialiser = load(
+        REFERENCE_EVALUATION_PATH, f"terminal_evaluation_{terminal_status}",
+    )
+    workspace_root = tmp_path / terminal_status
+    candidate = fixture("agent-product")
+    terminalise_reference_evaluation(candidate, terminal_status)
+    awaiting_transition = copy.deepcopy(candidate["state_history"][-1])
+    candidate["status"] = "reviewing"
+    candidate["state_history"] = candidate["state_history"][:-1]
+    candidate["checkpoint"].update({
+        "current_slice": "reviewing", "next_action": "decide whether to retry",
+        "in_flight": [],
+    })
+    materialiser.materialise_reference_run(
+        candidate, workspace_root, ROOT,
+        evaluation_repetitions=2, evaluation_sample_size=1,
+    )
+    module.validate(
+        candidate, ROOT, workspace_root=workspace_root, verify_hashes=True,
+    )
+
+    awaiting = copy.deepcopy(candidate)
+    awaiting["status"] = "awaiting_acceptance"
+    awaiting["state_history"].append(awaiting_transition)
+    awaiting["checkpoint"].update({
+        "current_slice": "awaiting-acceptance", "next_action": "human acceptance",
+    })
+    with pytest.raises(module.Invalid, match="at least one complete passing evaluation"):
+        module.validate(
+            awaiting, ROOT, workspace_root=workspace_root, verify_hashes=True,
+        )
+
+
+def test_terminal_evaluation_requires_deterministic_not_judgement_evidence(tmp_path):
+    module = load_validator()
+    materialiser = load(REFERENCE_EVALUATION_PATH, "terminal_evidence_kind")
+    workspace_root = tmp_path / "terminal-evidence"
+    candidate = fixture("agent-product")
+    binding = terminalise_reference_evaluation(candidate)
+    materialiser.materialise_reference_run(candidate, workspace_root, ROOT)
+    binding["evidence_id"] = next(
+        item["id"] for item in candidate["evidence"] if item["kind"] == "judgement"
+    )
+    with pytest.raises(module.Invalid, match="terminal nonpass.*deterministic evidence"):
+        module.validate(
+            candidate, ROOT, workspace_root=workspace_root, verify_hashes=True,
+        )
+
+
+def test_fresh_complete_plan_after_failed_evaluation_can_satisfy_acceptance(tmp_path):
+    module = load_validator()
+    materialiser = load(REFERENCE_EVALUATION_PATH, "fresh_after_failed")
+    workspace_root = tmp_path / "fresh-after-failed"
+    candidate = fixture("agent-product")
+    failed = terminalise_reference_evaluation(candidate)
+    failed["evaluation_id"] = "EVAL-FAILED-FIRST"
+
+    candidate["artifacts"].append({
+        "id": "evaluation-retry",
+        "path": "evaluation-retry/EVALUATION.json",
+        "media_type": "application/json",
+        "artifact_type": "evidence",
+        "digest": "sha256:" + "e" * 64,
+        "class": "evidence",
+        "owner": "evaluation-chair",
+        "retention": "risk-policy",
+    })
+    retry = {
+        "status": "complete",
+        "anchored_at": "2026-07-10T00:04:30Z",
+        "evidence_id": next(
+            item["id"] for item in candidate["evidence"]
+            if item["kind"] == "judgement" and item["model_lineage"]["provider_family"] == "openai"
+        ),
+        "evaluation_artifact_id": "evaluation-retry",
+        "evaluation_id": "EVAL-RETRY",
+        "evaluation_digest": "sha256:" + "e" * 64,
+        "plan_digest": "sha256:" + "e" * 64,
+    }
+    candidate["assurance"]["evaluations"].append(retry)
+    candidate["state_history"][-2]["at"] = "2026-07-10T00:07:30Z"
+    candidate["state_history"][-1]["at"] = "2026-07-10T00:08:00Z"
+
+    materialiser.materialise_reference_run(candidate, workspace_root, ROOT)
+    materialiser.materialise_evaluation_binding(
+        candidate, workspace_root, ROOT, binding_index=0,
+        repetitions=2, sample_size=1,
+    )
+    materialiser.materialise_evaluation_binding(
+        candidate, workspace_root, ROOT, binding_index=1,
+        repetitions=3, sample_size=10, time_offset_minutes=2,
+    )
+
+    first_execution = next(
+        item["at"] for item in candidate["state_history"] if item["state"] == "executing"
+    )
+    assert retry["anchored_at"] > first_execution
+
+    planned_retry = copy.deepcopy(candidate)
+    planned_retry["status"] = "executing"
+    planned_retry["state_history"] = planned_retry["state_history"][:5] + [{
+        "state": "executing", "at": "2026-07-10T00:05:30Z", "evidence_ids": [],
+    }]
+    planned_retry["checkpoint"].update({
+        "current_slice": "executing", "next_action": "run fresh evaluation plan",
+        "in_flight": ["EVAL-RETRY"],
+    })
+    planned_retry_binding = planned_retry["assurance"]["evaluations"][1]
+    planned_retry_binding.update({
+        "status": "planned", "evaluation_artifact_id": "",
+        "evaluation_digest": "", "evidence_id": "",
+    })
+    planned_retry["artifacts"] = [
+        item for item in planned_retry["artifacts"] if item["id"] != "evaluation-retry"
+    ]
+    module.validate(
+        planned_retry, ROOT, workspace_root=workspace_root, verify_hashes=True,
+    )
+
+    module.validate(
+        candidate, ROOT, workspace_root=workspace_root, verify_hashes=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("anchor", "replacement", "message"),
+    [
+        ("evaluation_id", "EVAL-FORGED", "evaluation_id does not match"),
+        ("plan_digest", "sha256:" + "0" * 64, "plan.digest does not match"),
+    ],
+)
+def test_stochastic_evaluation_rejects_forged_delivery_anchors(
+    tmp_path, anchor, replacement, message,
+):
+    module = load_validator()
+    workspace_root = tmp_path / anchor
+    candidate = fixture("agent-product", workspace_root)
+    candidate["assurance"]["evaluations"][0][anchor] = replacement
+    with pytest.raises(module.Invalid, match=message):
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
+
+
+def test_stochastic_evaluation_is_bound_to_the_enclosing_delivery_run(tmp_path):
+    module = load_validator()
+    workspace_root = tmp_path / "run-id"
+    candidate = fixture("agent-product", workspace_root)
+    candidate["run_id"] = "FORGED-DELIVERY"
+    with pytest.raises(module.Invalid, match="enclosing_delivery_run_id does not match"):
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
+
+
+def test_stochastic_evaluation_verifies_nested_artifact_hashes(tmp_path):
+    module = load_validator()
+    workspace_root = tmp_path / "nested-hash"
+    candidate = fixture("agent-product", workspace_root)
+    output = workspace_root / "evaluation" / "evidence" / "output.json"
+    output.write_text(output.read_text() + "tampered\n")
+    with pytest.raises(module.Invalid, match="artifact output digest mismatch"):
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
+
+
+@pytest.mark.parametrize(
+    ("repetitions", "sample_size", "message"),
+    [
+        (2, 10, "bound plan repetitions are below"),
+        (3, 1, "bound plan sample size is below"),
+    ],
+)
+def test_stochastic_evaluation_uses_bound_plan_for_profile_minimums(
+    tmp_path, repetitions, sample_size, message,
+):
+    module = load_validator()
+    workspace_root = tmp_path / f"{repetitions}-{sample_size}"
+    candidate = fixture(
+        "agent-product", workspace_root,
+        evaluation_repetitions=repetitions,
+        evaluation_sample_size=sample_size,
+    )
+    with pytest.raises(module.Invalid, match=message):
+        module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
 
 
 def test_global_policy_root_cannot_be_replaced_by_project_registry(tmp_path):

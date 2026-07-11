@@ -21,13 +21,13 @@ Citations should support claims, not decorate sentences.
 Weak:
 
 ```text
-Romance scams are an important problem \cite{a,b,c}.
+Forecast accuracy matters in operational planning \cite{a,b,c}.
 ```
 
 Better:
 
 ```text
-Prior work has treated romance-scam detection primarily as a text-classification problem, often evaluating complete conversations rather than prefix-level intervention points \cite{a,b,c}.
+Prior work evaluates short-term demand forecasts mainly with aggregate error metrics, while fewer studies report calibration across low-volume regions \cite{a,b,c}.
 ```
 
 Use citations to support:
@@ -61,10 +61,7 @@ Preserve exactly unless explicitly asked:
 - `\cite{...}`
 - `\Cref{...}`, `\cref{...}`, `\ref{...}`, `\autoref{...}`
 - `\label{...}`
-- `\result{...}`
-- `\metric{...}`
-- `\model{...}`
-- `\path{...}`
+- project-defined commands and their arguments, such as `\result{...}`
 - equations and math environments
 - table column alignment
 - figure paths
@@ -78,7 +75,7 @@ Do not rewrite macro arguments for style. A macro argument can be a contract wit
 Keep references specific:
 
 ```text
-\Cref{tab:rq1-accuracy} reports decision-turn AUPRC.
+\Cref{tab:primary-results} reports the primary outcome.
 ```
 
 Avoid vague references:
@@ -116,7 +113,7 @@ The equation elegantly captures the relationship.
 Treat generated result macros as locked:
 
 ```latex
-\result{RQ1_AUPRC}
+\result{PRIMARY_METRIC}
 ```
 
 Do not replace them with guessed numbers. Do not hide unresolved tokens. If the prose overclaims a pending token, rewrite the claim as conditional or flag it.
@@ -124,7 +121,7 @@ Do not replace them with guessed numbers. Do not hide unresolved tokens. If the 
 Good:
 
 ```text
-Values in \Cref{tab:rq1-accuracy} are populated by the generated-results pipeline and remain conditional on the corresponding claim-manifest row.
+Values in \Cref{tab:primary-results} are populated by the project's verified results source and remain provisional until its declared checks pass.
 ```
 
 ## Common LaTeX Hazards

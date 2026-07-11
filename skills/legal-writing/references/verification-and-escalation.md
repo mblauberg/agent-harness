@@ -1,24 +1,62 @@
 # Verification And Escalation
 
-Shared verification pointer for Australian legal work. Apply the gate definitions in the owning project's
-agent instructions; do not replace them with this summary.
+Apply the owning project's authority and source gates. This reference is a
+portable verification protocol, not a substitute for current Australian law,
+forum procedure or qualified legal review.
 
-## Official-Source Hierarchy
+## Source Hierarchy
 
-Use official sources before commentary:
+Use the highest-authority current source available for the proposition:
 
-1. Current legislation from Federal Register or Queensland Legislation.
-2. Current court/tribunal pages and downloadable forms from FCFCOA, QCAT or Queensland Courts.
-3. Sealed/filed/stamped registry documents and original source evidence in the project's evidence store.
-4. Secondary explainers only as orientation; never as final authority where an official source is available.
+1. legislation and delegated instruments on the responsible official
+   legislation service;
+2. judgments, orders and reasons from an authorised court or tribunal source;
+3. current rules, practice directions, forms, filing guidance and notices from
+   the relevant official forum;
+4. sealed, issued, filed, served or otherwise authenticated proceeding records;
+5. original evidence permitted by the project's source protocol; and
+6. secondary commentary for orientation only, unless the task expressly calls
+   for it and its status is clear.
+
+An index, search result, summary, OCR layer, transcript, render or working note may
+locate a source. It does not replace that source. Check commencement,
+amendment, transitional provisions, supersession and the proposition's relevant
+date before calling a source current.
 
 ## Verification Record
 
-Record URL/path, date checked, version/date range, exact provision/form/page/line/timestamp and the fact it
-supports. If verification still leaves ambiguity, record the competing readings and practical risk in the
-relevant project control or status file as an unresolved user-instruction issue.
+For every rule, form, procedural statement or important fact, record:
 
-## Hard Stop Reminder
+- the proposition supported;
+- source title and stable URL or repository path;
+- issuing body and jurisdiction;
+- version, effective date or relevant date range;
+- exact section, rule, paragraph, page, line, field or timestamp;
+- date checked and whether the source itself was opened; and
+- any conflict, qualification or unresolved interpretation.
 
-Agents may prepare and verify. Current human-authority instruction is required to file, serve, lodge, upload,
-email a registry, sign, witness, certify, disclose protected contact details or finalise merits instructions.
+Do not report `filed`, `served`, `lodged`, `accepted`, `sealed`, `signed`,
+`witnessed` or `sent` without evidence for that distinct state.
+
+## Escalate Rather Than Infer
+
+Stop at an internal, clearly qualified draft when:
+
+- the forum, procedural stage, form or source hierarchy is uncertain;
+- official sources conflict or the relevant version cannot be established;
+- the requested wording would change a contention into a finding;
+- confidentiality, privilege, suppression, safety or redaction is unresolved;
+- an authority or quotation cannot be pinpoint-verified;
+- the task requires legal judgement beyond the supplied instructions; or
+- a signature, certification, undertaking, concession, filing, service or
+  external communication lacks current human authority.
+
+Record the competing readings and practical consequence in the project's
+canonical control or status document. Do not hide the gap in polished prose.
+
+## External-Action Gate
+
+Drafting and verification do not authorise filing, lodging, service, upload,
+signature, witnessing, certification, disclosure or communication. Treat each
+external act and recipient as a separate human-authorised step, then retain the
+evidence that proves what occurred.
