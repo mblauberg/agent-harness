@@ -415,7 +415,8 @@ def _validate_intent_design(run: dict[str, Any], artifacts: dict[str, dict[str, 
 
 def _validate_evidence(
     run: dict[str, Any], profile: dict[str, Any], artifacts: dict[str, dict[str, Any]],
-    required_kinds: set[str], allowed_source_paths: list[str],
+    required_kinds: set[str], allowed_source_paths: list[str], *,
+    artifact_root: Path | None, verify_hashes: bool,
 ) -> dict[str, dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     for index, raw in enumerate(_list(run.get("evidence"), "evidence")):
@@ -438,12 +439,74 @@ def _validate_evidence(
             exit_code = result.get("exit_code")
             fail(isinstance(exit_code, bool) or not isinstance(exit_code, int), f"deterministic evidence {evidence_id} requires integer exit_code")
             _digest(result.get("receipt_digest"), f"evidence {evidence_id}.result.receipt_digest")
+            declared_artifact = artifacts[item["artifact_id"]]
+            fail(
+                declared_artifact.get("digest") != result.get("receipt_digest"),
+                f"deterministic evidence {evidence_id} receipt digest must bind its declared artifact",
+            )
             fail((item.get("status") == "pass") != (exit_code == 0), f"deterministic evidence {evidence_id} status disagrees with its result")
         if item.get("kind") == "observation":
             _utc(item.get("observed_at"), f"evidence {evidence_id}.observed_at")
             measured = item.get("measured_value")
             fail(isinstance(measured, bool) or not isinstance(measured, (int, float)) or not math.isfinite(measured), f"observation evidence {evidence_id} requires a finite measured_value")
         by_id[evidence_id] = item
+    if verify_hashes:
+        fail(artifact_root is None, "deterministic evidence verification requires an artifact root")
+        evaluation_artifact_ids = {
+            item.get("evaluation_artifact_id")
+            for item in _list(_mapping(run.get("assurance"), "assurance").get("evaluations"), "assurance.evaluations")
+            if isinstance(item, dict) and item.get("evaluation_artifact_id")
+        }
+        for artifact_id in {
+            item["artifact_id"] for item in by_id.values()
+            if item.get("kind") == "deterministic"
+        } - evaluation_artifact_ids:
+            artifact = artifacts[artifact_id]
+            fail(
+                artifact.get("artifact_type") != "evidence"
+                or artifact.get("media_type") != "application/json"
+                or not artifact.get("path") or artifact.get("uri"),
+                f"deterministic evidence artifact {artifact_id} must be a local JSON evidence bundle",
+            )
+            target = artifact_root / artifact["path"]
+            try:
+                bundle = json.loads(target.read_text())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise Invalid(f"deterministic evidence artifact {artifact_id} must contain valid bundle JSON") from exc
+            bundle = _mapping(bundle, f"deterministic evidence artifact {artifact_id}")
+            fail(
+                set(bundle) != {"schema_version", "contract", "checks"}
+                or bundle.get("schema_version") != 1
+                or bundle.get("contract") != "deterministic-evidence-bundle",
+                f"deterministic evidence artifact {artifact_id} has an invalid bundle contract",
+            )
+            checks: dict[str, dict[str, Any]] = {}
+            for check_index, raw_check in enumerate(_list(bundle.get("checks"), f"deterministic evidence artifact {artifact_id}.checks")):
+                check = _mapping(raw_check, f"deterministic evidence artifact {artifact_id}.checks[{check_index}]")
+                fail(
+                    set(check) != {"id", "gate", "status", "method", "source_paths", "exit_code"}
+                    or not isinstance(check.get("id"), str) or check["id"] in checks,
+                    f"deterministic evidence artifact {artifact_id} has an invalid or duplicate check",
+                )
+                checks[check["id"]] = check
+            linked = {
+                item["id"]: item for item in by_id.values()
+                if item.get("kind") == "deterministic" and item.get("artifact_id") == artifact_id
+            }
+            fail(set(checks) != set(linked), f"deterministic evidence artifact {artifact_id} check set does not match its evidence rows")
+            for evidence_id, item in linked.items():
+                check = checks[evidence_id]
+                fail(
+                    check != {
+                        "id": evidence_id,
+                        "gate": item["gate"],
+                        "status": item["status"],
+                        "method": item["method"],
+                        "source_paths": item["source_paths"],
+                        "exit_code": item["result"]["exit_code"],
+                    },
+                    f"deterministic evidence artifact {artifact_id} check {evidence_id} does not match its evidence row",
+                )
     for kind, gates in profile["required_evidence"].items():
         if kind not in required_kinds:
             continue
@@ -865,7 +928,10 @@ def validate(
     acceptance_reached = furthest >= NORMAL_STATES.index("awaiting_acceptance")
     required_kinds = ({"deterministic"} if reviewing_reached else set()) | ({"judgement"} if acceptance_reached else set())
     allowed_source_paths = [_safe_path(item, "authority.allowed_source_paths") for item in authority["allowed_source_paths"]]
-    evidence = _validate_evidence(run, profile, artifacts, required_kinds, allowed_source_paths)
+    evidence = _validate_evidence(
+        run, profile, artifacts, required_kinds, allowed_source_paths,
+        artifact_root=workspace_root or receipt_dir, verify_hashes=verify_hashes,
+    )
     authority_evidence = evidence.get(authority.get("evidence"))
     fail(not authority_evidence or authority_evidence.get("kind") != "human" or authority_evidence.get("status") != "pass" or authority_evidence.get("gate") != "authority-approval", "authority must link matching passing human evidence")
     if run["risk_override"].get("status") == "approved":

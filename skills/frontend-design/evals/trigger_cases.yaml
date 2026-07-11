@@ -1,12 +1,12 @@
 schema_version: 1
 target_skill: frontend-design
 cases:
-  - {id: q100, relation: positive, prompt: "Redesign this dashboard and implement a coherent responsive visual system.", tags: [direct], expected: {primary_skill: frontend-design, companion_skills: []}}
-  - {id: q101, relation: positive, prompt: "Polish this onboarding flow with better hierarchy, spacing, motion, and empty states.", tags: [direct], expected: {primary_skill: frontend-design, companion_skills: []}}
-  - {id: q102, relation: positive, prompt: "Build reusable tokens and components for this authorised frontend design system change.", tags: [direct], expected: {primary_skill: frontend-design, companion_skills: []}}
+  - {id: q100, relation: positive, prompt: "Create three coherent responsive visual directions for this dashboard; do not change production source.", tags: [direct], expected: {primary_skill: frontend-design, companion_skills: []}}
+  - {id: q101, relation: positive, prompt: "Define the hierarchy, spacing, motion, and empty-state design for this onboarding brief without implementing it.", tags: [direct], expected: {primary_skill: frontend-design, companion_skills: []}}
+  - {id: q102, relation: positive, prompt: "Sketch a reusable token and component language for design discussion; no code changes are authorised.", tags: [direct], expected: {primary_skill: frontend-design, companion_skills: []}}
   - {id: q103, relation: negative, prompt: "Audit this interface source-read-only for UX and accessibility defects.", tags: [adjacent], expected: {primary_skill: frontend-review, companion_skills: []}}
   - {id: q104, relation: negative, prompt: "Profile why this React page has poor INP and a large client bundle.", tags: [adjacent], expected: {primary_skill: react-performance, companion_skills: []}}
   - {id: q105, relation: negative, prompt: "Repair this backend database migration; there is no user interface change.", tags: [adjacent], expected: {primary_skill: implement, companion_skills: []}}
   - {id: q106, relation: boundary, prompt: "Implement the approved dashboard redesign end-to-end and verify it before handoff.", tags: [composition], expected: {primary_skill: implement, companion_skills: [frontend-design]}}
-  - {id: q107, relation: boundary, prompt: "Redesign the slow results view without regressing its measured React performance.", tags: [composition], expected: {primary_skill: frontend-design, companion_skills: [react-performance]}}
-  - {id: q108, relation: boundary, prompt: "Iterate this interface design against the running app in a real browser.", tags: [composition], expected: {primary_skill: frontend-design, companion_skills: [playwright]}}
+  - {id: q107, relation: boundary, prompt: "Implement the approved redesign of the slow results view without regressing its measured React performance.", tags: [composition], expected: {primary_skill: implement, companion_skills: [frontend-design, react-performance]}}
+  - {id: q108, relation: boundary, prompt: "Implement and iterate the approved interface design against the running app in a real browser.", tags: [composition], expected: {primary_skill: implement, companion_skills: [frontend-design, playwright]}}

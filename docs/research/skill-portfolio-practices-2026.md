@@ -13,9 +13,9 @@ entire pack belongs here. This review therefore adapts individual ideas only
 when they have a distinct trigger, authority boundary, output and verification
 gate.
 
-The resulting portfolio has 34 skills: the existing 31 plus `refactor`,
-`frontend-review` and a rewritten cross-agent `caveman`. No existing skill was
-retired. The main improvements are contract repair, clearer composition,
+The resulting portfolio has 33 skills: the earlier 31 plus `refactor`,
+`frontend-review` and a rewritten cross-agent `caveman`, less the obsolete
+`agy-headless` provider skill. The main improvements are contract repair, clearer composition,
 catalogue-wide discovery limits, behavioural routing fixtures, deterministic
 safety checks and evidence-bearing review. `release` now promotes any accepted
 artifact through a separately authorised deploy, publish, share, send or
@@ -45,6 +45,62 @@ No private provider transcript was mined. Evaluation inputs are synthetic or
 run-owned. Public pack contents were not imported wholesale. Concepts are
 summarised; copied or substantially adapted components require their own
 licence notice and provenance.
+
+## 11 July external-pack and harness delta
+
+The review statically inspected all 24 skills and non-skill surfaces at
+[Addy Osmani `agent-skills` commit `4e8bd9f`](https://github.com/addyosmani/agent-skills/tree/4e8bd9fde4a38cd009053e649f4cdc7cd36b568b).
+No upstream installer, hook, evaluation runner or skill code was executed. The
+pack would duplicate lifecycle owners and materially exceed the local discovery
+budget, so no package or top-level skill was imported.
+
+Two mechanisms were independently re-authored inside existing owners:
+
+- `implement` now grounds version-sensitive external interfaces against the
+  installed/locked version, local conventions and narrow primary sources, with
+  an explicit `unverified` state;
+- migration work now inventories its mixed-version window, uses
+  expand/migrate/contract where applicable, expires compatibility paths only
+  with usage-zero evidence, and distinguishes reversal from containment.
+
+The frontend pack was reduced instead of augmented: `frontend-design` remains
+the mutation technique inside `implement`; read-only review, React performance,
+scope and document ownership stay with their existing specialists. Its
+competing critique/audit/optimise commands, score storage and pinning machinery
+were removed. Deterministic delivery evidence was also hardened so its receipt
+digest must match the declared artifact that `--verify-hashes` checks.
+The standalone `agy-headless` skill and direct Agy helper routes were retired:
+the activated Agent Fabric Agy adapter now owns Gemini execution, authority,
+model lineage, durable actions and recovery.
+The same boundary applies across families: Agent Fabric is the primary
+answer-bearing provider layer; Autonomous Lab's parallel cross-family shell
+wrapper was removed, while `cf_dispatch.sh` remains only a preflight or
+explicitly recorded degraded fallback.
+
+| Current system inspected | Useful mechanism | Local decision |
+|---|---|---|
+| [GitHub Agentic Workflows `0e0d373`](https://github.com/github/gh-aw/tree/0e0d3736527cc5029115b7a49a63388da83cc1b2) | Withhold credentials from the planning runtime; validate a typed effect request before a scoped executor applies it. | P1 scoped follow-up inside `release`; do not add its workflow schema. |
+| [OpenHands SDK/docs `a7d4182`](https://github.com/OpenHands/docs/tree/a7d418214914617674139b741d9d22691390457d) | Detect normalised repeated action/result, repeated-error and alternating loop signatures. | P1 scoped follow-up for `autonomous-lab` and headless adapters; retain no full conversation store. |
+| [mini-SWE-agent `e187bcb`](https://github.com/SWE-agent/mini-swe-agent/tree/e187bcb2ff5825d85761a6f9c1f98c9fa6cfbc79) | A small linear single-agent loop is a meaningful counterfactual to harness complexity. | P1 follow-up: add a typed evaluation kind before claiming minimal-baseline and mechanism-ablation enforcement. |
+| [Goose `3c1fdd6`](https://github.com/aaif-goose/goose/tree/3c1fdd692cc8aaa5f09b9175410c09a09d4dfe49) | Minimise visible tools and declare permitted operations. | P2 experiment; do not add recipes/subrecipes or copy autonomous defaults. |
+| [Trailblaze `0e13954`](https://github.com/block/trailblaze/tree/0e13954a52126e8bbdc33d1dc97cf0d7aa77786a) | Promote a successful exploratory UI path into deterministic replay. | P2 browser/TDD pattern only after project evidence; no global device stack. |
+| [Aider `5dc9490`](https://github.com/Aider-AI/aider/tree/5dc9490bb35f9729ef2c95d00a19ccd30c26339c) | Rank repository symbols into a bounded navigation map. | P2 prototype only for measured large-repository context churn. |
+| [OpenAI Symphony `4cbe3a9`](https://github.com/openai/symphony/tree/4cbe3a9699a73b862466c0b157ceca0c1985d6d7) | Reconcile durable work state before dispatch under one scheduler. | Already covered by receipts, `work-map` and one-chair ownership; no new action. |
+| [GitHub Spec Kit](https://github.com/github/spec-kit) | Constitution/specification/plan/task separation. | Already covered by `HARNESS.md`, `scope`, engineering docs and `implement`; avoid a parallel lifecycle. |
+
+The remaining P1 architecture proposals are a provider-neutral pre-action
+authority guard (filesystem, network, tools, expiry and sandbox capability), a
+typed external-effect request plus least-privilege executor, and a redacted
+deterministic loop circuit breaker. They require an approved cross-adapter spec,
+negative fixtures and degradation rules; this review deliberately does not
+smuggle them in as prose-only guarantees. Enforced child depth and descendant
+budget consumption remains part of that follow-up; prose alone is not a gate.
+
+`api-design` and `observability` remain P2 standalone candidates, not omissions.
+Either must first recur in at least two projects and beat composition with
+existing owners in a frozen outcome-and-attention evaluation. Source-mutating
+hooks, host-permissive behavioural runners, automatic installation, fixed
+personas, provider-prefixed copies and second lifecycle schemas remain rejected.
 
 ## Current evidence and local consequence
 

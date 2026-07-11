@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
   "contract": "skill-routing-regression-plan",
-  "evaluation_id": "skill-portfolio-routing-20260711",
-  "frozen_at": "2026-07-11T08:52:15Z",
+  "evaluation_id": "skill-portfolio-routing-20260711-fabric-v2-opus",
+  "frozen_at": "2026-07-11T09:44:01Z",
   "dataset": {
     "path": "routing-holdout.yaml",
-    "sha256": "sha256:20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13",
-    "cases": 14,
+    "sha256": "sha256:ccf946829c97f0972d144b1e1e07cc308833d7dc6cc20d20eed850e3d422b30d",
+    "cases": 15,
     "split": "fresh-holdout"
   },
   "catalogue": {
-    "sha256": "sha256:c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6",
-    "characters": 7548
+    "sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
+    "characters": 7354
   },
   "classifier": {
     "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs.",
     "instruction_sha256": "sha256:8ff0f0d50114cbf542b86f0abcbdd67e6824e7e3eafb3b6b9e62107dfafb2318",
-    "packet_sha256": "sha256:c9c9f29ffea12e6bb3f6cb3bdb0625a7324ccd7cf0cbf4a8a028ce8332f5aa72",
-    "runner_sha256": "sha256:1baf607105ac1b92fde1c3a7ce5f8bb567a316c9a7246755f0c8fc62b5a5ab68",
+    "packet_sha256": "sha256:cd6e98de0f6cc753ed65128e2ac2c6a76a2622aea888f5e424e39f166abdd1fb",
+    "runner_sha256": "sha256:193a72f733dd8d10f0e6ef4047c9d3b83784fdcf8192328800a491d473796984",
     "output_schema_sha256": "sha256:faf1831b602103f2b0bdbcd1ec99b30985555930ac559baa57b0ea5e773049f6"
   },
   "rubric": {
@@ -31,7 +31,7 @@
     "families": ["anthropic", "openai"],
     "repetitions": 3,
     "attempts": 6,
-    "case_rows": 84,
+    "case_rows": 90,
     "retry_policy": "none"
   },
   "lineage": [

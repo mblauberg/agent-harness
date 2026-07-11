@@ -5,6 +5,12 @@ Evidence cut-off: 10 July 2026
 Review cadence: quarterly, and whenever a primary model, provider interface or
 material security standard changes
 
+Implementation status (11 July 2026): this document is the pre-implementation
+baseline. Its 30-skill inventory and ten material gaps are historical, not the
+live backlog. The implemented 33-skill state, closed gaps and current intake
+decisions are tracked in
+[Agent skill portfolio: 2026 research and refactor](skill-portfolio-practices-2026.md).
+
 ## Executive finding
 
 The harness already implements the strongest common pattern across current
@@ -132,6 +138,9 @@ material harness changes; deterministic and held-out evals test them.
 - public-safety and harness contract tests.
 
 ### Material gaps
+
+The numbered list below records the 10 July baseline. Do not re-open an item
+without checking the live contracts and the implementation-status companion.
 
 1. `implement` and its run validator assume Git revisions and source paths, so
    the supposed general lifecycle has no neutral execution contract.

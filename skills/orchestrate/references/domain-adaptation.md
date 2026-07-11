@@ -34,7 +34,7 @@ step. Respect the **host project's** authority rules — do not perform a gated 
 authority that project grants for that artifact. Encode any "must NOT do" as a `prohibited-action` flag
 in the handoff record (`layering-and-context.md`).
 
-## Data-sensitivity (external CLIs disclose content to that provider)
+## Data-sensitivity (external provider routes disclose content)
 
 Sending content to an external-family CLI discloses it to that provider. **Follow the host
 project's / operator's data policy** for what may leave the machine, and decide this *before*

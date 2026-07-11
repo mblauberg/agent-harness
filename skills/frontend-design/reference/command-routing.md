@@ -9,8 +9,6 @@ Load the named reference whenever a command is invoked.
 | `teach` | Build | Set up PRODUCT.md and DESIGN.md | [teach](teach.md) |
 | `document` | Build | Generate DESIGN.md from code | [document](document.md) |
 | `extract [target]` | Build | Extract reusable tokens/components | [extract](extract.md) |
-| `critique [target]` | Evaluate | Heuristic UX review | [critique](critique.md) |
-| `audit [target]` | Evaluate | Accessibility, performance, responsive checks | [audit](audit.md) |
 | `polish [target]` | Refine | Final pre-ship quality pass | [polish](polish.md) |
 | `bolder [target]` | Refine | Amplify a safe or bland design | [bolder](bolder.md) |
 | `quieter [target]` | Refine | Reduce aggression or stimulation | [quieter](quieter.md) |
@@ -25,8 +23,20 @@ Load the named reference whenever a command is invoked.
 | `overdrive [target]` | Enhance | Push beyond conventional limits | [overdrive](overdrive.md) |
 | `clarify [target]` | Fix | Improve labels, copy and errors | [clarify](clarify.md) |
 | `adapt [target]` | Fix | Adapt devices and screen sizes | [adapt](adapt.md) |
-| `optimize [target]` | Fix | Diagnose and fix UI performance | [optimize](optimize.md) |
 | `live` | Iterate | Generate browser-selected variants | [live](live.md) |
+
+## Owner boundaries
+
+- `scope` owns the approved task brief and consequential design decisions;
+  `shape` supplies the frontend discovery method.
+- `implement` owns every source-changing command, deterministic verification,
+  independent review and human-acceptance handoff.
+- `engineering-docs` owns PRODUCT/DESIGN artifact placement, indexing and
+  archival; `teach` and `document` supply domain extraction and interview steps.
+- `frontend-review` owns read-only UX, accessibility, responsive and visual
+  findings. This command set has no competing critique or audit route.
+- `react-performance` owns measured React, bundle, hydration and Web Vitals
+  diagnosis. Design changes compose only after that evidence identifies a fix.
 
 ## Lookup data
 
@@ -42,17 +52,6 @@ verbatim.
 - An unknown first word is general design context.
 
 Setup and register selection have already run. Commands do not recursively
-invoke the parent skill. If missing context blocks `craft`, finish `teach`,
-reload, then resume the original command through `shape`.
-
-## Pin and unpin
-
-`pin <command>` creates `$<command>` as a standalone shortcut;
-`unpin <command>` removes it from every harness directory in the project.
-
-```bash
-node "${AGENTS_HOME:-$HOME/.agents}/skills/frontend-design/scripts/pin.mjs" <pin|unpin> <command>
-```
-
-Accept any command in the table. On success, report the result and confirm the
-shortcut; on error, relay stderr verbatim.
+invoke the parent skill. If missing context blocks `craft`, route the context
+artifact through `engineering-docs` using the `teach` method, reload, then
+resume through `shape`.

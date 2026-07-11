@@ -61,6 +61,8 @@ and judgement evidence, review independence, acceptance, release, observation
 and retrospective linkage. Domain skills own methods; the kernel owns state
 and proof. `implement` remains the software front door and uses the same
 canonical receipt; there is no parallel implementation schema or adapter.
+Passing deterministic evidence binds its declared, live-hash-verified artifact;
+a syntactically valid digest or exit code alone is not proof.
 
 Software execution composes bounded techniques rather than duplicating
 lifecycle owners: `tdd` for new or changed observable behaviour, `refactor` for
@@ -70,9 +72,11 @@ information hiding, cohesion, coupling, simplicity, idempotency and similar
 principles are hypothesis generators; a finding still needs a concrete failure
 mechanism, impact, evidence and validation route.
 
-Frontend authority is similarly split: `frontend-design` owns authorised design
-mutation, while `frontend-review` owns read-only UX, visual, accessibility and
-responsive evidence. `playwright`, `web-stack-conventions` and
+Frontend authority is similarly split: `frontend-design` supplies authorised
+design mutation methods inside `implement`, while `frontend-review` owns
+read-only UX, visual, accessibility and responsive evidence. `scope` owns the
+design decision and `engineering-docs` owns canonical placement. `playwright`,
+`web-stack-conventions` and
 `react-performance` provide tool or standards evidence without taking over the
 UI finding contract. `caveman` is a presentation overlay only; it cannot narrow
 evidence, authority, high-stakes clarity or an artifact's domain-writing rules.
@@ -96,6 +100,10 @@ state and synthesis. On substantial work it combines:
 Bonus-family failure never blocks the workflow. The other primary is required
 for the substantial review contract unless the human accepts an explicitly
 recorded degradation.
+Provider-backed external workers—including the other primary, Agy/Gemini and
+other bonus families—run through Agent Fabric. Direct CLIs are preflight or an
+explicitly recorded degraded fallback, not the primary answer-bearing path;
+provider adapters remain under `orchestrate`, not standalone skills.
 
 Paired-primary mode lets Claude and Codex rotate stage ownership through Herdr.
 It still has one chair and one active owner per stage, namespaced artifacts and

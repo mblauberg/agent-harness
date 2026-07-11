@@ -208,6 +208,48 @@ def test_local_artifact_must_be_inside_authorised_artifact_scope():
         module.validate(candidate, ROOT)
 
 
+def test_deterministic_evidence_digest_must_bind_its_declared_artifact():
+    module = load_validator()
+    candidate = fixture()
+    check = next(item for item in candidate["evidence"] if item["kind"] == "deterministic")
+    check["result"]["receipt_digest"] = "sha256:" + "c" * 64
+
+    with pytest.raises(module.Invalid, match="receipt digest must bind its declared artifact"):
+        module.validate(candidate, ROOT)
+
+
+def test_deterministic_evidence_artifact_must_be_a_matching_bundle(tmp_path):
+    module = load_validator()
+    workspace = tmp_path / "arbitrary"
+    candidate = fixture("software", workspace)
+    artifact = next(item for item in candidate["artifacts"] if item["id"] == "evidence-bundle")
+    target = workspace / artifact["path"]
+    target.write_text("not a receipt\n")
+    digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+    artifact["digest"] = digest
+    for item in candidate["evidence"]:
+        if item.get("kind") == "deterministic" and item.get("artifact_id") == artifact["id"]:
+            item["result"]["receipt_digest"] = digest
+
+    with pytest.raises(module.Invalid, match="valid bundle JSON"):
+        module.validate(candidate, ROOT, workspace_root=workspace, verify_hashes=True)
+
+    candidate = fixture("software", workspace)
+    artifact = next(item for item in candidate["artifacts"] if item["id"] == "evidence-bundle")
+    target = workspace / artifact["path"]
+    bundle = json.loads(target.read_text())
+    bundle["checks"][0]["gate"] = "wrong-gate"
+    target.write_text(json.dumps(bundle) + "\n")
+    digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+    artifact["digest"] = digest
+    for item in candidate["evidence"]:
+        if item.get("kind") == "deterministic" and item.get("artifact_id") == artifact["id"]:
+            item["result"]["receipt_digest"] = digest
+
+    with pytest.raises(module.Invalid, match="does not match its evidence row"):
+        module.validate(candidate, ROOT, workspace_root=workspace, verify_hashes=True)
+
+
 def test_risk_tier_cannot_be_downgraded_without_human_evidence():
     module = load_validator()
     candidate = fixture()

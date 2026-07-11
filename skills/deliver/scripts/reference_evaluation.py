@@ -318,9 +318,8 @@ def materialise_evaluation_binding(
         linked["result"]["receipt_digest"] = digest
     evidence_bundle = by_id.get("evidence-bundle")
     if evidence_bundle:
-        _write_delivery_artifact(
-            evidence_bundle, workspace_root,
-            (json.dumps({"evidence": run["evidence"]}, sort_keys=True) + "\n").encode(),
+        _materialise_deterministic_evidence_bundle(
+            run, evidence_bundle, workspace_root,
         )
     return evaluation
 
@@ -332,6 +331,33 @@ def _write_delivery_artifact(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(payload)
     artifact["digest"] = "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _materialise_deterministic_evidence_bundle(
+    run: dict[str, Any], artifact: dict[str, Any], workspace_root: Path,
+) -> None:
+    """Write a non-self-referential receipt and bind its evidence rows."""
+    checks = []
+    for item in run["evidence"]:
+        if item.get("kind") != "deterministic" or item.get("artifact_id") != artifact["id"]:
+            continue
+        checks.append({
+            "id": item["id"],
+            "gate": item["gate"],
+            "status": item["status"],
+            "method": item["method"],
+            "source_paths": item["source_paths"],
+            "exit_code": item["result"]["exit_code"],
+        })
+    payload = (json.dumps({
+        "schema_version": 1,
+        "contract": "deterministic-evidence-bundle",
+        "checks": checks,
+    }, sort_keys=True) + "\n").encode()
+    _write_delivery_artifact(artifact, workspace_root, payload)
+    for item in run["evidence"]:
+        if item.get("kind") == "deterministic" and item.get("artifact_id") == artifact["id"]:
+            item["result"]["receipt_digest"] = artifact["digest"]
 
 
 def materialise_reference_run(
@@ -355,8 +381,7 @@ def materialise_reference_run(
             run, workspace_root, root, binding_index=index,
             repetitions=evaluation_repetitions, sample_size=evaluation_sample_size,
         )
-    _write_delivery_artifact(
-        by_id["evidence-bundle"], workspace_root,
-        (json.dumps({"evidence": run["evidence"]}, sort_keys=True) + "\n").encode(),
+    _materialise_deterministic_evidence_bundle(
+        run, by_id["evidence-bundle"], workspace_root,
     )
     return run

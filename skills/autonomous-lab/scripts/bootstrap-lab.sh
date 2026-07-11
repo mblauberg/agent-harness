@@ -379,8 +379,8 @@ MODEL_MATRIX      = {{MODEL_MATRIX}}
 
 CROSS_FAMILY_VERIFIER = {{CROSS_FAMILY_VERIFIER}}
 # ^ which independent/different-model-family reviewer(s) underwrite high-stakes
-#   verdicts + their CLI invocations. Default: codex via codex exec, gemini via
-#   the agy wrapper; one-vs-both selector; REVIEW_TIMEOUT.
+#   verdicts + their route receipts. All answer-bearing external reviewers use
+#   Agent Fabric; direct CLIs are degraded preflight/fallback only.
 
 DOMAIN_INVARIANTS = {{DOMAIN_INVARIANTS}}
 # ^ OPTIONAL: load-bearing correctness properties that seed the property-test /
@@ -545,8 +545,8 @@ owed / escalated, tracked in STATE owed-lists, never silently auto-executed.
 ## §8 — Cross-family verification + anti-placebo
 
 High-stakes verdicts are underwritten by {{CROSS_FAMILY_VERIFIER}} via
-`scripts/cross-family.sh`. The agent that BUILDS a thing is never the agent that
-REPORTS its verdict (independence boundary). Prove every gate **RED-on-mutation**
+Agent Fabric under `orchestrate`. The agent that BUILDS a thing is never the
+agent that REPORTS its verdict (independence boundary). Prove every gate **RED-on-mutation**
 (flip the violation; if the gate still passes it is decoration and must be
 fixed — a placebo gate PIERCES any firm-stop). Domain correctness core, if any:
 {{DOMAIN_INVARIANTS}} — seed the property-test / differential-oracle suite;
@@ -1145,7 +1145,7 @@ ID_SCHEME	stable sequential per-item IDs (<id>) + fork IDs (<Fxxx>); never reuse
 EXPERT_AUTHORITIES	the named domain sign-off authorities for the expert escalation class (fill per domain)
 TRANSIENT_FAILURE_SIGNALS	overload/5xx, rate-limit, session-cap
 WORKFLOW_RUNNER	Claude Code operator: Workflow() (resumeFromRunId + readable per-run journal). Codex operator: eligible GPT-5.6 Ultra/native multi-agent stage graph (explicit waves below Ultra) + run ledger as journal (references/codex-operator.md)
-CROSS_FAMILY_VERIFIER	families outside the operator family, via scripts/cross-family.sh with mandatory --operator-family. Resolve brokered models first; Gemini requires an exact --gemini-model and remains advisory. Apply the HARNESS.md risk ladder; REVIEW_TIMEOUT 600s
+CROSS_FAMILY_VERIFIER	operator-relative other primary and bonus families through Agent Fabric under orchestrate; direct CLIs are explicit degraded preflight/fallback only. Apply the HARNESS.md risk ladder; REVIEW_TIMEOUT 600s
 RUBRIC	Correctness/fit, Risk, Reversibility, Cost, Operability, Build-leverage, Mission-centricity, Evidence-quality (weighted, weights sum to 1; recomputed deterministically)
 WORK_LAYERS	the problem-space slices the enumerate/research/judge workflows fan out across (decompose per domain: subsystems / data-model / external-interfaces / risk-surface / operability); overridable per workflow via args
 RUNAWAY_CAPS	max-concurrent-jobs 4, max-active-forks 3, fork-depth 2, per-unit-budget 3 runs before escalation, bounded-retry 2, long-wake 3600s (ceilings, not targets)
@@ -1158,7 +1158,7 @@ STOP_CONDITION	GOAL.md STATUS == STOP
 SALVAGE_DIR	.orchestrator/salvage/
 PROCESS_CHECK	an OS-level PID/process liveness check, independent of the task manager
 WAKE_SCHEDULER	the host self-pacing scheduler (completion-notify primary + a long fallback wake)
-EXTERNAL_FAMILIES	operator-relative other-primary and distinct model families via scripts/cross-family.sh; adapter identity never proves model lineage
+EXTERNAL_FAMILIES	operator-relative other-primary and distinct model families via Agent Fabric; adapter identity never proves model lineage
 REVIEW_TIMEOUT	600
 DEFS
 )"
@@ -1296,16 +1296,9 @@ if [ "$HAVE_CLAUDE" = false ] && [ "$HAVE_CODEX" = false ]; then
   warn "     Manual/agent dispatch still works without either."
 fi
 
-# cross-family CLIs (optional; for independent external review)
-CF=""
-command -v codex >/dev/null 2>&1 && CF="$CF codex"
-(command -v agy >/dev/null 2>&1 || [ -x "$HOME/.local/bin/agy" ]) && CF="$CF gemini/agy"
-if [ -n "$CF" ]; then
-  note "  ok   cross-family CLIs present:$CF (scripts/cross-family.sh usable)."
-else
-  warn "no cross-family CLI (codex / agy) found: set crossFamily:false; the run"
-  warn "     degrades to same-family adversarial panels for high-stakes gates."
-fi
+# Provider workers use Agent Fabric. The live status/doctor commands are the
+# operational preflight; provider binaries alone never prove an available route.
+note "  info external model-family dispatch uses Agent Fabric under orchestrate."
 
 # ============================================================================
 # RECEIPT + exit code

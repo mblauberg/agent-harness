@@ -311,7 +311,7 @@ stages without editing the script. Stage defaults should follow `{{MODEL_MATRIX}
 > the enumerate layers were a 20-element product/domain/compliance list (→ `{{WORK_LAYERS}}`), the
 > build ceiling was "scaffold + IaC + local/mocked, no real money/infra" (→ `{{BUILD_CEILING}}`), the
 > hard gates were money-movement/ledger/KYC/tenant-isolation (→ `{{HARD_GATES}}`), and the
-> cross-family reviewers were codex + gemini (→ `{{CROSS_FAMILY_VERIFIER}}`). Swap every one of those;
+> cross-family reviewers were the other primary plus a Fabric-routed Gemini bonus (→ `{{CROSS_FAMILY_VERIFIER}}`). Swap every one of those;
 > the primitives, archetype shapes, cross-cutting patterns, and gotchas above are domain-agnostic.
 > the reference run's `lab/workflows/` are *worked examples* in this same vein — read them for reference, do not
 > expect to copy them (the skill ships no runnable workflow files; each run authors its own).

@@ -19,14 +19,20 @@ def write_accepted_document_delivery(tmp_path, status="awaiting_release"):
     reference = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reference)
     delivery = reference.make_reference_run("document", ROOT)
+
+    materializer_path = ROOT / "skills" / "deliver" / "scripts" / "reference_evaluation.py"
+    materializer_spec = importlib.util.spec_from_file_location(
+        "release_document_materializer", materializer_path,
+    )
+    assert materializer_spec and materializer_spec.loader
+    materializer = importlib.util.module_from_spec(materializer_spec)
+    materializer_spec.loader.exec_module(materializer)
+    materializer.materialise_reference_run(delivery, tmp_path, ROOT)
+
     intent = b"accepted document\n"
-    evidence = b"document evidence\n"
     (tmp_path / "intent.md").write_bytes(intent)
-    (tmp_path / "evidence.json").write_bytes(evidence)
     intent_digest = "sha256:" + hashlib.sha256(intent).hexdigest()
-    evidence_digest = "sha256:" + hashlib.sha256(evidence).hexdigest()
     delivery["artifacts"][0]["digest"] = intent_digest
-    delivery["artifacts"][1]["digest"] = evidence_digest
     delivery["intent"]["digest"] = intent_digest
     delivery["design"]["digest"] = intent_digest
     delivery["human_gates"]["acceptance"] = {

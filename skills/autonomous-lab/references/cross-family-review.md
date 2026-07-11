@@ -1,6 +1,9 @@
 # Cross-Family Review
 
-*Layer 4 of the autonomous-lab discipline. Realized by the shipped `scripts/cross-family.sh` and wired into the **judge-panel / build-spike / finishing-audit archetypes you author per-run** (see `workflow-patterns.md` — the skill ships no workflow files). Read this when a decision or artifact is high-stakes and you must not let any single model family — least of all your own — be the final word.*
+*Layer 4 of the autonomous-lab discipline. Realized through `orchestrate` and
+Agent Fabric, then wired into the judge-panel, build-spike and finishing-audit
+archetypes authored per run. Read this when no single model family may be the
+final word.*
 
 Cross-family coverage follows the HARNESS risk ladder. Substantial+ stages use
 the other primary; crucial/terminal stages attempt bonus families. A workflow's
@@ -15,50 +18,41 @@ their evidence.
 Two payoffs, both load-bearing:
 
 1. **Genuine independence.** A reviewer from a different training lineage fails differently, carries different priors, and is not anchored by the author's blind spots. Cross-family *agreement* materially raises confidence on a one-way-door; cross-family *disagreement* surfaces real risk you would otherwise ship. A same-family self-review systematically **over-passes** — it shares the author's mistakes.
-2. **Provider-failure immunity.** The external CLIs hit *other vendors'* endpoints, so they keep working when the orchestrator's own API is overloaded (e.g. HTTP 529 / rate-limit / session-cap). Verification does not go dark because your primary provider is having a bad day. This is the whole point of routing *outside* your own provider rather than just spawning another same-family agent.
+2. **Provider-failure immunity.** Fabric routes activated adapters to other
+   vendor endpoints, so one provider failure need not erase verification. The
+   failure, substitution and actual lineage stay explicit.
 
 ---
 
 ## 2. The reviewer roster — config knob `{{EXTERNAL_FAMILIES}}`
 
-The roster is **family-relative to the operator**: it is "families ≠ the operator's", never a fixed
-vendor list. A Claude Code operator defaults to codex + gemini; a **Codex operator** defaults to
-claude + gemini (`codex-operator.md`) — a `codex exec` reviewer under a Codex operator is a
-same-family self-review and cannot certify a hard gate. Adapt to whatever CLIs you have **that reach
-a different provider than the orchestrator** — the requirement is *different vendor endpoint*, not a
-specific brand.
+The roster is **family-relative to the operator**: it is "families ≠ the
+operator's", never a fixed vendor list. A Claude Code operator uses Codex as
+the other primary; a Codex operator uses Claude. Same-family review cannot
+certify a hard gate.
 
-| Family | CLI invocation (via `scripts/cross-family.sh`) | Strengths |
+| Family | Fabric role | Strengths |
 |---|---|---|
-| **codex** (OpenAI family) | `cd <dir> && codex exec -s read-only --skip-git-repo-check "<prompt>"` | Adversarial correctness, rerunning read-only-safe checks, deep debugging and alternative designs. The default single reviewer under a non-OpenAI operator. |
-| **gemini / Antigravity** (Google family) | the `agy-headless` wrapper in its default sandbox with `--include-dir <dir>` | Very-large-context whole-corpus reads, multimodal input and breadth-first orientation. Advisory only: sandbox is not a certified no-write guarantee. |
-| **claude** (Anthropic family) | `claude -p` with tools disabled + plan mode (enforced read-only; see `cross-family.sh --models claude`) | Adversarial reasoning review, spec/contradiction analysis. The default single reviewer under a **Codex/OpenAI operator**. |
+| **Codex** (OpenAI family) | load-bearing other primary when Claude leads | Adversarial correctness, test/gate inspection, debugging and alternatives. |
+| **Claude** (Anthropic family) | load-bearing other primary when Codex leads | Adversarial reasoning, specification and contradiction analysis. |
+| **Gemini/Agy and other families** | non-blocking bonus adapters | Long-context breadth, multimodal inspection and blind-spot discovery. |
 
 Record outcomes with the three statuses (shared vocabulary with the `orchestrate`
 skill): `cross_family_certified` (enforced/oauth-safe read-only route ran), `cross_family_advisory`
-(best-effort route, e.g. agy — may scout, never certifies alone), `CROSS-FAMILY-NOT-RUN: <reason>`
+(best-effort bonus route may scout, never certifies alone), `CROSS-FAMILY-NOT-RUN: <reason>`
 (recorded skip). Never silently downgrade or collapse them.
 
-**Compose, do not re-document.** The agy invocation is owned by the dedicated **`agy-headless` scout skill**, and `scripts/cross-family.sh` **resolves the wrapper dynamically** (never a hardcoded path) — first match wins:
+**All answer-bearing cross-family work goes through Agent Fabric.**
+`orchestrate` creates a bounded provider-neutral task and authority envelope;
+Fabric selects an activated compatible adapter and records actual model family,
+actions, result and recovery. Missing other-primary coverage stops
+certification; missing bonus coverage does not. Use `cf_dispatch.sh` only for
+adapter/auth preflight or an explicitly recorded degraded fallback when Fabric
+is unavailable to the host.
 
-1. `$AGY_WRAPPER` env var, if set **and** executable;
-2. skill-relative: `<dir-of-cross-family.sh>/../../agy-headless/scripts/run-agy-headless`;
-3. `$HOME/.agents/skills/agy-headless/scripts/run-agy-headless`;
-4. `$HOME/.claude/skills/agy-headless/scripts/run-agy-headless`;
-5. `run-agy-headless` on `PATH`;
-6. else fall back to direct `agy` on `PATH`.
-
-`scripts/cross-family.sh` shells out to whichever it finds; do not reimplement agy's flags, model-discovery, or auth here. Inherit its documented quirks:
-
-- An **unknown `--model` slug silently falls back to Gemini Flash.** Confirm which model actually answered before you trust a Pro-tier verdict.
-- **`--sandbox` is read-only *intent*, not a certified no-write proof.** Treat agy as scout/advisory unless host policy accepts best-effort external review as evidence.
-- agy returns **prose, not JSON** (no `--output-format json`). Impose a structured markdown output contract in the prompt and parse that.
-
-`scripts/cross-family.sh` must **fail loud** if a CLI is missing or
-unauthenticated. The caller records that result. Missing other-primary coverage
-stops certification; missing bonus-family coverage does not block the run.
-
-**Reviewers are slow and agentic.** They explore the working dir and run tools — budget a generous `{{REVIEW_TIMEOUT}}` (default ~600000 ms / `--print-timeout 540s`). If a reviewer's sandbox cannot read the target files, the orchestrating step feeds it the needed excerpts (Read + paste into the prompt) — but **the returned judgment must still be the external family's, captured verbatim.** You supply context; you do not supply the verdict.
+**Reviewers are slow and agentic.** Budget a bounded `{{REVIEW_TIMEOUT}}`. Give
+each reviewer only authorised artifacts or excerpts. Preserve the provider
+result artifact and route receipt; supply context, never the verdict.
 
 ---
 
@@ -74,14 +68,14 @@ Cross-family review is one of **two** independent-verification layers; the `{{MO
   gates when available, but quota/API failure never blocks progress and their
   findings are advisory until a primary-family reviewer corroborates them.
 
-**How many external reviewers** — knob `crossFamily: 'codex' | 'both' | false`:
+**How many external reviewers** — route the other primary and optional bonus
+families through Fabric:
 
 - **`codex`** is the load-bearing other primary when Claude operates. Its
   failure is explicit and stops certification.
-- **`both`** runs the other primary and Gemini concurrently. Reconcile evidence,
-  not votes. Gemini failure is recorded and ignored for gating; a Gemini
-  finding blocks only after a primary-family reviewer reproduces or
-  corroborates it.
+- A Gemini bonus may run concurrently through Fabric. Reconcile evidence, not
+  votes. Its failure is recorded and ignored for gating; its finding blocks
+  only after primary-family reproduction or corroboration.
 - For the hardest terminal refutation, use a fresh flagship context, the other
   primary and one or more opportunistic bonus families.
 
@@ -89,12 +83,15 @@ Cross-family review is one of **two** independent-verification layers; the `{{MO
 
 ## 4. The non-negotiable rule: never trust a self-reported external verdict
 
-> A build/worker agent that runs the external reviewer *itself* **will sometimes overclaim** ("codex VERDICT: FAIL → PASS"). The authoritative verdict is the workflow's **INDEPENDENT cross-review tool-result** — the reviewer's raw stdout captured in a **separate orchestrator-controlled step** — **not** the build agent's prose summary of it.
+> A build/worker agent that reports its own external review can overclaim. The
+> authoritative verdict is the independent Fabric result artifact and receipt,
+> not the build agent's summary.
 
 This is the layer's hardest-won lesson. Enforce a structural **independence boundary**: *the agent that builds/authors an artifact must never be the agent that reports its external verdict.* Architecturally:
 
 - **Build/author = one step.** Returns `buildReport` + `selfReview` (same-family, advisory only).
-- **Cross-family review = a separate step** whose `agentType` is the external reviewer. It invokes the external CLI and returns `crossReview` as **its own typed field**, mapped from the reviewer's raw output.
+- **Cross-family review = a separate Fabric task** owned by the external
+  reviewer. It returns `crossReview` plus its own route/result receipt.
 - **The orchestrator reads the `crossReview` schema field.** The build report's claims about the review are *narrative only* and carry **no authority**. If the build report says "codex passed" and the independent `crossReview` field says FAIL, **FAIL is the truth.**
 
 In the **build-spike archetype** this is why `crossReview` is a sibling of `buildReport`, never folded inside it — that separation *is* the independence boundary.
@@ -108,9 +105,8 @@ Pattern (from the build/spike and finishing-audit workflows):
 ```
 Build      → agent builds the artifact; returns buildReport            (one agent)
 Review     → selfReview (same-family, advisory)                        (same or new agent)
-           → IF crossFamily: crossReview = a SEPARATE agent step whose
-             prompt INVOKES scripts/cross-family.sh and returns ITS
-             verdict, mapped to the XCHECK schema                       (must be a different step)
+           → IF crossFamily: crossReview = a SEPARATE Fabric task whose
+             result maps to the XCHECK schema                           (must be a different step)
 Synthesize → reconcile verdict(s); fold findings into gate decision    (orchestrator reads crossReview field)
 ```
 

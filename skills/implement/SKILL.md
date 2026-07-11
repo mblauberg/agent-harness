@@ -9,7 +9,7 @@ Own the software profile from approved contract to verified human handoff.
 
 ## Entry gate
 
-Before implementation, require:
+Require:
 
 - approved scope, non-goals and acceptance criteria;
 - costly-to-reverse design decisions approved or explicitly parked;
@@ -34,6 +34,9 @@ waives authority or gates and must name a normal follow-up reconciliation run.
    `diagnose` when root cause is unknown. Migrations may require both behaviour
    tests and refactor equivalence evidence. Use `orchestrate` only when
    decomposition or independent coverage helps.
+   For a version-sensitive external interface or migration, apply
+   [source grounding](references/source-grounding.md) and
+   [migration compatibility](references/migration-compatibility.md).
 3. Run deterministic checks and map every acceptance criterion to evidence.
    When scope requires assurance, run `evaluate` and attach its passing receipt.
 4. Invoke `code-review` read-only. Reviewer coverage follows the risk tier in
@@ -66,7 +69,7 @@ waives authority or gates and must name a normal follow-up reconciliation run.
   missing bonus-family output does not.
 - Objective evidence outranks reviewer confidence; reviewer conclusions are
   adjudicated, not voted.
-- Routine micro-edits need not create `RUN.json` unless requested. Substantial
+- Micro-edits need not create `RUN.json` unless requested. Substantial
   and higher changes do.
 - `awaiting_acceptance` is the successful machine-gate state. Move the
   canonical receipt to `accepted` only after explicit human acceptance.

@@ -8,16 +8,17 @@ Verified locally on macOS, 2026-06-07. Model IDs, flags, auth, and safety modes 
 - [Safety rule](#safety-rule)
 - [Harness-conditioned rule](#harness-conditioned-rule)
 - [Auth preflight](#auth-preflight)
-- [Agy advisory lane](#agy-advisory-lane)
+- [Fabric bonus lane](#fabric-bonus-lane)
 - [Runtime routing](#runtime-routing)
 - [Output normalisation](#output-normalisation)
 - [Data policy](#data-policy)
 
 ## Safety rule
 
-Use headless CLIs for **different-family pressure**, not as a way to spawn yourself. A read-only
-verifier must either have an enforced read-only/planning mode or be treated as advisory. Advisory routes
-can still be useful scouts, but their claims must be verified before certification.
+Normal answer-bearing external work uses Agent Fabric. Use headless CLIs only
+for adapter/auth preflight or an explicitly recorded degraded fallback, never
+as the primary worker substrate. A fallback verifier must enforce read-only or
+planning mode; advisory claims require independent verification.
 
 ## Harness-conditioned rule
 
@@ -64,18 +65,13 @@ or `oauth_safe_mode`.
 - `cursor`: `--mode plan --sandbox enabled`; current help documents plan/ask as read-only modes.
 - `kiro`: disabled by default in the dispatcher. Enable only with `CF_DISPATCH_ENABLE_KIRO=1`; no hard
   read-only mode was verified in current local help.
-- `agy`: disabled by default in the dispatcher. Enable only with `CF_DISPATCH_ENABLE_AGY=1`; `--sandbox`
-  is terminal restriction, not a full read-only/no-tools guarantee. Enabled agy records
-  `read_only_guarantee=best_effort`, so use it as scout/advisory output rather than certified
-  verification. Set `CF_DISPATCH_AGY_TIMEOUT=30s` (or similar) to pass `--print-timeout`.
 - `copilot`: disabled by default in the dispatcher. Guaranteed prompt-only review requires all tools
   disabled (`--available-tools=''`); repo inspection cannot currently be guaranteed read-only from local
   help.
 
 If any adapter cannot enforce the promised safety level, log the failure and fail over. Do not silently
 downgrade certification. For large prompts, prefer `--prompt-file`; enforced adapters use
-stdin/file-backed input where supported to avoid shell argument limits. The current agy adapter still
-passes prompt text as a CLI argument; prefer bounded prompts and evidence packets for that route.
+stdin/file-backed input where supported to avoid shell argument limits.
 Orchestrated runs always pass `--out <run-dir>/<classified-artifact>` and list it
 in the manifest. Omitting `--out` creates one declared ephemeral output for a
 one-shot caller to consume/remove; dispatcher-internal prompt/raw/diagnostic
@@ -96,14 +92,14 @@ the result in the run manifest and move to the next tool.
 | `codex` | `codex --version`; `codex exec -s read-only "OK"` | login / usage limit |
 | `cursor-agent` | `cursor-agent --help`; `cursor-agent --list-models` | auth / workspace trust |
 | `kiro-cli` | `kiro-cli chat --list-models` | credits / auth |
-| `agy` | `agy models`; `agy --sandbox --print-timeout 20s --print "OK"` | sign-in / timeout / capacity |
 | `copilot` | `copilot --help`; `copilot -p "OK" --mode plan` | login / permission prompt |
 
-## Agy advisory lane
+## Fabric bonus lane
 
-Agy is advisory by default because local help currently exposes `--sandbox` as terminal restriction, not
-a full read-only/no-tools guarantee. Use it anyway when policy allows: make it a divergent scout, broad
-critic, or missing-risk finder.
+Gemini/Agy work is an Agent Fabric provider task, never a `cf_dispatch.sh`
+direct-CLI route. The chair supplies a narrowed authority and budget; Fabric
+records the activated adapter, model lineage, action state and recovery. Treat
+the result as advisory until primary-family evidence corroborates it.
 
 Preferred prompt packet:
 
@@ -115,7 +111,7 @@ questions: <what to refute, complete, or falsify>
 return: hypothesis | risk | evidence_needed | likely_files | falsification_check
 ```
 
-Do not treat agy output as established fact. Feed its claims to native section reviewers or certified
+Do not treat bonus output as established fact. Feed its claims to native section reviewers or certified
 cross-family verifiers for source/test/schema confirmation.
 
 ## Runtime routing
@@ -132,8 +128,8 @@ Examples:
   when `ANTHROPIC_API_KEY`/`apiKeyHelper` exists, otherwise OAuth safe mode if already logged in.
 - Codex verifier -> `codex exec -s read-only -m <model> -c model_reasoning_effort=<level>`.
 - Cursor scout -> `cursor-agent -p --mode plan --sandbox enabled --model <model>`.
-- Gemini-family scout -> `CF_DISPATCH_ENABLE_AGY=1 CF_DISPATCH_AGY_TIMEOUT=15m ... --tool agy`;
-  use as a best-effort scout unless a future local help route proves enforceable read-only/no-tools.
+- Gemini-family scout -> an `orchestrate` task through the activated Agent
+  Fabric `agy` adapter; retain its route/action receipt.
 
 Use aliases only when the CLI documents them as current. For high-stakes work, record the resolved model
 or CLI version in the run manifest.
