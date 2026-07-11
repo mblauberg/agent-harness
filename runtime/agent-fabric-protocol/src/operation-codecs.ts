@@ -24,6 +24,7 @@ import {
   relativePath,
   secret,
   sha256,
+  sha256Hex,
   timestamp,
   unionOf,
   type Codec,
@@ -423,7 +424,7 @@ const recoveryEvidenceCodec = unionOf([
 ]);
 const lifecycleCheckpointCodec = objectCodec({
   relativePath,
-  sha256,
+  sha256: sha256Hex,
   mailboxWatermark: integer(),
   acknowledgedAboveWatermark: integerList,
   inFlightChildren: stringList,
@@ -1940,7 +1941,7 @@ const observerEventCodec = objectCodec({
   createdAt: integer(),
   summary: text,
 });
-const receiptCodec = objectCodec({ relativePath, schemaVersion: unionOf([literal(1), literal(2)]), sha256 });
+const receiptCodec = objectCodec({ relativePath, schemaVersion: unionOf([literal(1), literal(2)]), sha256: sha256Hex });
 
 type CodecDirection = "input" | "result";
 
@@ -2112,7 +2113,7 @@ function semanticFieldCodec(
     parentAgentId: nullable(identifier),
     lifecycle: text,
   }), { maximum: 256 });
-  if (field === "receipts") return arrayOf(objectCodec({ relativePath, sha256, exportedAt: integer() }), { maximum: 256 });
+  if (field === "receipts") return arrayOf(objectCodec({ relativePath, sha256: sha256Hex, exportedAt: integer() }), { maximum: 256 });
   if (field === "barrier") return objectCodec({ state: enumeration(["open", "closed"]) });
   if (field === "counts") return objectCodec({
     agents: integer(), tasks: integer(), tasksTerminal: integer(), messages: integer(),
@@ -2131,6 +2132,11 @@ function semanticFieldCodec(
   if (field === "artifactRefs" || field === "evidenceRefs") return artifactRefsCodec;
   if (["launchPacketRef", "handoffRef", "consequencePreviewRef", "drainReceiptRef"].includes(field)) return artifactRefCodec;
   if (field === "relativePath") return relativePath;
+  if (
+    field === "sha256" &&
+    (operation === FABRIC_OPERATIONS.publishArtifact || operation === FABRIC_OPERATIONS.exportReceipt)
+  ) return sha256Hex;
+  if (field === "checkpointSha256" && operation === FABRIC_OPERATIONS.reportProviderState) return sha256Hex;
   if (["sha256", "authorityRef", "before", "after", "checkpointSha256", "payloadDigest", "receiptDigest", "stateDigest"].includes(field)) {
     if (field === "after" && direction === "input") return integer();
     return sha256;

@@ -33,7 +33,7 @@ describe("AC-001 symmetric paired messaging", () => {
       throw new TypeError("peer delivery is invalid");
     }
     expect(requestDelivery.messageId).toBe(request.structured.messageId);
-    await callTool(fixture.peerProxy.client, "fabric_message_ack", { deliveryId: requestDelivery.deliveryId });
+    await callTool(fixture.peerProxy.client, "fabric_delivery_acknowledge", { deliveryId: requestDelivery.deliveryId });
 
     const response = await callTool(fixture.peerProxy.client, "fabric_message_send", {
       audience: { kind: "agents", agentIds: ["chair"] },
@@ -53,8 +53,8 @@ describe("AC-001 symmetric paired messaging", () => {
       throw new TypeError("chair delivery is invalid");
     }
     expect(responseDelivery.messageId).toBe(response.structured.messageId);
-    await callTool(fixture.chairProxy.client, "fabric_message_ack", { deliveryId: responseDelivery.deliveryId });
-    const assigned = await callTool(fixture.chairProxy.client, "fabric_task_assign", {
+    await callTool(fixture.chairProxy.client, "fabric_delivery_acknowledge", { deliveryId: responseDelivery.deliveryId });
+    const assigned = await callTool(fixture.chairProxy.client, "fabric_task_create", {
       taskId: `pair-task-${labels.peer}`,
       authorityId: fixture.peerAuthorityId,
       eligibleAgentIds: ["peer"],
@@ -75,7 +75,7 @@ describe("AC-001 symmetric paired messaging", () => {
       commandId: `${labels.peer}:artifact:publish`,
     });
     expect(artifact.structured.sha256).toBe(artifactHash);
-    const completed = await callTool(fixture.peerProxy.client, "fabric_task_complete", {
+    const completed = await callTool(fixture.peerProxy.client, "fabric_task_update", {
       taskId: assigned.structured.taskId,
       expectedRevision: claimed.structured.revision,
       state: "complete",

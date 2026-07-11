@@ -73,11 +73,12 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       "fabric_budget_usage_record",
       "fabric_budget_usage_reconcile",
       "fabric_budget_release",
-      "fabric_budget_get",
+      "fabric_budget_read",
       "fabric_task_handoff_acknowledge",
     ];
-    expect(tools.tools.filter((tool) => stage5ToolNames.includes(tool.name)).map((tool) => tool.name)).toEqual(stage5ToolNames);
-    expect(tools.tools.find((tool) => tool.name === "fabric_budget_get")?.outputSchema).toMatchObject({
+    expect(tools.tools.filter((tool) => stage5ToolNames.includes(tool.name)).map((tool) => tool.name).sort())
+      .toEqual([...stage5ToolNames].sort());
+    expect(tools.tools.find((tool) => tool.name === "fabric_budget_read")?.outputSchema).toMatchObject({
       type: "object",
       required: ["budgetId", "parentBudgetId", "state", "dimensions", "returned"],
     });
@@ -201,7 +202,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       isError: false,
       structured: { state: "released", returned: { turns: 6 } },
     });
-    const readBudget = await callTool(chairProxy.client, "fabric_budget_get", {
+    const readBudget = await callTool(chairProxy.client, "fabric_budget_read", {
       budgetId: "stage5-mcp-child-budget",
     });
     expect(readBudget).toMatchObject({
@@ -228,7 +229,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       commandId: "stage5:mcp:root:claim",
     });
     expect(claimed.isError).toBe(false);
-    const completed = await callTool(leaderProxy.client, "fabric_task_complete", {
+    const completed = await callTool(leaderProxy.client, "fabric_task_update", {
       taskId: "stage5-mcp-team-root-task",
       expectedRevision: 2,
       state: "complete",

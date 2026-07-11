@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { callTool, createMcpFixture, recordArray } from "../../support/mcp-testkit.ts";
 
 // Stage 2 assignment (AFAB-001): public contracts for fabric_artifact_publish,
-// fabric_barrier_close, fabric_run_status and the four run resources.
+// fabric_barrier_close, fabric_run_status_read and the four run resources.
 //
 // BLOCKED SUB-SLICE: these tests are the failing public contract required by
 // the assignment. The MCP facade forwards each operation to the daemon, but
@@ -50,7 +50,7 @@ describe("Stage 2 fabric_artifact_publish contract (blocked on core publishArtif
       commandId: "mcp:artifact:traversal",
     });
     expect(traversal.isError).toBe(true);
-    expect(traversal.structured).toMatchObject({ code: "ARTIFACT_PATH_FORBIDDEN" });
+    expect(traversal.structured).toMatchObject({ code: "MCP_INPUT_INVALID" });
 
     const absolute = await callTool(fixture.chairProxy.client, "fabric_artifact_publish", {
       relativePath: "/etc/report.md",
@@ -58,7 +58,7 @@ describe("Stage 2 fabric_artifact_publish contract (blocked on core publishArtif
       commandId: "mcp:artifact:absolute",
     });
     expect(absolute.isError).toBe(true);
-    expect(absolute.structured).toMatchObject({ code: "ARTIFACT_PATH_FORBIDDEN" });
+    expect(absolute.structured).toMatchObject({ code: "MCP_INPUT_INVALID" });
 
     const badDigest = await callTool(fixture.chairProxy.client, "fabric_artifact_publish", {
       relativePath: "findings/ok.md",
@@ -111,7 +111,7 @@ describe("Stage 2 fabric_barrier_close contract (blocked on core closeBarrier)",
       if (typeof delivery.deliveryId !== "string") {
         throw new Error("expected a delivery id");
       }
-      const acked = await callTool(fixture.peerProxy.client, "fabric_message_ack", {
+      const acked = await callTool(fixture.peerProxy.client, "fabric_delivery_acknowledge", {
         deliveryId: delivery.deliveryId,
       });
       expect(acked.isError).toBe(false);
@@ -143,13 +143,13 @@ describe("Stage 2 fabric_barrier_close contract (blocked on core closeBarrier)",
     const delivery = recordArray(received.structured.deliveries, "deliveries")[0];
     if (typeof delivery?.deliveryId !== "string") throw new Error("expected a delivery id");
 
-    const forbidden = await callTool(fixture.peerProxy.client, "fabric_message_abandon", {
+    const forbidden = await callTool(fixture.peerProxy.client, "fabric_delivery_abandon", {
       deliveryId: delivery.deliveryId,
       reason: "self-abandon is forbidden",
       commandId: "mcp:barrier:peer-abandon",
     });
     expect(forbidden).toMatchObject({ isError: true, structured: { code: "CAPABILITY_FORBIDDEN" } });
-    const abandoned = await callTool(fixture.chairProxy.client, "fabric_message_abandon", {
+    const abandoned = await callTool(fixture.chairProxy.client, "fabric_delivery_abandon", {
       deliveryId: delivery.deliveryId,
       reason: "peer session irrecoverably lost; operator approved abandonment",
       commandId: "mcp:barrier:chair-abandon",
@@ -166,12 +166,12 @@ describe("Stage 2 fabric_barrier_close contract (blocked on core closeBarrier)",
   });
 });
 
-describe("Stage 2 fabric_run_status and run resources contract (blocked on core read surface)", () => {
+describe("Stage 2 fabric_run_status_read and run resources contract (blocked on core read surface)", () => {
   it("reports one shared run status to both clients", async () => {
     const fixture = await createMcpFixture("run-mcp-status");
     cleanup.push(() => fixture.cleanup());
 
-    const viaChair = await callTool(fixture.chairProxy.client, "fabric_run_status", {
+    const viaChair = await callTool(fixture.chairProxy.client, "fabric_run_status_read", {
       runId: "run-mcp-status",
     });
     expect(viaChair.isError).toBe(false);
@@ -179,7 +179,7 @@ describe("Stage 2 fabric_run_status and run resources contract (blocked on core 
       runId: "run-mcp-status",
       chairAgentId: "chair",
     });
-    const viaPeer = await callTool(fixture.peerProxy.client, "fabric_run_status", {
+    const viaPeer = await callTool(fixture.peerProxy.client, "fabric_run_status_read", {
       runId: "run-mcp-status",
     });
     expect(viaPeer.isError).toBe(false);

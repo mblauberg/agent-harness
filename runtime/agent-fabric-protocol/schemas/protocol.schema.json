@@ -5405,7 +5405,11 @@
                     },
                     "sha256": {
                       "type": "string",
-                      "pattern": "^sha256:[a-f0-9]{64}$"
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "x-minUtf8Bytes": 64,
+                      "x-maxUtf8Bytes": 64,
+                      "pattern": "^[a-f0-9]{64}$"
                     },
                     "mailboxWatermark": {
                       "type": "integer",
@@ -5566,7 +5570,11 @@
                 },
                 "checkpointSha256": {
                   "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "x-minUtf8Bytes": 64,
+                  "x-maxUtf8Bytes": 64,
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }
@@ -7311,7 +7319,11 @@
                 },
                 "sha256": {
                   "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "x-minUtf8Bytes": 64,
+                  "x-maxUtf8Bytes": 64,
+                  "pattern": "^[a-f0-9]{64}$"
                 },
                 "commandId": {
                   "type": "string",
@@ -31902,7 +31914,11 @@
                 },
                 "sha256": {
                   "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "x-minUtf8Bytes": 64,
+                  "x-maxUtf8Bytes": 64,
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }
@@ -32086,7 +32102,11 @@
                     },
                     "sha256": {
                       "type": "string",
-                      "pattern": "^sha256:[a-f0-9]{64}$"
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "x-minUtf8Bytes": 64,
+                      "x-maxUtf8Bytes": 64,
+                      "pattern": "^[a-f0-9]{64}$"
                     }
                   }
                 }
@@ -33103,7 +33123,11 @@
                       },
                       "sha256": {
                         "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "x-minUtf8Bytes": 64,
+                        "x-maxUtf8Bytes": 64,
+                        "pattern": "^[a-f0-9]{64}$"
                       },
                       "exportedAt": {
                         "type": "integer",
@@ -33271,7 +33295,11 @@
                 },
                 "sha256": {
                   "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "x-minUtf8Bytes": 64,
+                  "x-maxUtf8Bytes": 64,
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }

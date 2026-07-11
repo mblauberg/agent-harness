@@ -527,7 +527,11 @@
           },
           "sha256": {
             "type": "string",
-            "pattern": "^sha256:[a-f0-9]{64}$"
+            "minLength": 1,
+            "maxLength": 64,
+            "x-minUtf8Bytes": 64,
+            "x-maxUtf8Bytes": 64,
+            "pattern": "^[a-f0-9]{64}$"
           },
           "commandId": {
             "$ref": "#/$defs/generated_1"
@@ -572,12 +576,16 @@
           },
           "sha256": {
             "type": "string",
-            "pattern": "^sha256:[a-f0-9]{64}$"
+            "minLength": 1,
+            "maxLength": 64,
+            "x-minUtf8Bytes": 64,
+            "x-maxUtf8Bytes": 64,
+            "pattern": "^[a-f0-9]{64}$"
           }
         }
       },
-      "inputCodecDigest": "sha256:0abef42894702cf995dcb666016bf61362364e8c3bb8ffbdfcb90103fe188659",
-      "outputCodecDigest": "sha256:d217fdf00c61a802f93a4da975637d60599bbdfd2d1ff7e06d76dd40f6390e4c"
+      "inputCodecDigest": "sha256:5946cb14f53ef21f014f79341b0e7da9f79eca3441fa106ff41bcc0e5d31dc56",
+      "outputCodecDigest": "sha256:2a6b521b433ad74dc51ed5245dbe87d8ed9ea0224709c69a81fad893b84611e0"
     },
     {
       "operation": "fabric.v1.authority.delegate",
@@ -936,14 +944,18 @@
               },
               "sha256": {
                 "type": "string",
-                "pattern": "^sha256:[a-f0-9]{64}$"
+                "minLength": 1,
+                "maxLength": 64,
+                "x-minUtf8Bytes": 64,
+                "x-maxUtf8Bytes": 64,
+                "pattern": "^[a-f0-9]{64}$"
               }
             }
           }
         }
       },
       "inputCodecDigest": "sha256:3bfc234fc87e04af03c6c8bb681380a26d5c1e986ddbc11911e6e72b76aba656",
-      "outputCodecDigest": "sha256:04ce32f445c778ae8d3decce5f2464dd01775956da67498c113ee646e6819e54"
+      "outputCodecDigest": "sha256:a43e5ef5f6c61c4a58a92ab317974eef2ebf747d37ce3e6c68777170bcbd37e6"
     },
     {
       "operation": "fabric.v1.budget.read",
@@ -2597,7 +2609,11 @@
               },
               "sha256": {
                 "type": "string",
-                "pattern": "^sha256:[a-f0-9]{64}$"
+                "minLength": 1,
+                "maxLength": 64,
+                "x-minUtf8Bytes": 64,
+                "x-maxUtf8Bytes": 64,
+                "pattern": "^[a-f0-9]{64}$"
               },
               "mailboxWatermark": {
                 "type": "integer",
@@ -2716,7 +2732,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:3924abee8aacf762463bacac37bd60af9cadda99d858faa5bee1679d664384d9",
+      "inputCodecDigest": "sha256:98d3cdd4160650b9ee9d499e06780e50697df2828feb477033e763ea18b7b709",
       "outputCodecDigest": "sha256:465cfa242dc1298ea56641948cb3097563f35ee91120795d35a8434e14b706f4"
     },
     {
@@ -5267,7 +5283,11 @@
           },
           "checkpointSha256": {
             "type": "string",
-            "pattern": "^sha256:[a-f0-9]{64}$"
+            "minLength": 1,
+            "maxLength": 64,
+            "x-minUtf8Bytes": 64,
+            "x-maxUtf8Bytes": 64,
+            "pattern": "^[a-f0-9]{64}$"
           }
         },
         "$defs": {
@@ -5336,7 +5356,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:5fc957f2866a551ac7eedd9c9b91c06d3eb351682e1aa8216cbe57151a43fcfe",
+      "inputCodecDigest": "sha256:460e6a7d01e01693f01eb38db50a18363dedae84cecfdc6190437b3b0db9664c",
       "outputCodecDigest": "sha256:465cfa242dc1298ea56641948cb3097563f35ee91120795d35a8434e14b706f4"
     },
     {
@@ -5383,12 +5403,16 @@
           },
           "sha256": {
             "type": "string",
-            "pattern": "^sha256:[a-f0-9]{64}$"
+            "minLength": 1,
+            "maxLength": 64,
+            "x-minUtf8Bytes": 64,
+            "x-maxUtf8Bytes": 64,
+            "pattern": "^[a-f0-9]{64}$"
           }
         }
       },
       "inputCodecDigest": "sha256:8b52b2e0f540748634d0c7e6be8ee08edd6c26e69bc9d6cfb08646487b2cf99c",
-      "outputCodecDigest": "sha256:e9339e11bf5f0a4b9bf9dec3894b0bc10fbdad54197338644b0127e4434b5b44"
+      "outputCodecDigest": "sha256:a458cbf41eee7843faa8ff300af543e16ed982262e9ff2a17bd64d878b572119"
     },
     {
       "operation": "fabric.v1.receipt.list",
@@ -5439,7 +5463,11 @@
                 },
                 "sha256": {
                   "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "x-minUtf8Bytes": 64,
+                  "x-maxUtf8Bytes": 64,
+                  "pattern": "^[a-f0-9]{64}$"
                 },
                 "exportedAt": {
                   "type": "integer",
@@ -5453,7 +5481,7 @@
         }
       },
       "inputCodecDigest": "sha256:5ba2b508b9b253924acd5c599798af04e117d6bfd927434c4e779e22e6a9cb2b",
-      "outputCodecDigest": "sha256:59287c9ea5f58b8074747bb47172500f9731a6153218a89f41439301b38a904e"
+      "outputCodecDigest": "sha256:4d913a8159a499400d4b3e1969593129189828dc36db82bc478d9744ff1aff35"
     },
     {
       "operation": "fabric.v1.resource.reconcile",

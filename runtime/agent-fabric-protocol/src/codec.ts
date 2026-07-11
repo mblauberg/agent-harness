@@ -89,6 +89,13 @@ export const sha256 = defineCodec<string>(
   parseSha256Digest,
 );
 
+export const sha256Hex = boundedString({
+  minBytes: 64,
+  maxBytes: 64,
+  pattern: "^[a-f0-9]{64}$",
+  example: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+});
+
 export const relativePath = defineCodec<string>(
   {
     type: "string",

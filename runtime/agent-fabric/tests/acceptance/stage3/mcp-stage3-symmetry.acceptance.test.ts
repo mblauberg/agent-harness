@@ -9,31 +9,32 @@ afterEach(async () => {
 });
 
 describe("Stage 3 MCP client-surface symmetry", () => {
-  it("serves identical Stage 3 schemas to Claude and Codex proxies", async () => {
+  it("serves identical schemas for shared grants and no constant-bound aliases", async () => {
     const fixture = await createMcpFixture("run-stage3-mcp-symmetry");
     cleanup.push(fixture.cleanup);
     const [chairTools, peerTools] = await Promise.all([
       fixture.chairProxy.client.listTools(),
       fixture.peerProxy.client.listTools(),
     ]);
-    expect(chairTools.tools).toEqual(peerTools.tools);
+    const chairByName = new Map(chairTools.tools.map((tool) => [tool.name, tool]));
+    for (const peerTool of peerTools.tools) expect(chairByName.get(peerTool.name)).toStrictEqual(peerTool);
     const names = new Set(chairTools.tools.map((tool) => tool.name));
     for (const name of [
-      "fabric_agent_spawn",
-      "fabric_agent_attach",
-      "fabric_agent_steer",
-      "fabric_agent_release",
+      "fabric_provider_action_dispatch",
       "fabric_lifecycle_request",
-      "fabric_operator_intervention",
+      "fabric_operator_intervention_record",
     ]) {
       expect(names.has(name), `${name} missing`).toBe(true);
+    }
+    for (const removedAlias of ["fabric_run_create", "fabric_agent_steer", "fabric_agent_release"]) {
+      expect(names.has(removedAlias), `${removedAlias} must remain absent`).toBe(false);
     }
   });
 
   it("routes an intervention through the shared daemon and into the receipt", async () => {
     const fixture = await createMcpFixture("run-stage3-mcp-intervention");
     cleanup.push(fixture.cleanup);
-    const recorded = await callTool(fixture.chairProxy.client, "fabric_operator_intervention", {
+    const recorded = await callTool(fixture.chairProxy.client, "fabric_operator_intervention_record", {
       source: "fabric",
       directInputProvenance: "complete",
       taskRevision: 1,
