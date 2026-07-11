@@ -41,6 +41,16 @@ export type ProjectionFact<T, Source extends ProjectionSource = ProjectionSource
       candidates: readonly [T, T, ...T[]];
     };
 
+export type NativeNotificationDeliverySummary = {
+  targetIntegration: "native-desktop";
+  status: "available" | "unavailable" | "stale";
+  journalState: "missing" | "pending" | "claimed" | "sent" | "failed" | "deduplicated" | "ambiguous";
+  deliveryItemRevision: number | null;
+  claimGeneration: number | null;
+  integrationState: "absent" | "available" | "unavailable" | "stale";
+  observedAt: Timestamp;
+};
+
 export type AttentionItem = {
   itemId: string;
   revision: number;
@@ -50,6 +60,7 @@ export type AttentionItem = {
   sourceFreshness: "live" | "snapshot" | "stale" | "unavailable" | "conflict";
   lastEventAt: Timestamp;
   duplicateCount: number;
+  nativeNotification: NativeNotificationDeliverySummary;
 };
 
 export type RunProjection = {
@@ -420,6 +431,7 @@ export type OperatorViewSummaryMap = {
     label: AttentionItem["label"];
     priority: AttentionItem["priority"];
     title: string;
+    nativeNotification: NativeNotificationDeliverySummary;
   };
   project: { kind: "project"; goal: string; repositoryRevision: string; repository?: GitRepositorySummary };
   runs: { kind: "run"; phase: string; health: RunProjection["health"]; nextMilestone: string };

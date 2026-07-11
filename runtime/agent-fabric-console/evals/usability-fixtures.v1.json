@@ -67,7 +67,12 @@
           "title": "Worktree merge awaits evidence",
           "freshness": "live",
           "ageMs": 2000,
-          "duplicateCount": 3
+          "duplicateCount": 3,
+          "nativeNotification": {
+            "status": "available",
+            "journalState": "sent",
+            "integrationState": "available"
+          }
         },
         {
           "id": "attention-advisory",
@@ -76,7 +81,12 @@
           "title": "Evaluation worker completed",
           "freshness": "live",
           "ageMs": 1000,
-          "duplicateCount": 1
+          "duplicateCount": 1,
+          "nativeNotification": {
+            "status": "unavailable",
+            "journalState": "failed",
+            "integrationState": "available"
+          }
         }
       ],
       "system": [
@@ -120,7 +130,12 @@
           "freshness": "live",
           "ageMs": 500,
           "duplicateCount": 1,
-          "consequential": true
+          "consequential": true,
+          "nativeNotification": {
+            "status": "stale",
+            "journalState": "ambiguous",
+            "integrationState": "available"
+          }
         },
         {
           "id": "attention-stale-authority",
@@ -129,7 +144,12 @@
           "title": "Authority evidence requires refresh",
           "freshness": "stale",
           "ageMs": 70000,
-          "duplicateCount": 2
+          "duplicateCount": 2,
+          "nativeNotification": {
+            "status": "stale",
+            "journalState": "pending",
+            "integrationState": "stale"
+          }
         },
         {
           "id": "attention-conflict",
@@ -138,7 +158,12 @@
           "title": "Provider identity conflict",
           "freshness": "conflict",
           "ageMs": 5000,
-          "duplicateCount": 1
+          "duplicateCount": 1,
+          "nativeNotification": {
+            "status": "unavailable",
+            "journalState": "missing",
+            "integrationState": "absent"
+          }
         }
       ],
       "system": [

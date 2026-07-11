@@ -56,7 +56,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operation-codecs.js",
-      "sha256": "0d5bfcab297368a46dd4367ed4fcab1bc238b389159c6b2a90e2d3f5d49ce1c2"
+      "sha256": "2526cd106ff86080b410099b76eab90be889cfc97b05ccc71f9265d82028c15e"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operations.js",

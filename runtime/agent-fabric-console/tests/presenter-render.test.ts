@@ -117,6 +117,15 @@ function richDataset(
           label: "Approval",
           priority: "safety-integrity",
           title: "Approve quarantine recovery",
+          nativeNotification: {
+            targetIntegration: "native-desktop",
+            status: "stale",
+            journalState: "ambiguous",
+            deliveryItemRevision: 7,
+            claimGeneration: 3,
+            integrationState: "available",
+            observedAt: timestamp,
+          },
         },
         "safety-integrity",
       ),
@@ -128,6 +137,15 @@ function richDataset(
           label: "FYI",
           priority: "advisory",
           title: "Routine evaluation complete",
+          nativeNotification: {
+            targetIntegration: "native-desktop",
+            status: "unavailable",
+            journalState: "missing",
+            deliveryItemRevision: null,
+            claimGeneration: null,
+            integrationState: "absent",
+            observedAt: timestamp,
+          },
         },
         "advisory",
       ),
@@ -377,6 +395,94 @@ describe("structured presenter and responsive Fabric renderer", () => {
     });
     expect(JSON.stringify(presentation)).not.toMatch(/\d+%|percentage/i);
   });
+
+  it.each([
+    ["available", "sent"],
+    ["unavailable", "failed"],
+    ["stale", "ambiguous"],
+  ] as const)(
+    "renders native notification %s status at reference and compact dimensions without granting an action",
+    (status, journalState) => {
+      const dataset = richDataset();
+      const first = dataset.pages.attention.rows[0];
+      if (first?.summary?.kind !== "attention") {
+        throw new Error("expected attention fixture");
+      }
+      const notification = {
+        ...first.summary.nativeNotification,
+        status,
+        journalState,
+      };
+      const attentionRows = [
+        {
+          ...first,
+          summary: { ...first.summary, nativeNotification: notification },
+        },
+        ...dataset.pages.attention.rows.slice(1),
+      ];
+      const projected = {
+        ...dataset,
+        pages: {
+          ...dataset.pages,
+          attention: { ...dataset.pages.attention, rows: attentionRows },
+        },
+      };
+      const state = controllerState();
+      const stateBefore = structuredClone(state);
+      const datasetBefore = structuredClone(projected);
+
+      const presentation = presentFabricConsole(
+        projected,
+        state,
+        createFabricUiState(),
+        { columns: 80, rows: 24 },
+      );
+      expect(presentation.masterRows[0]?.secondary).toContain(
+        `notify ${status}/${journalState}`,
+      );
+      expect(presentation.detail?.lines).toEqual(
+        expect.arrayContaining([
+          {
+            label: "Native notification",
+            value: `${status} | journal ${journalState}`,
+          },
+          {
+            label: "Notification basis",
+            value: expect.stringContaining("integration available | delivery r7 | claim g3"),
+          },
+        ]),
+      );
+      expect(presentation.actions).toStrictEqual([
+        {
+          id: "action:resume",
+          label: "Resume",
+          enabled: true,
+          availableAction: "resume",
+        },
+      ]);
+
+      const reference = renderFabricConsoleFrame(
+        projected,
+        state,
+        createFabricUiState(),
+        { columns: 80, rows: 24 },
+      );
+      const compact = renderFabricConsoleFrame(
+        projected,
+        state,
+        createFabricUiState({ compactPane: "detail" }),
+        { columns: 60, rows: 18 },
+      );
+      expect(reference.rows.join("\n")).toContain(
+        `Native notification: ${status} | journal ${journalState}`,
+      );
+      expect(compact.rows.join("\n")).toContain(
+        `Native notification: ${status} | journal ${journalState}`,
+      );
+      expect(state).toStrictEqual(stateBefore);
+      expect(projected).toStrictEqual(datasetBefore);
+    },
+  );
 
   it("uses a full-frame Review containing every consequential binding", () => {
     const presentation = presentFabricConsole(

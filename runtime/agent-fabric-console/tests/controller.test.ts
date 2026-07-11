@@ -43,6 +43,15 @@ const credential = {
   token: "credential-secret",
 } as OperatorCapabilityCredential;
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
+const nativeNotification = {
+  targetIntegration: "native-desktop",
+  status: "available",
+  journalState: "sent",
+  deliveryItemRevision: 7,
+  claimGeneration: null,
+  integrationState: "available",
+  observedAt: timestamp,
+} as const;
 const digestA = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
 const digestB = (`sha256:${"b".repeat(64)}`) as Sha256Digest;
 const digestC = (`sha256:${"c".repeat(64)}`) as Sha256Digest;
@@ -147,6 +156,10 @@ function row(itemRevision = 7): ConsoleRow<"attention"> {
       label: "Blocked",
       priority: "critical-path",
       title: "Resume blocked task",
+      nativeNotification: {
+        ...nativeNotification,
+        deliveryItemRevision: itemRevision,
+      },
     },
     detailRef: { kind: "task", taskId, expectedRevision: itemRevision },
     actionAvailability: {

@@ -156,6 +156,15 @@ describe("public protocol adapter", () => {
                       label: "Approval",
                       priority: "safety-integrity",
                       title: "Approve quarantine recovery",
+                      nativeNotification: {
+                        targetIntegration: "native-desktop",
+                        status: "available",
+                        journalState: "sent",
+                        deliveryItemRevision: 7,
+                        claimGeneration: null,
+                        integrationState: "available",
+                        observedAt,
+                      },
                     },
                     detailRef: {
                       kind: "system",

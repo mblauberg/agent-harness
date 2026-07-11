@@ -14,6 +14,15 @@ import {
 } from "../src/model.js";
 
 const observedAt = "2026-07-11T12:00:00.000Z" as Timestamp;
+const nativeNotification = {
+  targetIntegration: "native-desktop",
+  status: "available",
+  journalState: "sent",
+  deliveryItemRevision: 1,
+  claimGeneration: null,
+  integrationState: "available",
+  observedAt,
+} as const;
 
 function attentionRow(
   overrides: Partial<OperatorViewRow<"attention">> &
@@ -39,6 +48,10 @@ function attentionRow(
           label: priority === "critical-path" ? "Blocked" : "FYI",
           priority,
           title: `${priority} item`,
+          nativeNotification: {
+            ...nativeNotification,
+            deliveryItemRevision: overrides.itemRevision,
+          },
         },
         detailRef: {
           kind: "system",

@@ -52,6 +52,7 @@ describe("versioned Console usability evaluation", () => {
           !observation.containsInferredPercentage &&
           observation.consequentialReviewRequired &&
           observation.optionalIntegrationIndependent &&
+          observation.nativeNotificationVisible &&
           observation.exactViewport,
       ),
     ).toBe(true);

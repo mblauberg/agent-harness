@@ -6,6 +6,7 @@ import type {
   MessageBodyRef,
   MessageBodyReadRequest,
   MessageBodyReadResult,
+  NativeNotificationDeliverySummary,
   OperatorDetailReadRequest,
   OperatorDetailReadResult,
   OperatorDetail,
@@ -525,6 +526,7 @@ export class OperatorProjectionStore {
         duplicateCount: typeof payload.duplicateCount === "number" && Number.isSafeInteger(payload.duplicateCount)
           ? Math.max(1, payload.duplicateCount)
           : 1,
+        nativeNotification: this.#nativeNotification(item),
       };
     });
   }
@@ -657,11 +659,12 @@ export class OperatorProjectionStore {
       const priority = attentionPriority(payload.priority, text(item, "severity"));
       const title = typeof payload.title === "string" ? payload.title : text(item, "kind");
       const revision = integer(item, "revision");
+      const nativeNotification = this.#nativeNotification(item);
       return {
         itemId: text(item, "item_id"),
         itemRevision: revision,
         fact: liveFact(revision, toTimestamp(integer(item, "updated_at"), "attentionRow.observedAt"), {
-          summary: { kind: "attention", label, priority, title },
+          summary: { kind: "attention", label, priority, title, nativeNotification },
           detailRef,
           actionAvailability: availability,
         }),
@@ -673,6 +676,57 @@ export class OperatorProjectionStore {
     return integer(row(this.#database.prepare(`
       SELECT revision FROM project_sessions WHERE project_session_id=?
     `).get(projectSessionId), "project session"), "revision");
+  }
+
+  #nativeNotification(item: Row): NativeNotificationDeliverySummary {
+    const itemId = text(item, "item_id");
+    const itemRevision = integer(item, "revision");
+    const deliveryValue = this.#database.prepare(`
+      SELECT item_revision, state, claim_generation, updated_at
+        FROM notification_deliveries
+       WHERE item_id=? AND target_integration='native-desktop'
+       ORDER BY (item_revision=?) DESC, item_revision DESC, updated_at DESC
+       LIMIT 1
+    `).get(itemId, itemRevision);
+    const integrationValue = this.#database.prepare(`
+      SELECT state, checked_at FROM integration_availability
+       WHERE integration_id='native-desktop'
+    `).get();
+    const delivery = isRow(deliveryValue) ? deliveryValue : null;
+    const integration = isRow(integrationValue) ? integrationValue : null;
+    const integrationState = integration === null ? "absent" : text(integration, "state");
+    if (
+      integrationState !== "absent" && integrationState !== "available" &&
+      integrationState !== "unavailable" && integrationState !== "stale"
+    ) throw new Error("stored native notification integration state is invalid");
+    const journalState = delivery === null ? "missing" : text(delivery, "state");
+    if (
+      journalState !== "missing" && journalState !== "pending" && journalState !== "claimed" &&
+      journalState !== "sent" && journalState !== "failed" && journalState !== "deduplicated" &&
+      journalState !== "ambiguous"
+    ) throw new Error("stored native notification journal state is invalid");
+    const deliveryItemRevision = delivery === null ? null : integer(delivery, "item_revision");
+    const status = integrationState === "stale" ||
+      (deliveryItemRevision !== null && deliveryItemRevision !== itemRevision) || journalState === "ambiguous"
+      ? "stale"
+      : integrationState === "absent" || integrationState === "unavailable" ||
+          journalState === "missing" || journalState === "failed"
+        ? "unavailable"
+        : "available";
+    const observedAtMillis = Math.max(
+      integer(item, "updated_at"),
+      delivery === null ? 0 : integer(delivery, "updated_at"),
+      integration === null ? 0 : integer(integration, "checked_at"),
+    );
+    return {
+      targetIntegration: "native-desktop",
+      status,
+      journalState,
+      deliveryItemRevision,
+      claimGeneration: delivery === null ? null : integer(delivery, "claim_generation"),
+      integrationState,
+      observedAt: toTimestamp(observedAtMillis, "attention.nativeNotification.observedAt"),
+    };
   }
 
   #projectRows(projectId: ProjectId, authenticated: AuthenticatedOperatorCredential): OperatorViewRow<"project">[] {

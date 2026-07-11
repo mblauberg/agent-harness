@@ -4,6 +4,7 @@ import stringWidth from "string-width";
 import type {
   AgentId,
   AttentionItem,
+  NativeNotificationDeliverySummary,
   ProjectId,
   ProjectSession,
   ProjectSessionId,
@@ -60,6 +61,18 @@ export type UsabilityAttention = Readonly<{
   ageMs: number;
   duplicateCount: number;
   consequential: boolean;
+  nativeNotification: Readonly<{
+    status: "available" | "unavailable" | "stale";
+    journalState:
+      | "missing"
+      | "pending"
+      | "claimed"
+      | "sent"
+      | "failed"
+      | "deduplicated"
+      | "ambiguous";
+    integrationState: "absent" | "available" | "unavailable" | "stale";
+  }>;
 }>;
 
 export type UsabilitySystem = Readonly<{
@@ -102,6 +115,7 @@ export type UsabilityObservation = Readonly<{
   containsInferredPercentage: boolean;
   consequentialReviewRequired: boolean;
   optionalIntegrationIndependent: boolean;
+  nativeNotificationVisible: boolean;
   exactViewport: boolean;
 }>;
 
@@ -176,6 +190,10 @@ function parseRun(value: unknown, path: string): UsabilityRun {
 
 function parseAttention(value: unknown, path: string): UsabilityAttention {
   const item = record(value, path);
+  const notification = record(
+    item.nativeNotification,
+    `${path}.nativeNotification`,
+  );
   return {
     id: string(item.id, `${path}.id`),
     label: choice(
@@ -207,6 +225,31 @@ function parseAttention(value: unknown, path: string): UsabilityAttention {
       1,
     ),
     consequential: item.consequential === true,
+    nativeNotification: {
+      status: choice(
+        notification.status,
+        ["available", "unavailable", "stale"],
+        `${path}.nativeNotification.status`,
+      ),
+      journalState: choice(
+        notification.journalState,
+        [
+          "missing",
+          "pending",
+          "claimed",
+          "sent",
+          "failed",
+          "deduplicated",
+          "ambiguous",
+        ],
+        `${path}.nativeNotification.journalState`,
+      ),
+      integrationState: choice(
+        notification.integrationState,
+        ["absent", "available", "unavailable", "stale"],
+        `${path}.nativeNotification.integrationState`,
+      ),
+    },
   };
 }
 
@@ -359,6 +402,7 @@ function attentionRow(item: UsabilityAttention): ConsoleRow<"attention"> {
               item.duplicateCount > 1
                 ? `${item.title} (${String(item.duplicateCount)} grouped)`
                 : item.title,
+            nativeNotification: notificationSummary(item),
           },
     detailRef:
       item.freshness === "unavailable" || item.freshness === "conflict"
@@ -368,6 +412,22 @@ function attentionRow(item: UsabilityAttention): ConsoleRow<"attention"> {
       item.freshness === "live" && item.consequential
         ? { state: "available", actions: ["resume"], requiresPreview: true }
         : { state: "read-only", reason: "state-ineligible" },
+  };
+}
+
+function notificationSummary(
+  item: UsabilityAttention,
+): NativeNotificationDeliverySummary {
+  const journalState = item.nativeNotification.journalState;
+  return {
+    targetIntegration: "native-desktop",
+    status: item.nativeNotification.status,
+    journalState,
+    deliveryItemRevision: journalState === "missing" ? null : 7,
+    claimGeneration:
+      journalState === "claimed" || journalState === "ambiguous" ? 3 : null,
+    integrationState: item.nativeNotification.integrationState,
+    observedAt: timestamp,
   };
 }
 
@@ -428,6 +488,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     sourceFreshness: item.freshness,
     lastEventAt: timestamp,
     duplicateCount: item.duplicateCount,
+    nativeNotification: notificationSummary(item),
   }));
   return {
     connection: { state: "live" },
@@ -555,6 +616,8 @@ function observe(
   const githubUnavailable = fixture.system.some(
     (item) => item.id === "github" && item.freshness === "unavailable",
   );
+  const topNotification =
+    top?.summary?.kind === "attention" ? top.summary.nativeNotification : null;
   return {
     fixtureId: fixture.id,
     repetition,
@@ -586,6 +649,11 @@ function observe(
     optionalIntegrationIndependent:
       !githubUnavailable ||
       (dataset.connection.state === "live" && presentation.connection === "LIVE"),
+    nativeNotificationVisible:
+      topNotification === null ||
+      frameText.includes(
+        `${topNotification.status} | journal ${topNotification.journalState}`,
+      ),
     exactViewport:
       frame.columns === manifest.referenceViewport.columns &&
       frame.rows.length === manifest.referenceViewport.rows &&
@@ -634,6 +702,7 @@ export function evaluateUsabilityManifest(
         !observation.containsInferredPercentage &&
         observation.consequentialReviewRequired &&
         observation.optionalIntegrationIndependent &&
+        observation.nativeNotificationVisible &&
         observation.exactViewport;
     }
   }

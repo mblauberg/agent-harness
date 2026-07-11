@@ -525,6 +525,15 @@ const runProjectionCodec = objectCodec({
   nextMilestone: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
 });
+const nativeNotificationDeliverySummaryCodec = objectCodec({
+  targetIntegration: literal("native-desktop"),
+  status: enumeration(["available", "unavailable", "stale"]),
+  journalState: enumeration(["missing", "pending", "claimed", "sent", "failed", "deduplicated", "ambiguous"]),
+  deliveryItemRevision: nullable(positiveInteger),
+  claimGeneration: nullable(integer({ minimum: 0 })),
+  integrationState: enumeration(["absent", "available", "unavailable", "stale"]),
+  observedAt: timestamp,
+});
 const attentionItemCodec = objectCodec({
   itemId: identifier,
   revision: positiveInteger,
@@ -534,6 +543,7 @@ const attentionItemCodec = objectCodec({
   sourceFreshness: enumeration(["live", "snapshot", "stale", "unavailable", "conflict"]),
   lastEventAt: timestamp,
   duplicateCount: integer(),
+  nativeNotification: nativeNotificationDeliverySummaryCodec,
 });
 const projectionSourceCodec = enumeration(["fabric", "delivery-run", "git", "github", "herdr", "provider"]);
 
@@ -1417,6 +1427,7 @@ const attentionSummaryCodec = objectCodec({
   label: enumeration(["Decision", "Approval", "Blocked", "FYI"]),
   priority: enumeration(["safety-integrity", "critical-path", "expiring-authority", "acceptance-ready", "advisory"]),
   title: text,
+  nativeNotification: nativeNotificationDeliverySummaryCodec,
 });
 const projectSummaryCodec = objectCodec(
   { kind: literal("project"), goal: text, repositoryRevision: text },

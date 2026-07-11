@@ -85,7 +85,21 @@ describe("canonical scoped-gate read", () => {
 
 const observedAt = "2026-07-11T10:00:00.000Z";
 const rowCases = [
-  ["attention", { kind: "attention", label: "Decision", priority: "critical-path", title: "Choose" }, { kind: "task", taskId: "task_01", expectedRevision: 1 }],
+  ["attention", {
+    kind: "attention",
+    label: "Decision",
+    priority: "critical-path",
+    title: "Choose",
+    nativeNotification: {
+      targetIntegration: "native-desktop",
+      status: "available",
+      journalState: "sent",
+      deliveryItemRevision: 1,
+      claimGeneration: null,
+      integrationState: "available",
+      observedAt,
+    },
+  }, { kind: "task", taskId: "task_01", expectedRevision: 1 }],
   ["project", { kind: "project", goal: "Ship", repositoryRevision: "revision_01" }, { kind: "project", projectId: "project_01", expectedRevision: 1 }],
   ["runs", { kind: "run", phase: "reviewing", health: "healthy", nextMilestone: "acceptance" }, { kind: "run", coordinationRunId: "run_01", expectedRevision: 1 }],
   ["work", { kind: "work", state: "active", checkState: "passing" }, { kind: "task", taskId: "task_01", expectedRevision: 1 }],
@@ -124,6 +138,39 @@ describe("rich operator projection v2", () => {
       snapshotRevision: 4,
       readTransactionId: "read_tx_01",
     })).toMatchObject({ status: "page", view });
+  });
+
+  it("requires the closed native notification summary on attention rows", () => {
+    const [, validSummary, detailRef] = rowCases[0];
+    const { nativeNotification: _omitted, ...missingNotification } = validSummary;
+    const page = (summary: unknown) => ({
+      status: "page",
+      view: "attention",
+      rows: [row(summary, detailRef)],
+      nextCursor: 1,
+      hasMore: false,
+      snapshotRevision: 4,
+      readTransactionId: "read_tx_01",
+    });
+
+    expect(() =>
+      parseOperationResult(
+        FABRIC_OPERATIONS.projectionViewPage,
+        page(missingNotification),
+      ),
+    ).toThrowError(/nativeNotification is required/u);
+    expect(() =>
+      parseOperationResult(
+        FABRIC_OPERATIONS.projectionViewPage,
+        page({
+          ...validSummary,
+          nativeNotification: {
+            ...validSummary.nativeNotification,
+            status: "unknown",
+          },
+        }),
+      ),
+    ).toThrowError(/nativeNotification.status/u);
   });
 
   it("rejects a row whose stable item revision differs from its fact revision", () => {

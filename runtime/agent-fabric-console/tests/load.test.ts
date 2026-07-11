@@ -32,6 +32,15 @@ import { TerminalInputDecoder } from "../src/input.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digest = (`sha256:${"e".repeat(64)}`) as Sha256Digest;
+const nativeNotification = {
+  targetIntegration: "native-desktop",
+  status: "available",
+  journalState: "sent",
+  deliveryItemRevision: 1,
+  claimGeneration: null,
+  integrationState: "available",
+  observedAt: timestamp,
+} as const;
 
 function largeFixture(count: number) {
   const rows: ConsoleRow<"attention">[] = Array.from(
@@ -53,6 +62,10 @@ function largeFixture(count: number) {
         label: index % 17 === 0 ? "Blocked" : "FYI",
         priority: index % 17 === 0 ? "critical-path" : "advisory",
         title: `Bounded load item ${String(index)}`,
+        nativeNotification: {
+          ...nativeNotification,
+          deliveryItemRevision: index + 1,
+        },
       },
       detailRef: {
         kind: "system",

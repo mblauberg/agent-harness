@@ -27,6 +27,15 @@ import {
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digest = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
+const nativeNotification = {
+  targetIntegration: "native-desktop",
+  status: "available",
+  journalState: "sent",
+  deliveryItemRevision: 7,
+  claimGeneration: null,
+  integrationState: "available",
+  observedAt: timestamp,
+} as const;
 const available: OperatorActionAvailability = {
   state: "available",
   actions: ["resume"],
@@ -51,6 +60,7 @@ function fixtureDataset(revision = 11): FabricConsoleDataset {
       label: "Blocked",
       priority: "critical-path",
       title: "Resume blocked task",
+      nativeNotification,
     },
     detailRef: {
       kind: "system",

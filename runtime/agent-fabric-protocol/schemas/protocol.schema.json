@@ -54799,7 +54799,8 @@
                               "title",
                               "sourceFreshness",
                               "lastEventAt",
-                              "duplicateCount"
+                              "duplicateCount",
+                              "nativeNotification"
                             ],
                             "properties": {
                               "itemId": {
@@ -54857,6 +54858,79 @@
                               "duplicateCount": {
                                 "type": "integer",
                                 "minimum": 0
+                              },
+                              "nativeNotification": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "targetIntegration",
+                                  "status",
+                                  "journalState",
+                                  "deliveryItemRevision",
+                                  "claimGeneration",
+                                  "integrationState",
+                                  "observedAt"
+                                ],
+                                "properties": {
+                                  "targetIntegration": {
+                                    "const": "native-desktop"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "available",
+                                      "unavailable",
+                                      "stale"
+                                    ]
+                                  },
+                                  "journalState": {
+                                    "type": "string",
+                                    "enum": [
+                                      "missing",
+                                      "pending",
+                                      "claimed",
+                                      "sent",
+                                      "failed",
+                                      "deduplicated",
+                                      "ambiguous"
+                                    ]
+                                  },
+                                  "deliveryItemRevision": {
+                                    "oneOf": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "claimGeneration": {
+                                    "oneOf": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "integrationState": {
+                                    "type": "string",
+                                    "enum": [
+                                      "absent",
+                                      "available",
+                                      "unavailable",
+                                      "stale"
+                                    ]
+                                  },
+                                  "observedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
                               }
                             }
                           },
@@ -54955,7 +55029,8 @@
                                 "title",
                                 "sourceFreshness",
                                 "lastEventAt",
-                                "duplicateCount"
+                                "duplicateCount",
+                                "nativeNotification"
                               ],
                               "properties": {
                                 "itemId": {
@@ -55013,6 +55088,79 @@
                                 "duplicateCount": {
                                   "type": "integer",
                                   "minimum": 0
+                                },
+                                "nativeNotification": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "targetIntegration",
+                                    "status",
+                                    "journalState",
+                                    "deliveryItemRevision",
+                                    "claimGeneration",
+                                    "integrationState",
+                                    "observedAt"
+                                  ],
+                                  "properties": {
+                                    "targetIntegration": {
+                                      "const": "native-desktop"
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "available",
+                                        "unavailable",
+                                        "stale"
+                                      ]
+                                    },
+                                    "journalState": {
+                                      "type": "string",
+                                      "enum": [
+                                        "missing",
+                                        "pending",
+                                        "claimed",
+                                        "sent",
+                                        "failed",
+                                        "deduplicated",
+                                        "ambiguous"
+                                      ]
+                                    },
+                                    "deliveryItemRevision": {
+                                      "oneOf": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 1
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "claimGeneration": {
+                                      "oneOf": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "integrationState": {
+                                      "type": "string",
+                                      "enum": [
+                                        "absent",
+                                        "available",
+                                        "unavailable",
+                                        "stale"
+                                      ]
+                                    },
+                                    "observedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
                                 }
                               }
                             },
@@ -55388,7 +55536,8 @@
                                       "title",
                                       "sourceFreshness",
                                       "lastEventAt",
-                                      "duplicateCount"
+                                      "duplicateCount",
+                                      "nativeNotification"
                                     ],
                                     "properties": {
                                       "itemId": {
@@ -55446,6 +55595,79 @@
                                       "duplicateCount": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "nativeNotification": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "targetIntegration",
+                                          "status",
+                                          "journalState",
+                                          "deliveryItemRevision",
+                                          "claimGeneration",
+                                          "integrationState",
+                                          "observedAt"
+                                        ],
+                                        "properties": {
+                                          "targetIntegration": {
+                                            "const": "native-desktop"
+                                          },
+                                          "status": {
+                                            "type": "string",
+                                            "enum": [
+                                              "available",
+                                              "unavailable",
+                                              "stale"
+                                            ]
+                                          },
+                                          "journalState": {
+                                            "type": "string",
+                                            "enum": [
+                                              "missing",
+                                              "pending",
+                                              "claimed",
+                                              "sent",
+                                              "failed",
+                                              "deduplicated",
+                                              "ambiguous"
+                                            ]
+                                          },
+                                          "deliveryItemRevision": {
+                                            "oneOf": [
+                                              {
+                                                "type": "integer",
+                                                "minimum": 1
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
+                                          },
+                                          "claimGeneration": {
+                                            "oneOf": [
+                                              {
+                                                "type": "integer",
+                                                "minimum": 0
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
+                                          },
+                                          "integrationState": {
+                                            "type": "string",
+                                            "enum": [
+                                              "absent",
+                                              "available",
+                                              "unavailable",
+                                              "stale"
+                                            ]
+                                          },
+                                          "observedAt": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                          }
+                                        }
                                       }
                                     }
                                   },
@@ -55562,7 +55784,8 @@
                                         "title",
                                         "sourceFreshness",
                                         "lastEventAt",
-                                        "duplicateCount"
+                                        "duplicateCount",
+                                        "nativeNotification"
                                       ],
                                       "properties": {
                                         "itemId": {
@@ -55620,6 +55843,79 @@
                                         "duplicateCount": {
                                           "type": "integer",
                                           "minimum": 0
+                                        },
+                                        "nativeNotification": {
+                                          "type": "object",
+                                          "additionalProperties": false,
+                                          "required": [
+                                            "targetIntegration",
+                                            "status",
+                                            "journalState",
+                                            "deliveryItemRevision",
+                                            "claimGeneration",
+                                            "integrationState",
+                                            "observedAt"
+                                          ],
+                                          "properties": {
+                                            "targetIntegration": {
+                                              "const": "native-desktop"
+                                            },
+                                            "status": {
+                                              "type": "string",
+                                              "enum": [
+                                                "available",
+                                                "unavailable",
+                                                "stale"
+                                              ]
+                                            },
+                                            "journalState": {
+                                              "type": "string",
+                                              "enum": [
+                                                "missing",
+                                                "pending",
+                                                "claimed",
+                                                "sent",
+                                                "failed",
+                                                "deduplicated",
+                                                "ambiguous"
+                                              ]
+                                            },
+                                            "deliveryItemRevision": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "integer",
+                                                  "minimum": 1
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
+                                            },
+                                            "claimGeneration": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
+                                            },
+                                            "integrationState": {
+                                              "type": "string",
+                                              "enum": [
+                                                "absent",
+                                                "available",
+                                                "unavailable",
+                                                "stale"
+                                              ]
+                                            },
+                                            "observedAt": {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            }
+                                          }
                                         }
                                       }
                                     },
@@ -59487,7 +59783,8 @@
                                           "kind",
                                           "label",
                                           "priority",
-                                          "title"
+                                          "title",
+                                          "nativeNotification"
                                         ],
                                         "properties": {
                                           "kind": {
@@ -59518,6 +59815,79 @@
                                             "maxLength": 4096,
                                             "x-minUtf8Bytes": 1,
                                             "x-maxUtf8Bytes": 4096
+                                          },
+                                          "nativeNotification": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "required": [
+                                              "targetIntegration",
+                                              "status",
+                                              "journalState",
+                                              "deliveryItemRevision",
+                                              "claimGeneration",
+                                              "integrationState",
+                                              "observedAt"
+                                            ],
+                                            "properties": {
+                                              "targetIntegration": {
+                                                "const": "native-desktop"
+                                              },
+                                              "status": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "available",
+                                                  "unavailable",
+                                                  "stale"
+                                                ]
+                                              },
+                                              "journalState": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "missing",
+                                                  "pending",
+                                                  "claimed",
+                                                  "sent",
+                                                  "failed",
+                                                  "deduplicated",
+                                                  "ambiguous"
+                                                ]
+                                              },
+                                              "deliveryItemRevision": {
+                                                "oneOf": [
+                                                  {
+                                                    "type": "integer",
+                                                    "minimum": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
+                                              },
+                                              "claimGeneration": {
+                                                "oneOf": [
+                                                  {
+                                                    "type": "integer",
+                                                    "minimum": 0
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
+                                              },
+                                              "integrationState": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "absent",
+                                                  "available",
+                                                  "unavailable",
+                                                  "stale"
+                                                ]
+                                              },
+                                              "observedAt": {
+                                                "type": "string",
+                                                "format": "date-time"
+                                              }
+                                            }
                                           }
                                         }
                                       },
@@ -59895,7 +60265,8 @@
                                             "kind",
                                             "label",
                                             "priority",
-                                            "title"
+                                            "title",
+                                            "nativeNotification"
                                           ],
                                           "properties": {
                                             "kind": {
@@ -59926,6 +60297,79 @@
                                               "maxLength": 4096,
                                               "x-minUtf8Bytes": 1,
                                               "x-maxUtf8Bytes": 4096
+                                            },
+                                            "nativeNotification": {
+                                              "type": "object",
+                                              "additionalProperties": false,
+                                              "required": [
+                                                "targetIntegration",
+                                                "status",
+                                                "journalState",
+                                                "deliveryItemRevision",
+                                                "claimGeneration",
+                                                "integrationState",
+                                                "observedAt"
+                                              ],
+                                              "properties": {
+                                                "targetIntegration": {
+                                                  "const": "native-desktop"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "available",
+                                                    "unavailable",
+                                                    "stale"
+                                                  ]
+                                                },
+                                                "journalState": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "missing",
+                                                    "pending",
+                                                    "claimed",
+                                                    "sent",
+                                                    "failed",
+                                                    "deduplicated",
+                                                    "ambiguous"
+                                                  ]
+                                                },
+                                                "deliveryItemRevision": {
+                                                  "oneOf": [
+                                                    {
+                                                      "type": "integer",
+                                                      "minimum": 1
+                                                    },
+                                                    {
+                                                      "type": "null"
+                                                    }
+                                                  ]
+                                                },
+                                                "claimGeneration": {
+                                                  "oneOf": [
+                                                    {
+                                                      "type": "integer",
+                                                      "minimum": 0
+                                                    },
+                                                    {
+                                                      "type": "null"
+                                                    }
+                                                  ]
+                                                },
+                                                "integrationState": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "absent",
+                                                    "available",
+                                                    "unavailable",
+                                                    "stale"
+                                                  ]
+                                                },
+                                                "observedAt": {
+                                                  "type": "string",
+                                                  "format": "date-time"
+                                                }
+                                              }
                                             }
                                           }
                                         },

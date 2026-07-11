@@ -351,7 +351,10 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
   }
   switch (summary.kind) {
     case "attention":
-      return [summary.title, `${summary.label} | ${summary.priority}`];
+      return [
+        summary.title,
+        `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}`,
+      ];
     case "project":
       return [summary.goal, `repository ${summary.repositoryRevision}`];
     case "run":
@@ -399,9 +402,32 @@ function detailLines(row: ConsoleRow): PresentedDetail {
     { label: "Kind", value: row.summary?.kind ?? "unavailable" },
     { label: "Summary", value: primary },
     { label: "State", value: secondary },
+  ];
+  if (row.summary?.kind === "attention") {
+    const notification = row.summary.nativeNotification;
+    lines.push(
+      {
+        label: "Native notification",
+        value: `${notification.status} | journal ${notification.journalState}`,
+      },
+      {
+        label: "Notification basis",
+        value: `integration ${notification.integrationState} | delivery ${
+          notification.deliveryItemRevision === null
+            ? "missing"
+            : `r${String(notification.deliveryItemRevision)}`
+        } | claim ${
+          notification.claimGeneration === null
+            ? "none"
+            : `g${String(notification.claimGeneration)}`
+        } | observed ${notification.observedAt}`,
+      },
+    );
+  }
+  lines.push(
     { label: "Source", value: row.freshness.source },
     { label: "Freshness", value: freshnessLabel(row.freshness) },
-  ];
+  );
   if (row.actionAvailability.state === "read-only") {
     lines.push({ label: "Actions", value: `read-only: ${row.actionAvailability.reason}` });
   } else {

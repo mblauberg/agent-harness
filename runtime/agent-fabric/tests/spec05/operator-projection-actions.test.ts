@@ -316,6 +316,99 @@ describe("operator projection store", () => {
     });
   });
 
+  it.each([
+    ["pending", "available", 2, "available"],
+    ["claimed", "available", 2, "available"],
+    ["sent", "available", 2, "available"],
+    ["deduplicated", "available", 2, "available"],
+    ["failed", "available", 2, "unavailable"],
+    ["ambiguous", "available", 2, "stale"],
+    ["pending", "unavailable", 2, "unavailable"],
+    ["pending", "stale", 2, "stale"],
+    ["sent", "available", 1, "stale"],
+    ["missing", "available", null, "unavailable"],
+    ["missing", "absent", null, "unavailable"],
+  ] as const)(
+    "projects native delivery %s with %s integration at revision %s as %s without mutating authority",
+    (journalState, integrationState, deliveryItemRevision, expectedStatus) => {
+      const fixture = setupProjection();
+      if (integrationState !== "absent") {
+        fixture.database.prepare(`
+          INSERT INTO integration_availability(integration_id, state, discovered_contract_json, checked_at)
+          VALUES ('native-desktop', ?, '{}', ?)
+        `).run(integrationState, now - 150);
+      }
+      if (journalState !== "missing" && deliveryItemRevision !== null) {
+        fixture.database.prepare(`
+          INSERT INTO notification_deliveries(
+            notification_id, item_id, item_revision, target_integration, dedupe_key,
+            state, claim_generation, claim_deadline, effect_identity_hash, updated_at
+          ) VALUES ('notification_native_01', 'attention_01', ?, 'native-desktop',
+                    'notification:native:01', ?, 3, NULL, NULL, ?)
+        `).run(deliveryItemRevision, journalState, now - 100);
+      }
+      const before = fixture.database.prepare(`
+        SELECT item_id, revision, state FROM attention_items
+        UNION ALL
+        SELECT notification_id, item_revision, state FROM notification_deliveries
+        ORDER BY 1
+      `).all();
+      const projectId = identifier<"ProjectId">("project_01");
+      const projectSessionId = identifier<"ProjectSessionId">("session_01");
+      const snapshot = fixture.projections.snapshot({
+        credential: fixture.credential,
+        projectId,
+        projectSessionId,
+      });
+      const page = fixture.projections.viewPage({
+        credential: fixture.credential,
+        projectId,
+        projectSessionId,
+        view: "attention",
+        snapshotRevision: snapshot.snapshotRevision,
+        cursor: 0,
+        limit: 10,
+      });
+      const expectedNotification = {
+        targetIntegration: "native-desktop",
+        status: expectedStatus,
+        journalState,
+        deliveryItemRevision,
+        claimGeneration: journalState === "missing" ? null : 3,
+        integrationState,
+        observedAt: new Date(
+          journalState !== "missing" ? now - 100 : integrationState !== "absent" ? now - 150 : now - 400,
+        ).toISOString(),
+      };
+
+      expect(page).toMatchObject({
+        status: "page",
+        rows: [{
+          itemId: "attention_01",
+          itemRevision: 2,
+          fact: {
+            value: {
+              summary: {
+                nativeNotification: expectedNotification,
+              },
+              actionAvailability: { state: "available", requiresPreview: true },
+            },
+          },
+        }],
+      });
+      expect(snapshot.attention).toMatchObject({
+        freshness: "live",
+        value: [{ itemId: "attention_01", nativeNotification: expectedNotification }],
+      });
+      expect(fixture.database.prepare(`
+        SELECT item_id, revision, state FROM attention_items
+        UNION ALL
+        SELECT notification_id, item_revision, state FROM notification_deliveries
+        ORDER BY 1
+      `).all()).toEqual(before);
+    },
+  );
+
   it("pages monotonic events and reads a revision-bound terminal-safe full message", () => {
     const fixture = setupProjection();
     const projectId = identifier<"ProjectId">("project_01");
