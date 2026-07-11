@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=24.15.0 <25"
   },
+  "bin": {
+    "agent-fabric-herdr": "dist/cli.js"
+  },
   "files": [
     "dist"
   ],

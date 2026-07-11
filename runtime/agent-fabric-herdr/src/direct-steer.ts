@@ -7,6 +7,8 @@ import type {
 import type { HerdrAdapter } from "./herdr-adapter.js";
 import { digestHerdrIntent } from "./herdr-adapter.js";
 
+const CREDENTIAL_PATTERN = /\b(?:afb|afc|afop)_[A-Za-z0-9_-]{8,}|\bghp_[A-Za-z0-9_]{8,}|\bgithub_pat_[A-Za-z0-9_]{8,}/u;
+
 export type DirectSteerRejectionCode =
   | "explicit-fire-and-forget-required"
   | "invalid-prompt"
@@ -107,7 +109,8 @@ function assertDirectSteerRequest(request: DirectSteerRequest): void {
   if (
     request.prompt.length === 0 ||
     Buffer.byteLength(request.prompt, "utf8") > 4_096 ||
-    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u009b]/u.test(request.prompt)
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u009b]/u.test(request.prompt) ||
+    CREDENTIAL_PATTERN.test(request.prompt)
   ) {
     throw new DirectSteerRejectedError(
       "invalid-prompt",

@@ -216,7 +216,8 @@ export type HerdrIntent =
 export type HerdrAppliedReceipt = {
   status: "applied";
   operation: HerdrIntent["kind"];
-  paneRef?: HerdrPaneRef;
+  /** Serialized evidence is revalidated on read and does not confer pane identity. */
+  paneRef?: string;
   detail?: JsonValue;
 };
 

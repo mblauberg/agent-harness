@@ -49,6 +49,25 @@ npm run test:load
 
 All normal tests use temporary databases and fake provider boundaries. They do not log into providers or register MCP servers.
 
+### Optional GitHub hosted checks
+
+Local typed Git reads are independent of GitHub. `GitRepositoryReadService`
+accepts an optional `GitHostedChecksPort`; omitting it is the default and
+projects `unavailable` hosted facts while keeping local Git `live`.
+
+Trusted daemon composition can call
+`createOptionalGitHubHostedChecksAdapter({ enabled: true, ... })` with one
+canonical repository root, exact `owner/repository`, `github.com`, and a
+canonical SHA-256-pinned `gh` executable. The adapter issues only the fixed
+bounded check-runs request for the observed native HEAD. It accepts no URL,
+ref, arbitrary GitHub endpoint, argument vector, shell or caller environment.
+An outage, authentication failure, malformed response, more than 100 checks or
+oversized output becomes exact-HEAD `stale` (when a same-binding cache exists)
+or `unavailable`; it never fails or rewrites the local Git projection.
+Credentials may be inherited ephemerally by `gh`, but are never accepted in
+configuration, persisted, logged or projected. Retargeting the canonical root,
+repository or HEAD fails before process I/O.
+
 Inspect the live machine without printing capabilities:
 
 ```sh

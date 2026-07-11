@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric, type Fabric } from "../../src/index.ts";
 import type { PublicProtocolContext } from "../../src/daemon/public-protocol.ts";
+import { GitRepositoryReadService } from "../../src/operator/git-repository-read.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../support/stage1-fixture.ts";
 
@@ -201,6 +202,100 @@ afterEach(async () => {
 });
 
 describe("operator repository read", () => {
+  it("projects enabled hosted checks without coupling them to local Git availability", async () => {
+    const fixture = await setupFixture();
+    await fixture.fabric.close();
+    const database = new Database(join(fixture.stateRoot, "fabric.sqlite3"));
+    try {
+      const service = new GitRepositoryReadService({
+        database,
+        operatorStore: new OperatorStore({ database, clock: () => now }),
+        privateStateRoot: await realpath(fixture.stateRoot),
+        clock: () => now,
+        hostedChecks: {
+          read: async (binding) => ({
+            freshness: "live",
+            source: "github",
+            revision: 41,
+            observedAt: "2027-01-01T00:00:00Z" as never,
+            value: {
+              repository: "example/project",
+              headObjectDigest: binding.headObjectDigest,
+              state: "passing",
+              total: 2,
+              passing: 2,
+              failing: 0,
+              pending: 0,
+            },
+          }),
+        },
+      });
+
+      const result = await service.read(fixture.request);
+
+      expect(result).toMatchObject({
+        status: "current",
+        repository: {
+          freshness: "live",
+          source: "git",
+          hostedChecks: {
+            freshness: "live",
+            source: "github",
+            revision: 41,
+            value: {
+              repository: "example/project",
+              state: "passing",
+              total: 2,
+            },
+          },
+        },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the local Git projection current when the optional hosted adapter fails", async () => {
+    const fixture = await setupFixture();
+    await fixture.fabric.close();
+    const database = new Database(join(fixture.stateRoot, "fabric.sqlite3"));
+    try {
+      const service = new GitRepositoryReadService({
+        database,
+        operatorStore: new OperatorStore({ database, clock: () => now }),
+        privateStateRoot: await realpath(fixture.stateRoot),
+        clock: () => now,
+        hostedChecks: {
+          read: async () => ({
+            freshness: "unavailable" as const,
+            source: "github" as const,
+            revision: 41,
+            observedAt: "2027-01-01T00:00:00Z" as never,
+            reason: `credential afop_${"x".repeat(32)}`,
+          }),
+        },
+      });
+
+      const result = await service.read(fixture.request);
+
+      expect(result).toMatchObject({
+        status: "current",
+        repository: {
+          freshness: "live",
+          source: "git",
+          hostedChecks: {
+            freshness: "unavailable",
+            source: "github",
+            reason: "hosted checks integration failed safely; local Git observation is independent",
+          },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("afop_");
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns a bounded typed local Git projection through the public operator dispatcher", async () => {
     const fixture = await setupFixture();
     try {

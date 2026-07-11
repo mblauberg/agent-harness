@@ -99,7 +99,7 @@ describe("Fabric-backed direct Herdr steering", () => {
     expect(fixture.injections).toEqual([]);
   });
 
-  it.each(["", "bad\u001bsequence", "x".repeat(4_097)])(
+  it.each(["", "bad\u001bsequence", "x".repeat(4_097), `afop_${"x".repeat(32)}`])(
     "rejects unsafe or unbounded prompt text before validation",
     async (prompt) => {
       const fixture = createFixture(validReference);

@@ -29,6 +29,7 @@ import {
   type GitWorktreeRecord,
   type ProjectionFact,
   type Sha256Digest,
+  type Timestamp,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
@@ -47,6 +48,7 @@ const GIT_TIMEOUT_MS = 15_000;
 const GIT_EXECUTABLE = "/usr/bin/git";
 const DIFF_TRUNCATION_MARKER = Buffer.from("\n[agent-fabric: diff truncated at 1048576 bytes]\n", "utf8");
 const NATIVE_OBJECT_PATTERN = /^[0-9a-f]{40,64}$/u;
+const HOSTED_SECRET_PATTERN = /\b(?:afb|afc|afop)_[A-Za-z0-9_-]{8,}|\bghp_[A-Za-z0-9_]{8,}|\bgithub_pat_[A-Za-z0-9_]{8,}/u;
 
 type GitCommandResult = { stdout: Buffer; truncated: boolean };
 
@@ -91,21 +93,41 @@ type FullObservation = {
   worktrees: { items: GitWorktreeRecord[]; truncated: boolean };
 };
 
+export type GitHostedChecksBinding = {
+  canonicalRepositoryRoot: string;
+  canonicalWorktreePath: string;
+  repositoryStateDigest: Sha256Digest;
+  headObjectDigest: Sha256Digest;
+  nativeHeadObjectId: string;
+  snapshotRevision: number;
+  observedAt: Timestamp;
+};
+
+/** Optional hosted facts are read independently after the local Git snapshot is complete. */
+export interface GitHostedChecksPort {
+  read(
+    binding: GitHostedChecksBinding,
+  ): Promise<ProjectionFact<GitHostedChecks | null, "github">>;
+}
+
 export type GitRepositoryReadServiceOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
   privateStateRoot: string;
+  hostedChecks?: GitHostedChecksPort;
 };
 
 export class GitRepositoryReadService {
   readonly #database: Database.Database;
   readonly #operatorStore: OperatorStore;
   readonly #privateStateRoot: string;
+  readonly #hostedChecks: GitHostedChecksPort | undefined;
   readonly #clock: () => number;
 
   constructor(options: GitRepositoryReadServiceOptions) {
     this.#database = options.database;
     this.#operatorStore = options.operatorStore;
     this.#privateStateRoot = resolve(options.privateStateRoot);
+    this.#hostedChecks = options.hostedChecks;
     this.#clock = options.clock ?? Date.now;
   }
 
@@ -140,13 +162,15 @@ export class GitRepositoryReadService {
     const finalSnapshotRevision = this.#globalRevision();
     if (finalSnapshotRevision !== request.snapshotRevision) return resnapshot(finalSnapshotRevision);
     const observedAt = parseTimestamp(new Date(this.#clock()).toISOString(), "gitRepository.observedAt");
-    const hostedChecks: ProjectionFact<GitHostedChecks | null, "github"> = {
-      freshness: "unavailable",
-      source: "github",
-      revision: request.snapshotRevision,
+    const hostedChecks = await this.#readHostedChecks({
+      canonicalRepositoryRoot: target.repositoryRoot,
+      canonicalWorktreePath: target.worktreePath,
+      repositoryStateDigest: observation.core.repositoryStateDigest,
+      headObjectDigest: observation.core.head.objectDigest,
+      nativeHeadObjectId: observation.core.status.headObjectId,
+      snapshotRevision: request.snapshotRevision,
       observedAt,
-      reason: "hosted checks integration is unavailable; local Git observation is independent",
-    };
+    });
     const repository: GitRepositoryProjection = {
       freshness: "live",
       source: "git",
@@ -196,6 +220,19 @@ export class GitRepositoryReadService {
       ),
       repository,
     };
+  }
+
+  async #readHostedChecks(
+    binding: GitHostedChecksBinding,
+  ): Promise<ProjectionFact<GitHostedChecks | null, "github">> {
+    if (this.#hostedChecks === undefined) return unavailableHostedChecks(binding, "hosted checks integration is disabled; local Git observation is independent");
+    try {
+      const fact = await this.#hostedChecks.read(binding);
+      assertHostedChecksFact(fact, binding.headObjectDigest);
+      return fact;
+    } catch {
+      return unavailableHostedChecks(binding, "hosted checks integration failed safely; local Git observation is independent");
+    }
   }
 
   #authorise(request: GitRepositoryReadRequest): AuthenticatedOperatorCredential {
@@ -405,6 +442,59 @@ export class GitRepositoryReadService {
       path: `private/git-diffs/${filename}`,
       digest,
     }, "gitRepository.diff.artifactRef");
+  }
+}
+
+function unavailableHostedChecks(
+  binding: Pick<GitHostedChecksBinding, "snapshotRevision" | "observedAt">,
+  reason: string,
+): ProjectionFact<GitHostedChecks | null, "github"> {
+  return {
+    freshness: "unavailable",
+    source: "github",
+    revision: binding.snapshotRevision,
+    observedAt: parseTimestamp(binding.observedAt, "gitRepository.hostedChecks.observedAt"),
+    reason,
+  };
+}
+
+function assertHostedChecksFact(
+  fact: ProjectionFact<GitHostedChecks | null, "github">,
+  expectedHeadObjectDigest: Sha256Digest,
+): void {
+  if (fact.source !== "github" || !Number.isSafeInteger(fact.revision) || fact.revision < 0) {
+    throw new TypeError("hosted checks fact identity is invalid");
+  }
+  parseTimestamp(fact.observedAt, "gitRepository.hostedChecks.observedAt");
+  if (fact.freshness === "unavailable") {
+    assertHostedText(fact.reason, "hosted checks unavailability reason", 1024);
+    return;
+  }
+  const values = fact.freshness === "conflict" ? fact.candidates : [fact.value];
+  if (values.length < 1 || values.length > 16) throw new TypeError("hosted checks fact candidate count is invalid");
+  for (const value of values) {
+    if (value === null) continue;
+    assertHostedText(value.repository, "hosted checks repository", 1024);
+    if (value.headObjectDigest !== expectedHeadObjectDigest) {
+      throw new TypeError("hosted checks fact is bound to another Git object");
+    }
+    const counts = [value.total, value.passing, value.failing, value.pending];
+    if (counts.some((count) => !Number.isSafeInteger(count) || count < 0 || count > 100)) {
+      throw new TypeError("hosted checks counts exceed the bounded projection");
+    }
+    if (value.passing + value.failing + value.pending !== value.total) {
+      throw new TypeError("hosted checks counts are inconsistent");
+    }
+  }
+}
+
+function assertHostedText(value: string, label: string, maximumBytes: number): void {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (
+    bytes < 1 || bytes > maximumBytes ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u009b]/u.test(value) || HOSTED_SECRET_PATTERN.test(value)
+  ) {
+    throw new TypeError(`${label} is unsafe or exceeds its bound`);
   }
 }
 

@@ -16,6 +16,28 @@ export {
   LocalOperatorConsoleUnavailableError,
   openLocalOperatorConsoleSession,
 } from "./operator/local-console-session.js";
+export { createOptionalGitHubHostedChecksAdapter } from "./operator/github-hosted-checks.js";
+export type {
+  GitHubCliHostedChecksOptions,
+  GitHubHostedChecksProcessPort,
+  OptionalGitHubHostedChecksConfiguration,
+} from "./operator/github-hosted-checks.js";
+export type {
+  GitHostedChecksBinding,
+  GitHostedChecksPort,
+} from "./operator/git-repository-read.js";
+export { HerdrFabricPorts } from "./integrations/herdr-fabric-ports.js";
+export type {
+  DirectSteerIntent,
+  FabricSteerReference,
+  FabricSteerReferenceValidation,
+  HerdrActionEvidence,
+  HerdrActionRecord,
+  HerdrAppliedOperation,
+  HerdrEffectReceipt,
+  HerdrFabricPortsOptions,
+  HerdrRecoverySummary,
+} from "./integrations/herdr-fabric-ports.js";
 export type {
   LocalOperatorConsoleSession,
   LocalOperatorConsoleSessionOptions,
