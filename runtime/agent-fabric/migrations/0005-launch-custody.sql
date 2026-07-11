@@ -3,6 +3,9 @@
 CREATE UNIQUE INDEX provider_actions_global_adapter_action
   ON provider_actions(adapter_id, action_id);
 
+ALTER TABLE provider_actions
+  ADD COLUMN journal_revision INTEGER NOT NULL DEFAULT 1 CHECK (journal_revision >= 1);
+
 CREATE TABLE project_session_launch_custody (
   project_session_id TEXT NOT NULL,
   custody_attempt_generation INTEGER NOT NULL CHECK (custody_attempt_generation >= 1),

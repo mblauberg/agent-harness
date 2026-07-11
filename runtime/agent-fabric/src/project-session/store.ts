@@ -124,11 +124,12 @@ export class ProjectSessionStore {
     request: ProjectSessionTransitionRequest,
   ): ProjectSession {
     const identity = this.#sessionIdentity(request.projectSessionId);
+    const targetState: string = request.transition.to;
     if (
       identity.state === "launching" ||
       identity.state === "launch_ambiguous" ||
-      request.transition.to === "launching" ||
-      request.transition.to === "launch_ambiguous"
+      targetState === "launching" ||
+      targetState === "launch_ambiguous"
     ) {
       throw new ProjectFabricCoreError(
         "LIFECYCLE_PRECONDITION_FAILED",

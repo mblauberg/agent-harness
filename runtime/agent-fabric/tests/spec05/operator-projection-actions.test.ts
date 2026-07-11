@@ -5,6 +5,7 @@ import {
   parseIdentifier,
   parseArtifactRef,
   parseOperatorCapabilityGrant,
+  parseProviderActionRefV1,
   parseSha256Digest,
   parseTimestamp,
   type OperatorActionCommitRequest,
@@ -29,6 +30,7 @@ import {
   type OperatorActionEffectPort,
   type OperatorEffectOutcome,
   type OperatorActionStatePort,
+  type OperatorLaunchCustodyPort,
 } from "../../src/operator/action-store.ts";
 import { OperatorProjectionStore } from "../../src/operator/projection-store.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
@@ -68,8 +70,8 @@ function setupProjection(): {
     migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
   ]);
   database.exec(`
-    INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
-    VALUES ('project_01', '/project/one', 3, 1, ${now - 10_000}, ${now - 1_000});
+    INSERT INTO projects(project_id, canonical_root, trust_record_digest, revision, authority_generation, created_at, updated_at)
+    VALUES ('project_01', '/project/one', '${digest}', 3, 1, ${now - 10_000}, ${now - 1_000});
     INSERT INTO project_sessions(
       project_session_id, project_id, mode, state, revision, generation, authority_ref,
       budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
@@ -1110,41 +1112,85 @@ describe("operator action store", () => {
     const resourcePlanRef = parseArtifactRef({ path: "launch/resources.json", digest }, "test.resourcePlanRef");
     const authorityRef = parseSha256Digest(digest, "test.launchAuthorityRef");
     const providerActionId = identifier<"ProviderActionId">("provider_action_launch_01");
-    const intent: OperatorActionIntent = {
+    const intent: Extract<OperatorActionIntent, { kind: "project-session-launch" }> = {
       kind: "project-session-launch",
       projectId,
       projectSessionId,
+      expectedProjectRevision: 3,
       expectedSessionRevision: 1,
       expectedSessionGeneration: 1,
+      trustRecordDigest: authorityRef,
       launchPacketRef,
       authorityRef,
       budgetRef: "budget_01",
       resourcePlanRef,
       providerAdapterId: "claude-agent-sdk",
       providerActionId,
+      providerContractDigest: authorityRef,
+      resourceStateDigest: authorityRef,
     };
     let current: OperatorActionCurrentState = {
       kind: "project-session-launch",
       revision: 1,
-      projectId,
-      projectSessionId,
-      sessionGeneration: 1,
-      lifecycleState: "awaiting_launch",
-      launchPacketRef,
-      authorityRef,
-      budgetRef: "budget_01",
-      resourcePlanRef,
-      providerAdapterId: "claude-agent-sdk",
-      providerActionId,
+      state: {
+        schemaVersion: 1,
+        projectId,
+        projectRevision: 3,
+        projectSessionId,
+        sessionRevision: 1,
+        sessionGeneration: 1,
+        currentLaunchPacketRef: launchPacketRef,
+        trustRecordDigest: authorityRef,
+        providerAdapterId: "claude-agent-sdk",
+        providerContractDigest: authorityRef,
+        resourceStateDigest: authorityRef,
+        sessionState: "awaiting_launch",
+        provedFailedAttempt: null,
+      },
+    };
+    let launchTerminal = false;
+    const launchCustody: OperatorLaunchCustodyPort = {
+      readCurrentState: async () => {
+        if (current.kind !== "project-session-launch") throw new Error("launch state changed family");
+        return current.state;
+      },
+      inspect: async () => ({} as never),
+      prepareInTransaction: () => ({
+        schemaVersion: 1,
+        providerAdapterId: "claude-agent-sdk",
+        providerActionId: "provider_action_launch_01",
+        providerContractDigest: authorityRef,
+        publicPayload: {},
+        capability: "volatile-chair-capability",
+        socketPath: "/private/fabric.sock",
+      }),
+      dispatchPrepared: async () => {
+        launchTerminal = true;
+        return {};
+      },
+      providerActionRefForCommand: () => parseProviderActionRefV1({
+        schemaVersion: 1,
+        projectSessionId,
+        coordinationRunId: "run_launch_01",
+        providerAdapterId: "claude-agent-sdk",
+        providerActionId,
+        providerContractDigest: authorityRef,
+        custodyAttemptGeneration: 1,
+        journalRevision: launchTerminal ? 2 : 1,
+        journalState: launchTerminal ? "terminal" : "prepared",
+        outcomeKind: launchTerminal ? "terminal-success" : null,
+        outcomeDigest: launchTerminal ? authorityRef : null,
+      }),
     };
     const actions = new OperatorActionStore({
       database: fixture.database,
       operatorStore: fixture.operatorStore,
       statePort: { read: async () => current },
       effectPort: {
-        dispatch: async () => ({ status: "committed", afterState: { lifecycleState: "launching" } }),
+        dispatch: async () => { throw new Error("generic effect port must not own launch"); },
         observe: async () => { throw new Error("not expected"); },
       },
+      launchCustody,
       clock: () => now,
     });
     const request: OperatorActionPreviewRequest = {
@@ -1221,7 +1267,7 @@ describe("operator action store", () => {
 
     current = {
       ...current,
-      providerActionId: identifier<"ProviderActionId">("provider_action_changed_01"),
+      state: { ...current.state, providerAdapterId: "changed-adapter" },
     };
     await expect(actions.preview(fixture.context, {
       ...request,
@@ -1247,8 +1293,7 @@ describe("operator action store", () => {
     const foreignSessionId = identifier<"ProjectSessionId">("session_foreign_01");
     current = {
       ...current,
-      projectSessionId: foreignSessionId,
-      providerActionId,
+      state: { ...current.state, projectSessionId: foreignSessionId },
     };
     await expect(actions.preview(fixture.context, {
       ...request,

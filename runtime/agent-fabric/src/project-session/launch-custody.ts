@@ -1,5 +1,18 @@
 import type { ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import {
+  parseLaunchAdapterOutcomeV1,
+  parseLaunchPacketV1,
+  parseLaunchResourcePlanV1,
+  parseProjectSessionLaunchCurrentState,
+  parseArtifactRef,
+  parseProviderActionRefV1,
+  type ProjectSessionLaunchCurrentState,
+  type ProjectSessionLaunchIntent,
+  type ProviderActionRefV1,
+  type ArtifactRef,
+  type Sha256Digest,
+} from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -8,28 +21,11 @@ import { expandAuthorityActions } from "../domain/operations.js";
 import { ProjectFabricCoreError } from "./contracts.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
 
-type Digest = `sha256:${string}`;
-type ArtifactBinding = Readonly<{ path: string; digest: Digest }>;
+type Digest = Sha256Digest;
+type ArtifactBinding = ArtifactRef;
 type ResourceAmounts = Readonly<Record<string, number>>;
 
-export type LaunchCustodyIntent = Readonly<{
-  kind: "project-session-launch";
-  projectId: string;
-  projectSessionId: string;
-  expectedProjectRevision: number;
-  expectedSessionRevision: number;
-  expectedSessionGeneration: number;
-  trustRecordDigest: Digest;
-  launchPacketRef: ArtifactBinding;
-  authorityRef: Digest;
-  budgetRef: string;
-  resourcePlanRef: ArtifactBinding;
-  providerAdapterId: string;
-  providerActionId: string;
-  providerContractDigest: Digest;
-  resourceStateDigest: Digest;
-  retryOf?: Readonly<{ providerAdapterId: string; providerActionId: string }>;
-}>;
+export type LaunchCustodyIntent = ProjectSessionLaunchIntent;
 
 export type NormalisedLaunchAuthority = Readonly<{
   workspaceRoots: readonly string[];
@@ -47,6 +43,7 @@ export type LaunchAdapterContract = Readonly<{
   schemaVersion: 1;
   inputSchemaId: string;
   inputSchema: Record<string, unknown>;
+  noEffectProofSchemas: Readonly<Record<string, Record<string, unknown>>>;
 }>;
 
 type LaunchPacket = Readonly<{
@@ -102,6 +99,59 @@ export type LaunchDispatchHandle = Readonly<{
   publicPayload: Record<string, unknown>;
   capability: string;
   socketPath: string;
+}>;
+
+type LaunchOutcomeBase = Readonly<{
+  schemaVersion: 1;
+  providerAdapterId: string;
+  providerActionId: string;
+  providerContractDigest: Digest;
+  observationKind: "dispatch-return" | "lookup";
+  observedAt: string;
+}>;
+
+type LaunchTerminalSuccess = LaunchOutcomeBase & Readonly<{
+  outcome: Readonly<{
+    kind: "terminal-success";
+    providerSessionRef: string;
+    providerSessionGeneration: number;
+    effectDigest: Digest;
+    resourceUsage: Readonly<Record<string, number | "unknown">>;
+  }>;
+}>;
+
+type LaunchTerminalNoEffect = LaunchOutcomeBase & Readonly<{
+  outcome: Readonly<{
+    kind: "terminal-no-effect";
+    failureCode: string;
+    noEffectProof: Readonly<{ schemaId: string; proof: Record<string, unknown>; digest: Digest }>;
+  }>;
+}>;
+
+type LaunchAmbiguous = LaunchOutcomeBase & Readonly<{
+  outcome: Readonly<{
+    kind: "ambiguous";
+    reasonCode:
+      | "absent"
+      | "transport-error"
+      | "adapter-error"
+      | "malformed"
+      | "incomplete"
+      | "conflict"
+      | "missing-resume-reference";
+    evidenceDigest: Digest | null;
+  }>;
+}>;
+
+export type LaunchAdapterOutcome = LaunchTerminalSuccess | LaunchTerminalNoEffect | LaunchAmbiguous;
+
+export type LaunchRecoveryResult = Readonly<{
+  preparedFailed: number;
+  lookedUp: number;
+  activated: number;
+  failed: number;
+  ambiguous: number;
+  recoveryRequired: number;
 }>;
 
 type LaunchCustodyServiceOptions = Readonly<{
@@ -169,10 +219,10 @@ function exactDigest(value: unknown, label: string): Digest {
 
 function exactArtifact(value: unknown, label: string): ArtifactBinding {
   const record = exactRecord(value, label, ["path", "digest"]);
-  return {
+  return parseArtifactRef({
     path: safeRelativePath(nonEmptyString(record.path, `${label}.path`), `${label}.path`),
     digest: exactDigest(record.digest, `${label}.digest`),
-  };
+  }, label);
 }
 
 function stringArray(value: unknown, label: string, allowEmpty = true): string[] {
@@ -334,73 +384,58 @@ function sameAmounts(left: ResourceAmounts, right: ResourceAmounts): boolean {
 }
 
 function parsePacket(value: unknown, projectRoot: string): LaunchPacket {
-  const packet = exactRecord(value, "launch_packet_v1", [
-    "schema_version", "project_id", "project_session_id", "run_id", "chair_agent_id",
-    "project_run_directory", "topology_mode", "budget_ref", "resource_plan_ref", "chair_authority", "provider",
-  ]);
-  if (packet.schema_version !== 1) protocol("launch_packet_v1.schema_version must be 1");
-  const topology = nonEmptyString(packet.topology_mode, "launch_packet_v1.topology_mode");
-  if (topology !== "coordinated" && topology !== "independent") protocol("launch_packet_v1.topology_mode is invalid");
-  const provider = exactRecord(packet.provider, "launch_packet_v1.provider", [
-    "adapter_id", "action_id", "contract_digest", "input_schema_id", "input",
-  ]);
-  if (!isRow(provider.input)) protocol("launch_packet_v1.provider.input must be an object");
+  let packet: ReturnType<typeof parseLaunchPacketV1>;
+  try {
+    packet = parseLaunchPacketV1(value);
+  } catch {
+    protocol("launch_packet_v1 does not match the closed protocol schema");
+  }
   const projectRunDirectory = safeRelativePath(
-    nonEmptyString(packet.project_run_directory, "launch_packet_v1.project_run_directory"),
+    packet.projectRunDirectory,
     "launch_packet_v1.project_run_directory",
   );
   resolveAuthorityPath(projectRoot, projectRunDirectory, "launch_packet_v1.project_run_directory");
   return {
     schemaVersion: 1,
-    projectId: nonEmptyString(packet.project_id, "launch_packet_v1.project_id"),
-    projectSessionId: nonEmptyString(packet.project_session_id, "launch_packet_v1.project_session_id"),
-    runId: nonEmptyString(packet.run_id, "launch_packet_v1.run_id"),
-    chairAgentId: nonEmptyString(packet.chair_agent_id, "launch_packet_v1.chair_agent_id"),
+    projectId: packet.projectId,
+    projectSessionId: packet.projectSessionId,
+    runId: packet.runId,
+    chairAgentId: packet.chairAgentId,
     projectRunDirectory,
-    topologyMode: topology,
-    budgetRef: nonEmptyString(packet.budget_ref, "launch_packet_v1.budget_ref"),
-    resourcePlanRef: exactArtifact(packet.resource_plan_ref, "launch_packet_v1.resource_plan_ref"),
-    chairAuthority: normaliseLaunchChairAuthority(packet.chair_authority, projectRoot),
+    topologyMode: packet.topologyMode,
+    budgetRef: packet.budgetRef,
+    resourcePlanRef: exactArtifact(packet.resourcePlanRef, "launch_packet_v1.resourcePlanRef"),
+    chairAuthority: normaliseLaunchChairAuthority(packet.chairAuthority, projectRoot),
     provider: {
-      adapterId: nonEmptyString(provider.adapter_id, "launch_packet_v1.provider.adapter_id"),
-      actionId: nonEmptyString(provider.action_id, "launch_packet_v1.provider.action_id"),
-      contractDigest: exactDigest(provider.contract_digest, "launch_packet_v1.provider.contract_digest"),
-      inputSchemaId: nonEmptyString(provider.input_schema_id, "launch_packet_v1.provider.input_schema_id"),
-      input: provider.input,
+      adapterId: packet.provider.adapterId,
+      actionId: packet.provider.actionId,
+      contractDigest: packet.provider.contractDigest as Digest,
+      inputSchemaId: packet.provider.inputSchemaId,
+      input: packet.provider.input,
     },
   };
 }
 
-function scope(value: unknown, label: string): { scopeId: string; limits: ResourceAmounts } {
-  const record = exactRecord(value, label, ["scope_id", "limits"]);
-  return {
-    scopeId: nonEmptyString(record.scope_id, `${label}.scope_id`),
-    limits: resourceAmounts(record.limits, `${label}.limits`),
-  };
-}
-
 function parsePlan(value: unknown): LaunchResourcePlan {
-  const plan = exactRecord(value, "launch_resource_plan_v1", [
-    "schema_version", "project_id", "project_session_id", "run_id", "budget_ref", "scopes", "launch_reservation",
-  ]);
-  if (plan.schema_version !== 1) protocol("launch_resource_plan_v1.schema_version must be 1");
-  const scopes = exactRecord(plan.scopes, "launch_resource_plan_v1.scopes", [
-    "project", "project_session", "coordination_run",
-  ]);
-  const reservation = exactRecord(plan.launch_reservation, "launch_resource_plan_v1.launch_reservation", ["amounts"]);
-  const project = scope(scopes.project, "launch_resource_plan_v1.scopes.project");
-  const projectSession = scope(scopes.project_session, "launch_resource_plan_v1.scopes.project_session");
-  const coordinationRun = scope(scopes.coordination_run, "launch_resource_plan_v1.scopes.coordination_run");
+  let parsed: ReturnType<typeof parseLaunchResourcePlanV1>;
+  try {
+    parsed = parseLaunchResourcePlanV1(value);
+  } catch {
+    protocol("launch_resource_plan_v1 does not match the closed protocol schema");
+  }
+  const project = { scopeId: parsed.scopes.project.scopeId, limits: resourceAmounts(parsed.scopes.project.limits, "project limits") };
+  const projectSession = { scopeId: parsed.scopes.projectSession.scopeId, limits: resourceAmounts(parsed.scopes.projectSession.limits, "project-session limits") };
+  const coordinationRun = { scopeId: parsed.scopes.coordinationRun.scopeId, limits: resourceAmounts(parsed.scopes.coordinationRun.limits, "coordination-run limits") };
   assertNarrowing(project.limits, projectSession.limits, "project-session scope");
   assertNarrowing(projectSession.limits, coordinationRun.limits, "coordination-run scope");
-  const amounts = resourceAmounts(reservation.amounts, "launch_resource_plan_v1.launch_reservation.amounts");
+  const amounts = resourceAmounts(parsed.launchReservation.amounts, "launch_resource_plan_v1.launchReservation.amounts");
   assertNarrowing(coordinationRun.limits, amounts, "launch reservation");
   return {
     schemaVersion: 1,
-    projectId: nonEmptyString(plan.project_id, "launch_resource_plan_v1.project_id"),
-    projectSessionId: nonEmptyString(plan.project_session_id, "launch_resource_plan_v1.project_session_id"),
-    runId: nonEmptyString(plan.run_id, "launch_resource_plan_v1.run_id"),
-    budgetRef: nonEmptyString(plan.budget_ref, "launch_resource_plan_v1.budget_ref"),
+    projectId: parsed.projectId,
+    projectSessionId: parsed.projectSessionId,
+    runId: parsed.runId,
+    budgetRef: parsed.budgetRef,
     scopes: { project, projectSession, coordinationRun },
     launchReservation: { amounts },
   };
@@ -416,6 +451,28 @@ function assertNoTrustedProviderControls(value: unknown, path = "provider.input"
     if (FORBIDDEN_PROVIDER_KEYS.test(key)) forbidden(`${path}.${key} is a trusted control field`);
     assertNoTrustedProviderControls(item, `${path}.${key}`);
   }
+}
+
+function jsonEvidenceDigest(value: unknown): Digest {
+  try {
+    return `sha256:${sha256(canonicalJson(value))}` as Digest;
+  } catch {
+    return `sha256:${sha256(String(value))}` as Digest;
+  }
+}
+
+function isoTimestamp(value: unknown, label: string): string {
+  const timestamp = nonEmptyString(value, label);
+  const milliseconds = Date.parse(timestamp);
+  if (!Number.isFinite(milliseconds)) protocol(`${label} must be an ISO timestamp`);
+  return new Date(milliseconds).toISOString();
+}
+
+function positiveOutcomeInteger(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    protocol("launch provider session generation must be a positive safe integer");
+  }
+  return value;
 }
 
 export function computeLaunchResourceStateDigest(
@@ -450,7 +507,7 @@ export function computeLaunchResourceStateDigest(
      WHERE project_session_id=? AND state NOT IN ('released','reconciled')
      ORDER BY reservation_id
   `).all(projectSessionId);
-  return `sha256:${sha256(canonicalJson({ scopes, reservations }))}`;
+  return `sha256:${sha256(canonicalJson({ scopes, reservations }))}` as Digest;
 }
 
 export class LaunchCustodyService {
@@ -496,11 +553,38 @@ export class LaunchCustodyService {
     if (intent.retryOf !== undefined && sessionState !== "launch_failed") {
       throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "launch retry requires proved launch_failed");
     }
+    let failedAttempt: Row | undefined;
     if (intent.retryOf === undefined) {
-      assertSameArtifact(intent.launchPacketRef, {
+      assertSameArtifact(intent.launchPacketRef, parseArtifactRef({
         path: text(session, "launch_packet_path"),
         digest: exactDigest(session.launch_packet_digest, "stored launch packet digest"),
-      }, "stored launch packet");
+      }, "stored launch packet"), "stored launch packet");
+    } else {
+      failedAttempt = row(this.#database.prepare(`
+        SELECT c.*, p.status, p.execution_count, p.effect_count, p.idempotency_proven, p.result_json
+          FROM project_session_launch_custody c
+          JOIN provider_actions p
+            ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+         WHERE c.project_session_id=?
+         ORDER BY c.custody_attempt_generation DESC LIMIT 1
+      `).get(intent.projectSessionId), "failed launch custody");
+      if (
+        text(failedAttempt, "provider_adapter_id") !== intent.retryOf.providerAdapterId ||
+        text(failedAttempt, "provider_action_id") !== intent.retryOf.providerActionId ||
+        text(failedAttempt, "status") !== "terminal" ||
+        integer(failedAttempt, "effect_count") !== 0 ||
+        integer(failedAttempt, "idempotency_proven") !== 1 ||
+        !this.#isProvedNoEffect(failedAttempt)
+      ) {
+        throw new ProjectFabricCoreError("CONFLICT", "launch retry does not bind the exact proved failed attempt");
+      }
+      assertSameArtifact(parseArtifactRef({
+        path: text(session, "launch_packet_path"),
+        digest: exactDigest(session.launch_packet_digest, "stored failed launch packet digest"),
+      }, "stored failed launch packet"), parseArtifactRef({
+        path: text(failedAttempt, "launch_packet_path"),
+        digest: exactDigest(failedAttempt.launch_packet_digest, "failed custody packet digest"),
+      }, "failed custody packet"), "failed attempt packet");
     }
     if (text(session, "budget_ref") !== intent.budgetRef) stale("launch budget reference changed");
     const packet = parsePacket(jsonArtifact(root, intent.launchPacketRef, "launch packet"), root);
@@ -515,6 +599,18 @@ export class LaunchCustodyService {
       packet.provider.actionId !== intent.providerActionId ||
       packet.provider.contractDigest !== intent.providerContractDigest
     ) stale("launch packet, plan, intent or session identity changed");
+    if (
+      failedAttempt !== undefined &&
+      (
+        packet.runId === text(failedAttempt, "coordination_run_id") ||
+        (
+          packet.provider.adapterId === text(failedAttempt, "provider_adapter_id") &&
+          packet.provider.actionId === text(failedAttempt, "provider_action_id")
+        )
+      )
+    ) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch retry requires a new run and provider action identity");
+    }
     if (`sha256:${sha256(canonicalJson(packet.chairAuthority))}` !== intent.authorityRef) {
       stale("launch chair authority digest changed");
     }
@@ -770,7 +866,7 @@ export class LaunchCustodyService {
     };
   }
 
-  async dispatchPrepared(handle: LaunchDispatchHandle): Promise<unknown> {
+  async dispatchPrepared(handle: LaunchDispatchHandle): Promise<LaunchAdapterOutcome> {
     const key = `${handle.providerAdapterId}\0${handle.providerActionId}`;
     if (this.#consumedHandles.has(key)) {
       throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch handoff is one-use");
@@ -778,7 +874,7 @@ export class LaunchCustodyService {
     const changed = this.#database.prepare(`
       UPDATE provider_actions
          SET status='dispatched', history_json='["prepared","dispatched"]',
-             execution_count=1, updated_at=?
+             execution_count=1, journal_revision=journal_revision+1, updated_at=?
        WHERE adapter_id=? AND action_id=? AND status='prepared'
          AND EXISTS (
            SELECT 1 FROM project_session_launch_custody c
@@ -789,7 +885,44 @@ export class LaunchCustodyService {
     `).run(this.#clock(), handle.providerAdapterId, handle.providerActionId, handle.providerContractDigest);
     if (changed.changes !== 1) throw new ProjectFabricCoreError("CONFLICT", "launch action is not prepared");
     this.#consumedHandles.add(key);
-    return await this.#adapterEffects.dispatch(handle);
+    const custody = row(this.#database.prepare(`
+      SELECT * FROM project_session_launch_custody
+       WHERE provider_adapter_id=? AND provider_action_id=? AND provider_contract_digest=?
+    `).get(
+      handle.providerAdapterId,
+      handle.providerActionId,
+      handle.providerContractDigest,
+    ), "launch custody");
+    let contract: LaunchAdapterContract;
+    try {
+      contract = await this.#adapterContracts.inspect(handle.providerAdapterId);
+      if (`sha256:${sha256(canonicalJson(contract))}` !== handle.providerContractDigest) {
+        throw new Error("launch provider contract changed");
+      }
+    } catch (error: unknown) {
+      const outcome = this.#ambiguousOutcome(
+        custody,
+        "conflict",
+        jsonEvidenceDigest(error instanceof Error ? error.message : error),
+        "dispatch-return",
+      );
+      this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
+      return outcome;
+    }
+    let raw: unknown;
+    try {
+      raw = await this.#adapterEffects.dispatch(handle);
+    } catch (error: unknown) {
+      raw = this.#ambiguousOutcome(
+        custody,
+        "adapter-error",
+        jsonEvidenceDigest(error instanceof Error ? error.message : error),
+        "dispatch-return",
+      );
+    }
+    const outcome = this.#normaliseOutcome(custody, raw, "dispatch-return", contract);
+    this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
+    return outcome;
   }
 
   async lookup(input: Readonly<{
@@ -798,6 +931,584 @@ export class LaunchCustodyService {
     providerContractDigest: Digest;
   }>): Promise<unknown> {
     return await this.#adapterEffects.lookup(input);
+  }
+
+  async readCurrentState(intent: LaunchCustodyIntent): Promise<ProjectSessionLaunchCurrentState> {
+    const inspection = await this.inspect(intent);
+    const session = row(this.#database.prepare(`
+      SELECT state, launch_packet_path, launch_packet_digest
+        FROM project_sessions WHERE project_session_id=? AND project_id=?
+    `).get(intent.projectSessionId, intent.projectId), "launch project session");
+    const sessionState = text(session, "state");
+    const common = {
+      schemaVersion: 1 as const,
+      projectId: intent.projectId,
+      projectRevision: inspection.inspectedProjectRevision,
+      projectSessionId: intent.projectSessionId,
+      sessionRevision: inspection.inspectedSessionRevision,
+      sessionGeneration: inspection.inspectedSessionGeneration,
+      currentLaunchPacketRef: {
+        path: text(session, "launch_packet_path"),
+        digest: exactDigest(session.launch_packet_digest, "stored launch packet digest"),
+      },
+      trustRecordDigest: intent.trustRecordDigest,
+      providerAdapterId: intent.providerAdapterId,
+      providerContractDigest: intent.providerContractDigest,
+      resourceStateDigest: intent.resourceStateDigest,
+    };
+    if (sessionState === "awaiting_launch") {
+      return parseProjectSessionLaunchCurrentState({
+        ...common,
+        sessionState: "awaiting_launch",
+        provedFailedAttempt: null,
+      });
+    }
+    if (sessionState !== "launch_failed") throw new ProjectFabricCoreError("CONFLICT", "launch state is not inspectable");
+    const failed = row(this.#database.prepare(`
+      SELECT c.provider_adapter_id, c.provider_action_id, p.status, p.execution_count,
+             p.effect_count, p.result_json
+        FROM project_session_launch_custody c
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+       WHERE c.project_session_id=?
+       ORDER BY c.custody_attempt_generation DESC LIMIT 1
+    `).get(intent.projectSessionId), "proved failed launch attempt");
+    if (text(failed, "status") !== "terminal" || integer(failed, "effect_count") !== 0) {
+      throw new ProjectFabricCoreError("CONFLICT", "latest launch attempt is not a proved failure");
+    }
+    return parseProjectSessionLaunchCurrentState({
+      ...common,
+      sessionState: "launch_failed",
+      provedFailedAttempt: {
+        providerAdapterId: text(failed, "provider_adapter_id"),
+        providerActionId: text(failed, "provider_action_id") as never,
+      },
+    });
+  }
+
+  providerActionRefForCommand(operatorId: string, commandId: string): ProviderActionRefV1 {
+    const value = row(this.#database.prepare(`
+      SELECT c.project_session_id, c.custody_attempt_generation, c.coordination_run_id,
+             c.provider_adapter_id, c.provider_action_id, c.provider_contract_digest,
+             p.journal_revision, p.status, p.result_json, p.execution_count, p.effect_count
+        FROM project_session_launch_custody c
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+       WHERE c.operator_id=? AND c.operator_command_id=?
+    `).get(operatorId, commandId), "launch provider action reference");
+    const status = text(value, "status");
+    const common = {
+      schemaVersion: 1,
+      projectSessionId: text(value, "project_session_id"),
+      coordinationRunId: text(value, "coordination_run_id"),
+      providerAdapterId: text(value, "provider_adapter_id"),
+      providerActionId: text(value, "provider_action_id"),
+      providerContractDigest: text(value, "provider_contract_digest"),
+      custodyAttemptGeneration: integer(value, "custody_attempt_generation"),
+      journalRevision: integer(value, "journal_revision"),
+    };
+    if (status === "prepared" || status === "dispatched" || status === "accepted") {
+      return parseProviderActionRefV1({ ...common, journalState: status, outcomeKind: null, outcomeDigest: null });
+    }
+    if (status === "ambiguous") {
+      const result = value.result_json;
+      if (typeof result !== "string") throw new Error("ambiguous launch action has no outcome");
+      return parseProviderActionRefV1({
+        ...common,
+        journalState: "ambiguous",
+        outcomeKind: "ambiguous",
+        outcomeDigest: `sha256:${sha256(result)}`,
+      });
+    }
+    if (status === "terminal") {
+      const result = value.result_json;
+      if (typeof result !== "string") throw new Error("terminal launch action has no outcome");
+      let outcomeKind: "terminal-success" | "terminal-no-effect";
+      try {
+        const parsed = JSON.parse(result) as unknown;
+        if (isRow(parsed) && parsed.kind === "core-pre-dispatch-no-effect") outcomeKind = "terminal-no-effect";
+        else {
+          const adapterOutcome = parseLaunchAdapterOutcomeV1(parsed);
+          if (adapterOutcome.outcome.kind === "ambiguous") throw new Error("terminal action stored ambiguity");
+          outcomeKind = adapterOutcome.outcome.kind;
+        }
+      } catch (error: unknown) {
+        throw new Error("terminal launch outcome is invalid", { cause: error });
+      }
+      return parseProviderActionRefV1({
+        ...common,
+        journalState: "terminal",
+        outcomeKind,
+        outcomeDigest: `sha256:${sha256(result)}`,
+      });
+    }
+    throw new Error(`launch provider action has invalid status ${status}`);
+  }
+
+  async recover(): Promise<LaunchRecoveryResult> {
+    const result: {
+      preparedFailed: number;
+      lookedUp: number;
+      activated: number;
+      failed: number;
+      ambiguous: number;
+      recoveryRequired: number;
+    } = {
+      preparedFailed: 0,
+      lookedUp: 0,
+      activated: 0,
+      failed: 0,
+      ambiguous: 0,
+      recoveryRequired: 0,
+    };
+    const prepared = this.#database.prepare(`
+      SELECT c.*
+        FROM project_session_launch_custody c
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+       WHERE p.status='prepared'
+       ORDER BY c.project_session_id, c.custody_attempt_generation
+    `).all().filter(isRow);
+    for (const custody of prepared) {
+      this.#database.transaction(() => this.#failPrepared(custody))();
+      result.preparedFailed += 1;
+      result.failed += 1;
+    }
+
+    const observable = this.#database.prepare(`
+      SELECT c.*
+        FROM project_session_launch_custody c
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+       WHERE p.status IN ('dispatched','accepted','ambiguous')
+       ORDER BY c.project_session_id, c.custody_attempt_generation
+    `).all().filter(isRow);
+    for (const custody of observable) {
+      const providerAdapterId = text(custody, "provider_adapter_id");
+      const providerActionId = text(custody, "provider_action_id");
+      const providerContractDigest = exactDigest(custody.provider_contract_digest, "custody provider contract digest");
+      let contract: LaunchAdapterContract;
+      try {
+        contract = await this.#adapterContracts.inspect(providerAdapterId);
+        if (`sha256:${sha256(canonicalJson(contract))}` !== providerContractDigest) {
+          throw new Error("launch provider contract changed");
+        }
+      } catch (error: unknown) {
+        const outcome = this.#ambiguousOutcome(
+          custody,
+          "conflict",
+          jsonEvidenceDigest(error instanceof Error ? error.message : error),
+        );
+        const disposition = this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
+        result[disposition] += 1;
+        continue;
+      }
+      let raw: unknown;
+      try {
+        raw = await this.#adapterEffects.lookup({ providerAdapterId, providerActionId, providerContractDigest });
+      } catch (error: unknown) {
+        raw = this.#ambiguousOutcome(
+          custody,
+          "adapter-error",
+          jsonEvidenceDigest(error instanceof Error ? error.message : error),
+        );
+      }
+      result.lookedUp += 1;
+      const outcome = this.#normaliseOutcome(custody, raw, "lookup", contract);
+      const disposition = this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
+      result[disposition] += 1;
+    }
+    return result;
+  }
+
+  #failPrepared(custody: Row): void {
+    const adapterId = text(custody, "provider_adapter_id");
+    const actionId = text(custody, "provider_action_id");
+    const now = this.#clock();
+    const proof = {
+      schemaVersion: 1,
+      kind: "core-pre-dispatch-no-effect",
+      providerAdapterId: adapterId,
+      providerActionId: actionId,
+      observedAt: new Date(now).toISOString(),
+      proof: { executionCount: 0, durableStatus: "prepared" },
+    };
+    const changed = this.#database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal', history_json='["prepared","terminal"]',
+             execution_count=0, effect_count=0, idempotency_proven=1,
+             result_json=?, journal_revision=journal_revision+1, updated_at=?
+       WHERE adapter_id=? AND action_id=? AND status='prepared'
+    `).run(canonicalJson({ ...proof, digest: jsonEvidenceDigest(proof) }), now, adapterId, actionId);
+    if (changed.changes !== 1) stale("prepared launch changed during recovery");
+    this.#releaseReservation(text(custody, "reservation_id"));
+    this.#terminaliseFailedLaunch(custody, now);
+  }
+
+  #normaliseOutcome(
+    custody: Row,
+    value: unknown,
+    observationKind: "dispatch-return" | "lookup",
+    contract: LaunchAdapterContract,
+  ): LaunchAdapterOutcome {
+    const raw = value;
+    const conflict = (reason: LaunchAmbiguous["outcome"]["reasonCode"]): LaunchAmbiguous =>
+      this.#ambiguousOutcome(custody, reason, jsonEvidenceDigest(raw), observationKind);
+    try {
+      value = parseLaunchAdapterOutcomeV1(value);
+    } catch {
+      return conflict("malformed");
+    }
+    try {
+      const root = exactRecord(value, "launch_adapter_outcome_v1", [
+        "schemaVersion", "providerAdapterId", "providerActionId", "providerContractDigest",
+        "observationKind", "observedAt", "outcome",
+      ]);
+      if (
+        root.schemaVersion !== 1 ||
+        root.providerAdapterId !== text(custody, "provider_adapter_id") ||
+        root.providerActionId !== text(custody, "provider_action_id") ||
+        root.providerContractDigest !== text(custody, "provider_contract_digest") ||
+        root.observationKind !== observationKind
+      ) return conflict("conflict");
+      const base: LaunchOutcomeBase = {
+        schemaVersion: 1,
+        providerAdapterId: text(custody, "provider_adapter_id"),
+        providerActionId: text(custody, "provider_action_id"),
+        providerContractDigest: exactDigest(custody.provider_contract_digest, "custody provider contract digest"),
+        observationKind,
+        observedAt: isoTimestamp(root.observedAt, "launch_adapter_outcome_v1.observedAt"),
+      };
+      const tagged = exactRecord(root.outcome, "launch_adapter_outcome_v1.outcome", ["kind"], [
+        "providerSessionRef", "providerSessionGeneration", "effectDigest", "resourceUsage",
+        "failureCode", "noEffectProof", "reasonCode", "evidenceDigest",
+      ]);
+      if (tagged.kind === "terminal-success") {
+        const success = exactRecord(root.outcome, "launch_adapter_outcome_v1.outcome", [
+          "kind", "providerSessionRef", "providerSessionGeneration", "effectDigest", "resourceUsage",
+        ]);
+        const reservation = row(this.#database.prepare(`
+          SELECT amounts_json FROM resource_reservations WHERE reservation_id=?
+        `).get(text(custody, "reservation_id")), "launch reservation");
+        const expected = resourceAmounts(
+          JSON.parse(text(reservation, "amounts_json")) as unknown,
+          "launch reservation amounts",
+        );
+        if (!isRow(success.resourceUsage)) return conflict("conflict");
+        if (canonicalJson(Object.keys(success.resourceUsage).sort()) !== canonicalJson(Object.keys(expected).sort())) {
+          return conflict("conflict");
+        }
+        const resourceUsage: Record<string, number | "unknown"> = {};
+        for (const [unit, usage] of Object.entries(success.resourceUsage)) {
+          if (usage !== "unknown" && (typeof usage !== "number" || !Number.isSafeInteger(usage) || usage < 0)) {
+            return conflict("conflict");
+          }
+          resourceUsage[unit] = usage;
+        }
+        return {
+          ...base,
+          outcome: {
+            kind: "terminal-success",
+            providerSessionRef: nonEmptyString(success.providerSessionRef, "launch outcome providerSessionRef"),
+            providerSessionGeneration: positiveOutcomeInteger(success.providerSessionGeneration),
+            effectDigest: exactDigest(success.effectDigest, "launch outcome effectDigest"),
+            resourceUsage,
+          },
+        };
+      }
+      if (tagged.kind === "terminal-no-effect") {
+        const failure = exactRecord(root.outcome, "launch_adapter_outcome_v1.outcome", [
+          "kind", "failureCode", "noEffectProof",
+        ]);
+        const proof = exactRecord(failure.noEffectProof, "launch no-effect proof", ["schemaId", "proof", "digest"]);
+        if (!isRow(proof.proof)) return conflict("conflict");
+        const proofDigest = exactDigest(proof.digest, "launch no-effect proof digest");
+        if (jsonEvidenceDigest(proof.proof) !== proofDigest) return conflict("conflict");
+        const proofSchemaId = nonEmptyString(proof.schemaId, "launch no-effect proof schema");
+        const proofSchema = contract.noEffectProofSchemas[proofSchemaId];
+        if (proofSchema === undefined) return conflict("conflict");
+        try {
+          const validate = new Ajv2020({ allErrors: true, strict: true }).compile(proofSchema);
+          if (!validate(proof.proof)) return conflict("conflict");
+        } catch {
+          return conflict("conflict");
+        }
+        return {
+          ...base,
+          outcome: {
+            kind: "terminal-no-effect",
+            failureCode: nonEmptyString(failure.failureCode, "launch failure code"),
+            noEffectProof: {
+              schemaId: proofSchemaId,
+              proof: proof.proof,
+              digest: proofDigest,
+            },
+          },
+        };
+      }
+      if (tagged.kind === "ambiguous") {
+        const ambiguous = exactRecord(root.outcome, "launch_adapter_outcome_v1.outcome", [
+          "kind", "reasonCode", "evidenceDigest",
+        ]);
+        const reason = ambiguous.reasonCode;
+        if (
+          reason !== "absent" && reason !== "transport-error" && reason !== "adapter-error" &&
+          reason !== "malformed" && reason !== "incomplete" && reason !== "conflict" &&
+          reason !== "missing-resume-reference"
+        ) {
+          return conflict("conflict");
+        }
+        if (ambiguous.evidenceDigest !== null && (typeof ambiguous.evidenceDigest !== "string" || !DIGEST.test(ambiguous.evidenceDigest))) {
+          return conflict("conflict");
+        }
+        return {
+          ...base,
+          outcome: {
+            kind: "ambiguous",
+            reasonCode: reason,
+            evidenceDigest: ambiguous.evidenceDigest as Digest | null,
+          },
+        };
+      }
+      return conflict("conflict");
+    } catch (error: unknown) {
+      if (error instanceof ProjectFabricCoreError) return conflict("conflict");
+      return conflict("malformed");
+    }
+  }
+
+  #ambiguousOutcome(
+    custody: Row,
+    reasonCode: LaunchAmbiguous["outcome"]["reasonCode"],
+    evidenceDigest: Digest | null,
+    observationKind: "dispatch-return" | "lookup" = "lookup",
+  ): LaunchAmbiguous {
+    return {
+      schemaVersion: 1,
+      providerAdapterId: text(custody, "provider_adapter_id"),
+      providerActionId: text(custody, "provider_action_id"),
+      providerContractDigest: exactDigest(custody.provider_contract_digest, "custody provider contract digest"),
+      observationKind,
+      observedAt: new Date(this.#clock()).toISOString(),
+      outcome: { kind: "ambiguous", reasonCode, evidenceDigest },
+    };
+  }
+
+  #applyOutcome(
+    custody: Row,
+    outcome: LaunchAdapterOutcome,
+  ): "activated" | "failed" | "ambiguous" | "recoveryRequired" {
+    const now = this.#clock();
+    const adapterId = text(custody, "provider_adapter_id");
+    const actionId = text(custody, "provider_action_id");
+    const serialized = canonicalJson(outcome);
+    if (outcome.outcome.kind === "ambiguous") {
+      this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='ambiguous', history_json='["prepared","dispatched","ambiguous"]',
+               result_json=?, journal_revision=journal_revision+1, updated_at=?
+         WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+      `).run(serialized, now, adapterId, actionId);
+      this.#database.prepare(`
+        UPDATE project_sessions SET state='launch_ambiguous', revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND state='launching'
+      `).run(now, text(custody, "project_session_id"));
+      this.#database.prepare(`
+        UPDATE runs SET lifecycle_state='launch_ambiguous', revision=revision+1
+         WHERE run_id=? AND lifecycle_state='launching'
+      `).run(text(custody, "coordination_run_id"));
+      return "ambiguous";
+    }
+    if (outcome.outcome.kind === "terminal-no-effect") {
+      this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='terminal', history_json='["prepared","dispatched","terminal"]',
+               result_json=?, idempotency_proven=1,
+               journal_revision=journal_revision+1, updated_at=?
+         WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+      `).run(serialized, now, adapterId, actionId);
+      this.#releaseReservation(text(custody, "reservation_id"));
+      this.#terminaliseFailedLaunch(custody, now);
+      return "failed";
+    }
+
+    const settlement = this.#settleSuccessfulReservation(
+      text(custody, "reservation_id"),
+      outcome.outcome.resourceUsage,
+    );
+    this.#database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal', history_json='["prepared","dispatched","accepted","terminal"]',
+             effect_count=1, idempotency_proven=1, provider_session_generation=?,
+             result_json=?, journal_revision=journal_revision+1, updated_at=?
+       WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+    `).run(
+      outcome.outcome.providerSessionGeneration,
+      serialized,
+      now,
+      adapterId,
+      actionId,
+    );
+    if (settlement === "overrun") {
+      this.#database.prepare(`
+        UPDATE project_sessions SET state='recovery_required', revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')
+      `).run(now, text(custody, "project_session_id"));
+      this.#database.prepare(`
+        UPDATE runs SET lifecycle_state='recovery_required', revision=revision+1
+         WHERE run_id=? AND lifecycle_state IN ('launching','launch_ambiguous')
+      `).run(text(custody, "coordination_run_id"));
+      return "recoveryRequired";
+    }
+    this.#database.prepare(`
+      UPDATE agents SET provider_session_ref=?, lifecycle='ready'
+       WHERE run_id=? AND agent_id=?
+    `).run(
+      outcome.outcome.providerSessionRef,
+      text(custody, "coordination_run_id"),
+      text(custody, "chair_agent_id"),
+    );
+    this.#database.prepare(`
+      INSERT INTO provider_state(
+        run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256
+      ) VALUES (?, ?, ?, NULL, NULL)
+      ON CONFLICT(run_id, agent_id) DO UPDATE SET
+        provider_session_generation=excluded.provider_session_generation,
+        context_revision=NULL,
+        reconciled_checkpoint_sha256=NULL
+    `).run(
+      text(custody, "coordination_run_id"),
+      text(custody, "chair_agent_id"),
+      outcome.outcome.providerSessionGeneration,
+    );
+    this.#database.prepare(`
+      UPDATE project_sessions SET state='active', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')
+    `).run(now, text(custody, "project_session_id"));
+    this.#database.prepare(`
+      UPDATE runs SET lifecycle_state='active', revision=revision+1
+       WHERE run_id=? AND lifecycle_state IN ('launching','launch_ambiguous')
+    `).run(text(custody, "coordination_run_id"));
+    this.#database.prepare(`
+      UPDATE project_session_memberships
+         SET state='reconciled', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND coordination_run_id=?
+         AND member_kind='provider-action' AND member_id=? AND state='active'
+    `).run(
+      now,
+      text(custody, "project_session_id"),
+      text(custody, "coordination_run_id"),
+      actionId,
+    );
+    return "activated";
+  }
+
+  #terminaliseFailedLaunch(custody: Row, now: number): void {
+    this.#database.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
+      .run(now, text(custody, "capability_hash"));
+    this.#database.prepare(`
+      UPDATE run_chair_leases SET status='revoked', updated_at=?
+       WHERE lease_id=? AND status IN ('active','frozen')
+    `).run(now, text(custody, "chair_lease_id"));
+    this.#database.prepare(`
+      UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=?
+    `).run(text(custody, "coordination_run_id"), text(custody, "chair_agent_id"));
+    this.#database.prepare(`
+      UPDATE project_sessions SET state='launch_failed', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')
+    `).run(now, text(custody, "project_session_id"));
+    this.#database.prepare(`
+      UPDATE runs SET lifecycle_state='launch_failed', revision=revision+1
+       WHERE run_id=? AND lifecycle_state IN ('launching','launch_ambiguous')
+    `).run(text(custody, "coordination_run_id"));
+    this.#database.prepare(`
+      UPDATE project_session_memberships
+         SET state='reconciled', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND coordination_run_id=? AND state='active'
+    `).run(now, text(custody, "project_session_id"), text(custody, "coordination_run_id"));
+  }
+
+  #releaseReservation(reservationId: string): void {
+    const dimensions = this.#database.prepare(`
+      SELECT scope_id, unit_key, amount, consumed, released
+        FROM resource_reservation_dimensions WHERE reservation_id=?
+    `).all(reservationId).filter(isRow);
+    for (const dimension of dimensions) {
+      const remainder = integer(dimension, "amount") - integer(dimension, "consumed") - integer(dimension, "released");
+      const changed = this.#database.prepare(`
+        UPDATE resource_dimensions SET reserved=reserved-?
+         WHERE scope_id=? AND unit_key=? AND reserved>=?
+      `).run(remainder, text(dimension, "scope_id"), text(dimension, "unit_key"), remainder);
+      if (changed.changes !== 1) throw new Error("launch reservation release ledger changed");
+      this.#database.prepare(`
+        UPDATE resource_reservation_dimensions SET released=released+?
+         WHERE reservation_id=? AND scope_id=? AND unit_key=?
+      `).run(remainder, reservationId, text(dimension, "scope_id"), text(dimension, "unit_key"));
+    }
+    this.#database.prepare(`
+      UPDATE resource_reservations SET state='released', revision=revision+1, updated_at=?
+       WHERE reservation_id=?
+    `).run(this.#clock(), reservationId);
+  }
+
+  #settleSuccessfulReservation(
+    reservationId: string,
+    usage: Readonly<Record<string, number | "unknown">>,
+  ): "settled" | "overrun" {
+    const reservation = row(this.#database.prepare(`
+      SELECT amounts_json FROM resource_reservations WHERE reservation_id=?
+    `).get(reservationId), "launch reservation");
+    const amounts = JSON.parse(text(reservation, "amounts_json")) as Record<string, number>;
+    if (Object.entries(usage).some(([unit, consumed]) => consumed !== "unknown" && consumed > (amounts[unit] ?? -1))) {
+      return "overrun";
+    }
+    const dimensions = this.#database.prepare(`
+      SELECT scope_id, unit_key, amount FROM resource_reservation_dimensions WHERE reservation_id=?
+    `).all(reservationId).filter(isRow);
+    for (const dimension of dimensions) {
+      const unit = text(dimension, "unit_key");
+      const amount = integer(dimension, "amount");
+      const consumed = usage[unit];
+      if (consumed === undefined) throw new Error("validated launch usage dimension is missing");
+      if (consumed === "unknown") {
+        const changed = this.#database.prepare(`
+          UPDATE resource_dimensions SET reserved=reserved-?, usage_unknown=1
+           WHERE scope_id=? AND unit_key=? AND reserved>=?
+        `).run(amount, text(dimension, "scope_id"), unit, amount);
+        if (changed.changes !== 1) throw new Error("launch unknown-usage ledger changed");
+        this.#database.prepare(`
+          UPDATE resource_reservation_dimensions SET usage_unknown=1
+           WHERE reservation_id=? AND scope_id=? AND unit_key=?
+        `).run(reservationId, text(dimension, "scope_id"), unit);
+      } else {
+        const changed = this.#database.prepare(`
+          UPDATE resource_dimensions SET reserved=reserved-?, used=used+?
+           WHERE scope_id=? AND unit_key=? AND reserved>=?
+        `).run(amount, consumed, text(dimension, "scope_id"), unit, amount);
+        if (changed.changes !== 1) throw new Error("launch usage ledger changed");
+        this.#database.prepare(`
+          UPDATE resource_reservation_dimensions SET consumed=?, released=?
+           WHERE reservation_id=? AND scope_id=? AND unit_key=?
+        `).run(consumed, amount - consumed, reservationId, text(dimension, "scope_id"), unit);
+      }
+    }
+    this.#database.prepare(`
+      UPDATE resource_reservations SET state='reconciled', revision=revision+1, updated_at=?
+       WHERE reservation_id=?
+    `).run(this.#clock(), reservationId);
+    return "settled";
+  }
+
+  #isProvedNoEffect(value: Row): boolean {
+    const serialized = value.result_json;
+    if (typeof serialized !== "string") return false;
+    try {
+      const parsed = JSON.parse(serialized) as unknown;
+      if (isRow(parsed) && parsed.kind === "core-pre-dispatch-no-effect") return true;
+      return parseLaunchAdapterOutcomeV1(parsed).outcome.kind === "terminal-no-effect";
+    } catch {
+      return false;
+    }
   }
 
   #revalidateInspection(inspection: LaunchInspection): void {
@@ -822,12 +1533,29 @@ export class LaunchCustodyService {
     readArtifact(inspection.canonicalProjectRoot, intent.resourcePlanRef, "launch resource plan");
     if (intent.retryOf === undefined) {
       if (text(session, "state") !== "awaiting_launch") stale("launch session state changed");
-      assertSameArtifact(intent.launchPacketRef, {
+      assertSameArtifact(intent.launchPacketRef, parseArtifactRef({
         path: text(session, "launch_packet_path"),
         digest: exactDigest(session.launch_packet_digest, "stored launch packet digest"),
-      }, "stored launch packet");
-    } else if (text(session, "state") !== "launch_failed") {
-      stale("launch retry state changed");
+      }, "stored launch packet"), "stored launch packet");
+    } else {
+      if (text(session, "state") !== "launch_failed") stale("launch retry state changed");
+      const failed = row(this.#database.prepare(`
+        SELECT c.provider_adapter_id, c.provider_action_id, p.status,
+               p.execution_count, p.effect_count, p.idempotency_proven, p.result_json
+          FROM project_session_launch_custody c
+          JOIN provider_actions p
+            ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+         WHERE c.project_session_id=?
+         ORDER BY c.custody_attempt_generation DESC LIMIT 1
+      `).get(intent.projectSessionId), "failed launch custody");
+      if (
+        text(failed, "provider_adapter_id") !== intent.retryOf.providerAdapterId ||
+        text(failed, "provider_action_id") !== intent.retryOf.providerActionId ||
+        text(failed, "status") !== "terminal" ||
+        integer(failed, "effect_count") !== 0 ||
+        integer(failed, "idempotency_proven") !== 1 ||
+        !this.#isProvedNoEffect(failed)
+      ) stale("proved launch failure changed before retry commit");
     }
   }
 
@@ -860,6 +1588,32 @@ export class LaunchCustodyService {
       },
     ] as const;
     for (const definition of definitions) {
+      const existing = this.#database.prepare(`
+        SELECT project_id, project_session_id, coordination_run_id, parent_scope_id,
+               scope_kind, owner_ref, state
+          FROM resource_scopes WHERE scope_id=?
+      `).get(definition.scope.scopeId);
+      if (isRow(existing)) {
+        const limits = Object.fromEntries(this.#database.prepare(`
+          SELECT unit_key, limit_value FROM resource_dimensions WHERE scope_id=? ORDER BY unit_key
+        `).all(definition.scope.scopeId).filter(isRow).map((dimension) => [
+          text(dimension, "unit_key"),
+          integer(dimension, "limit_value"),
+        ]));
+        if (
+          text(existing, "project_id") !== intent.projectId ||
+          existing.project_session_id !== definition.projectSessionId ||
+          existing.coordination_run_id !== definition.runId ||
+          existing.parent_scope_id !== definition.parent ||
+          text(existing, "scope_kind") !== definition.kind ||
+          text(existing, "owner_ref") !== definition.owner ||
+          text(existing, "state") !== "active" ||
+          !sameAmounts(limits, definition.scope.limits)
+        ) {
+          throw new ProjectFabricCoreError("CONFLICT", `${definition.kind} resource scope changed before retry`);
+        }
+        continue;
+      }
       this.#database.prepare(`
         INSERT INTO resource_scopes(
           scope_id, project_id, project_session_id, coordination_run_id,

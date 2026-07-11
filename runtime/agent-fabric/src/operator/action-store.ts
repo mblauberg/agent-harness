@@ -11,7 +11,8 @@ import type {
   OperatorActionReconcileRequest,
   OperatorActionStatus,
   OperatorActionStatusRequest,
-  ProjectSessionLaunchIntent,
+  ProjectSessionLaunchCurrentState,
+  ProviderActionRefV1,
   RegisteredExternalEffectState,
   ScopedGate,
   Sha256Digest,
@@ -31,6 +32,11 @@ import {
 import type Database from "better-sqlite3";
 
 import { ProjectFabricCoreError, type AuthenticatedOperatorContext, type CoreServiceOptions } from "../project-session/contracts.js";
+import type {
+  LaunchCustodyIntent,
+  LaunchDispatchHandle,
+  LaunchInspection,
+} from "../project-session/launch-custody.js";
 import { canonicalJson, integer, isRow, nullableText, row, sha256, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
 
@@ -44,16 +50,7 @@ export type OperatorActionCurrentState =
   | {
       kind: "project-session-launch";
       revision: number;
-      projectId: ProjectSessionLaunchIntent["projectId"];
-      projectSessionId: ProjectSessionLaunchIntent["projectSessionId"];
-      sessionGeneration: number;
-      lifecycleState: string;
-      launchPacketRef: ArtifactRef;
-      authorityRef: Sha256Digest;
-      budgetRef: string;
-      resourcePlanRef: ArtifactRef;
-      providerAdapterId: string;
-      providerActionId: ProjectSessionLaunchIntent["providerActionId"];
+      state: ProjectSessionLaunchCurrentState;
     }
   | {
       kind: "project-session-lifecycle";
@@ -102,10 +99,23 @@ export interface OperatorActionEffectPort {
   observe(request: OperatorEffectRequest & { effectRef: ArtifactRef | null }): Promise<OperatorEffectOutcome>;
 }
 
+export interface OperatorLaunchCustodyPort {
+  readCurrentState(intent: LaunchCustodyIntent): Promise<ProjectSessionLaunchCurrentState>;
+  inspect(intent: LaunchCustodyIntent): Promise<LaunchInspection>;
+  prepareInTransaction(input: Readonly<{
+    inspection: LaunchInspection;
+    operatorId: string;
+    operatorCommandId: string;
+  }>): LaunchDispatchHandle;
+  dispatchPrepared(handle: LaunchDispatchHandle): Promise<unknown>;
+  providerActionRefForCommand(operatorId: string, commandId: string): ProviderActionRefV1;
+}
+
 export type OperatorActionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
   statePort: OperatorActionStatePort;
   effectPort: OperatorActionEffectPort;
+  launchCustody?: OperatorLaunchCustodyPort;
   previewTtlMs?: number;
 };
 
@@ -114,6 +124,7 @@ export class OperatorActionStore {
   readonly #operatorStore: OperatorStore;
   readonly #statePort: OperatorActionStatePort;
   readonly #effectPort: OperatorActionEffectPort;
+  readonly #launchCustody: OperatorLaunchCustodyPort | undefined;
   readonly #clock: () => number;
   readonly #previewTtlMs: number;
   readonly #inFlightCommits = new Map<string, { payloadHash: string; promise: Promise<OperatorActionReceipt> }>();
@@ -123,6 +134,7 @@ export class OperatorActionStore {
     this.#operatorStore = options.operatorStore;
     this.#statePort = options.statePort;
     this.#effectPort = options.effectPort;
+    this.#launchCustody = options.launchCustody;
     this.#clock = options.clock ?? Date.now;
     this.#previewTtlMs = options.previewTtlMs ?? 5 * 60_000;
     if (!Number.isSafeInteger(this.#previewTtlMs) || this.#previewTtlMs < 1) {
@@ -135,7 +147,7 @@ export class OperatorActionStore {
     request: OperatorActionPreviewRequest,
   ): Promise<OperatorActionPreview> {
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, request.intent);
-    const current = await this.#statePort.read(request.intent);
+    const current = await this.#readCurrentState(request.intent);
     validateCurrentState(request.intent, request.command.expectedRevision, current);
     const beforeStateDigest = digestValue(current, "operatorActionPreview.beforeStateDigest");
     const intentDigest = digestValue(request.intent, "operatorActionPreview.intentDigest");
@@ -235,7 +247,7 @@ export class OperatorActionStore {
       this.#recordRejected(context, request, stored, envelope, payloadHash, code);
       throw error;
     }
-    const current = await this.#statePort.read(envelope.preview.intent);
+    const current = await this.#readCurrentState(envelope.preview.intent);
     try {
       validateCurrentState(envelope.preview.intent, request.command.expectedRevision, current);
     } catch (error: unknown) {
@@ -260,6 +272,17 @@ export class OperatorActionStore {
         "state-changed",
       );
       throw new ProjectFabricCoreError("STALE_REVISION", "operator action state changed after preview");
+    }
+    if (envelope.preview.intent.kind === "project-session-launch") {
+      return await this.#commitLaunch(
+        context,
+        request,
+        envelope,
+        envelope.preview.intent,
+        authenticated,
+        payloadHash,
+        current,
+      );
     }
     const preparedState = {
       status: "pending" as const,
@@ -332,6 +355,106 @@ export class OperatorActionStore {
     );
   }
 
+  async #commitLaunch(
+    context: AuthenticatedOperatorContext,
+    request: OperatorActionCommitRequest,
+    envelope: StoredPreviewEnvelope,
+    intent: Extract<OperatorActionIntent, { kind: "project-session-launch" }>,
+    authenticated: AuthenticatedOperatorCredential,
+    payloadHash: string,
+    current: OperatorActionCurrentState,
+  ): Promise<OperatorActionReceipt> {
+    const launchCustody = this.#launchCustody;
+    if (launchCustody === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
+    }
+    const inspection = await launchCustody.inspect(intent);
+    const provisionalState = {
+      status: "pending" as const,
+      commandId: request.command.commandId,
+      phase: "prepared" as const,
+      attemptGeneration: 1,
+    };
+    const provisionalReceipt: OperatorActionReceipt = {
+      commandId: request.command.commandId,
+      previewId: envelope.preview.previewId,
+      previewRevision: envelope.preview.previewRevision,
+      intentDigest: envelope.preview.intentDigest,
+      beforeStateDigest: envelope.preview.beforeStateDigest,
+      afterStateDigest: digestValue(provisionalState, "operatorLaunchCommit.provisionalStateDigest"),
+      evidenceRefs: envelope.preview.evidenceRefs,
+      committedAt: toTimestamp(this.#clock(), "operatorLaunchCommit.committedAt"),
+    };
+    const prepare = this.#database.transaction(():
+      | { kind: "replay"; receipt: OperatorActionReceipt }
+      | { kind: "prepared"; receipt: OperatorActionReceipt; handle: LaunchDispatchHandle } => {
+      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
+      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
+      const latest = this.#previewRow(request.previewId);
+      this.#assertPreviewClaim(latest, request.command.commandId);
+      this.#database.prepare(`
+        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
+      `).run(
+        canonicalJson({ preview: envelope.preview, action: { ...provisionalState, receipt: provisionalReceipt } }),
+        request.command.commandId,
+        request.previewId,
+      );
+      this.#insertCommand(
+        context,
+        request.command,
+        request.projectId,
+        actionSessionId(authenticated, intent),
+        "launch",
+        payloadHash,
+        current,
+        provisionalState,
+        provisionalReceipt,
+        "committed",
+      );
+      const handle = launchCustody.prepareInTransaction({
+        inspection,
+        operatorId: context.operatorId,
+        operatorCommandId: request.command.commandId,
+      });
+      const providerActionRef = launchCustody.providerActionRefForCommand(
+        context.operatorId,
+        request.command.commandId,
+      );
+      const preparedState = {
+        ...provisionalState,
+        attemptGeneration: providerActionRef.custodyAttemptGeneration,
+      };
+      const receipt: OperatorActionReceipt = {
+        ...provisionalReceipt,
+        afterStateDigest: digestValue(preparedState, "operatorLaunchCommit.preparedStateDigest"),
+        providerActionRef,
+      };
+      this.#database.prepare(`
+        UPDATE operator_previews SET preview_json=? WHERE preview_id=?
+      `).run(
+        canonicalJson({ preview: envelope.preview, action: { ...preparedState, receipt } }),
+        request.previewId,
+      );
+      this.#database.prepare(`
+        UPDATE operator_commands SET after_json=?, result_json=?
+         WHERE operator_id=? AND command_id=?
+      `).run(
+        canonicalJson(preparedState),
+        canonicalJson(receipt),
+        context.operatorId,
+        request.command.commandId,
+      );
+      return { kind: "prepared", receipt, handle };
+    });
+    const prepared = prepare();
+    if (prepared.kind === "replay") return prepared.receipt;
+    await launchCustody.dispatchPrepared(prepared.handle);
+    return {
+      ...prepared.receipt,
+      providerActionRef: launchCustody.providerActionRefForCommand(context.operatorId, request.command.commandId),
+    };
+  }
+
   status(request: OperatorActionStatusRequest): OperatorActionStatus {
     const authenticated = this.#operatorStore.authenticateCredential(request.credential.token);
     if (
@@ -368,7 +491,50 @@ export class OperatorActionStore {
     }
     const envelope = parseStoredPreview(text(previewValue, "preview_json"));
     if (envelope.action === null) throw new Error("confirmed operator preview has no action state");
+    if (envelope.preview.intent.kind === "project-session-launch") {
+      return this.#launchStatus(
+        authenticated.context.operatorId,
+        request.commandId,
+        envelope,
+      );
+    }
     return statusFromAction(envelope.action, envelope.preview.intentDigest);
+  }
+
+  #launchStatus(
+    operatorId: string,
+    commandId: string,
+    envelope: StoredPreviewEnvelope,
+  ): OperatorActionStatus {
+    const launchCustody = this.#launchCustody;
+    if (launchCustody === undefined || envelope.action === null) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
+    }
+    const providerActionRef = launchCustody.providerActionRefForCommand(operatorId, commandId);
+    const receipt: OperatorActionReceipt = {
+      ...parseStoredReceipt(envelope.action),
+      providerActionRef,
+    };
+    if (providerActionRef.journalState === "terminal") {
+      return { status: "committed", commandId, receipt };
+    }
+    if (providerActionRef.journalState === "ambiguous") {
+      return {
+        status: "ambiguous",
+        commandId,
+        intentDigest: envelope.preview.intentDigest,
+        attemptGeneration: providerActionRef.custodyAttemptGeneration,
+        providerActionRef,
+      };
+    }
+    return {
+      status: "pending",
+      commandId,
+      intentDigest: envelope.preview.intentDigest,
+      phase: providerActionRef.journalState,
+      attemptGeneration: providerActionRef.custodyAttemptGeneration,
+      providerActionRef,
+    };
   }
 
   async reconcile(
@@ -491,6 +657,15 @@ export class OperatorActionStore {
     });
     this.#updateReconcileCommand(context.operatorId, request.command.commandId, result);
     return result;
+  }
+
+  async #readCurrentState(intent: OperatorActionIntent): Promise<OperatorActionCurrentState> {
+    if (intent.kind !== "project-session-launch") return await this.#statePort.read(intent);
+    if (this.#launchCustody === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
+    }
+    const state = await this.#launchCustody.readCurrentState(intent);
+    return { kind: "project-session-launch", revision: state.sessionRevision, state };
   }
 
   #authenticateCommand(
@@ -918,24 +1093,36 @@ function validateCurrentState(
     if (current.kind !== "project-session-launch") {
       throw new TypeError("project-session launch intent received another current-state family");
     }
+    const launch = current.state;
     if (
-      intent.projectId !== current.projectId ||
-      intent.projectSessionId !== current.projectSessionId ||
-      intent.expectedSessionRevision !== current.revision ||
-      intent.expectedSessionGeneration !== current.sessionGeneration ||
-      !sameArtifact(intent.launchPacketRef, current.launchPacketRef) ||
-      intent.authorityRef !== current.authorityRef ||
-      intent.budgetRef !== current.budgetRef ||
-      !sameArtifact(intent.resourcePlanRef, current.resourcePlanRef) ||
-      intent.providerAdapterId !== current.providerAdapterId ||
-      intent.providerActionId !== current.providerActionId
+      launch.projectId !== intent.projectId ||
+      launch.projectRevision !== intent.expectedProjectRevision ||
+      launch.projectSessionId !== intent.projectSessionId ||
+      launch.sessionRevision !== intent.expectedSessionRevision ||
+      launch.sessionRevision !== current.revision ||
+      launch.sessionGeneration !== intent.expectedSessionGeneration ||
+      launch.trustRecordDigest !== intent.trustRecordDigest ||
+      launch.providerAdapterId !== intent.providerAdapterId ||
+      launch.providerContractDigest !== intent.providerContractDigest ||
+      launch.resourceStateDigest !== intent.resourceStateDigest
     ) {
       throw new ProjectFabricCoreError("STALE_REVISION", "project-session launch custody binding changed");
     }
-    if (current.lifecycleState !== "awaiting_launch") {
+    if (launch.sessionState === "awaiting_launch") {
+      if (intent.retryOf !== undefined || launch.provedFailedAttempt !== null || !sameArtifact(intent.launchPacketRef, launch.currentLaunchPacketRef)) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "initial launch packet or retry binding changed");
+      }
+      return;
+    }
+    if (
+      intent.retryOf === undefined ||
+      launch.provedFailedAttempt === null ||
+      intent.retryOf.providerAdapterId !== launch.provedFailedAttempt.providerAdapterId ||
+      intent.retryOf.providerActionId !== launch.provedFailedAttempt.providerActionId
+    ) {
       throw new ProjectFabricCoreError(
-        "LIFECYCLE_PRECONDITION_FAILED",
-        "project session is not awaiting launch",
+        "STALE_REVISION",
+        "proved launch failure or retry identity changed",
       );
     }
     return;
