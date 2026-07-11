@@ -190,7 +190,7 @@ export type BaselineOperationInputMap = {
   [FABRIC_OPERATIONS.recordRevocationProof]: { leaseId: string; generation: number; kind: "predecessor-terminal" | "os-isolated" | "patch-only"; detail: Readonly<Record<string, string>>; commandId: string };
   [FABRIC_OPERATIONS.revokeCapability]: { agentId: string; commandId: string };
   [FABRIC_OPERATIONS.rotateCapability]: { agentId: string; expectedPrincipalGeneration: number; commandId: string };
-  [FABRIC_OPERATIONS.acquireWriteLease]: { scope: readonly string[]; ttlMs: number; commandId: string };
+  [FABRIC_OPERATIONS.acquireWriteLease]: { scope: readonly string[]; ttlMs: number; commandId: string; taskId?: string };
   [FABRIC_OPERATIONS.recoverWriteLease]: { leaseId: string; expectedGeneration: number; commandId: string; evidence: LegacyRecoveryEvidence };
   [FABRIC_OPERATIONS.renewWriteLease]: { leaseId: string; expectedGeneration: number; ttlMs: number; commandId: string };
   [FABRIC_OPERATIONS.getWriteLease]: { leaseId: string };

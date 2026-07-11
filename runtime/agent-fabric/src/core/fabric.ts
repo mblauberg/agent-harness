@@ -62,9 +62,10 @@ import {
   type OperatorActionStatePort,
 } from "../operator/action-store.js";
 import {
-  assertOperatorTaskRunnable,
   assertRunAcceptingWork,
+  assertTaskOperationAdmitted,
   createProductionOperatorActionPorts,
+  resolveTaskBindingForActiveWork,
   type ProductionDaemonStopPort,
 } from "../operator/production-action-ports.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
@@ -944,6 +945,59 @@ export class Fabric {
     });
   }
 
+  recordDaemonStopCustodyResult(input: {
+    custodyId: string;
+    resultCorrelationDigest: string;
+    operatorId: string;
+    projectId: string;
+    projectSessionId: string;
+    principalGeneration: number;
+    commandId: string;
+    daemonInstanceGeneration: number;
+    state: "stopped" | "failed" | "rejected";
+    result: unknown;
+  }): void {
+    const changed = this.#database.prepare(`
+      UPDATE operator_daemon_stop_custody SET state=?, result_json=?, updated_at=?
+       WHERE custody_id=? AND result_correlation_digest=?
+         AND operator_id=? AND project_id=? AND project_session_id=? AND command_id=?
+         AND principal_generation=? AND daemon_instance_generation=? AND operation='daemon-stop'
+         AND state IN ('prepared','scheduled')
+    `).run(
+      input.state,
+      canonicalJson(input.result),
+      this.#clock(),
+      input.custodyId,
+      input.resultCorrelationDigest,
+      input.operatorId,
+      input.projectId,
+      input.projectSessionId,
+      input.commandId,
+      input.principalGeneration,
+      input.daemonInstanceGeneration,
+    );
+    if (changed.changes === 1) return;
+    const existing = this.#database.prepare(`
+      SELECT state, result_json FROM operator_daemon_stop_custody
+       WHERE custody_id=? AND result_correlation_digest=?
+         AND operator_id=? AND project_id=? AND project_session_id=?
+         AND principal_generation=? AND command_id=?
+         AND daemon_instance_generation=? AND operation='daemon-stop'
+    `).get(
+      input.custodyId,
+      input.resultCorrelationDigest,
+      input.operatorId,
+      input.projectId,
+      input.projectSessionId,
+      input.principalGeneration,
+      input.commandId,
+      input.daemonInstanceGeneration,
+    );
+    if (!isRow(existing) || existing.state !== input.state || existing.result_json !== canonicalJson(input.result)) {
+      throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop custody result correlation changed");
+    }
+  }
+
   provisionLocalOperator(input: LocalOperatorProvisioningInput): LocalOperatorProvisioningResult {
     return this.#operatorStore.provisionLocalOperator(input);
   }
@@ -1787,6 +1841,7 @@ export class Fabric {
   ): AuthorityResult {
     const commandId = input.commandId ?? `authority:${uuidv7()}`;
     return this.#commandJournal.execute(runId, actorAgentId, commandId, input, isAuthorityResult, () => {
+      assertRunAcceptingWork(this.#database, runId);
       const parentRow = rowOrNotFound(
         this.#database
           .prepare("SELECT authority_json FROM authorities WHERE authority_id = ? AND run_id = ?")
@@ -1841,6 +1896,7 @@ export class Fabric {
     actorAgentId: string,
     input: { agentId: string; authorityId: string; providerSessionRef?: string; adapterId?: string },
   ): { capability: string } {
+    assertRunAcceptingWork(this.#database, runId);
     const authorityRow = rowOrNotFound(
       this.#database
         .prepare("SELECT authority_json, parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?")
@@ -1902,6 +1958,7 @@ export class Fabric {
       payload: Record<string, unknown>;
     },
   ): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+    assertRunAcceptingWork(this.#database, runId);
     this.#adapter(input.adapterId);
     this.#providerSessions.preflightRegistration({
       runId,
@@ -1957,6 +2014,7 @@ export class Fabric {
       providerSessionRef: string;
     },
   ): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+    assertRunAcceptingWork(this.#database, runId);
     this.#adapter(input.adapterId);
     this.#providerSessions.preflightRegistration({
       runId,
@@ -2024,6 +2082,8 @@ export class Fabric {
       }
       return { messageId: stringField(existing, "message_id") };
     }
+    assertRunAcceptingWork(this.#database, runId);
+    if (input.audience.kind === "task") assertTaskOperationAdmitted(this.#database, runId, input.audience.taskId);
     const messageId = uuidv7();
     const conversationId = input.conversationId ?? messageId;
     this.#database.transaction(() => {
@@ -2510,13 +2570,13 @@ export class Fabric {
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
       assertRunAcceptingWork(this.#database, runId);
-      assertOperatorTaskRunnable(this.#database, runId, input.taskId);
       const eligible = this.#database
         .prepare("SELECT 1 FROM task_eligible_agents WHERE run_id = ? AND task_id = ? AND agent_id = ?")
         .get(runId, input.taskId, actorAgentId);
       if (!isRow(eligible)) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "agent is not eligible to claim the task");
       }
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = rowOrNotFound(
         this.#database
           .prepare("SELECT state, revision FROM tasks WHERE run_id = ? AND task_id = ?")
@@ -2568,6 +2628,7 @@ export class Fabric {
     input: { taskId: string; expectedRevision: number; commandId: string },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = this.getTask(runId, input.taskId);
       if (task.revision !== input.expectedRevision) {
         throw new FabricError("TASK_REVISION_CONFLICT", "task revision changed");
@@ -2598,6 +2659,7 @@ export class Fabric {
     const parse = (value: unknown): value is { taskId: string; checkId: string; status: "pass" | "fail" } =>
       isRow(value) && typeof value.taskId === "string" && typeof value.checkId === "string" && (value.status === "pass" || value.status === "fail");
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const changed = this.#database
         .prepare("UPDATE task_objective_checks SET status = ?, evidence = ? WHERE run_id = ? AND task_id = ? AND check_id = ?")
         .run(input.status, input.evidence, runId, input.taskId, input.checkId);
@@ -2614,6 +2676,7 @@ export class Fabric {
     const parse = (value: unknown): value is { taskId: string; gateId: string; status: "approved" | "rejected" } =>
       isRow(value) && typeof value.taskId === "string" && typeof value.gateId === "string" && (value.status === "approved" || value.status === "rejected");
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       this.#assertChair(runId, actorAgentId);
       const changed = this.#database
         .prepare("UPDATE task_human_gates SET status = ?, evidence = ? WHERE run_id = ? AND task_id = ? AND gate_id = ?")
@@ -2630,6 +2693,7 @@ export class Fabric {
   ): { acknowledged: true } {
     const parse = (value: unknown): value is { acknowledged: true } => isRow(value) && value.acknowledged === true;
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = this.getTask(runId, input.taskId);
       if (task.revision !== input.taskRevision || task.ownerLeaseGeneration !== input.ownerLeaseGeneration) {
         throw new FabricError("TASK_REVISION_CONFLICT", "handoff revision or generation changed");
@@ -2670,6 +2734,7 @@ export class Fabric {
     },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = rowOrNotFound(
         this.#database
           .prepare("SELECT owner_agent_id, revision, state FROM tasks WHERE run_id = ? AND task_id = ?")
@@ -2703,6 +2768,7 @@ export class Fabric {
     },
   ): ProofResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isProofResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       this.#assertChair(runId, actorAgentId);
       const task = this.getTask(runId, input.taskId);
       if (task.state !== "active" || task.ownerAgentId === null || task.ownerLeaseGeneration !== input.ownerLeaseGeneration) {
@@ -2748,6 +2814,7 @@ export class Fabric {
     },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       this.#assertChair(runId, actorAgentId);
       const task = this.getTask(runId, input.taskId);
       if (
@@ -2898,12 +2965,8 @@ export class Fabric {
   acquireWriteLease(
     runId: string,
     actorAgentId: string,
-    input: { scope: string[]; ttlMs: number; commandId: string },
+    input: { scope: string[]; ttlMs: number; commandId: string; taskId?: string },
   ): LeaseResult {
-    const lifecycle = this.getAgentLifecycle(runId, actorAgentId).lifecycle;
-    if (lifecycle === "context-unreconciled") {
-      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context cannot acquire a write lease");
-    }
     const workspaceRoot = this.#workspaceRootForRun(runId);
     const scopes = [...new Set(input.scope.map((path) => canonicalAuthorityPath(workspaceRoot, path)))].sort();
     const actor = rowOrNotFound(
@@ -2925,7 +2988,31 @@ export class Fabric {
     ) {
       throw new FabricError("AUTHORITY_WIDENING", "write scope exceeds the actor authority");
     }
-    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, { operation: "acquire-write", scopes, ttlMs: input.ttlMs }, isLeaseResult, () => {
+    const commandPayload = {
+      operation: "acquire-write",
+      scopes,
+      ttlMs: input.ttlMs,
+      taskId: input.taskId ?? null,
+    };
+    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, commandPayload, isLeaseResult);
+    if (replay !== undefined) return replay;
+    const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+    if (taskId !== undefined) {
+      const bound = this.#database.prepare(`
+        SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
+          AND (owner_agent_id=? OR EXISTS (
+            SELECT 1 FROM task_participants participant
+             WHERE participant.run_id=tasks.run_id AND participant.task_id=tasks.task_id
+               AND participant.agent_id=?
+          ))
+      `).get(runId, taskId, actorAgentId, actorAgentId);
+      if (!isRow(bound)) throw new FabricError("CAPABILITY_FORBIDDEN", "write lease task is outside the actor task scope");
+    }
+    const lifecycle = this.getAgentLifecycle(runId, actorAgentId).lifecycle;
+    if (lifecycle === "context-unreconciled") {
+      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context cannot acquire a write lease");
+    }
+    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, commandPayload, isLeaseResult, () => {
       const conflicts = this.#writeLeaseConflicts(runId, scopes);
       if (conflicts.some((item) => item.status === "quarantined")) {
         throw new FabricError("WRITE_SCOPE_QUARANTINED", "write scope overlaps a quarantined lease");
@@ -2949,6 +3036,13 @@ export class Fabric {
         .run(leaseId, runId, actorAgentId, now + input.ttlMs, now);
       for (const scope of scopes) {
         this.#database.prepare("INSERT INTO write_scope_entries(lease_id, canonical_path) VALUES (?, ?)").run(leaseId, scope);
+      }
+      if (taskId !== undefined) {
+        this.#database.prepare(`
+          INSERT INTO task_obligation_bindings(
+            coordination_run_id, task_id, obligation_kind, obligation_id, state, created_at, updated_at
+          ) VALUES (?, ?, 'write-lease', ?, 'active', ?, ?)
+        `).run(runId, taskId, leaseId, now, now);
       }
       const result: LeaseResult = { leaseId, holderAgentId: actorAgentId, generation: 1, status: "active", scope: scopes };
       this.#event(runId, "write-lease-acquired", actorAgentId, result);
@@ -3222,14 +3316,15 @@ export class Fabric {
       commandId: string;
     },
   ): Promise<LifecycleResult> {
+    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isLifecycleResult);
+    if (replay !== undefined) return replay;
+    assertTaskOperationAdmitted(this.#database, runId, input.taskId);
     if (actorAgentId !== input.agentId) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agents may request lifecycle changes only for themselves");
     }
     if (!isLifecycleCheckpoint(input.checkpoint)) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "lifecycle checkpoint lacks a portable recovery field");
     }
-    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isLifecycleResult);
-    if (replay !== undefined) return replay;
     this.#verifyCheckpoint(runId, input.agentId, input.taskId, input.taskRevision, input.checkpoint);
 
     if (input.action === "completion-ready") {
@@ -3396,31 +3491,73 @@ export class Fabric {
     },
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
-    assertRunAcceptingWork(this.#database, runId);
-    if (typeof input.payload.taskId === "string") {
-      assertOperatorTaskRunnable(this.#database, runId, input.payload.taskId);
-    }
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const target = this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
     if (input.operation === "send_turn" && target === undefined) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "send_turn requires a bound provider session target");
     }
-    let admittedInputPayload = input.payload;
+    const taskValue = input.payload.taskId;
+    if (taskValue !== undefined && typeof taskValue !== "string") {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "provider task ID must be text");
+    }
+    const taskId = input.operation === "send_turn" || input.operation === "steer"
+      ? resolveTaskBindingForActiveWork(
+        this.#database,
+        runId,
+        target?.agentId ?? actorAgentId,
+        taskValue,
+      )
+      : undefined;
+    if (input.operation !== "send_turn" && input.operation !== "steer") {
+      assertRunAcceptingWork(this.#database, runId);
+    }
+    const taskBoundPayload = taskId === undefined ? input.payload : { ...input.payload, taskId };
+    let admittedInputPayload = taskBoundPayload;
     if (target !== undefined) {
       this.#assertProviderPrincipalActive(runId, target.agentId);
+      if (taskId !== undefined) {
+        const taskMember = this.#database.prepare(`
+          SELECT 1 FROM tasks task
+           WHERE task.run_id=? AND task.task_id=? AND (
+             task.owner_agent_id=? OR EXISTS (
+               SELECT 1 FROM task_participants participant
+                WHERE participant.run_id=task.run_id AND participant.task_id=task.task_id
+                  AND participant.agent_id=?
+             )
+           )
+        `).get(runId, taskId, target.agentId, target.agentId);
+        if (!isRow(taskMember)) {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "provider target is outside the exact task scope");
+        }
+      }
       const targetAgent = rowOrNotFound(
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, target.agentId),
         "provider target agent",
       );
-      admittedInputPayload = this.#admitProviderPayload(runId, stringField(targetAgent, "authority_id"), input.payload);
+      admittedInputPayload = this.#admitProviderPayload(runId, stringField(targetAgent, "authority_id"), taskBoundPayload);
     } else {
       this.#adapter(input.adapterId);
+      if (taskId !== undefined) {
+        const taskMember = this.#database.prepare(`
+          SELECT 1 FROM tasks task
+           WHERE task.run_id=? AND task.task_id=? AND (
+             task.owner_agent_id=? OR EXISTS (
+               SELECT 1 FROM task_participants participant
+                WHERE participant.run_id=task.run_id AND participant.task_id=task.task_id
+                  AND participant.agent_id=?
+             )
+           )
+        `).get(runId, taskId, actorAgentId, actorAgentId);
+        if (!isRow(taskMember)) {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "provider actor is outside the exact task scope");
+        }
+      }
       const actor = rowOrNotFound(
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
         "provider actor",
       );
-      admittedInputPayload = this.#admitProviderPayload(runId, stringField(actor, "authority_id"), input.payload);
+      admittedInputPayload = this.#admitProviderPayload(runId, stringField(actor, "authority_id"), taskBoundPayload);
     }
     if (input.operation === "send_turn" || input.operation === "steer") {
       this.#assertAdapterModel(input.adapterId, admittedInputPayload);
@@ -4358,6 +4495,19 @@ export class Fabric {
       throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path must be relative and traversal-free");
     }
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isArtifactResult, () => {
+      const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+      if (taskId !== undefined) {
+        const bound = this.#database.prepare(`
+          SELECT 1 FROM tasks task WHERE task.run_id=? AND task.task_id=? AND (
+            task.owner_agent_id=? OR EXISTS (
+              SELECT 1 FROM task_participants participant
+               WHERE participant.run_id=task.run_id AND participant.task_id=task.task_id
+                 AND participant.agent_id=?
+            )
+          )
+        `).get(runId, taskId, actorAgentId, actorAgentId);
+        if (!isRow(bound)) throw new FabricError("CAPABILITY_FORBIDDEN", "artifact task is outside the actor task scope");
+      }
       const run = rowOrNotFound(
         this.#database.prepare("SELECT project_run_directory FROM runs WHERE run_id = ?").get(runId),
         "run",
@@ -4375,12 +4525,6 @@ export class Fabric {
       if (!pathContains(canonicalPath(directoryValue), target)) {
         throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path escapes the run directory");
       }
-      if (input.taskId !== undefined) {
-        rowOrNotFound(
-          this.#database.prepare("SELECT 1 FROM tasks WHERE run_id = ? AND task_id = ?").get(runId, input.taskId),
-          "artifact task",
-        );
-      }
       const artifactId = uuidv7();
       this.#database
         .prepare(
@@ -4389,7 +4533,7 @@ export class Fabric {
         .run(
           artifactId,
           runId,
-          input.taskId ?? null,
+          taskId ?? null,
           actorAgentId,
           input.relativePath,
           input.sha256,

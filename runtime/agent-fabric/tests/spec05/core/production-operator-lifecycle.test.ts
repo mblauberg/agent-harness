@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import type { OperatorActionIntent, Sha256Digest } from "@local/agent-fabric-protocol";
+import { parseSha256Digest } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
@@ -7,10 +9,34 @@ import {
   assertRunAcceptingWork,
   createProductionOperatorActionPorts,
 } from "../../../src/operator/production-action-ports.ts";
+import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 
 const databases: Database.Database[] = [];
 const digest = `sha256:${"a".repeat(64)}`;
 const now = Date.parse("2027-01-01T00:00:00Z");
+
+function stateDigest(value: unknown): Sha256Digest {
+  return parseSha256Digest(`sha256:${sha256(canonicalJson(value))}`, "test.stateDigest");
+}
+
+function scopedEffectRequest(
+  commandId: string,
+  intent: OperatorActionIntent,
+  beforeStateDigest: Sha256Digest,
+) {
+  return {
+    commandId,
+    operatorId: "operator_01",
+    projectId: "project_01",
+    projectSessionId: "session_01",
+    principalGeneration: 1,
+    operation: intent.kind === "control" ? intent.action : intent.kind,
+    intent,
+    intentDigest: stateDigest(intent),
+    beforeStateDigest,
+    attemptGeneration: 1,
+  } as const;
+}
 
 function fixture(adapter: Parameters<typeof createProductionOperatorActionPorts>[0]["adapter"] = {
   capabilities: async () => { throw new Error("idle control must not inspect an adapter"); },
@@ -146,11 +172,13 @@ describe("production operator lifecycle ports", () => {
     let dispatches = 0;
     let lookups = 0;
     let providerActionId = "";
+    let providerPayload: Record<string, unknown> = {};
     const { database, ports } = fixture({
       capabilities: async () => ({ actionJournal: true, operations: ["interrupt", "lookup_action"] }),
       dispatch: async (_adapterId, input) => {
         dispatches += 1;
         providerActionId = input.actionId;
+        providerPayload = input.payload;
         throw new Error("connection lost after dispatch");
       },
       lookup: async (_adapterId, actionId) => {
@@ -159,11 +187,16 @@ describe("production operator lifecycle ports", () => {
         return {
           actionId,
           operation: "interrupt",
+          payloadHash: sha256(canonicalJson(providerPayload)),
           status: "terminal",
           history: ["prepared", "dispatched", "accepted", "terminal"],
           executionCount: 1,
           effectCount: 1,
-          result: { interrupted: true },
+          result: {
+            interrupted: true,
+            resumeReference: "provider_session_01",
+            turnId: "native_turn_01",
+          },
         };
       },
     });
@@ -172,11 +205,11 @@ describe("production operator lifecycle ports", () => {
         run_id, action_id, adapter_id, operation, target_agent_id,
         provider_session_generation, turn_lease_generation, identity_hash,
         payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
+        effect_count, idempotency_proven, result_json, updated_at
       ) VALUES (
         'run_01', 'turn_01', 'fake', 'send_turn', 'chair_01', 2, 1,
         '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'dispatched',
-        '["prepared","dispatched"]', 1, 0, 0, ${now}
+        '["prepared","dispatched"]', 1, 0, 0, '{"turnId":"native_turn_01"}', ${now}
       );
       INSERT INTO provider_session_turn_leases(
         run_id, agent_id, provider_session_generation, turn_lease_generation,
@@ -218,6 +251,10 @@ describe("production operator lifecycle ports", () => {
     expect(lookups).toBe(1);
     expect(database.prepare("SELECT task_id, state FROM operator_control_fences").all())
       .toEqual([{ task_id: "task_01", state: "paused" }]);
+    expect(database.prepare("SELECT status FROM provider_session_turn_leases WHERE action_id='turn_01'").get())
+      .toEqual({ status: "released" });
+    expect(database.prepare("SELECT status FROM provider_actions WHERE action_id='turn_01'").get())
+      .toEqual({ status: "terminal" });
   });
 
   it("does not interrupt a shared owner's unrelated active turn", async () => {
@@ -239,11 +276,11 @@ describe("production operator lifecycle ports", () => {
         run_id, action_id, adapter_id, operation, target_agent_id,
         provider_session_generation, turn_lease_generation, identity_hash,
         payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
+        effect_count, idempotency_proven, result_json, updated_at
       ) VALUES (
         'run_01', 'turn_sibling', 'fake', 'send_turn', 'chair_01', 2, 1,
         '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_02"}', 'dispatched',
-        '["prepared","dispatched"]', 1, 0, 0, ${now}
+        '["prepared","dispatched"]', 1, 0, 0, '{"turnId":"native_sibling"}', ${now}
       );
       INSERT INTO provider_session_turn_leases(
         run_id, agent_id, provider_session_generation, turn_lease_generation,
@@ -364,11 +401,11 @@ describe("production operator lifecycle ports", () => {
         run_id, action_id, adapter_id, operation, target_agent_id,
         provider_session_generation, turn_lease_generation, identity_hash,
         payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
+        effect_count, idempotency_proven, result_json, updated_at
       ) VALUES (
         'run_01', 'turn_unproved', 'fake', 'send_turn', 'chair_01', 2, 1,
         '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'dispatched',
-        '["prepared","dispatched"]', 1, 0, 0, ${now}
+        '["prepared","dispatched"]', 1, 0, 0, '{"turnId":"native_unproved"}', ${now}
       );
       INSERT INTO provider_session_turn_leases(
         run_id, agent_id, provider_session_generation, turn_lease_generation,
@@ -411,11 +448,16 @@ describe("production operator lifecycle ports", () => {
         return {
           actionId: input.actionId,
           operation: "steer",
+          payloadHash: sha256(canonicalJson(input.payload)),
           status: "terminal",
           history: ["prepared", "dispatched", "accepted", "terminal"],
           executionCount: 1,
           effectCount: 1,
-          result: { steered: true },
+          result: {
+            steered: true,
+            resumeReference: "provider_session_01",
+            turnId: "turn_provider_01",
+          },
         };
       },
       lookup: async () => { throw new Error("terminal steer must not be looked up"); },
@@ -495,7 +537,102 @@ describe("production operator lifecycle ports", () => {
       ), (
         'session_01', 'run_01', 'task', 'task_02',
         1, 'active', 1, ${now}, ${now}
+      ), (
+        'session_01', 'run_01', 'lease', 'lease_task_01',
+        1, 'active', 1, ${now}, ${now}
+      ), (
+        'session_01', 'run_01', 'required-message', 'message_task_01',
+        1, 'active', 1, ${now}, ${now}
+      ), (
+        'session_01', 'run_01', 'scoped-barrier', 'barrier_task_01',
+        1, 'active', 1, ${now}, ${now}
+      ), (
+        'session_01', 'run_01', 'required-message', 'reply_task_01',
+        1, 'active', 1, ${now}, ${now}
       );
+      INSERT INTO leases(lease_id, run_id, kind, holder_agent_id, generation, status, expires_at, updated_at)
+      VALUES ('lease_task_01', 'run_01', 'write', 'chair_01', 1, 'active', ${now + 60_000}, ${now});
+      INSERT INTO write_scope_entries(lease_id, canonical_path)
+      VALUES ('lease_task_01', '/project/one/src/task_01');
+      INSERT INTO task_obligation_bindings(
+        coordination_run_id, task_id, obligation_kind, obligation_id, state, created_at, updated_at
+      ) VALUES
+        ('run_01', 'task_01', 'write-lease', 'lease_task_01', 'active', ${now}, ${now}),
+        ('run_01', 'task_01', 'resource-reservation', 'reservation_task_01', 'active', ${now}, ${now});
+      INSERT INTO resource_scopes(
+        scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
+        scope_kind, owner_ref, state, revision
+      ) VALUES ('scope_project_01', 'project_01', NULL, NULL, NULL, 'project', 'project_01', 'active', 1);
+      INSERT INTO resource_dimensions(scope_id, unit_key, limit_value, used, reserved, usage_unknown)
+      VALUES ('scope_project_01', 'tokens', 10, 0, 3, 0);
+      INSERT INTO resource_reservations(
+        reservation_id, project_session_id, coordination_run_id, leaf_scope_id,
+        operation_id, actor_agent_id, state, revision, generation, identity_hash,
+        path_json, amounts_json, created_at, updated_at
+      ) VALUES (
+        'reservation_task_01', 'session_01', 'run_01', 'scope_project_01',
+        'task_01', 'chair_01', 'reserved', 1, 1, '${"8".repeat(64)}',
+        '[{"scopeId":"scope_project_01"}]', '{"tokens":3}', ${now}, ${now}
+      );
+      INSERT INTO resource_reservation_dimensions(
+        reservation_id, scope_id, unit_key, amount, consumed, released, usage_unknown
+      ) VALUES ('reservation_task_01', 'scope_project_01', 'tokens', 3, 0, 0, 0);
+      INSERT INTO writer_admissions(
+        writer_admission_id, reservation_id, repository_root, worktree_path, writer_generation, state
+      ) VALUES ('writer_task_01', 'reservation_task_01', '/project/one', '/project/one/.worktrees/task_01', 1, 'active');
+      INSERT INTO messages(
+        message_id, run_id, sender_id, dedupe_key, payload_hash, audience_json,
+        kind, body, requires_ack, conversation_id, task_revision, hop_count, created_at
+      ) VALUES (
+        'message_task_01', 'run_01', 'chair_01', 'request:task_01', '${"9".repeat(64)}',
+        '{"kind":"task","taskId":"task_01"}', 'request', 'bounded request', 1,
+        'conversation_task_01', 3, 0, ${now}
+      ), (
+        'reply_task_01', 'run_01', 'chair_01', 'reply:task_01', '${"7".repeat(64)}',
+        '{"kind":"agent","agentId":"chair_01"}', 'reply', 'bounded result', 1,
+        'conversation_task_01', 4, 0, ${now}
+      );
+      INSERT INTO deliveries(
+        delivery_id, message_id, run_id, recipient_id, mailbox_sequence, state, attempt_count
+      ) VALUES
+        ('delivery_task_01', 'message_task_01', 'run_01', 'chair_01', 1, 'ready', 0),
+        ('delivery_reply_task_01', 'reply_task_01', 'run_01', 'chair_01', 2, 'ready', 0);
+      INSERT INTO task_requests(
+        request_id, project_session_id, run_id, task_id, requester_agent_id,
+        request_revision, conversation_id, request_message_id, target_agent_id,
+        target_provider_session, expected_artifacts_json, acknowledgement_required,
+        dedupe_key, response_deadline, callback_id, callback_generation,
+        dependent_barrier_id, state, payload_digest, created_at, updated_at
+      ) VALUES (
+        'request_task_01', 'session_01', 'run_01', 'task_01', 'chair_01', 1,
+        'conversation_task_01', 'message_task_01', 'chair_01', 'provider_session_01',
+        '[]', 1, 'request:task_01', ${now + 60_000}, 'callback_task_01', 1,
+        'barrier_task_01', 'pending', '${digest}', ${now}, ${now}
+      );
+      INSERT INTO task_request_recipients(request_id, delivery_id)
+      VALUES ('request_task_01', 'delivery_task_01');
+      INSERT INTO task_request_barriers(request_id, barrier_id, state)
+      VALUES ('request_task_01', 'barrier_task_01', 'blocked');
+      INSERT INTO task_results(
+        result_id, request_id, project_session_id, run_id, task_id, task_revision,
+        reply_message_id, reply_revision, payload_digest, artifacts_json,
+        terminal_state, summary, created_at
+      ) VALUES (
+        'result_task_01', 'request_task_01', 'session_01', 'run_01', 'task_01', 4,
+        'reply_task_01', 1, '${digest}', '[]', 'complete', 'result prepared before crash', ${now}
+      );
+      INSERT INTO result_deliveries(
+        result_delivery_id, callback_id, request_id, result_id, project_session_id,
+        run_id, task_id, requester_agent_id, target_provider_session, state, required,
+        revision, claim_generation, assignment_generation, response_deadline,
+        request_revision, reply_revision, task_revision, payload_digest, updated_at
+      ) VALUES (
+        'result_delivery_task_01', 'callback_task_01', 'request_task_01', 'result_task_01',
+        'session_01', 'run_01', 'task_01', 'chair_01', 'provider_session_01', 'pending', 1,
+        1, 0, 1, ${now + 60_000}, 1, 1, 4, '${digest}', ${now}
+      );
+      INSERT INTO task_expected_artifacts(run_id, task_id, relative_path)
+      VALUES ('run_01', 'task_01', 'cancelled-task-missing.txt');
     `);
     const cancel = {
       kind: "control" as const,
@@ -546,6 +683,77 @@ describe("production operator lifecycle ports", () => {
        WHERE project_session_id='session_01' AND coordination_run_id='run_01'
          AND member_kind='task' AND member_id='task_02'
     `).get()).toEqual({ state: "active", revision: 1, abandoned_reason: null });
+    expect(database.prepare("SELECT status FROM leases WHERE lease_id='lease_task_01'").get())
+      .toEqual({ status: "released" });
+    expect(database.prepare("SELECT state FROM task_obligation_bindings WHERE obligation_id='lease_task_01'").get())
+      .toEqual({ state: "abandoned" });
+    expect(database.prepare("SELECT state FROM task_obligation_bindings WHERE obligation_id='reservation_task_01'").get())
+      .toEqual({ state: "abandoned" });
+    expect(database.prepare("SELECT state FROM resource_reservations WHERE reservation_id='reservation_task_01'").get())
+      .toEqual({ state: "released" });
+    expect(database.prepare("SELECT reserved FROM resource_dimensions WHERE scope_id='scope_project_01' AND unit_key='tokens'").get())
+      .toEqual({ reserved: 0 });
+    expect(database.prepare("SELECT state FROM writer_admissions WHERE writer_admission_id='writer_task_01'").get())
+      .toEqual({ state: "revoked" });
+    expect(database.prepare("SELECT state FROM task_requests WHERE request_id='request_task_01'").get())
+      .toEqual({ state: "abandoned" });
+    expect(database.prepare("SELECT state FROM task_request_barriers WHERE request_id='request_task_01'").get())
+      .toEqual({ state: "abandoned" });
+    expect(database.prepare("SELECT state, resolution_reason FROM deliveries WHERE delivery_id='delivery_task_01'").get())
+      .toEqual({ state: "abandoned", resolution_reason: "Operator cancelled the bounded task" });
+    expect(database.prepare("SELECT state, required, abandoned_reason FROM result_deliveries WHERE result_delivery_id='result_delivery_task_01'").get())
+      .toEqual({ state: "abandoned", required: 0, abandoned_reason: "Operator cancelled the bounded task" });
+    expect(database.prepare("SELECT state, resolution_reason FROM deliveries WHERE delivery_id='delivery_reply_task_01'").get())
+      .toEqual({ state: "abandoned", resolution_reason: "Operator cancelled the bounded task" });
+    expect(database.prepare(`
+      SELECT kind, state FROM attention_items WHERE dedupe_key='operator-cancel:run_01:task_01:3'
+    `).get()).toEqual({ kind: "operator-task-cancelled", state: "open" });
+  });
+
+  it("does not retain missing artifacts from a cancelled task as drain obligations", async () => {
+    const { database, ports } = fixture();
+    database.prepare(`
+      INSERT INTO task_expected_artifacts(run_id, task_id, relative_path)
+      VALUES ('run_01', 'task_01', 'cancelled-task-missing.txt')
+    `).run();
+    await ports.effectPort.dispatch({
+      commandId: "cancel_before_drain",
+      intent: {
+        kind: "control",
+        action: "cancel",
+        target: {
+          kind: "task",
+          projectSessionId: "session_01" as never,
+          coordinationRunId: "run_01" as never,
+          taskId: "task_01" as never,
+          expectedRevision: 3,
+        },
+        reason: "cancel before drain",
+      },
+      intentDigest: digest as never,
+      beforeStateDigest: digest as never,
+      attemptGeneration: 1,
+    });
+    const session = database.prepare(`
+      SELECT revision, generation FROM project_sessions WHERE project_session_id='session_01'
+    `).get() as { revision: number; generation: number };
+    const global = database.prepare("SELECT revision FROM daemon_global_state WHERE singleton=1")
+      .get() as { revision: number };
+    const intent = {
+      kind: "project-session-drain" as const,
+      projectSessionId: "session_01" as never,
+      expectedSessionRevision: session.revision,
+      expectedSessionGeneration: session.generation,
+      expectedGlobalStateRevision: global.revision,
+    };
+    const before = await ports.statePort.read(intent);
+    const request = scopedEffectRequest("drain_after_cancel", intent, stateDigest(before));
+    ports.effectPort.prepare?.(request);
+
+    await expect(ports.effectPort.dispatch(request)).resolves.toMatchObject({
+      status: "committed",
+      afterState: { lifecycleState: "quiescing", obligationsSettled: true },
+    });
   });
 
   it("rejects stale revision, generation, and wrong-session control targets before effects", async () => {
@@ -583,6 +791,168 @@ describe("production operator lifecycle ports", () => {
         expectedRevision: 3,
       },
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("binds a prepared subtree control to its exact descendants and dependency/membership revisions", async () => {
+    const { database, ports } = fixture();
+    const intent = {
+      kind: "control" as const,
+      action: "pause" as const,
+      target: {
+        kind: "subtree" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        rootTaskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+    };
+    const before = await ports.statePort.read(intent);
+    expect(before).toMatchObject({
+      kind: "control",
+      binding: {
+        projectSessionId: "session_01",
+        membershipRevision: 1,
+        runs: [{ runId: "run_01", dependencyRevision: 1 }],
+        tasks: [{ taskId: "task_01", revision: 3 }],
+      },
+    });
+    const request = scopedEffectRequest("pause_subtree_race_01", intent, stateDigest(before));
+    ports.effectPort.prepare?.(request);
+    database.exec(`
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES (
+        'run_01', 'task_02', 'authority_01', 'Late descendant', 'base_02', 'active',
+        'chair_01', 7, 1, 'chair_01'
+      );
+      INSERT INTO dependency_mutation_guards(
+        run_id, project_session_id, target_revision, expected_edge_count, expected_binding_count
+      ) VALUES ('run_01', 'session_01', 2, 1, 0);
+      UPDATE runs SET dependency_revision=2 WHERE run_id='run_01';
+      INSERT INTO task_dependencies(
+        run_id, task_id, dependency_task_id, project_session_id, dependency_revision
+      ) VALUES ('run_01', 'task_02', 'task_01', 'session_01', 2);
+      DELETE FROM dependency_mutation_guards WHERE run_id='run_01';
+      UPDATE project_sessions SET membership_revision=2, revision=revision+1
+       WHERE project_session_id='session_01';
+    `);
+
+    await expect(ports.effectPort.dispatch(request)).resolves.toMatchObject({ status: "rejected", code: "state-changed" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM operator_control_fences").get()).toEqual({ count: 0 });
+  });
+
+  it("rejects a prepared task control when its exact provider turn is replaced", async () => {
+    let adapterCalls = 0;
+    const { database, ports } = fixture({
+      capabilities: async () => { adapterCalls += 1; return { actionJournal: true, operations: ["interrupt", "lookup_action"] }; },
+      dispatch: async () => { adapterCalls += 1; return {}; },
+      lookup: async () => { adapterCalls += 1; return {}; },
+    });
+    database.exec(`
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, result_json, updated_at
+      ) VALUES (
+        'run_01', 'turn_before', 'fake', 'send_turn', 'chair_01', 2, 1,
+        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
+        '["prepared","dispatched","accepted"]', 1, 1, 0, '{"turnId":"native_before"}', ${now}
+      );
+      INSERT INTO provider_session_turn_leases(
+        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        action_id, status, created_at, updated_at
+      ) VALUES ('run_01', 'chair_01', 2, 1, 'turn_before', 'active', ${now}, ${now});
+    `);
+    const intent = {
+      kind: "control" as const,
+      action: "pause" as const,
+      target: {
+        kind: "task" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        taskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+    };
+    const before = await ports.statePort.read(intent);
+    expect(before).toMatchObject({ binding: { turns: [{ sourceActionId: "turn_before", turnId: "native_before" }] } });
+    const request = scopedEffectRequest("pause_turn_race_01", intent, stateDigest(before));
+    ports.effectPort.prepare?.(request);
+    database.exec(`
+      UPDATE provider_session_turn_leases SET status='released' WHERE action_id='turn_before';
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, result_json, updated_at
+      ) VALUES (
+        'run_01', 'turn_after', 'fake', 'send_turn', 'chair_01', 2, 2,
+        '${"e".repeat(64)}', '${"f".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
+        '["prepared","dispatched","accepted"]', 1, 1, 0, '{"turnId":"native_after"}', ${now}
+      );
+      INSERT INTO provider_session_turn_leases(
+        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        action_id, status, created_at, updated_at
+      ) VALUES ('run_01', 'chair_01', 2, 2, 'turn_after', 'active', ${now}, ${now});
+    `);
+
+    await expect(ports.effectPort.dispatch(request)).resolves.toMatchObject({ status: "rejected", code: "state-changed" });
+    expect(adapterCalls).toBe(0);
+  });
+
+  it("proves a prepared control had no external effect instead of replaying it after restart", async () => {
+    let adapterCalls = 0;
+    const { database, ports } = fixture({
+      capabilities: async () => { adapterCalls += 1; return {}; },
+      dispatch: async () => { adapterCalls += 1; return {}; },
+      lookup: async () => { adapterCalls += 1; return {}; },
+    });
+    const intent = {
+      kind: "control" as const,
+      action: "pause" as const,
+      target: {
+        kind: "task" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        taskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+    };
+    const before = await ports.statePort.read(intent);
+    const request = scopedEffectRequest("pause_prepared_crash_01", intent, stateDigest(before));
+    ports.effectPort.prepare?.(request);
+
+    await expect(ports.effectPort.dispatch({ ...request, principalGeneration: 2 }))
+      .rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+
+    await expect(ports.effectPort.observe({ ...request, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({ status: "rejected", code: "state-changed" });
+    expect(adapterCalls).toBe(0);
+    expect(database.prepare(`
+      SELECT state FROM operator_effect_custody WHERE command_id='pause_prepared_crash_01'
+    `).get()).toEqual({ state: "no-effect" });
+  });
+
+  it("admits work only for explicit active visibility states", () => {
+    for (const state of [
+      "draft", "awaiting_launch", "launching", "launch_failed", "launch_ambiguous",
+      "reconciling", "recovery_required", "quarantined",
+    ]) {
+      const { database } = fixture();
+      database.prepare("UPDATE project_sessions SET state=?, revision=revision+1 WHERE project_session_id='session_01'")
+        .run(state);
+      database.prepare("UPDATE runs SET lifecycle_state=?, revision=revision+1 WHERE run_id='run_01'").run(state);
+      expect(() => assertRunAcceptingWork(database, "run_01"), state).toThrow(/not accepting/u);
+    }
+    for (const state of ["active", "visibility_degraded"]) {
+      const { database } = fixture();
+      database.prepare("UPDATE project_sessions SET state=?, revision=revision+1 WHERE project_session_id='session_01'")
+        .run(state);
+      database.prepare("UPDATE runs SET lifecycle_state=?, revision=revision+1 WHERE run_id='run_01'").run(state);
+      expect(() => assertRunAcceptingWork(database, "run_01"), state).not.toThrow();
+    }
   });
 
   it("binds subtree, run, and session targets to their authoritative revision families", async () => {
@@ -876,8 +1246,86 @@ describe("production operator lifecycle ports", () => {
       });
   });
 
+  it("scopes same-ID lifecycle receipts by operator, project, and authority session", async () => {
+    const { database, ports } = fixture();
+    database.prepare("UPDATE tasks SET state='complete', revision=revision+1 WHERE run_id='run_01' AND task_id='task_01'").run();
+    database.exec(`
+      INSERT INTO projects(project_id, canonical_root, trust_record_digest, revision, authority_generation, created_at, updated_at)
+      VALUES ('project_02', '/project/two', '${digest}', 1, 1, ${now}, ${now});
+      INSERT INTO project_sessions(
+        project_session_id, project_id, mode, state, revision, generation, authority_ref,
+        budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+        origin_kind, origin_operator_id, created_at, updated_at
+      ) VALUES (
+        'session_02', 'project_02', 'coordinated', 'active', 2, 1, '${digest}',
+        'budget_02', 'launch-02.json', '${digest}', 1, 'operator-launch', 'operator_02', ${now}, ${now}
+      );
+      INSERT INTO runs(
+        run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
+        project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
+        authority_ref, budget_ref, dependency_revision, topology_slot
+      ) VALUES (
+        'run_02', 'chair_02', '/project/two', '.agent-run/AFAB-002', ${now},
+        'session_02', 'active', 4, 1, 'chair:run_02:1', '${digest}', 'budget_02', 1, 1
+      );
+      INSERT INTO authorities(authority_id, run_id, authority_json, authority_hash, created_at)
+      VALUES ('authority_02', 'run_02', '{}', '${"8".repeat(64)}', ${now});
+      INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_02', 'chair_02', 'authority_02', 'provider_session_02', 'ready');
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES (
+        'run_02', 'task_02', 'authority_02', 'Already settled', 'base_02', 'complete',
+        'chair_02', 4, 1, 'chair_02'
+      );
+    `);
+
+    const drain = async (scope: { operatorId: string; projectId: string; projectSessionId: string }) => {
+      const global = database.prepare("SELECT revision FROM daemon_global_state WHERE singleton=1").get() as { revision: number };
+      const intent = {
+        kind: "project-session-drain" as const,
+        projectSessionId: scope.projectSessionId as never,
+        expectedSessionRevision: 2,
+        expectedSessionGeneration: 1,
+        expectedGlobalStateRevision: global.revision,
+      };
+      const before = await ports.statePort.read(intent);
+      const request = {
+        ...scopedEffectRequest("same_lifecycle_command", intent, stateDigest(before)),
+        ...scope,
+      };
+      ports.effectPort.prepare?.(request);
+      const outcome = await ports.effectPort.dispatch(request);
+      if (outcome.status !== "committed" || outcome.effectRef === undefined) throw new Error("expected scoped drain receipt");
+      return outcome.effectRef;
+    };
+    const first = await drain({ operatorId: "operator_01", projectId: "project_01", projectSessionId: "session_01" });
+    const second = await drain({ operatorId: "operator_02", projectId: "project_02", projectSessionId: "session_02" });
+
+    expect(first).not.toEqual(second);
+    expect(database.prepare(`
+      SELECT operator_id, project_id, authority_session_id, command_id
+        FROM operator_lifecycle_receipts ORDER BY operator_id
+    `).all()).toEqual([
+      {
+        operator_id: "operator_01",
+        project_id: "project_01",
+        authority_session_id: "session_01",
+        command_id: "same_lifecycle_command",
+      },
+      {
+        operator_id: "operator_02",
+        project_id: "project_02",
+        authority_session_id: "session_02",
+        command_id: "same_lifecycle_command",
+      },
+    ]);
+  });
+
   it("fences daemon drain and stop by the exact epoch, global revision, and receipt", async () => {
     const { database } = fixture();
+    let stopRequests = 0;
     database.exec(`
       UPDATE tasks SET state='complete', revision=revision+1 WHERE run_id='run_01' AND task_id='task_01';
       UPDATE runs SET lifecycle_state='cancelled', revision=revision+1 WHERE run_id='run_01';
@@ -900,6 +1348,7 @@ describe("production operator lifecycle ports", () => {
       },
       daemonStop: {
         request: async ({ token }) => {
+          stopRequests += 1;
           const updated = database.prepare(`
             UPDATE daemon_runtime_epochs SET state='stopped', stopped_at=?, heartbeat_at=?
              WHERE instance_generation=? AND state='quiescing' AND observed_global_revision=?
@@ -914,28 +1363,54 @@ describe("production operator lifecycle ports", () => {
       expectedDaemonGeneration: 7,
       expectedGlobalStateRevision: before.revision,
     };
-    const drained = await ports.effectPort.dispatch({
-      commandId: "daemon_drain_01",
-      intent: drain,
-      intentDigest: digest as never,
-      beforeStateDigest: digest as never,
-      attemptGeneration: 1,
-    });
+    const drainBefore = await ports.statePort.read(drain);
+    const drainRequest = scopedEffectRequest("daemon_drain_01", drain, stateDigest(drainBefore));
+    ports.effectPort.prepare?.(drainRequest);
+    const drained = await ports.effectPort.dispatch(drainRequest);
     expect(drained).toMatchObject({ status: "committed", afterState: { lifecycleState: "quiescing" } });
     if (drained.status !== "committed" || drained.effectRef === undefined) throw new Error("expected daemon drain receipt");
     const afterDrain = database.prepare("SELECT revision FROM daemon_global_state WHERE singleton=1").get() as { revision: number };
-    await expect(ports.effectPort.dispatch({
-      commandId: "daemon_stop_01",
-      intent: {
-        kind: "daemon-stop",
-        expectedDaemonGeneration: 7,
-        expectedGlobalStateRevision: afterDrain.revision,
-        drainReceiptRef: drained.effectRef,
-      },
-      intentDigest: digest as never,
-      beforeStateDigest: digest as never,
-      attemptGeneration: 1,
-    })).resolves.toMatchObject({ status: "committed", afterState: { lifecycleState: "stopped" } });
+    const stopIntent = {
+      kind: "daemon-stop" as const,
+      expectedDaemonGeneration: 7,
+      expectedGlobalStateRevision: afterDrain.revision,
+      drainReceiptRef: drained.effectRef,
+    };
+    const stopBefore = await ports.statePort.read(stopIntent);
+    const stopRequest = scopedEffectRequest("daemon_stop_01", stopIntent, stateDigest(stopBefore));
+    ports.effectPort.prepare?.(stopRequest);
+    const competing = scopedEffectRequest("daemon_stop_competing", stopIntent, stateDigest(stopBefore));
+    expect(() => ports.effectPort.prepare?.(competing)).toThrow(/another operator command owns/u);
+    await expect(ports.effectPort.observe({ ...stopRequest, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({ status: "rejected", code: "state-changed" });
+    ports.effectPort.prepare?.(competing);
+    await expect(ports.effectPort.dispatch(competing)).resolves.toMatchObject({
+      status: "committed",
+      afterState: { lifecycleState: "stopped" },
+    });
+    await expect(ports.effectPort.dispatch(competing)).resolves.toMatchObject({
+      status: "committed",
+      afterState: { lifecycleState: "stopped" },
+    });
+    expect(stopRequests).toBe(1);
+    expect(database.prepare(`
+      SELECT operator_id, project_id, project_session_id, principal_generation,
+             command_id, operation, state,
+             result_correlation_digest
+        FROM operator_daemon_stop_custody WHERE command_id='daemon_stop_competing'
+    `).get()).toMatchObject({
+      operator_id: "operator_01",
+      project_id: "project_01",
+      project_session_id: "session_01",
+      principal_generation: 1,
+      command_id: "daemon_stop_competing",
+      operation: "daemon-stop",
+      state: "stopped",
+      result_correlation_digest: expect.stringMatching(/^sha256:/u),
+    });
+    expect(database.prepare(`
+      SELECT state FROM operator_daemon_stop_custody WHERE command_id='daemon_stop_01'
+    `).get()).toEqual({ state: "no-effect" });
     expect(database.prepare("SELECT state, stopped_at FROM daemon_runtime_epochs WHERE instance_generation=7").get())
       .toEqual({ state: "stopped", stopped_at: now });
   });
@@ -961,7 +1436,7 @@ describe("production operator lifecycle ports", () => {
       attemptGeneration: 1,
     })).resolves.toEqual({ status: "pending", phase: "observing" });
     expect(database.prepare("SELECT COUNT(*) AS count FROM operator_lifecycle_receipts").get()).toEqual({ count: 0 });
-    expect(() => assertRunAcceptingWork(database, "run_01")).toThrow(/daemon is draining/u);
+    expect(() => assertRunAcceptingWork(database, "run_01")).toThrow(/daemon is not accepting/u);
     await expect(ports.effectPort.dispatch({
       commandId: "daemon_stop_without_receipt",
       intent: {

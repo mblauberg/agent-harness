@@ -1419,7 +1419,7 @@ export class FabricDaemonClient {
     return { events, nextCursor: result.nextCursor };
   }
 
-  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string }): Promise<{
+  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string; taskId?: string }): Promise<{
     leaseId: string; holderAgentId: string; generation: number; status: "active" | "quarantined"; scope: string[];
   }> {
     return this.#leaseResult(await this.#call("acquireWriteLease", input));

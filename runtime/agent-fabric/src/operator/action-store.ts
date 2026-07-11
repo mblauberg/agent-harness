@@ -46,6 +46,7 @@ export type OperatorActionCurrentState =
       revision: number;
       lifecycleState: string;
       eligibleActions: readonly ("pause" | "resume" | "cancel" | "steer")[];
+      binding?: JsonValue;
     }
   | {
       kind: "project-session-launch";
@@ -88,6 +89,11 @@ export type OperatorEffectOutcome =
 
 export type OperatorEffectRequest = {
   commandId: string;
+  operatorId?: string;
+  projectId?: string;
+  projectSessionId?: string;
+  principalGeneration?: number;
+  operation?: string;
   intent: OperatorActionIntent;
   intentDigest: Sha256Digest;
   beforeStateDigest: Sha256Digest;
@@ -95,6 +101,7 @@ export type OperatorEffectRequest = {
 };
 
 export interface OperatorActionEffectPort {
+  prepare?(request: OperatorEffectRequest): void;
   dispatch(request: OperatorEffectRequest): Promise<OperatorEffectOutcome>;
   observe(request: OperatorEffectRequest & { effectRef: ArtifactRef | null }): Promise<OperatorEffectOutcome>;
 }
@@ -300,6 +307,18 @@ export class OperatorActionStore {
       evidenceRefs: envelope.preview.evidenceRefs,
       committedAt: toTimestamp(this.#clock(), "operatorActionCommit.committedAt"),
     };
+    const effectRequest: OperatorEffectRequest = {
+      commandId: request.command.commandId,
+      operatorId: context.operatorId,
+      projectId: request.projectId,
+      projectSessionId: actionSessionId(authenticated, envelope.preview.intent),
+      principalGeneration: context.principalGeneration,
+      operation: requiredOperatorActionForIntent(envelope.preview.intent),
+      intent: envelope.preview.intent,
+      intentDigest: envelope.preview.intentDigest,
+      beforeStateDigest: envelope.preview.beforeStateDigest,
+      attemptGeneration: 1,
+    };
     const prepare = this.#database.transaction((): OperatorActionReceipt | null => {
       const concurrentReplay = this.#commandReplay(
         context.operatorId,
@@ -328,6 +347,7 @@ export class OperatorActionStore {
         preparedReceipt,
         "committed",
       );
+      this.#effectPort.prepare?.(effectRequest);
       return null;
     });
     const concurrentReplay = prepare();
@@ -335,13 +355,7 @@ export class OperatorActionStore {
 
     let outcome: OperatorEffectOutcome;
     try {
-      outcome = await this.#effectPort.dispatch({
-        commandId: request.command.commandId,
-        intent: envelope.preview.intent,
-        intentDigest: envelope.preview.intentDigest,
-        beforeStateDigest: envelope.preview.beforeStateDigest,
-        attemptGeneration: 1,
-      });
+      outcome = await this.#effectPort.dispatch(effectRequest);
     } catch {
       return preparedReceipt;
     }
@@ -623,6 +637,11 @@ export class OperatorActionStore {
     try {
       outcome = await this.#effectPort.observe({
         commandId: request.targetCommandId,
+        operatorId: context.operatorId,
+        projectId: request.projectId,
+        projectSessionId: actionSessionId(authenticated, envelope.preview.intent),
+        principalGeneration: context.principalGeneration,
+        operation: requiredOperatorActionForIntent(envelope.preview.intent),
         intent: envelope.preview.intent,
         intentDigest: envelope.preview.intentDigest,
         beforeStateDigest: envelope.preview.beforeStateDigest,

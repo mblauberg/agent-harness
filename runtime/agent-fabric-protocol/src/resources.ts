@@ -15,6 +15,7 @@ import {
   type ReservationId,
   type ResourceScopeId,
   type TeamId,
+  type TaskId,
 } from "./primitives.js";
 
 export type ResourceScopeRef =
@@ -49,6 +50,7 @@ export type ResourceReservationRequest = {
   projectSessionId: ProjectSessionId;
   path: readonly ResourceScopeRef[];
   amounts: ResourceAmounts;
+  taskId?: TaskId;
   writerAdmission?: WriterAdmission;
 };
 
@@ -293,6 +295,7 @@ export function parseResourceReservationRequest(value: unknown): ResourceReserva
     "projectSessionId",
     "path",
     "amounts",
+    "taskId",
     "writerAdmission",
   ]);
   if (!Array.isArray(record.path) || record.path.length < 2) {
@@ -345,6 +348,9 @@ export function parseResourceReservationRequest(value: unknown): ResourceReserva
     projectSessionId,
     path,
     amounts: parseAmounts(record.amounts, "resourceReservation.amounts"),
+    ...(record.taskId === undefined
+      ? {}
+      : { taskId: parseIdentifier<"TaskId">(record.taskId, "resourceReservation.taskId") }),
     ...(record.writerAdmission === undefined ? {} : { writerAdmission: parseWriterAdmission(record.writerAdmission) }),
   };
 }

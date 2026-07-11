@@ -146,6 +146,7 @@ const reservationRequest = {
   commandId: "command_reserve_01",
   reservationId: "reservation_01",
   projectSessionId: "ps_01",
+  taskId: "task_01",
   path: [
     { kind: "project", scopeId: "resource_project", projectId: "project_01" },
     {

@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 
 import {
+  FABRIC_OPERATIONS,
   PROTOCOL_FEATURES,
   PROTOCOL_LIMITS,
 } from "@local/agent-fabric-protocol";
@@ -177,7 +178,18 @@ rmSync(socketPath, { force: true });
 
 const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON);
 const initializeResult = daemonInitializeResult(Object.keys(daemonAdapters));
-const pendingDaemonStops = new Map<string, QuiesceToken>();
+type PendingDaemonStop = Readonly<{
+  custodyId: string;
+  resultCorrelationDigest: string;
+  operatorId: string;
+  projectId: string;
+  projectSessionId: string;
+  principalGeneration: number;
+  commandId: string;
+  operation: "daemon-stop";
+  token: QuiesceToken;
+}>;
+const pendingDaemonStops = new Map<string, PendingDaemonStop>();
 const fabric = await openFabric({
   databasePath,
   capabilityKey,
@@ -186,14 +198,21 @@ const fabric = await openFabric({
   workspaceRoots,
   adapters: daemonAdapters,
   daemonStopPort: {
-    request: async ({ commandId, token }) => {
-      const existing = pendingDaemonStops.get(commandId);
+    request: async (request) => {
+      const existing = pendingDaemonStops.get(request.custodyId);
       if (
         existing !== undefined &&
-        (existing.daemonInstanceGeneration !== token.daemonInstanceGeneration ||
-          existing.observedGlobalStateRevision !== token.observedGlobalStateRevision)
+        (existing.resultCorrelationDigest !== request.resultCorrelationDigest ||
+          existing.operatorId !== request.operatorId ||
+          existing.projectId !== request.projectId ||
+          existing.projectSessionId !== request.projectSessionId ||
+          existing.principalGeneration !== request.principalGeneration ||
+          existing.commandId !== request.commandId ||
+          existing.operation !== request.operation ||
+          existing.token.daemonInstanceGeneration !== request.token.daemonInstanceGeneration ||
+          existing.token.observedGlobalStateRevision !== request.token.observedGlobalStateRevision)
       ) return "busy";
-      pendingDaemonStops.set(commandId, token);
+      pendingDaemonStops.set(request.custodyId, request);
       return "scheduled";
     },
   },
@@ -389,10 +408,23 @@ const servePublicConnection = (socket: Socket): void => {
         totalInFlight -= 1;
       }
     },
-    afterResponse: ({ input }) => {
+    afterResponse: ({ context, operation, input, result }) => {
+      if (operation !== FABRIC_OPERATIONS.operatorActionCommit || context.principal.kind !== "operator") return;
       const value: unknown = input;
-      if (!isRecord(value) || !isRecord(value.command) || typeof value.command.commandId !== "string") return;
-      completeQueuedDaemonStop(value.command.commandId);
+      const principal = context.principal;
+      const command = isRecord(value) ? value.command : undefined;
+      if (
+        !isRecord(command) || typeof command.commandId !== "string" ||
+        !isRecord(result) || result.commandId !== command.commandId
+      ) return;
+      const matches = [...pendingDaemonStops.values()].filter((pending) =>
+        pending.operatorId === principal.operatorId &&
+        pending.projectId === principal.projectId &&
+        pending.principalGeneration === principal.principalGeneration &&
+        pending.commandId === command.commandId &&
+        pending.operation === "daemon-stop");
+      if (matches.length !== 1) return;
+      completeQueuedDaemonStop(matches[0]!.custodyId);
     },
   });
 };
@@ -446,6 +478,8 @@ process.stdout.write(`${JSON.stringify({ ready: true })}\n`);
 let shuttingDown = false;
 const markProductionTerminal = async (
   signal: NodeJS.Signals | null,
+  state: "stopped" | "crashed" = "stopped",
+  exitCode: number | null = null,
 ): Promise<void> => {
   if (bootstrapMode !== "production-election") return;
   const paths = privateDiscoveryPaths(runtimeDirectory);
@@ -463,8 +497,8 @@ const markProductionTerminal = async (
     async () => await markPrivateDiscoveryTerminal({
       paths,
       expected,
-      state: "stopped",
-      exitCode: null,
+      state,
+      exitCode,
       signal,
     }),
   );
@@ -482,24 +516,42 @@ const markProductionTerminal = async (
 };
 
 const stopElection = new BootstrapElection({ runtimeDirectory });
-completeQueuedDaemonStop = (commandId: string): void => {
-  const token = pendingDaemonStops.get(commandId);
-  if (token === undefined || shuttingDown) return;
-  pendingDaemonStops.delete(commandId);
+completeQueuedDaemonStop = (custodyId: string): void => {
+  const pending = pendingDaemonStops.get(custodyId);
+  if (pending === undefined || shuttingDown) return;
+  pendingDaemonStops.delete(custodyId);
   setImmediate(() => {
     if (shuttingDown) return;
+    let socketClosed = false;
     void fabric.attemptDrainedStop({
-      actionId: `operator-daemon-stop:${commandId}`,
-      token,
+      actionId: `operator-daemon-stop:${custodyId}`,
+      token: pending.token,
       election: stopElection,
       closeSocket: async () => {
         await new Promise<void>((resolve) => {
-          server.close(() => resolve());
+          server.close(() => {
+            socketClosed = true;
+            resolve();
+          });
           for (const active of sockets) active.end();
         });
       },
     }).then(async (result) => {
-      if (result.state !== "stopped") return;
+      if (result.state !== "stopped") {
+        fabric.recordDaemonStopCustodyResult({
+          ...pending,
+          daemonInstanceGeneration: pending.token.daemonInstanceGeneration,
+          state: "rejected",
+          result,
+        });
+        return;
+      }
+      fabric.recordDaemonStopCustodyResult({
+        ...pending,
+        daemonInstanceGeneration: pending.token.daemonInstanceGeneration,
+        state: "stopped",
+        result,
+      });
       shuttingDown = true;
       try {
         await fabric.close();
@@ -509,7 +561,27 @@ completeQueuedDaemonStop = (commandId: string): void => {
         await markProductionTerminal(null).catch(() => undefined);
         process.exit(0);
       }
-    }).catch(() => undefined);
+    }).catch(async (error: unknown) => {
+      let failure = error;
+      try {
+        fabric.recordDaemonStopCustodyResult({
+          ...pending,
+          daemonInstanceGeneration: pending.token.daemonInstanceGeneration,
+          state: "failed",
+          result: { message: error instanceof Error ? error.message : String(error) },
+        });
+      } catch (custodyError: unknown) {
+        failure = new AggregateError([error, custodyError], "daemon stop and custody persistence both failed");
+      }
+      process.stderr.write(`operator daemon stop failed: ${failure instanceof Error ? failure.message : String(failure)}\n`);
+      if (!socketClosed) return;
+      shuttingDown = true;
+      await fabric.close();
+      rmSync(socketPath, { force: true });
+      await releaseDaemonLocks(daemonLocks);
+      await markProductionTerminal(null, "crashed", 1).catch(() => undefined);
+      process.exit(1);
+    });
   });
 };
 const shutdown = (signal: "SIGINT" | "SIGTERM"): void => {

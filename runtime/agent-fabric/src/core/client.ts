@@ -258,7 +258,7 @@ export class FabricClient {
     return this.#fabric.rotateCapability(this.#runId, this.#agentId, input);
   }
 
-  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string }): Promise<LeaseResult> {
+  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string; taskId?: string }): Promise<LeaseResult> {
     this.#authorise(FABRIC_OPERATIONS.acquireWriteLease);
     return this.#fabric.acquireWriteLease(this.#runId, this.#agentId, input);
   }

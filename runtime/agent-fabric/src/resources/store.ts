@@ -10,6 +10,7 @@ import {
   type ResourceScopeRef,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
+import { resolveTaskBindingForActiveWork } from "../operator/production-action-ports.js";
 
 import {
   ProjectFabricCoreError,
@@ -153,6 +154,7 @@ export class HierarchicalAdmissionStore {
 
   reserve(context: AuthenticatedAgentContext, value: ResourceReservationRequest): ResourceReservation {
     const request = parseResourceReservationRequest(value);
+    const requestedTaskId = (request as ResourceReservationRequest & { taskId?: string }).taskId;
     this.#assertAgentContext(context);
     if (
       request.projectSessionId !== context.projectSessionId ||
@@ -173,6 +175,12 @@ export class HierarchicalAdmissionStore {
         }
         return this.project(request.reservationId);
       }
+      const taskId = resolveTaskBindingForActiveWork(
+        this.#database,
+        context.coordinationRunId,
+        context.agentId,
+        requestedTaskId,
+      );
       this.#assertPath(request.path);
       const writer = request.writerAdmission === undefined
         ? undefined
@@ -198,12 +206,13 @@ export class HierarchicalAdmissionStore {
           reservation_id, project_session_id, coordination_run_id, leaf_scope_id,
           operation_id, actor_agent_id, state, revision, generation, identity_hash,
           path_json, amounts_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, NULL, ?, 'reserved', 1, 1, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', 1, 1, ?, ?, ?, ?, ?)
       `).run(
         request.reservationId,
         request.projectSessionId,
         context.coordinationRunId,
         leaf.scopeId,
+        taskId ?? null,
         context.agentId,
         identityHash,
         canonicalJson(request.path),
@@ -231,6 +240,13 @@ export class HierarchicalAdmissionStore {
         }
       }
       if (writer !== undefined) this.#insertWriter(request.reservationId, writer);
+      if (taskId !== undefined) {
+        this.#database.prepare(`
+          INSERT INTO task_obligation_bindings(
+            coordination_run_id, task_id, obligation_kind, obligation_id, state, created_at, updated_at
+          ) VALUES (?, ?, 'resource-reservation', ?, 'active', ?, ?)
+        `).run(context.coordinationRunId, taskId, request.reservationId, now, now);
+      }
       this.#fault("resources:reserve:after-ledger");
       return this.project(request.reservationId);
     });

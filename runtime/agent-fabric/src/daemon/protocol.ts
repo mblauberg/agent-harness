@@ -728,6 +728,7 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
         scope: stringArray(params.scope, "scope"),
         ttlMs: requiredNumber(params, "ttlMs"),
         commandId: requiredString(params, "commandId"),
+        ...(params.taskId === undefined ? {} : { taskId: requiredString(params, "taskId") }),
       });
     case "recoverWriteLease":
       return client.recoverWriteLease({

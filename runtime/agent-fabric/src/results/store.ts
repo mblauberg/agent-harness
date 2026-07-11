@@ -32,7 +32,7 @@ import {
   timestampToMillis,
   type Row,
 } from "../project-session/store-support.js";
-import { assertOperatorTaskRunnable, assertRunAcceptingWork } from "../operator/production-action-ports.js";
+import { assertRunAcceptingWork, assertTaskOperationAdmitted } from "../operator/production-action-ports.js";
 
 export type AuthenticatedIntegrationContext = Readonly<{
   integrationId: string;
@@ -234,7 +234,7 @@ export class AtomicDeliveryStore {
     const request = parseTaskCompleteWithReply(value);
     this.#assertAgentContext(context, context.projectSessionId, context.coordinationRunId);
     return this.#executeAgentCommand(context, request.commandId, request, () => {
-      assertOperatorTaskRunnable(this.#database, context.coordinationRunId, request.taskId);
+      assertTaskOperationAdmitted(this.#database, context.coordinationRunId, request.taskId);
       const pending = row(this.#database.prepare(`
         SELECT * FROM task_requests WHERE request_message_id=?
       `).get(request.requestMessageId), "task request");
@@ -381,7 +381,6 @@ export class AtomicDeliveryStore {
   claim(context: DeliveryContext, request: ResultDeliveryClaimRequest): ResultDelivery {
     return this.#transition(context, request.commandId, "claim", request, () => {
       const delivery = this.#deliveryRow(request.resultDeliveryId);
-      assertOperatorTaskRunnable(this.#database, text(delivery, "run_id"), text(delivery, "task_id"));
       this.#assertDeliveryContext(context, delivery);
       this.#assertRevision(delivery, request.expectedRevision);
       if (text(delivery, "state") !== "pending") {
@@ -739,6 +738,8 @@ export class AtomicDeliveryStore {
         }
         return parseResultDelivery(JSON.parse(text(existing, "detail_json"))) as Result;
       }
+      const delivery = this.#deliveryRow(deliveryId);
+      assertTaskOperationAdmitted(this.#database, text(delivery, "run_id"), text(delivery, "task_id"));
       const result = mutate();
       this.#database.prepare(`
         INSERT INTO result_delivery_attempts(
