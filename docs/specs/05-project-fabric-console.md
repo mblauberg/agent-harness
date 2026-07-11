@@ -1,14 +1,19 @@
 # Project Fabric Console and adaptive session orchestration
 
-Status: Approved; implementation pending fresh-session launch
-Version: 1.0
+Status: Approved; implementation in progress
+Version: 1.1
 Date: 11 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
 Design chairs: Codex with Claude Code adversarial review
 Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
-Review result: no unresolved P0-P2 on the approved revision
+Review result (v1.0): no unresolved P0-P2 on the approved revision
+
+Version 1.1 records the human's implementation clarification of 11 July 2026:
+80x24 is the default/reference acceptance viewport, not a fixed-only terminal
+size. The Console follows current terminal dimensions, reflows dynamically and
+preserves operator state across resize events.
 
 ## 1. Decision and relationship to existing specs
 
@@ -359,14 +364,27 @@ Required views are:
 - **Activity:** readable messages, decisions and lifecycle events.
 - **System:** daemon, adapters, trust, seats, expiry and degraded integrations.
 
-The TUI shall remain fully usable at 80x24 with a keyboard, visible focus and
-non-colour urgency indicators. It shall also accept mouse input inside and
-outside Herdr: click to focus/select/activate, wheel to scroll, and pointer
-actions for tabs, lists, links, buttons and split resizing where the terminal
-supports them. Mouse and keyboard actions shall use the same command,
-confirmation and audit paths; pointer input cannot bypass a consequential-action
-review. Mouse capture shall be configurable and preserve an explicit terminal
-text-selection gesture. No required information or action may be hover-only.
+The TUI shall remain fully usable at its default/reference viewport of 80x24
+with a keyboard, visible focus and non-colour urgency indicators. At other
+sizes it shall use the available rows and columns, reflow and expand or compact
+master/detail content, and recompute pointer regions without hiding required
+identity, freshness or action fields where the current geometry can display
+them. `SIGWINCH` and equivalent resize events shall preserve selected stable
+IDs, focus owner, scroll positions, input draft and pending command state;
+shrinking clamps layout and scroll safely and shall not submit, repeat or
+discard an action. Smaller-than-reference layouts may collapse panes or require
+scrolling, but shall remain bounded, retain the Detach binding and terminal
+restoration path, and show Help/Detach affordances whenever geometry permits.
+Zero, undefined and ultra-small dimensions shall enter a clipped inert state
+until a valid resize rather than allocating unboundedly or mutating Fabric.
+
+It shall also accept mouse input inside and outside Herdr: click to
+focus/select/activate, wheel to scroll, and pointer actions for tabs, lists,
+links, buttons and split resizing where the terminal supports them. Mouse and
+keyboard actions shall use the same command, confirmation and audit paths;
+pointer input cannot bypass a consequential-action review. Mouse capture shall
+be configurable and preserve an explicit terminal text-selection gesture. No
+required information or action may be hover-only.
 
 Normal message bodies shall be readable on demand; default list previews remain
 bounded and terminal-neutralised. The UI shall not suppress ordinary content
@@ -650,8 +668,12 @@ Implementation is accepted only when objective tests demonstrate:
     focus is enabled only for a contract-tested actionable integration.
 21. Scripted keyboard-only and mouse usability evaluations at 80x24 verify
     every required view and action, visible focus, non-colour urgency, click
-    targets, scrolling, resizing, configurable capture and preserved text
-    selection. Mouse activation cannot duplicate a command or bypass review. A
+    targets, scrolling, configurable capture and preserved text selection.
+    Resize sequences across smaller-than-reference, 80x24 and larger terminal
+    sizes
+    verify dynamic reflow, recomputed hit regions and preservation of focus,
+    selected IDs, scroll, drafts and pending commands. Mouse activation or a
+    resize cannot duplicate a command or bypass review. A
     versioned usability-fixture manifest covers: empty/healthy work; concurrent
     multi-run work; and consequential-gate plus degraded/stale/conflict state.
     Each fixture declares the expected top attention item and correct
@@ -701,6 +723,8 @@ Implementation is accepted only when objective tests demonstrate:
 
 ## 16. Implementation gate
 
-This spec records the human-approved product direction. Implementation remains
-pending an explicit fresh-session launch after the human reviews the final
-committed revision and prompt.
+Spec 05 v1.0 records the human-approved product direction. The direct
+instruction of 11 July 2026 launched canonical run AFAB-004 from a fresh
+context, authorised the local implementation and later clarified dynamic
+terminal resizing in v1.1. Final human acceptance remains pending; Git push,
+release, deployment and other separately gated effects remain unauthorised.
