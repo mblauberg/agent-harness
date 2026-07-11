@@ -42,6 +42,7 @@ import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
 import { renderSafePreview } from "../visibility/safe-preview.js";
 import { OperatorStore, type AuthenticatedOperatorCredential } from "../operator/store.js";
+import { OperatorProjectionStore } from "../operator/projection-store.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
 import type { PublicProtocolContext } from "../daemon/public-protocol.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
@@ -776,6 +777,7 @@ export class Fabric {
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #operatorStore: OperatorStore;
+  readonly #operatorProjections: OperatorProjectionStore;
   readonly #projectSessions: ProjectSessionStore;
   readonly #intakes: IntakeStore;
   readonly #gates: ScopedGateStore;
@@ -798,6 +800,11 @@ export class Fabric {
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
+    this.#operatorProjections = new OperatorProjectionStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
     this.#projectSessions = new ProjectSessionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
@@ -1471,6 +1478,42 @@ export class Fabric {
           };
         }
         return { status: "current", gate, readTransactionId, stateDigest };
+      }
+      case FABRIC_OPERATIONS.projectDiscover: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectDiscover];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.discover(request);
+      }
+      case FABRIC_OPERATIONS.projectionSnapshot: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionSnapshot];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.snapshot(request);
+      }
+      case FABRIC_OPERATIONS.projectionEvents: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionEvents];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.events(request);
+      }
+      case FABRIC_OPERATIONS.projectionViewPage: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionViewPage];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.viewPage(request);
+      }
+      case FABRIC_OPERATIONS.projectionDetailRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionDetailRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.detail(request);
+      }
+      case FABRIC_OPERATIONS.messageBodyRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.messageBodyRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.messageBody(request);
       }
       case FABRIC_OPERATIONS.chairTakeover: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.chairTakeover];

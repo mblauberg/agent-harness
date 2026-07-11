@@ -203,6 +203,19 @@ describe("public protocol credential routing", () => {
           },
         );
         expect(session).toMatchObject({ projectId: principal.projectId, state: "recovery_required" });
+        await expect(reopened.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.projectionSnapshot,
+          {
+            credential: { capabilityId: "cap_operator_protocol", token: "operator-protocol-secret" },
+            projectId: principal.projectId,
+            projectSessionId: projectSessionId as never,
+          },
+        )).resolves.toMatchObject({
+          schemaVersion: 1,
+          project: { value: { projectId: principal.projectId } },
+          session: { value: { projectSessionId } },
+        });
       } finally {
         await reopened.close();
       }
