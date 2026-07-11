@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolv
 
 import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
+import type { VerifiedProtocolCredential } from "@local/agent-fabric-protocol";
 
 import type {
   AuthorityInput,
@@ -1147,6 +1148,33 @@ export class Fabric {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired or revoked");
     }
     return new FabricClient(this, stringField(row, "run_id"), stringField(row, "agent_id"), sha256(token));
+  }
+
+  verifyProtocolCredential(token: string): VerifiedProtocolCredential {
+    const authenticated = this.#database.prepare(`
+      SELECT c.run_id, c.agent_id, c.principal_generation, c.expires_at, c.revoked_at,
+             a.authority_json, r.project_session_id
+        FROM capabilities c
+        JOIN agents g ON g.run_id=c.run_id AND g.agent_id=c.agent_id
+        JOIN authorities a ON a.authority_id=g.authority_id
+        JOIN runs r ON r.run_id=c.run_id
+       WHERE c.token_hash=?
+    `).get(sha256(token));
+    if (!isRow(authenticated) || authenticated.revoked_at !== null || numberField(authenticated, "expires_at") <= this.#clock()) {
+      throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired, revoked or unknown");
+    }
+    const authority = parseAuthority(stringField(authenticated, "authority_json"));
+    const denied = new Set(authority.deniedActions);
+    return {
+      principal: {
+        kind: "agent",
+        agentId: stringField(authenticated, "agent_id") as never,
+        projectSessionId: stringField(authenticated, "project_session_id") as never,
+        runId: stringField(authenticated, "run_id"),
+        principalGeneration: numberField(authenticated, "principal_generation"),
+      },
+      grantedOperations: authority.actions.filter((operation) => !denied.has(operation)),
+    };
   }
 
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {
