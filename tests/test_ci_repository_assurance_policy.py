@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+FABRIC_PACKAGE = ROOT / "runtime" / "agent-fabric" / "package.json"
 IMMUTABLE_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 
 
@@ -73,6 +75,32 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
         assert required in fabric_commands
     run_steps = [step for step in fabric_steps if "run" in step]
     assert all(step.get("working-directory") == "runtime/agent-fabric" for step in run_steps)
+
+
+def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
+    document = _workflow()
+    fabric_steps = _steps(_job(document, "fabric"))
+    node_setup = next(
+        step for step in fabric_steps if str(step.get("uses", "")).startswith("actions/setup-node@")
+    )
+    cache_paths = str(node_setup.get("with", {}).get("cache-dependency-path", "")).splitlines()
+    assert "runtime/agent-fabric/package-lock.json" in cache_paths
+    assert "runtime/agent-fabric-protocol/package-lock.json" in cache_paths
+
+    package = json.loads(FABRIC_PACKAGE.read_text(encoding="utf-8"))
+    scripts = package.get("scripts")
+    assert isinstance(scripts, dict)
+    protocol_check = scripts.get("check:protocol")
+    daemon_check = scripts.get("check")
+    assert isinstance(protocol_check, str)
+    assert "npm --prefix ../agent-fabric-protocol ci --ignore-scripts" in protocol_check
+    assert "npm --prefix ../agent-fabric-protocol run check" in protocol_check
+    assert isinstance(daemon_check, str)
+    assert daemon_check.index("npm run check:protocol") < daemon_check.index("npm run typecheck")
+
+    fabric_commands = "\n".join(str(step.get("run", "")) for step in fabric_steps)
+    assert "test ! -e ../agent-fabric-protocol/dist" in fabric_commands
+    assert "test -f ../agent-fabric-protocol/dist/index.d.ts" in fabric_commands
 
 
 def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:

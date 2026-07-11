@@ -44,7 +44,12 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: runtime/agent-fabric/package-lock.json
+          cache-dependency-path: |
+            runtime/agent-fabric/package-lock.json
+            runtime/agent-fabric-protocol/package-lock.json
+      - name: Assert protocol build starts clean
+        working-directory: runtime/agent-fabric
+        run: test ! -e ../agent-fabric-protocol/dist
       - name: Install locked fabric dependencies
         working-directory: runtime/agent-fabric
         run: npm ci
@@ -53,6 +58,9 @@ jobs:
         env:
           AGENT_FABRIC_PORTABLE_TESTS: "1"
         run: npm run check
+      - name: Verify local protocol dependency was built
+        working-directory: runtime/agent-fabric
+        run: test -f ../agent-fabric-protocol/dist/index.d.ts
       - name: Run fabric evaluation suite
         working-directory: runtime/agent-fabric
         run: npm run test:evaluation

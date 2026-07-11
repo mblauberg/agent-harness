@@ -19,7 +19,8 @@
     "test:acceptance": "vitest run tests/acceptance",
     "test:load": "vitest run tests/performance",
     "test:evaluation": "vitest run tests/evaluation",
-    "check": "npm run typecheck && npm run build && npm run test"
+    "check:protocol": "npm --prefix ../agent-fabric-protocol ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric-protocol run check",
+    "check": "npm run check:protocol && npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {
     "@local/agent-fabric-protocol": "file:../agent-fabric-protocol",
