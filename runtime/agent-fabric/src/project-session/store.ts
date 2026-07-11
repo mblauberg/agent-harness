@@ -163,17 +163,33 @@ export class ProjectSessionStore {
           );
         }
         this.#fault("session:transition");
-        this.#database.prepare(`
-          UPDATE project_sessions
-             SET state=?, revision=revision+1, updated_at=?
-           WHERE project_session_id=? AND revision=? AND generation=?
-        `).run(
-          request.transition.to,
-          this.#clock(),
-          request.projectSessionId,
-          current.revision,
-          request.expectedGeneration,
-        );
+        if (request.transition.to === "awaiting_launch") {
+          this.#database.prepare(`
+            UPDATE project_sessions
+               SET state='awaiting_launch', launch_packet_path=?, launch_packet_digest=?,
+                   revision=revision+1, updated_at=?
+             WHERE project_session_id=? AND revision=? AND generation=? AND state='draft'
+          `).run(
+            request.transition.launchPacketRef.path,
+            request.transition.launchPacketRef.digest,
+            this.#clock(),
+            request.projectSessionId,
+            current.revision,
+            request.expectedGeneration,
+          );
+        } else {
+          this.#database.prepare(`
+            UPDATE project_sessions
+               SET state=?, revision=revision+1, updated_at=?
+             WHERE project_session_id=? AND revision=? AND generation=?
+          `).run(
+            request.transition.to,
+            this.#clock(),
+            request.projectSessionId,
+            current.revision,
+            request.expectedGeneration,
+          );
+        }
         return this.getProjectSession({
           projectId: current.projectId as ProjectId,
           projectSessionId: request.projectSessionId,

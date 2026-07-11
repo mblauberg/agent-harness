@@ -131,10 +131,18 @@ describe("project-session store", () => {
       },
       projectSessionId: "session_01",
       expectedGeneration: 1,
-      transition: { to: "awaiting_launch", reason: "reviewed" },
+      transition: {
+        to: "awaiting_launch",
+        reason: "reviewed",
+        launchPacketRef: { path: "launch/reviewed-packet.json", digest: `sha256:${"b".repeat(64)}` },
+      },
     } as unknown as ProjectSessionTransitionRequest;
     const transitioned = sessions.transitionProjectSession(context, transitionRequest);
-    expect(transitioned).toMatchObject({ state: "awaiting_launch", revision: 2 });
+    expect(transitioned).toMatchObject({
+      state: "awaiting_launch",
+      revision: 2,
+      launchPacketRef: { path: "launch/reviewed-packet.json", digest: `sha256:${"b".repeat(64)}` },
+    });
 
     const publicLaunchTransition = {
       ...transitionRequest,
