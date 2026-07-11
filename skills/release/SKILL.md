@@ -10,10 +10,12 @@ owns the authority gate and evidence; runbooks and tools own mechanics.
 
 ## Entry gate
 
-Require the accepted delivery receipt, artifact digest, typed action (`deploy`,
-`publish`, `share`, `send` or `activate`), target, owner, disclosure/data policy
-and project instructions.
+Require the accepted delivery receipt, exact accepted-artifact digest, typed
+action (`deploy`, `publish`, `share`, `send` or `activate`), target-bound
+release authority, owner, disclosure/data policy and project instructions.
 Implementation acceptance is not promotion authority.
+Broad project/session authority cannot release or deploy; the promotion grant
+must bind this artifact, action, target, expiry and applicable constraints.
 
 Start new work from the canonical
 [RELEASE.template.json](templates/RELEASE.template.json). The validator accepts

@@ -15,9 +15,11 @@ and `ARCHIVE_DIR`.
 
 ## Start
 
-For substantial work, reopen the state file from disk; never trust injected
-state. Read open decisions touching the task and only relevant docs. Human
-gates remain unanswered until a human decides them.
+For substantial work, start a fresh session at the approved phase/slice
+boundary and reopen disk state; never trust injected state. Resume from the
+digest-bound handoff and read only relevant docs and open decisions. Human
+gates remain unanswered until a human decides them. Routine bounded work may
+continue while its context is healthy and inside authority.
 
 ## Checkpoint
 
@@ -38,6 +40,11 @@ Before checkpoint, load
 [context-hygiene.md](references/context-hygiene.md). Run its read-only audit
 when run directories, logs, handoffs or large agent-facing docs accumulate.
 Consolidate current state; never paste transcripts into handoffs.
+
+Provider session retention is minimal: keep only contract-required identifiers,
+generation/callback state and resumable digests. Never retain credentials or
+raw transcripts as continuity state; after compaction revalidate generation,
+expiry and ownership before reuse.
 
 ## End after changed state
 

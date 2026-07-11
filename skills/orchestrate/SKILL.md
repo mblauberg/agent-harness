@@ -9,6 +9,8 @@ description: "Use when bounded fan-out, multi-agent research, cross-family revie
 
 Portable doctrine: decompose -> waves -> reduce -> gate -> finish. The chair
 owns synthesis; workers provide isolated, decorrelated coverage.
+One chair owns each coordination run and may dynamically appoint leaders,
+form/retire teams, pair or reroute inside authority.
 
 ## Rules
 
@@ -17,8 +19,10 @@ owns synthesis; workers provide isolated, decorrelated coverage.
   worker.
 - Preflight dependencies, tool density and shared error sources. Keep
   coordination-heavy reasoning with one owner; agent count is not a target.
-- **No concurrent shared-state writes.** Partition source scopes; otherwise
-  workers are read-only or patch-only with namespaced artifacts.
+- **No concurrent shared-state writes.** Partition source scopes. With approved
+  worktree authority, writers use isolated repository-owned
+  `.worktrees/<task-agent>`; otherwise use read/patch-only workers and one
+  serial applier.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
   Pane injection is fire-and-forget steering. Without a tested callback, record
   `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded collection.
@@ -43,7 +47,8 @@ tightly coupled or unpartitionable tasks.
 2. Use **native same-session subagents** first. **Use same-family CLI only for
    auth/preflight smoke tests**, never as the primary worker substrate.
 3. Dispatch parallel read/partitioned-write waves and serial shared-state
-   waves. Paired-primary mode keeps one chair and one stage owner.
+   waves. Adjust leaders/teams only on evidence; paired-primary keeps one chair
+   and one stage owner.
 4. Reduce manifests and digests into a claim/conflict map; verify against the
    live tree before repair.
 5. Add only informative waves: narrow, repair, verify, **cross-family broad

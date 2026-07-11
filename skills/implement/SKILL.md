@@ -5,7 +5,7 @@ description: "Use for an approved software change through verified implementatio
 
 # Implement
 
-Own the software profile from approved contract to verified human handoff.
+Own the software profile from approved contract to verified handoff.
 
 ## Entry gate
 
@@ -13,27 +13,27 @@ Require:
 
 - approved scope, non-goals and acceptance criteria;
 - costly-to-reverse design decisions approved or explicitly parked;
-- build ceiling and write/external authority known;
+- build ceiling and write/external authority;
 - risk/authority profile from `config/risk-policy.json`, including the minimum
   tier, bounded paths, disclosure, secrets and external-action constraints;
 - whether stochastic/judgement-bearing behaviour requires `evaluate`.
 
-If these are missing, route to `scope`. Do not infer owner decisions.
+If missing, use `scope`; never infer owner decisions.
 
-For active service/safety impact, `mode: expedited-incident` may use a
-human-approved containment spec and parallel verification/review. It never
-waives authority or gates and must name a normal follow-up reconciliation run.
+For active service/safety impact, `mode: expedited-incident` may use an approved
+containment spec and parallel verification/review. It never waives gates or
+authority and must name a normal reconciliation run.
 
 ## Loop
 
 1. Create the single canonical `delivery-run` receipt from
    `../deliver/templates/RUN.template.json`, set profile `software`, and follow
    [run-contract.md](references/run-contract.md).
-2. Select the execution method per slice: `tdd` for new or changed observable
-   behaviour; `refactor` for approved behaviour-preserving structural work;
-   `diagnose` when root cause is unknown. Migrations may require both behaviour
-   tests and refactor equivalence evidence. Use `orchestrate` only when
-   decomposition or independent coverage helps.
+2. Keep an adaptive plan. Per slice use `tdd` for changed observable behaviour,
+   `refactor` for approved behaviour-preserving structure and `diagnose` for an
+   unknown cause. Migrations may need behaviour tests and equivalence evidence.
+   Use `orchestrate` only when decomposition or independent coverage helps;
+   revise topology/order inside authority as evidence changes.
    For a version-sensitive external interface or migration, apply
    [source grounding](references/source-grounding.md) and
    [migration compatibility](references/migration-compatibility.md).
@@ -45,10 +45,10 @@ waives authority or gates and must name a normal follow-up reconciliation run.
 5. Repair blocking findings, then repeat verification and independent review.
    Maximum two repair cycles. After that, or on scope/design drift, stop and
    return to the human or `scope` with evidence.
-6. Update owned documentation when behaviour, architecture, operations, or
-   decisions changed. For substantial and higher runs, apply `session` context
-   hygiene: refresh the recovery checkpoint, run the read-only audit, graduate
-   durable findings and classify retained/ephemeral artifacts in `RUN.json`.
+6. Update owned documentation when behaviour, architecture, operations or
+   decisions change. For substantial+ runs apply `session`: refresh the
+   recovery checkpoint, audit context, graduate durable findings and classify
+   retained/ephemeral artifacts in `RUN.json`.
 7. Validate with
    `"${AGENTS_HOME:-$HOME/.agents}/skills/deliver/scripts/validate_delivery.py" \
    .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes`.
@@ -69,7 +69,8 @@ waives authority or gates and must name a normal follow-up reconciliation run.
   missing bonus-family output does not.
 - Objective evidence outranks reviewer confidence; reviewer conclusions are
   adjudicated, not voted.
-- Micro-edits need not create `RUN.json` unless requested. Substantial
-  and higher changes do.
+- Routine minor work may continue automatically without `RUN.json` unless
+  requested. Substantial+ starts a fresh implementation session bound to
+  approved digests.
 - `awaiting_acceptance` is the successful machine-gate state. Move the
   canonical receipt to `accepted` only after explicit human acceptance.

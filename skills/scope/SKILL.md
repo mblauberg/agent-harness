@@ -17,6 +17,10 @@ actions, disclosure/secrets, external effects, expiry and approver. Only a
 human may downgrade risk. Judgement-bearing AI, ranking or heuristic behaviour
 adds an `evaluate` requirement.
 
+Preserve decision context: intake/revision, goals, constraints, alternatives,
+evidence and decided/parked branches. Revise it rather than spawning a
+competing scope thread.
+
 ## Grill
 
 Load `grill-me` and resolve purpose -> users -> constraints -> edge cases ->
@@ -68,4 +72,6 @@ without licence and redistribution authority.
 
 Before handoff confirm all branches are decided or parked, exclusions and
 failure modes are explicit, authority/risk are machine-readable, evidence is
-anchored, and a human approved the spec and one-way doors.
+anchored, and a human approved the spec and one-way doors. The execution
+handoff is digest-bound to the exact approved scope, decisions and authority;
+change creates a new revision and gate.

@@ -5,8 +5,8 @@ description: "Use after delivery, release, incident, evaluation, or a long run t
 
 # Retrospect
 
-Turn completed-cycle evidence into a better next cycle. This is the quality
-flywheel after delivery: benchmark, diagnose, propose, verify and monitor.
+Turn completed-cycle evidence into a better next cycle: benchmark, diagnose,
+propose, verify and monitor.
 Do not produce retrospective theatre or one dated log per run.
 Scale depth to risk and friction: a clean routine cycle may return `no change`;
 substantial runs, escaped defects and repeated human corrections need the full pass.
@@ -27,7 +27,8 @@ For substantial+ or repeated cycles, create
 
 - outcome and acceptance-criteria success;
 - trajectory compliance, safety and escaped defects;
-- human attention, corrections, rework and blocked time;
+- human attention, corrections, rework, gate latency, unnecessary interruption
+  and blocked time;
 - test/eval and reviewer effectiveness;
 - orchestration, model routing, delegation and tool reliability;
 - context size, compaction, handoff and artifact hygiene;
@@ -47,7 +48,8 @@ For substantial+ or repeated cycles, create
 4. **Verify**: convert representative failures into deterministic tests or
    versioned eval cases and run the regression suite before claiming improvement.
 5. **Monitor** the next comparable cycle for recurrence, regressions, cost and
-   new failure modes.
+   new failure modes. Feed supported attention and gate changes into the next
+   scope cycle instead of creating a parallel process diary.
 
 `improved` requires an authorised intervention, passing regression gate and
 enough comparable later cycles meeting predeclared target and guard metrics.

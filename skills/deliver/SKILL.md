@@ -22,7 +22,10 @@ may strengthen a profile, never weaken kernel gates silently.
 ## Lifecycle
 
 1. Create `.agent-run/<id>/RUN.json` from `templates/RUN.template.json` and
-   bind intent, design and authority by digest.
+   bind intent, design and authority by digest. When the delivery belongs to a
+   coordinated project, record its explicit project session, coordination run
+   and workstream/lead relationships; use explicit not-applicable values for
+   an independent run rather than inventing parents.
 2. Record each state transition. No state may jump an approval, evidence,
    review, acceptance or release gate.
 3. Execute through the relevant skills. Software routes execution through
@@ -55,4 +58,5 @@ explicit authority. Filesystem receipts remain truth when Herdr or another
 transport is unavailable.
 
 `implement` uses this same receipt with profile `software`; no parallel
-implementation receipt format exists.
+implementation receipt format exists. Live task or membership projections may
+link to it but never replace its canonical acceptance evidence.

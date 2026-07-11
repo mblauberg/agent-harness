@@ -10,6 +10,10 @@ spans many sessions or agents, the batons pile up and nobody holds the route.
 The work map is the effort-level view: one file per effort, updated as legs
 complete, read first on every resume.
 
+Record curated project/run/lead dependencies, outcome legs and human gates.
+The map is not live task truth: link canonical Fabric or project artifacts and
+never infer claims, completion, leases or current membership from the map.
+
 ## The map file
 
 Use the project's canonical effort file. If no owner exists, propose

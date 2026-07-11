@@ -1,0 +1,7 @@
+schema_version: 1
+target_skill: deliver
+cases:
+  - {id: s05-deliver-positive, relation: positive, prompt: "Deliver this approved agent product with its project-session, coordination-run and workstream relationships recorded.", tags: [spec05, direct], expected: {primary_skill: deliver, companion_skills: []}}
+  - {id: s05-deliver-negative, relation: negative, prompt: "Implement this approved software feature through tests, review and human acceptance.", tags: [spec05, boundary], expected: {primary_skill: implement, companion_skills: []}}
+  - {id: s05-deliver-adjacent, relation: adjacent, prompt: "Deliver the approved research outcome using bounded teams under one accountable chair.", tags: [spec05, composition], expected: {primary_skill: deliver, companion_skills: [orchestrate]}}
+  - {id: s05-deliver-portability, relation: portability, prompt: "With Console, Herdr and GitHub unavailable, deliver from project artifacts and filesystem-backed canonical receipts.", tags: [spec05, portable], adapters: {console: absent, herdr: absent, github: absent}, expected: {primary_skill: deliver, companion_skills: []}}
