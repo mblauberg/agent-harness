@@ -1,15 +1,17 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.10
+Version: 0.11
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.10 closes the review-discovered chair-bridge recovery, provider-native
-attestation evidence, MCP resource parity and duplicate lifecycle-surface gaps.
+Version 0.11 closes the review-discovered MCP bootstrap, secret-result and
+descriptor-ownership gaps. Version 0.10 closes the review-discovered
+chair-bridge recovery, provider-native attestation evidence, MCP resource parity
+and duplicate lifecycle-surface gaps.
 Version 0.9 closed the implementation-discovered current-agent MCP parity and
 launched-chair tool-surface gap. Version 0.8 closes the provider-session continuity
 attestation and live-bridge gap. Version 0.7 closed launch-custody, artifact,
@@ -669,56 +671,32 @@ Claude Code and Codex launch separate stdio MCP proxy processes. Each proxy
 connects to the same Unix socket and shared daemon. The proxy may safely start
 the daemon under a single-instance lock when it is absent.
 
-Full MCP surface, introduced by stage:
+The operation registry is the sole owner of the current MCP tool set. Every
+active agent-principal operation has an exhaustive `tool` or `none`
+classification and every `tool` entry owns one stable name. The generated
+descriptor/reference artifact, rather than a second list in this document,
+records the Stage 2-5 and Spec 05 names. V1 has exactly one descriptor per
+operation; constant-bound aliases such as a steer-only provider action or a
+release-only lifecycle action are not additional descriptors. A future variant
+projection must replace the whole-operation descriptor with a registry-declared
+exhaustive, non-overlapping set and cannot silently omit an admitted enum member.
 
-```yaml
-tools_by_stage:
-  stage_2:
-    - fabric_run_create
-    - fabric_run_status
-    - fabric_task_list
-    - fabric_agent_list
-    - fabric_receipt_list
-    - fabric_task_assign
-    - fabric_task_claim
-    - fabric_task_complete
-    - fabric_message_send
-    - fabric_message_receive
-    - fabric_message_ack
-    - fabric_artifact_publish
-    - fabric_barrier_close
-  stage_3:
-    - fabric_agent_spawn
-    - fabric_agent_attach
-    - fabric_agent_steer
-    - fabric_agent_release
-    - fabric_lifecycle_request
-    - fabric_operator_intervention
-  stage_5:
-    - fabric_team_create
-  spec_05:
-    - fabric_membership_bind
-    - fabric_intake_revise
-    - fabric_scoped_gate_create
-    - fabric_scoped_gate_check
-    - fabric_resource_reserve
-    - fabric_resource_release
-    - fabric_resource_reconcile
-    - fabric_task_request
-    - fabric_task_complete_with_reply
-    - fabric_result_delivery_claim
-    - fabric_result_delivery_consume
-    - fabric_result_delivery_retry
-    - fabric_result_delivery_reassign
-    - fabric_result_delivery_abandon
-resources:
-  - fabric://runs/{run_id}/status
-  - fabric://runs/{run_id}/tasks
-  - fabric://runs/{run_id}/agents
-  - fabric://runs/{run_id}/receipts
-```
+Run creation is not an agent operation. Legacy `createRun` remains a private
+bootstrap compatibility method, while production run creation belongs to
+operator launch custody. `fabric_run_create` is never an MCP descriptor. The
+proxy accepts only an `afc_` agent capability, initialises with
+`expectedPrincipalKind: agent` and rejects a bootstrap credential before
+advertising tools.
 
-Unshipped operations are absent rather than stubbed. Stage 2 contract tests
+The generated read descriptors additionally own these resource templates:
+
+- `fabric://runs/{run_id}/status`
+- `fabric://runs/{run_id}/tasks`
+- `fabric://runs/{run_id}/agents`
+- `fabric://runs/{run_id}/receipts`
+
+Unshipped or registry-classified `none` operations are absent rather than
+stubbed. Stage 2 contract tests
 verify resource round-trips from both MCP clients. The four URI templates are
 MCP-native convenience projections of the same generated run-status, task-list,
 agent-list and receipt-list descriptors; they are not another schema owner.
@@ -730,13 +708,31 @@ before then `fabric_barrier_close` accepts only chair-owned run or stage scope.
 MCP notifications are not assumed to reach every interactive client. Mailbox
 state and adapter delivery remain authoritative.
 
-The Spec 05 set is generated from the same closed agent-operation codecs and
-principal registry as the public protocol. The standalone MCP proxy negotiates
-the authenticated agent protocol before advertising tools; it does not retain
+The complete current set is generated from the same closed agent-operation
+codecs and principal registry as the public protocol. The standalone MCP proxy
+negotiates the authenticated agent protocol before advertising tools; it does not retain
 a second hand-written method vocabulary. Operations absent from the negotiated
 features or current authority are absent from the advertised tool list, not
 present as permissive generic RPC. Inputs and outputs are validated by the
 shared codecs before and after the daemon call.
+
+Registry classification is compile-time exhaustive. `registerAgent`,
+`rotateCapability` and any other operation whose result still contains a bearer
+secret are `none`. Spawn and attach become `tool` only with secret-free public
+result codecs and shared custody: the daemon generates the target capability,
+persists only its digest and privately hands plaintext to a bridge-provisioning
+adapter inside the stable one-effect provider action. The model-visible result
+contains agent/action/session identity plus `bridgeState` and
+`bridgeGeneration`, never the token. An adapter that cannot provision a bridge
+advertises that fact before dispatch; attach may then register a bridge-less
+mailbox/wake-up participant with `bridgeState: none`, but neither attach nor
+spawn fabricates a live Fabric tool surface. A supported retained bridge must
+complete a later provider-originated Fabric call before it is claimed active.
+
+Every model-visible result is the exact closed public result codec. Opaque
+provider output is replaced by typed contract evidence and/or a digest before
+projection; `additionalProperties: true`, raw provider JSON and copied output
+schemas are forbidden.
 
 A launched chair receives this same current, principal-scoped MCP operation
 surface through the secret-consuming provider-session bridge, plus one private
@@ -2145,9 +2141,11 @@ fabricates a human operator or approval; anything not provably closed enters
 
 ### 32.11 Current-agent MCP parity and launched-chair surface
 
-The canonical MCP descriptor set is a projection of the active agent-principal
-operation registry and its closed protocol codecs. It includes the Stage 2-5
-tools and every Spec 05 agent operation listed in section 14. A descriptor owns
+The canonical MCP descriptor set is the `tool` projection of the active
+agent-principal operation registry and its closed protocol codecs. The registry,
+not section 14 prose, is the sole membership and stable-name owner. Every active
+agent operation is explicitly classified, and adding or removing an operation
+without a projection classification fails the build. A descriptor owns
 one stable tool name, protocol operation, input codec, output codec, receipt
 renderer, optional resource-template URI and required negotiated feature. The
 run-status, task-list, agent-list and receipt-list resource templates resolve
@@ -2164,6 +2162,20 @@ principal. Provider-session bridges apply the same rule and additionally bind
 the live provider invocation to the launched session reference/generation and
 retained bridge generation. Secret handoff material is never a tool argument,
 model-visible descriptor, result, receipt or error.
+
+One V1 descriptor projects one complete operation codec. Constant-bound aliases
+are prohibited. A later exhaustive variant set may replace that descriptor only
+when every admitted discriminator value is covered exactly once, every binding
+is registry-owned and the daemon still parses and reauthorises the complete
+canonical operation. Result descriptors are exact closed codec projections;
+provider payload/result fields cannot remain open JSON at the model boundary.
+
+Spawn/attach capability issuance uses the same hash-only, prepare-before-I/O,
+dispatch-once and lookup-only custody owner as chair launch. Their public
+results are secret-free. Bridge-capable adapters consume the target credential
+only through volatile private handoff and retain the exact generation-bound
+transport; bridge-incapable attach remains explicitly `none`. No wrapper,
+calling model, MCP proxy persistence or protocol result relays a child token.
 
 The launched-chair surface shall support real coordination, not only
 attestation or mailbox probing. After attestation, a later provider-originated
@@ -2190,6 +2202,20 @@ continuity.
   later-turn current-agent Fabric call through the original retained bridge and
   records `not-run` rather than passing when login or provider access would be
   required. No test may claim that fake transport proves provider authenticity.
+- **FR-036:** Every active agent operation shall have one registry-owned MCP
+  projection classification; the generated `tool` set is complete for the
+  negotiated grant and every `none` operation is absent from all projections.
+- **FR-037:** Spawn/attach shall return no bearer secret and shall use shared
+  effect custody for any private target-bridge provisioning.
+- **NFR-021:** Bootstrap authority, plaintext capabilities, raw provider output
+  and open result schemas shall never reach an MCP descriptor, structured
+  result, text receipt, resource, error, log or persisted proxy state.
+- **AC-030:** Descriptor drift tests reject an unclassified operation, copied
+  schema, duplicate operation name, secret-bearing result, bootstrap token,
+  incomplete variant set or projection mismatch. Real-adapter/fake-provider
+  spawn and attach tests prove secret-free results, exact bridge-state honesty,
+  later-turn calls over supported retained bridges and no fabricated surface
+  for unsupported interactive attachment.
 
 ### 32.12 Chair-bridge recovery and one lifecycle mutation surface
 

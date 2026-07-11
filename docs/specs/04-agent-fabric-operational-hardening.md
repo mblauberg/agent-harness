@@ -1,14 +1,16 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.6
+Version: 1.7
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.6 closes the review-discovered bridge recovery, provider-native
-attestation evidence, resource projection and lifecycle-surface gaps. Version
+Version 1.7 closes the review-discovered MCP bootstrap, secret-result and
+descriptor-ownership gaps. Version 1.6 closes the review-discovered bridge
+recovery, provider-native attestation evidence, resource projection and
+lifecycle-surface gaps. Version
 1.5 closed the implementation-discovered current-agent MCP parity and
 retained provider-session tool-projection gap. Version 1.4 closes the provider-session continuity
 attestation and live-bridge gap. Version 1.3 closed atomic launch-custody,
@@ -699,25 +701,47 @@ duplicate local provisioning and daemon restart without blind chair respawn.
 
 One daemon-owned authenticated agent protocol is the transport authority for
 both standalone MCP proxies and retained launched-chair bridges. MCP tool
-descriptors are generated from the active agent-principal operation registry
-and the protocol's closed input/output codecs. Startup negotiates the current
-feature and operation grant before `tools/list`; a stale descriptor, missing
+descriptors are generated from the exhaustive `tool` classifications in the
+active agent-principal operation registry and the protocol's closed input/output
+codecs. The registry is the only membership/name owner; documentation and
+provider projections consume its generated artifact. Startup negotiates the
+current feature and operation grant before `tools/list`; a stale descriptor, missing
 feature or revoked generation is removed or rejected before daemon mutation.
 The legacy private method vocabulary may remain for bootstrap compatibility,
 but it cannot be the owner of the current MCP tool list or bypass public
 principal/generation checks.
 
+The standalone proxy accepts only an `afc_` agent capability and requests an
+agent principal. A bootstrap `afb_` credential is rejected before `tools/list`;
+private legacy `createRun` is never an MCP descriptor. Every active agent
+operation is classified `tool` or `none`, and the build fails for an absent or
+stale classification. V1 projects exactly one complete descriptor per operation
+and permits no constant-bound aliases. Secret-bearing `registerAgent` and
+`rotateCapability` remain `none`.
+
 Provider adapters project the same descriptors into their supported native
 tool mechanism. The Claude SDK bridge owns one in-process MCP server per live
 chair session. The Codex app-server bridge owns dynamic tools on the exact
 retained thread/connection. Both validate the provider-emitted invocation,
-closed arguments and daemon result; both retain only volatile credential and
+closed arguments and exact closed daemon result; both retain only volatile credential and
 transport state. The attestation challenge is an additional private tool and
 is not a substitute for the coordination surface. Successful launch retains
 the adapter process/connection so a later provider turn can call a normal
 Fabric tool. Release or supervisor shutdown closes it once. Unexpected loss
 before terminal launch is ambiguous; loss after activation journals provider-
 context/chair loss and fences normal delivery/turn authority.
+
+Spawn and attach use the existing custody owner rather than a parallel secret
+path. The daemon prepares the target capability hash and stable provider action
+before I/O. A bridge-capable adapter consumes plaintext once through private
+volatile handoff, journals the stable action and retains a generation-bound
+bridge; lookup alone resolves ambiguity after restart. Public protocol and MCP
+results replace the token with target identity plus `bridgeState` and
+`bridgeGeneration`. An adapter without bridge provisioning reports that closed
+capability before dispatch; attach may remain an honest bridge-less participant,
+but no surface claims provider-originated Fabric access. Raw adapter result JSON
+is never model-visible: the public codec exposes only typed contract evidence or
+its digest and has `additionalProperties: false`.
 
 The hard projection limits are 96 tools, 32 KiB canonical JSON per descriptor
 and 512 KiB for the complete descriptor set. The complete authorised set must
@@ -735,7 +759,13 @@ shared daemon while any authoritative liveness predicate remains.
 Deterministic acceptance adds:
 
 - generated descriptor parity against every active Spec 05 agent operation and
-  negative drift fixtures for an added/removed operation or feature;
+  negative drift fixtures for an added/removed/unclassified operation or feature;
+- bootstrap-credential rejection before tool advertisement; no
+  `fabric_run_create`; exhaustive `tool`/`none` classification and no copied or
+  constant-bound alias descriptors;
+- codec-wide secret scans plus spawn/attach custody tests proving secret-free
+  public/MCP results, exact bridge-state honesty, supported later-turn calls and
+  unsupported bridge absence without fabricated continuity;
 - identical tool names and closed schemas across standalone Claude/Codex MCP,
   Claude SDK MCP and Codex dynamic-tool projections;
 - point-of-use wrong-run, wrong-chair, wrong-session-generation, revoked,
