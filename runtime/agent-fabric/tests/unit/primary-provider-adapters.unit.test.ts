@@ -2,6 +2,8 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer, type Socket } from "node:net";
+import { createInterface } from "node:readline";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
@@ -33,11 +35,73 @@ const ATTESTATION_CHALLENGE = "ab".repeat(32);
 const ATTESTATION_CHALLENGE_DIGEST = chairLaunchChallengeDigest(ATTESTATION_CHALLENGE);
 
 const temporaryDirectories: string[] = [];
+const temporaryClosures: Array<() => Promise<void>> = [];
 
 async function journal(): Promise<SqliteAdapterActionJournal> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-provider-adapter-"));
   temporaryDirectories.push(directory);
   return new SqliteAdapterActionJournal(join(directory, "actions.sqlite3"));
+}
+
+async function fabricSocketFixture(): Promise<{
+  socketPath: string;
+  rpcCall: ReturnType<typeof vi.fn>;
+  drop(): Promise<void>;
+}> {
+  const directory = await mkdtemp(join(tmpdir(), "agent-fabric-chair-socket-"));
+  temporaryDirectories.push(directory);
+  const socketPath = join(directory, "fabric.sock");
+  const sockets = new Set<Socket>();
+  const rpcCall = vi.fn();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    const lines = createInterface({ input: socket, crlfDelay: Infinity });
+    lines.on("line", (line) => {
+      const request = JSON.parse(line) as { id: string; method: string };
+      if (request.method === "initialize") {
+        socket.write(`${JSON.stringify({
+          id: request.id,
+          result: {
+            protocolVersion: 1,
+            daemonVersion: "0.1.0",
+            capabilities: ["rpc"],
+            activeAdapters: [],
+            limits: {
+              maximumFrameBytes: 1_048_576,
+              maximumConnections: 32,
+              maximumInFlightPerConnection: 16,
+              maximumTotalInFlight: 128,
+              maximumClientPending: 32,
+              maximumAdapterInFlight: 8,
+              idleTimeoutMs: 300_000,
+            },
+          },
+        })}\n`);
+        return;
+      }
+      rpcCall(request.method);
+      socket.write(`${JSON.stringify({
+        id: request.id,
+        result: { contiguousWatermark: 0, acknowledgedAboveWatermark: [] },
+      })}\n`);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, resolve);
+  });
+  const drop = async (): Promise<void> => {
+    await Promise.all([...sockets].map(async (socket) => await new Promise<void>((resolve) => {
+      socket.once("close", resolve);
+      socket.destroy();
+    })));
+  };
+  temporaryClosures.push(async () => {
+    await drop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  return { socketPath, rpcCall, drop };
 }
 
 function provedChairLaunch(
@@ -76,6 +140,7 @@ function provedChairLaunch(
 }
 
 afterEach(async () => {
+  await Promise.allSettled(temporaryClosures.splice(0).map((close) => close()));
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -602,8 +667,8 @@ describe("Claude Agent SDK fabric adapter", () => {
 describe("installed Claude chair launch boundary", () => {
   it("requires a provider MCP callback and reuses the retained bridge on a later turn", async () => {
     const actionJournal = await journal();
-    const rpcCall = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
-    const rpcClose = vi.fn(async () => undefined);
+    const fabricServer = await fabricSocketFixture();
+    const rpcCall = fabricServer.rpcCall;
     let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
     let mcp: ReturnType<typeof createClaudeChairMcpBridge> | undefined;
     let queryCount = 0;
@@ -693,15 +758,13 @@ describe("installed Claude chair launch boundary", () => {
       executable: "/trusted/claude",
       query: queryFactory,
       bridgeFactory: async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
-        bridge = await createChairLaunchFabricBridge(input, {
-          connect: vi.fn(async () => ({ call: rpcCall, close: rpcClose })),
-        });
+        bridge = await createChairLaunchFabricBridge(input);
         return bridge;
       },
       mcpBridgeFactory,
     }]);
     const capability = "claude-private-capability-canary";
-    const socketPath = "/private/claude-fabric.sock";
+    const socketPath = fabricServer.socketPath;
     const adapter = createClaudeAgentSdkAdapter({
       boundary,
       journal: actionJournal,
@@ -742,13 +805,11 @@ describe("installed Claude chair launch boundary", () => {
     expect(queryInput.prompt).not.toContain(capability);
     expect(queryInput.prompt).not.toContain(socketPath);
     expect(rpcCall).toHaveBeenCalledOnce();
-    expect(rpcClose).not.toHaveBeenCalled();
     await boundary.sendTurn({ resumeReference: "claude-chair-session-1", prompt: "later work" });
     expect(directMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(mismatchedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(replayedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(rpcCall).toHaveBeenCalledTimes(2);
-    expect(rpcClose).not.toHaveBeenCalled();
     expect(mcpBridgeFactory).toHaveBeenCalledOnce();
     expect(queryClose).toHaveBeenCalledTimes(2);
     await expect(adapter.request("lookup_action", { actionId: "claude-launch-1" })).resolves.toMatchObject({
@@ -756,12 +817,12 @@ describe("installed Claude chair launch boundary", () => {
       idempotencyProven: true,
     });
     if (bridge === undefined) throw new Error("Claude bridge missing");
-    await bridge.close();
+    await fabricServer.drop();
+    await vi.waitFor(() => expect(bridge?.closed).toBe(true));
     await expect(adapter.request("lookup_action", { actionId: "claude-launch-1" })).rejects.toMatchObject({
       code: "CHAIR_BRIDGE_LOST",
     });
     await boundary.closeAll();
-    expect(rpcClose).toHaveBeenCalledOnce();
     actionJournal.close();
   });
 
@@ -878,8 +939,8 @@ describe("installed Codex chair launch boundary", () => {
   it("requires an attributed dynamic-tool callback and reuses it on a later turn", async () => {
     const actionJournal = await journal();
     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
-    const rpcCall = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
-    const rpcClose = vi.fn(async () => undefined);
+    const fabricServer = await fabricSocketFixture();
+    const rpcCall = fabricServer.rpcCall;
     let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
     let serverRequestHandler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
     const providerServerRequestIds: number[] = [];
@@ -973,14 +1034,12 @@ describe("installed Codex chair launch boundary", () => {
     const connectionFactory = vi.fn(() => connection);
     const providerContractDigest = `sha256:${"d".repeat(64)}`;
     const bridgeFactory = async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
-      bridge = await createChairLaunchFabricBridge(input, {
-        connect: vi.fn(async () => ({ call: rpcCall, close: rpcClose })),
-      });
+      bridge = await createChairLaunchFabricBridge(input);
       return bridge;
     };
     const boundary = Reflect.construct(InstalledCodexAppServerBoundary, [connectionFactory, bridgeFactory]);
     const capability = "codex-private-capability-canary";
-    const socketPath = "/private/codex-fabric.sock";
+    const socketPath = fabricServer.socketPath;
     const adapter = createCodexAppServerAdapter({
       boundary,
       journal: actionJournal,
@@ -1041,19 +1100,140 @@ describe("installed Codex chair launch boundary", () => {
     expect(rpcCall).toHaveBeenCalledTimes(2);
     expect(providerServerRequestIds).toEqual([901, 902]);
     expect(connectionFactory).toHaveBeenCalledOnce();
-    expect(rpcClose).not.toHaveBeenCalled();
     await expect(adapter.request("lookup_action", { actionId: "codex-launch-1" })).resolves.toMatchObject({
       status: "terminal",
       idempotencyProven: true,
     });
-    await connection.close();
+    await fabricServer.drop();
+    await vi.waitFor(() => expect(bridge?.closed).toBe(true));
     await expect(adapter.request("lookup_action", { actionId: "codex-launch-1" })).rejects.toMatchObject({
       code: "CHAIR_BRIDGE_LOST",
     });
     await boundary.closeAll();
-    expect(connection.close).toHaveBeenCalledTimes(2);
-    expect(rpcClose).toHaveBeenCalledOnce();
+    expect(connection.close).toHaveBeenCalledOnce();
     actionJournal.close();
+  });
+
+  it("fences a Codex chair before a 257th distinct native tuple and retains replay history", async () => {
+    let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
+    let serverRequestHandler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
+    let turnCount = 0;
+    let currentTurnId = "";
+    let connectionClosed = false;
+    let capacityError: unknown;
+    let replayError: unknown;
+    const rpcCall = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+    const connection = {
+      get closed() {
+        return connectionClosed;
+      },
+      initialize: vi.fn(async () => undefined),
+      setServerRequestHandler: vi.fn((_method: string, handler: (params: Record<string, unknown>) => Promise<unknown>) => {
+        serverRequestHandler = handler;
+      }),
+      request: vi.fn(async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "codex-capacity-thread" } };
+        if (method === "turn/start") {
+          turnCount += 1;
+          currentTurnId = `codex-capacity-turn-${turnCount}`;
+          return { turn: { id: currentTurnId, status: "inProgress" } };
+        }
+        return {
+          thread: {
+            id: "codex-capacity-thread",
+            turns: [{
+              id: currentTurnId,
+              status: "completed",
+              items: [{ type: "agentMessage", text: "capacity turn" }],
+            }],
+          },
+        };
+      }),
+      close: vi.fn(async () => {
+        connectionClosed = true;
+      }),
+      waitForNotification: vi.fn(async () => {
+        if (serverRequestHandler === undefined || bridge === undefined) throw new Error("capacity handler missing");
+        if (turnCount === 1) {
+          await serverRequestHandler({
+            arguments: { challengeResponse: bridge.challengeResponse },
+            callId: "capacity-attestation",
+            threadId: "codex-capacity-thread",
+            tool: bridge.challengeToolName,
+            turnId: currentTurnId,
+          });
+          return {
+            threadId: "codex-capacity-thread",
+            turn: { id: currentTurnId, status: "completed" },
+          };
+        }
+        for (let index = 0; index < 256; index += 1) {
+          await serverRequestHandler({
+            arguments: {},
+            callId: `capacity-call-${index}`,
+            threadId: "codex-capacity-thread",
+            tool: "fabric_get_mailbox_state",
+            turnId: currentTurnId,
+          });
+        }
+        capacityError = await serverRequestHandler({
+          arguments: {},
+          callId: "capacity-call-256",
+          threadId: "codex-capacity-thread",
+          tool: "fabric_get_mailbox_state",
+          turnId: currentTurnId,
+        }).catch((error: unknown) => error);
+        replayError = await serverRequestHandler({
+          arguments: {},
+          callId: "capacity-call-0",
+          threadId: "codex-capacity-thread",
+          tool: "fabric_get_mailbox_state",
+          turnId: currentTurnId,
+        }).catch((error: unknown) => error);
+        throw new Error("capacity-fenced provider connection");
+      }),
+    };
+    const boundary = Reflect.construct(InstalledCodexAppServerBoundary, [
+      vi.fn(() => connection),
+      async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
+        bridge = await createChairLaunchFabricBridge(input, {
+          connect: vi.fn(async () => ({
+            call: rpcCall,
+            close: vi.fn(async () => undefined),
+          })),
+        });
+        return bridge;
+      },
+    ]);
+    await boundary.launchChair({
+      actionId: "codex-capacity-launch",
+      providerAdapterId: "codex-app-server",
+      providerContractDigest: `sha256:${"8".repeat(64)}`,
+      challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "openai",
+        model: "gpt-test",
+        prompt: "begin capacity test",
+      },
+      environment: {
+        AGENT_FABRIC_CAPABILITY: "codex-capacity-capability",
+        AGENT_FABRIC_SOCKET_PATH: "/private/codex-capacity.sock",
+        AGENT_FABRIC_ATTESTATION_CHALLENGE: ATTESTATION_CHALLENGE,
+      },
+    });
+
+    await expect(boundary.sendTurn({
+      resumeReference: "codex-capacity-thread",
+      prompt: "exercise native tuple capacity",
+    })).rejects.toThrow("capacity-fenced provider connection");
+    expect(capacityError).toMatchObject({ code: "CHAIR_BRIDGE_LOST" });
+    expect(replayError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
+    expect(rpcCall).toHaveBeenCalledTimes(257);
+    expect(connectionClosed).toBe(true);
+    expect(bridge?.closed).toBe(true);
+    expect(boundary.hasLiveChairSession("codex-capacity-thread", 1)).toBe(false);
+    await boundary.closeAll();
   });
 });
 

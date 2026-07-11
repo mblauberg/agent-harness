@@ -8,11 +8,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
-      "sha256": "2e8678b7a478fce68452caf40efe3713bb2603055348efe6febe37e21cadd55a"
+      "sha256": "19508a60fe07977f082fc3fbfa5ad97b0789df9139280fddb66c91a73a331165"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js",
-      "sha256": "3eaee268261fbf1285ee1a052cb7842f0d80b37a1072b0cc314509742230d10b"
+      "sha256": "8ec1bd182c98e78ab8cb0599a21d612df942240c8e0f87592331213248d21952"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-json-rpc.js",
@@ -44,7 +44,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/transport/ndjson-rpc.js",
-      "sha256": "842d97823498d72837f4857eeba72e8492abeb55caff502249b92782476fe741"
+      "sha256": "548e575276bd77efd431f79e0a9c9db3c1b40e2a3da48f0f12be93508e433f0a"
     }
   ]
 }

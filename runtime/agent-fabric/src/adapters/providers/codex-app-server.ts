@@ -195,7 +195,6 @@ type CodexChairSession = {
   providerSessionRef: string;
   providerSessionGeneration: number;
   nativeInvocationKeys: Set<string>;
-  nativeInvocationOrder: string[];
   currentTurnId?: string;
   busy?: boolean;
 };
@@ -205,7 +204,7 @@ function consumeCodexNativeInvocation(
   threadId: string,
   turnId: string,
   callId: string,
-): void {
+): boolean {
   const key = JSON.stringify([threadId, turnId, callId]);
   if (session.nativeInvocationKeys.has(key)) {
     throw new ProviderAdapterError(
@@ -213,12 +212,9 @@ function consumeCodexNativeInvocation(
       "Codex replayed a native provider tool-call tuple",
     );
   }
+  if (session.nativeInvocationKeys.size >= 256) return false;
   session.nativeInvocationKeys.add(key);
-  session.nativeInvocationOrder.push(key);
-  if (session.nativeInvocationOrder.length > 256) {
-    const expired = session.nativeInvocationOrder.shift();
-    if (expired !== undefined) session.nativeInvocationKeys.delete(expired);
-  }
+  return true;
 }
 
 function codexChairDynamicTools(bridge: ChairLaunchFabricBridge): Record<string, unknown>[] {
@@ -312,6 +308,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     chairSession?: CodexChairSession,
     attestationToolName?: string,
   ): Promise<Record<string, unknown>> {
+    if (chairSession !== undefined) chairSession.nativeInvocationKeys.clear();
     const instruction = attestationToolName === undefined
       ? textInput(payload)
       : [{
@@ -434,7 +431,14 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
         ) {
           throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex tool call is not attributable to the active chair turn");
         }
-        consumeCodexNativeInvocation(chairSession, params.threadId, params.turnId, params.callId);
+        if (!consumeCodexNativeInvocation(chairSession, params.threadId, params.turnId, params.callId)) {
+          await bridge.close();
+          await connection?.close();
+          throw new ProviderAdapterError(
+            "CHAIR_BRIDGE_LOST",
+            "Codex native provider tool-call capacity was exceeded",
+          );
+        }
         if (params.tool === bridge.challengeToolName) {
           if (
             !isRecord(params.arguments) ||
@@ -472,7 +476,6 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
         providerSessionRef: resumeReference,
         providerSessionGeneration: 1,
         nativeInvocationKeys: new Set(),
-        nativeInvocationOrder: [],
       };
       evidence = {
         resumeReference,

@@ -136,6 +136,10 @@ export class TimedNdjsonTransport {
     return this.#initializeResult;
   }
 
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   #disconnect(): void {
     if (this.#closed) return;
     this.#closed = true;

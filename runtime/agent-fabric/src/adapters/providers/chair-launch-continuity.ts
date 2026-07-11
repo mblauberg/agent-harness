@@ -20,6 +20,7 @@ export type ChairLaunchFabricBridgeInput = ChairLaunchAttestationBinding & {
 
 export type ChairLaunchFabricBridgeDependencies = {
   connect(input: { socketPath: string; capability: string }): Promise<{
+    readonly closed?: boolean;
     call(method: string, params: Record<string, unknown>): Promise<unknown>;
     close(): Promise<void>;
   }>;
@@ -100,7 +101,7 @@ export class ChairLaunchFabricBridge {
   }
 
   get closed(): boolean {
-    return this.#closed;
+    return this.#closed || this.#transport.closed === true;
   }
 
   bindProviderSession(providerSessionRef: string, providerSessionGeneration: number): void {
@@ -118,7 +119,7 @@ export class ChairLaunchFabricBridge {
   }
 
   async attest(invocation: ChairLaunchProviderInvocation): Promise<void> {
-    if (this.#closed) throw continuityError("chair bridge is closed");
+    if (this.closed) throw continuityError("chair bridge is closed");
     if (this.#invoked) {
       throw new ProviderAdapterError("CHAIR_ATTESTATION_REPLAY", "chair attestation challenge was already invoked");
     }
@@ -149,13 +150,13 @@ export class ChairLaunchFabricBridge {
   }
 
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
-    if (this.#closed) throw continuityError("chair bridge is closed");
+    if (this.closed) throw continuityError("chair bridge is closed");
     return await this.#transport.call(method, params);
   }
 
   async result(): Promise<ChairLaunchProviderResult> {
     if (
-      this.#closed ||
+      this.closed ||
       this.#session === undefined ||
       this.#providerTurnRef === undefined ||
       this.#invocationRef === undefined
