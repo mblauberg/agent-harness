@@ -1,13 +1,14 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.4
+Version: 1.5
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.4 closes the implementation-discovered provider-session continuity
+Version 1.5 closes the implementation-discovered current-agent MCP parity and
+retained provider-session tool-projection gap. Version 1.4 closes the provider-session continuity
 attestation and live-bridge gap. Version 1.3 closed atomic launch-custody,
 recovery, secret-handoff and global provider-action identity gaps. Version 1.2
 closed the private operator bootstrap and generation-bound chair-launch
@@ -688,3 +689,52 @@ Deterministic fake-adapter and crash-injection gates shall prove:
 
 These gates also cover private/public principal separation, trust-root recheck,
 duplicate local provisioning and daemon restart without blind chair respawn.
+
+### 9.11 Schema-derived MCP and provider-session tool projection
+
+One daemon-owned authenticated agent protocol is the transport authority for
+both standalone MCP proxies and retained launched-chair bridges. MCP tool
+descriptors are generated from the active agent-principal operation registry
+and the protocol's closed input/output codecs. Startup negotiates the current
+feature and operation grant before `tools/list`; a stale descriptor, missing
+feature or revoked generation is removed or rejected before daemon mutation.
+The legacy private method vocabulary may remain for bootstrap compatibility,
+but it cannot be the owner of the current MCP tool list or bypass public
+principal/generation checks.
+
+Provider adapters project the same descriptors into their supported native
+tool mechanism. The Claude SDK bridge owns one in-process MCP server per live
+chair session. The Codex app-server bridge owns dynamic tools on the exact
+retained thread/connection. Both validate the provider-emitted invocation,
+closed arguments and daemon result; both retain only volatile credential and
+transport state. The attestation challenge is an additional private tool and
+is not a substitute for the coordination surface. Successful launch retains
+the adapter process/connection so a later provider turn can call a normal
+Fabric tool. Release or supervisor shutdown closes it once. Unexpected loss
+before terminal launch is ambiguous; loss after activation journals provider-
+context/chair loss and fences normal delivery/turn authority.
+
+The runtime shall bound tool count, descriptor and argument size, request
+duration, concurrent calls, buffered output and error detail. It shall never
+forward terminal control, credentials, raw transport failures or unvalidated
+provider output. Duplicate tool calls retain the underlying protocol command
+identity and idempotency behavior; a proxy or provider crash cannot blindly
+replay a side effect. Closing one MCP proxy or provider bridge does not stop the
+shared daemon while any authoritative liveness predicate remains.
+
+Deterministic acceptance adds:
+
+- generated descriptor parity against every active Spec 05 agent operation and
+  negative drift fixtures for an added/removed operation or feature;
+- identical tool names and closed schemas across standalone Claude/Codex MCP,
+  Claude SDK MCP and Codex dynamic-tool projections;
+- point-of-use wrong-run, wrong-chair, wrong-session-generation, revoked,
+  expired and action-insufficient rejection through every projection;
+- provider-originated attestation followed by a distinct later-turn mailbox or
+  coordination call over the same bridge, with zero wrapper self-probe path;
+- bridge/proxy crash, timeout, malformed argument/result, oversize, duplicate
+  and concurrent-call coverage without daemon loss, duplicate external effect
+  or false task/message completion; and
+- end-to-end MCP proxy and production Console/TUI dogfood against one real
+  elected daemon and canonical socket, without provider login or persistent
+  MCP registration during this implementation run.

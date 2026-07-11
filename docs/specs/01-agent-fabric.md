@@ -1,14 +1,15 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.8
+Version: 0.9
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.8 closes the implementation-discovered provider-session continuity
+Version 0.9 closes the implementation-discovered current-agent MCP parity and
+launched-chair tool-surface gap. Version 0.8 closes the provider-session continuity
 attestation and live-bridge gap. Version 0.7 closed launch-custody, artifact,
 secret-handoff and provider-action identity gaps. Version 0.6 closed the typed
 Git-read and Activity message-body binding gaps. Version 0.5 closed local
@@ -690,6 +691,21 @@ tools_by_stage:
     - fabric_operator_intervention
   stage_5:
     - fabric_team_create
+  spec_05:
+    - fabric_membership_bind
+    - fabric_intake_revise
+    - fabric_scoped_gate_create
+    - fabric_scoped_gate_check
+    - fabric_resource_reserve
+    - fabric_resource_release
+    - fabric_resource_reconcile
+    - fabric_task_request
+    - fabric_task_complete_with_reply
+    - fabric_result_delivery_claim
+    - fabric_result_delivery_consume
+    - fabric_result_delivery_retry
+    - fabric_result_delivery_reassign
+    - fabric_result_delivery_abandon
 resources:
   - fabric://runs/{run_id}/status
   - fabric://runs/{run_id}/tasks
@@ -706,6 +722,25 @@ before then `fabric_barrier_close` accepts only chair-owned run or stage scope.
 
 MCP notifications are not assumed to reach every interactive client. Mailbox
 state and adapter delivery remain authoritative.
+
+The Spec 05 set is generated from the same closed agent-operation codecs and
+principal registry as the public protocol. The standalone MCP proxy negotiates
+the authenticated agent protocol before advertising tools; it does not retain
+a second hand-written method vocabulary. Operations absent from the negotiated
+features or current authority are absent from the advertised tool list, not
+present as permissive generic RPC. Inputs and outputs are validated by the
+shared codecs before and after the daemon call.
+
+A launched chair receives this same current, principal-scoped MCP operation
+surface through the secret-consuming provider-session bridge, plus one private
+one-use attestation tool. Claude SDK MCP tools and Codex app-server dynamic
+tools may use provider-specific transport descriptions, but their Fabric names,
+schemas, authority results and receipts are generated from the same descriptors.
+The provider session must originate every tool call. The adapter wrapper may
+route and validate an attributed call but cannot invoke a Fabric operation on
+the model's behalf and report that as session activity. Later turns reuse the
+same retained bridge; a resume reference without it exposes no Fabric tools and
+follows chair-loss recovery.
 
 ## 15. Session lifecycle
 
@@ -2088,3 +2123,44 @@ Their launch packet, authority and root budget are derived without widening
 from the existing run/root authority and budget records. The migration never
 fabricates a human operator or approval; anything not provably closed enters
 `recovery_required` for explicit reconciliation.
+
+### 32.11 Current-agent MCP parity and launched-chair surface
+
+The canonical MCP descriptor set is a projection of the active agent-principal
+operation registry and its closed protocol codecs. It includes the Stage 2-5
+tools and every Spec 05 agent operation listed in section 14. A descriptor owns
+one stable tool name, protocol operation, input codec, output codec, receipt
+renderer and required negotiated feature. Standalone proxies and provider-
+session bridges import those descriptors; neither copies schemas or accepts an
+arbitrary method name.
+
+The standalone proxy authenticates once, negotiates an agent principal and
+advertises only descriptors present in the negotiated grant. Every call uses
+that connection identity and is reauthorised at the daemon. A tool argument
+cannot substitute another capability, run, chair, session generation or
+principal. Provider-session bridges apply the same rule and additionally bind
+the live provider invocation to the launched session reference/generation and
+retained bridge generation. Secret handoff material is never a tool argument,
+model-visible descriptor, result, receipt or error.
+
+The launched-chair surface shall support real coordination, not only
+attestation or mailbox probing. After attestation, a later provider-originated
+turn must successfully perform at least one schema-derived Fabric operation
+through the same retained bridge. Standalone Claude-labelled and Codex-labelled
+MCP proxies, Claude SDK in-process MCP and Codex dynamic-tool projections must
+produce schema-equivalent success and closed failure for the same authorised
+fixture. Adapter or bridge loss removes/degrades the affected surface without
+killing the daemon, acknowledging a message, completing a task or fabricating
+continuity.
+
+- **FR-033:** The current agent MCP surface shall be generated from the shared
+  principal-scoped operation registry and closed protocol codecs, and a launched
+  chair shall receive that same authorised surface through its retained bridge.
+- **NFR-018:** MCP proxies and provider-session tool projections shall expose no
+  generic arbitrary RPC, capability substitution, duplicated schema owner or
+  wrapper-originated call evidence.
+- **AC-027:** schema parity tests cover standalone Claude/Codex proxies and
+  launched Claude/Codex provider surfaces; wrong-principal, wrong-generation,
+  missing-feature, malformed input/output, wrapper self-call and bridge-loss
+  fixtures fail closed, while a provider-originated later turn performs a real
+  current-agent Fabric operation through the original retained bridge.
