@@ -50,6 +50,10 @@ import {
 } from "../operator/action-store.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
 import type { PublicProtocolContext } from "../daemon/public-protocol.js";
+import {
+  markDaemonRuntimeRunning as markRuntimeEpochRunning,
+  recoverDaemonRuntimeEpoch as recoverRuntimeEpoch,
+} from "../daemon/global-liveness.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { IntakeStore } from "../project-session/intake-store.js";
@@ -879,6 +883,23 @@ export class Fabric {
     });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
     this.#executionProfile = options.executionProfile ?? "headless";
+  }
+
+  recoverDaemonRuntimeEpoch(input: {
+    instanceGeneration: number;
+    instanceId: string;
+  }): ReturnType<typeof recoverRuntimeEpoch> {
+    return recoverRuntimeEpoch(this.#database, {
+      ...input,
+      now: this.#clock(),
+    });
+  }
+
+  markDaemonRuntimeRunning(instanceGeneration: number): ReturnType<typeof markRuntimeEpochRunning> {
+    return markRuntimeEpochRunning(this.#database, {
+      instanceGeneration,
+      now: this.#clock(),
+    });
   }
 
   #selectWorkspaceRoot(

@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 
 import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
 
@@ -92,6 +93,15 @@ describe("production daemon bootstrap wiring", () => {
     handles.push(second);
 
     expect(second.pid).toBe(first.pid);
+    const database = new Database(options.databasePath, { readonly: true, fileMustExist: true });
+    try {
+      expect(database.prepare(`
+        SELECT instance_generation, state FROM daemon_runtime_epochs
+        ORDER BY instance_generation DESC LIMIT 1
+      `).get()).toEqual({ instance_generation: 1, state: "running" });
+    } finally {
+      database.close();
+    }
     expect([
       ...await readdir(stateDirectory),
       ...await readdir(runtimeDirectory),

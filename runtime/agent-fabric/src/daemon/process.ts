@@ -127,6 +127,10 @@ const fabric = await openFabric({
   workspaceRoots,
   adapters: daemonAdapters,
 });
+fabric.recoverDaemonRuntimeEpoch({
+  instanceGeneration: daemonInstanceGeneration,
+  instanceId: `${bootstrapActionId ?? "forced-process"}:${String(process.pid)}`,
+});
 await fabric.recoverStartupState();
 const sockets = new Set<Socket>();
 let totalInFlight = 0;
@@ -333,6 +337,7 @@ await new Promise<void>((resolve, reject) => {
     resolve();
   });
 });
+fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 
 process.stdout.write(`${JSON.stringify({ ready: true })}\n`);
 
