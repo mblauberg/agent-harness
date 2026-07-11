@@ -101,11 +101,16 @@ export async function runForegroundDaemon(arguments_: string[]): Promise<void> {
         bootstrapCapability: daemon.bootstrapCapability,
       },
     );
+    const startedAt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Australia/Brisbane", dateStyle: "short", timeStyle: "medium", hourCycle: "h23",
+    }).format(new Date());
+    process.stdout.write(`agent-fabric ready pid=${daemon.pid} protocol=1 socket=${daemon.address.path} started=${startedAt} AEST (UTC+10)\n`);
     await daemon.waitForExit();
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
     await rm(discoveryPath, { force: true });
     await stop();
+    process.stdout.write("agent-fabric stopped\n");
   }
 }

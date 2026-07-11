@@ -122,7 +122,7 @@ describe("Stage 2 fabric_barrier_close contract (blocked on core closeBarrier)",
     });
     expect(closed.isError).toBe(false);
     expect(closed.structured).toMatchObject({ scope: "run", closed: true });
-    expect(closed.structured.receipt).toMatchObject({ schemaVersion: 1 });
+    expect(closed.structured.receipt).toMatchObject({ schemaVersion: 2 });
     expect(String((closed.structured.receipt as Record<string, unknown>).relativePath)).toMatch(/^fabric-receipt-[0-9a-f]{64}\.json$/u);
   });
 

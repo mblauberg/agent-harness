@@ -3,6 +3,7 @@ import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { EventsAfterResult, ObserverEvent } from "../core/contracts.js";
+import { renderSafePreview } from "./safe-preview.js";
 
 type EventSource = {
   eventsAfter(input: { cursor: number; limit: number }): Promise<EventsAfterResult>;
@@ -28,11 +29,7 @@ function isCursorState(value: unknown, runId: string): value is CursorState {
 }
 
 function renderEvent(event: ObserverEvent): string {
-  const summary = event.summary
-    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, 240);
+  const summary = renderSafePreview(event.summary, 240);
   const parts = Object.fromEntries(
     BRISBANE_TIMESTAMP.formatToParts(new Date(event.createdAt))
       .filter((part) => part.type !== "literal")

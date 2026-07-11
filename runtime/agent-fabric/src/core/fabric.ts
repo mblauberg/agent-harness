@@ -33,6 +33,7 @@ import { assessAdapterModelPolicy } from "../adapters/model-selection.js";
 import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
+import { renderSafePreview } from "../visibility/safe-preview.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
@@ -559,7 +560,7 @@ function isReceiptResult(value: unknown): value is ReceiptResult {
     isRow(value) &&
     typeof value.relativePath === "string" &&
     /^fabric-receipt-[0-9a-f]{64}\.json$/u.test(value.relativePath) &&
-    value.schemaVersion === 1 &&
+    (value.schemaVersion === 1 || value.schemaVersion === 2) &&
     typeof value.sha256 === "string"
   );
 }
@@ -3809,11 +3810,7 @@ export class Fabric {
               this.#database.prepare("SELECT kind, body FROM messages WHERE run_id = ? AND message_id = ?").get(runId, payload.messageId),
               "observer message",
             );
-            const preview = stringField(message, "body")
-              .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
-              .replace(/\s+/gu, " ")
-              .trim()
-              .slice(0, 160);
+            const preview = renderSafePreview(stringField(message, "body"), 160);
             summary = `${stringField(message, "kind")} ${actor} → ${payload.recipients.join(", ")}: ${preview}`;
           }
         }
@@ -3890,7 +3887,7 @@ export class Fabric {
     if (typeof directoryValue !== "string") {
       throw new FabricError("NOT_FOUND", "run has no project receipt directory");
     }
-    const receipt = this.#database.transaction(() => projectFabricReceipt(this.#database, runId, this.#clock()))();
+    const receipt = this.#database.transaction(() => projectFabricReceipt(this.#database, runId))();
     assertFabricReceiptSchema(receipt);
     const bytes = `${JSON.stringify(receipt, null, 2)}\n`;
     mkdirSync(directoryValue, { recursive: true, mode: 0o700 });
@@ -3898,7 +3895,7 @@ export class Fabric {
     const relativePath = `fabric-receipt-${digest}.json`;
     writeFileSync(join(directoryValue, relativePath), bytes, { encoding: "utf8", mode: 0o600 });
     writeFileSync(join(directoryValue, "fabric-receipt.json"), bytes, { encoding: "utf8", mode: 0o600 });
-    const result: ReceiptResult = { relativePath, schemaVersion: 1, sha256: digest };
+    const result: ReceiptResult = { relativePath, schemaVersion: 2, sha256: digest };
     this.#database.transaction(() => {
         this.#database
           .prepare(

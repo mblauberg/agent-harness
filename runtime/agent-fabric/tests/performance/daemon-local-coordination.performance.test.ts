@@ -15,6 +15,8 @@ describe("Stage 1 local coordination performance", () => {
     const clients: Array<{ close(): Promise<void> }> = [];
     const recipientIds = ["peer"];
     try {
+      // Bootstrap is setup-only authority, not one of the 32 active fabric seats.
+      await fixture.bootstrap.close();
       for (let index = 0; index < 30; index += 1) {
         const agentId = `worker-${index}`;
         const authority = await fixture.chair.delegateAuthority({

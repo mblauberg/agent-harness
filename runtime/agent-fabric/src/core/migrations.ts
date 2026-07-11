@@ -3,10 +3,13 @@ import { existsSync, readFileSync } from "node:fs";
 
 import type Database from "better-sqlite3";
 
+import { preflightAdditiveInvariants } from "../persistence/invariants.js";
+
 export type Migration = {
   version: number;
   name: string;
   sql: string;
+  preflight?: (database: Database.Database) => void;
 };
 
 export type MigrationErrorCode =
@@ -30,7 +33,7 @@ type MigrationRow = {
   checksum: string | null;
 };
 
-const defaultMigrationFiles = ["0001-core.sql", "0002-observer-event-sequence.sql"] as const;
+const defaultMigrationFiles = ["0001-core.sql", "0002-observer-event-sequence.sql", "0003-integrity-and-query-plans.sql"] as const;
 
 function loadDefaultMigrations(): Migration[] {
   return defaultMigrationFiles.map((filename, index) => {
@@ -46,6 +49,7 @@ function loadDefaultMigrations(): Migration[] {
       version: index + 1,
       name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
       sql: readFileSync(migrationUrl, "utf8"),
+      ...(index === 2 ? { preflight: preflightAdditiveInvariants } : {}),
     };
   });
 }
@@ -158,6 +162,7 @@ export function applyMigrations(
     const { pragmas, body } = splitConnectionPragmas(migration.sql);
     if (pragmas.length > 0) database.exec(pragmas);
     const applyOne = database.transaction(() => {
+      migration.preflight?.(database);
       database.exec(body);
       database
         .prepare(`

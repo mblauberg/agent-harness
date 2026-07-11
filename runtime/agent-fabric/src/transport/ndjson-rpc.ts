@@ -1,9 +1,16 @@
 import { connect as connectSocket, type Socket } from "node:net";
-import { createInterface, type Interface } from "node:readline";
 
 import { v7 as uuidv7 } from "uuid";
 
-import { isDaemonResponse, type DaemonResponse } from "../daemon/protocol.js";
+import {
+  FABRIC_DAEMON_VERSION,
+  FABRIC_PROTOCOL_VERSION,
+  isDaemonInitializeResult,
+  isDaemonResponse,
+  type DaemonInitializeResult,
+  type DaemonResponse,
+} from "../daemon/protocol.js";
+import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "./bounded-ndjson.js";
 
 type Pending = {
   resolve(value: unknown): void;
@@ -44,18 +51,31 @@ function positiveTimeout(value: number | undefined, fallback: number, label: str
 
 export class TimedNdjsonTransport {
   readonly #socket: Socket;
-  readonly #lines: Interface;
+  readonly #reader: BoundedNdjsonReader;
+  readonly #writer: BoundedNdjsonWriter;
   readonly #capability: string;
   readonly #requestTimeoutMs: number;
   readonly #pending = new Map<string, Pending>();
+  #initializeResult: DaemonInitializeResult | undefined;
+  #terminalError: Error | undefined;
   #closed = false;
 
   private constructor(socket: Socket, capability: string, requestTimeoutMs: number) {
     this.#socket = socket;
     this.#capability = capability;
     this.#requestTimeoutMs = requestTimeoutMs;
-    this.#lines = createInterface({ input: socket, crlfDelay: Infinity });
-    this.#lines.on("line", (line) => this.#receive(line));
+    this.#writer = new BoundedNdjsonWriter(socket, {
+      maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+      maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumClientPending,
+    });
+    this.#reader = new BoundedNdjsonReader(socket, {
+      maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+      onFrame: (line) => this.#receive(line),
+      onError: (error) => {
+        this.#terminalError = new FabricRemoteError("DAEMON_PROTOCOL_INVALID", error.message);
+        socket.destroy();
+      },
+    });
     socket.on("error", () => this.#disconnect());
     socket.on("close", () => this.#disconnect());
   }
@@ -90,14 +110,37 @@ export class TimedNdjsonTransport {
       socket.once("connect", onConnect);
       socket.once("error", onError);
     });
-    return new TimedNdjsonTransport(socket, options.capability, requestTimeoutMs);
+    const transport = new TimedNdjsonTransport(socket, options.capability, requestTimeoutMs);
+    try {
+      const initialized = await transport.#callInternal("initialize", {
+        protocolVersion: FABRIC_PROTOCOL_VERSION,
+        client: { name: "agent-fabric", version: FABRIC_DAEMON_VERSION },
+        capabilities: ["rpc"],
+      });
+      if (!isDaemonInitializeResult(initialized)) {
+        throw new FabricRemoteError("DAEMON_PROTOCOL_MISMATCH", "daemon initialize response is incompatible");
+      }
+      transport.#initializeResult = initialized;
+      return transport;
+    } catch (error: unknown) {
+      transport.#terminalError = error instanceof Error ? error : new Error(String(error));
+      socket.destroy();
+      throw error;
+    }
+  }
+
+  get initializeResult(): DaemonInitializeResult {
+    if (this.#initializeResult === undefined) {
+      throw new FabricRemoteError("DAEMON_NOT_INITIALIZED", "daemon transport is not initialized");
+    }
+    return this.#initializeResult;
   }
 
   #disconnect(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#lines.close();
-    this.#rejectPending(new FabricRemoteError("DAEMON_DISCONNECTED", "daemon connection closed"));
+    this.#reader.close();
+    this.#rejectPending(this.#terminalError ?? new FabricRemoteError("DAEMON_DISCONNECTED", "daemon connection closed"));
   }
 
   #rejectPending(error: Error): void {
@@ -115,7 +158,12 @@ export class TimedNdjsonTransport {
       if (!isDaemonResponse(value)) throw new Error("invalid daemon response");
       response = value;
     } catch (error: unknown) {
-      this.#rejectPending(error instanceof Error ? error : new Error(String(error)));
+      this.#terminalError = new FabricRemoteError(
+        "DAEMON_PROTOCOL_INVALID",
+        error instanceof Error ? error.message : String(error),
+      );
+      this.#rejectPending(this.#terminalError);
+      this.#socket.destroy();
       return;
     }
     const pending = this.#pending.get(response.id);
@@ -130,8 +178,24 @@ export class TimedNdjsonTransport {
   }
 
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (this.#initializeResult === undefined) {
+      throw new FabricRemoteError("DAEMON_NOT_INITIALIZED", "daemon transport is not initialized");
+    }
+    if (method === "initialize") {
+      throw new FabricRemoteError("DAEMON_ALREADY_INITIALIZED", "daemon transport is already initialized");
+    }
+    return await this.#callInternal(method, params);
+  }
+
+  async #callInternal(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (this.#closed) {
       throw new FabricRemoteError("DAEMON_DISCONNECTED", "daemon connection is closed");
+    }
+    if (this.#pending.size >= FABRIC_PROTOCOL_LIMITS.maximumClientPending) {
+      throw new FabricRemoteError(
+        "DAEMON_CLIENT_OVERLOADED",
+        `daemon client has ${String(FABRIC_PROTOCOL_LIMITS.maximumClientPending)} pending calls`,
+      );
     }
     const id = uuidv7();
     const result = new Promise<unknown>((resolve, reject) => {
@@ -141,17 +205,16 @@ export class TimedNdjsonTransport {
       }, this.#requestTimeoutMs);
       this.#pending.set(id, { resolve, reject, timeout });
     });
-    this.#socket.write(
-      `${JSON.stringify({ id, capability: this.#capability, method, params })}\n`,
-      (error?: Error | null) => {
-        if (error === undefined || error === null) return;
-        const pending = this.#pending.get(id);
-        if (pending === undefined) return;
+    try {
+      await this.#writer.write({ id, capability: this.#capability, method, params });
+    } catch (error: unknown) {
+      const pending = this.#pending.get(id);
+      if (pending !== undefined) {
         this.#pending.delete(id);
         clearTimeout(pending.timeout);
-        pending.reject(error);
-      },
-    );
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
     return result;
   }
 

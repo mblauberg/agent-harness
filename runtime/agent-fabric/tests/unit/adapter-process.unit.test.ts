@@ -70,6 +70,19 @@ describe("AdapterProcessTransport", () => {
     expect(processExists(pid)).toBe(false);
   });
 
+  it("rejects more than eight in-flight adapter calls without dispatching them", async () => {
+    const transport = fixture("never-reply", 5_000);
+    const pending = Array.from(
+      { length: 8 },
+      () => transport.request("capabilities", {}).catch((error: unknown) => error),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await expect(transport.request("capabilities", {})).rejects.toMatchObject({ code: "ADAPTER_OVERLOADED" });
+    await transport.close();
+    await Promise.allSettled(pending);
+  });
+
   it("supports AbortSignal and cleans up the child", async () => {
     const transport = fixture("never-reply", 5_000);
     const pid = transport.pid;

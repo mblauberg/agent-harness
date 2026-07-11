@@ -1,0 +1,138 @@
+import Database from "better-sqlite3";
+import { readFileSync } from "node:fs";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { applyMigrations, type Migration } from "../../src/core/migrations.ts";
+import { PersistenceInvariantError, preflightAdditiveInvariants } from "../../src/persistence/invariants.ts";
+
+const openDatabases: Database.Database[] = [];
+const migration = (version: number, filename: string): Migration => ({
+  version,
+  name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
+  sql: readFileSync(new URL(`../../migrations/${filename}`, import.meta.url), "utf8"),
+});
+
+afterEach(() => {
+  for (const database of openDatabases.splice(0)) database.close();
+});
+
+describe("additive persistence invariants", () => {
+  it("preflights legacy rows transactionally before installing migration 3", () => {
+    const database = new Database(":memory:");
+    openDatabases.push(database);
+    const first = migration(1, "0001-core.sql");
+    const second = migration(2, "0002-observer-event-sequence.sql");
+    applyMigrations(database, [first, second]);
+    database.prepare("INSERT INTO runs VALUES ('run-a','chair','/tmp',NULL,1)").run();
+    database.prepare("INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','hash',1)").run();
+    database.prepare("INSERT INTO agents VALUES ('run-a','chair',NULL,'authority-a',NULL,'invalid-state')").run();
+    const third = { ...migration(3, "0003-integrity-and-query-plans.sql"), preflight: preflightAdditiveInvariants };
+
+    expect(() => applyMigrations(database, [first, second, third])).toThrowError(
+      expect.objectContaining<Partial<PersistenceInvariantError>>({ code: "PERSISTENCE_INVARIANT_VIOLATION" }),
+    );
+    expect(database.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='agents_values_insert'").get()).toBeUndefined();
+  });
+
+  it("rejects invalid critical values and cross-run references", () => {
+    const database = new Database(":memory:");
+    openDatabases.push(database);
+    applyMigrations(database);
+    database.exec(`
+      INSERT INTO runs VALUES ('run-a','chair-a','/tmp/a',NULL,1);
+      INSERT INTO runs VALUES ('run-b','chair-b','/tmp/b',NULL,1);
+      INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','a',1);
+      INSERT INTO authorities VALUES ('authority-b','run-b',NULL,'{}','b',1);
+      INSERT INTO agents VALUES ('run-a','chair-a',NULL,'authority-a',NULL,'ready');
+      INSERT INTO agents VALUES ('run-b','chair-b',NULL,'authority-b',NULL,'ready');
+    `);
+
+    expect(() => database.prepare("UPDATE agents SET lifecycle='invented' WHERE run_id='run-a'").run()).toThrow(/INVARIANT_agents_lifecycle/u);
+    expect(() => database.prepare("INSERT INTO tasks VALUES ('run-a','task-x','authority-b','x','base','ready',NULL,0,0,'chair-a')").run()).toThrow(/INVARIANT_tasks_authority_same_run/u);
+    expect(() => database.prepare("INSERT INTO messages VALUES ('message-x','run-a','chair-a','dedupe','hash','{}','event','body',2,'conversation',NULL,NULL,0,NULL,1)").run()).toThrow(/INVARIANT_messages_requires_ack/u);
+  });
+
+  it("fires every additive insert and update invariant trigger", () => {
+    const cases = [
+      ["INVARIANT_agents_lifecycle", "INSERT INTO agents VALUES ('run-a','bad',NULL,'authority-a',NULL,'bad')", "UPDATE agents SET lifecycle='bad' WHERE agent_id='worker-a'"],
+      ["INVARIANT_agents_authority_same_run", "INSERT INTO agents VALUES ('run-a','bad',NULL,'authority-b',NULL,'ready')", "UPDATE agents SET authority_id='authority-b' WHERE agent_id='worker-a'"],
+      ["INVARIANT_agents_parent_same_run", "INSERT INTO agents VALUES ('run-a','bad','chair-b','authority-a',NULL,'ready')", "UPDATE agents SET parent_agent_id='chair-b' WHERE agent_id='worker-a'"],
+      ["INVARIANT_authorities_parent_same_run", "INSERT INTO authorities VALUES ('authority-x','run-a','authority-b','{}','x',1)", "UPDATE authorities SET parent_authority_id='authority-b' WHERE authority_id='authority-child'"],
+      ["INVARIANT_tasks_values", "INSERT INTO tasks VALUES ('run-a','task-x','authority-a','x','b','bad',NULL,0,0,'chair-a')", "UPDATE tasks SET state='bad' WHERE task_id='task-a'"],
+      ["INVARIANT_tasks_authority_same_run", "INSERT INTO tasks VALUES ('run-a','task-x','authority-b','x','b','ready',NULL,0,0,'chair-a')", "UPDATE tasks SET authority_id='authority-b' WHERE task_id='task-a'"],
+      ["INVARIANT_tasks_owner_same_run", "INSERT INTO tasks VALUES ('run-a','task-x','authority-a','x','b','ready','chair-b',0,0,'chair-a')", "UPDATE tasks SET owner_agent_id='chair-b' WHERE task_id='task-a'"],
+      ["INVARIANT_tasks_creator_same_run", "INSERT INTO tasks VALUES ('run-a','task-x','authority-a','x','b','ready',NULL,0,0,'chair-b')", "UPDATE tasks SET created_by='chair-b' WHERE task_id='task-a'"],
+      ["INVARIANT_messages_requires_ack", "INSERT INTO messages VALUES ('message-x','run-a','chair-a','dx','h','{}','event','b',2,'c',NULL,NULL,0,NULL,1)", "UPDATE messages SET requires_ack=2 WHERE message_id='message-a'"],
+      ["INVARIANT_messages_sender_same_run", "INSERT INTO messages VALUES ('message-x','run-a','chair-b','dx','h','{}','event','b',1,'c',NULL,NULL,0,NULL,1)", "UPDATE messages SET sender_id='chair-b' WHERE message_id='message-a'"],
+      ["INVARIANT_messages_reply_same_run", "INSERT INTO messages VALUES ('message-x','run-a','chair-a','dx','h','{}','event','b',1,'c','message-b',NULL,0,NULL,1)", "UPDATE messages SET reply_to_message_id='message-b' WHERE message_id='message-a'"],
+      ["INVARIANT_deliveries_values", "INSERT INTO deliveries VALUES ('delivery-x','message-a','run-a','worker-a',0,'ready',0,NULL,NULL,NULL,NULL)", "UPDATE deliveries SET mailbox_sequence=0 WHERE delivery_id='delivery-a'"],
+      ["INVARIANT_deliveries_message_same_run", "INSERT INTO deliveries VALUES ('delivery-x','message-b','run-a','worker-a',2,'ready',0,NULL,NULL,NULL,NULL)", "UPDATE deliveries SET message_id='message-b' WHERE delivery_id='delivery-a'"],
+      ["INVARIANT_deliveries_recipient_same_run", "INSERT INTO deliveries VALUES ('delivery-x','message-a','run-a','chair-b',2,'ready',0,NULL,NULL,NULL,NULL)", "UPDATE deliveries SET recipient_id='chair-b' WHERE delivery_id='delivery-a'"],
+      ["INVARIANT_leases_values", "INSERT INTO leases VALUES ('lease-x','run-a','other','worker-a',1,'active',9,1)", "UPDATE leases SET kind='other' WHERE lease_id='lease-a'"],
+      ["INVARIANT_leases_holder_same_run", "INSERT INTO leases VALUES ('lease-x','run-a','write','chair-b',1,'active',9,1)", "UPDATE leases SET holder_agent_id='chair-b' WHERE lease_id='lease-a'"],
+      ["INVARIANT_provider_actions_values", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','worker-a',1,1,'i','p','{}','bad','[]',0,0,0,NULL,1)", "UPDATE provider_actions SET status='bad' WHERE action_id='action-a'"],
+      ["INVARIANT_provider_actions_target_same_run", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','chair-b',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1)", "UPDATE provider_actions SET target_agent_id='chair-b' WHERE action_id='action-a'"],
+      ["INVARIANT_authority_budget_boolean", "INSERT INTO authority_budget VALUES ('authority-a','other',1,0,0,2)", "UPDATE authority_budget SET usage_unknown=2 WHERE authority_id='authority-a'"],
+      ["INVARIANT_capabilities_generation", "INSERT INTO capabilities VALUES ('token-x','run-a','worker-a',0,9,NULL)", "UPDATE capabilities SET principal_generation=0 WHERE token_hash='token-a'"],
+      ["INVARIANT_provider_state_generation", "INSERT INTO provider_state VALUES ('run-a','chair-a',0,NULL,NULL)", "UPDATE provider_state SET provider_session_generation=0 WHERE agent_id='worker-a'"],
+      ["INVARIANT_events_actor_same_run", "INSERT INTO events VALUES ('event-x','run-a','x','chair-b','{}',2)", "UPDATE events SET actor_agent_id='chair-b' WHERE event_id='event-a'"],
+      ["INVARIANT_barriers_state", "INSERT INTO barriers VALUES ('run-a','stage','x','open',NULL,NULL)", "UPDATE barriers SET state='open' WHERE run_id='run-a'"],
+      ["INVARIANT_teams_values", "INSERT INTO teams VALUES ('run-a','team-x',NULL,0,'chair-a','chair-a',NULL,'task-a','authority-a','budget-a','active',1,NULL,1)", "UPDATE teams SET depth=0 WHERE team_id='team-a'"],
+      ["INVARIANT_budgets_state", "INSERT INTO budgets VALUES ('run-a','budget-x',NULL,'team-a','chair-a','bad','{}',1)", "UPDATE budgets SET state='bad' WHERE budget_id='budget-a'"],
+      ["INVARIANT_budget_dimensions_values", "INSERT INTO budget_dimensions VALUES ('run-a','budget-a','other',1,2,0,0,0)", "UPDATE budget_dimensions SET reserved=20 WHERE budget_id='budget-a'"],
+      ["INVARIANT_objective_check_status", "INSERT INTO task_objective_checks VALUES ('run-a','task-a','check-x','bad',NULL)", "UPDATE task_objective_checks SET status='bad' WHERE check_id='check-a'"],
+      ["INVARIANT_human_gate_status", "INSERT INTO task_human_gates VALUES ('run-a','task-a','gate-x','bad',NULL)", "UPDATE task_human_gates SET status='bad' WHERE gate_id='gate-a'"],
+    ] as const;
+
+    for (const [code, invalidInsert, invalidUpdate] of cases) {
+      const database = new Database(":memory:");
+      try {
+        applyMigrations(database);
+        database.exec(`
+          INSERT INTO runs VALUES ('run-a','chair-a','/tmp/a',NULL,1);
+          INSERT INTO runs VALUES ('run-b','chair-b','/tmp/b',NULL,1);
+          INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','a',1);
+          INSERT INTO authorities VALUES ('authority-b','run-b',NULL,'{}','b',1);
+          INSERT INTO authorities VALUES ('authority-child','run-a','authority-a','{}','c',1);
+          INSERT INTO agents VALUES ('run-a','chair-a',NULL,'authority-a',NULL,'ready');
+          INSERT INTO agents VALUES ('run-a','worker-a','chair-a','authority-a',NULL,'ready');
+          INSERT INTO agents VALUES ('run-b','chair-b',NULL,'authority-b',NULL,'ready');
+          INSERT INTO authority_budget VALUES ('authority-a','turns',10,0,0,0);
+          INSERT INTO tasks VALUES ('run-a','task-a','authority-a','x','b','ready','worker-a',0,0,'chair-a');
+          INSERT INTO messages VALUES ('message-a','run-a','chair-a','da','h','{}','event','b',1,'c',NULL,NULL,0,NULL,1);
+          INSERT INTO messages VALUES ('message-b','run-b','chair-b','db','h','{}','event','b',1,'c',NULL,NULL,0,NULL,1);
+          INSERT INTO deliveries VALUES ('delivery-a','message-a','run-a','worker-a',1,'ready',0,NULL,NULL,NULL,NULL);
+          INSERT INTO leases VALUES ('lease-a','run-a','write','worker-a',1,'active',9,1);
+          INSERT INTO capabilities VALUES ('token-a','run-a','worker-a',1,9,NULL);
+          INSERT INTO provider_state VALUES ('run-a','worker-a',1,NULL,NULL);
+          INSERT INTO provider_actions VALUES ('run-a','action-a','a','turn','worker-a',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1);
+          INSERT INTO events VALUES ('event-a','run-a','x','worker-a','{}',1);
+          INSERT INTO barriers VALUES ('run-a','run','','closed',1,'hash');
+          INSERT INTO teams VALUES ('run-a','team-a',NULL,1,'chair-a','chair-a',NULL,'task-a','authority-a','budget-a','active',1,NULL,1);
+          INSERT INTO budgets VALUES ('run-a','budget-a',NULL,'team-a','chair-a','active','{}',1);
+          INSERT INTO budget_dimensions VALUES ('run-a','budget-a','turns',10,0,0,0,0);
+          INSERT INTO task_objective_checks VALUES ('run-a','task-a','check-a','pending',NULL);
+          INSERT INTO task_human_gates VALUES ('run-a','task-a','gate-a','pending',NULL);
+        `);
+        expect(() => database.exec(invalidInsert), `${code} insert`).toThrow(new RegExp(code, "u"));
+        expect(() => database.exec(invalidUpdate), `${code} update`).toThrow(new RegExp(code, "u"));
+      } finally { database.close(); }
+    }
+  });
+
+  it("selects the focused indexes for hot-path predicates", () => {
+    const database = new Database(":memory:");
+    openDatabases.push(database);
+    applyMigrations(database);
+    const plan = (sql: string): string => database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((row) => String((row as { detail: string }).detail)).join("\n");
+
+    expect(plan("SELECT * FROM deliveries WHERE run_id='r' AND recipient_id='a' AND state='ready' ORDER BY mailbox_sequence")).toContain("deliveries_ready_mailbox");
+    expect(plan("SELECT * FROM tasks WHERE run_id='r' AND state='active'")).toContain("tasks_by_state");
+    expect(plan("SELECT * FROM tasks WHERE run_id='r' AND owner_agent_id='a' AND state='active'")).toContain("tasks_by_owner");
+    expect(plan("SELECT * FROM leases WHERE status='active' AND expires_at<=1")).toContain("leases_by_expiry");
+    expect(plan("SELECT * FROM provider_actions WHERE run_id='r' AND status IN ('prepared','dispatched','ambiguous') ORDER BY updated_at")).toContain("provider_actions_unresolved");
+    expect(plan("SELECT e.* FROM observer_event_sequence s JOIN events e ON e.event_id=s.event_id WHERE e.run_id='r' AND s.sequence>1 ORDER BY s.sequence")).toMatch(/observer_event_sequence|events_by_run_cursor/u);
+  });
+});

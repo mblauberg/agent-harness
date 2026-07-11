@@ -23,7 +23,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
       wrapper_entrypoint_sha256: "b0dc5b625acbe8781d7cc7776d1871148c34026575c7dc83904be78b78851116"
       wrapper_manifest: "config/adapter-manifests/claude-agent-sdk.json"
-      wrapper_manifest_sha256: "cd4b0b87d637eee9a0dcc13a99e6162f16c84d265ac9b952335453d8c52d84b4"
+      wrapper_manifest_sha256: "6de228ec59dfe5e3c30756d0ce0a0e313b91b7dc79efe692a03f76ed181d8ded"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
@@ -62,7 +62,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js"
       wrapper_entrypoint_sha256: "99ce2a69be689bd81439c16381111626e944a49f46210fed09fc39e78a5a48df"
       wrapper_manifest: "config/adapter-manifests/codex-app-server.json"
-      wrapper_manifest_sha256: "2e2ab836bae7d316c55cdf0ec06726cd8d7f1d66a473b6eee55c60f9b0c3999b"
+      wrapper_manifest_sha256: "b01117c4bd3048b276adedd8c231c5e3a95b1a75427fe0c66239ab7648f1f22d"
     contract:
       adapter_version: 1
       protocol: codex-app-server
@@ -135,7 +135,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/pi-rpc.js"
       wrapper_entrypoint_sha256: "ba2b2b57496879c48821a57452039515a93bfea1f7587d33ddffe689fed8129e"
       wrapper_manifest: "config/adapter-manifests/pi-rpc.json"
-      wrapper_manifest_sha256: "9982d0dc24990f07e357e446d6c51b2073a469cae34e97bd78f9fa52517f4ee2"
+      wrapper_manifest_sha256: "93084e6fb65292f353b8bf3fad9766deab026f307cb8b931e9d85489713a62f2"
     contract:
       adapter_version: 1
       protocol: pi-jsonl-rpc
@@ -182,7 +182,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/agy.js"
       wrapper_entrypoint_sha256: "0f58ad2745da7cffb9ff30ac6f8bd65e060ce2212cb1a16c1682ba9b6f0adf96"
       wrapper_manifest: "config/adapter-manifests/agy.json"
-      wrapper_manifest_sha256: "eae1029d77fb6791a10f46ab99aa571e942d807811816fa71cf5f16b613f308d"
+      wrapper_manifest_sha256: "02c9faa1a9bf3a3cf001ae40dedab6dcde7ec9d7e9cd14f59506e39fa9bc0b3b"
     contract:
       adapter_version: 1
       protocol: agy-headless-cli
@@ -220,7 +220,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/cursor-agent.js"
       wrapper_entrypoint_sha256: "3b5894b8d902fdc5fe1a2707b9f04f6bc00efb836266ef48566d6d722daaf8e2"
       wrapper_manifest: "config/adapter-manifests/cursor-agent.json"
-      wrapper_manifest_sha256: "068168ca36449435dcb3f5a16af70d39ead442b9b34d03eb9945ce3d623e1e81"
+      wrapper_manifest_sha256: "08b3c2d5350401430f34de6f565989c6a88deccd3d6cc29f853c680fac503c9c"
     contract:
       adapter_version: 1
       protocol: cursor-agent-stream-json-cli
@@ -259,7 +259,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/kiro-acp.js"
       wrapper_entrypoint_sha256: "c7c1c3f242312f5e1812ae6b32f015260c38b92c6466856dc89b644985e41c39"
       wrapper_manifest: "config/adapter-manifests/kiro-acp.json"
-      wrapper_manifest_sha256: "7480137bdc59e15e35eeed739c5059b5fb632a513357bc87179fd750243bd86b"
+      wrapper_manifest_sha256: "888a256a127d32742f8f476cb419b0c89334d461e7e3c172640bf4e964f18278"
     contract:
       adapter_version: 1
       protocol: agent-client-protocol

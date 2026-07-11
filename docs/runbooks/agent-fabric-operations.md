@@ -37,16 +37,13 @@ Then verify the selected compatibility entries against the current executable/sc
 
 ## Current local installation
 
-The current project-scoped seat roster is:
+Read workstation-specific run, roster, expiry, adapter and socket state from
+the machine interface. Do not copy it into this runbook:
 
-- project: `${AGENTS_HOME:-$HOME/.agents}`
-- project key: `5ae9d33e8601daeba039a34c`
-- run: `project-5ae9d33e8601daeba039a34c-a43bfdc81b81b192`
-- chair: Codex
-- peers: Agy, Claude Code, Cursor and Kiro
-- seat expiry: `2026-08-10T03:17:58.000Z`
-- socket: `~/.local/state/agent-harness/fabric/runtime/fabric-v1.sock`
-- seat directory: `~/.local/state/agent-harness/fabric/seats/5ae9d33e8601daeba039a34c/`
+```sh
+scripts/agent-fabric status --json --project "$PWD"
+scripts/agent-fabric doctor --json
+```
 
 Each client registry contains only the proxy command, socket path, fabric state
 directory, seat and client label:
@@ -84,9 +81,11 @@ env AGENT_FABRIC_RUNTIME_DIRECTORY="$HOME/.local/state/agent-harness/fabric/runt
   --agents-home "$HOME/.agents"
 ```
 
-There is deliberately no login item or background auto-start service yet. Keep
-the Herdr daemon pane open while registered clients use the fabric. If it
-stops, restart the command above before reconnecting clients. A second daemon
+There is deliberately no login item or background auto-start service yet. The
+healthy foreground daemon is intentionally quiet, so its dedicated
+`infrastructure` pane normally appears blank. Reuse that one pane; do not open
+another on restart. If it stops, restart the command above in the existing pane
+before reconnecting clients. A second daemon
 for the same socket or the same SQLite database fails closed. The socket lock
 prevents unlink takeover; the database lock prevents two startup-recovery
 owners from serving one durable store through different sockets.
@@ -163,9 +162,9 @@ Run transport-only checks independently of provider execution:
 
 ```sh
 cd runtime/agent-fabric
-AGENT_FABRIC_PROJECT_KEY=5ae9d33e8601daeba039a34c \
+AGENT_FABRIC_PROJECT_KEY='<from status --json>' \
   node smoke/registered-mcp-health.mjs ../..
-AGENT_FABRIC_PROJECT_KEY=5ae9d33e8601daeba039a34c \
+AGENT_FABRIC_PROJECT_KEY='<from status --json>' \
   node smoke/registered-mcp-roundtrip.mjs ../..
 ```
 
@@ -210,6 +209,23 @@ the old immutable run for audit and reconciliation.
 - Provider effects use stable action IDs. Ambiguous effects are looked up or quarantined; they are not silently replayed.
 - Interactive pane/TUI loss suspends the principal and freezes delivery until explicit reattach/rotation.
 - Agents request compact or rotate with a revision-bound checkpoint. The lead closes stage/run barriers only after tasks, evidence, messages, leases, provider actions, handoffs and gates reconcile.
+
+## Retention and archive
+
+Retention is report-only. It never deletes data:
+
+```sh
+scripts/agent-fabric retention status
+scripts/agent-fabric retention preview
+scripts/agent-fabric retention archive \
+  --run-id '<terminal run id>' \
+  --output "$HOME/.local/state/agent-harness/fabric/archives"
+```
+
+Archive requires a terminal, non-quarantined run with a verified exported
+receipt. It copies that immutable coordination receipt and a hash-bound
+manifest without modifying the source database or run directory. There is no
+retention `apply` command.
 
 ## Receipt and shutdown
 

@@ -9,6 +9,9 @@ import { runEventObserver } from "./event-observer.js";
 import { mcpSeatPath, provisionMcpSeats } from "./mcp-provision.js";
 import { provisionObserverCredential } from "./observer-provision.js";
 import { resolveFabricPaths } from "./paths.js";
+import { runRetentionCli } from "./retention.js";
+import { fabricDoctor, fabricStatus } from "./status.js";
+import { runWorkspaceTrust } from "./workspace-trust.js";
 
 function option(arguments_: string[], name: string): string | undefined {
   const index = arguments_.indexOf(name);
@@ -76,6 +79,16 @@ async function verifyReceipt(arguments_: string[]): Promise<void> {
 }
 
 async function main(arguments_: string[]): Promise<void> {
+  if (arguments_[0] === "status") {
+    process.stdout.write(`${JSON.stringify(await fabricStatus(arguments_.slice(1), resolveFabricPaths()), null, 2)}\n`);
+    return;
+  }
+  if (arguments_[0] === "doctor") {
+    const output = await fabricDoctor(arguments_.slice(1), resolveFabricPaths());
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    if (output.healthy !== true) process.exitCode = 1;
+    return;
+  }
   if (arguments_[0] === "inspect") {
     inspect(arguments_.slice(1));
     return;
@@ -110,8 +123,18 @@ async function main(arguments_: string[]): Promise<void> {
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
   }
+  if (arguments_[0] === "workspace") {
+    const output = await runWorkspaceTrust(arguments_.slice(1), resolveFabricPaths());
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    return;
+  }
+  if (arguments_[0] === "retention") {
+    const output = await runRetentionCli(arguments_.slice(1), resolveFabricPaths().databasePath);
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    return;
+  }
   throw new Error(
-    "usage: agent-fabric inspect [--database PATH] [--json] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | mcp provision --project PATH --chair SEAT --seats SEAT,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
+    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--json] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | mcp provision --project PATH --chair SEAT --seats SEAT,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
   );
 }
 

@@ -31,6 +31,6 @@ Deliver [Spec 03](../specs/03-agent-fabric-activation.md): safely activate all m
 
 - 11 July 2026 Codex: activation authority received; native and Fable audits found real boundary prerequisites, so staged hardening began before configuration promotion.
 - 11 July 2026 Codex: Claude/Haiku, Codex/GPT-5.4-mini, Agy/Gemini 3.1 Pro, Cursor/Composer 2.5 and Kiro/DeepSeek 3.2 passed real read-only spawn/turn/release smokes.
-- 11 July 2026 Codex: old run closed with a receipt, the five-seat generation renewed atomically to `project-5ae9d33e8601daeba039a34c-a43bfdc81b81b192`, health and two-way smokes passed, and the explicit observer authority/pane started.
+- 11 July 2026 Codex: old run closed with a receipt, the five-seat generation renewed atomically, health and two-way smokes passed, and the explicit observer authority/pane started. Machine-specific IDs and expiry are available through `agent-fabric status --json`.
 - 11 July 2026 Codex/Fable/native reviewers: closed adapter activation, Kiro confinement/recovery, observer authority, router rollback, Codex notification and Agy session-identity defects. Final reviews are clean at P0-P2.
 - 11 July 2026 final gate: runtime 91 files/323 tests, whole harness 314 tests, held-out routing 18/18, evaluation 13/13, load 1/1 and production dependency audit zero vulnerabilities. All five provider smokes verified pinned executable/wrapper/manifest digests, exact output and an unchanged isolated workspace.

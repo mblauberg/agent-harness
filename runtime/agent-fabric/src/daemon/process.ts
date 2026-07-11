@@ -1,12 +1,31 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
-import { createInterface } from "node:readline";
 
 import { openFabric } from "../index.js";
-import { createRunInput, dispatchClientMethod, isDaemonRequest } from "./protocol.js";
+import {
+  createRunInput,
+  daemonInitializeParams,
+  daemonInitializeResult,
+  dispatchClientMethod,
+  FABRIC_PROTOCOL_VERSION,
+  isDaemonRequest,
+  isRecord,
+  type DaemonRequest,
+} from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
 import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "./client.js";
+import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../transport/bounded-ndjson.js";
+
+class DaemonProtocolError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "DaemonProtocolError";
+    this.code = code;
+  }
+}
 
 function secretEqual(left: string, right: string): boolean {
   const leftDigest = createHash("sha256").update(left).digest();
@@ -71,49 +90,160 @@ try {
 }
 rmSync(socketPath, { force: true });
 
+const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON);
+const initializeResult = daemonInitializeResult(Object.keys(daemonAdapters));
 const fabric = await openFabric({
   databasePath,
   capabilityKey,
   executionProfile,
   maximumConcurrentProviderTurns,
   workspaceRoots,
-  adapters: parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON),
+  adapters: daemonAdapters,
 });
 await fabric.recoverStartupState();
 const sockets = new Set<Socket>();
+let totalInFlight = 0;
 const server = createServer((socket) => {
+  const writer = new BoundedNdjsonWriter(socket, {
+    maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+    maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumInFlightPerConnection,
+  });
+  if (sockets.size >= FABRIC_PROTOCOL_LIMITS.maximumConnections) {
+    void writer.write({
+      id: "connection",
+      error: {
+        name: "DaemonProtocolError",
+        code: "DAEMON_CONNECTION_LIMIT",
+        message: `daemon accepts at most ${String(FABRIC_PROTOCOL_LIMITS.maximumConnections)} connections`,
+      },
+    }).finally(() => socket.end());
+    return;
+  }
   sockets.add(socket);
   socket.once("close", () => sockets.delete(socket));
-  const lines = createInterface({ input: socket, crlfDelay: Infinity });
-  lines.on("line", (line) => {
-    void (async () => {
-      let id = "unknown";
-      try {
-        const parsed: unknown = JSON.parse(line);
-        if (!isDaemonRequest(parsed)) {
-          throw new TypeError("invalid daemon request");
-        }
-        id = parsed.id;
-        const result =
-          secretEqual(parsed.capability, bootstrapCapability)
-            ? parsed.method === "createRun"
-              ? await fabric.createRun(createRunInput(parsed.params))
-              : (() => {
-                  throw new TypeError("bootstrap capability may only create a run");
-                })()
-            : await dispatchClientMethod(fabric.connect(parsed.capability), parsed.method, parsed.params);
-        socket.write(`${JSON.stringify({ id, result: result === undefined ? null : result })}\n`);
-      } catch (error: unknown) {
-        const name = error instanceof Error ? error.name : "Error";
-        const message = error instanceof Error ? error.message : String(error);
-        const code =
-          typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-            ? error.code
-            : "DAEMON_REQUEST_FAILED";
-        socket.write(`${JSON.stringify({ id, error: { name, code, message } })}\n`);
+  let connectionInFlight = 0;
+  let initializedCapability: string | undefined;
+  let initializationComplete = false;
+
+  const respond = async (
+    id: string,
+    operation: () => Promise<unknown>,
+    onSuccess?: () => void,
+  ): Promise<void> => {
+    try {
+      const result = await operation();
+      await writer.write({ id, result: result === undefined ? null : result });
+      onSuccess?.();
+    } catch (error: unknown) {
+      const name = error instanceof Error ? error.name : "Error";
+      const message = error instanceof Error ? error.message : String(error);
+      const code =
+        typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+          ? error.code
+          : "DAEMON_REQUEST_FAILED";
+      await writer.write({ id, error: { name, code, message } }).catch(() => socket.destroy());
+    } finally {
+      connectionInFlight -= 1;
+      totalInFlight -= 1;
+    }
+  };
+
+  const dispatch = async (request: DaemonRequest): Promise<unknown> => {
+    if (request.method === "initialize") {
+      if (initializedCapability !== undefined) {
+        throw new DaemonProtocolError("DAEMON_ALREADY_INITIALIZED", "daemon connection is already initialized");
       }
-    })();
+      const initialize = daemonInitializeParams(request.params);
+      if (initialize.protocolVersion !== FABRIC_PROTOCOL_VERSION) {
+        throw new DaemonProtocolError(
+          "DAEMON_PROTOCOL_UNSUPPORTED",
+          `daemon protocol ${String(initialize.protocolVersion)} is unsupported`,
+        );
+      }
+      initializedCapability = request.capability;
+      return initializeResult;
+    }
+    if (!initializationComplete || initializedCapability === undefined) {
+      throw new DaemonProtocolError("DAEMON_NOT_INITIALIZED", "initialize must succeed before daemon commands");
+    }
+    if (!secretEqual(request.capability, initializedCapability)) {
+      throw new DaemonProtocolError(
+        "DAEMON_CAPABILITY_MISMATCH",
+        "daemon capability cannot change after initialization",
+      );
+    }
+    return secretEqual(request.capability, bootstrapCapability)
+      ? request.method === "createRun"
+        ? await fabric.createRun(createRunInput(request.params))
+        : (() => {
+            throw new DaemonProtocolError("BOOTSTRAP_SCOPE_VIOLATION", "bootstrap capability may only create a run");
+          })()
+      : await dispatchClientMethod(fabric.connect(request.capability), request.method, request.params);
+  };
+
+  const reader = new BoundedNdjsonReader(socket, {
+    maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+    idleTimeoutMs: FABRIC_PROTOCOL_LIMITS.idleTimeoutMs,
+    onIdle: () => socket.destroy(),
+    onError: (error) => {
+      void writer.write({ id: "unknown", error: { name: error.name, code: error.code, message: error.message } })
+        .finally(() => socket.destroy());
+    },
+    onFrame: (line) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch (cause: unknown) {
+        void writer.write({
+          id: "unknown",
+          error: {
+            name: "DaemonProtocolError",
+            code: "DAEMON_PROTOCOL_INVALID",
+            message: cause instanceof Error ? cause.message : "malformed daemon JSON",
+          },
+        }).catch(() => socket.destroy());
+        return;
+      }
+      const id = isRecord(parsed) && typeof parsed.id === "string" ? parsed.id : "unknown";
+      if (!isDaemonRequest(parsed)) {
+        void writer.write({
+          id,
+          error: { name: "DaemonProtocolError", code: "DAEMON_PROTOCOL_INVALID", message: "invalid daemon request" },
+        }).catch(() => socket.destroy());
+        return;
+      }
+      if (connectionInFlight >= FABRIC_PROTOCOL_LIMITS.maximumInFlightPerConnection) {
+        void writer.write({
+          id,
+          error: {
+            name: "DaemonProtocolError",
+            code: "DAEMON_CONNECTION_OVERLOADED",
+            message: `connection permits ${String(FABRIC_PROTOCOL_LIMITS.maximumInFlightPerConnection)} in-flight commands`,
+          },
+        }).catch(() => socket.destroy());
+        return;
+      }
+      if (totalInFlight >= FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight) {
+        void writer.write({
+          id,
+          error: {
+            name: "DaemonProtocolError",
+            code: "DAEMON_OVERLOADED",
+            message: `daemon permits ${String(FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight)} in-flight commands`,
+          },
+        }).catch(() => socket.destroy());
+        return;
+      }
+      connectionInFlight += 1;
+      totalInFlight += 1;
+      void respond(
+        id,
+        () => dispatch(parsed),
+        parsed.method === "initialize" ? () => { initializationComplete = true; } : undefined,
+      );
+    },
   });
+  socket.once("close", () => reader.close());
 });
 
 await new Promise<void>((resolve, reject) => {

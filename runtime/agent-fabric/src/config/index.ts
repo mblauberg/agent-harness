@@ -269,6 +269,7 @@ export async function loadFabricConfig(options: {
   projectPath?: string;
   runPath?: string;
   agentsHome?: string;
+  additionalWorkspaceRoots?: string[];
 }): Promise<ResolvedFabricConfig> {
   const globalConfig = expandTrustedWorkspaceRoots(
     await validateDocument(await parseDocument(options.globalPath), "global"),
@@ -297,6 +298,10 @@ export async function loadFabricConfig(options: {
     workspaceRoots: (trustedConfig.workspaceRoots ?? []).map(canonicalConfigPath),
     maximumConcurrentProviderTurns: trustedConfig.limits?.maximumConcurrentProviderTurns ?? 8,
   };
+  state.workspaceRoots = [...new Set([
+    ...state.workspaceRoots,
+    ...(options.additionalWorkspaceRoots ?? []).map(canonicalConfigPath),
+  ])].sort();
 
   for (const [layer, path] of [
     ["project", options.projectPath],

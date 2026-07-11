@@ -12,7 +12,7 @@ import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
 import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
 import { FabricRemoteError, TimedNdjsonTransport } from "../transport/ndjson-rpc.js";
-import { isRecord } from "./protocol.js";
+import { isRecord, type DaemonInitializeResult } from "./protocol.js";
 import { composeDaemonConfiguration } from "./composition.js";
 
 export { FabricRemoteError } from "../transport/ndjson-rpc.js";
@@ -419,6 +419,10 @@ export class FabricDaemonClient {
 
   static async connect(socketPath: string, capability: string): Promise<FabricDaemonClient> {
     return new FabricDaemonClient(await TimedNdjsonTransport.connect({ socketPath, capability }));
+  }
+
+  get initializeResult(): DaemonInitializeResult {
+    return this.#transport.initializeResult;
   }
 
   async #call(method: string, params: Record<string, unknown>): Promise<unknown> {

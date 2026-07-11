@@ -152,4 +152,22 @@ describe("runtime configuration schema validation", () => {
       code: "CONFIG_WIDENING_FORBIDDEN",
     });
   });
+
+  it("admits machine roots before project and run layers narrow the combined maximum", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-runtime-machine-root-"));
+    const portableRoot = join(root, "portable");
+    const machineRoot = join(root, "machine");
+    const narrowed = join(machineRoot, "project");
+    await Promise.all([mkdir(portableRoot, { recursive: true }), mkdir(narrowed, { recursive: true })]);
+    const globalPath = join(root, "global.yaml");
+    const projectPath = join(root, "project.yaml");
+    await writeJson(globalPath, validGlobal(portableRoot));
+    await writeJson(projectPath, { schemaVersion: 1, workspaceRoots: [narrowed] });
+
+    await expect(loadFabricConfig({
+      globalPath,
+      projectPath,
+      additionalWorkspaceRoots: [machineRoot],
+    })).resolves.toMatchObject({ workspaceRoots: [await realpath(narrowed)] });
+  });
 });

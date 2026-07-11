@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
+import { canonicalFabricReceipt, isJsonValue, type JsonValue } from "./canonical.js";
+
 type Row = Record<string, unknown>;
 
 function row(value: unknown): Row {
@@ -29,7 +31,7 @@ function observedAt(value: unknown): string {
 
 export type FabricReceipt = ReturnType<typeof projectFabricReceipt>;
 
-export function projectFabricReceipt(database: Database.Database, runId: string, now: number) {
+export function projectFabricReceipt(database: Database.Database, runId: string) {
   const run = row(database.prepare("SELECT chair_agent_id FROM runs WHERE run_id = ?").get(runId));
   const chairAgentId = string(run.chair_agent_id);
   const count = (table: "agents" | "tasks" | "messages" | "deliveries" | "leases" | "events"): number =>
@@ -69,7 +71,7 @@ export function projectFabricReceipt(database: Database.Database, runId: string,
     };
   });
   const chair = agents.find((agent) => agent.agentId === chairAgentId);
-  const stageOwners = database.prepare("SELECT task_id, owner_agent_id, state, revision, owner_lease_generation FROM tasks WHERE run_id = ? AND owner_agent_id IS NOT NULL ORDER BY task_id").all(runId).map((value) => {
+  const taskOwners = database.prepare("SELECT task_id, owner_agent_id, state, revision, owner_lease_generation FROM tasks WHERE run_id = ? AND owner_agent_id IS NOT NULL ORDER BY task_id").all(runId).map((value) => {
     const item = row(value);
     return { taskId: string(item.task_id), ownerAgentId: string(item.owner_agent_id), state: string(item.state), revision: number(item.revision), ownerLeaseGeneration: number(item.owner_lease_generation) };
   });
@@ -83,6 +85,16 @@ export function projectFabricReceipt(database: Database.Database, runId: string,
     return { kind: "write" as const, leaseId: string(item.lease_id), holderAgentId: string(item.holder_agent_id), generation: number(item.generation), status: string(item.status), expiresAt: observedAt(item.expires_at), scope };
   });
   const deliveryCount = (predicate: string): number => number(row(database.prepare(`SELECT COUNT(*) AS count FROM deliveries WHERE run_id = ? AND ${predicate}`).get(runId)).count);
+  const deliveryCounts = {
+    ready: deliveryCount("state = 'ready'"),
+    claimed: deliveryCount("state = 'claimed'"),
+    acknowledged: deliveryCount("state = 'acknowledged'"),
+    abandoned: deliveryCount("state = 'abandoned'"),
+    expired: deliveryCount("state = 'expired'"),
+  };
+  if (Object.values(deliveryCounts).reduce((total, value) => total + value, 0) !== count("deliveries")) {
+    throw new Error("receipt projection encountered an unknown delivery state");
+  }
   const objectiveChecks = database.prepare("SELECT task_id, check_id, status, evidence FROM task_objective_checks WHERE run_id = ? ORDER BY task_id, check_id").all(runId).map((value) => {
     const item = row(value);
     return { taskId: string(item.task_id), checkId: string(item.check_id), status: string(item.status), evidence: typeof item.evidence === "string" ? item.evidence : null };
@@ -104,7 +116,7 @@ export function projectFabricReceipt(database: Database.Database, runId: string,
   `).all(runId).map((value) => {
     const item = row(value);
     const receipt: unknown = JSON.parse(string(item.receipt_json));
-    if (typeof receipt !== "object" || receipt === null || Array.isArray(receipt)) {
+    if (!isJsonValue(receipt) || typeof receipt !== "object" || receipt === null || Array.isArray(receipt)) {
       throw new Error("stored model routing receipt is invalid");
     }
     return {
@@ -134,27 +146,35 @@ export function projectFabricReceipt(database: Database.Database, runId: string,
     };
   });
   const metadata = database.prepare("SELECT execution_profile FROM run_metadata WHERE run_id = ?").get(runId);
-  return {
-    schemaVersion: 1,
+  const watermarkValue = database.prepare(
+    "SELECT event_id, created_at FROM events WHERE run_id = ? ORDER BY created_at DESC, event_id DESC LIMIT 1",
+  ).get(runId);
+  const watermark = rowOrUndefined(watermarkValue);
+  const committedState: { [key: string]: JsonValue } = {
+    schemaVersion: 2,
     runId,
     chair: { agentId: chairAgentId, adapterId: chair?.adapterId ?? null },
-    observedAt: new Date(now).toISOString(),
-    stageOwners,
+    taskOwners,
     agents,
     executionProfile: typeof rowOrUndefined(metadata)?.execution_profile === "string" ? string(row(metadata).execution_profile) : "unconfigured",
     directInputProvenance,
     modelRoutingReceipts,
     taskAndWriteLeases: [...taskLeases, ...writeLeases],
-    messagesSentReceivedAbandoned: {
-      sent: count("messages"), delivered: count("deliveries"), acknowledged: deliveryCount("state = 'acknowledged'"), abandoned: deliveryCount("state = 'abandoned'"), expired: deliveryCount("state = 'expired'"),
+    messageAndDeliveryCounts: {
+      messages: count("messages"),
+      deliveries: deliveryCounts,
     },
     objectiveChecks,
     crossFamilyReviews,
     providerFailuresAndSubstitutions,
     operatorInterventions: interventions,
     compactionsAndRotations,
-    counts: { agents: count("agents"), tasks: count("tasks"), messages: count("messages"), deliveries: count("deliveries"), leases: count("leases"), events: count("events") },
+    eventWatermark: watermark === undefined
+      ? null
+      : { eventId: string(watermark.event_id), createdAt: observedAt(watermark.created_at) },
+    counts: { agents: count("agents"), tasks: count("tasks"), messages: count("messages"), leases: count("leases"), events: count("events") },
   };
+  return canonicalFabricReceipt(committedState);
 }
 
 function rowOrUndefined(value: unknown): Row | undefined {

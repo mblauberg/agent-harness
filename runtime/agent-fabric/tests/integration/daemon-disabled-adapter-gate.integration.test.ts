@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
+import { runWorkspaceTrust } from "../../src/cli/workspace-trust.ts";
 import { createPrimaryCompatibilityFixture } from "../support/primary-adapter-testkit.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -102,5 +103,41 @@ describe("daemon trusted adapter composition", () => {
     } finally {
       await rm(fixture.directory, { recursive: true, force: true });
     }
+  });
+
+  it("admits a machine-only root before project profile and path narrowing", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "fabric-machine-composition-"));
+    const portableRoot = join(directory, "portable");
+    const machineRoot = join(directory, "machine");
+    const projectRoot = join(machineRoot, "project");
+    const stateDirectory = join(directory, "state");
+    const runtimeDirectory = join(stateDirectory, "runtime");
+    await Promise.all([
+      mkdir(portableRoot, { recursive: true }), mkdir(projectRoot, { recursive: true }),
+      mkdir(runtimeDirectory, { recursive: true, mode: 0o700 }),
+    ]);
+    const globalConfigPath = join(directory, "global.yaml");
+    const projectConfigPath = join(directory, "project.yaml");
+    await writeFile(globalConfigPath, stringify({
+      schemaVersion: 1, allowedAdapters: [], activeAdapters: [], adapters: {},
+      allowedProfiles: ["paired-visible"], workspaceRoots: [portableRoot],
+      limits: { maximumConcurrentProviderTurns: 8 },
+    }));
+    await writeFile(projectConfigPath, stringify({
+      schemaVersion: 1, namedExecutionProfile: "paired-visible", workspaceRoots: [projectRoot],
+    }));
+    const paths = {
+      stateDirectory, runtimeDirectory,
+      databasePath: join(stateDirectory, "fabric.sqlite3"), socketPath: join(runtimeDirectory, "fabric.sock"),
+    };
+    try {
+      await runWorkspaceTrust(["trust", machineRoot, "--profiles", "paired-visible"], paths);
+      await expect(composeDaemonConfiguration({
+        globalConfigPath, projectConfigPath,
+        compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
+        compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
+        agentsHome: directory, stateDirectory,
+      })).resolves.toMatchObject({ executionProfile: "paired-visible", workspaceRoots: [await realpath(projectRoot)] });
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });

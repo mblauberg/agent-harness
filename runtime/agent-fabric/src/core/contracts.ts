@@ -27,7 +27,7 @@ export type TaskResult = {
   dependencies: string[];
 };
 
-export type ReceiptResult = { relativePath: string; schemaVersion: 1; sha256: string };
+export type ReceiptResult = { relativePath: string; schemaVersion: 1 | 2; sha256: string };
 export type ObserverEvent = {
   cursor: number;
   eventId: string;

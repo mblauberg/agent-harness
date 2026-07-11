@@ -8,6 +8,38 @@ import { describe, expect, it } from "vitest";
 import { writeDeliveryRunFixture } from "../support/delivery-run-fixture.ts";
 
 describe("Stage 1 chair receipt link", () => {
+  it("continues to verify a hash-bound historical schema-v1 fabric receipt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-v1-receipt-link-"));
+    const runDirectory = join(root, ".agent-run", "run-v1-link");
+    await mkdir(runDirectory, { recursive: true });
+    try {
+      const receipt = {
+        schemaVersion: 1,
+        runId: "run-v1-link",
+        chair: { agentId: "chair", adapterId: null },
+        observedAt: "2026-07-11T00:00:00.000Z",
+        stageOwners: [], agents: [], executionProfile: "headless", directInputProvenance: "unavailable",
+        modelRoutingReceipts: [], taskAndWriteLeases: [],
+        messagesSentReceivedAbandoned: { sent: 0, delivered: 0, acknowledged: 0, abandoned: 0, expired: 0 },
+        objectiveChecks: [], crossFamilyReviews: [], providerFailuresAndSubstitutions: [], operatorInterventions: [],
+        compactionsAndRotations: [], counts: { agents: 0, tasks: 0, messages: 0, deliveries: 0, leases: 0, events: 0 },
+      };
+      const bytes = Buffer.from(`${JSON.stringify(receipt)}\n`);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const relativePath = ".agent-run/run-v1-link/historical-v1.json";
+      await writeFile(join(runDirectory, "historical-v1.json"), bytes);
+      const runReceiptPath = await writeDeliveryRunFixture({
+        runDirectory, runId: "run-v1-link", artifactPath: relativePath, artifactSha256: sha256,
+      });
+
+      await expect(verifyFabricReceiptLink({ runReceiptPath })).resolves.toEqual({
+        valid: true, relativePath, schemaVersion: 1, sha256,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("verifies the fabric receipt declared by the canonical delivery-run artifact", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-receipt-link-"));
     const runDirectory = join(root, ".agent-run", "run-link");
@@ -43,14 +75,14 @@ describe("Stage 1 chair receipt link", () => {
       await expect(verifyFabricReceiptLink({ runReceiptPath })).resolves.toMatchObject({
         valid: true,
         relativePath: artifactPath,
-        schemaVersion: 1,
+        schemaVersion: 2,
         sha256: exported.sha256,
       });
 
       const fabricReceiptPath = join(runDirectory, exported.relativePath);
       const bytes = await readFile(fabricReceiptPath);
       const invalid = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
-      delete invalid.stageOwners;
+      delete invalid.taskOwners;
       const invalidBytes = Buffer.from(`${JSON.stringify(invalid)}\n`);
       await writeFile(fabricReceiptPath, invalidBytes);
       const invalidHash = createHash("sha256").update(invalidBytes).digest("hex");

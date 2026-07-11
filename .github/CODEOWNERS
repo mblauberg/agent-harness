@@ -1,0 +1,19 @@
+* @mblauberg
+
+# Repository automation and release gates
+/.github/ @mblauberg
+
+# Agent fabric runtime, persistence and contracts
+/runtime/agent-fabric/ @mblauberg
+/runtime/agent-fabric/migrations/ @mblauberg
+/runtime/agent-fabric/schemas/ @mblauberg
+
+# Routing, activation and security policy
+/config/model-routing.json @mblauberg
+/config/adapter-compatibility.yaml @mblauberg
+/config/agent-fabric.yaml @mblauberg
+/config/risk-policy.json @mblauberg
+/config/security-evidence.json @mblauberg
+/scripts/model_route.py @mblauberg
+/scripts/static-security-check.py @mblauberg
+/scripts/public_release_check.py @mblauberg

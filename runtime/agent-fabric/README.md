@@ -26,12 +26,17 @@ Important boundaries:
 - `src/core/client.ts`: capability-bound client façade
 - `src/application/command-journal.ts`: command dedupe and transaction owner
 - `src/persistence/sqlite.ts`: hardened connection and canonical migration startup
+- `src/transport/bounded-ndjson.ts`: shared byte-bounded framing
+- `src/cli/workspace-trust.ts`: exact machine-local workspace admission
+- `src/cli/retention.ts`: report-only retention and non-destructive archive
 - `src/core/read-policy.ts`: chair/owner/participant scoped projections
 - `src/daemon/`: single-instance process, trusted composition and socket transport
 - `src/mcp/`: one input/output schema surface for both primary clients
 - `src/adapters/providers/`: isolated, pinned provider adapters
 - `src/exports/`: receipt projection, schema enforcement and link verification
-- `migrations/0001-core.sql`: unreleased canonical baseline; freeze at the first release
+- `migrations/0001-core.sql`: canonical baseline
+- `migrations/0002-observer-event-sequence.sql`: durable observer cursor
+- `migrations/0003-integrity-and-query-plans.sql`: additive invariants and hot-path indexes
 
 ## Development
 
@@ -43,6 +48,14 @@ npm run test:load
 ```
 
 All normal tests use temporary databases and fake provider boundaries. They do not log into providers or register MCP servers.
+
+Inspect the live machine without printing capabilities:
+
+```sh
+scripts/agent-fabric status --json --project "$PWD"
+scripts/agent-fabric doctor --json
+scripts/agent-fabric retention preview
+```
 
 ## Runtime locations
 

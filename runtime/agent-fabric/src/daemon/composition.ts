@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
 import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
 import { loadFabricConfig } from "../config/index.js";
+import { trustedWorkspaceRoots } from "../cli/workspace-trust.js";
 
 type AdapterMap = NonNullable<FabricOpenOptions["adapters"]>;
 
@@ -68,13 +69,32 @@ export async function composeDaemonConfiguration(options: {
   agentsHome: string;
   stateDirectory?: string;
 }): Promise<{ adapters: AdapterMap; executionProfile: string; maximumConcurrentProviderTurns: number; workspaceRoots: string[] }> {
-  const config = await loadFabricConfig({
+  const trustedConfigOptions = {
     globalPath: options.globalConfigPath,
     agentsHome: options.agentsHome,
     ...(options.localConfigPath === undefined ? {} : { localPath: options.localConfigPath }),
+  };
+  const configOptions = {
+    ...trustedConfigOptions,
     ...(options.projectConfigPath === undefined ? {} : { projectPath: options.projectConfigPath }),
     ...(options.runConfigPath === undefined ? {} : { runPath: options.runConfigPath }),
-  });
+  };
+  const allLocalTrustedRoots = options.stateDirectory === undefined
+    ? []
+    : await trustedWorkspaceRoots({
+        stateDirectory: options.stateDirectory,
+      });
+  const candidateConfig = await loadFabricConfig({ ...configOptions, additionalWorkspaceRoots: allLocalTrustedRoots });
+  const eligibleLocalTrustedRoots = options.stateDirectory === undefined
+    ? []
+    : await trustedWorkspaceRoots({
+        stateDirectory: options.stateDirectory,
+        executionProfile: candidateConfig.executionProfile ?? "headless",
+      });
+  const config = eligibleLocalTrustedRoots.length === allLocalTrustedRoots.length &&
+      eligibleLocalTrustedRoots.every((root, index) => root === allLocalTrustedRoots[index])
+    ? candidateConfig
+    : await loadFabricConfig({ ...configOptions, additionalWorkspaceRoots: eligibleLocalTrustedRoots });
   await verifyAdapterCompatibility({ compatibilityPath: options.compatibilityPath, schemaPath: options.compatibilitySchemaPath, adapterIds: config.adapterIds, requireEnabled: true });
   const adapters = Object.fromEntries(await Promise.all(config.adapterIds.map(async (adapterId) => {
     const command = config.adapterCommands[adapterId];

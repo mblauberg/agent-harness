@@ -1,4 +1,5 @@
-import { lstat, mkdtemp, rm } from "node:fs/promises";
+import Database from "better-sqlite3";
+import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,6 +29,23 @@ describe("SQLite connection hardening", () => {
         await expect(lstat(sibling).then((metadata) => metadata.mode & 0o777)).resolves.toBe(0o600);
       }
       database.close();
+      await expect(lstat(`${path}.unclean`)).rejects.toMatchObject({ code: "ENOENT" });
     }
+  });
+
+  it("runs bounded integrity checks after an unclean marker", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-sqlite-"));
+    directories.push(directory);
+    const path = join(directory, "fabric.sqlite3");
+    openFabricDatabase(path).close();
+    const raw = new Database(path);
+    raw.pragma("foreign_keys = OFF");
+    raw.prepare("INSERT INTO authorities VALUES ('orphan','missing-run',NULL,'{}','hash',1)").run();
+    raw.close();
+    await writeFile(`${path}.unclean`, "", { mode: 0o600 });
+
+    expect(() => openFabricDatabase(path)).toThrowError(
+      expect.objectContaining({ code: "PERSISTENCE_FOREIGN_KEY_CHECK_FAILED" }),
+    );
   });
 });

@@ -26,7 +26,6 @@ const deliveryValidatorPath = fileURLToPath(
 
 type ReceiptTarget = {
   relativePath: string;
-  schemaVersion: number;
   expectedHash: string;
   pathBase: string;
   runId: string;
@@ -94,7 +93,6 @@ function canonicalReceiptTarget(runReceipt: Record<string, unknown>, location: R
   }
   return {
     relativePath,
-    schemaVersion: 1,
     expectedHash: digest.slice("sha256:".length),
     pathBase: location.workspaceRoot,
     runId: runReceipt.run_id,
@@ -131,11 +129,15 @@ export async function verifyFabricReceiptLink(options: { runReceiptPath: string 
   } catch (error: unknown) {
     throw new FabricReceiptError("RECEIPT_SCHEMA_MISMATCH", error instanceof Error ? error.message : String(error));
   }
-  if (!isRecord(receipt) || receipt.schemaVersion !== target.schemaVersion || typeof receipt.runId !== "string") {
+  if (
+    !isRecord(receipt) ||
+    (receipt.schemaVersion !== 1 && receipt.schemaVersion !== 2) ||
+    typeof receipt.runId !== "string"
+  ) {
     throw new FabricReceiptError("RECEIPT_SCHEMA_MISMATCH", "fabric receipt schema does not match the link");
   }
   if (receipt.runId !== target.runId) {
     throw new FabricReceiptError("RECEIPT_SCHEMA_MISMATCH", "fabric receipt belongs to a different run");
   }
-  return { valid: true, relativePath: target.relativePath, schemaVersion: target.schemaVersion, sha256: actualHash };
+  return { valid: true, relativePath: target.relativePath, schemaVersion: receipt.schemaVersion, sha256: actualHash };
 }

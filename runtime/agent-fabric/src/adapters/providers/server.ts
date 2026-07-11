@@ -1,6 +1,6 @@
 import type { Readable, Writable } from "node:stream";
-import { createInterface } from "node:readline";
 
+import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../../transport/bounded-ndjson.js";
 import { isRecord, ProviderAdapterError, type AdapterRequestHandler } from "./types.js";
 
 type AdapterRequest = {
@@ -35,37 +35,69 @@ function errorEnvelope(error: unknown): { code: string; message: string; details
   };
 }
 
-function write(output: Writable, value: unknown): void {
-  output.write(`${JSON.stringify(value)}\n`);
-}
-
 export async function serveAdapter(
   adapter: AdapterRequestHandler,
   streams: { input: Readable; output: Writable },
 ): Promise<void> {
-  const lines = createInterface({ input: streams.input, crlfDelay: Infinity });
+  const writer = new BoundedNdjsonWriter(streams.output, {
+    maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+    maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight,
+  });
   const pending = new Set<Promise<void>>();
-  lines.on("line", (line) => {
-    const work = (async (): Promise<void> => {
+  let inFlight = 0;
+  const track = (work: Promise<void>): void => {
+    pending.add(work);
+    void work.then(
+      () => pending.delete(work),
+      () => pending.delete(work),
+    );
+  };
+  const reader = new BoundedNdjsonReader(streams.input, {
+    maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+    onError: (error) => {
+      track(writer.write({
+        id: "invalid",
+        error: errorEnvelope(new ProviderAdapterError(
+          "PROTOCOL_INVALID",
+          error.message,
+          { protocolCode: error.code },
+        )),
+      }));
+    },
+    onFrame: (line) => {
       let request: AdapterRequest;
       try {
         const parsed: unknown = JSON.parse(line);
         request = requestEnvelope(parsed);
       } catch (error: unknown) {
-        write(streams.output, { id: "invalid", error: errorEnvelope(error) });
+        track(writer.write({ id: "invalid", error: errorEnvelope(error) }));
         return;
       }
-      try {
-        const result = await adapter.request(request.method, request.params);
-        write(streams.output, { id: request.id, result });
-      } catch (error: unknown) {
-        write(streams.output, { id: request.id, error: errorEnvelope(error) });
+      if (inFlight >= FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight) {
+        track(writer.write({
+          id: request.id,
+          error: {
+            code: "ADAPTER_OVERLOADED",
+            message: `adapter permits ${String(FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight)} in-flight requests`,
+          },
+        }));
+        return;
       }
-    })();
-    pending.add(work);
-    void work.finally(() => pending.delete(work));
+      inFlight += 1;
+      const work = (async (): Promise<void> => {
+        try {
+          const result = await adapter.request(request.method, request.params);
+          await writer.write({ id: request.id, result });
+        } catch (error: unknown) {
+          await writer.write({ id: request.id, error: errorEnvelope(error) });
+        } finally {
+          inFlight -= 1;
+        }
+      })();
+      track(work);
+    },
   });
-  await new Promise<void>((resolve) => lines.once("close", resolve));
+  await reader.closed;
   await Promise.all(pending);
 }
 

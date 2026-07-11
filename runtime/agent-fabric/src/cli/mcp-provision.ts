@@ -39,7 +39,7 @@ const PEER_OPERATIONS = [
   FABRIC_OPERATIONS.listAgents,
 ] as const;
 
-type DiscoveryReceipt = {
+export type DiscoveryReceipt = {
   schemaVersion: 1;
   socketPath: string;
   pid: number;
@@ -99,7 +99,7 @@ function parseSeats(value: string): McpSeat[] {
   return seats.sort((left, right) => left.localeCompare(right));
 }
 
-async function readDiscoveryReceipt(paths: FabricPaths): Promise<DiscoveryReceipt> {
+export async function readDiscoveryReceipt(paths: FabricPaths): Promise<DiscoveryReceipt> {
   const discoveryPath = join(paths.runtimeDirectory, "fabric-v1.discovery.json");
   const directory = await lstat(paths.runtimeDirectory);
   if (directory.isSymbolicLink() || !directory.isDirectory() || (directory.mode & 0o777) !== 0o700) {

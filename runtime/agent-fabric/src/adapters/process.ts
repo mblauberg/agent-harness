@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface, type Interface } from "node:readline";
 
 import { v7 as uuidv7 } from "uuid";
+
+import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../transport/bounded-ndjson.js";
 
 export type AdapterTransportErrorCode =
   | "ADAPTER_COMMAND_EMPTY"
@@ -11,6 +12,7 @@ export type AdapterTransportErrorCode =
   | "ADAPTER_PROTOCOL_INVALID"
   | "ADAPTER_EXITED"
   | "ADAPTER_CLOSED"
+  | "ADAPTER_OVERLOADED"
   | "ADAPTER_STDIN_FAILED";
 
 export class AdapterTransportError extends Error {
@@ -64,7 +66,8 @@ function signalAborted(signal: AbortSignal | undefined): boolean {
 
 export class AdapterProcessTransport {
   readonly #child: ChildProcessWithoutNullStreams;
-  readonly #lines: Interface;
+  readonly #reader: BoundedNdjsonReader;
+  readonly #writer: BoundedNdjsonWriter;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #responseTimeoutMs: number;
   readonly #closeTimeoutMs: number;
@@ -98,8 +101,18 @@ export class AdapterProcessTransport {
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
-    this.#lines = createInterface({ input: this.#child.stdout, crlfDelay: Infinity });
-    this.#lines.on("line", (line) => this.#receive(line));
+    this.#writer = new BoundedNdjsonWriter(this.#child.stdin, {
+      maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+      maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight,
+    });
+    this.#reader = new BoundedNdjsonReader(this.#child.stdout, {
+      maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+      onFrame: (line) => this.#receive(line),
+      onError: (cause) => this.#failTransport(
+        new AdapterTransportError("ADAPTER_PROTOCOL_INVALID", cause.message, { cause }),
+        true,
+      ),
+    });
     this.#child.stderr.setEncoding("utf8");
     this.#child.stderr.on("data", (chunk: string) => {
       this.#stderr = `${this.#stderr}${chunk}`.slice(-4096);
@@ -179,6 +192,12 @@ export class AdapterProcessTransport {
     if (this.#closed) {
       throw this.#terminalError ?? new AdapterTransportError("ADAPTER_CLOSED", "adapter transport is closed");
     }
+    if (this.#pending.size >= FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight) {
+      throw new AdapterTransportError(
+        "ADAPTER_OVERLOADED",
+        `adapter client has ${String(FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight)} in-flight requests`,
+      );
+    }
 
     const timeoutMs = positiveMilliseconds(options.timeoutMs ?? this.#responseTimeoutMs, "timeoutMs");
     const id = uuidv7();
@@ -207,21 +226,16 @@ export class AdapterProcessTransport {
       this.#pending.set(id, pending);
     });
 
-    const request = `${JSON.stringify({ id, method, params })}\n`;
     try {
-      this.#child.stdin.write(request, (error: Error | null | undefined) => {
-        if (error !== null && error !== undefined) {
-          this.#failTransport(
-            new AdapterTransportError("ADAPTER_STDIN_FAILED", `adapter stdin failed: ${error.message}`, { cause: error }),
-            true,
-          );
-        }
-      });
+      await this.#writer.write({ id, method, params });
     } catch (error: unknown) {
-      this.#failTransport(
-        new AdapterTransportError("ADAPTER_STDIN_FAILED", "adapter stdin write failed", { cause: error }),
-        true,
+      const transportError = new AdapterTransportError(
+        "ADAPTER_STDIN_FAILED",
+        "adapter stdin write failed",
+        { cause: error },
       );
+      this.#failTransport(transportError, true);
+      throw transportError;
     }
     return await result;
   }
@@ -240,7 +254,7 @@ export class AdapterProcessTransport {
     this.#rejectPending(
       this.#terminalError ?? new AdapterTransportError("ADAPTER_CLOSED", "adapter transport closed before response"),
     );
-    this.#lines.close();
+    this.#reader.close();
     if (this.#child.exitCode !== null || this.#child.signalCode !== null || this.#terminalError?.code === "ADAPTER_SPAWN_FAILED") {
       this.#child.stdin.destroy();
       return;
@@ -325,7 +339,7 @@ export class AdapterProcessTransport {
     }
     this.#closed = true;
     this.#rejectPending(this.#terminalError);
-    this.#lines.close();
+    this.#reader.close();
     if (kill && this.#child.exitCode === null && this.#child.signalCode === null) {
       this.#child.kill("SIGKILL");
     }

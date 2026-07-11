@@ -16,11 +16,15 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/server.js",
-      "sha256": "7f5cbe1c3bebf0880bce30334a59bcc83b111dde1a67372cc6c438275c817bf4"
+      "sha256": "e9342bf9300595f8ce9a6e30e44034212ebcef18c8739db14e04b519b3006dc3"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
       "sha256": "c8d2768f18013aa7559a525e11b227d5b6a2f1bc50d954923d99a8ebe8c7abac"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/transport/bounded-ndjson.js",
+      "sha256": "f4de18ca4b1fe4f705afa4a2bcccc84a9ee2f2ab8b5632611b83ed2c033a7950"
     }
   ]
 }

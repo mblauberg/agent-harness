@@ -41,7 +41,9 @@ describe("foreground daemon CLI", () => {
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stderr: Buffer[] = [];
+    const stdout: Buffer[] = [];
     child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
     const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
       child.once("close", (code, signal) => resolve({ code, signal }));
     });
@@ -62,6 +64,10 @@ describe("foreground daemon CLI", () => {
       await rm(root, { recursive: true, force: true });
       expect(exit).toEqual({ code: 0, signal: null });
       expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+      const visible = Buffer.concat(stdout).toString("utf8");
+      expect(visible).toMatch(/agent-fabric ready pid=\d+ protocol=1 .*AEST \(UTC\+10\)/u);
+      expect(visible).toContain("agent-fabric stopped");
+      expect(visible).not.toMatch(/af[bc]_[A-Za-z0-9_-]{43}/u);
     }
   });
 
