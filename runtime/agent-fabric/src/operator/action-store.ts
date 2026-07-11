@@ -11,6 +11,7 @@ import type {
   OperatorActionReconcileRequest,
   OperatorActionStatus,
   OperatorActionStatusRequest,
+  ProjectSessionLaunchIntent,
   RegisteredExternalEffectState,
   ScopedGate,
   Sha256Digest,
@@ -39,6 +40,20 @@ export type OperatorActionCurrentState =
       revision: number;
       lifecycleState: string;
       eligibleActions: readonly ("pause" | "resume" | "cancel" | "steer")[];
+    }
+  | {
+      kind: "project-session-launch";
+      revision: number;
+      projectId: ProjectSessionLaunchIntent["projectId"];
+      projectSessionId: ProjectSessionLaunchIntent["projectSessionId"];
+      sessionGeneration: number;
+      lifecycleState: string;
+      launchPacketRef: ArtifactRef;
+      authorityRef: Sha256Digest;
+      budgetRef: string;
+      resourcePlanRef: ArtifactRef;
+      providerAdapterId: string;
+      providerActionId: ProjectSessionLaunchIntent["providerActionId"];
     }
   | {
       kind: "project-session-lifecycle";
@@ -153,7 +168,7 @@ export class OperatorActionStore {
         }
         return parseStoredPreview(text(existing, "preview_json")).preview;
       }
-      const projectSessionId = requiredSession(authenticated);
+      const projectSessionId = actionSessionId(authenticated, request.intent);
       this.#database.prepare(`
         INSERT INTO operator_previews(
           preview_id, operator_id, project_session_id, operation, payload_digest,
@@ -181,7 +196,7 @@ export class OperatorActionStore {
     const stored = this.#previewRow(request.previewId);
     const envelope = parseStoredPreview(text(stored, "preview_json"));
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId);
+    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
     const payloadHash = sha256(canonicalJson(sanitisedCommitRequest(request)));
     const inFlightKey = `${context.operatorId}:${request.command.commandId}`;
     const inFlight = this.#inFlightCommits.get(inFlightKey);
@@ -282,7 +297,7 @@ export class OperatorActionStore {
         context,
         request.command,
         request.projectId,
-        requiredSession(authenticated),
+        actionSessionId(authenticated, envelope.preview.intent),
         requiredOperatorActionForIntent(envelope.preview.intent),
         payloadHash,
         current,
@@ -368,7 +383,7 @@ export class OperatorActionStore {
     `).get(request.targetCommandId, context.operatorId), "operator action target");
     const envelope = parseStoredPreview(text(stored, "preview_json"));
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId);
+    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
     const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
     if (replay !== null) return replay;
@@ -419,7 +434,7 @@ export class OperatorActionStore {
         context,
         request.command,
         request.projectId,
-        requiredSession(authenticated),
+        actionSessionId(authenticated, envelope.preview.intent),
         requiredOperatorActionForIntent(envelope.preview.intent),
         payloadHash,
         action,
@@ -495,7 +510,16 @@ export class OperatorActionStore {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", `operator capability lacks ${requiredAction}`);
     }
     const intentSessionId = sessionIdForIntent(intent);
-    if (intentSessionId !== undefined && authenticated.projectSessionId !== intentSessionId) {
+    if (intent.kind === "project-session-launch") {
+      if (authenticated.kind !== "project-launch" || intent.projectId !== projectId) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "project launch intent lacks exact project authority");
+      }
+      if (!isRow(this.#database.prepare(`
+        SELECT project_session_id FROM project_sessions WHERE project_session_id=? AND project_id=?
+      `).get(intent.projectSessionId, projectId))) {
+        throw new ProjectFabricCoreError("WRONG_PROJECT", "project launch session belongs to another project");
+      }
+    } else if (intentSessionId !== undefined && authenticated.projectSessionId !== intentSessionId) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator capability is bound to another session");
     }
     return authenticated;
@@ -511,9 +535,10 @@ export class OperatorActionStore {
     stored: Row,
     authenticated: AuthenticatedOperatorCredential,
     projectId: string,
+    intent: OperatorActionIntent,
   ): void {
     const storedSessionId = text(stored, "project_session_id");
-    if (authenticated.projectSessionId !== storedSessionId) {
+    if (actionSessionId(authenticated, intent) !== storedSessionId) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator preview belongs to another session");
     }
     if (!isRow(this.#database.prepare(`
@@ -876,6 +901,32 @@ function validateCurrentState(
       actual: current.revision,
     });
   }
+  if (intent.kind === "project-session-launch") {
+    if (current.kind !== "project-session-launch") {
+      throw new TypeError("project-session launch intent received another current-state family");
+    }
+    if (
+      intent.projectId !== current.projectId ||
+      intent.projectSessionId !== current.projectSessionId ||
+      intent.expectedSessionRevision !== current.revision ||
+      intent.expectedSessionGeneration !== current.sessionGeneration ||
+      !sameArtifact(intent.launchPacketRef, current.launchPacketRef) ||
+      intent.authorityRef !== current.authorityRef ||
+      intent.budgetRef !== current.budgetRef ||
+      !sameArtifact(intent.resourcePlanRef, current.resourcePlanRef) ||
+      intent.providerAdapterId !== current.providerAdapterId ||
+      intent.providerActionId !== current.providerActionId
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "project-session launch custody binding changed");
+    }
+    if (current.lifecycleState !== "awaiting_launch") {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "project session is not awaiting launch",
+      );
+    }
+    return;
+  }
   if (intent.kind === "control") {
     if (current.kind !== "control") throw new TypeError("control intent received another current-state family");
     if (intent.target.expectedRevision !== current.revision) {
@@ -1041,7 +1092,9 @@ function consequenceClass(intent: OperatorActionIntent): OperatorActionPreview["
 
 function combinedEvidence(request: OperatorActionPreviewRequest): ArtifactRef[] {
   const evidence = [...request.command.evidenceRefs];
-  if (request.intent.kind === "control" && request.intent.action === "steer") {
+  if (request.intent.kind === "project-session-launch") {
+    evidence.push(request.intent.launchPacketRef, request.intent.resourcePlanRef);
+  } else if (request.intent.kind === "control" && request.intent.action === "steer") {
     evidence.push(...request.intent.evidenceRefs);
   } else if (request.intent.kind === "registered-external-effect") {
     evidence.push(request.intent.requestArtifactRef);
@@ -1056,11 +1109,17 @@ function combinedEvidence(request: OperatorActionPreviewRequest): ArtifactRef[] 
 }
 
 function sessionIdForIntent(intent: OperatorActionIntent): string | undefined {
+  if (intent.kind === "project-session-launch") return intent.projectSessionId;
   if (intent.kind === "control") return intent.target.projectSessionId;
   if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop" || intent.kind === "promotion") {
     return intent.projectSessionId;
   }
   return undefined;
+}
+
+function actionSessionId(authenticated: AuthenticatedOperatorCredential, intent: OperatorActionIntent): string {
+  if (intent.kind === "project-session-launch") return intent.projectSessionId;
+  return requiredSession(authenticated);
 }
 
 function requiredSession(authenticated: AuthenticatedOperatorCredential): string {
@@ -1111,6 +1170,7 @@ function rejectionForIntent(intent: OperatorActionIntent): OperatorActionRejecti
   if (intent.kind === "registered-external-effect") return "external-contract-stale";
   if (intent.kind === "promotion") return "release-binding-mismatch";
   if (
+    intent.kind === "project-session-launch" ||
     intent.kind === "project-session-drain" ||
     intent.kind === "project-session-stop" ||
     intent.kind === "daemon-drain" ||

@@ -1031,6 +1031,165 @@ describe("operator action store", () => {
       "preview_promotion_01",
     );
   });
+
+  it("validates every reviewed project-session launch custody binding before preview", async () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO project_sessions(
+        project_session_id, project_id, mode, state, revision, generation, authority_ref,
+        budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+        origin_kind, origin_operator_id, created_at, updated_at
+      ) VALUES (
+        'session_launch_01', 'project_01', 'coordinated', 'awaiting_launch', 1, 1, '${digest}',
+        'budget_01', 'launch/packet.json', '${digest}', 1,
+        'operator-launch', 'operator_01', ${now - 200}, ${now - 100}
+      );
+    `);
+    const launchCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_launch_01"),
+      token: "launch-secret-01",
+    };
+    fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: launchCredential.capabilityId,
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "project-launch",
+      actions: ["read", "launch"],
+    }), launchCredential.token);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_launch_01");
+    const launchPacketRef = parseArtifactRef({ path: "launch/packet.json", digest }, "test.launchPacketRef");
+    const resourcePlanRef = parseArtifactRef({ path: "launch/resources.json", digest }, "test.resourcePlanRef");
+    const authorityRef = parseSha256Digest(digest, "test.launchAuthorityRef");
+    const providerActionId = identifier<"ProviderActionId">("provider_action_launch_01");
+    const intent: OperatorActionIntent = {
+      kind: "project-session-launch",
+      projectId,
+      projectSessionId,
+      expectedSessionRevision: 1,
+      expectedSessionGeneration: 1,
+      launchPacketRef,
+      authorityRef,
+      budgetRef: "budget_01",
+      resourcePlanRef,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId,
+    };
+    let current: OperatorActionCurrentState = {
+      kind: "project-session-launch",
+      revision: 1,
+      projectId,
+      projectSessionId,
+      sessionGeneration: 1,
+      lifecycleState: "awaiting_launch",
+      launchPacketRef,
+      authorityRef,
+      budgetRef: "budget_01",
+      resourcePlanRef,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId,
+    };
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => current },
+      effectPort: {
+        dispatch: async () => ({ status: "committed", afterState: { lifecycleState: "launching" } }),
+        observe: async () => { throw new Error("not expected"); },
+      },
+      clock: () => now,
+    });
+    const request: OperatorActionPreviewRequest = {
+      command: {
+        credential: launchCredential,
+        commandId: identifier<"CommandId">("preview_launch_01"),
+        expectedRevision: 1,
+        actor: identifier<"OperatorId">("operator_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_preview_launch_01",
+        },
+        evidenceRefs: [],
+      },
+      projectId,
+      intent,
+    };
+
+    const preview = await actions.preview(fixture.context, request);
+    expect(preview).toMatchObject({
+      intent,
+      consequenceClass: "consequential",
+      evidenceRefs: [launchPacketRef, resourcePlanRef],
+    });
+    const receipt = await actions.commit(fixture.context, {
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("commit_launch_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_commit_launch_01",
+        },
+      },
+      projectId,
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_launch_01" },
+    });
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+
+    current = {
+      ...current,
+      providerActionId: identifier<"ProviderActionId">("provider_action_changed_01"),
+    };
+    await expect(actions.preview(fixture.context, {
+      ...request,
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("preview_launch_changed_01"),
+      },
+    })).rejects.toMatchObject({ code: "STALE_REVISION" });
+
+    fixture.database.exec(`
+      INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
+      VALUES ('project_02', '/project/two', 1, 1, ${now - 100}, ${now - 100});
+      INSERT INTO project_sessions(
+        project_session_id, project_id, mode, state, revision, generation, authority_ref,
+        budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+        origin_kind, origin_operator_id, created_at, updated_at
+      ) VALUES (
+        'session_foreign_01', 'project_02', 'coordinated', 'awaiting_launch', 1, 1, '${digest}',
+        'budget_01', 'launch/packet.json', '${digest}', 1,
+        'operator-launch', 'operator_01', ${now - 100}, ${now - 100}
+      );
+    `);
+    const foreignSessionId = identifier<"ProjectSessionId">("session_foreign_01");
+    current = {
+      ...current,
+      projectSessionId: foreignSessionId,
+      providerActionId,
+    };
+    await expect(actions.preview(fixture.context, {
+      ...request,
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("preview_launch_foreign_session_01"),
+      },
+      intent: { ...intent, projectSessionId: foreignSessionId },
+    })).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+  });
 });
 
 async function expectValidPreview(

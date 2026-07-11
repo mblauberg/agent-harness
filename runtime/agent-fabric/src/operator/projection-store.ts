@@ -1238,7 +1238,9 @@ function attentionPriority(value: unknown, severity: string): AttentionItem["pri
 function actionAvailability(authenticated: AuthenticatedOperatorCredential): OperatorActionAvailability {
   const actions: OperatorAvailableAction[] = [];
   for (const action of authenticated.actions) {
-    if (action === "pause" || action === "resume" || action === "cancel" || action === "steer" || action === "git") {
+    if (action === "launch") {
+      actions.push("project-session-launch");
+    } else if (action === "pause" || action === "resume" || action === "cancel" || action === "steer" || action === "git") {
       actions.push(action);
     } else if (action === "drain") {
       actions.push("project-session-drain", "daemon-drain");
