@@ -685,6 +685,7 @@ describe("typed Console application bootstrap boundary", () => {
           projectId,
           canonicalRoot: "/repo",
           goal: "Ship typed reads",
+          acceptedScopeRef: null,
           repositoryRevision: "repo-r3",
           ...(selectedWorktree === null
             ? {}
@@ -764,7 +765,12 @@ describe("typed Console application bootstrap boundary", () => {
               revision: 3,
               observedAt: timestamp,
               value: {
-                summary: { kind: "project", goal: "Ship typed reads", repositoryRevision: "repo-r3" },
+                summary: {
+                  kind: "project",
+                  goal: "Ship typed reads",
+                  acceptedScopeRef: null,
+                  repositoryRevision: "repo-r3",
+                },
                 detailRef: { kind: "project", projectId, expectedRevision: 3 },
                 actionAvailability: { state: "read-only", reason: "state-ineligible" },
               },

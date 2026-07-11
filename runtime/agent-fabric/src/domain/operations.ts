@@ -44,6 +44,7 @@ export const LEGACY_OPERATION_BUNDLES: Record<LegacyAuthorityAction, readonly Fa
     FABRIC_OPERATIONS.recordOperatorIntervention,
     FABRIC_OPERATIONS.recordVisibilityFailure,
     FABRIC_OPERATIONS.publishArtifact,
+    FABRIC_OPERATIONS.evidencePublish,
     FABRIC_OPERATIONS.closeBarrier,
   ],
   delegate: [

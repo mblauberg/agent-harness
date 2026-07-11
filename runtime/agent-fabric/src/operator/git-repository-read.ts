@@ -33,6 +33,7 @@ import {
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
+import { ArtifactRegistry } from "../artifacts/registry.js";
 import { ProjectFabricCoreError, type CoreServiceOptions } from "../project-session/contracts.js";
 import { canonicalJson, integer, isRow, row, text } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
@@ -115,6 +116,7 @@ export type GitRepositoryReadServiceOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
   privateStateRoot: string;
   hostedChecks?: GitHostedChecksPort;
+  artifactRegistry?: ArtifactRegistry;
 };
 
 export class GitRepositoryReadService {
@@ -123,6 +125,7 @@ export class GitRepositoryReadService {
   readonly #privateStateRoot: string;
   readonly #hostedChecks: GitHostedChecksPort | undefined;
   readonly #clock: () => number;
+  readonly #artifactRegistry: ArtifactRegistry;
 
   constructor(options: GitRepositoryReadServiceOptions) {
     this.#database = options.database;
@@ -130,6 +133,7 @@ export class GitRepositoryReadService {
     this.#privateStateRoot = resolve(options.privateStateRoot);
     this.#hostedChecks = options.hostedChecks;
     this.#clock = options.clock ?? Date.now;
+    this.#artifactRegistry = options.artifactRegistry ?? new ArtifactRegistry(this.#database, this.#clock);
   }
 
   async read(request: GitRepositoryReadRequest): Promise<GitRepositoryReadResult> {
@@ -179,7 +183,10 @@ export class GitRepositoryReadService {
         { repositoryStateDigest: postHostedFence.core.repositoryStateDigest },
       );
     }
-    const artifactRef = await this.#writePrivateDiff(observation.diffBytes);
+    const artifactRef = await this.#writePrivateDiff(observation.diffBytes, {
+      projectId: request.projectId,
+      projectSessionId: request.projectSessionId ?? null,
+    });
     const finalSnapshotRevision = this.#globalRevision();
     if (finalSnapshotRevision !== request.snapshotRevision) return resnapshot(finalSnapshotRevision);
     const returnFence = await this.#observeProjectionFence(target.repositoryRoot, target.worktreePath);
@@ -430,7 +437,10 @@ export class GitRepositoryReadService {
     `).get(), "daemon global state"), "revision");
   }
 
-  async #writePrivateDiff(bytes: Buffer) {
+  async #writePrivateDiff(
+    bytes: Buffer,
+    scope: { projectId: string; projectSessionId: string | null },
+  ) {
     const stateRoot = await realpath(this.#privateStateRoot);
     if (stateRoot !== this.#privateStateRoot) {
       throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "private state root is not canonical");
@@ -477,10 +487,20 @@ export class GitRepositoryReadService {
         await handle.close();
       }
     }
-    return parseArtifactRef({
-      path: `private/git-diffs/${filename}`,
+    const registered = this.#artifactRegistry.register({
+      projectId: scope.projectId,
+      projectSessionId: scope.projectSessionId,
+      runId: null,
+      taskId: null,
+      publisherKind: "fabric",
+      publisherRef: "fabric-git-private-diff",
+      publisherAgentId: null,
+      sourceKind: "git-private-diff",
+      evidenceKind: "diff",
+      relativePath: `private/git-diffs/${filename}`,
       digest,
-    }, "gitRepository.diff.artifactRef");
+    });
+    return parseArtifactRef(registered.artifactRef, "gitRepository.diff.artifactRef");
   }
 }
 

@@ -9,6 +9,7 @@ import { preflightProjectSessionOperations } from "../persistence/project-sessio
 import { preflightProviderBridgeCustody } from "../persistence/provider-bridge-custody-preflight.js";
 import { preflightExternalEffectCustody } from "../persistence/external-effect-custody-preflight.js";
 import { preflightLaunchedChairBridgeLoss } from "../persistence/launched-chair-bridge-loss-preflight.js";
+import { preflightArtifactRegistry } from "../persistence/artifact-registry-preflight.js";
 
 export type Migration = {
   version: number;
@@ -48,6 +49,7 @@ const defaultMigrationFiles = [
   "0007-provider-bridge-custody.sql",
   "0008-external-effect-custody.sql",
   "0009-launched-chair-bridge-loss.sql",
+  "0010-artifact-registry.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {
@@ -74,8 +76,10 @@ function loadDefaultMigrations(): Migration[] {
               ? { preflight: preflightProviderBridgeCustody }
               : index === 7
                 ? { preflight: preflightExternalEffectCustody }
-              : index === 8
-                ? { preflight: preflightLaunchedChairBridgeLoss }
+                : index === 8
+                  ? { preflight: preflightLaunchedChairBridgeLoss }
+                  : index === 9
+                    ? { preflight: preflightArtifactRegistry }
             : {}),
     };
   });

@@ -121,6 +121,38 @@ describe("negotiated operator client", () => {
     });
     expect(client.operatorControl?.command).toBeUndefined();
   });
+
+  it("exposes artifact content only with the exact negotiated operation", async () => {
+    const unavailable = createOperatorClient(new RecordingTransport([], {}));
+    expect(unavailable.artifacts).toBeUndefined();
+
+    const result = {
+      available: false,
+      artifactRef: {
+        path: "docs/spec.md",
+        digest: `sha256:${"a".repeat(64)}`,
+      },
+      reason: "not-found",
+    };
+    const transport = new RecordingTransport(["artifact-content-read.v1"], result);
+    const client = createOperatorClient(transport);
+    if (client.artifacts === undefined) throw new Error("expected artifact content feature");
+    const input = {
+      credential: { capabilityId: "capability_01", token: "afop_read_token" },
+      projectId: "project_01",
+      evidenceId: "evidence_01",
+      expectedEvidenceRevision: 1,
+      artifactRef: result.artifactRef,
+      cursor: null,
+      maximumBytes: 131_072,
+      maximumLines: 2_000,
+    } as never;
+    await expect(client.artifacts.readContent(input)).resolves.toBe(result);
+    expect(transport.calls).toStrictEqual([{
+      operation: FABRIC_OPERATIONS.operatorArtifactContentRead,
+      input,
+    }]);
+  });
 });
 
 describe("negotiated baseline agent client", () => {
@@ -138,5 +170,28 @@ describe("negotiated baseline agent client", () => {
     });
 
     expect(transport.calls.at(-1)?.operation).toBe(FABRIC_OPERATIONS.sendMessage);
+  });
+
+  it("exposes evidence publication only with the registry feature", async () => {
+    const result = { evidenceId: "evidence_01" };
+    const unavailable = createAgentClient(new RecordingTransport([], result, "agent"));
+    expect(unavailable.evidence).toBeUndefined();
+    const transport = new RecordingTransport(["artifact-registry.v1"], result, "agent");
+    const client = createAgentClient(transport);
+    if (client.evidence === undefined) throw new Error("expected evidence registry feature");
+    const input = {
+      commandId: "command_01",
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      requestedSourceKind: "run-file",
+      evidenceKind: "test",
+      relativePath: "test/results.txt",
+      sourceDigest: `sha256:${"b".repeat(64)}`,
+    } as never;
+    await expect(client.evidence.publish(input)).resolves.toBe(result);
+    expect(transport.calls).toStrictEqual([{
+      operation: FABRIC_OPERATIONS.evidencePublish,
+      input,
+    }]);
   });
 });

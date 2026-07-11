@@ -1,14 +1,7 @@
-const FABRIC_BEARER = /(af(?:b|c|op)_)[A-Za-z0-9_-]{43}/gu;
+import { inertArtifactText } from "./artifact-content-safety.js";
 
-/** Full local operator text with terminal controls and Fabric bearer values removed. */
+/** Full local operator text through the shared terminal and credential classifier. */
 export function renderSafeMessageBody(raw: string): string {
-  return raw
-    .replace(/\r\n?/gu, "\n")
-    .replace(/\t/gu, " ")
-    .replace(/[\u2028\u2029]/gu, "\n")
-    .replace(/[\u200b-\u200d\u2060\ufeff]/gu, "")
-    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
-    .replace(/\p{Cf}/gu, "")
-    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/gu, " ")
-    .replace(FABRIC_BEARER, (_value, prefix: string) => `${prefix}<redacted>`);
+  const inert = inertArtifactText(raw);
+  return inert.safe ? inert.content : "[unsafe message content withheld]";
 }

@@ -154,6 +154,7 @@ function richDataset(
       row("project", "project-1", {
         kind: "project",
         goal: "Ship the project Console",
+        acceptedScopeRef: null,
         repositoryRevision: "c2fc623",
       }),
     ],
@@ -367,6 +368,159 @@ function review(stage: ActionReview["stage"] = "review"): ActionReview {
 }
 
 describe("structured presenter and responsive Fabric renderer", () => {
+  it("shows the exact registered accepted scope in Project row and detail", () => {
+    const dataset = richDataset();
+    const projectRow = dataset.pages.project.rows[0];
+    if (projectRow === undefined || projectRow.summary?.kind !== "project") {
+      throw new Error("project fixture unavailable");
+    }
+    const acceptedScopeRef = {
+      path: "docs/specs/05-project-fabric-console.md" as never,
+      digest: digestB,
+    };
+    const scopedDataset: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        project: {
+          ...dataset.pages.project,
+          rows: [{
+            ...projectRow,
+            summary: { ...projectRow.summary, acceptedScopeRef },
+          }],
+        },
+      },
+    };
+    const baseController = controllerState();
+    const controller: ConsoleControllerState = {
+      ...baseController,
+      activeView: "project",
+      selectionByView: {
+        ...baseController.selectionByView,
+        project: {
+          stableId: projectRow.stableId,
+          revision: projectRow.revision,
+        },
+      },
+    };
+    const presented = presentFabricConsole(
+      scopedDataset,
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(presented.masterRows[0]?.secondary).toContain(
+      `${acceptedScopeRef.path}@${acceptedScopeRef.digest}`,
+    );
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Accepted scope",
+      value: `${acceptedScopeRef.path}@${acceptedScopeRef.digest}`,
+    });
+  });
+
+  it("requires an exact explicit terminal-neutralisation confirmation before evidence actions", () => {
+    const dataset = richDataset();
+    const evidenceRow = dataset.pages.evidence.rows[0];
+    if (evidenceRow === undefined) throw new Error("evidence fixture unavailable");
+    const actionableRow: ConsoleRow<"evidence"> = {
+      ...evidenceRow,
+      view: "evidence",
+      actionAvailability: {
+        state: "available",
+        actions: ["promotion"],
+        requiresPreview: true,
+      },
+    };
+    const reviewed: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        evidence: { ...dataset.pages.evidence, rows: [actionableRow] },
+      },
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding: {
+          view: "evidence",
+          itemId: actionableRow.stableId,
+          itemRevision: actionableRow.revision,
+          projectionRevision: revisionFromProtocol(11),
+        },
+        readTransactionId: "artifact-review",
+        result: {
+          artifactRef: { path: "docs/spec.md" as never, digest: digestA },
+          evidenceRevision: 7,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair-1",
+          projectSessionId: sessionId,
+          coordinationRunId: "run-1" as never,
+          taskId: null,
+          createdAt: timestamp,
+          mediaType: "text/markdown",
+          content: "reviewed",
+          totalBytes: 12,
+          totalLines: 1,
+          renderedTotalBytes: 8,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: digestB,
+          transformation: "terminal-neutralised",
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{ pageIndex: 0, lineFragment: "whole", pageContentDigest: digestB, bytes: 8 }],
+          coverage: { complete: true, verified: true, pageCount: 1 },
+          reviewDisposition: "confirm-terminal-neutralised",
+        },
+      },
+    };
+    const baseController = controllerState();
+    const controller: ConsoleControllerState = {
+      ...baseController,
+      activeView: "evidence",
+      selectionByView: {
+        ...baseController.selectionByView,
+        evidence: {
+          stableId: actionableRow.stableId,
+          revision: actionableRow.revision,
+        },
+      },
+    };
+    const pending = presentFabricConsole(
+      reviewed,
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(pending.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "artifact:confirm-terminal-neutralised", enabled: true }),
+      expect.objectContaining({ id: "action:promotion", enabled: false }),
+    ]));
+
+    const confirmed = presentFabricConsole(
+      reviewed,
+      controller,
+      createFabricUiState({
+        artifactConfirmation: {
+          evidenceId: actionableRow.stableId,
+          evidenceRevision: 7,
+          sourceDigest: digestA,
+          renderedDigest: digestB,
+          transformation: "terminal-neutralised",
+          pageCount: 1,
+        },
+      }),
+      { columns: 80, rows: 24 },
+    );
+    expect(confirmed.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "artifact:confirm-terminal-neutralised" }),
+    ]));
+    expect(confirmed.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:promotion", enabled: true }),
+    ]));
+  });
+
   it("answers the reference questions from canonical facts without inferred progress", () => {
     const presentation = presentFabricConsole(
       richDataset(),

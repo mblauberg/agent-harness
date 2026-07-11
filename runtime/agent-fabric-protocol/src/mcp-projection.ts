@@ -176,6 +176,7 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
     resource("receipts", "Run receipts", "Exported coordination receipts for one run."),
   ),
   [FABRIC_OPERATIONS.exportReceipt]: tool(FABRIC_OPERATIONS.exportReceipt),
+  [FABRIC_OPERATIONS.evidencePublish]: tool(FABRIC_OPERATIONS.evidencePublish),
   [FABRIC_OPERATIONS.membershipBind]: tool(FABRIC_OPERATIONS.membershipBind),
   [FABRIC_OPERATIONS.intakeRevise]: tool(FABRIC_OPERATIONS.intakeRevise),
   [FABRIC_OPERATIONS.scopedGateCreate]: tool(FABRIC_OPERATIONS.scopedGateCreate),

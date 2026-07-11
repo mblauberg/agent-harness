@@ -210,6 +210,7 @@ export async function createMcpFixture(
 
   return {
     directory,
+    databasePath,
     socketPath,
     projectRunDirectory,
     daemon,

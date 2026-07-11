@@ -78,11 +78,14 @@ export class OperatorProjectionStore {
   readonly #database: Database.Database;
   readonly #operatorStore: OperatorStore;
   readonly #clock: () => number;
+  readonly #registryV1: boolean;
 
   constructor(options: OperatorProjectionStoreOptions) {
     this.#database = options.database;
     this.#operatorStore = options.operatorStore;
     this.#clock = options.clock ?? Date.now;
+    this.#registryV1 = (this.#database.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name?: unknown }>)
+      .some(({ name }) => name === "project_id");
   }
 
   discover(request: ProjectDiscoveryRequest): ProjectDiscoveryResult {
@@ -733,6 +736,7 @@ export class OperatorProjectionStore {
     const project = this.#projectRow(projectId);
     const revision = integer(project, "revision");
     const goal = this.#projectGoal(projectId);
+    const acceptedScopeRef = this.#acceptedScopeRef(projectId);
     return [{
       itemId: text(project, "project_id"),
       itemRevision: revision,
@@ -740,6 +744,7 @@ export class OperatorProjectionStore {
         summary: {
           kind: "project",
           goal,
+          acceptedScopeRef,
           repositoryRevision: "unavailable",
         },
         detailRef: { kind: "project", projectId, expectedRevision: revision },
@@ -831,25 +836,41 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     authenticated: AuthenticatedOperatorCredential,
   ): OperatorViewRow<"evidence">[] {
-    const values = this.#sessionQuery(
+    const values = (this.#registryV1 ? (projectSessionId === undefined
+      ? this.#database.prepare(`
+          SELECT * FROM artifacts
+           WHERE project_id=? AND registry_state='active'
+           ORDER BY created_at DESC, artifact_id
+        `).all(projectId)
+      : this.#database.prepare(`
+          SELECT * FROM artifacts
+           WHERE project_id=? AND registry_state='active'
+             AND (project_session_id IS NULL OR project_session_id=?)
+           ORDER BY created_at DESC, artifact_id
+        `).all(projectId, projectSessionId)
+    ) : this.#sessionQuery(
       projectId,
       projectSessionId,
-      `SELECT a.*, r.project_session_id FROM artifacts a JOIN runs r ON r.run_id=a.run_id`,
+      `SELECT a.*, r.project_session_id, 1 AS revision,
+              'artifact' AS evidence_kind, 'agent' AS publisher_kind,
+              a.publisher_agent_id AS publisher_ref, 'run-file' AS source_kind
+         FROM artifacts a JOIN runs r ON r.run_id=a.run_id`,
       "ORDER BY a.created_at DESC, a.artifact_id",
-    );
+    )).map((value) => row(value, "evidence registry row"));
     return values.map((artifact): OperatorViewRow<"evidence"> => {
       const evidenceId = text(artifact, "artifact_id");
+      const revision = integer(artifact, "revision");
       return {
         itemId: evidenceId,
-        itemRevision: 1,
-        fact: liveFact(1, toTimestamp(integer(artifact, "created_at"), "evidenceRow.observedAt"), {
+        itemRevision: revision,
+        fact: liveFact(revision, toTimestamp(integer(artifact, "created_at"), "evidenceRow.observedAt"), {
           summary: {
             kind: "evidence",
-            evidenceKind: "artifact",
+            evidenceKind: text(artifact, "evidence_kind") as "artifact" | "diff" | "test" | "review" | "receipt",
             status: "informational",
-            provenance: `fabric:${text(artifact, "publisher_agent_id")}`,
+            provenance: `${text(artifact, "publisher_kind")}:${text(artifact, "publisher_ref")}`,
           },
-          detailRef: { kind: "evidence", evidenceId, expectedRevision: 1 },
+          detailRef: { kind: "evidence", evidenceId, expectedRevision: revision },
           actionAvailability: actionAvailability(authenticated),
         }),
       };
@@ -1001,6 +1022,7 @@ export class OperatorProjectionStore {
         projectId,
         canonicalRoot,
         goal: this.#projectGoal(projectId),
+        acceptedScopeRef: this.#acceptedScopeRef(projectId),
         repositoryRevision: "unavailable",
       },
     };
@@ -1126,24 +1148,39 @@ export class OperatorProjectionStore {
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
   ): LoadedOperatorDetail {
-    const artifact = row(this.#database.prepare(`
-      SELECT a.* FROM artifacts a
-      JOIN runs r ON r.run_id=a.run_id
-      JOIN project_sessions s ON s.project_session_id=r.project_session_id
-      WHERE a.artifact_id=? AND s.project_id=?
-        AND (? IS NULL OR r.project_session_id=?)
+    const artifact = row(this.#database.prepare(this.#registryV1 ? `
+      SELECT * FROM artifacts
+       WHERE artifact_id=? AND project_id=? AND registry_state='active'
+         AND (? IS NULL OR project_session_id IS NULL OR project_session_id=?)
+    ` : `
+      SELECT a.*, r.project_session_id, 1 AS revision,
+             'artifact' AS evidence_kind, 'agent' AS publisher_kind,
+             a.publisher_agent_id AS publisher_ref, 'run-file' AS source_kind
+        FROM artifacts a
+        JOIN runs r ON r.run_id=a.run_id
+        JOIN project_sessions s ON s.project_session_id=r.project_session_id
+       WHERE a.artifact_id=? AND s.project_id=?
+         AND (? IS NULL OR r.project_session_id=?)
     `).get(detailRef.evidenceId, projectId, projectSessionId ?? null, projectSessionId ?? null), "evidence detail");
+    const revision = integer(artifact, "revision");
     return {
-      revision: 1,
+      revision,
       observedAt: toTimestamp(integer(artifact, "created_at"), "evidenceDetail.observedAt"),
       detail: {
         kind: "evidence",
         evidenceId: detailRef.evidenceId,
-        evidenceKind: "artifact",
+        evidenceKind: text(artifact, "evidence_kind") as "artifact" | "diff" | "test" | "review" | "receipt",
         artifactRef: parseArtifactRef({
           path: text(artifact, "relative_path"),
           digest: text(artifact, "sha256"),
         }, "evidenceDetail.artifactRef"),
+        sourceKind: text(artifact, "source_kind") as "project-file" | "run-file" | "git-private-diff",
+        publisherKind: text(artifact, "publisher_kind") as "agent" | "operator" | "fabric" | "project" | "migration",
+        publisherRef: text(artifact, "publisher_ref"),
+        projectSessionId: nullableText(artifact, "project_session_id") as never,
+        coordinationRunId: nullableText(artifact, "run_id") as never,
+        taskId: nullableText(artifact, "task_id") as never,
+        createdAt: toTimestamp(integer(artifact, "created_at"), "evidenceDetail.createdAt"),
         status: "informational",
       },
     };
@@ -1265,6 +1302,23 @@ export class OperatorProjectionStore {
       ORDER BY updated_at DESC, intake_id LIMIT 1
     `).get(projectId);
     return isRow(value) ? text(value, "summary") : "No accepted project goal recorded";
+  }
+
+  #acceptedScopeRef(projectId: ProjectId): ArtifactRef | null {
+    if (!this.#registryV1) return null;
+    const value = this.#database.prepare(`
+      SELECT artifact.relative_path, artifact.sha256
+        FROM intakes intake
+        JOIN artifacts artifact ON artifact.artifact_id=intake.accepted_scope_artifact_id
+       WHERE intake.project_id=? AND intake.state='accepted'
+         AND intake.accepted_scope_state='bound' AND artifact.registry_state='active'
+       ORDER BY intake.updated_at DESC, intake.intake_id LIMIT 1
+    `).get(projectId);
+    if (!isRow(value)) return null;
+    return parseArtifactRef({
+      path: text(value, "relative_path"),
+      digest: text(value, "sha256"),
+    }, "project.acceptedScopeRef");
   }
 }
 

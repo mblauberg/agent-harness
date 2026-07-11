@@ -376,6 +376,30 @@ export class FabricConsoleApplication {
       }
       return;
     }
+    if (activation.regionId === "artifact:confirm-terminal-neutralised") {
+      const inspection = this.dataset.inspection;
+      if (
+        activation.binding === null ||
+        inspection?.kind !== "artifact" ||
+        inspection.state !== "current" ||
+        inspection.result.reviewDisposition !== "confirm-terminal-neutralised" ||
+        activation.binding.view !== "evidence" ||
+        activation.binding.itemId !== inspection.binding.itemId ||
+        activation.binding.itemRevision !== inspection.binding.itemRevision ||
+        activation.binding.projectionRevision !== inspection.binding.projectionRevision
+      ) {
+        throw new Error("terminal-neutralised artifact confirmation is stale");
+      }
+      this.#runtime.setArtifactConfirmation({
+        evidenceId: inspection.binding.itemId,
+        evidenceRevision: inspection.result.evidenceRevision,
+        sourceDigest: inspection.result.artifactRef.digest,
+        renderedDigest: inspection.result.renderedArtifactDigest,
+        transformation: "terminal-neutralised",
+        pageCount: inspection.result.coverage.pageCount,
+      });
+      return;
+    }
     const workflowPlanner = this.#workflowPlanner;
     const workflowReview = this.#runtime.ui.workflowReview;
     if (activation.regionId === "palette:submit") {

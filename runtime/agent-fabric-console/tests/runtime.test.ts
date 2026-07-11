@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -686,7 +688,9 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.frame.rows.join("\n")).toContain("line-29");
   });
 
-  it("renders bounded artifact content as inert text in the Evidence detail pane", () => {
+  it("renders bounded artifact content as inert text in the Evidence detail pane", async () => {
+    const rendered = "# Actual reviewed spec\n\u001b[31mred must stay inert\nafop_hidden-token";
+    const renderedDigest = `sha256:${createHash("sha256").update(rendered).digest("hex")}` as Sha256Digest;
     const controller = new FakeController();
     const row: ConsoleRow<"evidence"> = {
       view: "evidence",
@@ -711,7 +715,11 @@ describe("Fabric Console runtime routing", () => {
         evidenceId: "artifact-spec" as never,
         expectedRevision: 7,
       },
-      actionAvailability: { state: "read-only", reason: "state-ineligible" },
+      actionAvailability: {
+        state: "available",
+        actions: ["promotion"],
+        requiresPreview: true,
+      },
     };
     controller.dataset = {
       ...controller.dataset,
@@ -737,14 +745,39 @@ describe("Fabric Console runtime routing", () => {
         },
         readTransactionId: "artifact-read",
         result: {
-          available: true,
           artifactRef: { path: "docs/spec.md" as never, digest },
+          evidenceRevision: 7,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair-1",
+          projectSessionId: null,
+          coordinationRunId: null,
+          taskId: null,
+          createdAt: timestamp,
           mediaType: "text/markdown",
-          content: "# Actual reviewed spec\n\u001b[31mred must stay inert\nafop_hidden-token",
+          content: rendered,
           totalBytes: 100,
-          truncated: false,
+          totalLines: 3,
+          renderedTotalBytes: Buffer.byteLength(rendered),
+          renderedTotalLines: 3,
+          renderedArtifactDigest: renderedDigest,
+          transformation: "combined",
           terminalNeutralised: true,
           capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{
+            pageIndex: 0,
+            lineFragment: "whole",
+            pageContentDigest: renderedDigest,
+            bytes: Buffer.byteLength(rendered),
+          }],
+          coverage: {
+            complete: true,
+            verified: true,
+            pageCount: 1,
+          },
+          reviewDisposition: "blocked-redacted",
         },
       },
     };
@@ -760,7 +793,10 @@ describe("Fabric Console runtime routing", () => {
     const runtime = new FabricConsoleRuntime({
       controller,
       viewport: { columns: 80, rows: 24 },
-      ui: createFabricUiState({ compactPane: "detail" }),
+      ui: createFabricUiState({
+        compactPane: "detail",
+        focusId: "detail:evidence:artifact-spec",
+      }),
       draw: () => {},
       detach: async () => {},
       activate: async () => {},
@@ -770,11 +806,29 @@ describe("Fabric Console runtime routing", () => {
     });
     const frame = runtime.frame.rows.join("\n");
 
-    expect(frame).toContain("# Actual reviewed spec");
-    expect(frame).toContain("<ESC>[31mred must stay inert");
-    expect(frame).toContain("[REDACTED capability]");
-    expect(frame).not.toContain("afop_hidden-token");
-    expect(frame).not.toContain("\u001b");
+    expect(frame).toContain("Evidence: artifact r7");
+    expect(frame).toContain("Publisher: agent:chair-1");
+    expect(frame).toContain("Coverage: 1/1 VERIFIED");
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "action:promotion")?.enabled).toBe(false);
+    await runtime.handleInput({ kind: "key", key: "page-down" });
+    expect(runtime.frame.rows.join("\n")).toContain("Review: BLOCKED | hidden source bytes");
+    await runtime.handleInput({ kind: "key", key: "page-down" });
+    const contentFrame = runtime.frame.rows.join("\n");
+    expect(contentFrame).toContain("# Actual reviewed spec");
+    expect(contentFrame).toContain("<ESC>[31mred must stay inert");
+    expect(contentFrame).toContain("[REDACTED capability]");
+    expect(contentFrame).not.toContain("afop_hidden-token");
+    expect(contentFrame).not.toContain("\u001b");
+
+    runtime.resize({ columns: 44, rows: 15 });
+    expect(runtime.frame.mode).toBe("compact");
+    expect(controller.dataset.inspection).toBeDefined();
+    runtime.resize({ columns: 120, rows: 32 });
+    expect(runtime.frame.mode).toBe("wide");
+    await runtime.handleInput({ kind: "key", key: "page-up" });
+    await runtime.handleInput({ kind: "key", key: "page-up" });
+    expect(runtime.frame.rows.join("\n")).toContain("Coverage: 1/1 VERIFIED");
+    expect(controller.state.selectionByView.evidence?.stableId).toBe("artifact-spec");
   });
 
   it("detaches exactly once, never stops work, and ignores late input", async () => {

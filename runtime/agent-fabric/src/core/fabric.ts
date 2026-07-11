@@ -6,10 +6,13 @@ import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
 import type {
   AgentCustodyResult,
+  EvidenceArtifactRegistration,
+  EvidencePublishRequest,
   OperationInputMap,
   ProtocolOperation,
   VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
+import { parseEvidenceArtifactRegistration } from "@local/agent-fabric-protocol";
 
 import type {
   AuthorityInput,
@@ -67,6 +70,7 @@ import {
   type GitHostedChecksPort,
 } from "../operator/git-repository-read.js";
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
+import { ArtifactContentReadService } from "../operator/artifact-content-read.js";
 import {
   OperatorActionStore,
   type OperatorActionEffectPort,
@@ -141,6 +145,8 @@ import type {
   TeamResult,
 } from "./contracts.js";
 import { FabricReadPolicy } from "./read-policy.js";
+import { ArtifactRegistry } from "../artifacts/registry.js";
+import { normalizeRunArtifactDirectory, resolveRunArtifactRoot } from "../artifacts/run-root.js";
 
 export { FabricClient } from "./client.js";
 
@@ -723,6 +729,15 @@ function isArtifactResult(value: unknown): value is ArtifactResult {
   );
 }
 
+function isEvidenceArtifactRegistration(value: unknown): value is EvidenceArtifactRegistration {
+  try {
+    parseEvidenceArtifactRegistration(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isBarrierResult(value: unknown): value is BarrierResult {
   return (
     isRow(value) &&
@@ -850,6 +865,7 @@ export class Fabric {
   readonly #operatorStore: OperatorStore;
   readonly #operatorProjections: OperatorProjectionStore;
   readonly #gitRepositoryReads: GitRepositoryReadService;
+  readonly #artifactContentReads: ArtifactContentReadService;
   readonly #operatorActions: OperatorActionStore;
   readonly #launchCustody: LaunchCustodyService | undefined;
   readonly #projectSessions: ProjectSessionStore;
@@ -859,6 +875,7 @@ export class Fabric {
   readonly #results: AtomicDeliveryStore;
   readonly #notifications: NotificationOutbox;
   readonly #notificationWorker: NativeNotificationWorker;
+  readonly #artifactRegistry: ArtifactRegistry;
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -874,6 +891,7 @@ export class Fabric {
     upgradeStoredAuthorities(this.#database, this.#workspaceRoots);
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
+    this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
     this.#providerSessions = new ProviderSessionCoordinator({
@@ -895,6 +913,12 @@ export class Fabric {
       privateStateRoot: dirname(realpathSync(options.databasePath)),
       clock: this.#clock,
       ...(options.gitHostedChecks === undefined ? {} : { hostedChecks: options.gitHostedChecks }),
+      artifactRegistry: this.#artifactRegistry,
+    });
+    this.#artifactContentReads = new ArtifactContentReadService({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      privateStateRoot: dirname(realpathSync(options.databasePath)),
     });
     const productionOperatorPorts = createProductionOperatorActionPorts({
       database: this.#database,
@@ -972,7 +996,11 @@ export class Fabric {
       commandJournal: this.#commandJournal,
       clock: this.#clock,
     });
-    this.#results = new AtomicDeliveryStore({ database: this.#database, clock: this.#clock });
+    this.#results = new AtomicDeliveryStore({
+      database: this.#database,
+      clock: this.#clock,
+      artifactRegistry: this.#artifactRegistry,
+    });
     this.#intakes = new IntakeStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
@@ -1617,6 +1645,7 @@ export class Fabric {
     chairCapability: string;
   }> {
     const location = this.#selectWorkspaceRoot(input.projectRunDirectory, input.workspaceRoot);
+    const storedRunDirectory = normalizeRunArtifactDirectory(location.workspaceRoot, location.projectRunDirectory);
     const authority = normaliseAuthority(input.chair.authority, location.workspaceRoot);
     const existing = this.#database.prepare(`
       SELECT r.chair_agent_id, r.workspace_root, r.project_run_directory, g.authority_id, a.authority_hash,
@@ -1627,7 +1656,7 @@ export class Fabric {
        WHERE r.run_id = ? ORDER BY c.principal_generation DESC LIMIT 1
     `).get(input.runId);
     if (isRow(existing)) {
-      if (existing.chair_agent_id !== input.chair.agentId || existing.workspace_root !== location.workspaceRoot || existing.project_run_directory !== location.projectRunDirectory || existing.authority_hash !== sha256(canonicalJson(authority))) {
+      if (existing.chair_agent_id !== input.chair.agentId || existing.workspace_root !== location.workspaceRoot || existing.project_run_directory !== storedRunDirectory || existing.authority_hash !== sha256(canonicalJson(authority))) {
         throw new FabricError("DEDUPE_CONFLICT", "run ID was reused with changed creation input");
       }
       if (existing.revoked_at !== null) throw new FabricError("AUTHENTICATION_FAILED", "chair capability was revoked");
@@ -1682,17 +1711,19 @@ export class Fabric {
           run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
           project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
           authority_ref, budget_ref, dependency_revision, topology_slot
-        ) VALUES (?, ?, ?, ?, ?, ?, 'recovery_required', 1, 1, ?, ?, ?, 1, NULL)
+          , project_run_directory_basis
+        ) VALUES (?, ?, ?, ?, ?, ?, 'recovery_required', 1, 1, ?, ?, ?, 1, NULL, ?)
       `).run(
         input.runId,
         input.chair.agentId,
         location.workspaceRoot,
-        location.projectRunDirectory,
+        storedRunDirectory,
         now,
         compatibility.projectSessionId,
         `chair:${input.runId}:1`,
         compatibility.authorityRef,
         compatibility.budgetRef,
+        storedRunDirectory === null ? "none" : "project-relative",
       );
       this.#database
         .prepare(
@@ -1930,6 +1961,12 @@ export class Fabric {
             agent,
             input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryAbandon],
           );
+        case FABRIC_OPERATIONS.evidencePublish:
+          return this.publishEvidence(
+            context.principal.runId,
+            context.principal.agentId,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.evidencePublish],
+          );
         default:
           throw Object.assign(new Error(`agent protocol operation is not wired: ${operation}`), {
             code: "PROTOCOL_UNSUPPORTED",
@@ -2131,6 +2168,12 @@ export class Fabric {
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
         return this.#gitRepositoryReads.read(request);
+      }
+      case FABRIC_OPERATIONS.operatorArtifactContentRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorArtifactContentRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#artifactContentReads.read(request);
       }
       case FABRIC_OPERATIONS.operatorActionPreview: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
@@ -4924,45 +4967,75 @@ export class Fabric {
         `).get(runId, taskId, actorAgentId, actorAgentId);
         if (!isRow(bound)) throw new FabricError("CAPABILITY_FORBIDDEN", "artifact task is outside the actor task scope");
       }
-      const run = rowOrNotFound(
-        this.#database.prepare("SELECT project_run_directory FROM runs WHERE run_id = ?").get(runId),
-        "run",
-      );
-      const directoryValue = run.project_run_directory;
-      if (typeof directoryValue !== "string") {
-        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "run has no project artifact directory");
-      }
-      let target: string;
-      try {
-        target = canonicalPath(resolve(directoryValue, input.relativePath));
-      } catch (error: unknown) {
-        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path cannot be canonicalised", { cause: error });
-      }
-      if (!pathContains(canonicalPath(directoryValue), target)) {
-        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path escapes the run directory");
-      }
-      const artifactId = uuidv7();
-      this.#database
-        .prepare(
-          "INSERT INTO artifacts(artifact_id, run_id, task_id, publisher_agent_id, relative_path, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .run(
-          artifactId,
-          runId,
-          taskId ?? null,
-          actorAgentId,
-          input.relativePath,
-          input.sha256,
-          this.#clock(),
-        );
+      const registered = this.#artifactRegistry.registerAgentEvidence({
+        runId,
+        agentId: actorAgentId,
+        taskId: taskId ?? null,
+        requestedSourceKind: "run-file",
+        evidenceKind: "artifact",
+        relativePath: input.relativePath,
+        digest: input.sha256,
+        verifyBytes: false,
+        enforcePathAuthority: false,
+      });
       const result: ArtifactResult = {
-        artifactId,
+        artifactId: registered.evidenceId,
         relativePath: input.relativePath,
         sha256: input.sha256,
       };
       this.#event(runId, "artifact-published", actorAgentId, result);
       return result;
     });
+  }
+
+  publishEvidence(
+    runId: string,
+    actorAgentId: string,
+    input: EvidencePublishRequest,
+  ): EvidenceArtifactRegistration {
+    if (input.coordinationRunId !== runId) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "evidence run binding differs from the authenticated run");
+    }
+    const root = resolveRunArtifactRoot(this.#database, runId);
+    if (input.projectSessionId !== root.projectSessionId) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "evidence session binding differs from the authenticated session");
+    }
+    return this.#commandJournal.execute(
+      runId,
+      actorAgentId,
+      input.commandId,
+      input,
+      isEvidenceArtifactRegistration,
+      () => {
+        const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+        const registered = this.#artifactRegistry.registerAgentEvidence({
+          runId,
+          agentId: actorAgentId,
+          taskId: taskId ?? null,
+          requestedSourceKind: input.requestedSourceKind,
+          evidenceKind: input.evidenceKind,
+          relativePath: input.relativePath,
+          digest: input.sourceDigest,
+        });
+        if (registered.projectSessionId === null || registered.coordinationRunId === null) {
+          throw new Error("agent evidence registration lost its session/run binding");
+        }
+        return {
+          evidenceId: registered.evidenceId,
+          evidenceRevision: registered.evidenceRevision,
+          projectId: registered.projectId as never,
+          projectSessionId: registered.projectSessionId as never,
+          coordinationRunId: registered.coordinationRunId as never,
+          taskId: registered.taskId as never,
+          sourceKind: registered.sourceKind as "project-file" | "run-file",
+          evidenceKind: registered.evidenceKind,
+          artifactRef: registered.artifactRef as never,
+          publisherKind: "agent",
+          publisherRef: registered.publisherRef as never,
+          createdAt: new Date(registered.createdAt).toISOString() as never,
+        };
+      },
+    );
   }
 
   closeBarrier(
@@ -5224,14 +5297,15 @@ export class Fabric {
     const replay = this.#commandJournal.read(runId, actorAgentId, commandId, payload, isReceiptResult);
     if (replay !== undefined) return replay;
     const run = rowOrNotFound(
-      this.#database.prepare("SELECT chair_agent_id, project_run_directory FROM runs WHERE run_id = ?").get(runId),
+      this.#database.prepare("SELECT chair_agent_id FROM runs WHERE run_id = ?").get(runId),
       "run",
     );
     if (stringField(run, "chair_agent_id") !== actorAgentId) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "only the chair may export the receipt");
     }
-    const directoryValue = run.project_run_directory;
-    if (typeof directoryValue !== "string") {
+    const artifactRoot = resolveRunArtifactRoot(this.#database, runId);
+    const directoryValue = artifactRoot.artifactRoot;
+    if (directoryValue === null) {
       throw new FabricError("NOT_FOUND", "run has no project receipt directory");
     }
     const receipt = this.#database.transaction(() => projectFabricReceipt(this.#database, runId))();
@@ -5244,11 +5318,24 @@ export class Fabric {
     writeFileSync(join(directoryValue, "fabric-receipt.json"), bytes, { encoding: "utf8", mode: 0o600 });
     const result: ReceiptResult = { relativePath, schemaVersion: 2, sha256: digest };
     this.#database.transaction(() => {
-        this.#database
-          .prepare(
-            "INSERT OR IGNORE INTO receipt_exports(run_id, relative_path, sha256, exported_at) VALUES (?, ?, ?, ?)",
-          )
-          .run(runId, relativePath, digest, this.#clock());
+      this.#database
+        .prepare(
+          "INSERT OR IGNORE INTO receipt_exports(run_id, relative_path, sha256, exported_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(runId, relativePath, digest, this.#clock());
+      this.#artifactRegistry.register({
+        projectId: artifactRoot.projectId,
+        projectSessionId: artifactRoot.projectSessionId,
+        runId,
+        taskId: null,
+        publisherKind: "fabric",
+        publisherRef: "fabric-receipt-export",
+        publisherAgentId: null,
+        sourceKind: artifactRoot.projectRelativeDirectory === "." ? "project-file" : "run-file",
+        evidenceKind: "receipt",
+        relativePath,
+        digest,
+      });
       this.#commandJournal.write(runId, actorAgentId, commandId, payload, result);
     })();
     return result;
@@ -5442,14 +5529,11 @@ export class Fabric {
     if (task.revision !== taskRevision || task.ownerAgentId !== agentId) {
       throw new FabricError("TASK_REVISION_CONFLICT", "checkpoint task revision or owner changed");
     }
-    const run = rowOrNotFound(
-      this.#database.prepare("SELECT project_run_directory FROM runs WHERE run_id = ?").get(runId),
-      "run",
-    );
-    if (typeof run.project_run_directory !== "string") {
+    const resolvedRoot = resolveRunArtifactRoot(this.#database, runId);
+    if (resolvedRoot.artifactRoot === null) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "run has no checkpoint directory");
     }
-    const root = canonicalPath(run.project_run_directory);
+    const root = canonicalPath(resolvedRoot.artifactRoot);
     const checkpointPath = canonicalPath(resolve(root, checkpoint.relativePath));
     if (!pathContains(root, checkpointPath) || !existsSync(checkpointPath)) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint path is missing or outside the run directory");

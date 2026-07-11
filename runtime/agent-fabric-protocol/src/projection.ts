@@ -433,7 +433,13 @@ export type OperatorViewSummaryMap = {
     title: string;
     nativeNotification: NativeNotificationDeliverySummary;
   };
-  project: { kind: "project"; goal: string; repositoryRevision: string; repository?: GitRepositorySummary };
+  project: {
+    kind: "project";
+    goal: string;
+    acceptedScopeRef: ArtifactRef | null;
+    repositoryRevision: string;
+    repository?: GitRepositorySummary;
+  };
   runs: { kind: "run"; phase: string; health: RunProjection["health"]; nextMilestone: string };
   work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
   agents: {
@@ -511,6 +517,7 @@ export type OperatorDetail =
       projectId: ProjectId;
       canonicalRoot: string;
       goal: string;
+      acceptedScopeRef: ArtifactRef | null;
       repositoryRevision: string;
       repository?: GitRepositoryProjection;
     }
@@ -544,6 +551,13 @@ export type OperatorDetail =
       evidenceId: string;
       evidenceKind: EvidenceViewItem["kind"];
       artifactRef: ArtifactRef;
+      sourceKind: "project-file" | "run-file" | "git-private-diff";
+      publisherKind: "agent" | "operator" | "fabric" | "project" | "migration";
+      publisherRef: string;
+      projectSessionId: ProjectSessionId | null;
+      coordinationRunId: CoordinationRunId | null;
+      taskId: TaskId | null;
+      createdAt: Timestamp;
       status: EvidenceViewItem["status"];
     }
   | ActivityDetail

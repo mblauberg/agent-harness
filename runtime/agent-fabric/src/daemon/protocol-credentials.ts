@@ -35,6 +35,7 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
     FABRIC_OPERATIONS.operatorActionStatus,
     FABRIC_OPERATIONS.messageBodyRead,
     FABRIC_OPERATIONS.operatorRepositoryRead,
+    FABRIC_OPERATIONS.operatorArtifactContentRead,
   ],
   decide: [
     FABRIC_OPERATIONS.projectSessionTransition,

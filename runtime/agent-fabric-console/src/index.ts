@@ -9,6 +9,7 @@ import { presentMessageBodyWindow, presentSafeTextWindow } from "./message.js";
 import type { ConsoleControllerState } from "./controller.js";
 import type { FabricView, Revision } from "./model.js";
 import {
+  matchesArtifactConfirmation,
   presentFabricConsole,
   responsiveModeFor,
   type FabricConsolePresentation,
@@ -1326,11 +1327,41 @@ function renderFabricDetail(
     inspection.binding.itemId === presentation.detail?.stableId
   ) {
     if (inspection.state === "current") {
+      const result = inspection.result;
+      const scope = [
+        result.projectSessionId === null ? null : `session:${result.projectSessionId}`,
+        result.coordinationRunId === null ? null : `run:${result.coordinationRunId}`,
+        result.taskId === null ? null : `task:${result.taskId}`,
+      ].filter((value): value is string => value !== null).join(" | ") || "project";
+      const confirmed = matchesArtifactConfirmation(
+        ui.artifactConfirmation,
+        inspection.binding.itemId,
+        result,
+      );
+      const review = result.reviewDisposition === "eligible"
+        ? "COMPLETE | Accept/Implement eligible"
+        : confirmed
+          ? `CONFIRMED ${result.transformation} + ${result.artifactRef.digest}`
+        : result.reviewDisposition === "confirm-terminal-neutralised"
+          ? `CONFIRM ${result.transformation} + source digest before Accept/Implement`
+          : "BLOCKED | hidden source bytes";
+      const detailText = [
+        `Evidence: ${result.evidenceKind} r${String(result.evidenceRevision)} | ${result.sourceKind}`,
+        `Publisher: ${result.publisherKind}:${result.publisherRef} | ${result.createdAt}`,
+        `Scope: ${scope}`,
+        `Path: ${result.artifactRef.path}`,
+        `Source digest: ${result.artifactRef.digest}`,
+        `Coverage: ${String(result.coverage.pageCount)}/${String(result.pages.length)} VERIFIED | source ${String(result.totalBytes)}B/${String(result.totalLines)}L | rendered ${String(result.renderedTotalBytes)}B/${String(result.renderedTotalLines)}L`,
+        `Rendered digest: ${result.renderedArtifactDigest}`,
+        `Transformation: ${result.transformation} | Review: ${review}`,
+        "--- CONTENT ---",
+        result.content,
+      ].join("\n");
       const window = presentSafeTextWindow(
-        inspection.result.content,
+        detailText,
         {
-          columns: Math.max(1, bounds.x2 - bounds.x1 - 5),
-          rows: Math.max(1, height - 3),
+          columns: Math.max(1, bounds.x2 - bounds.x1 + 1),
+          rows: Math.max(1, height),
           offset: Math.max(
             0,
             Math.trunc(ui.detailScrollOffsetByView[presentation.activeView] ?? 0),
@@ -1339,16 +1370,12 @@ function renderFabricDetail(
         { sanitizeDisplayText, graphemes, cellWidth },
       );
       detailScrollMaximum = Math.max(0, window.totalLines - 1);
-      lines = [
-        `Artifact: ${inspection.result.artifactRef.path}`,
-        `Digest: ${inspection.result.artifactRef.digest}`,
-        `Content: ${inspection.result.mediaType} | ${String(inspection.result.totalBytes)} bytes${inspection.result.truncated ? " | TRUNCATED" : ""}`,
-        ...window.lines.map((line) => `Body: ${line}`),
-      ];
+      lines = window.lines;
     } else {
       lines = [
         `Artifact: ${inspection.binding.itemId}`,
         `Read: unavailable | ${inspection.reason}`,
+        "Accept/Implement: DISABLED | complete verified content required",
       ];
     }
   } else if (

@@ -64,6 +64,12 @@ import type {
   ProtocolOperation,
 } from "./rpc-contract.js";
 import { budgetUnitKey } from "./resource-unit-keys.js";
+import {
+  parseArtifactContentReadRequest,
+  parseArtifactContentReadResult,
+  parseEvidenceArtifactRegistration,
+  parseEvidencePublishRequest,
+} from "./artifacts.js";
 
 export type ObjectWireShape = {
   kind: "object";
@@ -148,7 +154,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.intakeDraftCreate]: object(["command", "intakeId", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
   [FABRIC_OPERATIONS.intakeRead]: object(["credential", "intakeId"]),
   [FABRIC_OPERATIONS.intakeSubmit]: object(["command", "intakeId", "expectedRevision", "projectSessionId", "coordinationRunId", "summary", "artifactRefs", "gateIds", "chairRequest"]),
-  [FABRIC_OPERATIONS.intakeRevise]: object(["origin", "command", "intakeId", "projectSessionId", "coordinationRunId", "expectedRevision", "state", "summary", "artifactRefs", "gateIds"], ["chairRequest"]),
+  [FABRIC_OPERATIONS.intakeRevise]: object(["origin", "command", "intakeId", "projectSessionId", "coordinationRunId", "expectedRevision", "state", "summary", "artifactRefs", "gateIds"], ["chairRequest", "acceptedScopeRef"]),
   [FABRIC_OPERATIONS.scopedGateCreate]: object(["origin", "command", "intent"]),
   [FABRIC_OPERATIONS.scopedGateResolve]: object(["command", "gateId", "status", "decisionEvidence"]),
   [FABRIC_OPERATIONS.scopedGateCheck]: object(["projectSessionId", "coordinationRunId", "dependencyRevision", "enforcementPoint"], ["taskId", "operationId", "barrierId"]),
@@ -178,6 +184,31 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.messageBodyRead]: object(["credential", "projectSessionId", "messageId", "expectedRevision"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["credential", "projectId", "snapshotRevision", "target", "diff", "log"],
+    ["projectSessionId"],
+  ),
+  [FABRIC_OPERATIONS.evidencePublish]: object(
+    [
+      "commandId",
+      "projectSessionId",
+      "coordinationRunId",
+      "requestedSourceKind",
+      "evidenceKind",
+      "relativePath",
+      "sourceDigest",
+    ],
+    ["taskId"],
+  ),
+  [FABRIC_OPERATIONS.operatorArtifactContentRead]: object(
+    [
+      "credential",
+      "projectId",
+      "evidenceId",
+      "expectedEvidenceRevision",
+      "artifactRef",
+      "cursor",
+      "maximumBytes",
+      "maximumLines",
+    ],
     ["projectSessionId"],
   ),
   [FABRIC_OPERATIONS.projectSessionDrain]: object(["command", "projectSessionId", "expectedGeneration", "consequencePreviewRef", "confirmedPreviewRevision"]),
@@ -253,9 +284,9 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.operatorCommand]: object(["commandId", "actor", "provenance", "operation", "expectedRevision", "committedRevision", "before", "after", "evidenceRefs", "committedAt"]),
   [FABRIC_OPERATIONS.integrationInputAttest]: object(["attestationId", "integrationId", "integrationGeneration", "operatorId", "projectId", "projectSessionId", "providerEvent", "humanUtterance", "gateBinding", "recordedAt"]),
   [FABRIC_OPERATIONS.intakeDraftCreate]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
-  [FABRIC_OPERATIONS.intakeRead]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"], ["projectSessionId", "coordinationRunId"]),
+  [FABRIC_OPERATIONS.intakeRead]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"], ["projectSessionId", "coordinationRunId", "acceptedScopeRef"]),
   [FABRIC_OPERATIONS.intakeSubmit]: object(["intakeId", "projectId", "projectSessionId", "coordinationRunId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
-  [FABRIC_OPERATIONS.intakeRevise]: object(["intakeId", "projectId", "projectSessionId", "coordinationRunId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
+  [FABRIC_OPERATIONS.intakeRevise]: object(["intakeId", "projectId", "projectSessionId", "coordinationRunId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"], ["acceptedScopeRef"]),
   [FABRIC_OPERATIONS.scopedGateCreate]: object(["gateId", "projectSessionId", "coordinationRunId", "scope", "affectedTaskIds", "dependencyRevision", "blockedOperationIds", "enforcementPoints", "question", "reason", "options", "recommendation", "consequences", "evidenceRefs", "revision", "createdByRef", "expectedApproverRef", "status"], ["deadline", "default", "resolution", "releaseBinding"]),
   [FABRIC_OPERATIONS.scopedGateResolve]: object(["gateId", "projectSessionId", "coordinationRunId", "scope", "affectedTaskIds", "dependencyRevision", "blockedOperationIds", "enforcementPoints", "question", "reason", "options", "recommendation", "consequences", "evidenceRefs", "revision", "createdByRef", "expectedApproverRef", "status"], ["deadline", "default", "resolution", "releaseBinding"]),
   [FABRIC_OPERATIONS.scopedGateCheck]: object(["allowed", "checkedGateRevisions"], ["blockingGateIds"]),
@@ -286,6 +317,41 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["status"],
     ["projectId", "projectSessionId", "snapshotRevision", "readTransactionId", "repository", "reason", "currentSnapshotRevision"],
+  ),
+  [FABRIC_OPERATIONS.evidencePublish]: object([
+    "evidenceId",
+    "evidenceRevision",
+    "projectId",
+    "projectSessionId",
+    "coordinationRunId",
+    "taskId",
+    "sourceKind",
+    "evidenceKind",
+    "artifactRef",
+    "publisherKind",
+    "publisherRef",
+    "createdAt",
+  ]),
+  [FABRIC_OPERATIONS.operatorArtifactContentRead]: object(
+    ["available", "artifactRef"],
+    [
+      "reason",
+      "mediaType",
+      "content",
+      "totalBytes",
+      "totalLines",
+      "renderedTotalBytes",
+      "renderedTotalLines",
+      "pageIndex",
+      "lineFragment",
+      "pageContentDigest",
+      "renderedArtifactDigest",
+      "nextCursor",
+      "transformation",
+      "terminalNeutralised",
+      "capabilityValuesRedacted",
+      "credentialValuesRedacted",
+    ],
   ),
   [FABRIC_OPERATIONS.projectSessionDrain]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionStop]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
@@ -339,6 +405,123 @@ const agentAuthorityOperationCodec = defineCodec<FabricOperation>({
 const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
 const artifactRefsCodec = arrayOf(artifactRefCodec, { maximum: 128 });
 const credentialCodec = objectCodec({ capabilityId: identifier, token: secret });
+const evidenceKindCodec = enumeration(["artifact", "diff", "test", "review", "receipt"]);
+const publishableEvidenceSourceKindCodec = enumeration(["project-file", "run-file"]);
+const evidencePublishInputCodec = parserBacked(
+  objectCodec({
+    commandId: identifier,
+    projectSessionId: identifier,
+    coordinationRunId: identifier,
+    requestedSourceKind: publishableEvidenceSourceKindCodec,
+    evidenceKind: evidenceKindCodec,
+    relativePath,
+    sourceDigest: sha256,
+  }, { taskId: identifier }),
+  parseEvidencePublishRequest,
+  parseEvidencePublishRequest({
+    commandId: "command_01",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    requestedSourceKind: "run-file",
+    evidenceKind: "artifact",
+    relativePath: "artifacts/item.json",
+    sourceDigest: sha256.example,
+  }),
+);
+const evidenceRegistrationCodec = parserBacked(
+  objectCodec({
+    evidenceId: identifier,
+    evidenceRevision: positiveInteger,
+    projectId: identifier,
+    projectSessionId: identifier,
+    coordinationRunId: identifier,
+    taskId: nullable(identifier),
+    sourceKind: publishableEvidenceSourceKindCodec,
+    evidenceKind: evidenceKindCodec,
+    artifactRef: artifactRefCodec,
+    publisherKind: literal("agent"),
+    publisherRef: identifier,
+    createdAt: timestamp,
+  }),
+  parseEvidenceArtifactRegistration,
+  parseEvidenceArtifactRegistration({
+    evidenceId: "artifact_01",
+    evidenceRevision: 1,
+    projectId: "project_01",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    taskId: null,
+    sourceKind: "run-file",
+    evidenceKind: "artifact",
+    artifactRef: artifactRefCodec.example,
+    publisherKind: "agent",
+    publisherRef: "agent_01",
+    createdAt: timestamp.example,
+  }),
+);
+const artifactContentReadInputCodec = parserBacked(
+  objectCodec({
+    credential: credentialCodec,
+    projectId: identifier,
+    evidenceId: identifier,
+    expectedEvidenceRevision: positiveInteger,
+    artifactRef: artifactRefCodec,
+    cursor: nullable(boundedString({ maxBytes: 4096, example: "cursor_01" })),
+    maximumBytes: integer({ minimum: 4, maximum: 131_072 }),
+    maximumLines: integer({ minimum: 1, maximum: 2_000 }),
+  }, { projectSessionId: identifier }),
+  parseArtifactContentReadRequest,
+  parseArtifactContentReadRequest({
+    credential: credentialCodec.example,
+    projectId: "project_01",
+    evidenceId: "artifact_01",
+    expectedEvidenceRevision: 1,
+    artifactRef: artifactRefCodec.example,
+    cursor: null,
+    maximumBytes: 131_072,
+    maximumLines: 2_000,
+  }),
+);
+const artifactContentReadResultCodec = parserBacked(
+  unionOf([
+    objectCodec({
+      available: literal(false),
+      artifactRef: artifactRefCodec,
+      reason: enumeration(["not-found", "forbidden", "unsupported-media", "unsafe-content", "stale", "oversized"]),
+    }),
+    objectCodec({
+      available: literal(true),
+      artifactRef: artifactRefCodec,
+      mediaType: enumeration(["text/markdown", "application/json", "text/x-diff", "text/plain"]),
+      content: boundedString({ minBytes: 0, maxBytes: 131_072, example: "safe content\n" }),
+      totalBytes: integer(),
+      totalLines: integer(),
+      renderedTotalBytes: integer(),
+      renderedTotalLines: integer(),
+      pageIndex: integer(),
+      lineFragment: enumeration(["whole", "start", "middle", "end"]),
+      pageContentDigest: sha256,
+      renderedArtifactDigest: sha256,
+      nextCursor: nullable(boundedString({ maxBytes: 4096, example: "cursor_02" })),
+      transformation: enumeration([
+        "none",
+        "terminal-neutralised",
+        "capability-redacted",
+        "credential-redacted",
+        "combined",
+      ]),
+      terminalNeutralised: literal(true),
+      capabilityValuesRedacted: literal(true),
+      credentialValuesRedacted: literal(true),
+    }),
+  ]),
+  parseArtifactContentReadResult,
+  parseArtifactContentReadResult({
+    available: false,
+    artifactRef: artifactRefCodec.example,
+    reason: "not-found",
+  }),
+);
 const consoleProvenanceCodec = objectCodec({
   kind: literal("console-direct-input"),
   clientId: identifier,
@@ -987,18 +1170,28 @@ const intakeDraftCodec = objectCodec({
   artifactRefs: artifactRefsCodec,
   gateIds: stringList,
 });
-const boundIntakeCodec = objectCodec({
+const boundIntakeCommonFields = {
   intakeId: identifier,
   projectId: identifier,
   projectSessionId: identifier,
   coordinationRunId: identifier,
   revision: positiveInteger,
-  state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
   dedupeKey: text,
   summary: text,
   artifactRefs: artifactRefsCodec,
   gateIds: stringList,
-});
+};
+const boundIntakeCodec = unionOf([
+  objectCodec({
+    ...boundIntakeCommonFields,
+    state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "deferred", "cancelled"]),
+  }),
+  objectCodec({
+    ...boundIntakeCommonFields,
+    state: literal("accepted"),
+    acceptedScopeRef: artifactRefCodec,
+  }),
+]);
 const intakeCodec = unionOf([intakeDraftCodec, boundIntakeCodec]);
 const intakeDraftCreateBaseCodec = objectCodec({
   command: operatorMutationCodec,
@@ -1494,7 +1687,7 @@ const attentionSummaryCodec = objectCodec({
   nativeNotification: nativeNotificationDeliverySummaryCodec,
 });
 const projectSummaryCodec = objectCodec(
-  { kind: literal("project"), goal: text, repositoryRevision: text },
+  { kind: literal("project"), goal: text, acceptedScopeRef: nullable(artifactRefCodec), repositoryRevision: text },
   { repository: gitRepositorySummaryCodec },
 );
 const runSummaryCodec = objectCodec({
@@ -1614,7 +1807,14 @@ const operatorViewPageResultCodec = parserBacked(
 
 const operatorDetailCodec = unionOf([
   objectCodec(
-    { kind: literal("project"), projectId: identifier, canonicalRoot: absoluteFilesystemPathCodec, goal: text, repositoryRevision: text },
+    {
+      kind: literal("project"),
+      projectId: identifier,
+      canonicalRoot: absoluteFilesystemPathCodec,
+      goal: text,
+      acceptedScopeRef: nullable(artifactRefCodec),
+      repositoryRevision: text,
+    },
     { repository: gitRepositoryProjectionCodec },
   ),
   objectCodec({
@@ -1651,6 +1851,13 @@ const operatorDetailCodec = unionOf([
     evidenceId: identifier,
     evidenceKind: enumeration(["artifact", "diff", "test", "review", "receipt"]),
     artifactRef: artifactRefCodec,
+    sourceKind: enumeration(["project-file", "run-file", "git-private-diff"]),
+    publisherKind: enumeration(["agent", "operator", "fabric", "project", "migration"]),
+    publisherRef: identifier,
+    projectSessionId: nullable(identifier),
+    coordinationRunId: nullable(identifier),
+    taskId: nullable(identifier),
+    createdAt: timestamp,
     status: enumeration(["pass", "fail", "pending", "informational"]),
   }),
   objectCodec({
@@ -1741,7 +1948,6 @@ const intakeRevisionCommonFields = {
   projectSessionId: identifier,
   coordinationRunId: identifier,
   expectedRevision: positiveInteger,
-  state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
   summary: text,
   artifactRefs: artifactRefsCodec,
   gateIds: stringList,
@@ -1751,11 +1957,27 @@ const intakeRevisionCodec = unionOf([
     origin: literal("operator"),
     command: operatorMutationCodec,
     ...intakeRevisionCommonFields,
+    state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "deferred", "cancelled"]),
+  }, { chairRequest: taskRequestCodec }),
+  objectCodec({
+    origin: literal("operator"),
+    command: operatorMutationCodec,
+    ...intakeRevisionCommonFields,
+    state: literal("accepted"),
+    acceptedScopeRef: artifactRefCodec,
   }, { chairRequest: taskRequestCodec }),
   objectCodec({
     origin: literal("chair"),
     command: chairMutationCodec,
     ...intakeRevisionCommonFields,
+    state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "deferred", "cancelled"]),
+  }, { chairRequest: taskRequestCodec }),
+  objectCodec({
+    origin: literal("chair"),
+    command: chairMutationCodec,
+    ...intakeRevisionCommonFields,
+    state: literal("accepted"),
+    acceptedScopeRef: artifactRefCodec,
   }, { chairRequest: taskRequestCodec }),
 ]);
 const gateCreateCodec = unionOf([
@@ -2399,6 +2621,8 @@ const budgetResultOperations: ReadonlySet<ProtocolOperation> = new Set([
 ]);
 
 function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
+  if (operation === FABRIC_OPERATIONS.evidencePublish) return evidencePublishInputCodec;
+  if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadInputCodec;
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationInputCodec;
   if (operation === FABRIC_OPERATIONS.sendMessage) return legacyMessageCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateCodec;
@@ -2428,6 +2652,8 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
 }
 
 function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
+  if (operation === FABRIC_OPERATIONS.evidencePublish) return evidenceRegistrationCodec;
+  if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadResultCodec;
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationResultCodec;
   if (operation === FABRIC_OPERATIONS.spawnAgent || operation === FABRIC_OPERATIONS.attachAgent) {
     return agentCustodyResultCodec;

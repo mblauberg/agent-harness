@@ -82,6 +82,15 @@ export type UsabilitySystem = Readonly<{
   detail: string;
 }>;
 
+export type UsabilityEvidenceReview = Readonly<{
+  evidenceId: string;
+  path: string;
+  sourceDigest: Sha256Digest;
+  renderedDigest: Sha256Digest;
+  transformation: "terminal-neutralised" | "capability-redacted" | "credential-redacted" | "combined";
+  expectedDisposition: "confirm-terminal-neutralised" | "blocked-redacted";
+}>;
+
 export type UsabilityFixture = Readonly<{
   id: string;
   description: string;
@@ -90,6 +99,7 @@ export type UsabilityFixture = Readonly<{
   runs: readonly UsabilityRun[];
   attention: readonly UsabilityAttention[];
   system: readonly UsabilitySystem[];
+  evidenceReview: UsabilityEvidenceReview | null;
   expectedTopAttentionId: string | null;
   expectedAnswers: UsabilityExpectedAnswers;
 }>;
@@ -116,6 +126,8 @@ export type UsabilityObservation = Readonly<{
   consequentialReviewRequired: boolean;
   optionalIntegrationIndependent: boolean;
   nativeNotificationVisible: boolean;
+  dynamicResizeSafe: boolean;
+  artifactReviewSafe: boolean;
   exactViewport: boolean;
 }>;
 
@@ -283,6 +295,33 @@ function parseAnswers(value: unknown, path: string): UsabilityExpectedAnswers {
   };
 }
 
+function shaDigest(value: unknown, path: string): Sha256Digest {
+  if (typeof value !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(value)) {
+    throw new TypeError(`${path} must be a canonical SHA-256 digest`);
+  }
+  return value as Sha256Digest;
+}
+
+function parseEvidenceReview(value: unknown, path: string): UsabilityEvidenceReview {
+  const item = record(value, path);
+  return {
+    evidenceId: string(item.evidenceId, `${path}.evidenceId`),
+    path: string(item.path, `${path}.path`),
+    sourceDigest: shaDigest(item.sourceDigest, `${path}.sourceDigest`),
+    renderedDigest: shaDigest(item.renderedDigest, `${path}.renderedDigest`),
+    transformation: choice(
+      item.transformation,
+      ["terminal-neutralised", "capability-redacted", "credential-redacted", "combined"],
+      `${path}.transformation`,
+    ),
+    expectedDisposition: choice(
+      item.expectedDisposition,
+      ["confirm-terminal-neutralised", "blocked-redacted"],
+      `${path}.expectedDisposition`,
+    ),
+  };
+}
+
 function parseFixture(value: unknown, path: string): UsabilityFixture {
   const fixture = record(value, path);
   const expectedTop = fixture.expectedTopAttentionId;
@@ -304,6 +343,9 @@ function parseFixture(value: unknown, path: string): UsabilityFixture {
     system: array(fixture.system, `${path}.system`).map((item, index) =>
       parseSystem(item, `${path}.system[${String(index)}]`),
     ),
+    evidenceReview: fixture.evidenceReview === undefined
+      ? null
+      : parseEvidenceReview(fixture.evidenceReview, `${path}.evidenceReview`),
     expectedTopAttentionId: expectedTop,
     expectedAnswers: parseAnswers(
       fixture.expectedAnswers,
@@ -478,6 +520,32 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
   }));
   const attentionRows = rankConsoleRows(fixture.attention.map(attentionRow));
   const systemRows = fixture.system.map(systemRow);
+  const evidenceReview = fixture.evidenceReview;
+  const evidenceRows: readonly ConsoleRow<"evidence">[] = evidenceReview === null
+    ? []
+    : [{
+        view: "evidence",
+        stableId: evidenceReview.evidenceId,
+        revision: revisionFromProtocol(7),
+        urgency: "acceptance-ready",
+        freshness: freshness("live", 500),
+        summary: {
+          kind: "evidence",
+          evidenceKind: "artifact",
+          status: "informational",
+          provenance: "agent:chair-evaluation",
+        },
+        detailRef: {
+          kind: "evidence",
+          evidenceId: evidenceReview.evidenceId,
+          expectedRevision: 7,
+        },
+        actionAvailability: {
+          state: "available",
+          actions: ["promotion"],
+          requiresPreview: true,
+        },
+      }];
   const pages = createEmptyViewPages();
   const attentionFacts: AttentionItem[] = fixture.attention.map((item) => ({
     itemId: item.id,
@@ -554,9 +622,64 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
         snapshotRevision: revisionFromProtocol(revision),
         readTransactionId: `fixture:${fixture.id}:system`,
       },
+      evidence: {
+        view: "evidence",
+        rows: evidenceRows,
+        nextCursor: evidenceRows.length,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(revision),
+        readTransactionId: `fixture:${fixture.id}:evidence`,
+      },
     },
     loadedAtMs: performance.now(),
     canMutate: true,
+    ...(evidenceReview === null ? {} : {
+      inspection: {
+        kind: "artifact" as const,
+        state: "current" as const,
+        binding: {
+          view: "evidence" as const,
+          itemId: evidenceReview.evidenceId,
+          itemRevision: revisionFromProtocol(7),
+          projectionRevision: revisionFromProtocol(revision),
+        },
+        readTransactionId: `fixture:${fixture.id}:artifact`,
+        result: {
+          artifactRef: {
+            path: evidenceReview.path as never,
+            digest: evidenceReview.sourceDigest,
+          },
+          evidenceRevision: 7,
+          evidenceKind: "artifact" as const,
+          sourceKind: "project-file" as const,
+          publisherKind: "agent" as const,
+          publisherRef: "chair-evaluation",
+          projectSessionId,
+          coordinationRunId: runs[0]?.runId ?? null,
+          taskId: null,
+          createdAt: timestamp,
+          mediaType: "text/markdown" as const,
+          content: "reviewed inert artifact",
+          totalBytes: 30,
+          totalLines: 1,
+          renderedTotalBytes: 23,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: evidenceReview.renderedDigest,
+          transformation: evidenceReview.transformation,
+          terminalNeutralised: true as const,
+          capabilityValuesRedacted: true as const,
+          credentialValuesRedacted: true as const,
+          pages: [{
+            pageIndex: 0,
+            lineFragment: "whole" as const,
+            pageContentDigest: evidenceReview.renderedDigest,
+            bytes: 23,
+          }],
+          coverage: { complete: true as const, verified: true as const, pageCount: 1 },
+          reviewDisposition: evidenceReview.expectedDisposition,
+        },
+      },
+    }),
   };
 }
 
@@ -611,6 +734,65 @@ function observe(
   );
   const durationMs = performance.now() - started;
   const frameText = frame.rows.join("\n");
+  const resizeFrames = [
+    dependencies.render(dataset, controller, ui, { columns: 44, rows: 15 }),
+    dependencies.render(dataset, controller, ui, { columns: 120, rows: 32 }),
+  ];
+  const dynamicResizeSafe =
+    resizeFrames[0]?.columns === 44 && resizeFrames[0].rows.length === 15 &&
+    resizeFrames[1]?.columns === 120 && resizeFrames[1].rows.length === 32 &&
+    resizeFrames.every((candidate) => candidate.mode !== "inert") &&
+    controller.activeView === "attention" &&
+    controller.selectionByView.attention?.stableId === top?.stableId;
+  let artifactReviewSafe = true;
+  const evidenceReview = fixture.evidenceReview;
+  if (evidenceReview !== null) {
+    const evidenceRow = dataset.pages.evidence.rows[0];
+    if (evidenceRow === undefined) {
+      artifactReviewSafe = false;
+    } else {
+      const evidenceController: ConsoleControllerState = {
+        ...controller,
+        activeView: "evidence",
+        selectionByView: {
+          ...controller.selectionByView,
+          evidence: {
+            stableId: evidenceRow.stableId,
+            revision: evidenceRow.revision,
+          },
+        },
+      };
+      const evidenceUi = createFabricUiState({
+        compactPane: "detail",
+        focusId: `detail:evidence:${evidenceRow.stableId}`,
+      });
+      const evidencePresentation = presentFabricConsole(
+        dataset,
+        evidenceController,
+        evidenceUi,
+        manifest.referenceViewport,
+      );
+      const evidenceFrames = [
+        dependencies.render(dataset, evidenceController, evidenceUi, { columns: 60, rows: 18 }),
+        dependencies.render(dataset, evidenceController, evidenceUi, manifest.referenceViewport),
+        dependencies.render(dataset, evidenceController, evidenceUi, { columns: 120, rows: 32 }),
+      ];
+      const evidenceText = evidenceFrames.map(({ rows }) => rows.join("\n")).join("\n");
+      const promotion = evidencePresentation.actions.find(({ id }) => id === "action:promotion");
+      const confirmation = evidencePresentation.actions.find(
+        ({ id }) => id === "artifact:confirm-terminal-neutralised",
+      );
+      artifactReviewSafe =
+        promotion?.enabled === false &&
+        (evidenceReview.expectedDisposition === "confirm-terminal-neutralised"
+          ? confirmation?.enabled === true
+          : confirmation === undefined) &&
+        evidenceText.includes(evidenceReview.path) &&
+        evidenceText.includes("Coverage: 1/1 VERIFIED") &&
+        !/[\u001b\u009b\u202e]/u.test(evidenceText) &&
+        !/\b(?:afb_|afc_|afop_)/u.test(evidenceText);
+    }
+  }
   const visibleAnswer = (value: string): string =>
     frameText.includes(value) ? value : "not-visible";
   const githubUnavailable = fixture.system.some(
@@ -654,6 +836,8 @@ function observe(
       frameText.includes(
         `${topNotification.status} | journal ${topNotification.journalState}`,
       ),
+    dynamicResizeSafe,
+    artifactReviewSafe,
     exactViewport:
       frame.columns === manifest.referenceViewport.columns &&
       frame.rows.length === manifest.referenceViewport.rows &&
@@ -703,6 +887,8 @@ export function evaluateUsabilityManifest(
         observation.consequentialReviewRequired &&
         observation.optionalIntegrationIndependent &&
         observation.nativeNotificationVisible &&
+        observation.dynamicResizeSafe &&
+        observation.artifactReviewSafe &&
         observation.exactViewport;
     }
   }

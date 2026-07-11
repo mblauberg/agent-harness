@@ -145,10 +145,13 @@ async function setup(): Promise<Fixture> {
         ${Date.parse("2099-01-01T00:00:00Z")}, ${now}
       );
       INSERT INTO artifacts(
-        artifact_id, run_id, task_id, publisher_agent_id, relative_path, sha256, created_at
+        artifact_id, project_id, project_session_id, run_id, task_id,
+        publisher_kind, publisher_ref, publisher_agent_id, source_kind, evidence_kind,
+        relative_path, sha256, registry_state, quarantine_reason, revision, created_at
       ) VALUES (
-        'artifact_membership', 'run_membership', 'task_membership',
-        'chair_membership', 'evidence/membership.md', '${digest}', ${now}
+        'artifact_membership', '${projectId}', '${projectSessionId}', 'run_membership', 'task_membership',
+        'agent', 'chair_membership', 'chair_membership', 'project-file', 'artifact',
+        'evidence/membership.md', '${digest}', 'active', NULL, 1, ${now}
       );
       INSERT INTO scoped_gates(
         gate_id, project_session_id, coordination_run_id, dedupe_key, scope_kind,

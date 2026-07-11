@@ -1,5 +1,9 @@
 import { FABRIC_OPERATIONS, type FabricOperation } from "../domain/operations.js";
-import type { AgentCustodyResult } from "@local/agent-fabric-protocol";
+import type {
+  AgentCustodyResult,
+  EvidenceArtifactRegistration,
+  EvidencePublishRequest,
+} from "@local/agent-fabric-protocol";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { FabricError } from "../errors.js";
 import type {
@@ -466,6 +470,11 @@ export class FabricClient {
   }): Promise<ArtifactResult> {
     this.#authorise(FABRIC_OPERATIONS.publishArtifact);
     return this.#fabric.publishArtifact(this.#runId, this.#agentId, input);
+  }
+
+  async publishEvidence(input: EvidencePublishRequest): Promise<EvidenceArtifactRegistration> {
+    this.#authorise(FABRIC_OPERATIONS.evidencePublish);
+    return this.#fabric.publishEvidence(this.#runId, this.#agentId, input);
   }
 
   async closeBarrier(input: {

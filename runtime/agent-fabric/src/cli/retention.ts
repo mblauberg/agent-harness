@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { constants } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
 
 type RunRow = {
   run_id: string;
@@ -122,7 +123,9 @@ export async function archiveRun(databasePath: string, runId: string, outputDire
     if (row === undefined || typeof row.project_run_directory !== "string" || typeof row.relative_path !== "string" || typeof row.sha256 !== "string") {
       throw new Error(`terminal run has no exported receipt: ${runId}`);
     }
-    projectRunDirectory = row.project_run_directory;
+    const resolvedRoot = resolveRunArtifactRoot(database, runId);
+    if (resolvedRoot.artifactRoot === null) throw new Error(`terminal run has no artifact root: ${runId}`);
+    projectRunDirectory = resolvedRoot.artifactRoot;
     relativePath = row.relative_path;
     expectedSha256 = row.sha256;
   } finally {

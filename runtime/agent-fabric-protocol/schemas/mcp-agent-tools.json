@@ -343,6 +343,12 @@
       "description": "Invoke the closed fabric.v1.receipt.export operation as the authenticated Agent Fabric principal.",
       "receiptRenderer": "generic-v1"
     },
+    "fabric.v1.evidence.publish": {
+      "projection": "tool",
+      "name": "fabric_evidence_publish",
+      "description": "Invoke the closed fabric.v1.evidence.publish operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "generic-v1"
+    },
     "fabric.v1.project-session.membership.bind": {
       "projection": "tool",
       "name": "fabric_project_session_membership_bind",
@@ -1045,6 +1051,7 @@
               "fabric.v1.delivery.acknowledge",
               "fabric.v1.discussion-group.create",
               "fabric.v1.events.observe",
+              "fabric.v1.evidence.publish",
               "fabric.v1.intake.revise",
               "fabric.v1.launch.attest",
               "fabric.v1.lease.revocation-proof.record",
@@ -1130,7 +1137,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:cb44a369bf28c769ff00a5d64f6223ccad82cc610b41728c216685d87b4b9879",
+      "inputCodecDigest": "sha256:51c35a9e0c08f1f3bd1dfd89f777c2b1757e71621df44050788c6593360d9b8e",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -2445,6 +2452,182 @@
       "outputCodecDigest": "sha256:22fe05cd5c739b8c564d618e311ba0899931261425cec4e3144bdc6da590274b"
     },
     {
+      "operation": "fabric.v1.evidence.publish",
+      "name": "fabric_evidence_publish",
+      "description": "Invoke the closed fabric.v1.evidence.publish operation as the authenticated Agent Fabric principal.",
+      "feature": "artifact-registry.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commandId",
+          "projectSessionId",
+          "coordinationRunId",
+          "requestedSourceKind",
+          "evidenceKind",
+          "relativePath",
+          "sourceDigest"
+        ],
+        "properties": {
+          "commandId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "projectSessionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "coordinationRunId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "requestedSourceKind": {
+            "type": "string",
+            "enum": [
+              "project-file",
+              "run-file"
+            ]
+          },
+          "evidenceKind": {
+            "type": "string",
+            "enum": [
+              "artifact",
+              "diff",
+              "test",
+              "review",
+              "receipt"
+            ]
+          },
+          "relativePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+          },
+          "sourceDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "taskId": {
+            "$ref": "#/$defs/generated_1"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidenceId",
+          "evidenceRevision",
+          "projectId",
+          "projectSessionId",
+          "coordinationRunId",
+          "taskId",
+          "sourceKind",
+          "evidenceKind",
+          "artifactRef",
+          "publisherKind",
+          "publisherRef",
+          "createdAt"
+        ],
+        "properties": {
+          "evidenceId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "evidenceRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "projectId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "projectSessionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "coordinationRunId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "taskId": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceKind": {
+            "type": "string",
+            "enum": [
+              "project-file",
+              "run-file"
+            ]
+          },
+          "evidenceKind": {
+            "type": "string",
+            "enum": [
+              "artifact",
+              "diff",
+              "test",
+              "review",
+              "receipt"
+            ]
+          },
+          "artifactRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "publisherKind": {
+            "const": "agent"
+          },
+          "publisherRef": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:9b0949b04bc4c69d0e44762848ea1d3039bc98acf65e18ee4ff1eb7ff9b63e43",
+      "outputCodecDigest": "sha256:9d4ddd9e69079fc132c925734b92f91f42372be180c4e63147090ee525ef2598"
+    },
+    {
       "operation": "fabric.v1.intake.revise",
       "name": "fabric_intake_revise",
       "description": "Invoke the closed fabric.v1.intake.revise operation as the authenticated Agent Fabric principal.",
@@ -2460,10 +2643,10 @@
           "projectSessionId",
           "coordinationRunId",
           "expectedRevision",
-          "state",
           "summary",
           "artifactRefs",
-          "gateIds"
+          "gateIds",
+          "state"
         ],
         "properties": {
           "origin": {
@@ -2530,17 +2713,6 @@
             "type": "integer",
             "minimum": 1
           },
-          "state": {
-            "type": "string",
-            "enum": [
-              "awaiting-chair",
-              "discussing",
-              "awaiting-human",
-              "accepted",
-              "deferred",
-              "cancelled"
-            ]
-          },
           "summary": {
             "type": "string",
             "minLength": 1,
@@ -2572,6 +2744,16 @@
           },
           "gateIds": {
             "$ref": "#/$defs/generated_1"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting-chair",
+              "discussing",
+              "awaiting-human",
+              "deferred",
+              "cancelled"
+            ]
           },
           "chairRequest": {
             "type": "object",
@@ -2758,109 +2940,186 @@
       },
       "outputSchema": {
         "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "intakeId",
-          "projectId",
-          "projectSessionId",
-          "coordinationRunId",
-          "revision",
-          "state",
-          "dedupeKey",
-          "summary",
-          "artifactRefs",
-          "gateIds"
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intakeId",
+              "projectId",
+              "projectSessionId",
+              "coordinationRunId",
+              "revision",
+              "dedupeKey",
+              "summary",
+              "artifactRefs",
+              "gateIds",
+              "state"
+            ],
+            "properties": {
+              "intakeId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "projectId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "projectSessionId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "coordinationRunId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "dedupeKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
+              },
+              "artifactRefs": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "gateIds": {
+                "$ref": "#/$defs/generated_2"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "awaiting-chair",
+                  "discussing",
+                  "awaiting-human",
+                  "deferred",
+                  "cancelled"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intakeId",
+              "projectId",
+              "projectSessionId",
+              "coordinationRunId",
+              "revision",
+              "dedupeKey",
+              "summary",
+              "artifactRefs",
+              "gateIds",
+              "state",
+              "acceptedScopeRef"
+            ],
+            "properties": {
+              "intakeId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "projectId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "projectSessionId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "coordinationRunId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "dedupeKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
+              },
+              "artifactRefs": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "gateIds": {
+                "$ref": "#/$defs/generated_2"
+              },
+              "state": {
+                "const": "accepted"
+              },
+              "acceptedScopeRef": {
+                "$ref": "#/$defs/generated_3"
+              }
+            }
+          }
         ],
-        "properties": {
-          "intakeId": {
-            "$ref": "#/$defs/generated_1"
-          },
-          "projectId": {
-            "$ref": "#/$defs/generated_1"
-          },
-          "projectSessionId": {
-            "$ref": "#/$defs/generated_1"
-          },
-          "coordinationRunId": {
-            "$ref": "#/$defs/generated_1"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "awaiting-chair",
-              "discussing",
-              "awaiting-human",
-              "accepted",
-              "deferred",
-              "cancelled"
-            ]
-          },
-          "dedupeKey": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096,
-            "x-minUtf8Bytes": 1,
-            "x-maxUtf8Bytes": 4096
-          },
-          "summary": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096,
-            "x-minUtf8Bytes": 1,
-            "x-maxUtf8Bytes": 4096
-          },
-          "artifactRefs": {
+        "$defs": {
+          "generated_1": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "path",
-                "digest"
-              ],
-              "properties": {
-                "path": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                },
-                "digest": {
-                  "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
-                }
-              }
+              "$ref": "#/$defs/generated_3"
             },
             "minItems": 0,
             "maxItems": 128
           },
-          "gateIds": {
+          "generated_2": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_1"
+              "$ref": "#/$defs/generated_4"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
-          }
-        },
-        "$defs": {
-          "generated_1": {
+          },
+          "generated_3": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "generated_4": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_5": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           }
         }
       },
-      "inputCodecDigest": "sha256:0f03f8314de5f4d58df9ab712f9ef1f98592a7185bc614d36587aebc9a27ecab",
-      "outputCodecDigest": "sha256:5811f0ea63e157031b7ec0b7a40877d25ce4c0ddd16ce0426491f0656f374b67"
+      "inputCodecDigest": "sha256:e75a4f28ac1afe116279ed70236bf5175f090b47f62faed4a5808c8c529ac843",
+      "outputCodecDigest": "sha256:a983be49ad166462a44df3506dbd15613c764aab401e1a641afd1bf90f11b186"
     },
     {
       "operation": "fabric.v1.launch.attest",
@@ -10989,7 +11248,9 @@
                   "fabric.v1.operator-action.status",
                   "fabric.v1.operator-action.reconcile",
                   "fabric.v1.message-body.read",
-                  "fabric.v1.operator-repository.read"
+                  "fabric.v1.operator-repository.read",
+                  "fabric.v1.evidence.publish",
+                  "fabric.v1.operator-artifact-content.read"
                 ]
               }
             }
@@ -11071,7 +11332,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:3c674761e8b8b5fe81cf1457ab436c41c28a61c3d2b82e187fdc0221032b8919",
+      "inputCodecDigest": "sha256:a96c1a9681eb91ad6ec587496a3bacc8a6fe8fc81c8abf1e5de7aba8246c7f37",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -11331,7 +11592,9 @@
                     "fabric.v1.operator-action.status",
                     "fabric.v1.operator-action.reconcile",
                     "fabric.v1.message-body.read",
-                    "fabric.v1.operator-repository.read"
+                    "fabric.v1.operator-repository.read",
+                    "fabric.v1.evidence.publish",
+                    "fabric.v1.operator-artifact-content.read"
                   ]
                 },
                 "minItems": 0,
@@ -11833,7 +12096,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:b2f3de6f55852251bd6bc44a14ad2dce26fd6cf33d72dac9e36372e61c01efe6",
+      "inputCodecDigest": "sha256:973f0bcb56d6ad651e0cebc8e3c6806717057f6858d21797e260675fc44153c9",
       "outputCodecDigest": "sha256:32d143b94b062880b03ba675e7ae97905cc7e72789206a9efbc2969e0475c9e7"
     },
     {
@@ -14903,6 +15166,7 @@
               "fabric.v1.delivery.acknowledge",
               "fabric.v1.discussion-group.create",
               "fabric.v1.events.observe",
+              "fabric.v1.evidence.publish",
               "fabric.v1.intake.revise",
               "fabric.v1.launch.attest",
               "fabric.v1.lease.revocation-proof.record",
@@ -15202,7 +15466,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:853c248e7901bcd013f961af10573b207209165795c88f0a98599ba64c2a0460",
+      "inputCodecDigest": "sha256:cdb804cf22a16dc5a358577ad307d28ab1637886ff158032a6ba80caf1a247d7",
       "outputCodecDigest": "sha256:8aa83937ef68ab3f6c8965a180666c94d4b0c6c1825d2d075f854440fca047c5"
     },
     {

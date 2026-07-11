@@ -19,6 +19,8 @@ export type OperationFeature =
   | "launch-attestation.v1"
   | "message-body-read.v1"
   | "operator-repository-read.v1"
+  | "artifact-registry.v1"
+  | "artifact-content-read.v1"
   | "lifecycle-control.v1";
 
 type OperationDefinition = {
@@ -150,6 +152,8 @@ const DEFINITIONS = defineOperations({
   operatorActionReconcile: { operation: "fabric.v1.operator-action.reconcile", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   messageBodyRead: { operation: "fabric.v1.message-body.read", feature: "message-body-read.v1", principals: ["operator"], kind: "extension" },
   operatorRepositoryRead: { operation: "fabric.v1.operator-repository.read", feature: "operator-repository-read.v1", principals: ["operator"], kind: "extension" },
+  evidencePublish: { operation: "fabric.v1.evidence.publish", feature: "artifact-registry.v1", principals: ["agent"], kind: "extension" },
+  operatorArtifactContentRead: { operation: "fabric.v1.operator-artifact-content.read", feature: "artifact-content-read.v1", principals: ["operator"], kind: "extension" },
   projectSessionDrain: {
     operation: "fabric.v1.project-session.drain",
     feature: "lifecycle-control.v1",

@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { openFabric, type Fabric } from "../../../src/index.ts";
 import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
+import { OperatorProjectionStore } from "../../../src/operator/projection-store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
 const now = Date.parse("2027-01-01T00:00:00Z");
@@ -110,8 +111,31 @@ async function setupRoutingFixture(): Promise<RoutingFixture> {
         ('intake_routing', 2, 'awaiting-chair', '{}', ?, 'operator_routing', ?)
     `).run(digestA, now, digestA, now);
     database.prepare(`
-      INSERT INTO intake_artifact_bindings(intake_id, intake_revision, relative_path, sha256)
-      VALUES ('intake_routing', 2, 'docs/spec.md', ?)
+      INSERT INTO artifacts(
+        artifact_id, project_id, project_session_id, run_id, task_id,
+        publisher_kind, publisher_ref, publisher_agent_id, source_kind, evidence_kind,
+        relative_path, sha256, registry_state, quarantine_reason, revision, created_at
+      ) VALUES (
+        'artifact_routing', ?, ?, 'run_intake_revision', NULL,
+        'project', 'project-owned', NULL, 'project-file', 'artifact',
+        'docs/spec.md', ?, 'active', NULL, 1, ?
+      )
+    `).run(projectId, projectSessionId, digestA, now);
+    database.prepare(`
+      INSERT INTO artifacts(
+        artifact_id, project_id, project_session_id, run_id, task_id,
+        publisher_kind, publisher_ref, publisher_agent_id, source_kind, evidence_kind,
+        relative_path, sha256, registry_state, quarantine_reason, revision, created_at
+      ) VALUES (
+        'artifact_routing_plan', ?, ?, 'run_intake_revision', NULL,
+        'project', 'project-owned', NULL, 'project-file', 'artifact',
+        'plans/routing.md', ?, 'active', NULL, 1, ?
+      )
+    `).run(projectId, projectSessionId, digestB, now);
+    database.prepare(`
+      INSERT INTO intake_artifact_bindings(
+        intake_id, intake_revision, artifact_id, relative_path, sha256
+      ) VALUES ('intake_routing', 2, 'artifact_routing', 'docs/spec.md', ?)
     `).run(digestA);
     database.prepare(`
       INSERT INTO intake_gate_bindings(intake_id, intake_revision, gate_id, gate_revision)
@@ -232,6 +256,24 @@ function chairRequest(fixture: RoutingFixture): Extract<IntakeRevisionRequest, {
     gateIds: ["gate_routing"],
   });
   if (parsed.origin !== "chair") throw new Error("expected chair revision");
+  return parsed;
+}
+
+function acceptedRequest(fixture: RoutingFixture): Extract<IntakeRevisionRequest, { origin: "operator" }> {
+  const scope = { path: "plans/routing.md", digest: digestB };
+  const parsed = parseIntakeRevisionRequest({
+    ...operatorRequest(fixture),
+    command: {
+      ...operatorRequest(fixture).command,
+      commandId: "command_intake_routing_accept",
+      evidenceRefs: [scope],
+    },
+    state: "accepted",
+    summary: "Accept exact registered routing scope",
+    artifactRefs: [scope],
+    acceptedScopeRef: scope,
+  });
+  if (parsed.origin !== "operator") throw new Error("expected accepted operator revision");
   return parsed;
 }
 
@@ -357,6 +399,147 @@ describe("intake revision public routing", () => {
         FABRIC_OPERATIONS.intakeRevise,
         operatorRequest(fixture),
       )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("persists and projects one exact accepted scope while advancing the project revision", async () => {
+    const fixture = await setupRoutingFixture();
+    try {
+      const before = new Database(fixture.databasePath, { readonly: true });
+      const beforeRevision = (before.prepare("SELECT revision FROM projects WHERE project_id=?")
+        .get(fixture.projectId) as { revision: number }).revision;
+      before.close();
+      const accepted = await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      expect(accepted).toMatchObject({
+        revision: 3,
+        state: "accepted",
+        acceptedScopeRef: { path: "plans/routing.md", digest: digestB },
+      });
+
+      const database = new Database(fixture.databasePath);
+      try {
+        expect(database.prepare(`
+          SELECT accepted_scope_artifact_id, accepted_scope_state
+            FROM intakes WHERE intake_id='intake_routing'
+        `).get()).toEqual({
+          accepted_scope_artifact_id: "artifact_routing_plan",
+          accepted_scope_state: "bound",
+        });
+        expect(database.prepare("SELECT revision FROM projects WHERE project_id=?").get(fixture.projectId))
+          .toEqual({ revision: beforeRevision + 1 });
+        database.prepare(`
+          INSERT INTO artifacts(
+            artifact_id,project_id,project_session_id,run_id,task_id,publisher_kind,
+            publisher_ref,publisher_agent_id,source_kind,evidence_kind,relative_path,
+            sha256,registry_state,quarantine_reason,revision,created_at
+          ) VALUES ('artifact_quarantined_scope',?,NULL,NULL,NULL,'migration','test',NULL,
+                    'project-file','artifact','quarantined.md',?,'quarantined','test',1,?)
+        `).run(fixture.projectId, `sha256:${"c".repeat(64)}`, now);
+        expect(() => database.prepare(`
+          UPDATE intakes SET accepted_scope_artifact_id='artifact_quarantined_scope'
+           WHERE intake_id='intake_routing'
+        `).run()).toThrow(/accepted scope must reference one active exact-scope registry row/iu);
+        const operatorStore = new OperatorStore({ database, clock: () => now });
+        const projection = new OperatorProjectionStore({ database, operatorStore, clock: () => now });
+        const credential = {
+          capabilityId: "cap_intake_routing" as never,
+          token: "intake-routing-secret",
+        };
+        const snapshot = projection.snapshot({
+          credential,
+          projectId: fixture.projectId as never,
+          projectSessionId: fixture.projectSessionId as never,
+        });
+        const page = projection.viewPage({
+          credential,
+          projectId: fixture.projectId as never,
+          projectSessionId: fixture.projectSessionId as never,
+          view: "project",
+          snapshotRevision: snapshot.snapshotRevision,
+          cursor: 0,
+          limit: 10,
+        });
+        expect(page).toMatchObject({
+          status: "page",
+          rows: [{
+            fact: {
+              value: {
+                summary: {
+                  acceptedScopeRef: { path: "plans/routing.md", digest: digestB },
+                },
+              },
+            },
+          }],
+        });
+        const projectFact = page.status === "page" ? page.rows[0]?.fact : undefined;
+        if (
+          projectFact === undefined ||
+          projectFact.freshness === "unavailable" ||
+          projectFact.freshness === "conflict" ||
+          projectFact.value.detailRef.kind !== "project"
+        ) {
+          throw new Error("project detail reference unavailable");
+        }
+        expect(projection.detail({
+          credential,
+          projectId: fixture.projectId as never,
+          projectSessionId: fixture.projectSessionId as never,
+          snapshotRevision: snapshot.snapshotRevision,
+          detailRef: projectFact.value.detailRef,
+        })).toMatchObject({
+          status: "current",
+          detail: {
+            value: {
+              acceptedScopeRef: { path: "plans/routing.md", digest: digestB },
+            },
+          },
+        });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unregistered project file atomically instead of registering during intake binding", async () => {
+    const fixture = await setupRoutingFixture();
+    try {
+      const content = "unregistered but present\n";
+      const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+      await writeFile(join(fixture.directory, "unregistered.md"), content);
+      const base = operatorRequest(fixture);
+      const request = parseIntakeRevisionRequest({
+        ...base,
+        command: {
+          ...base.command,
+          commandId: "command_intake_unregistered",
+          evidenceRefs: [{ path: "unregistered.md", digest }],
+        },
+        artifactRefs: [{ path: "unregistered.md", digest }],
+      });
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        request,
+      )).rejects.toMatchObject({ code: "NOT_FOUND" });
+      const database = new Database(fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare("SELECT revision FROM intakes WHERE intake_id='intake_routing'").get())
+          .toEqual({ revision: 2 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE relative_path='unregistered.md'").get())
+          .toEqual({ count: 0 });
+      } finally {
+        database.close();
+      }
     } finally {
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });

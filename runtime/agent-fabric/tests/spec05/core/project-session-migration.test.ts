@@ -150,7 +150,7 @@ describe("launch-custody migration 0005", () => {
     const database = new Database(":memory:");
     databases.push(database);
 
-    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9], currentVersion: 9 });
+    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], currentVersion: 10 });
     expect(database.prepare(`
       SELECT name FROM sqlite_master
        WHERE type='table' AND name='project_session_launch_custody'

@@ -18,7 +18,10 @@ import {
   type FabricView,
   type Revision,
 } from "./model.js";
-import type { FabricConsoleDataset } from "./protocol-adapter.js";
+import type {
+  ConsoleArtifactContentResult,
+  FabricConsoleDataset,
+} from "./protocol-adapter.js";
 import type { ConsoleWorkflowReview } from "./workflow.js";
 
 export type FabricResponsiveMode =
@@ -46,6 +49,16 @@ export type FabricConsoleUiState = Readonly<{
   splitterRatio: number;
   reviewScrollOffset: number;
   workflowReview: ConsoleWorkflowReview | null;
+  artifactConfirmation: ArtifactReviewConfirmation | null;
+}>;
+
+export type ArtifactReviewConfirmation = Readonly<{
+  evidenceId: string;
+  evidenceRevision: number;
+  sourceDigest: string;
+  renderedDigest: string;
+  transformation: "terminal-neutralised";
+  pageCount: number;
 }>;
 
 export function createFabricUiState(
@@ -72,7 +85,23 @@ export function createFabricUiState(
         ? 0
         : Math.max(0, overrides.reviewScrollOffset),
     workflowReview: overrides.workflowReview ?? null,
+    artifactConfirmation: overrides.artifactConfirmation ?? null,
   };
+}
+
+export function matchesArtifactConfirmation(
+  confirmation: ArtifactReviewConfirmation | null,
+  evidenceId: string,
+  result: ConsoleArtifactContentResult,
+): boolean {
+  return confirmation !== null &&
+    result.reviewDisposition === "confirm-terminal-neutralised" &&
+    confirmation.evidenceId === evidenceId &&
+    confirmation.evidenceRevision === result.evidenceRevision &&
+    confirmation.sourceDigest === result.artifactRef.digest &&
+    confirmation.renderedDigest === result.renderedArtifactDigest &&
+    confirmation.transformation === result.transformation &&
+    confirmation.pageCount === result.coverage.pageCount;
 }
 
 const MAX_PRESENTATION_CELLS = 250_000;
@@ -356,7 +385,12 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
         `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}`,
       ];
     case "project":
-      return [summary.goal, `repository ${summary.repositoryRevision}`];
+      return [
+        summary.goal,
+        summary.acceptedScopeRef === null
+          ? `scope unaccepted | repository ${summary.repositoryRevision}`
+          : `scope ${summary.acceptedScopeRef.path}@${summary.acceptedScopeRef.digest} | repository ${summary.repositoryRevision}`,
+      ];
     case "run":
       return [summary.phase, `${summary.health} | next ${summary.nextMilestone}`];
     case "work":
@@ -433,6 +467,14 @@ function detailLines(row: ConsoleRow): PresentedDetail {
   } else {
     lines.push({ label: "Actions", value: row.actionAvailability.actions.join(", ") });
   }
+  if (row.summary?.kind === "project") {
+    lines.push({
+      label: "Accepted scope",
+      value: row.summary.acceptedScopeRef === null
+        ? "unaccepted"
+        : `${row.summary.acceptedScopeRef.path}@${row.summary.acceptedScopeRef.digest}`,
+    });
+  }
   return { stableId: row.stableId, revision: row.revision, lines };
 }
 
@@ -443,6 +485,7 @@ function actionLabel(action: OperatorAvailableAction): string {
     cancel: "Cancel",
     steer: "Steer",
     "project-session-launch": "Launch run",
+    "chair-bridge-recovery": "Recover chair bridge",
     "project-session-drain": "Drain session",
     "project-session-stop": "Stop session",
     "daemon-drain": "Drain daemon",
@@ -457,16 +500,62 @@ function actionLabel(action: OperatorAvailableAction): string {
 function rowActions(
   row: ConsoleRow | null,
   canMutate: boolean,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
 ): readonly PresentedAction[] {
   if (row === null || row.actionAvailability.state !== "available") {
     return [];
   }
+  const currentArtifact = row.view === "evidence" &&
+    dataset.inspection?.kind === "artifact" &&
+    dataset.inspection.state === "current" &&
+    dataset.inspection.binding.itemId === row.stableId &&
+    dataset.inspection.binding.itemRevision === row.revision &&
+    dataset.inspection.binding.projectionRevision === dataset.snapshotRevision
+      ? dataset.inspection
+      : null;
+  const artifactReviewEligible = row.view !== "evidence" || (
+    currentArtifact !== null && (
+      currentArtifact.result.reviewDisposition === "eligible" ||
+      matchesArtifactConfirmation(
+        ui.artifactConfirmation,
+        row.stableId,
+        currentArtifact.result,
+      )
+    )
+  );
   return row.actionAvailability.actions.map((action) => ({
     id: `action:${action}`,
     label: actionLabel(action),
-    enabled: canMutate && row.freshness.state === "live",
+    enabled: canMutate && row.freshness.state === "live" && artifactReviewEligible,
     availableAction: action,
   }));
+}
+
+function rowAndArtifactActions(
+  row: ConsoleRow | null,
+  canMutate: boolean,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
+): readonly PresentedAction[] {
+  const actions = rowActions(row, canMutate, dataset, ui);
+  if (row?.view !== "evidence") return actions;
+  const inspection = dataset.inspection;
+  if (
+    inspection?.kind !== "artifact" ||
+    inspection.state !== "current" ||
+    inspection.binding.itemId !== row.stableId ||
+    inspection.binding.itemRevision !== row.revision ||
+    inspection.binding.projectionRevision !== dataset.snapshotRevision ||
+    inspection.result.reviewDisposition !== "confirm-terminal-neutralised" ||
+    matchesArtifactConfirmation(ui.artifactConfirmation, row.stableId, inspection.result)
+  ) return actions;
+  return [{
+    id: "artifact:confirm-terminal-neutralised",
+    label: `Confirm ${inspection.result.transformation} + source digest`,
+    enabled: true,
+    availableAction: null,
+  }, ...actions];
 }
 
 function scopeLabel(gate: ReviewGate): string {
@@ -559,6 +648,18 @@ function presentIntent(
         label: "Request artifact",
         value: `${intent.requestArtifactRef.path}@${intent.requestArtifactRef.digest}`,
       },
+    ];
+  }
+  if (intent.kind === "chair-bridge-recovery") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Path", value: intent.path },
+      { label: "Run", value: intent.coordinationRunId },
+      { label: "Loss", value: intent.lossId },
+      { label: "Expected session revision", value: String(intent.expectedSessionRevision) },
+      { label: "Expected run revision", value: String(intent.expectedRunRevision) },
+      { label: "Expected chair generation", value: String(intent.expectedChairGeneration) },
+      { label: "Recovery manifest digest", value: intent.recoveryManifestDigest },
     ];
   }
   if (intent.kind === "promotion") {
@@ -760,9 +861,11 @@ export function presentFabricConsole(
     detail: selectedRow === null ? null : detailLines(selectedRow),
     actions:
       review === null && workflowReview === null
-        ? rowActions(
+          ? rowAndArtifactActions(
             selectedRow,
             dataset.canMutate && dataset.connection.state === "live",
+            dataset,
+            ui,
           )
         : review === null
           ? workflowReviewActions(workflowReview as ConsoleWorkflowReview)

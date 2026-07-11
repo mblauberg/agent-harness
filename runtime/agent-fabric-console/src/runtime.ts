@@ -12,6 +12,8 @@ import type {
 import { FABRIC_VIEWS, type FabricView } from "./model.js";
 import {
   createFabricUiState,
+  matchesArtifactConfirmation,
+  type ArtifactReviewConfirmation,
   type FabricConsoleUiState,
   type FabricViewport,
 } from "./presenter.js";
@@ -168,7 +170,34 @@ export class FabricConsoleRuntime {
   updateDataset(dataset: FabricConsoleDataset): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
     this.#controller.updateDataset(dataset);
+    const confirmation = this.#ui.artifactConfirmation;
+    const inspection = dataset.inspection;
+    const retainConfirmation = confirmation !== null &&
+      inspection?.kind === "artifact" &&
+      inspection.state === "current" &&
+      matchesArtifactConfirmation(
+        confirmation,
+        inspection.binding.itemId,
+        inspection.result,
+      );
+    if (!retainConfirmation) {
+      this.#ui = { ...this.#ui, artifactConfirmation: null };
+    }
     this.#pointer = { pressed: null };
+    return this.repaint();
+  }
+
+  setArtifactConfirmation(
+    confirmation: ArtifactReviewConfirmation | null,
+  ): FabricConsoleFrame {
+    if (this.#closed) return this.#frame;
+    this.#ui = {
+      ...this.#ui,
+      artifactConfirmation: confirmation,
+      notice: confirmation === null
+        ? null
+        : `${confirmation.transformation} confirmed for ${confirmation.sourceDigest}`,
+    };
     return this.repaint();
   }
 

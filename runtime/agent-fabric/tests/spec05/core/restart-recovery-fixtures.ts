@@ -35,18 +35,20 @@ export function seedSpec05Run(database: Database.Database): void {
   `).run();
   database.prepare(`
     INSERT INTO runs(
-      run_id, chair_agent_id, workspace_root, created_at, project_session_id,
+      run_id, chair_agent_id, workspace_root, project_run_directory,
+      project_run_directory_basis, created_at, project_session_id,
       lifecycle_state, revision, chair_generation, chair_lease_id,
       authority_ref, budget_ref, dependency_revision, topology_slot
     ) VALUES (
-      'run_01', 'chair_01', '/project/one', 1, 'session_01',
+      'run_01', 'chair_01', '/project/one', '.agent-run/run_01',
+      'project-relative', 1, 'session_01',
       'active', 1, 1, 'chair:run_01:1', 'authority-run', 'budget-run', 1, 1
     )
   `).run();
   database.prepare(`
     INSERT INTO authorities(authority_id, run_id, authority_json, authority_hash, created_at)
-    VALUES ('authority_01', 'run_01', '{}', 'authority-hash', 1)
-  `).run();
+    VALUES ('authority_01', 'run_01', ?, 'authority-hash', 1)
+  `).run(JSON.stringify({ artifactPaths: [".agent-run/run_01"] }));
   for (const [agentId, providerRef] of [
     ["chair_01", "provider-chair"],
     ["worker_01", "provider-worker"],

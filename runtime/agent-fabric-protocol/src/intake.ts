@@ -45,11 +45,15 @@ type IntakeBase = {
 
 export type IntakeDraft = IntakeBase & { state: "draft" };
 
-export type BoundIntake = IntakeBase & {
+type BoundIntakeBase = IntakeBase & {
   projectSessionId: ProjectSessionId;
   coordinationRunId: CoordinationRunId;
-  state: BoundIntakeState;
 };
+
+export type BoundIntake = BoundIntakeBase & (
+  | { state: "accepted"; acceptedScopeRef: ArtifactRef }
+  | { state: Exclude<BoundIntakeState, "accepted">; acceptedScopeRef?: never }
+);
 
 export type Intake = IntakeDraft | BoundIntake;
 
@@ -81,17 +85,21 @@ export type IntakeSubmission = {
   };
 };
 
-type IntakeRevision = {
+type IntakeRevisionBase = {
   intakeId: IntakeId;
   projectSessionId: ProjectSessionId;
   coordinationRunId: CoordinationRunId;
   expectedRevision: number;
-  state: BoundIntakeState;
   summary: string;
   artifactRefs: readonly ArtifactRef[];
   gateIds: readonly GateId[];
   chairRequest?: TaskRequest;
 };
+
+type IntakeRevision = IntakeRevisionBase & (
+  | { state: "accepted"; acceptedScopeRef: ArtifactRef }
+  | { state: Exclude<BoundIntakeState, "accepted">; acceptedScopeRef?: never }
+);
 
 export type IntakeRevisionRequest =
   | (IntakeRevision & { origin: "operator"; command: OperatorMutationContext })
@@ -125,6 +133,7 @@ export function parseIntake(value: unknown): Intake {
         "summary",
         "artifactRefs",
         "gateIds",
+        ...(state === "accepted" ? ["acceptedScopeRef"] : []),
       ];
   const record = strictRecord(value, "intake", fields);
   const common = {
@@ -141,7 +150,7 @@ export function parseIntake(value: unknown): Intake {
     (candidate): candidate is BoundIntakeState => candidate !== "draft" && candidate === state,
   );
   if (boundState === undefined) throw new TypeError("intake.state is invalid");
-  return {
+  const bound = {
     ...common,
     projectSessionId: parseIdentifier<"ProjectSessionId">(record.projectSessionId, "intake.projectSessionId"),
     coordinationRunId: parseIdentifier<"CoordinationRunId">(
@@ -150,6 +159,10 @@ export function parseIntake(value: unknown): Intake {
     ),
     state: boundState,
   };
+  if (boundState === "accepted") {
+    return { ...bound, state: boundState, acceptedScopeRef: parseArtifactRef(record.acceptedScopeRef, "intake.acceptedScopeRef") };
+  }
+  return { ...bound, state: boundState };
 }
 
 export function parseIntakeDraftCreateRequest(value: unknown): IntakeDraftCreateRequest {
@@ -286,12 +299,28 @@ export function parseIntakeRevisionRequest(value: unknown): IntakeRevisionReques
     "artifactRefs",
     "gateIds",
     "chairRequest",
+    "acceptedScopeRef",
   ]);
   const state = INTAKE_STATES.find(
     (candidate): candidate is BoundIntakeState => candidate !== "draft" && candidate === record.state,
   );
   if (state === undefined) throw new TypeError("intakeRevision.state must be a session-bound state");
-  const revision = {
+  const acceptedScopeRef = record.acceptedScopeRef === undefined
+    ? undefined
+    : parseArtifactRef(record.acceptedScopeRef, "intakeRevision.acceptedScopeRef");
+  if (state === "accepted") {
+    if (acceptedScopeRef === undefined) throw new TypeError("intakeRevision.acceptedScopeRef is required when accepted");
+  } else if (acceptedScopeRef !== undefined) {
+    throw new TypeError("intakeRevision.acceptedScopeRef is forbidden unless accepted");
+  }
+  const artifactRefs = parseArtifactRefs(record.artifactRefs, "intakeRevision.artifactRefs");
+  if (acceptedScopeRef !== undefined) {
+    const occurrences = artifactRefs.filter(
+      (artifact) => artifact.path === acceptedScopeRef.path && artifact.digest === acceptedScopeRef.digest,
+    ).length;
+    if (occurrences !== 1) throw new TypeError("intakeRevision.acceptedScopeRef must occur exactly once in artifactRefs");
+  }
+  const revisionBase = {
     intakeId: parseIdentifier<"IntakeId">(record.intakeId, "intakeRevision.intakeId"),
     projectSessionId: parseIdentifier<"ProjectSessionId">(
       record.projectSessionId,
@@ -302,12 +331,14 @@ export function parseIntakeRevisionRequest(value: unknown): IntakeRevisionReques
       "intakeRevision.coordinationRunId",
     ),
     expectedRevision: safeInteger(record.expectedRevision, "intakeRevision.expectedRevision", 1),
-    state,
     summary: requiredString(record.summary, "intakeRevision.summary"),
-    artifactRefs: parseArtifactRefs(record.artifactRefs, "intakeRevision.artifactRefs"),
+    artifactRefs,
     gateIds: parseGateIds(record.gateIds, "intakeRevision.gateIds"),
     ...(record.chairRequest === undefined ? {} : { chairRequest: parseTaskRequest(record.chairRequest) }),
   };
+  const revision: IntakeRevision = state === "accepted"
+    ? { ...revisionBase, state, acceptedScopeRef: acceptedScopeRef as ArtifactRef }
+    : { ...revisionBase, state };
   if (revision.chairRequest !== undefined) {
     assertChairRequestBinding({
       path: "intakeRevision.chairRequest",

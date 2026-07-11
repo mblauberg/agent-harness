@@ -53,6 +53,8 @@ describe("versioned Console usability evaluation", () => {
           observation.consequentialReviewRequired &&
           observation.optionalIntegrationIndependent &&
           observation.nativeNotificationVisible &&
+          observation.dynamicResizeSafe &&
+          observation.artifactReviewSafe &&
           observation.exactViewport,
       ),
     ).toBe(true);
@@ -79,6 +81,16 @@ describe("versioned Console usability evaluation", () => {
       "attention-safety-gate",
     ]);
     expect(degraded.every(({ optionalIntegrationIndependent }) => optionalIntegrationIndependent)).toBe(true);
+    expect(degraded.every(({ dynamicResizeSafe, artifactReviewSafe }) => (
+      dynamicResizeSafe && artifactReviewSafe
+    ))).toBe(true);
+    expect(manifest.fixtures.find(({ id }) => id === "gate-degraded-stale-conflict"))
+      .toMatchObject({
+        evidenceReview: {
+          transformation: "terminal-neutralised",
+          expectedDisposition: "confirm-terminal-neutralised",
+        },
+      });
     expect(
       manifest.fixtures
         .flatMap(({ attention }) => attention)

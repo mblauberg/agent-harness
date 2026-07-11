@@ -1,4 +1,10 @@
 import type { BaselineOperationInputMap, BaselineOperationResultMap } from "./baseline-contracts.js";
+import type {
+  ArtifactContentReadRequest,
+  ArtifactContentReadResult,
+  EvidenceArtifactRegistration,
+  EvidencePublishRequest,
+} from "./artifacts.js";
 import type { ProtocolFeature } from "./features.js";
 import type {
   ScopedGate,
@@ -205,6 +211,8 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionReconcileRequest;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadRequest;
   [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadRequest;
+  [FABRIC_OPERATIONS.evidencePublish]: EvidencePublishRequest;
+  [FABRIC_OPERATIONS.operatorArtifactContentRead]: ArtifactContentReadRequest;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSessionDrainRequest;
   [FABRIC_OPERATIONS.projectSessionStop]: ProjectSessionStopRequest;
   [FABRIC_OPERATIONS.daemonDrain]: DaemonDrainRequest;
@@ -285,6 +293,8 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionStatus;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadResult;
   [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadResult;
+  [FABRIC_OPERATIONS.evidencePublish]: EvidenceArtifactRegistration;
+  [FABRIC_OPERATIONS.operatorArtifactContentRead]: ArtifactContentReadResult;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionStop]: ProjectSession;
   [FABRIC_OPERATIONS.daemonDrain]: DaemonLifecycleResult;

@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 
 import type {
+  ArtifactContentClient,
+  ArtifactContentReadResult,
+  ArtifactContentTransformation,
+  ArtifactLineFragment,
+  ArtifactMediaType,
+  ArtifactRef,
+  CoordinationRunId,
+  EvidenceKind,
+  EvidenceSourceKind,
   NegotiatedOperatorClient,
   GitRepositoryReadClient,
   GitRepositoryReadRequest,
@@ -22,7 +31,11 @@ import type {
   ProjectionSnapshotRequest,
   ScopedGateReadRequest,
   ScopedGateReadResult,
+  Sha256Digest,
+  TaskId,
+  Timestamp,
 } from "@local/agent-fabric-protocol";
+import { parseArtifactContentReadResult } from "@local/agent-fabric-protocol";
 
 import { readConsoleMessageBody } from "./message.js";
 
@@ -54,41 +67,46 @@ export type ConsoleProtocolPort = Readonly<{
   readGate(request: ScopedGateReadRequest): Promise<ScopedGateReadResult>;
   readMessageBody: MessageBodyClient["read"] | null;
   readRepository: GitRepositoryReadClient["read"] | null;
-  readArtifactContent: ConsoleArtifactContentRead | null;
+  readArtifactContent: ArtifactContentClient["readContent"] | null;
 }>;
 
-export type ConsoleArtifactContentRequest = Readonly<{
-  credential: OperatorCapabilityCredential;
-  projectId: ProjectId;
-  projectSessionId?: ProjectSessionId;
-  snapshotRevision: number;
-  evidenceId: string;
-  expectedEvidenceRevision: number;
-  artifactRef: Readonly<{ path: string; digest: string }>;
-  maximumBytes: number;
-  maximumLines: number;
+export type ConsoleArtifactContentPage = Readonly<{
+  pageIndex: number;
+  lineFragment: ArtifactLineFragment;
+  pageContentDigest: Sha256Digest;
+  bytes: number;
 }>;
 
-export type ConsoleArtifactContentResult =
-  | Readonly<{
-      available: true;
-      artifactRef: Readonly<{ path: string; digest: string }>;
-      mediaType: "text/markdown" | "application/json" | "text/x-diff" | "text/plain";
-      content: string;
-      totalBytes: number;
-      truncated: boolean;
-      terminalNeutralised: true;
-      capabilityValuesRedacted: true;
-    }>
-  | Readonly<{
-      available: false;
-      artifactRef: Readonly<{ path: string; digest: string }>;
-      reason: "not-found" | "forbidden" | "unsupported-media" | "stale" | "oversized";
-    }>;
-
-export type ConsoleArtifactContentRead = (
-  request: ConsoleArtifactContentRequest,
-) => Promise<ConsoleArtifactContentResult>;
+export type ConsoleArtifactContentResult = Readonly<{
+  artifactRef: ArtifactRef;
+  evidenceRevision: number;
+  evidenceKind: EvidenceKind;
+  sourceKind: EvidenceSourceKind;
+  publisherKind: "agent" | "operator" | "fabric" | "project" | "migration";
+  publisherRef: string;
+  projectSessionId: ProjectSessionId | null;
+  coordinationRunId: CoordinationRunId | null;
+  taskId: TaskId | null;
+  createdAt: Timestamp;
+  mediaType: ArtifactMediaType;
+  content: string;
+  totalBytes: number;
+  totalLines: number;
+  renderedTotalBytes: number;
+  renderedTotalLines: number;
+  renderedArtifactDigest: Sha256Digest;
+  transformation: ArtifactContentTransformation;
+  terminalNeutralised: true;
+  capabilityValuesRedacted: true;
+  credentialValuesRedacted: true;
+  pages: readonly ConsoleArtifactContentPage[];
+  coverage: Readonly<{
+    complete: true;
+    verified: true;
+    pageCount: number;
+  }>;
+  reviewDisposition: "eligible" | "confirm-terminal-neutralised" | "blocked-redacted";
+}>;
 
 export type ConsoleProtocolBinding =
   | Readonly<{
@@ -121,21 +139,11 @@ export function bindConsoleProtocolClient(
   }
   const projection = client.projection;
   const consoleClient = client.console;
-  const artifactSurface = Reflect.get(client, "artifacts");
-  const artifactReadMethod =
-    typeof artifactSurface === "object" &&
-    artifactSurface !== null &&
-    typeof Reflect.get(artifactSurface, "readContent") === "function"
-      ? Reflect.get(artifactSurface, "readContent") as ConsoleArtifactContentRead
-      : null;
-  const artifactRead: ConsoleArtifactContentRead | null =
-    artifactReadMethod === null
+  const artifacts = client.artifacts;
+  const artifactRead: ArtifactContentClient["readContent"] | null =
+    artifacts === undefined
       ? null
-      : async (request) => await Reflect.apply(
-          artifactReadMethod,
-          artifactSurface,
-          [request],
-        ) as ConsoleArtifactContentResult;
+      : (request) => artifacts.readContent(request);
   return {
     ok: true,
     readOnly: consoleClient.readOnly,
@@ -221,7 +229,7 @@ export type ConsoleReadInspection =
       state: "current";
       binding: ConsoleInspectionBinding;
       readTransactionId: string;
-      result: Extract<ConsoleArtifactContentResult, { available: true }>;
+      result: ConsoleArtifactContentResult;
     }>
   | Readonly<{
       kind: "artifact";
@@ -236,6 +244,7 @@ export type ConsoleReadInspection =
         | "artifact-not-found"
         | "artifact-forbidden"
         | "artifact-unsupported-media"
+        | "artifact-unsafe-content"
         | "artifact-stale"
         | "artifact-oversized"
         | "contract-invalid"
@@ -269,8 +278,49 @@ function failureCode(error: unknown): string | null {
   return typeof code === "string" ? code : null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+const MAX_ARTIFACT_PAGES = 2_048;
+const MAX_ARTIFACT_RENDERED_BYTES = 2_097_152;
+
+function contentDigest(value: string): Sha256Digest {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}` as Sha256Digest;
+}
+
+function artifactLineCount(value: string): number {
+  if (value.length === 0) return 0;
+  let lines = 1;
+  for (const byte of Buffer.from(value, "utf8")) {
+    if (byte === 0x0a) lines += 1;
+  }
+  return lines;
+}
+
+function returnedPageLineCount(value: string): number {
+  if (value.length === 0) return 0;
+  const lines = artifactLineCount(value);
+  return value.endsWith("\n") ? lines - 1 : lines;
+}
+
+function sameArtifactRef(left: ArtifactRef, right: ArtifactRef): boolean {
+  return left.path === right.path && left.digest === right.digest;
+}
+
+function expectedLineFragment(input: {
+  startsAtLineBoundary: boolean;
+  endsAtLineBoundary: boolean;
+}): ArtifactLineFragment {
+  return input.startsAtLineBoundary
+    ? input.endsAtLineBoundary ? "whole" : "start"
+    : input.endsAtLineBoundary ? "end" : "middle";
+}
+
+function reviewDisposition(
+  transformation: ArtifactContentTransformation,
+): ConsoleArtifactContentResult["reviewDisposition"] {
+  if (transformation === "none") return "eligible";
+  if (transformation === "terminal-neutralised") {
+    return "confirm-terminal-neutralised";
+  }
+  return "blocked-redacted";
 }
 
 export type FabricConsoleDataset = Readonly<{
@@ -521,77 +571,142 @@ export class ConsoleProtocolAdapter {
         if (read === null) return unavailableArtifact(binding, "feature-unavailable");
         const maximumBytes = 131_072;
         const maximumLines = 2_000;
-        const rawResult: unknown = await read({
-          ...this.#readScope(),
-          snapshotRevision: revisionToProtocol(binding.projectionRevision),
-          evidenceId: evidence.evidenceId,
-          expectedEvidenceRevision: revisionToProtocol(binding.itemRevision),
-          artifactRef: evidence.artifactRef,
-          maximumBytes,
-          maximumLines,
-        });
-        if (
-          !isRecord(rawResult) ||
-          (rawResult.available !== true && rawResult.available !== false) ||
-          !isRecord(rawResult.artifactRef) ||
-          typeof rawResult.artifactRef.path !== "string" ||
-          typeof rawResult.artifactRef.digest !== "string"
-        ) {
-          return unavailableArtifact(binding, "contract-invalid");
-        }
-        const result = rawResult as ConsoleArtifactContentResult;
-        if (
-          result.artifactRef.path !== evidence.artifactRef.path ||
-          result.artifactRef.digest !== evidence.artifactRef.digest
-        ) {
-          return unavailableArtifact(binding, "contract-invalid");
-        }
-        if (!result.available) {
-          const reasons = {
-            "not-found": "artifact-not-found",
-            forbidden: "artifact-forbidden",
-            "unsupported-media": "artifact-unsupported-media",
-            stale: "artifact-stale",
-            oversized: "artifact-oversized",
-          } as const;
+        const unavailableReasons = {
+          "not-found": "artifact-not-found",
+          forbidden: "artifact-forbidden",
+          "unsupported-media": "artifact-unsupported-media",
+          "unsafe-content": "artifact-unsafe-content",
+          stale: "artifact-stale",
+          oversized: "artifact-oversized",
+        } as const;
+        const pages: ConsoleArtifactContentPage[] = [];
+        const renderedParts: string[] = [];
+        const seenCursors = new Set<string>();
+        let cursor: string | null = null;
+        let expectedPageIndex = 0;
+        let previousEndedAtLineBoundary = true;
+        let firstPage: Extract<ArtifactContentReadResult, { available: true }> | null = null;
+        for (; expectedPageIndex < MAX_ARTIFACT_PAGES; expectedPageIndex += 1) {
+          const rawResult: unknown = await read({
+            ...this.#readScope(),
+            evidenceId: evidence.evidenceId,
+            expectedEvidenceRevision: revisionToProtocol(binding.itemRevision),
+            artifactRef: evidence.artifactRef,
+            cursor,
+            maximumBytes,
+            maximumLines,
+          });
+          let result: ArtifactContentReadResult;
+          try {
+            result = parseArtifactContentReadResult(rawResult);
+          } catch {
+            return unavailableArtifact(binding, "contract-invalid");
+          }
+          if (!sameArtifactRef(result.artifactRef, evidence.artifactRef)) {
+            return unavailableArtifact(binding, "contract-invalid");
+          }
+          if (!result.available) {
+            return unavailableArtifact(binding, unavailableReasons[result.reason]);
+          }
+          const pageBytes = Buffer.byteLength(result.content, "utf8");
+          const finalPage = result.nextCursor === null;
           if (
-            typeof result.reason !== "string" ||
-            !(result.reason in reasons)
+            result.pageIndex !== expectedPageIndex ||
+            contentDigest(result.content) !== result.pageContentDigest ||
+            pageBytes > maximumBytes ||
+            returnedPageLineCount(result.content) > maximumLines ||
+            (result.content.length === 0 && !finalPage) ||
+            result.lineFragment !== expectedLineFragment({
+              startsAtLineBoundary: previousEndedAtLineBoundary,
+              endsAtLineBoundary: finalPage || result.content.endsWith("\n"),
+            })
           ) {
             return unavailableArtifact(binding, "contract-invalid");
           }
-          return unavailableArtifact(binding, reasons[result.reason]);
+          if (firstPage === null) {
+            firstPage = result;
+            if (
+              result.renderedTotalBytes > MAX_ARTIFACT_RENDERED_BYTES ||
+              (result.transformation === "none" &&
+                result.renderedArtifactDigest !== result.artifactRef.digest)
+            ) {
+              return unavailableArtifact(binding, "contract-invalid");
+            }
+          } else if (
+            result.mediaType !== firstPage.mediaType ||
+            result.totalBytes !== firstPage.totalBytes ||
+            result.totalLines !== firstPage.totalLines ||
+            result.renderedTotalBytes !== firstPage.renderedTotalBytes ||
+            result.renderedTotalLines !== firstPage.renderedTotalLines ||
+            result.renderedArtifactDigest !== firstPage.renderedArtifactDigest ||
+            result.transformation !== firstPage.transformation ||
+            result.terminalNeutralised !== firstPage.terminalNeutralised ||
+            result.capabilityValuesRedacted !== firstPage.capabilityValuesRedacted ||
+            result.credentialValuesRedacted !== firstPage.credentialValuesRedacted
+          ) {
+            return unavailableArtifact(binding, "contract-invalid");
+          }
+          pages.push({
+            pageIndex: result.pageIndex,
+            lineFragment: result.lineFragment,
+            pageContentDigest: result.pageContentDigest,
+            bytes: pageBytes,
+          });
+          renderedParts.push(result.content);
+          previousEndedAtLineBoundary = result.content.endsWith("\n");
+          const nextCursor = result.nextCursor;
+          if (nextCursor === null) break;
+          if (
+            nextCursor === cursor ||
+            seenCursors.has(nextCursor)
+          ) {
+            return unavailableArtifact(binding, "contract-invalid");
+          }
+          seenCursors.add(nextCursor);
+          cursor = nextCursor;
         }
-        const contentBytes = typeof result.content === "string"
-          ? Buffer.byteLength(result.content)
-          : maximumBytes + 1;
-        const lineCount = typeof result.content === "string"
-          ? result.content.split("\n").length
-          : maximumLines + 1;
-        const mediaTypes = new Set([
-          "text/markdown",
-          "application/json",
-          "text/x-diff",
-          "text/plain",
-        ]);
-        const contentDigest = typeof result.content === "string"
-          ? `sha256:${createHash("sha256").update(result.content).digest("hex")}`
-          : null;
+        const lastPage = pages.at(-1);
+        if (firstPage === null || lastPage === undefined || expectedPageIndex >= MAX_ARTIFACT_PAGES) {
+          return unavailableArtifact(binding, "contract-invalid");
+        }
+        const content = renderedParts.join("");
         if (
-          !mediaTypes.has(result.mediaType) ||
-          typeof result.content !== "string" ||
-          result.terminalNeutralised !== true ||
-          result.capabilityValuesRedacted !== true ||
-          !Number.isSafeInteger(result.totalBytes) ||
-          result.totalBytes < contentBytes ||
-          contentBytes > maximumBytes ||
-          lineCount > maximumLines ||
-          typeof result.truncated !== "boolean" ||
-          (!result.truncated && result.totalBytes !== contentBytes) ||
-          (!result.truncated && contentDigest !== result.artifactRef.digest)
+          Buffer.byteLength(content, "utf8") !== firstPage.renderedTotalBytes ||
+          artifactLineCount(content) !== firstPage.renderedTotalLines ||
+          contentDigest(content) !== firstPage.renderedArtifactDigest
         ) {
           return unavailableArtifact(binding, "contract-invalid");
         }
+        const result: ConsoleArtifactContentResult = {
+          artifactRef: firstPage.artifactRef,
+          evidenceRevision: revisionToProtocol(binding.itemRevision),
+          evidenceKind: evidence.evidenceKind,
+          sourceKind: evidence.sourceKind,
+          publisherKind: evidence.publisherKind,
+          publisherRef: evidence.publisherRef,
+          projectSessionId: evidence.projectSessionId,
+          coordinationRunId: evidence.coordinationRunId,
+          taskId: evidence.taskId,
+          createdAt: evidence.createdAt,
+          mediaType: firstPage.mediaType,
+          content,
+          totalBytes: firstPage.totalBytes,
+          totalLines: firstPage.totalLines,
+          renderedTotalBytes: firstPage.renderedTotalBytes,
+          renderedTotalLines: firstPage.renderedTotalLines,
+          renderedArtifactDigest: firstPage.renderedArtifactDigest,
+          transformation: firstPage.transformation,
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages,
+          coverage: {
+            complete: true,
+            verified: true,
+            pageCount: pages.length,
+          },
+          reviewDisposition: reviewDisposition(firstPage.transformation),
+        };
         return {
           kind: "artifact",
           state: "current",

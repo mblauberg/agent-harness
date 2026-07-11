@@ -1,5 +1,7 @@
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 import {
   NdjsonRpcTransport,
@@ -7,6 +9,7 @@ import {
   buildMcpDescriptorSet,
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 
 import { createFabricMcpServer } from "../../../src/mcp/server.ts";
 import { callTool, createMcpFixture } from "../../support/mcp-testkit.ts";
@@ -58,6 +61,50 @@ describe("registry-owned MCP projection", () => {
     expect(status).toMatchObject({
       isError: false,
       structured: { runId: fixture.run.runId, chairAgentId: "chair" },
+    });
+
+    const evidenceContent = "MCP registered review\n";
+    const evidenceDigest = `sha256:${createHash("sha256").update(evidenceContent).digest("hex")}`;
+    await mkdir(join(fixture.directory, ".agent-run"), { recursive: true });
+    await writeFile(join(fixture.directory, ".agent-run", "review.md"), evidenceContent);
+    const database = new Database(fixture.databasePath, { readonly: true });
+    const identity = database.prepare("SELECT project_session_id FROM runs WHERE run_id=?")
+      .get(fixture.run.runId) as { project_session_id: string };
+    database.close();
+    const evidence = await callTool(fixture.chairProxy.client, "fabric_evidence_publish", {
+      commandId: "mcp_evidence_publish_01",
+      projectSessionId: identity.project_session_id,
+      coordinationRunId: fixture.run.runId,
+      requestedSourceKind: "project-file",
+      evidenceKind: "review",
+      relativePath: ".agent-run/review.md",
+      sourceDigest: evidenceDigest,
+    });
+    expect(evidence).toMatchObject({
+      isError: false,
+      structured: {
+        evidenceRevision: 1,
+        sourceKind: "project-file",
+        evidenceKind: "review",
+        artifactRef: {
+          path: ".agent-run/review.md",
+          digest: evidenceDigest,
+        },
+      },
+    });
+    const callerRoot = await callTool(fixture.chairProxy.client, "fabric_evidence_publish", {
+      commandId: "mcp_evidence_publish_invalid",
+      projectSessionId: identity.project_session_id,
+      coordinationRunId: fixture.run.runId,
+      requestedSourceKind: "project-file",
+      evidenceKind: "review",
+      relativePath: ".agent-run/review.md",
+      sourceDigest: evidenceDigest,
+      sourceRoot: fixture.directory,
+    });
+    expect(callerRoot).toMatchObject({
+      isError: true,
+      structured: { code: "MCP_INPUT_INVALID" },
     });
     const missing = await callTool(fixture.chairProxy.client, "fabric_provider_action_read", {
       actionId: "missing-action",

@@ -16,6 +16,7 @@ import {
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
+import { ArtifactRegistry } from "../artifacts/registry.js";
 import {
   ProjectFabricCoreError,
   type AuthenticatedAgentContext,
@@ -89,11 +90,13 @@ export class AtomicDeliveryStore {
   readonly #database: Database.Database;
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
+  readonly #artifactRegistry: ArtifactRegistry;
 
-  constructor(options: CoreServiceOptions) {
+  constructor(options: CoreServiceOptions & { artifactRegistry?: ArtifactRegistry }) {
     this.#database = options.database;
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
+    this.#artifactRegistry = options.artifactRegistry ?? new ArtifactRegistry(this.#database, this.#clock);
   }
 
   request(context: AuthenticatedAgentContext, value: TaskRequest): TaskRequestCommit {
@@ -277,23 +280,17 @@ export class AtomicDeliveryStore {
       }))}`;
       const artifactIds: string[] = [];
       for (const artifact of request.reply.artifactRefs) {
-        const artifactId = `artifact_${sha256(`${context.coordinationRunId}\0${artifact.path}\0${artifact.digest}`).slice(0, 24)}`;
-        artifactIds.push(artifactId);
-        this.#database.prepare(`
-          INSERT INTO artifacts(
-            artifact_id, run_id, task_id, publisher_agent_id,
-            relative_path, sha256, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(run_id, relative_path, sha256) DO NOTHING
-        `).run(
-          artifactId,
-          context.coordinationRunId,
-          request.taskId,
-          context.agentId,
-          artifact.path,
-          artifact.digest,
-          now,
-        );
+        const registered = this.#artifactRegistry.registerAgentEvidence({
+          runId: context.coordinationRunId,
+          agentId: context.agentId,
+          taskId: request.taskId,
+          requestedSourceKind: "run-file",
+          evidenceKind: "artifact",
+          relativePath: artifact.path,
+          digest: artifact.digest,
+          verifyBytes: false,
+        });
+        artifactIds.push(registered.evidenceId);
       }
       this.#database.prepare(`
         INSERT INTO task_results(

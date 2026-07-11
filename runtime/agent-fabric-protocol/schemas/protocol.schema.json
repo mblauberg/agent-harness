@@ -407,7 +407,8 @@
                   "fabric.v1.result-delivery.consume",
                   "fabric.v1.result-delivery.retry",
                   "fabric.v1.result-delivery.reassign",
-                  "fabric.v1.result-delivery.abandon"
+                  "fabric.v1.result-delivery.abandon",
+                  "fabric.v1.evidence.publish"
                 ]
               },
               "minItems": 0,
@@ -590,7 +591,8 @@
                   "fabric.v1.result-delivery.consume",
                   "fabric.v1.result-delivery.retry",
                   "fabric.v1.result-delivery.reassign",
-                  "fabric.v1.result-delivery.abandon"
+                  "fabric.v1.result-delivery.abandon",
+                  "fabric.v1.evidence.publish"
                 ]
               },
               "minItems": 0,
@@ -1434,6 +1436,8 @@
         "fabric.v1.operator-action.reconcile",
         "fabric.v1.message-body.read",
         "fabric.v1.operator-repository.read",
+        "fabric.v1.evidence.publish",
+        "fabric.v1.operator-artifact-content.read",
         "fabric.v1.project-session.drain",
         "fabric.v1.project-session.stop",
         "fabric.v1.daemon.drain",
@@ -1538,7 +1542,9 @@
         "fabric.v1.operator-action.status",
         "fabric.v1.operator-action.reconcile",
         "fabric.v1.message-body.read",
-        "fabric.v1.operator-repository.read"
+        "fabric.v1.operator-repository.read",
+        "fabric.v1.evidence.publish",
+        "fabric.v1.operator-artifact-content.read"
       ]
     },
     "operatorPrincipal": {
@@ -2207,7 +2213,7 @@
         },
         "requiredFeatures": {
           "type": "array",
-          "maxItems": 18,
+          "maxItems": 20,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2228,13 +2234,15 @@
               "launch-attestation.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
+              "artifact-registry.v1",
+              "artifact-content-read.v1",
               "lifecycle-control.v1"
             ]
           }
         },
         "optionalFeatures": {
           "type": "array",
-          "maxItems": 18,
+          "maxItems": 20,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2255,6 +2263,8 @@
               "launch-attestation.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
+              "artifact-registry.v1",
+              "artifact-content-read.v1",
               "lifecycle-control.v1"
             ]
           }
@@ -2395,7 +2405,7 @@
         },
         "features": {
           "type": "array",
-          "maxItems": 18,
+          "maxItems": 20,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2416,13 +2426,15 @@
               "launch-attestation.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
+              "artifact-registry.v1",
+              "artifact-content-read.v1",
               "lifecycle-control.v1"
             ]
           }
         },
         "allowedOperations": {
           "type": "array",
-          "maxItems": 96,
+          "maxItems": 98,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2521,7 +2533,9 @@
               "fabric.v1.operator-action.status",
               "fabric.v1.operator-action.reconcile",
               "fabric.v1.message-body.read",
-              "fabric.v1.operator-repository.read"
+              "fabric.v1.operator-repository.read",
+              "fabric.v1.evidence.publish",
+              "fabric.v1.operator-artifact-content.read"
             ]
           }
         },
@@ -2655,7 +2669,7 @@
             },
             "requiredFeatures": {
               "type": "array",
-              "maxItems": 18,
+              "maxItems": 20,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2676,13 +2690,15 @@
                   "launch-attestation.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
+                  "artifact-registry.v1",
+                  "artifact-content-read.v1",
                   "lifecycle-control.v1"
                 ]
               }
             },
             "optionalFeatures": {
               "type": "array",
-              "maxItems": 18,
+              "maxItems": 20,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2703,6 +2719,8 @@
                   "launch-attestation.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
+                  "artifact-registry.v1",
+                  "artifact-content-read.v1",
                   "lifecycle-control.v1"
                 ]
               }
@@ -2865,7 +2883,7 @@
             },
             "features": {
               "type": "array",
-              "maxItems": 18,
+              "maxItems": 20,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2886,13 +2904,15 @@
                   "launch-attestation.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
+                  "artifact-registry.v1",
+                  "artifact-content-read.v1",
                   "lifecycle-control.v1"
                 ]
               }
             },
             "allowedOperations": {
               "type": "array",
-              "maxItems": 96,
+              "maxItems": 98,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2991,7 +3011,9 @@
                   "fabric.v1.operator-action.status",
                   "fabric.v1.operator-action.reconcile",
                   "fabric.v1.message-body.read",
-                  "fabric.v1.operator-repository.read"
+                  "fabric.v1.operator-repository.read",
+                  "fabric.v1.evidence.publish",
+                  "fabric.v1.operator-artifact-content.read"
                 ]
               }
             },
@@ -3277,6 +3299,7 @@
                           "fabric.v1.delivery.acknowledge",
                           "fabric.v1.discussion-group.create",
                           "fabric.v1.events.observe",
+                          "fabric.v1.evidence.publish",
                           "fabric.v1.intake.revise",
                           "fabric.v1.launch.attest",
                           "fabric.v1.lease.revocation-proof.record",
@@ -3481,6 +3504,7 @@
                           "fabric.v1.delivery.acknowledge",
                           "fabric.v1.discussion-group.create",
                           "fabric.v1.events.observe",
+                          "fabric.v1.evidence.publish",
                           "fabric.v1.intake.revise",
                           "fabric.v1.launch.attest",
                           "fabric.v1.lease.revocation-proof.record",
@@ -6065,6 +6089,7 @@
                                   "fabric.v1.delivery.acknowledge",
                                   "fabric.v1.discussion-group.create",
                                   "fabric.v1.events.observe",
+                                  "fabric.v1.evidence.publish",
                                   "fabric.v1.intake.revise",
                                   "fabric.v1.launch.attest",
                                   "fabric.v1.lease.revocation-proof.record",
@@ -6269,6 +6294,7 @@
                                   "fabric.v1.delivery.acknowledge",
                                   "fabric.v1.discussion-group.create",
                                   "fabric.v1.events.observe",
+                                  "fabric.v1.evidence.publish",
                                   "fabric.v1.intake.revise",
                                   "fabric.v1.launch.attest",
                                   "fabric.v1.lease.revocation-proof.record",
@@ -6473,6 +6499,7 @@
                                     "fabric.v1.delivery.acknowledge",
                                     "fabric.v1.discussion-group.create",
                                     "fabric.v1.events.observe",
+                                    "fabric.v1.evidence.publish",
                                     "fabric.v1.intake.revise",
                                     "fabric.v1.launch.attest",
                                     "fabric.v1.lease.revocation-proof.record",
@@ -6677,6 +6704,7 @@
                                     "fabric.v1.delivery.acknowledge",
                                     "fabric.v1.discussion-group.create",
                                     "fabric.v1.events.observe",
+                                    "fabric.v1.evidence.publish",
                                     "fabric.v1.intake.revise",
                                     "fabric.v1.launch.attest",
                                     "fabric.v1.lease.revocation-proof.record",
@@ -13469,10 +13497,10 @@
                     "projectSessionId",
                     "coordinationRunId",
                     "expectedRevision",
-                    "state",
                     "summary",
                     "artifactRefs",
-                    "gateIds"
+                    "gateIds",
+                    "state"
                   ],
                   "properties": {
                     "origin": {
@@ -13660,17 +13688,6 @@
                       "type": "integer",
                       "minimum": 1
                     },
-                    "state": {
-                      "type": "string",
-                      "enum": [
-                        "awaiting-chair",
-                        "discussing",
-                        "awaiting-human",
-                        "accepted",
-                        "deferred",
-                        "cancelled"
-                      ]
-                    },
                     "summary": {
                       "type": "string",
                       "minLength": 1,
@@ -13716,6 +13733,16 @@
                       "minItems": 0,
                       "maxItems": 256,
                       "uniqueItems": true
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "awaiting-chair",
+                        "discussing",
+                        "awaiting-human",
+                        "deferred",
+                        "cancelled"
+                      ]
                     },
                     "chairRequest": {
                       "type": "object",
@@ -13954,10 +13981,508 @@
                     "projectSessionId",
                     "coordinationRunId",
                     "expectedRevision",
-                    "state",
                     "summary",
                     "artifactRefs",
-                    "gateIds"
+                    "gateIds",
+                    "state",
+                    "acceptedScopeRef"
+                  ],
+                  "properties": {
+                    "origin": {
+                      "const": "operator"
+                    },
+                    "command": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "credential",
+                        "commandId",
+                        "expectedRevision",
+                        "actor",
+                        "provenance",
+                        "evidenceRefs"
+                      ],
+                      "properties": {
+                        "credential": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "capabilityId",
+                            "token"
+                          ],
+                          "properties": {
+                            "capabilityId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "token": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 16,
+                              "x-maxUtf8Bytes": 4096,
+                              "x-agent-fabric-sensitive": true
+                            }
+                          }
+                        },
+                        "commandId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "actor": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "provenance": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "clientId",
+                                "inputEventId"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "console-direct-input"
+                                },
+                                "clientId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                },
+                                "inputEventId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "attestationId",
+                                "integrationId",
+                                "integrationGeneration"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "attested-provider-input"
+                                },
+                                "attestationId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                },
+                                "integrationId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                },
+                                "integrationGeneration": {
+                                  "type": "integer",
+                                  "minimum": 1
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "path",
+                              "digest"
+                            ],
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              },
+                              "digest": {
+                                "type": "string",
+                                "pattern": "^sha256:[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          "minItems": 0,
+                          "maxItems": 128
+                        }
+                      }
+                    },
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    },
+                    "state": {
+                      "const": "accepted"
+                    },
+                    "acceptedScopeRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "chairRequest": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "commandId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "task",
+                        "request"
+                      ],
+                      "properties": {
+                        "commandId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "task": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "taskId",
+                            "taskRevision",
+                            "objective",
+                            "baseRevision",
+                            "expectedArtifactPaths"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "taskRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 4096
+                            },
+                            "baseRevision": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 4096
+                            },
+                            "expectedArtifactPaths": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              },
+                              "minItems": 0,
+                              "maxItems": 128,
+                              "uniqueItems": true
+                            }
+                          }
+                        },
+                        "request": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "requestRevision",
+                            "messageId",
+                            "conversationId",
+                            "targetAgentId",
+                            "targetProviderSessionRef",
+                            "requiresAck",
+                            "dedupeKey",
+                            "responseDeadline",
+                            "callbackId",
+                            "callbackGeneration",
+                            "dependentBarrierId"
+                          ],
+                          "properties": {
+                            "requestRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "messageId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "conversationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "targetAgentId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "targetProviderSessionRef": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "requiresAck": {
+                              "const": true
+                            },
+                            "dedupeKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 4096
+                            },
+                            "responseDeadline": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "callbackId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "callbackGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "dependentBarrierId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "intakeBinding": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "intakeId",
+                                "intakeRevision",
+                                "gateIds",
+                                "artifactDigests"
+                              ],
+                              "properties": {
+                                "intakeId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                },
+                                "intakeRevision": {
+                                  "type": "integer",
+                                  "minimum": 1
+                                },
+                                "gateIds": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "x-minUtf8Bytes": 1,
+                                    "x-maxUtf8Bytes": 128,
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                  },
+                                  "minItems": 0,
+                                  "maxItems": 256,
+                                  "uniqueItems": true
+                                },
+                                "artifactDigests": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                  },
+                                  "minItems": 0,
+                                  "maxItems": 128,
+                                  "uniqueItems": true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "origin",
+                    "command",
+                    "intakeId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "expectedRevision",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds",
+                    "state"
                   ],
                   "properties": {
                     "origin": {
@@ -14064,16 +14589,409 @@
                       "type": "integer",
                       "minimum": 1
                     },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    },
                     "state": {
                       "type": "string",
                       "enum": [
                         "awaiting-chair",
                         "discussing",
                         "awaiting-human",
-                        "accepted",
                         "deferred",
                         "cancelled"
                       ]
+                    },
+                    "chairRequest": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "commandId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "task",
+                        "request"
+                      ],
+                      "properties": {
+                        "commandId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "task": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "taskId",
+                            "taskRevision",
+                            "objective",
+                            "baseRevision",
+                            "expectedArtifactPaths"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "taskRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 4096
+                            },
+                            "baseRevision": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 4096
+                            },
+                            "expectedArtifactPaths": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              },
+                              "minItems": 0,
+                              "maxItems": 128,
+                              "uniqueItems": true
+                            }
+                          }
+                        },
+                        "request": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "requestRevision",
+                            "messageId",
+                            "conversationId",
+                            "targetAgentId",
+                            "targetProviderSessionRef",
+                            "requiresAck",
+                            "dedupeKey",
+                            "responseDeadline",
+                            "callbackId",
+                            "callbackGeneration",
+                            "dependentBarrierId"
+                          ],
+                          "properties": {
+                            "requestRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "messageId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "conversationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "targetAgentId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "targetProviderSessionRef": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "requiresAck": {
+                              "const": true
+                            },
+                            "dedupeKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 4096
+                            },
+                            "responseDeadline": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "callbackId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "callbackGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "dependentBarrierId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "intakeBinding": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "intakeId",
+                                "intakeRevision",
+                                "gateIds",
+                                "artifactDigests"
+                              ],
+                              "properties": {
+                                "intakeId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                },
+                                "intakeRevision": {
+                                  "type": "integer",
+                                  "minimum": 1
+                                },
+                                "gateIds": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "x-minUtf8Bytes": 1,
+                                    "x-maxUtf8Bytes": 128,
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                  },
+                                  "minItems": 0,
+                                  "maxItems": 256,
+                                  "uniqueItems": true
+                                },
+                                "artifactDigests": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                  },
+                                  "minItems": 0,
+                                  "maxItems": 128,
+                                  "uniqueItems": true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "origin",
+                    "command",
+                    "intakeId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "expectedRevision",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds",
+                    "state",
+                    "acceptedScopeRef"
+                  ],
+                  "properties": {
+                    "origin": {
+                      "const": "chair"
+                    },
+                    "command": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "commandId",
+                        "agentId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "principalGeneration",
+                        "chairLeaseId",
+                        "chairLeaseGeneration",
+                        "expectedRunRevision",
+                        "expectedRevision"
+                      ],
+                      "properties": {
+                        "commandId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "agentId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "principalGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "chairLeaseId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "chairLeaseGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 1
                     },
                     "summary": {
                       "type": "string",
@@ -14120,6 +15038,29 @@
                       "minItems": 0,
                       "maxItems": 256,
                       "uniqueItems": true
+                    },
+                    "state": {
+                      "const": "accepted"
+                    },
+                    "acceptedScopeRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
                     },
                     "chairRequest": {
                       "type": "object",
@@ -14747,7 +15688,9 @@
                               "fabric.v1.operator-action.status",
                               "fabric.v1.operator-action.reconcile",
                               "fabric.v1.message-body.read",
-                              "fabric.v1.operator-repository.read"
+                              "fabric.v1.operator-repository.read",
+                              "fabric.v1.evidence.publish",
+                              "fabric.v1.operator-artifact-content.read"
                             ]
                           },
                           "minItems": 0,
@@ -15199,7 +16142,9 @@
                               "fabric.v1.operator-action.status",
                               "fabric.v1.operator-action.reconcile",
                               "fabric.v1.message-body.read",
-                              "fabric.v1.operator-repository.read"
+                              "fabric.v1.operator-repository.read",
+                              "fabric.v1.evidence.publish",
+                              "fabric.v1.operator-artifact-content.read"
                             ]
                           },
                           "minItems": 0,
@@ -15805,7 +16750,9 @@
                         "fabric.v1.operator-action.status",
                         "fabric.v1.operator-action.reconcile",
                         "fabric.v1.message-body.read",
-                        "fabric.v1.operator-repository.read"
+                        "fabric.v1.operator-repository.read",
+                        "fabric.v1.evidence.publish",
+                        "fabric.v1.operator-artifact-content.read"
                       ]
                     }
                   }
@@ -22359,6 +23306,230 @@
                   }
                 }
               ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "input"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.evidence.publish"
+            },
+            "input": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "commandId",
+                "projectSessionId",
+                "coordinationRunId",
+                "requestedSourceKind",
+                "evidenceKind",
+                "relativePath",
+                "sourceDigest"
+              ],
+              "properties": {
+                "commandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "coordinationRunId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "requestedSourceKind": {
+                  "type": "string",
+                  "enum": [
+                    "project-file",
+                    "run-file"
+                  ]
+                },
+                "evidenceKind": {
+                  "type": "string",
+                  "enum": [
+                    "artifact",
+                    "diff",
+                    "test",
+                    "review",
+                    "receipt"
+                  ]
+                },
+                "relativePath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                },
+                "sourceDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "input"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.operator-artifact-content.read"
+            },
+            "input": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "credential",
+                "projectId",
+                "evidenceId",
+                "expectedEvidenceRevision",
+                "artifactRef",
+                "cursor",
+                "maximumBytes",
+                "maximumLines"
+              ],
+              "properties": {
+                "credential": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "capabilityId",
+                    "token"
+                  ],
+                  "properties": {
+                    "capabilityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "token": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 16,
+                      "x-maxUtf8Bytes": 4096,
+                      "x-agent-fabric-sensitive": true
+                    }
+                  }
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "evidenceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "expectedEvidenceRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "artifactRef": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "digest"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                    },
+                    "digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "cursor": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "maximumBytes": {
+                  "type": "integer",
+                  "minimum": 4,
+                  "maximum": 131072
+                },
+                "maximumLines": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2000
+                },
+                "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
             }
           }
         },
@@ -40374,122 +41545,256 @@
                   }
                 },
                 {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "intakeId",
-                    "projectId",
-                    "projectSessionId",
-                    "coordinationRunId",
-                    "revision",
-                    "state",
-                    "dedupeKey",
-                    "summary",
-                    "artifactRefs",
-                    "gateIds"
-                  ],
-                  "properties": {
-                    "intakeId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "projectId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "projectSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "coordinationRunId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "revision": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "state": {
-                      "type": "string",
-                      "enum": [
-                        "awaiting-chair",
-                        "discussing",
-                        "awaiting-human",
-                        "accepted",
-                        "deferred",
-                        "cancelled"
-                      ]
-                    },
-                    "dedupeKey": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 4096
-                    },
-                    "summary": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 4096
-                    },
-                    "artifactRefs": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "path",
-                          "digest"
-                        ],
-                        "properties": {
-                          "path": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "intakeId",
+                        "projectId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "revision",
+                        "dedupeKey",
+                        "summary",
+                        "artifactRefs",
+                        "gateIds",
+                        "state"
+                      ],
+                      "properties": {
+                        "intakeId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "dedupeKey": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "summary": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "artifactRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "path",
+                              "digest"
+                            ],
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              },
+                              "digest": {
+                                "type": "string",
+                                "pattern": "^sha256:[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          "minItems": 0,
+                          "maxItems": 128
+                        },
+                        "gateIds": {
+                          "type": "array",
+                          "items": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 4096,
-                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                           },
-                          "digest": {
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "awaiting-chair",
+                            "discussing",
+                            "awaiting-human",
+                            "deferred",
+                            "cancelled"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "intakeId",
+                        "projectId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "revision",
+                        "dedupeKey",
+                        "summary",
+                        "artifactRefs",
+                        "gateIds",
+                        "state",
+                        "acceptedScopeRef"
+                      ],
+                      "properties": {
+                        "intakeId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "dedupeKey": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "summary": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "artifactRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "path",
+                              "digest"
+                            ],
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              },
+                              "digest": {
+                                "type": "string",
+                                "pattern": "^sha256:[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          "minItems": 0,
+                          "maxItems": 128
+                        },
+                        "gateIds": {
+                          "type": "array",
+                          "items": {
                             "type": "string",
-                            "pattern": "^sha256:[a-f0-9]{64}$"
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
+                        },
+                        "state": {
+                          "const": "accepted"
+                        },
+                        "acceptedScopeRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "path",
+                            "digest"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            },
+                            "digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
                           }
                         }
-                      },
-                      "minItems": 0,
-                      "maxItems": 128
-                    },
-                    "gateIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128,
-                        "x-minUtf8Bytes": 1,
-                        "x-maxUtf8Bytes": 128,
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                      },
-                      "minItems": 0,
-                      "maxItems": 256,
-                      "uniqueItems": true
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             }
@@ -40629,122 +41934,256 @@
               "const": true
             },
             "result": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "intakeId",
-                "projectId",
-                "projectSessionId",
-                "coordinationRunId",
-                "revision",
-                "state",
-                "dedupeKey",
-                "summary",
-                "artifactRefs",
-                "gateIds"
-              ],
-              "properties": {
-                "intakeId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "projectId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "projectSessionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "coordinationRunId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "revision": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "state": {
-                  "type": "string",
-                  "enum": [
-                    "awaiting-chair",
-                    "discussing",
-                    "awaiting-human",
-                    "accepted",
-                    "deferred",
-                    "cancelled"
-                  ]
-                },
-                "dedupeKey": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 4096
-                },
-                "summary": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 4096
-                },
-                "artifactRefs": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "path",
-                      "digest"
-                    ],
-                    "properties": {
-                      "path": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "intakeId",
+                    "projectId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "revision",
+                    "dedupeKey",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds",
+                    "state"
+                  ],
+                  "properties": {
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "dedupeKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                       },
-                      "digest": {
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "awaiting-chair",
+                        "discussing",
+                        "awaiting-human",
+                        "deferred",
+                        "cancelled"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "intakeId",
+                    "projectId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "revision",
+                    "dedupeKey",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds",
+                    "state",
+                    "acceptedScopeRef"
+                  ],
+                  "properties": {
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "dedupeKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
                         "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    },
+                    "state": {
+                      "const": "accepted"
+                    },
+                    "acceptedScopeRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
                       }
                     }
-                  },
-                  "minItems": 0,
-                  "maxItems": 128
-                },
-                "gateIds": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
+                  }
                 }
-              }
+              ]
             }
           }
         },
@@ -40882,122 +42321,256 @@
               "const": true
             },
             "result": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "intakeId",
-                "projectId",
-                "projectSessionId",
-                "coordinationRunId",
-                "revision",
-                "state",
-                "dedupeKey",
-                "summary",
-                "artifactRefs",
-                "gateIds"
-              ],
-              "properties": {
-                "intakeId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "projectId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "projectSessionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "coordinationRunId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "revision": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "state": {
-                  "type": "string",
-                  "enum": [
-                    "awaiting-chair",
-                    "discussing",
-                    "awaiting-human",
-                    "accepted",
-                    "deferred",
-                    "cancelled"
-                  ]
-                },
-                "dedupeKey": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 4096
-                },
-                "summary": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 4096
-                },
-                "artifactRefs": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "path",
-                      "digest"
-                    ],
-                    "properties": {
-                      "path": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "intakeId",
+                    "projectId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "revision",
+                    "dedupeKey",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds",
+                    "state"
+                  ],
+                  "properties": {
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "dedupeKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                       },
-                      "digest": {
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "awaiting-chair",
+                        "discussing",
+                        "awaiting-human",
+                        "deferred",
+                        "cancelled"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "intakeId",
+                    "projectId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "revision",
+                    "dedupeKey",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds",
+                    "state",
+                    "acceptedScopeRef"
+                  ],
+                  "properties": {
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "dedupeKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
                         "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    },
+                    "state": {
+                      "const": "accepted"
+                    },
+                    "acceptedScopeRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
                       }
                     }
-                  },
-                  "minItems": 0,
-                  "maxItems": 128
-                },
-                "gateIds": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
+                  }
                 }
-              }
+              ]
             }
           }
         },
@@ -61143,6 +62716,7 @@
                                         "required": [
                                           "kind",
                                           "goal",
+                                          "acceptedScopeRef",
                                           "repositoryRevision"
                                         ],
                                         "properties": {
@@ -61155,6 +62729,33 @@
                                             "maxLength": 4096,
                                             "x-minUtf8Bytes": 1,
                                             "x-maxUtf8Bytes": 4096
+                                          },
+                                          "acceptedScopeRef": {
+                                            "oneOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "required": [
+                                                  "path",
+                                                  "digest"
+                                                ],
+                                                "properties": {
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 4096,
+                                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                                  },
+                                                  "digest": {
+                                                    "type": "string",
+                                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
                                           },
                                           "repositoryRevision": {
                                             "type": "string",
@@ -61742,6 +63343,7 @@
                                           "required": [
                                             "kind",
                                             "goal",
+                                            "acceptedScopeRef",
                                             "repositoryRevision"
                                           ],
                                           "properties": {
@@ -61754,6 +63356,33 @@
                                               "maxLength": 4096,
                                               "x-minUtf8Bytes": 1,
                                               "x-maxUtf8Bytes": 4096
+                                            },
+                                            "acceptedScopeRef": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "object",
+                                                  "additionalProperties": false,
+                                                  "required": [
+                                                    "path",
+                                                    "digest"
+                                                  ],
+                                                  "properties": {
+                                                    "path": {
+                                                      "type": "string",
+                                                      "minLength": 1,
+                                                      "maxLength": 4096,
+                                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                                    },
+                                                    "digest": {
+                                                      "type": "string",
+                                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
                                             },
                                             "repositoryRevision": {
                                               "type": "string",
@@ -65723,6 +67352,7 @@
                                     "projectId",
                                     "canonicalRoot",
                                     "goal",
+                                    "acceptedScopeRef",
                                     "repositoryRevision"
                                   ],
                                   "properties": {
@@ -65751,6 +67381,33 @@
                                       "maxLength": 4096,
                                       "x-minUtf8Bytes": 1,
                                       "x-maxUtf8Bytes": 4096
+                                    },
+                                    "acceptedScopeRef": {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": false,
+                                          "required": [
+                                            "path",
+                                            "digest"
+                                          ],
+                                          "properties": {
+                                            "path": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 4096,
+                                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                            },
+                                            "digest": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[a-f0-9]{64}$"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
                                     },
                                     "repositoryRevision": {
                                       "type": "string",
@@ -66945,6 +68602,13 @@
                                     "evidenceId",
                                     "evidenceKind",
                                     "artifactRef",
+                                    "sourceKind",
+                                    "publisherKind",
+                                    "publisherRef",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "taskId",
+                                    "createdAt",
                                     "status"
                                   ],
                                   "properties": {
@@ -66988,6 +68652,81 @@
                                           "pattern": "^sha256:[a-f0-9]{64}$"
                                         }
                                       }
+                                    },
+                                    "sourceKind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "project-file",
+                                        "run-file",
+                                        "git-private-diff"
+                                      ]
+                                    },
+                                    "publisherKind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "agent",
+                                        "operator",
+                                        "fabric",
+                                        "project",
+                                        "migration"
+                                      ]
+                                    },
+                                    "publisherRef": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "x-minUtf8Bytes": 1,
+                                      "x-maxUtf8Bytes": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "projectSessionId": {
+                                      "oneOf": [
+                                        {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "coordinationRunId": {
+                                      "oneOf": [
+                                        {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "taskId": {
+                                      "oneOf": [
+                                        {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time"
                                     },
                                     "status": {
                                       "type": "string",
@@ -67260,6 +68999,7 @@
                                       "projectId",
                                       "canonicalRoot",
                                       "goal",
+                                      "acceptedScopeRef",
                                       "repositoryRevision"
                                     ],
                                     "properties": {
@@ -67288,6 +69028,33 @@
                                         "maxLength": 4096,
                                         "x-minUtf8Bytes": 1,
                                         "x-maxUtf8Bytes": 4096
+                                      },
+                                      "acceptedScopeRef": {
+                                        "oneOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "required": [
+                                              "path",
+                                              "digest"
+                                            ],
+                                            "properties": {
+                                              "path": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 4096,
+                                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                              },
+                                              "digest": {
+                                                "type": "string",
+                                                "pattern": "^sha256:[a-f0-9]{64}$"
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
                                       },
                                       "repositoryRevision": {
                                         "type": "string",
@@ -68482,6 +70249,13 @@
                                       "evidenceId",
                                       "evidenceKind",
                                       "artifactRef",
+                                      "sourceKind",
+                                      "publisherKind",
+                                      "publisherRef",
+                                      "projectSessionId",
+                                      "coordinationRunId",
+                                      "taskId",
+                                      "createdAt",
                                       "status"
                                     ],
                                     "properties": {
@@ -68525,6 +70299,81 @@
                                             "pattern": "^sha256:[a-f0-9]{64}$"
                                           }
                                         }
+                                      },
+                                      "sourceKind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "project-file",
+                                          "run-file",
+                                          "git-private-diff"
+                                        ]
+                                      },
+                                      "publisherKind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "agent",
+                                          "operator",
+                                          "fabric",
+                                          "project",
+                                          "migration"
+                                        ]
+                                      },
+                                      "publisherRef": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "x-minUtf8Bytes": 1,
+                                        "x-maxUtf8Bytes": 128,
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                      },
+                                      "projectSessionId": {
+                                        "oneOf": [
+                                          {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "coordinationRunId": {
+                                        "oneOf": [
+                                          {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "taskId": {
+                                        "oneOf": [
+                                          {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "createdAt": {
+                                        "type": "string",
+                                        "format": "date-time"
                                       },
                                       "status": {
                                         "type": "string",
@@ -76343,6 +78192,582 @@
             },
             "operation": {
               "const": "fabric.v1.operator-repository.read"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "PROTOCOL_INVALID",
+                    "PROTOCOL_UNSUPPORTED",
+                    "FEATURE_UNAVAILABLE",
+                    "AUTHENTICATION_FAILED",
+                    "AUTHORITY_WIDENING",
+                    "ARTIFACT_DIGEST_INVALID",
+                    "ARTIFACT_PATH_FORBIDDEN",
+                    "ADAPTER_ARTIFACT_MISSING",
+                    "ADAPTER_COMPATIBILITY_INVALID",
+                    "ADAPTER_DISABLED",
+                    "ADAPTER_HASH_MISMATCH",
+                    "ADAPTER_PIN_UNRESOLVED",
+                    "ADAPTER_MODEL_REQUIRED",
+                    "ADAPTER_FAMILY_FORBIDDEN",
+                    "BARRIER_PRECONDITION_FAILED",
+                    "BUDGET_EXCEEDED",
+                    "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
+                    "CAPABILITY_EXPIRED",
+                    "CAPABILITY_REVOKED",
+                    "CONFIG_UNTRUSTED_FIELD",
+                    "CONFIG_WIDENING_FORBIDDEN",
+                    "DEDUPE_CONFLICT",
+                    "DELIVERY_ALREADY_RESOLVED",
+                    "DELIVERY_REASON_REQUIRED",
+                    "LEASE_NOT_EXPIRED",
+                    "LEASE_EXPIRED",
+                    "LEASE_QUARANTINED",
+                    "CHECKPOINT_INCOMPLETE",
+                    "CONTEXT_UNRECONCILED",
+                    "LIFECYCLE_PRECONDITION_FAILED",
+                    "MODEL_REQUIRED",
+                    "MODEL_NOT_ALLOWED",
+                    "MODEL_FAMILY_NOT_ALLOWED",
+                    "MESSAGE_RELATIONSHIP_FORBIDDEN",
+                    "MESSAGE_HOP_LIMIT_EXCEEDED",
+                    "MESSAGE_QUOTA_EXCEEDED",
+                    "NOT_FOUND",
+                    "PROVIDER_TURN_ACTIVE",
+                    "STALE_LEASE_GENERATION",
+                    "STALE_PRINCIPAL_GENERATION",
+                    "TASK_NOT_OWNER",
+                    "TASK_DEPENDENCY_BLOCKED",
+                    "TASK_SUBTREE_CONFLICT",
+                    "TASK_REVISION_CONFLICT",
+                    "TEAM_DEPTH_EXCEEDED",
+                    "STALE_TEAM_GENERATION",
+                    "BUDGET_USAGE_UNKNOWN",
+                    "WRITE_SCOPE_CONFLICT",
+                    "WRITE_SCOPE_RECOVERY_REQUIRED",
+                    "WRITE_SCOPE_QUARANTINED",
+                    "WRONG_PROJECT",
+                    "STALE_GENERATION",
+                    "STALE_REVISION",
+                    "GATE_BLOCKED",
+                    "RESOURCE_EXHAUSTED",
+                    "RESOURCE_USAGE_UNKNOWN",
+                    "OVERLOADED",
+                    "DEADLINE_EXCEEDED",
+                    "CONFLICT",
+                    "RECOVERY_REQUIRED",
+                    "PROJECTION_RESNAPSHOT_REQUIRED"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "details": {
+                  "$ref": "#/$defs/boundedJsonValue"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "result"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.evidence.publish"
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidenceId",
+                "evidenceRevision",
+                "projectId",
+                "projectSessionId",
+                "coordinationRunId",
+                "taskId",
+                "sourceKind",
+                "evidenceKind",
+                "artifactRef",
+                "publisherKind",
+                "publisherRef",
+                "createdAt"
+              ],
+              "properties": {
+                "evidenceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "evidenceRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "coordinationRunId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "taskId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceKind": {
+                  "type": "string",
+                  "enum": [
+                    "project-file",
+                    "run-file"
+                  ]
+                },
+                "evidenceKind": {
+                  "type": "string",
+                  "enum": [
+                    "artifact",
+                    "diff",
+                    "test",
+                    "review",
+                    "receipt"
+                  ]
+                },
+                "artifactRef": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "digest"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                    },
+                    "digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "publisherKind": {
+                  "const": "agent"
+                },
+                "publisherRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "error"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.evidence.publish"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "PROTOCOL_INVALID",
+                    "PROTOCOL_UNSUPPORTED",
+                    "FEATURE_UNAVAILABLE",
+                    "AUTHENTICATION_FAILED",
+                    "AUTHORITY_WIDENING",
+                    "ARTIFACT_DIGEST_INVALID",
+                    "ARTIFACT_PATH_FORBIDDEN",
+                    "ADAPTER_ARTIFACT_MISSING",
+                    "ADAPTER_COMPATIBILITY_INVALID",
+                    "ADAPTER_DISABLED",
+                    "ADAPTER_HASH_MISMATCH",
+                    "ADAPTER_PIN_UNRESOLVED",
+                    "ADAPTER_MODEL_REQUIRED",
+                    "ADAPTER_FAMILY_FORBIDDEN",
+                    "BARRIER_PRECONDITION_FAILED",
+                    "BUDGET_EXCEEDED",
+                    "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
+                    "CAPABILITY_EXPIRED",
+                    "CAPABILITY_REVOKED",
+                    "CONFIG_UNTRUSTED_FIELD",
+                    "CONFIG_WIDENING_FORBIDDEN",
+                    "DEDUPE_CONFLICT",
+                    "DELIVERY_ALREADY_RESOLVED",
+                    "DELIVERY_REASON_REQUIRED",
+                    "LEASE_NOT_EXPIRED",
+                    "LEASE_EXPIRED",
+                    "LEASE_QUARANTINED",
+                    "CHECKPOINT_INCOMPLETE",
+                    "CONTEXT_UNRECONCILED",
+                    "LIFECYCLE_PRECONDITION_FAILED",
+                    "MODEL_REQUIRED",
+                    "MODEL_NOT_ALLOWED",
+                    "MODEL_FAMILY_NOT_ALLOWED",
+                    "MESSAGE_RELATIONSHIP_FORBIDDEN",
+                    "MESSAGE_HOP_LIMIT_EXCEEDED",
+                    "MESSAGE_QUOTA_EXCEEDED",
+                    "NOT_FOUND",
+                    "PROVIDER_TURN_ACTIVE",
+                    "STALE_LEASE_GENERATION",
+                    "STALE_PRINCIPAL_GENERATION",
+                    "TASK_NOT_OWNER",
+                    "TASK_DEPENDENCY_BLOCKED",
+                    "TASK_SUBTREE_CONFLICT",
+                    "TASK_REVISION_CONFLICT",
+                    "TEAM_DEPTH_EXCEEDED",
+                    "STALE_TEAM_GENERATION",
+                    "BUDGET_USAGE_UNKNOWN",
+                    "WRITE_SCOPE_CONFLICT",
+                    "WRITE_SCOPE_RECOVERY_REQUIRED",
+                    "WRITE_SCOPE_QUARANTINED",
+                    "WRONG_PROJECT",
+                    "STALE_GENERATION",
+                    "STALE_REVISION",
+                    "GATE_BLOCKED",
+                    "RESOURCE_EXHAUSTED",
+                    "RESOURCE_USAGE_UNKNOWN",
+                    "OVERLOADED",
+                    "DEADLINE_EXCEEDED",
+                    "CONFLICT",
+                    "RECOVERY_REQUIRED",
+                    "PROJECTION_RESNAPSHOT_REQUIRED"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "details": {
+                  "$ref": "#/$defs/boundedJsonValue"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "result"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.operator-artifact-content.read"
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "available",
+                    "artifactRef",
+                    "reason"
+                  ],
+                  "properties": {
+                    "available": {
+                      "const": false
+                    },
+                    "artifactRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "not-found",
+                        "forbidden",
+                        "unsupported-media",
+                        "unsafe-content",
+                        "stale",
+                        "oversized"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "available",
+                    "artifactRef",
+                    "mediaType",
+                    "content",
+                    "totalBytes",
+                    "totalLines",
+                    "renderedTotalBytes",
+                    "renderedTotalLines",
+                    "pageIndex",
+                    "lineFragment",
+                    "pageContentDigest",
+                    "renderedArtifactDigest",
+                    "nextCursor",
+                    "transformation",
+                    "terminalNeutralised",
+                    "capabilityValuesRedacted",
+                    "credentialValuesRedacted"
+                  ],
+                  "properties": {
+                    "available": {
+                      "const": true
+                    },
+                    "artifactRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "mediaType": {
+                      "type": "string",
+                      "enum": [
+                        "text/markdown",
+                        "application/json",
+                        "text/x-diff",
+                        "text/plain"
+                      ]
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 0,
+                      "maxLength": 131072,
+                      "x-minUtf8Bytes": 0,
+                      "x-maxUtf8Bytes": 131072
+                    },
+                    "totalBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalLines": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "renderedTotalBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "renderedTotalLines": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "pageIndex": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "lineFragment": {
+                      "type": "string",
+                      "enum": [
+                        "whole",
+                        "start",
+                        "middle",
+                        "end"
+                      ]
+                    },
+                    "pageContentDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "renderedArtifactDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "nextCursor": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "transformation": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "terminal-neutralised",
+                        "capability-redacted",
+                        "credential-redacted",
+                        "combined"
+                      ]
+                    },
+                    "terminalNeutralised": {
+                      "const": true
+                    },
+                    "capabilityValuesRedacted": {
+                      "const": true
+                    },
+                    "credentialValuesRedacted": {
+                      "const": true
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "error"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.operator-artifact-content.read"
             },
             "ok": {
               "const": false

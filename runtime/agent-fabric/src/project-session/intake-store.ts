@@ -1,5 +1,6 @@
 import type {
   ChairMutationContext,
+  ArtifactRef,
   Intake,
   IntakeDraft,
   IntakeDraftCreateRequest,
@@ -35,6 +36,7 @@ export class IntakeStore {
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
   readonly #requestCommitter: IntakeTaskRequestCommitter | undefined;
+  readonly #registryV1: boolean;
 
   constructor(options: CoreServiceOptions & {
     operatorStore: OperatorStore;
@@ -45,6 +47,8 @@ export class IntakeStore {
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
     this.#requestCommitter = options.requestCommitter;
+    this.#registryV1 = (this.#database.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name?: unknown }>)
+      .some(({ name }) => name === "project_id");
   }
 
   createDraft(context: AuthenticatedOperatorContext, request: IntakeDraftCreateRequest): IntakeDraft {
@@ -70,6 +74,12 @@ export class IntakeStore {
       },
       () => {
         this.#fault("intake:draft");
+        const artifactBindings = this.#resolveArtifactBindings(
+          context.projectId,
+          null,
+          null,
+          request.artifactRefs,
+        );
         const now = this.#clock();
         const payload = {
           summary: request.summary,
@@ -99,11 +109,8 @@ export class IntakeStore {
           INSERT INTO intake_revisions(intake_id, revision, state, payload_json, payload_digest, actor_ref, created_at)
           VALUES (?, 1, 'draft', ?, ?, ?, ?)
         `).run(request.intakeId, payloadJson, payloadDigest, context.operatorId, now);
-        for (const artifact of request.artifactRefs) {
-          this.#database.prepare(`
-            INSERT INTO intake_artifact_bindings(intake_id, intake_revision, relative_path, sha256)
-            VALUES (?, 1, ?, ?)
-          `).run(request.intakeId, artifact.path, artifact.digest);
+        for (const artifact of artifactBindings) {
+          this.#insertArtifactBinding(request.intakeId, 1, artifact);
         }
         return this.get(request.intakeId) as IntakeDraft;
       },
@@ -124,10 +131,25 @@ export class IntakeStore {
       gateIds: JSON.parse(text(stored, "gate_ids_json")),
     };
     if (state === "draft") return parseIntake(common);
+    const acceptedScope = state === "accepted" && this.#registryV1
+      ? row(this.#database.prepare(`
+          SELECT artifact.relative_path, artifact.sha256
+            FROM artifacts artifact JOIN intakes intake
+              ON intake.accepted_scope_artifact_id=artifact.artifact_id
+           WHERE intake.intake_id=? AND intake.accepted_scope_state='bound'
+             AND artifact.registry_state='active'
+        `).get(intakeId), "accepted intake scope")
+      : undefined;
     return parseIntake({
       ...common,
       projectSessionId: text(stored, "project_session_id"),
       coordinationRunId: text(stored, "coordination_run_id"),
+      ...(acceptedScope === undefined ? {} : {
+        acceptedScopeRef: {
+          path: text(acceptedScope, "relative_path"),
+          digest: text(acceptedScope, "sha256"),
+        },
+      }),
     });
   }
 
@@ -181,6 +203,12 @@ export class IntakeStore {
         `).get(request.projectSessionId, request.coordinationRunId) === undefined) {
           throw new ProjectFabricCoreError("NOT_FOUND", "intake coordination run was not found in the target session");
         }
+        const artifactBindings = this.#resolveArtifactBindings(
+          context.projectId,
+          request.projectSessionId,
+          request.coordinationRunId,
+          request.artifactRefs,
+        );
         const commit = this.#requestCommitter?.commitTaskRequest(request.chairRequest);
         if (commit === undefined) throw new Error("task request commit is unavailable");
         this.#fault("intake:request");
@@ -223,11 +251,8 @@ export class IntakeStore {
           context.operatorId,
           this.#clock(),
         );
-        for (const artifact of request.artifactRefs) {
-          this.#database.prepare(`
-            INSERT INTO intake_artifact_bindings(intake_id, intake_revision, relative_path, sha256)
-            VALUES (?, ?, ?, ?)
-          `).run(request.intakeId, revision, artifact.path, artifact.digest);
+        for (const artifact of artifactBindings) {
+          this.#insertArtifactBinding(request.intakeId, revision, artifact);
         }
         for (const gateId of request.gateIds) {
           const gate = row(this.#database.prepare(`
@@ -284,6 +309,7 @@ export class IntakeStore {
           summary: request.summary,
           artifactRefs: request.artifactRefs,
           gateIds: request.gateIds,
+          ...(request.acceptedScopeRef === undefined ? {} : { acceptedScopeRef: request.acceptedScopeRef }),
           ...(request.chairRequest === undefined ? {} : { chairRequest: request.chairRequest }),
         },
       },
@@ -435,6 +461,20 @@ export class IntakeStore {
       return { gateId, revision: integer(gate, "revision") };
     });
     const revision = request.expectedRevision + 1;
+    const artifactBindings = this.#resolveArtifactBindings(
+      current.projectId,
+      request.projectSessionId,
+      request.coordinationRunId,
+      request.artifactRefs,
+    );
+    const acceptedScopeArtifactId = request.acceptedScopeRef === undefined
+      ? null
+      : artifactBindings.find((binding) =>
+          binding.path === request.acceptedScopeRef?.path && binding.digest === request.acceptedScopeRef.digest
+        )?.artifactId ?? null;
+    if (request.state === "accepted" && acceptedScopeArtifactId === null) {
+      throw new ProjectFabricCoreError("CONFLICT", "accepted scope does not resolve to one exact active artifact binding");
+    }
     const chairRequestCommit = request.chairRequest === undefined
       ? undefined
       : this.#commitRevisedChairRequest(request);
@@ -443,12 +483,21 @@ export class IntakeStore {
       summary: request.summary,
       artifactRefs: request.artifactRefs,
       gateIds: request.gateIds,
+      ...(request.acceptedScopeRef === undefined ? {} : { acceptedScopeRef: request.acceptedScopeRef }),
       ...(chairRequestCommit === undefined ? {} : { chairRequest: chairRequestCommit }),
     };
     const payloadJson = canonicalJson(payload);
     const payloadDigest = digest(payload);
     this.#fault("intake:revise:before-update");
-    const changed = this.#database.prepare(`
+    const changed = this.#database.prepare(this.#registryV1 ? `
+      UPDATE intakes
+         SET state=?, revision=?, summary=?, artifact_refs_json=?, gate_ids_json=?,
+             chair_request_id=COALESCE(?, chair_request_id),
+             chair_request_revision=COALESCE(?, chair_request_revision),
+             payload_digest=?, updated_at=?, accepted_scope_artifact_id=?, accepted_scope_state=?
+       WHERE intake_id=? AND project_id=? AND project_session_id=?
+         AND coordination_run_id=? AND revision=? AND state<>'draft'
+    ` : `
       UPDATE intakes
          SET state=?, revision=?, summary=?, artifact_refs_json=?, gate_ids_json=?,
              chair_request_id=COALESCE(?, chair_request_id),
@@ -466,6 +515,9 @@ export class IntakeStore {
       chairRequestCommit?.requestRevision ?? null,
       payloadDigest,
       this.#clock(),
+      ...(this.#registryV1
+        ? [acceptedScopeArtifactId, request.state === "accepted" ? "bound" : "not-applicable"]
+        : []),
       request.intakeId,
       current.projectId,
       request.projectSessionId,
@@ -475,15 +527,28 @@ export class IntakeStore {
     if (changed.changes !== 1) {
       throw new ProjectFabricCoreError("STALE_REVISION", "intake revision changed before commit");
     }
-    this.#database.prepare(`
+    if (this.#registryV1) this.#database.prepare(`
+      INSERT INTO intake_revisions(
+        intake_id, revision, state, payload_json, payload_digest, actor_ref, created_at,
+        accepted_scope_artifact_id, accepted_scope_state
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      request.intakeId,
+      revision,
+      request.state,
+      payloadJson,
+      payloadDigest,
+      actorRef,
+      this.#clock(),
+      acceptedScopeArtifactId,
+      request.state === "accepted" ? "bound" : "not-applicable",
+    );
+    else this.#database.prepare(`
       INSERT INTO intake_revisions(intake_id, revision, state, payload_json, payload_digest, actor_ref, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(request.intakeId, revision, request.state, payloadJson, payloadDigest, actorRef, this.#clock());
-    for (const artifact of request.artifactRefs) {
-      this.#database.prepare(`
-        INSERT INTO intake_artifact_bindings(intake_id, intake_revision, relative_path, sha256)
-        VALUES (?, ?, ?, ?)
-      `).run(request.intakeId, revision, artifact.path, artifact.digest);
+    for (const artifact of artifactBindings) {
+      this.#insertArtifactBinding(request.intakeId, revision, artifact);
     }
     for (const binding of gateBindings) {
       this.#database.prepare(`
@@ -492,6 +557,14 @@ export class IntakeStore {
       `).run(request.intakeId, revision, binding.gateId, binding.revision);
     }
     this.#fault("intake:revise:after-bindings");
+    const priorAcceptedScope = current.state === "accepted" ? current.acceptedScopeRef : undefined;
+    if (
+      (priorAcceptedScope?.path ?? null) !== (request.acceptedScopeRef?.path ?? null) ||
+      (priorAcceptedScope?.digest ?? null) !== (request.acceptedScopeRef?.digest ?? null)
+    ) {
+      this.#database.prepare("UPDATE projects SET revision=revision+1, updated_at=? WHERE project_id=?")
+        .run(this.#clock(), current.projectId);
+    }
     return this.get(request.intakeId);
   }
 
@@ -520,5 +593,69 @@ export class IntakeStore {
       throw new ProjectFabricCoreError("TASK_NOT_OWNER", "revised discussion request does not target the current chair");
     }
     return this.#requestCommitter.commitTaskRequest(request.chairRequest);
+  }
+
+  #resolveArtifactBindings(
+    projectId: string,
+    projectSessionId: string | null,
+    coordinationRunId: string | null,
+    artifactRefs: readonly ArtifactRef[],
+  ): Array<{ artifactId: string; path: string; digest: string }> {
+    if (!this.#registryV1) {
+      return artifactRefs.map((artifact) => ({ artifactId: "", path: artifact.path, digest: artifact.digest }));
+    }
+    return artifactRefs.map((artifact) => {
+      const values = this.#database.prepare(`
+        SELECT artifact_id, project_session_id, run_id, source_kind
+          FROM artifacts
+         WHERE project_id=? AND relative_path=? AND sha256=? AND registry_state='active'
+      `).all(projectId, artifact.path, artifact.digest).map((value) => row(value, "intake artifact candidate"));
+      const ranked = values.flatMap((candidate) => {
+        const candidateSession = nullableText(candidate, "project_session_id");
+        const candidateRun = nullableText(candidate, "run_id");
+        const tier = coordinationRunId !== null && candidateRun === coordinationRunId && candidateSession === projectSessionId
+          ? 0
+          : candidateRun === null && projectSessionId !== null && candidateSession === projectSessionId
+            ? 1
+            : candidateRun === null && candidateSession === null
+              ? 2
+              : undefined;
+        return tier === undefined ? [] : [{ candidate, tier }];
+      }).sort((left, right) => left.tier - right.tier ||
+        text(left.candidate, "artifact_id").localeCompare(text(right.candidate, "artifact_id")));
+      const bestTier = ranked[0]?.tier;
+      const best = bestTier === undefined ? [] : ranked.filter(({ tier }) => tier === bestTier);
+      if (best.length > 1) {
+        throw new ProjectFabricCoreError("CONFLICT", "artifact ref resolves to multiple registry rows at one scope tier");
+      }
+      const selected = best[0]?.candidate;
+      if (selected !== undefined) {
+        return { artifactId: text(selected, "artifact_id"), path: artifact.path, digest: artifact.digest };
+      }
+      throw new ProjectFabricCoreError(
+        "NOT_FOUND",
+        artifact.path.startsWith("private/git-diffs/")
+          ? "private Git diff has no fixed-producer registry row"
+          : "artifact ref has no exact active registry row",
+      );
+    });
+  }
+
+  #insertArtifactBinding(
+    intakeId: string,
+    revision: number,
+    artifact: { artifactId: string; path: string; digest: string },
+  ): void {
+    if (this.#registryV1) {
+      this.#database.prepare(`
+        INSERT INTO intake_artifact_bindings(intake_id, intake_revision, artifact_id, relative_path, sha256)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(intakeId, revision, artifact.artifactId, artifact.path, artifact.digest);
+      return;
+    }
+    this.#database.prepare(`
+      INSERT INTO intake_artifact_bindings(intake_id, intake_revision, relative_path, sha256)
+      VALUES (?, ?, ?, ?)
+    `).run(intakeId, revision, artifact.path, artifact.digest);
   }
 }

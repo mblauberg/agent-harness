@@ -210,6 +210,15 @@ afterEach(async () => {
   for (const directory of cleanups.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
+async function readAfterNovelArtifactRegistration(
+  request: GitRepositoryReadRequest,
+  read: (request: GitRepositoryReadRequest) => Promise<GitRepositoryReadResult>,
+): Promise<GitRepositoryReadResult> {
+  const first = await read(request);
+  if (first.status !== "resnapshot-required") return first;
+  return await read({ ...request, snapshotRevision: first.currentSnapshotRevision });
+}
+
 describe("operator repository read", () => {
   it("projects enabled hosted checks without coupling them to local Git availability", async () => {
     const fixture = await setupFixture({
@@ -232,10 +241,13 @@ describe("operator repository read", () => {
       },
     });
     try {
-      const result = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const result = await readAfterNovelArtifactRegistration(
         fixture.request,
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
       );
 
       expect(result).toMatchObject({
@@ -403,7 +415,7 @@ describe("operator repository read", () => {
         },
       });
 
-      const result = await service.read(fixture.request);
+      const result = await readAfterNovelArtifactRegistration(fixture.request, async (request) => await service.read(request));
 
       expect(result).toMatchObject({
         status: "current",
@@ -426,21 +438,24 @@ describe("operator repository read", () => {
   it("returns a bounded typed local Git projection through the public operator dispatcher", async () => {
     const fixture = await setupFixture();
     try {
-      const result = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const result = await readAfterNovelArtifactRegistration(
         fixture.request,
-      ) as GitRepositoryReadResult;
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
+      );
 
       expect(result).toMatchObject({
         status: "current",
         projectId: fixture.request.projectId,
         projectSessionId: fixture.request.projectSessionId,
-        snapshotRevision: fixture.request.snapshotRevision,
+        snapshotRevision: result.status === "current" ? result.snapshotRevision : fixture.request.snapshotRevision,
         repository: {
           freshness: "live",
           source: "git",
-          revision: fixture.request.snapshotRevision,
+          revision: result.status === "current" ? result.snapshotRevision : fixture.request.snapshotRevision,
           canonicalRepositoryRoot: fixture.repositoryRoot,
           canonicalWorktreePath: fixture.repositoryRoot,
           head: { detached: false, refName: "refs/heads/main" },
@@ -480,11 +495,14 @@ describe("operator repository read", () => {
   it("reads only an exact active worktree admitted to the credential-bound session", async () => {
     const fixture = await setupFixture({ worktree: "admitted" });
     try {
-      const result = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const result = await readAfterNovelArtifactRegistration(
         fixture.request,
-      ) as GitRepositoryReadResult;
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
+      );
       expect(result).toMatchObject({
         status: "current",
         projectSessionId: fixture.request.projectSessionId,
@@ -564,11 +582,14 @@ describe("operator repository read", () => {
   it("marks bounded path pages as truncated without losing repository state", async () => {
     const fixture = await setupFixture({ untrackedCount: 260 });
     try {
-      const result = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const result = await readAfterNovelArtifactRegistration(
         fixture.request,
-      ) as GitRepositoryReadResult;
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
+      );
       if (result.status !== "current") throw new Error("expected current Git projection");
       expect(result.repository.changes.untracked).toMatchObject({ truncated: true });
       expect(result.repository.changes.untracked.paths).toHaveLength(256);
@@ -581,11 +602,14 @@ describe("operator repository read", () => {
   it("caps an oversized immutable diff artifact with an explicit marker", async () => {
     const fixture = await setupFixture({ largeDiff: true });
     try {
-      const result = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const result = await readAfterNovelArtifactRegistration(
         fixture.request,
-      ) as GitRepositoryReadResult;
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
+      );
       if (result.status !== "current") throw new Error("expected current Git projection");
       const artifactPath = join(fixture.stateRoot, result.repository.diff.artifactRef.path);
       const artifact = await readFile(artifactPath);
@@ -600,15 +624,19 @@ describe("operator repository read", () => {
   it("uses returned exact object digests for typed object diff and log continuation", async () => {
     const fixture = await setupFixture();
     try {
-      const first = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const first = await readAfterNovelArtifactRegistration(
         fixture.request,
-      ) as GitRepositoryReadResult;
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
+      );
       if (first.status !== "current") throw new Error("expected current Git projection");
       const objectDigest = first.repository.head.objectDigest;
       const continuation: GitRepositoryReadRequest = {
         ...fixture.request,
+        snapshotRevision: first.snapshotRevision,
         diff: { kind: "objects", baseObjectDigest: objectDigest, targetObjectDigest: objectDigest },
         log: {
           cursor: {
@@ -618,11 +646,14 @@ describe("operator repository read", () => {
           limit: 10,
         },
       };
-      const second = await fixture.fabric.dispatchPublicProtocol(
-        fixture.context,
-        FABRIC_OPERATIONS.operatorRepositoryRead,
+      const second = await readAfterNovelArtifactRegistration(
         continuation,
-      ) as GitRepositoryReadResult;
+        async (request) => await fixture.fabric.dispatchPublicProtocol(
+          fixture.context,
+          FABRIC_OPERATIONS.operatorRepositoryRead,
+          request,
+        ) as GitRepositoryReadResult,
+      );
       if (second.status !== "current") throw new Error("expected current Git continuation");
       expect(second.repository.diff).toMatchObject({
         selector: continuation.diff,

@@ -1,5 +1,11 @@
 import type { ProtocolFeature } from "./features.js";
 import type {
+  ArtifactContentReadRequest,
+  ArtifactContentReadResult,
+  EvidenceArtifactRegistration,
+  EvidencePublishRequest,
+} from "./artifacts.js";
+import type {
   OperationInputForPrincipal,
 } from "./operation-codecs.js";
 import type {
@@ -219,6 +225,14 @@ export interface GitRepositoryReadClient {
   read(input: GitRepositoryReadRequest): Promise<GitRepositoryReadResult>;
 }
 
+export interface ArtifactContentClient {
+  readContent(input: ArtifactContentReadRequest): Promise<ArtifactContentReadResult>;
+}
+
+export interface EvidenceRegistryClient {
+  publish(input: EvidencePublishRequest): Promise<EvidenceArtifactRegistration>;
+}
+
 export type NegotiatedOperatorClient = {
   kind: "operator";
   features: readonly ProtocolFeature[];
@@ -231,6 +245,7 @@ export type NegotiatedOperatorClient = {
   projection?: ProjectionClient;
   messages?: MessageBodyClient;
   repository?: GitRepositoryReadClient;
+  artifacts?: ArtifactContentClient;
   console?: OperatorConsoleClient;
   close(): Promise<void>;
 };
@@ -243,6 +258,7 @@ export type NegotiatedAgentClient = {
   gates?: Pick<ScopedGateClient, "check">;
   resources?: ResourceReservationClient;
   requestResults?: AgentRequestResultClient;
+  evidence?: EvidenceRegistryClient;
   close(): Promise<void>;
 };
 
@@ -415,6 +431,15 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
           },
         }
       : {}),
+    ...(hasFeature(transport, "artifact-content-read.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.operatorArtifactContentRead)
+      ? {
+          artifacts: {
+            readContent: (input: ArtifactContentReadRequest) =>
+              transport.call(FABRIC_OPERATIONS.operatorArtifactContentRead, input),
+          },
+        }
+      : {}),
     ...(hasFeature(transport, "scoped-gate-read.v1") &&
       hasFeature(transport, "operator-projection.v2") &&
       hasOperations(transport, [
@@ -470,6 +495,14 @@ export function createAgentClient(transport: ProtocolRpcTransport): NegotiatedAg
         abandon: (input: ResultDeliveryAbandonRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryAbandon, input),
       },
     } : {}),
+    ...(hasFeature(transport, "artifact-registry.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.evidencePublish)
+      ? {
+          evidence: {
+            publish: (input: EvidencePublishRequest) => transport.call(FABRIC_OPERATIONS.evidencePublish, input),
+          },
+        }
+      : {}),
     close: () => transport.close(),
   };
 }

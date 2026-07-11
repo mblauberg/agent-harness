@@ -24,6 +24,8 @@ export const PROTOCOL_FEATURES = [
   "launch-attestation.v1",
   "message-body-read.v1",
   "operator-repository-read.v1",
+  "artifact-registry.v1",
+  "artifact-content-read.v1",
   "lifecycle-control.v1",
 ] as const;
 

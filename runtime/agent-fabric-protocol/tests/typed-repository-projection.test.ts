@@ -430,6 +430,7 @@ describe("Project v2 Git projection", () => {
     const summary = {
       kind: "project",
       goal: "Ship Agent Fabric",
+      acceptedScopeRef: null,
       repositoryRevision: "revision_09",
       repository: {
         freshness: repository.freshness,
@@ -466,6 +467,7 @@ describe("Project v2 Git projection", () => {
       projectId: "project_01",
       canonicalRoot: "/workspace/project",
       goal: "Ship Agent Fabric",
+      acceptedScopeRef: null,
       repositoryRevision: "revision_09",
       repository,
     } as const;

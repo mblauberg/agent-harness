@@ -442,8 +442,9 @@ describe("operator projection store", () => {
     const capability = `afb_${"z".repeat(43)}`;
     const agentCapability = `afc_${"x".repeat(43)}`;
     const operatorCapability = `afop_${"y".repeat(43)}`;
+    const credential = "password=message-secret-value";
     fixture.database.prepare("UPDATE messages SET body=? WHERE message_id='message_01'")
-      .run(`line 1\u001b[31m ${capability}\nline 2 ${agentCapability} ${operatorCapability}`);
+      .run(`line 1\u001b[31m ${capability} ${agentCapability} ${operatorCapability} ${credential}\nline 2`);
     fixture.database.prepare(`
       INSERT INTO message_contexts(message_id, context_json)
       VALUES ('message_01', '{"kind":"task","taskId":"task_01"}')
@@ -468,11 +469,11 @@ describe("operator projection store", () => {
     expect(body.body).toContain("line 2");
     expect(body.body).not.toContain("\u001b");
     expect(body.body).not.toContain(capability);
-    expect(body.body).toContain("afb_<redacted>");
     expect(body.body).not.toContain(agentCapability);
-    expect(body.body).toContain("afc_<redacted>");
     expect(body.body).not.toContain(operatorCapability);
-    expect(body.body).toContain("afop_<redacted>");
+    expect(body.body).not.toContain("message-secret-value");
+    expect(body.body).not.toMatch(/\b(?:afb_|afc_|afop_)/u);
+    expect(body.body).toContain("█");
 
     expect(() => fixture.projections.messageBody({
       credential: fixture.credential,

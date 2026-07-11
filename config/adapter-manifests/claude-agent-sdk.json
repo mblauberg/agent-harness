@@ -3,6 +3,10 @@
   "entrypoint": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
   "files": [
     {
+      "path": "runtime/agent-fabric-protocol/dist/artifacts.js",
+      "sha256": "58ed3a4d03391d93d4b78bd93272bfebb271f7c6d33e333e179b86d3b3a0b9a7"
+    },
+    {
       "path": "runtime/agent-fabric-protocol/dist/authentication.js",
       "sha256": "33eb9150330e99234796895823f294870cb5e268e56ef49326be4300b6769d13"
     },
@@ -12,7 +16,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/client.js",
-      "sha256": "899815e79c09b4bbc9e7be97fcd67f2bdb5de8f591ef613175efc0b57c2b20c1"
+      "sha256": "961ab5d1dd73694fac8493116d8976d58994c10ad120497626f4da5e6dd8870c"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/codec.js",
@@ -24,7 +28,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/features.js",
-      "sha256": "e12c80a76ac64552c8bb3fcdf334e62a98f665c0f1a35e00a9aec489f3ade6cc"
+      "sha256": "64805b7c54541a79bcda6cddd3b7f762342f89389bcc0339d3fe971e3b7bf100"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/gates.js",
@@ -32,11 +36,11 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/index.js",
-      "sha256": "e5c6a8ba80abce6e8852a8f06e47f47b7eab09dd03ff0511650e6d2a69222047"
+      "sha256": "2d477b70846b212800af6244cee43937fa3a4fa1c0cb40d6fce815362cf3c489"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/intake.js",
-      "sha256": "37e529b49a77761e458fbe76b785e184640296304b9565eafe3fd1659c1b0412"
+      "sha256": "ecf276ad6487636ad063b7335d44436bd7da7125cf5fc0d87951e617f8da77d7"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/launch.js",
@@ -44,7 +48,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/mcp-projection.js",
-      "sha256": "5715eba3bd24f122857e1a9b0d9b066ec15886aa907d91675fd3c53b32085adc"
+      "sha256": "be2498c485349034abe19d2401562912f6dfb860e083174483a1b3bbd9ac7043"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/membership.js",
@@ -56,11 +60,11 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operation-codecs.js",
-      "sha256": "5f0001163a7740d25a4468b61753f7b1afce2e8a9f650b0ca85c8b74537b3ec5"
+      "sha256": "5a00c8bdd05b3870b8b6586e12efd8c4af41fcb074489d4dc3f43d17306d088f"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operations.js",
-      "sha256": "7a0c722e804a7e8c23b2d35b6b80c9b5f313d0cca4657c7a3d50cb155ac4ea45"
+      "sha256": "afd5f2b57cfe0e70db5c56f9f1d2d00da31279b6f5d4a52f3000c62fe9cc0d05"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operator-actions.js",

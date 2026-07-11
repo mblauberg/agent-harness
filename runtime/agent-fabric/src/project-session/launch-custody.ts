@@ -2730,7 +2730,8 @@ export class LaunchCustodyService {
         run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
         project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
         authority_ref, budget_ref, dependency_revision, topology_slot
-      ) VALUES (?, ?, ?, ?, ?, ?, 'launching', 1, 1, ?, ?, ?, 1, ?)
+        , project_run_directory_basis
+      ) VALUES (?, ?, ?, ?, ?, ?, 'launching', 1, 1, ?, ?, ?, 1, ?, 'project-relative')
     `).run(
       packet.runId,
       packet.chairAgentId,
