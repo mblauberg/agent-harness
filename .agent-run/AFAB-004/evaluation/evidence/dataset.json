@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "dataset_id": "spec05-console-usability",
+  "version": "2026-07-11.1",
+  "development_split": "development-split.json",
+  "holdout_split": "holdout-split.json",
+  "case_ids": ["empty-healthy", "concurrent-multi-run", "gate-degraded-conflict"],
+  "data_policy": "synthetic repo-owned fixtures; no personal data, credentials, provider transcripts or live project content"
+}

@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "contract": "delivery-run",
+  "run_id": "AFAB-004",
+  "profile": "software",
+  "status": "executing",
+  "risk_tier": "crucial",
+  "risk_assessment": {
+    "blast_radius": "shared-system",
+    "reversibility": "moderate",
+    "data_sensitivity": "internal",
+    "migration": "stateful",
+    "oracle_quality": "mixed",
+    "external_effects": "none",
+    "critical_surface": "auth-security"
+  },
+  "risk_override": { "status": "not-required", "approved_by": "", "evidence": "", "reason": "" },
+  "high_stakes": false,
+  "intent": {
+    "artifact": "docs/specs/05-project-fabric-console.md",
+    "digest": "sha256:04fc2b743dabf5f01f7e0bc189565c63d98a66b0e333a46427d0c67e694dd41e",
+    "decision_owner": "human-maintainer",
+    "approval": { "status": "approved", "approver": "human-maintainer", "evidence": "intent-approval" }
+  },
+  "authority": {
+    "approved_by": "human-maintainer",
+    "evidence": "authority-approval",
+    "expires_at": "2026-08-10T08:05:18Z",
+    "allowed_source_paths": ["."],
+    "allowed_artifact_paths": ["."],
+    "prohibited_actions": ["external-publish", "deployment", "irreversible-action", "provider-login", "credential-disclosure", "git-push", "release"],
+    "disclosure": "approved-providers",
+    "secrets_access": "none",
+    "deployment": false,
+    "irreversible_actions": false,
+    "delegations": [
+      {
+        "actor": "native-spec-01-scout",
+        "source_paths": ["AGENTS.md", "HARNESS.md", "docs/specs", "runtime/agent-fabric"],
+        "artifact_paths": [".agent-run/AFAB-004/orchestration/findings/spec-01-amendment.md"],
+        "prohibited_actions": ["external-publish", "deployment", "irreversible-action", "provider-login", "credential-disclosure", "git-push", "release", "source-write"],
+        "disclosure": "local-only"
+      },
+      {
+        "actor": "native-spec-04-scout",
+        "source_paths": ["AGENTS.md", "HARNESS.md", "docs/specs", "runtime/agent-fabric"],
+        "artifact_paths": [".agent-run/AFAB-004/orchestration/findings/spec-04-amendment.md"],
+        "prohibited_actions": ["external-publish", "deployment", "irreversible-action", "provider-login", "credential-disclosure", "git-push", "release", "source-write"],
+        "disclosure": "local-only"
+      },
+      {
+        "actor": "native-implementation-scout",
+        "source_paths": ["AGENTS.md", "HARNESS.md", "docs/specs", "runtime/agent-fabric", "scripts", "skills", "tests", "evals", "config"],
+        "artifact_paths": [".agent-run/AFAB-004/orchestration/findings/implementation-map.md"],
+        "prohibited_actions": ["external-publish", "deployment", "irreversible-action", "provider-login", "credential-disclosure", "git-push", "release", "source-write"],
+        "disclosure": "local-only"
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "console-spec",
+      "path": "docs/specs/05-project-fabric-console.md",
+      "media_type": "text/markdown",
+      "artifact_type": "documentation",
+      "digest": "sha256:04fc2b743dabf5f01f7e0bc189565c63d98a66b0e333a46427d0c67e694dd41e",
+      "class": "canonical",
+      "owner": "human-maintainer",
+      "retention": "project-policy"
+    }
+  ],
+  "design": {
+    "status": "approved",
+    "artifact_id": "console-spec",
+    "digest": "sha256:04fc2b743dabf5f01f7e0bc189565c63d98a66b0e333a46427d0c67e694dd41e",
+    "approver": "human-maintainer",
+    "evidence": "design-approval",
+    "alternatives": ["retain-pane-only-operations", "browser-console", "second-orchestrator"],
+    "failure_analysis": "A projection that bypasses Fabric authority, non-atomic request/result delivery, overlapping writers, or weak daemon lifecycle predicates could duplicate work or approve consequential actions without valid human authority.",
+    "containment": "Disable the Console package and new protocol entrypoints, retain journals and immutable evidence, and restore the verified pre-migration database backup or forward-repair migration state.",
+    "one_way_doors": []
+  },
+  "state_history": [
+    { "state": "draft", "at": "2026-07-11T08:05:18Z", "evidence_ids": [] },
+    { "state": "scoped", "at": "2026-07-11T08:05:19Z", "evidence_ids": ["intent-approval"] },
+    { "state": "approved", "at": "2026-07-11T08:05:20Z", "evidence_ids": ["intent-approval", "authority-approval", "design-approval"] },
+    { "state": "executing", "at": "2026-07-11T08:24:47Z", "evidence_ids": [] }
+  ],
+  "evidence": [
+    {
+      "id": "intent-approval",
+      "kind": "human",
+      "status": "pass",
+      "gate": "intent-approval",
+      "method": "Direct instruction on 11 July 2026 to implement approved Spec 05 v1.0 from commit c2fc623 in a fresh context.",
+      "artifact_id": "console-spec",
+      "source_paths": []
+    },
+    {
+      "id": "authority-approval",
+      "kind": "human",
+      "status": "pass",
+      "gate": "authority-approval",
+      "method": "Direct authority for the entire local implementation, TDD, canonical worktrees, evaluations, load gates, and named provider reviews; push and release remain prohibited.",
+      "artifact_id": "console-spec",
+      "source_paths": []
+    },
+    {
+      "id": "design-approval",
+      "kind": "human",
+      "status": "pass",
+      "gate": "design-approval",
+      "method": "Spec 05 v1.0 at c2fc623 is binding and records no unresolved P0-P2 design findings.",
+      "artifact_id": "console-spec",
+      "source_paths": []
+    }
+  ],
+  "measures": { "outcome": [], "trajectory": [] },
+  "assurance": {
+    "stochastic_required": true,
+    "reason": "Operator usability, human-attention prioritisation, adaptive orchestration discipline, and changed skill routing require a frozen repeatable evaluation in addition to deterministic tests.",
+    "evaluations": [
+      {
+        "status": "planned",
+        "anchored_at": "2026-07-11T08:24:47Z",
+        "evidence_id": "",
+        "evaluation_artifact_id": "",
+        "evaluation_id": "AFAB-004-console-usability-v1",
+        "evaluation_digest": "",
+        "plan_digest": "sha256:bcdc1d88af2e2f322618c661e60febfe6172debc407be5290ce06e596f1cd85f"
+      }
+    ]
+  },
+  "reviews": [],
+  "security": {
+    "status": "pending",
+    "reason": "Verification pending",
+    "policy_sha256": "sha256:5e676cd3aa31aea76402bce7bb1b3b8ed89d7d3c41bb9fc25cbb77d7fd87c1d0",
+    "changed_surfaces": ["generated-artifact"],
+    "artifact_surfaces": [
+      { "artifact_id": "console-spec", "surfaces": ["generated-artifact"] }
+    ],
+    "checks": [
+      { "id": "provenance", "surface": "generated-artifact", "status": "pending", "evidence_id": "" }
+    ],
+    "agentic_risks": []
+  },
+  "high_stakes_controls": null,
+  "human_gates": {
+    "acceptance": { "status": "pending", "approver": "", "evidence": "" },
+    "release": { "status": "pending", "approver": "", "evidence": "" }
+  },
+  "observation": {
+    "status": "planned",
+    "window": { "kind": "event-count", "minimum": 3 },
+    "signals": ["availability", "error-rate", "task-success"],
+    "thresholds": {
+      "availability": { "direction": "gte", "limit": 1 },
+      "error-rate": { "direction": "eq", "limit": 0 },
+      "task-success": { "direction": "gte", "limit": 1 }
+    },
+    "owner": "codex-chair",
+    "containment": "Disable Console launch and new protocol operations while preserving prior fabric coordination and journals.",
+    "privacy": "aggregate-redacted",
+    "close_condition": "Human accepts the machine-gated implementation; release remains separately authorised.",
+    "started_at": "",
+    "ended_at": "",
+    "observed_events": 0,
+    "evidence_ids": []
+  },
+  "incident": null,
+  "retrospective": null,
+  "repair_cycles": 0,
+  "escaped_defect": false,
+  "human_corrections": [],
+  "checkpoint": {
+    "generation": 2,
+    "current_slice": "writer-topology",
+    "next_action": "Create isolated protocol, Console and Herdr writer worktrees from the accepted amendments and execute the first right-reason failures.",
+    "in_flight": ["protocol-contract", "console-ui", "herdr-adapter"],
+    "artifact_paths": [
+      "RUN.json",
+      "docs/specs/05-project-fabric-console.md",
+      ".agent-run/AFAB-004/evaluation/EVALUATION.json",
+      ".agent-run/AFAB-004/evaluation/evidence/evaluation-plan.json",
+      ".agent-run/AFAB-004/orchestration/findings/implementation-map.md"
+    ]
+  },
+  "degradation": null
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "runtime_id": "spec05-console-evaluation-runtime-v1",
+  "node": "24.15.0",
+  "test_runner": "vitest 4.1.10",
+  "clock": "deterministic monotonic fixture clock",
+  "terminal": {"columns": 80, "rows": 24, "colour": false},
+  "repetitions": 3,
+  "timeout_seconds": 10,
+  "external_services": false
+}

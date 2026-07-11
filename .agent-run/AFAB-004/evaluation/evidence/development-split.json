@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "split": "development",
+  "cases": [
+    {
+      "id": "dev-attention-order",
+      "purpose": "Exercise safety, blocked, acceptance-ready and FYI ordering during implementation.",
+      "expected_order": ["safety-integrity", "critical-path-blocked", "acceptance-ready", "advisory"]
+    }
+  ]
+}
