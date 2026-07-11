@@ -13,6 +13,13 @@ const migration = (version: number, filename: string): Migration => ({
   sql: readFileSync(new URL(`../../migrations/${filename}`, import.meta.url), "utf8"),
 });
 
+function applyInvariantMigrations(database: Database.Database): void {
+  const first = migration(1, "0001-core.sql");
+  const second = migration(2, "0002-observer-event-sequence.sql");
+  const third = { ...migration(3, "0003-integrity-and-query-plans.sql"), preflight: preflightAdditiveInvariants };
+  applyMigrations(database, [first, second, third]);
+}
+
 afterEach(() => {
   for (const database of openDatabases.splice(0)) database.close();
 });
@@ -24,7 +31,10 @@ describe("additive persistence invariants", () => {
     const first = migration(1, "0001-core.sql");
     const second = migration(2, "0002-observer-event-sequence.sql");
     applyMigrations(database, [first, second]);
-    database.prepare("INSERT INTO runs VALUES ('run-a','chair','/tmp',NULL,1)").run();
+    database.prepare(`
+      INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at)
+      VALUES ('run-a','chair','/tmp',NULL,1)
+    `).run();
     database.prepare("INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','hash',1)").run();
     database.prepare("INSERT INTO agents VALUES ('run-a','chair',NULL,'authority-a',NULL,'invalid-state')").run();
     const third = { ...migration(3, "0003-integrity-and-query-plans.sql"), preflight: preflightAdditiveInvariants };
@@ -39,10 +49,12 @@ describe("additive persistence invariants", () => {
   it("rejects invalid critical values and cross-run references", () => {
     const database = new Database(":memory:");
     openDatabases.push(database);
-    applyMigrations(database);
+    applyInvariantMigrations(database);
     database.exec(`
-      INSERT INTO runs VALUES ('run-a','chair-a','/tmp/a',NULL,1);
-      INSERT INTO runs VALUES ('run-b','chair-b','/tmp/b',NULL,1);
+      INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at)
+      VALUES ('run-a','chair-a','/tmp/a',NULL,1);
+      INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at)
+      VALUES ('run-b','chair-b','/tmp/b',NULL,1);
       INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','a',1);
       INSERT INTO authorities VALUES ('authority-b','run-b',NULL,'{}','b',1);
       INSERT INTO agents VALUES ('run-a','chair-a',NULL,'authority-a',NULL,'ready');
@@ -89,10 +101,12 @@ describe("additive persistence invariants", () => {
     for (const [code, invalidInsert, invalidUpdate] of cases) {
       const database = new Database(":memory:");
       try {
-        applyMigrations(database);
+        applyInvariantMigrations(database);
         database.exec(`
-          INSERT INTO runs VALUES ('run-a','chair-a','/tmp/a',NULL,1);
-          INSERT INTO runs VALUES ('run-b','chair-b','/tmp/b',NULL,1);
+          INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at)
+          VALUES ('run-a','chair-a','/tmp/a',NULL,1);
+          INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at)
+          VALUES ('run-b','chair-b','/tmp/b',NULL,1);
           INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','a',1);
           INSERT INTO authorities VALUES ('authority-b','run-b',NULL,'{}','b',1);
           INSERT INTO authorities VALUES ('authority-child','run-a','authority-a','{}','c',1);
@@ -125,7 +139,7 @@ describe("additive persistence invariants", () => {
   it("selects the focused indexes for hot-path predicates", () => {
     const database = new Database(":memory:");
     openDatabases.push(database);
-    applyMigrations(database);
+    applyInvariantMigrations(database);
     const plan = (sql: string): string => database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((row) => String((row as { detail: string }).detail)).join("\n");
 
     expect(plan("SELECT * FROM deliveries WHERE run_id='r' AND recipient_id='a' AND state='ready' ORDER BY mailbox_sequence")).toContain("deliveries_ready_mailbox");

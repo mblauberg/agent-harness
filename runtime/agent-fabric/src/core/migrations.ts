@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 
 import { preflightAdditiveInvariants } from "../persistence/invariants.js";
+import { preflightProjectSessionOperations } from "../persistence/project-session-preflight.js";
 
 export type Migration = {
   version: number;
@@ -33,7 +34,12 @@ type MigrationRow = {
   checksum: string | null;
 };
 
-const defaultMigrationFiles = ["0001-core.sql", "0002-observer-event-sequence.sql", "0003-integrity-and-query-plans.sql"] as const;
+const defaultMigrationFiles = [
+  "0001-core.sql",
+  "0002-observer-event-sequence.sql",
+  "0003-integrity-and-query-plans.sql",
+  "0004-project-session-operations.sql",
+] as const;
 
 function loadDefaultMigrations(): Migration[] {
   return defaultMigrationFiles.map((filename, index) => {
@@ -49,7 +55,11 @@ function loadDefaultMigrations(): Migration[] {
       version: index + 1,
       name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
       sql: readFileSync(migrationUrl, "utf8"),
-      ...(index === 2 ? { preflight: preflightAdditiveInvariants } : {}),
+      ...(index === 2
+        ? { preflight: preflightAdditiveInvariants }
+        : index === 3
+          ? { preflight: preflightProjectSessionOperations }
+          : {}),
     };
   });
 }

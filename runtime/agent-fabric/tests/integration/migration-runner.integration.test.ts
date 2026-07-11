@@ -122,10 +122,27 @@ describe("ordered migration runner", () => {
   it("applies the checked-in migrations and treats a second run as a no-op", () => {
     const database = openDatabase();
 
-    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3], currentVersion: 3 });
-    expect(applyMigrations(database)).toEqual({ applied: [], currentVersion: 3 });
-    expect(database.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
-    for (const table of ["lifecycle_checkpoints", "teams", "agent_adapter_bindings"]) {
+    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3, 4], currentVersion: 4 });
+    expect(applyMigrations(database)).toEqual({ applied: [], currentVersion: 4 });
+    expect(database.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+    ]);
+    for (const table of [
+      "lifecycle_checkpoints",
+      "teams",
+      "agent_adapter_bindings",
+      "projects",
+      "project_sessions",
+      "operator_commands",
+      "scoped_gates",
+      "resource_reservations",
+      "task_requests",
+      "attention_items",
+      "daemon_runtime_epochs",
+    ]) {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)).toEqual({
         name: table,
       });
