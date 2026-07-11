@@ -1,7 +1,7 @@
-import type { FabricOpenOptions } from "./domain/types.js";
-import { Fabric } from "./core/fabric.js";
+import { Fabric, type FabricRuntimeOpenOptions } from "./core/fabric.js";
 
 export { Fabric, FabricClient } from "./core/fabric.js";
+export type { FabricOperatorActionPorts, FabricRuntimeOpenOptions } from "./core/fabric.js";
 export {
   connectFabricDaemon,
   FabricDaemonClient,
@@ -28,6 +28,6 @@ export { resolveFabricPaths } from "./cli/paths.js";
 export { MESSAGE_POLICY } from "./domain/types.js";
 export type * from "./domain/types.js";
 
-export async function openFabric(options: FabricOpenOptions): Promise<Fabric> {
+export async function openFabric(options: FabricRuntimeOpenOptions): Promise<Fabric> {
   return new Fabric(options);
 }

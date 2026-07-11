@@ -43,6 +43,11 @@ import { openFabricDatabase } from "../persistence/sqlite.js";
 import { renderSafePreview } from "../visibility/safe-preview.js";
 import { OperatorStore, type AuthenticatedOperatorCredential } from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
+import {
+  OperatorActionStore,
+  type OperatorActionEffectPort,
+  type OperatorActionStatePort,
+} from "../operator/action-store.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
 import type { PublicProtocolContext } from "../daemon/public-protocol.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
@@ -84,6 +89,15 @@ import type {
 import { FabricReadPolicy } from "./read-policy.js";
 
 export { FabricClient } from "./client.js";
+
+export type FabricOperatorActionPorts = {
+  statePort: OperatorActionStatePort;
+  effectPort: OperatorActionEffectPort;
+};
+
+export type FabricRuntimeOpenOptions = FabricOpenOptions & {
+  operatorActionPorts?: FabricOperatorActionPorts;
+};
 
 type Row = Record<string, unknown>;
 type StoredAuthority = {
@@ -778,6 +792,7 @@ export class Fabric {
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #operatorStore: OperatorStore;
   readonly #operatorProjections: OperatorProjectionStore;
+  readonly #operatorActions: OperatorActionStore;
   readonly #projectSessions: ProjectSessionStore;
   readonly #intakes: IntakeStore;
   readonly #gates: ScopedGateStore;
@@ -785,7 +800,7 @@ export class Fabric {
   readonly #results: AtomicDeliveryStore;
   readonly #notifications: NotificationOutbox;
 
-  constructor(options: FabricOpenOptions) {
+  constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
     this.#clock = () => {
       const value = clock();
@@ -803,6 +818,26 @@ export class Fabric {
     this.#operatorProjections = new OperatorProjectionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    const unavailableStatePort: OperatorActionStatePort = {
+      read: async () => {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator action runtime is unavailable");
+      },
+    };
+    const unavailableEffectPort: OperatorActionEffectPort = {
+      dispatch: async () => {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator effect runtime is unavailable");
+      },
+      observe: async () => {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator effect runtime is unavailable");
+      },
+    };
+    this.#operatorActions = new OperatorActionStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      statePort: options.operatorActionPorts?.statePort ?? unavailableStatePort,
+      effectPort: options.operatorActionPorts?.effectPort ?? unavailableEffectPort,
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
@@ -1514,6 +1549,30 @@ export class Fabric {
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
         return this.#operatorProjections.messageBody(request);
+      }
+      case FABRIC_OPERATIONS.operatorActionPreview: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorActions.preview(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorActionCommit: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionCommit];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorActions.commit(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorActionStatus: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionStatus];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorActions.status(request);
+      }
+      case FABRIC_OPERATIONS.operatorActionReconcile: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionReconcile];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorActions.reconcile(credential.context, request);
       }
       case FABRIC_OPERATIONS.chairTakeover: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.chairTakeover];

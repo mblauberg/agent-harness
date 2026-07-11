@@ -159,7 +159,7 @@ describe("public protocol credential routing", () => {
           kind: "session",
           projectSessionId: identity.project_session_id,
           sessionGeneration: identity.generation,
-          actions: ["read", "decide"],
+          actions: ["read", "decide", "pause"],
         }), "operator-protocol-secret");
       } finally {
         database.close();
@@ -169,6 +169,20 @@ describe("public protocol credential routing", () => {
         databasePath,
         workspaceRoots: [directory],
         clock: () => Date.parse("2027-01-01T00:00:00Z"),
+        operatorActionPorts: {
+          statePort: {
+            read: async () => ({
+              kind: "control",
+              revision: 1,
+              lifecycleState: "active",
+              eligibleActions: ["pause"],
+            }),
+          },
+          effectPort: {
+            dispatch: async () => ({ status: "committed", afterState: { lifecycleState: "paused" } }),
+            observe: async () => ({ status: "committed", afterState: { lifecycleState: "paused" } }),
+          },
+        },
       });
       try {
         const verified = reopened.verifyProtocolCredential("operator-protocol-secret");
@@ -216,6 +230,31 @@ describe("public protocol credential routing", () => {
           project: { value: { projectId: principal.projectId } },
           session: { value: { projectSessionId } },
         });
+        await expect(reopened.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.operatorActionPreview,
+          {
+            command: {
+              credential: { capabilityId: "cap_operator_protocol", token: "operator-protocol-secret" },
+              commandId: "command_operator_preview_01",
+              expectedRevision: 1,
+              actor: "operator_protocol",
+              provenance: { kind: "console-direct-input", clientId: "console_01", inputEventId: "input_01" },
+              evidenceRefs: [],
+            },
+            projectId: principal.projectId,
+            intent: {
+              kind: "control",
+              action: "pause",
+              target: {
+                kind: "run",
+                projectSessionId,
+                coordinationRunId: "run_operator_protocol",
+                expectedRevision: 1,
+              },
+            },
+          } as never,
+        )).resolves.toMatchObject({ consequenceClass: "routine", confirmationMode: "explicit" });
       } finally {
         await reopened.close();
       }
