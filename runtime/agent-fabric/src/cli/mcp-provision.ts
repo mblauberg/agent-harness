@@ -4,7 +4,7 @@ import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 
 import { connectFabricDaemon, type FabricDaemonClient } from "../daemon/client.js";
-import { FABRIC_OPERATIONS } from "../domain/operations.js";
+import { AGENT_AUTHORITY_OPERATIONS, FABRIC_OPERATIONS } from "../domain/operations.js";
 import type { AuthorityInput } from "../domain/types.js";
 import type { FabricPaths } from "./paths.js";
 import {
@@ -205,7 +205,7 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
       projectRunDirectory: join(projectPath, ".agent-run", runId),
       chair: {
         agentId: chairSeat,
-        authority: authority(Object.values(FABRIC_OPERATIONS), expiresAt),
+        authority: authority(AGENT_AUTHORITY_OPERATIONS, expiresAt),
       },
     });
     chair = await connectFabricDaemon({ socketPath: discovery.socketPath, capability: run.chairCapability });
