@@ -21,9 +21,9 @@ adapters:
       executable: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
       executable_sha256: "1397a062c6889675055e3314dd956376ac51262a7734ad9e819c26975d71547a"
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
-      wrapper_entrypoint_sha256: "323b09926d35498b6f71080c95f5ac237b800c3ec7e442931a0db4fa25e1765a"
+      wrapper_entrypoint_sha256: "204b96929e15a203bef06ad528c007ea0ca3b3f3977d55c16b6961c3c9787ccf"
       wrapper_manifest: "config/adapter-manifests/claude-agent-sdk.json"
-      wrapper_manifest_sha256: "c2ff421dbf3caafb73c65e4ea35657a00c25d68fa645079e024c0915aa6275f9"
+      wrapper_manifest_sha256: "aff14b47931ee6dc7db1dacf563bef2ade23b3c262490d67cfd86a59d3d040b9"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
@@ -60,9 +60,9 @@ adapters:
       executable: "/opt/homebrew/Caskroom/codex/0.144.1/codex-aarch64-apple-darwin"
       executable_sha256: "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js"
-      wrapper_entrypoint_sha256: "e5a20e57660cf6827a9ece5dd67a023e0d79a74f137e4d4212d9016af5680275"
+      wrapper_entrypoint_sha256: "3eaee268261fbf1285ee1a052cb7842f0d80b37a1072b0cc314509742230d10b"
       wrapper_manifest: "config/adapter-manifests/codex-app-server.json"
-      wrapper_manifest_sha256: "f2e9f301e7a0f2322a32d8994bfb620460274295d93047d3949f2905b822cd30"
+      wrapper_manifest_sha256: "43b875ee1547bed0f1d29fad92763a55d179066ef18d78e04a66f6e31e742cc0"
     contract:
       adapter_version: 1
       protocol: codex-app-server

@@ -99,6 +99,10 @@ export class ChairLaunchFabricBridge {
     return this.#challenge.toString("hex");
   }
 
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   bindProviderSession(providerSessionRef: string, providerSessionGeneration: number): void {
     if (!boundedNativeRef(providerSessionRef) || !Number.isSafeInteger(providerSessionGeneration) || providerSessionGeneration <= 0) {
       throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "chair provider session binding is invalid");

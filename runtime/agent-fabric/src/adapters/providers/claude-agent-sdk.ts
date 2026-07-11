@@ -428,7 +428,11 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   hasLiveChairSession(resumeReference: string, providerSessionGeneration: number): boolean {
     const session = this.#chairSessions.get(resumeReference);
-    return session !== undefined && session.providerSessionGeneration === providerSessionGeneration;
+    return (
+      session !== undefined &&
+      session.providerSessionGeneration === providerSessionGeneration &&
+      !session.bridge.closed
+    );
   }
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {

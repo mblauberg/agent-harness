@@ -8,11 +8,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
-      "sha256": "eff85b562d54980dea223afe43ad3e93e1c4c6af72fc468413c65faf96b5939f"
+      "sha256": "2e8678b7a478fce68452caf40efe3713bb2603055348efe6febe37e21cadd55a"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
-      "sha256": "323b09926d35498b6f71080c95f5ac237b800c3ec7e442931a0db4fa25e1765a"
+      "sha256": "204b96929e15a203bef06ad528c007ea0ca3b3f3977d55c16b6961c3c9787ccf"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",

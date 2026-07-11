@@ -85,6 +85,10 @@ export class CodexJsonRpcConnection {
     });
   }
 
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   async initialize(): Promise<void> {
     await this.request("initialize", {
       clientInfo: { name: "agent-fabric", title: "Agent fabric provider adapter", version: "0.1.0" },

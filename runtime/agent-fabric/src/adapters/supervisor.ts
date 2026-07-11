@@ -76,6 +76,10 @@ function chairTransportKey(adapterId: string, providerSessionRef: string): strin
   return `${adapterId}\0${providerSessionRef}`;
 }
 
+function chairActionKey(adapterId: string, actionId: string): string {
+  return `${adapterId}\0${actionId}`;
+}
+
 function isReleaseRequest(method: string, params: Record<string, unknown>): boolean {
   return method === "release" || (method === "dispatch" && params.operation === "release");
 }
@@ -118,6 +122,7 @@ export class AdapterSupervisor {
   readonly #transports = new Map<string, AdapterProcessTransport>();
   readonly #chairTransports = new Map<string, AdapterProcessTransport>();
   readonly #knownChairSessions = new Map<string, number>();
+  readonly #chairSessionByAction = new Map<string, string>();
   readonly #consumedChairHandoffHashes = new Set<string>();
   readonly #controlTimeoutMs: number;
   readonly #providerTurnTimeoutMs: number;
@@ -140,13 +145,24 @@ export class AdapterSupervisor {
       );
     }
     const sessionRef = sessionRefs[0];
-    const chairKey = sessionRef === undefined ? undefined : chairTransportKey(adapterId, sessionRef);
+    const sessionChairKey = sessionRef === undefined ? undefined : chairTransportKey(adapterId, sessionRef);
+    const actionChairKey = method === "lookup_action" && typeof params.actionId === "string"
+      ? this.#chairSessionByAction.get(chairActionKey(adapterId, params.actionId))
+      : undefined;
+    if (sessionChairKey !== undefined && actionChairKey !== undefined && sessionChairKey !== actionChairKey) {
+      throw new ProviderAdapterError(
+        "STALE_LEASE_GENERATION",
+        `${adapterId} chair lookup action does not match its provider-session reference`,
+      );
+    }
+    const chairKey = actionChairKey ?? sessionChairKey;
+    const actionRoutedLookup = actionChairKey !== undefined;
     const knownChairGeneration = chairKey === undefined ? undefined : this.#knownChairSessions.get(chairKey);
     const requestedGenerations = providerSessionGenerations(params);
     if (
       knownChairGeneration !== undefined &&
       (
-        requestedGenerations.length === 0 ||
+        (requestedGenerations.length === 0 && !actionRoutedLookup) ||
         requestedGenerations.some((generation) => (
           typeof generation !== "number" ||
           !Number.isSafeInteger(generation) ||
@@ -256,6 +272,7 @@ export class AdapterSupervisor {
       }
       this.#chairTransports.set(key, transport);
       this.#knownChairSessions.set(key, result.providerSessionGeneration);
+      this.#chairSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
       return result;
     } catch {
       await transport.close().catch(() => undefined);
@@ -267,7 +284,6 @@ export class AdapterSupervisor {
     const transports = [...new Set([...this.#transports.values(), ...this.#chairTransports.values()])];
     this.#transports.clear();
     this.#chairTransports.clear();
-    this.#knownChairSessions.clear();
     await Promise.allSettled(transports.map((transport) => transport.close()));
   }
 }

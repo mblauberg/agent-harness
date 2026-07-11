@@ -755,10 +755,8 @@ describe("installed Claude chair launch boundary", () => {
       status: "terminal",
       idempotencyProven: true,
     });
-    await expect(boundary.sendTurn({
-      resumeReference: "claude-chair-session-1",
-      prompt: "replay a provider-native tool record",
-    })).rejects.toMatchObject({ code: "CHAIR_BRIDGE_LOST" });
+    if (bridge === undefined) throw new Error("Claude bridge missing");
+    await bridge.close();
     await expect(adapter.request("lookup_action", { actionId: "claude-launch-1" })).rejects.toMatchObject({
       code: "CHAIR_BRIDGE_LOST",
     });
@@ -884,9 +882,14 @@ describe("installed Codex chair launch boundary", () => {
     const rpcClose = vi.fn(async () => undefined);
     let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
     let serverRequestHandler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
+    const providerServerRequestIds: number[] = [];
     let turnCount = 0;
     let currentTurnId = "";
+    let connectionClosed = false;
     const connection = {
+      get closed() {
+        return connectionClosed;
+      },
       initialize: vi.fn(async () => undefined),
       setServerRequestHandler: vi.fn((_method: string, handler: (params: Record<string, unknown>) => Promise<unknown>) => {
         serverRequestHandler = handler;
@@ -910,7 +913,9 @@ describe("installed Codex chair launch boundary", () => {
           },
         };
       }),
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {
+        connectionClosed = true;
+      }),
       waitForNotification: vi.fn(async () => {
         if (serverRequestHandler === undefined || bridge === undefined) throw new Error("dynamic tool handler missing");
         if (turnCount === 1) {
@@ -943,12 +948,20 @@ describe("installed Codex chair launch boundary", () => {
             turnId: currentTurnId,
           });
         } else {
-          await serverRequestHandler({
+          const mailboxInvocation = {
             arguments: {},
             callId: "codex-provider-mailbox-call-1",
             threadId: "codex-chair-thread-1",
             tool: "fabric_get_mailbox_state",
             turnId: currentTurnId,
+          };
+          const invokeServerRequest = async (jsonRpcId: number): Promise<unknown> => {
+            providerServerRequestIds.push(jsonRpcId);
+            return await serverRequestHandler?.({ ...mailboxInvocation });
+          };
+          await invokeServerRequest(901);
+          await expect(invokeServerRequest(902)).rejects.toMatchObject({
+            code: "CHAIR_CONTINUITY_UNPROVEN",
           });
         }
         return {
@@ -1026,14 +1039,19 @@ describe("installed Codex chair launch boundary", () => {
     })).rejects.toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     await boundary.sendTurn({ resumeReference: "codex-chair-thread-1", prompt: "later work" });
     expect(rpcCall).toHaveBeenCalledTimes(2);
+    expect(providerServerRequestIds).toEqual([901, 902]);
     expect(connectionFactory).toHaveBeenCalledOnce();
     expect(rpcClose).not.toHaveBeenCalled();
     await expect(adapter.request("lookup_action", { actionId: "codex-launch-1" })).resolves.toMatchObject({
       status: "terminal",
       idempotencyProven: true,
     });
+    await connection.close();
+    await expect(adapter.request("lookup_action", { actionId: "codex-launch-1" })).rejects.toMatchObject({
+      code: "CHAIR_BRIDGE_LOST",
+    });
     await boundary.closeAll();
-    expect(connection.close).toHaveBeenCalledOnce();
+    expect(connection.close).toHaveBeenCalledTimes(2);
     expect(rpcClose).toHaveBeenCalledOnce();
     actionJournal.close();
   });

@@ -109,6 +109,8 @@ describe("persistent adapter supervision", () => {
       await expect(supervisor.launchChair("fake", request, { ...privateHandoff })).rejects.toMatchObject({
         code: "PRIVATE_HANDOFF_UNAVAILABLE",
       });
+      const liveLookup = await supervisor.request("fake", "lookup_action", { actionId: request.actionId });
+      expect(liveLookup).toMatchObject({ method: "lookup_action", pid: expect.any(Number) });
       await expect(supervisor.request("fake", "dispatch", {
         actionId: "later-turn-missing-generation",
         operation: "send_turn",
@@ -143,7 +145,7 @@ describe("persistent adapter supervision", () => {
           prompt: "must not dispatch",
         },
       })).rejects.toMatchObject({ code: "STALE_LEASE_GENERATION" });
-      await expect(supervisor.request("fake", "dispatch", {
+      const laterTurn = await supervisor.request("fake", "dispatch", {
         actionId: "later-turn-1",
         operation: "send_turn",
         payload: {
@@ -151,7 +153,8 @@ describe("persistent adapter supervision", () => {
           providerSessionGeneration: 1,
           prompt: "continue",
         },
-      })).resolves.toMatchObject({ method: "dispatch" });
+      });
+      expect(laterTurn).toMatchObject({ method: "dispatch", pid: (liveLookup as { pid: number }).pid });
       await expect(supervisor.request("fake", "dispatch", {
         actionId: "recoverable-provider-error",
         operation: "send_turn",
@@ -183,6 +186,9 @@ describe("persistent adapter supervision", () => {
           providerSessionGeneration: 1,
           prompt: "must not reconstruct",
         },
+      })).rejects.toMatchObject({ code: "CHAIR_BRIDGE_LOST" });
+      await expect(supervisor.request("fake", "lookup_action", {
+        actionId: request.actionId,
       })).rejects.toMatchObject({ code: "CHAIR_BRIDGE_LOST" });
       expect(await readFile(countPath, "utf8")).toBe("1");
     } finally {

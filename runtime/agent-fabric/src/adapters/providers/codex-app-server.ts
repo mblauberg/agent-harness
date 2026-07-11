@@ -184,7 +184,7 @@ export function codexThreadConfiguration(payload: Record<string, unknown>): Reco
 
 type CodexConnection = Pick<
   CodexJsonRpcConnection,
-  "initialize" | "request" | "waitForNotification" | "setServerRequestHandler" | "close"
+  "initialize" | "request" | "waitForNotification" | "setServerRequestHandler" | "close" | "closed"
 >;
 
 type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection;
@@ -194,9 +194,32 @@ type CodexChairSession = {
   bridge: ChairLaunchFabricBridge;
   providerSessionRef: string;
   providerSessionGeneration: number;
+  nativeInvocationKeys: Set<string>;
+  nativeInvocationOrder: string[];
   currentTurnId?: string;
   busy?: boolean;
 };
+
+function consumeCodexNativeInvocation(
+  session: CodexChairSession,
+  threadId: string,
+  turnId: string,
+  callId: string,
+): void {
+  const key = JSON.stringify([threadId, turnId, callId]);
+  if (session.nativeInvocationKeys.has(key)) {
+    throw new ProviderAdapterError(
+      "CHAIR_CONTINUITY_UNPROVEN",
+      "Codex replayed a native provider tool-call tuple",
+    );
+  }
+  session.nativeInvocationKeys.add(key);
+  session.nativeInvocationOrder.push(key);
+  if (session.nativeInvocationOrder.length > 256) {
+    const expired = session.nativeInvocationOrder.shift();
+    if (expired !== undefined) session.nativeInvocationKeys.delete(expired);
+  }
+}
 
 function codexChairDynamicTools(bridge: ChairLaunchFabricBridge): Record<string, unknown>[] {
   return [
@@ -351,10 +374,13 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
 
   hasLiveChairSession(resumeReference: string, providerSessionGeneration: number): boolean {
     const session = this.#chairSessions.get(resumeReference);
+    const connection = this.#connections.get(resumeReference);
     return (
       session !== undefined &&
       session.providerSessionGeneration === providerSessionGeneration &&
-      this.#connections.has(resumeReference)
+      !session.bridge.closed &&
+      connection !== undefined &&
+      !connection.closed
     );
   }
 
@@ -402,11 +428,13 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
           params.turnId !== chairSession.currentTurnId ||
           typeof params.callId !== "string" ||
           params.callId.length === 0 ||
+          Buffer.byteLength(params.callId, "utf8") > 512 ||
           typeof params.tool !== "string" ||
           (params.namespace !== undefined && params.namespace !== null)
         ) {
           throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex tool call is not attributable to the active chair turn");
         }
+        consumeCodexNativeInvocation(chairSession, params.threadId, params.turnId, params.callId);
         if (params.tool === bridge.challengeToolName) {
           if (
             !isRecord(params.arguments) ||
@@ -439,7 +467,13 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       const thread = threadFromResponse(response, "thread/start");
       const resumeReference = String(thread.id);
       bridge.bindProviderSession(resumeReference, 1);
-      chairSession = { bridge, providerSessionRef: resumeReference, providerSessionGeneration: 1 };
+      chairSession = {
+        bridge,
+        providerSessionRef: resumeReference,
+        providerSessionGeneration: 1,
+        nativeInvocationKeys: new Set(),
+        nativeInvocationOrder: [],
+      };
       evidence = {
         resumeReference,
         providerSessionGeneration: 1,
