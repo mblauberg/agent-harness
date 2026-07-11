@@ -192,6 +192,9 @@ const agentAuthorityOperationCodec = defineCodec<string>({
   type: "string",
   enum: activeAgentOperations,
 }, firstAgentOperation, (value, path) => parseAgentOperation(value, path));
+const chairAuthorityPathCodec = defineCodec<string>({
+  oneOf: [{ const: "." }, relativePath.schema],
+}, ".", parseChairAuthorityPath);
 const disclosureCodec = objectCodec({ level: literal("allowed") });
 const scopedDisclosureCodec = objectCodec({
   level: literal("scoped"),
@@ -217,9 +220,9 @@ const nonEmptyResourceAmountsCodec = recordOf(integer(), {
   exampleKey: "concurrent_turns",
 });
 const chairAuthorityCodec = objectCodec({
-  workspaceRoots: arrayOf(relativePath, { minimum: 1, maximum: 64, unique: true }),
-  sourcePaths: arrayOf(relativePath, { maximum: 256, unique: true }),
-  artifactPaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  workspaceRoots: arrayOf(chairAuthorityPathCodec, { minimum: 1, maximum: 64, unique: true }),
+  sourcePaths: arrayOf(chairAuthorityPathCodec, { maximum: 256, unique: true }),
+  artifactPaths: arrayOf(chairAuthorityPathCodec, { maximum: 256, unique: true }),
   actions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
   disclosure: defineCodec({
     oneOf: [
@@ -232,7 +235,7 @@ const chairAuthorityCodec = objectCodec({
   expiresAt: timestamp,
   budget: resourceAmountsCodec,
 }, {
-  deniedPaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  deniedPaths: arrayOf(chairAuthorityPathCodec, { maximum: 256, unique: true }),
   deniedActions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
 });
 const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
@@ -920,9 +923,9 @@ function parseChairAuthority(value: unknown, path: string): LegacyAuthorityInput
     "budget",
   ]);
   const authority: LegacyAuthorityInput = {
-    workspaceRoots: parseUniqueArray(record.workspaceRoots, `${path}.workspaceRoots`, 1, 64, parseCanonicalRelativePath),
-    sourcePaths: parseUniqueArray(record.sourcePaths, `${path}.sourcePaths`, 0, 256, parseCanonicalRelativePath),
-    artifactPaths: parseUniqueArray(record.artifactPaths, `${path}.artifactPaths`, 0, 256, parseCanonicalRelativePath),
+    workspaceRoots: parseUniqueArray(record.workspaceRoots, `${path}.workspaceRoots`, 1, 64, parseChairAuthorityPath),
+    sourcePaths: parseUniqueArray(record.sourcePaths, `${path}.sourcePaths`, 0, 256, parseChairAuthorityPath),
+    artifactPaths: parseUniqueArray(record.artifactPaths, `${path}.artifactPaths`, 0, 256, parseChairAuthorityPath),
     actions: parseUniqueArray(record.actions, `${path}.actions`, 0, 256, parseAgentOperation),
     disclosure: parseDisclosure(record.disclosure, `${path}.disclosure`),
     expiresAt: parseTimestamp(record.expiresAt, `${path}.expiresAt`),
@@ -932,11 +935,15 @@ function parseChairAuthority(value: unknown, path: string): LegacyAuthorityInput
     ...authority,
     ...(record.deniedPaths === undefined
       ? {}
-      : { deniedPaths: parseUniqueArray(record.deniedPaths, `${path}.deniedPaths`, 0, 256, parseCanonicalRelativePath) }),
+      : { deniedPaths: parseUniqueArray(record.deniedPaths, `${path}.deniedPaths`, 0, 256, parseChairAuthorityPath) }),
     ...(record.deniedActions === undefined
       ? {}
       : { deniedActions: parseUniqueArray(record.deniedActions, `${path}.deniedActions`, 0, 256, parseAgentOperation) }),
   };
+}
+
+function parseChairAuthorityPath(value: unknown, path: string): string {
+  return value === "." ? "." : parseCanonicalRelativePath(value, path);
 }
 
 function parseAuthorityBudget(value: unknown, path: string): Readonly<Record<string, number>> {

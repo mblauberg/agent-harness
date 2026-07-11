@@ -48,6 +48,29 @@ describe("launch contract schema and fixtures", () => {
       journalState: "accepted",
     })).toBe(false);
   });
+
+  it("keeps schema parity for exact-root chair authority paths", () => {
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    addFormats(ajv);
+    addProtocolSchemaKeywords(ajv);
+    const validatePacket = ajv.compile(LAUNCH_CONTRACT_SCHEMAS.launchPacketV1);
+    const exactRootAuthorityPacket = {
+      ...LAUNCH_CONTRACT_FIXTURES.launchPacketV1,
+      chairAuthority: {
+        ...LAUNCH_CONTRACT_FIXTURES.launchPacketV1.chairAuthority,
+        workspaceRoots: ["."],
+        sourcePaths: ["."],
+        artifactPaths: ["."],
+        deniedPaths: ["."],
+      },
+    };
+    expect(validatePacket(exactRootAuthorityPacket), ajv.errorsText(validatePacket.errors)).toBe(true);
+    expect(validatePacket({ ...exactRootAuthorityPacket, projectRunDirectory: "." })).toBe(false);
+    expect(validatePacket({
+      ...exactRootAuthorityPacket,
+      resourcePlanRef: { ...exactRootAuthorityPacket.resourcePlanRef, path: "." },
+    })).toBe(false);
+  });
 });
 
 const readOperations = [

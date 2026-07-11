@@ -198,6 +198,29 @@ describe("launch packet v1", () => {
       provider: { ...launchPacket.provider, executable: "/tmp/provider" },
     })).toThrowError(/executable|unknown field/iu);
   });
+
+  it.each(["workspaceRoots", "sourcePaths", "artifactPaths", "deniedPaths"] as const)(
+    "permits the exact project root in chairAuthority.%s only",
+    (field) => {
+      const authority = { ...launchPacket.chairAuthority, [field]: ["."] };
+      expect(parseLaunchPacketV1({ ...launchPacket, chairAuthority: authority }).chairAuthority[field])
+        .toStrictEqual(["."]);
+      for (const unsafe of ["../outside", "/absolute"]) {
+        expect(() => parseLaunchPacketV1({
+          ...launchPacket,
+          chairAuthority: { ...launchPacket.chairAuthority, [field]: [unsafe] },
+        })).toThrow();
+      }
+    },
+  );
+
+  it("keeps the exact-root marker forbidden for artifact refs and projectRunDirectory", () => {
+    expect(() => parseLaunchPacketV1({ ...launchPacket, projectRunDirectory: "." })).toThrow();
+    expect(() => parseLaunchPacketV1({
+      ...launchPacket,
+      resourcePlanRef: { ...launchPacket.resourcePlanRef, path: "." },
+    })).toThrow();
+  });
 });
 
 describe("launch resource plan v1", () => {
