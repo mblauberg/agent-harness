@@ -44,6 +44,7 @@ describe("packed agent-fabric migration custody", () => {
       "0005-launch-custody.sql",
       "0006-operator-lifecycle.sql",
       "0007-provider-bridge-custody.sql",
+      "0008-external-effect-custody.sql",
     ]);
 
     await symlink(new URL("../../../node_modules", import.meta.url), join(extracted, "node_modules"));
@@ -71,7 +72,7 @@ describe("packed agent-fabric migration custody", () => {
     try {
       expect(database.prepare(
         "SELECT version FROM schema_migrations ORDER BY version",
-      ).all()).toStrictEqual([1, 2, 3, 4, 5, 6, 7].map((version) => ({ version })));
+      ).all()).toStrictEqual([1, 2, 3, 4, 5, 6, 7, 8].map((version) => ({ version })));
     } finally {
       database.close();
     }

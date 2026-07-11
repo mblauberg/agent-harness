@@ -7,6 +7,7 @@ import { preflightAdditiveInvariants } from "../persistence/invariants.js";
 import { preflightLaunchCustody } from "../persistence/launch-custody-preflight.js";
 import { preflightProjectSessionOperations } from "../persistence/project-session-preflight.js";
 import { preflightProviderBridgeCustody } from "../persistence/provider-bridge-custody-preflight.js";
+import { preflightExternalEffectCustody } from "../persistence/external-effect-custody-preflight.js";
 
 export type Migration = {
   version: number;
@@ -44,6 +45,7 @@ const defaultMigrationFiles = [
   "0005-launch-custody.sql",
   "0006-operator-lifecycle.sql",
   "0007-provider-bridge-custody.sql",
+  "0008-external-effect-custody.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {
@@ -68,6 +70,8 @@ function loadDefaultMigrations(): Migration[] {
             ? { preflight: preflightLaunchCustody }
             : index === 6
               ? { preflight: preflightProviderBridgeCustody }
+              : index === 7
+                ? { preflight: preflightExternalEffectCustody }
             : {}),
     };
   });
