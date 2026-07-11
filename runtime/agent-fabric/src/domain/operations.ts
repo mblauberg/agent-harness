@@ -1,8 +1,8 @@
 import {
-  BASELINE_OPERATIONS,
   FABRIC_OPERATIONS,
   isActiveFabricOperation,
   OPERATION_REGISTRY,
+  operationsForPrincipal,
   type FabricOperation,
 } from "@local/agent-fabric-protocol";
 
@@ -77,12 +77,17 @@ export const LEGACY_OPERATION_BUNDLES: Record<LegacyAuthorityAction, readonly Fa
   ],
 };
 
+export const AGENT_AUTHORITY_OPERATIONS: readonly FabricOperation[] = Object.freeze([
+  ...operationsForPrincipal("agent"),
+]);
+
 export const AUTHORITY_ACTION_VOCABULARY: readonly string[] = Object.freeze([
   ...LEGACY_AUTHORITY_ACTIONS,
-  ...BASELINE_OPERATIONS,
+  ...AGENT_AUTHORITY_OPERATIONS,
 ]);
 
 const readOperationSet = new Set<FabricOperation>(LEGACY_OPERATION_BUNDLES.read);
+const agentAuthorityOperationSet = new Set<FabricOperation>(AGENT_AUTHORITY_OPERATIONS);
 
 export function isFabricOperation(value: string): value is FabricOperation {
   return isActiveFabricOperation(value);
@@ -96,6 +101,10 @@ function isLegacyAuthorityAction(value: string): value is LegacyAuthorityAction 
   return LEGACY_AUTHORITY_ACTIONS.some((candidate) => candidate === value);
 }
 
+export function isAgentAuthorityOperation(value: string): value is FabricOperation {
+  return isFabricOperation(value) && agentAuthorityOperationSet.has(value);
+}
+
 export type AuthorityActionExpansion =
   | { ok: true; operations: FabricOperation[] }
   | { ok: false; unknownActions: string[] };
@@ -104,7 +113,7 @@ export function expandAuthorityActions(actions: readonly string[]): AuthorityAct
   const operations = new Set<FabricOperation>();
   const unknownActions = new Set<string>();
   for (const action of actions) {
-    if (isFabricOperation(action)) {
+    if (isAgentAuthorityOperation(action)) {
       operations.add(action);
     } else if (isLegacyAuthorityAction(action)) {
       for (const operation of LEGACY_OPERATION_BUNDLES[action]) operations.add(operation);

@@ -17,7 +17,7 @@ import { MESSAGE_POLICY } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import {
   expandAuthorityActions,
-  isFabricOperation,
+  isAgentAuthorityOperation,
   isReadFabricOperation,
   type FabricOperation,
 } from "../domain/operations.js";
@@ -338,9 +338,9 @@ function isStoredAuthority(value: unknown): value is StoredAuthority {
     isStringArray(value.workspaceRoots) &&
     isStringArray(value.sourcePaths) &&
     isStringArray(value.artifactPaths) &&
-    isStringArray(value.actions) && value.actions.every(isFabricOperation) &&
+    isStringArray(value.actions) && value.actions.every(isAgentAuthorityOperation) &&
     isStringArray(value.deniedPaths) &&
-    isStringArray(value.deniedActions) && value.deniedActions.every(isFabricOperation) &&
+    isStringArray(value.deniedActions) && value.deniedActions.every(isAgentAuthorityOperation) &&
     isRow(value.disclosure) &&
     (value.disclosure.level === "allowed" || value.disclosure.level === "forbidden" || (value.disclosure.level === "scoped" && isStringArray(value.disclosure.scopes))) &&
     typeof value.expiresAt === "string" &&

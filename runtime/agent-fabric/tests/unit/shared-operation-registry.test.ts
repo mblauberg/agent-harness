@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import * as protocol from "@local/agent-fabric-protocol";
 import {
+  AUTHORITY_ACTION_VOCABULARY,
   FABRIC_OPERATIONS,
   OPERATION_REGISTRY,
   expandAuthorityActions,
@@ -17,6 +18,20 @@ describe("shared fabric operation registry", () => {
     expect(expandAuthorityActions([FABRIC_OPERATIONS.resolveHumanGate])).toStrictEqual({
       ok: false,
       unknownActions: [FABRIC_OPERATIONS.resolveHumanGate],
+    });
+  });
+
+  it("keeps agent authority vocabulary and expansion exactly aligned with active principal operations", () => {
+    const agentOperations = [...protocol.operationsForPrincipal("agent")].sort();
+    const vocabularyOperations = AUTHORITY_ACTION_VOCABULARY.filter(protocol.isActiveFabricOperation).sort();
+
+    expect(vocabularyOperations).toStrictEqual(agentOperations);
+    for (const operation of agentOperations) {
+      expect(expandAuthorityActions([operation])).toStrictEqual({ ok: true, operations: [operation] });
+    }
+    expect(expandAuthorityActions([FABRIC_OPERATIONS.daemonStop])).toStrictEqual({
+      ok: false,
+      unknownActions: [FABRIC_OPERATIONS.daemonStop],
     });
   });
 });
