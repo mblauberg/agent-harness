@@ -983,6 +983,30 @@ describe("launch custody", () => {
       attestationChallenge,
       socketPath: "/private/agent-fabric.sock",
     });
+    fixture.database.exec("SAVEPOINT wrong_agent_rebind_capability");
+    try {
+      const chair = fixture.database.prepare(`
+        SELECT authority_id FROM agents WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
+      `).get() as { authority_id: string };
+      fixture.database.prepare(`
+        INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, lifecycle)
+        VALUES ('run_launch_01', 'wrong_rebind_agent', 'chair_launch_01', ?, 'ready')
+      `).run(chair.authority_id);
+      const fresh = fixture.database.prepare(`
+        SELECT new_capability_hash, new_principal_generation
+          FROM chair_bridge_recovery_custody
+         WHERE operator_command_id='recovery_rebind_01'
+      `).get() as { new_capability_hash: string; new_principal_generation: number };
+      fixture.database.prepare(`DELETE FROM capabilities WHERE token_hash=?`).run(fresh.new_capability_hash);
+      expect(() => fixture.database.prepare(`
+        INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+        VALUES (?, 'run_launch_01', 'wrong_rebind_agent', ?, ?)
+      `).run(fresh.new_capability_hash, fresh.new_principal_generation, now + 60_000))
+        .toThrow(/INVARIANT_chair_bridge_loss_freezes_grants/u);
+    } finally {
+      fixture.database.exec("ROLLBACK TO wrong_agent_rebind_capability");
+      fixture.database.exec("RELEASE wrong_agent_rebind_capability");
+    }
     const concurrentInspection = await fixture.service.inspectChairRecovery({
       ...intent,
       providerActionId: "provider_rebind_concurrent_01" as never,
@@ -1366,6 +1390,104 @@ describe("launch custody", () => {
     `).get()).toEqual({ status: "terminal", effect_count: 1, idempotency_proven: 1 });
     expect(fixture.database.prepare(`SELECT state, provider_session_generation FROM launched_chair_bridge_state`).get())
       .toEqual({ state: "active", provider_session_generation: 3 });
+  });
+
+  it("keeps unresolved chair rebind custody out of generic startup recovery", async () => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "startup-unresolved-rebind-session",
+        providerSessionGeneration: 2,
+        effectDigest: digest("startup-unresolved-rebind-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      persistent: true,
+      recoverChair: async () => { throw new Error("connection dropped after provider acceptance"); },
+    });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    fixture.service.observeChairBridgeLoss({
+      projectSessionId: "session_launch_01", runId: "run_launch_01", agentId: "chair_launch_01",
+      principalGeneration: 1, adapterId: "claude-agent-sdk", actionId: "provider_launch_01",
+      providerSessionRef: "startup-unresolved-rebind-session", providerSessionGeneration: 2,
+      bridgeGeneration: 1, reason: "provider bridge closed",
+    });
+    const loss = fixture.database.prepare(`SELECT * FROM chair_bridge_losses`).get() as Record<string, unknown>;
+    const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, unknown>;
+    const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, unknown>;
+    const bridge = fixture.database.prepare(`SELECT revision FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
+    const intent: ChairBridgeRecoveryIntent = {
+      kind: "chair-bridge-recovery", schemaVersion: 1, path: "rebind",
+      projectSessionId: "session_launch_01" as never, coordinationRunId: "run_launch_01" as never,
+      lossId: String(loss.loss_id), recoveryManifestDigest: String(loss.recovery_manifest_digest) as Sha256Digest,
+      expectedSessionRevision: Number(session.revision), expectedSessionGeneration: Number(session.generation),
+      expectedRunRevision: Number(run.revision), expectedChairGeneration: Number(run.chair_generation),
+      expectedPrincipalGeneration: 1, expectedBridgeRevision: Number(bridge.revision),
+      expectedLostBridgeGeneration: 1, expectedProviderSessionGeneration: 2,
+      providerAdapterId: "claude-agent-sdk", providerContractDigest: contractDigest,
+      providerActionId: "startup_unresolved_rebind_action" as never,
+    };
+    const inspection = await fixture.service.inspectChairRecovery(intent);
+    const recovery = fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
+      inspection, operatorId: "operator_01", operatorCommandId: "startup_unresolved_rebind_command",
+    }))();
+    await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({ status: "ambiguous" });
+    closeTrackedDatabase(fixture.database);
+
+    const callsPath = join(fixture.root, "unresolved-rebind-calls.jsonl");
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.root],
+      fabricSocketPath: join(fixture.root, "fabric.sock"),
+      adapters: {
+        "claude-agent-sdk": {
+          command: [process.execPath, "--import", "tsx", recoveryAdapter],
+          environment: {
+            LAUNCH_RECOVERY_CALLS_PATH: callsPath,
+            LAUNCH_RECOVERY_CONTRACT_JSON: canonicalJson(contract),
+          },
+        },
+      },
+    });
+    let startup: Awaited<ReturnType<typeof runtime.recoverStartupState>> | undefined;
+    let directError: unknown;
+    try {
+      startup = await runtime.recoverStartupState();
+      try {
+        await runtime.reconcileProviderAction("run_launch_01", "chair_launch_01", {
+          actionId: "startup_unresolved_rebind_action",
+          commandId: "generic_rebind_reconcile_forbidden_01",
+        });
+      } catch (error: unknown) {
+        directError = error;
+      }
+    } finally {
+      await runtime.close();
+    }
+    expect(startup).toMatchObject({ actionsQuarantined: 0 });
+    expect(directError).toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    const calls = readFileSync(callsPath, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { method: string });
+    expect(calls.filter(({ method }) => method === "lookup_action")).toHaveLength(1);
+    const state = new Database(fixture.databasePath, { readonly: true });
+    expect(state.prepare(`
+      SELECT c.state, p.status, p.execution_count, p.effect_count
+        FROM chair_bridge_recovery_custody c
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+       WHERE c.operator_command_id='startup_unresolved_rebind_command'
+    `).get()).toEqual({ state: "ambiguous", status: "ambiguous", execution_count: 1, effect_count: 0 });
+    state.close();
   });
 
   it("fences an activated launched chair on restart without a retained bridge or generic status call", async () => {

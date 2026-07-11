@@ -1230,6 +1230,15 @@ export class Fabric {
     `).get(runId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
     }
+    if (this.#database.prepare(`
+      SELECT 1
+        FROM provider_actions p
+        JOIN chair_bridge_recovery_custody c
+          ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+       WHERE p.run_id=? AND p.action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "chair recovery provider actions mutate only through chair recovery custody");
+    }
   }
 
   async #inspectLaunchAdapterContract(adapterId: string): Promise<LaunchAdapterContract> {
@@ -1529,6 +1538,10 @@ export class Fabric {
          AND NOT EXISTS (
            SELECT 1 FROM provider_agent_custody c
             WHERE c.adapter_id=p.adapter_id AND c.action_id=p.action_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM chair_bridge_recovery_custody c
+            WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
          )
        ORDER BY p.updated_at, p.action_id
     `).all();

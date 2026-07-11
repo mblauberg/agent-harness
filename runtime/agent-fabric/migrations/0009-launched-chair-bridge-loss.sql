@@ -222,6 +222,7 @@ WHEN EXISTS (
   JOIN chair_bridge_losses loss ON loss.loss_id=recovery.loss_id
   WHERE recovery.path='rebind' AND recovery.state='prepared'
     AND loss.coordination_run_id=NEW.run_id
+    AND loss.chair_agent_id=NEW.agent_id
     AND recovery.new_capability_hash=NEW.token_hash
     AND recovery.new_principal_generation=NEW.principal_generation
 )
