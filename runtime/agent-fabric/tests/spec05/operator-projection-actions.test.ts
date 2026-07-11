@@ -415,6 +415,16 @@ describe("operator projection store", () => {
       expect(page.rows[0]).toMatchObject({ itemId: expectedItemId });
       const fact = page.rows[0]?.fact;
       if (fact?.freshness !== "live") throw new Error(`expected live ${view} row`);
+      if (view === "activity") {
+        expect(fact.value.summary).toMatchObject({
+          activityKind: "message",
+          messageBodyRef: {
+            projectSessionId,
+            messageId: "message_01",
+            expectedRevision: 1,
+          },
+        });
+      }
       const detail = fixture.projections.detail({
         credential: fixture.credential,
         projectId,
@@ -423,6 +433,20 @@ describe("operator projection store", () => {
         detailRef: fact.value.detailRef,
       });
       expect(detail).toMatchObject({ status: "current", detailRef: fact.value.detailRef });
+      if (view === "activity") {
+        expect(detail).toMatchObject({
+          detail: {
+            value: {
+              activityKind: "message",
+              messageBodyRef: {
+                projectSessionId,
+                messageId: "message_01",
+                expectedRevision: 1,
+              },
+            },
+          },
+        });
+      }
     }
   });
 

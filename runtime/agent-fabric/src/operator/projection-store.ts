@@ -3,6 +3,7 @@ import type {
   ArtifactRef,
   ConsoleView,
   JsonValue,
+  MessageBodyRef,
   MessageBodyReadRequest,
   MessageBodyReadResult,
   OperatorDetailReadRequest,
@@ -819,11 +820,25 @@ export class OperatorProjectionStore {
       const eventId = text(event, "event_id");
       const kind = activityKind(text(event, "type"));
       const occurredAt = toTimestamp(integer(event, "created_at"), "activityRow.occurredAt");
+      const summary = kind === "message"
+        ? {
+            kind: "activity" as const,
+            activityKind: "message" as const,
+            summary: text(event, "type"),
+            occurredAt,
+            messageBodyRef: this.#messageBodyRef(event),
+          }
+        : {
+            kind: "activity" as const,
+            activityKind: kind,
+            summary: text(event, "type"),
+            occurredAt,
+          };
       return {
         itemId: eventId,
         itemRevision: sequence,
         fact: liveFact(sequence, occurredAt, {
-          summary: { kind: "activity", activityKind: kind, summary: text(event, "type"), occurredAt },
+          summary,
           detailRef: { kind: "activity", eventId, expectedRevision: sequence },
           actionAvailability: actionAvailability(authenticated),
         }),
@@ -1086,7 +1101,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
   ): LoadedOperatorDetail {
     const event = row(this.#database.prepare(`
-      SELECT e.*, seq.sequence FROM events e
+      SELECT e.*, seq.sequence, r.project_session_id FROM events e
       JOIN observer_event_sequence seq ON seq.event_id=e.event_id
       JOIN runs r ON r.run_id=e.run_id
       JOIN project_sessions s ON s.project_session_id=r.project_session_id
@@ -1094,16 +1109,47 @@ export class OperatorProjectionStore {
         AND (? IS NULL OR r.project_session_id=?)
     `).get(detailRef.eventId, projectId, projectSessionId ?? null, projectSessionId ?? null), "activity detail");
     const occurredAt = toTimestamp(integer(event, "created_at"), "activityDetail.occurredAt");
+    const kind = activityKind(text(event, "type"));
+    const detail: OperatorDetail = kind === "message"
+      ? {
+          kind: "activity",
+          eventId: detailRef.eventId,
+          activityKind: "message",
+          summary: text(event, "type"),
+          occurredAt,
+          messageBodyRef: this.#messageBodyRef(event),
+        }
+      : {
+          kind: "activity",
+          eventId: detailRef.eventId,
+          activityKind: kind,
+          summary: text(event, "type"),
+          occurredAt,
+        };
     return {
       revision: integer(event, "sequence"),
       observedAt: occurredAt,
-      detail: {
-        kind: "activity",
-        eventId: detailRef.eventId,
-        activityKind: activityKind(text(event, "type")),
-        summary: text(event, "type"),
-        occurredAt,
-      },
+      detail,
+    };
+  }
+
+  #messageBodyRef(event: Row): MessageBodyRef {
+    const payload = jsonObject(text(event, "payload_json"), "message activity payload");
+    if (typeof payload.messageId !== "string") {
+      throw new Error("message activity has no exact message ID binding");
+    }
+    if (!isRow(this.#database.prepare(`
+      SELECT message_id FROM messages WHERE run_id=? AND message_id=?
+    `).get(text(event, "run_id"), payload.messageId))) {
+      throw new Error("message activity references a message outside its run");
+    }
+    return {
+      projectSessionId: parseIdentifier<"ProjectSessionId">(
+        text(event, "project_session_id"),
+        "messageBodyRef.projectSessionId",
+      ),
+      messageId: parseIdentifier<"MessageId">(payload.messageId, "messageBodyRef.messageId"),
+      expectedRevision: 1,
     };
   }
 
