@@ -1,4 +1,4 @@
-const FABRIC_BEARER = /af[bc]_[A-Za-z0-9_-]{43}/gu;
+const FABRIC_BEARER = /(af(?:b|c|op)_)[A-Za-z0-9_-]{43}/gu;
 
 /** Full local operator text with terminal controls and Fabric bearer values removed. */
 export function renderSafeMessageBody(raw: string): string {
@@ -10,5 +10,5 @@ export function renderSafeMessageBody(raw: string): string {
     .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
     .replace(/\p{Cf}/gu, "")
     .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/gu, " ")
-    .replace(FABRIC_BEARER, (value) => `${value.slice(0, 4)}<redacted>`);
+    .replace(FABRIC_BEARER, (_value, prefix: string) => `${prefix}<redacted>`);
 }
