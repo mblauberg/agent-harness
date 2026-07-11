@@ -1478,7 +1478,7 @@ agent or chair. An operator capability is revocable and binds:
 
 - one operator, project, optional project session and principal generation;
 - an explicit subset of `read`, `decide`, `steer`, `pause`, `resume`,
-  `cancel`, `drain`, `stop`, `launch`, `takeover`, `git` and
+  `cancel`, `drain`, `stop`, `launch`, `takeover`, `git`, `git-authorise` and
   `external-effect` operations;
 - issue and expiry times no later than the project session;
 - the current project/session generation; and
@@ -1488,7 +1488,9 @@ agent or chair. An operator capability is revocable and binds:
 A project-bound `launch` capability may create a reviewed session before a
 session ID exists. Every other session mutation requires the exact session ID
 and generation. Possession of `decide` does not imply `launch`, `takeover` or
-`external-effect`.
+`external-effect`. `git` admits an already-authorised typed mutation;
+`git-authorise` may issue or revoke a narrower Git grant but cannot execute one.
+Neither implies the other.
 
 Every operator mutation carries the capability, stable command ID, expected
 revision, actor and provenance. The daemon derives project and actor identity
@@ -2310,11 +2312,18 @@ git_action_authorisation:
   expected_session_generation: fenced-generation
   coordination_run_id: exact-accountable-run
   expected_run_revision: compare-and-set-integer
+  expected_dependency_revision: compare-and-set-integer
   authority_ref: exact-active-run-authority-sha256
   expected_authority_revision: compare-and-set-integer
   repository_root: exact-canonical-trusted-root
   worktree_path: exact-canonical-admitted-worktree
   repository_state_digest: exact-sha256
+  execution_profile_id: exact-trusted-profile
+  execution_profile_revision: compare-and-set-integer
+  execution_profile_digest: exact-sha256
+  operation_variant: exact-closed-variant
+  remote_binding: null-or-exact-registered-target
+  result_recipe_digest: exact-sha256
   operation_id: daemon-derived-stable-id
   effect_binding_digest: exact-sha256
   decision: preauthorised-or-gate-variant
@@ -2325,12 +2334,24 @@ daemon derives project and operator identity from the authenticated connection,
 then cross-checks every duplicated session, run, repository, worktree, revision
 and digest against the intent, current Fabric records and a fresh typed Git
 observation. `effect_binding_digest` is the canonical SHA-256 of the complete
-Git effect, repository binding and common authority binding, excluding only the
-operator credential, command ID, `operation_id` and the `decision` variant.
-`operation_id` is daemon-derived from that digest and is the stable operation
-identity used by a consequential gate. A changed action,
+Git effect, repository and remote bindings, execution profile, closed operation
+variant, canonical before state and complete expected result recipe, excluding
+only the operator credential, command ID, `operation_id` and the `decision`
+variant. `operation_id` is derived from authenticated operator, project session,
+stable Preview ID and `effect_binding_digest`. It is stable for exact Preview
+replay but distinct for a later Preview of the same Git state. A changed action,
 path, ref, remote, mode, expected object or revision therefore requires a new
 preview and authorisation decision.
+
+`coordination_run.authority_revision` is the canonical revision owner for the
+run's current authority tuple. It starts at one. Each historical
+`authority_ref` value is immutable. Authority rotation appends a history row
+and atomically changes the current `authority_ref`, increments
+`authority_revision` and the run revision, and invalidates every grant issued
+under the prior tuple. The common `expected_dependency_revision` is the same
+run-owned dependency revision used by scoped gates. No implementation may
+invent an authority revision from an operator command, grant row or artifact
+timestamp.
 
 The preauthorised variant is:
 
@@ -2342,8 +2363,29 @@ decision:
   grant_digest: exact-sha256
 ```
 
-The referenced `GitActionGrant` is an immutable revisioned narrowing of the
-active, human-approved project/session and coordination-run authority:
+The coordination-run authority may contain one closed positive
+`git_allowlist_v1`. Absence means that no Git grant can be issued. It names the
+maximum operation variants, execution profiles, remote registrations, refs,
+canonical path prefixes, worktree-creation permission, expiry and deterministic
+rewrite bounds. Denies still dominate. Only launch custody materialising an
+already human-approved session envelope, or a separately capable
+`git-authorise` operator action with independently attested direct human input,
+may issue or revoke a grant. The requested grant shall be a positive subset of
+every allow-list dimension; a capability, empty parent field or omission can
+never be treated as wildcard authority.
+
+`git-authorise` is itself a closed Preview/Commit operator intent. It selects
+`issue`, `revise` or `revoke`; binds the exact project/session/generation and
+session/run/dependency/authority revisions; names the current allow-list digest;
+and carries either the complete proposed canonical grant or the exact current
+grant ID/revision/digest. Revise binds both. The daemon derives the canonical
+child constraints and proposed digest, shows the complete old/new authority
+diff, and binds the independently attested direct-human decision to that
+Preview. The caller cannot submit opaque constraints, self-attest, reuse the
+decision for another grant or receive a bearer credential in the result.
+
+The referenced `GitActionGrant` is an immutable revisioned narrowing of that
+active allow-list:
 
 ```yaml
 git_action_grant:
@@ -2352,15 +2394,24 @@ git_action_grant:
   project_id: exact-project
   project_session_id: exact-session
   session_generation: fenced-generation
+  issuing_session_revision: exact-revision
   coordination_run_id: exact-run
+  issuing_run_revision: exact-revision
+  issuing_dependency_revision: exact-revision
   authority_ref: exact-active-run-authority-sha256
   authority_revision: exact-revision
   repository_root: exact-canonical-root
   worktree_path: exact-canonical-worktree
-  effects: closed-non-empty-set
-  remotes: closed-exact-name-set
+  execution_profile_id: exact-trusted-profile
+  execution_profile_revision: exact-revision
+  execution_profile_digest: exact-sha256
+  operation_variants: closed-non-empty-concrete-set
+  remote_bindings: closed-registered-target-set
   refs: closed-fully-qualified-ref-set
   path_prefixes: closed-canonical-relative-prefix-set
+  source_authority:
+    kind: launch-envelope-or-operator-command
+    digest: exact-sha256
   expires_at: bounded-timestamp
   revoked_at: null-or-timestamp
 ```
@@ -2368,22 +2419,83 @@ git_action_grant:
 The daemon hashes the immutable identity, authority, repository, constraint and
 expiry fields of the closed canonical grant to `grant_digest`; `revoked_at` is
 excluded because it is a later lifecycle fact. Empty
-constraint sets mean that category is unavailable, not unconstrained. A
-concrete action must match one named effect, every named remote and fully
-qualified ref, and every canonical repository-relative path must be contained
-by a granted prefix. The exact worktree shall remain an active writer admission
-for the same project session and run when the effect can write files. Denies in
-the parent authority dominate the grant. Grant expiry, revocation, session or
-run revision change, authority rotation, generation change, repository or
-worktree change, or constraint mismatch fails before Git process I/O.
+constraint sets mean that category is unavailable to an action requiring it,
+not unconstrained. `operation_variants` uses the exhaustive action-and-mode
+vocabulary below; coarse `branch`, `worktree`, `pull`, `merge`, `rebase` or
+`push` values are invalid. A concrete action must match one exact variant,
+execution profile, registered remote target, every fully qualified ref and
+every canonical repository-relative path. The exact worktree shall retain an
+active writer admission for the same project session and run when the effect
+can write files.
 
-A preauthorised grant may cover fetch, fast-forward-only pull, stage, unstage,
-commit, safe branch creation/rename/deletion, and clean worktree
-creation/move/removal when the approved envelope names those exact constraints.
-Push is preauthorised only when the grant names the exact remote plus source and
-destination refs and the effect uses `fast-forward-only`. Merge, rebase,
+Point-of-use equality is required for `issuing_session_revision`,
+`issuing_run_revision`, `issuing_dependency_revision`, session generation,
+authority revision/ref, execution-profile revision/digest and every remote
+registration revision/generation/target digest. Any change, grant expiry or
+revocation, repository/worktree change or constraint mismatch fails before Git
+lock acquisition or process I/O. Reissuing after a legitimate revision change
+requires a new human-authorised grant revision; a fresh action Preview cannot
+silently refresh an old grant.
+
+The daemon owns a secret-free remote registry independently of `.git/config`:
+
+```yaml
+git_remote_registration:
+  registration_id: stable-id
+  revision: compare-and-set-integer
+  generation: target-rotation-fence
+  project_id: exact-project
+  remote_name: bounded-display-name
+  transport_kind: allow-listed-kind
+  target_identity: normalised-secret-free-host-port-repository
+  target_digest: exact-sha256
+  adapter_id: trusted-remote-port
+  adapter_contract_digest: exact-sha256
+  credential_selector_digest: secret-free-sha256
+  state: active-or-revoked
+```
+
+For a remote action, `remote_binding` and the grant's `remote_bindings` contain
+the registration ID, revision, generation, name, target digest, adapter and
+contract digest. A name is display metadata, never authority. Retargeting a
+name appends a registration revision, advances generation and invalidates all
+prior grants, Previews and custody. Project Git configuration cannot select a
+target, remote helper, credential helper or transport executable.
+
+The trusted `GitExecutionProfile` is also closed and digest-bound. It records
+the exact Git binary path/version/digest and object format; built-in merge and
+rebase algorithm IDs; a sanitised configuration/environment policy; sealed
+empty hooks; permitted raw attribute behaviour; the trusted remote-port/helper
+registry; and hard result bounds. System, global and repository configuration
+cannot select an alias, hook, clean/process filter, custom merge/diff driver,
+editor, pager, signing programme, credential helper, remote helper, SSH command
+or executable. A profile may instead name an explicitly registered absolute
+helper binary plus digest, fixed argument template, credential selector and
+enforced sandbox. Unknown attributes, includes, helpers or drivers make the
+affected operation unavailable before Preview. Stage uses exact raw bytes, and
+merge/rebase use only the profile's built-in deterministic backend.
+
+The exhaustive V1 operation variants are:
+
+| Effect family | Exact operation variants | Preauthorised grant permitted |
+| --- | --- | --- |
+| fetch | `fetch` | yes |
+| pull | `pull-fast-forward-only`, `pull-merge-commit-start`, `pull-rebase-start` | fast-forward only |
+| index | `stage`, `unstage` | yes |
+| commit | `commit` | yes |
+| merge | `merge-fast-forward-only-start`, `merge-commit-start`, `merge-continue`, `merge-abort` | no |
+| rebase | `rebase-current-branch-no-autostash-start`, `rebase-continue`, `rebase-abort` | no |
+| push | `push-fast-forward-only`, `push-force-with-lease` | fast-forward only |
+| branch | `branch-create`, `branch-rename`, `branch-delete-merged-only`, `branch-delete-force` | all except force delete |
+| worktree | `worktree-create-detached`, `worktree-create-new-branch`, `worktree-create-existing-branch`, `worktree-move`, `worktree-remove-clean`, `worktree-remove-force` | all except force remove |
+| upstream | `upstream-set`, `upstream-unset` | yes |
+
+Each `OperatorGitIntent` discriminator/action/mode/strategy/policy maps to
+exactly one row value and vice versa. A grant containing a gate-only variant is
+invalid. Pull merge/rebase, all standalone merge/rebase variants,
 force-with-lease push, destructive branch deletion and forced worktree removal
-cannot use this variant.
+always use the gate variant. A grant for one sibling operation, such as
+`branch-create`, can never authorise `branch-rename` or either delete mode.
 
 The gate variant is:
 
@@ -2398,12 +2510,18 @@ decision:
 
 The gate shall belong to the same project session and coordination run, have an
 `operation` enforcement point, bind `blocked_operation_id` exactly to
-`operation_id`, retain the current dependency revision and have an
-authenticated human resolver. Policy approval, a gate for another action, a
-stale/superseded gate or a general consequential-action capability is
-insufficient. Commit rechecks the gate and every common binding after Preview
-and immediately before effect preparation. The gate never supplies release or
-deployment authority; those retain the exact release binding in section 32.3.
+`operation_id`, bind the current dependency revision and have an authenticated
+human resolver. Both decision variants create one `operation_admissions` row
+for `operation_id`; its `operation_kind` is the exact Git operation variant and
+its payload digest is `effect_binding_digest`. The gate variant additionally
+requires the persisted exact `(gate_id, operation_id)` association. An
+operation kind is classification data and can never substitute for the unique
+operation ID. Policy approval, a gate for another action, a stale/superseded
+gate or a general consequential-action capability is insufficient. Commit
+rechecks the gate, association, admission row and every common binding after
+Preview and immediately before effect preparation. The gate never supplies
+release or deployment authority; those retain the exact release binding in
+section 32.3.
 
 `OperatorGitIntent.operation` is extended only as needed to close these
 semantics:
@@ -2411,9 +2529,10 @@ semantics:
 - **Fetch:** names one registered remote plus exact source and tracking refs.
   It cannot accept a URL, refspec, executable, transport or arbitrary option.
 - **Pull:** names the same exact remote/ref pair and selects
-  `fast-forward-only`, `merge-commit` or `rebase`. Its fetch and integration
-  steps share one custody record; a partial fetch is an observable non-terminal
-  outcome, not permission to repeat the pull.
+  `fast-forward-only`, `merge-commit` or `rebase`. Merge/rebase pull is
+  gate-only. Its exact remote observation, tracking-ref update and integration
+  recipe share one custody record; a partial fetch is an observable
+  non-terminal outcome, not permission to repeat the pull.
 - **Stage and unstage:** contain a non-empty, unique set of canonical
   repository-relative paths. Absolute paths, traversal, NUL, pathspec magic,
   option interpretation and paths outside the bound worktree are rejected.
@@ -2424,16 +2543,28 @@ semantics:
   invoke an editor, pager, signing programme or repository hook, and it cannot
   include unreviewed worktree content.
 - **Merge:** names exact source and destination objects and selects either
-  `fast-forward-only` or `merge-commit`. `merge-commit` means one non-interactive
+  `fast-forward-only` or `merge-commit`. `merge-commit` binds the exact backend,
+  ordered parents, output tree, author/committer identities and timestamp,
+  message and resulting commit object. It is one non-interactive
   non-fast-forward merge with no implicit strategy, editor, autostash or
-  project-configured command execution. Conflict is a typed non-terminal Git
-  state requiring explicit later handling; it is never auto-aborted or retried.
+  project-configured command execution.
 - **Rebase:** always uses the gate variant. The source shall be the exact
   currently checked-out local branch and HEAD object in the bound worktree; the
   destination is one exact object/ref. V1 permits only a non-interactive,
   current-branch, `no-autostash` rebase. It forbids `--onto`, root,
-  rebase-merges, interactive/exec and rebasing another branch. Dirty,
+  rebase-merges, interactive/exec and rebasing another branch. Its recipe maps
+  every bounded source commit to exact new parent/tree, preserved author
+  identity/time, explicit committer identity/time and resulting object. Dirty,
   conflicted or detached state fails before preparation.
+- **Merge/rebase conflict exit:** a start may produce only the recipe's exact
+  success state or exact bounded conflict state. A conflict persists the
+  predecessor custody ID, operation variant, conflict generation, index stages,
+  affected paths and original before state. `merge-continue` and
+  `rebase-continue` are new gate-bound actions over that exact conflict and a
+  newly reviewed resolution index/worktree plus complete deterministic result
+  recipe. `merge-abort` and `rebase-abort` are also typed gate-bound actions and
+  may restore only the predecessor's exact before state. No generic command,
+  automatic abort/continue or reuse of the start gate is permitted.
 - **Push:** names one registered remote, one exact local source ref and one
   exact remote destination ref. `fast-forward-only` relies on the remote's
   atomic non-fast-forward rejection. `force-with-lease` additionally binds the
@@ -2456,45 +2587,105 @@ semantics:
   `clean` rejects modified, untracked, conflicted or unmerged state. `force`
   always uses the gate variant and binds those consequences; no grant can
   silently enable it.
+- **Upstream tracking:** `upstream-set` binds one exact local branch and one
+  exact registered remote target/ref plus the current local-config digest;
+  `upstream-unset` binds the exact existing association and digest. The fixed
+  port changes only the branch's remote and merge keys through a locked atomic
+  config update. It cannot set an arbitrary Git config key or remote URL.
+
+Every variant owns one closed `git_result_recipe_v1`. It includes the execution
+profile and algorithm IDs; canonical before state; exact expected success and,
+where admitted, conflict states; no-effect proof fields; at most 64 atomic ref/
+config updates; at most 128 input/output commit mappings; at most 4,096 conflict
+paths/index stages; and bounded index/worktree/config digests. Every produced
+commit mapping contains ordered parents, tree, author and committer identities
+and timestamps, message and derived object digest. The recipe and its digest
+are part of `effect_binding_digest` and expected terminal custody state. A
+backend, Git binary, configuration, selected identity/timestamp or result-bound
+change therefore requires a new Preview and gate/grant decision. An effect
+whose exact result or conflict state cannot be computed within these limits is
+unavailable in V1; it does not dispatch with an open-ended post-state.
 
 All ref names are fully qualified, validated data. The fixed Git port resolves
-them to current native objects and verifies the protocol object digests; no
-abbreviated revision, caller argument vector, shell, alias, hook, editor,
-pager, environment override or arbitrary Git subcommand is accepted. Remote
-access uses only a trusted registered remote and disables interactive prompts.
-The Preview shows repository, worktree, current branch, exact affected paths,
-source/destination refs and objects, remote, mode, expected revisions and the
-grant or gate evidence before confirmation.
+them to current native objects and verifies the protocol object digests under
+the bound execution profile; no abbreviated revision, caller argument vector,
+shell, alias, hook, editor, pager, unregistered helper, environment override or
+arbitrary Git subcommand is accepted. Immediately before the durable
+`prepared -> dispatching` transition it shall hold the operation-specific
+repository/index/ref/config/worktree fence, re-observe every bound filesystem
+and Git state, and retain that fence or a native compare-and-set through the
+first mutation. A platform that cannot supply the required fence exposes the
+variant as unavailable. Quarantining an already unauthorised stale-state
+mutation is not a substitute.
+
+The Preview shows repository, worktree, execution profile, current branch,
+exact affected paths, source/destination refs and objects, registered remote
+target, operation variant, deterministic result recipe and bounds, expected
+session/run/dependency/authority revisions, and the grant or gate evidence
+before confirmation.
 
 Added requirements are:
 
 - **FR-038:** Every Git mutation shall carry one closed, current
   `GitActionAuthorisation` whose preauthorised or gate variant binds the exact
-  project session, run, authority, repository, worktree, revisions, effect,
-  remote, refs and path constraints; a broad `git` capability alone shall have
-  zero effect.
-- **FR-039:** Merge, rebase, branch deletion and worktree creation/removal shall
-  implement only the closed modes above; history rewriting or destructive
-  force shall require the exact human-approved gate variant.
+  project session, run, dependency and authority revisions, repository,
+  worktree, execution profile, concrete operation variant, registered remote
+  target, refs, paths and result recipe; a broad `git` capability alone shall
+  have zero effect.
+- **FR-039:** Merge and rebase shall implement only the closed start,
+  continue and abort variants above. Branch deletion and worktree create/remove
+  shall implement only their named safe/force variants. Pull merge/rebase,
+  history rewriting or destructive force shall require the exact human-approved
+  gate variant.
+- **FR-040:** A Git grant shall be issued or revoked only through launch custody
+  materialising an approved positive run allow-list or a distinct
+  `git-authorise` capability, and shall capture the exact issuing session, run,
+  dependency and run-authority revisions without wildcard containment.
+- **FR-041:** Remote Git and upstream-tracking actions shall bind a daemon-owned
+  secret-free remote registration identity, target digest and generation; a
+  reused display name or project Git configuration shall confer no authority.
 - **NFR-022:** Typed Git execution shall use one fixed bounded port with no
   arbitrary shell, command, option, hook, editor, pager, executable or
   environment injection surface.
 - **NFR-023:** Each Git effect shall be prepared durably before process I/O and
   shall use evidence-only lookup after ambiguity; restart shall never blindly
   repeat a Git mutation.
+- **NFR-024:** Every Git mutation shall acquire its declared native lock/CAS
+  plan, recheck bound Git and filesystem state immediately before dispatch and
+  preserve that fence through the first mutation; an unfenceable variant shall
+  fail unavailable before mutation.
+- **NFR-025:** Commit-producing actions shall bind one pinned deterministic
+  backend and complete bounded output recipe into the authority digest; hostile
+  Git configuration, attributes and helpers shall be disabled or rejected
+  before Preview.
 
 Acceptance additionally requires:
 
 - **AC-031:** a matrix over missing, expired, revoked, wrong-project,
-  wrong-session/generation, wrong-run, stale-authority, stale-grant, wrong
-  repository/worktree, disallowed effect, remote, ref and path proves zero Git
-  process I/O. Matching routine grants succeed only inside their exact
-  constraints; push and every gate-only mode reject broad authority and a gate
-  for another effect.
+  wrong-session/generation, wrong issuing session/run/dependency revision,
+  stale run-authority or grant revision, wrong repository/worktree/execution
+  profile, sibling operation variant, remote target/generation, ref and path
+  proves zero Git process I/O. Matching routine grants succeed only inside
+  their exact positive constraints; pull merge/rebase, push and every gate-only
+  mode reject broad authority and a gate for another operation ID.
 - **AC-032:** real temporary-repository tests cover every closed Git effect and
   mode, including current-branch/no-autostash rebase, merged-only versus force
-  deletion, the three worktree-create modes and clean versus force removal.
-  Exact command replay has one effect; stale repository state fails before
-  dispatch; crash at each custody boundary performs no blind retry and exposes
-  any partial merge, rebase, pull or remote effect as ambiguous or quarantined
-  evidence.
+  deletion, the three worktree-create modes, clean versus force removal,
+  merge/rebase continue/abort and upstream set/unset. Exact command replay has
+  one effect; stale repository/filesystem state at every lock/recheck/CAS point
+  fails before mutation; crash at each custody boundary performs no blind retry
+  and exposes any partial merge, rebase, pull or remote effect as ambiguous or
+  quarantined evidence.
+- **AC-033:** grant issuance rejects absence of `git-authorise`, an absent or
+  negative parent allow-list, every widened operation/profile/remote/ref/path/
+  bound and a concurrent session/run/dependency/authority rotation. Direct SQL
+  and public protocol tests prove both decision variants create one exact
+  operation admission, while only the gate variant has the same-session/run
+  `(gate_id, operation_id)` association and human-approved dependency revision.
+- **AC-034:** hostile hook, filter, process, merge/diff driver, include, alias,
+  editor, pager, signer, credential/remote helper and SSH command canaries never
+  execute. Preview is byte-identical across wall time and mutable Git config for
+  one pinned profile; merge, pull and rebase recover only the exact bounded
+  commit mapping or conflict state. Retargeting `origin` under the same name
+  invalidates the old grant, and upstream tracking can change only through the
+  target-bound typed variants.
