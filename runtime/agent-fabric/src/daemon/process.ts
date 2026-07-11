@@ -2,9 +2,15 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 
+import {
+  PROTOCOL_FEATURES,
+  PROTOCOL_LIMITS,
+} from "@local/agent-fabric-protocol";
+
 import { openFabric } from "../index.js";
 import {
   createRunInput,
+  FABRIC_DAEMON_VERSION,
   daemonInitializeParams,
   daemonInitializeResult,
   dispatchClientMethod,
@@ -15,6 +21,8 @@ import {
 } from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
 import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "./client.js";
+import { routeDaemonConnection } from "./connection-router.js";
+import { servePublicProtocolConnection } from "./public-protocol.js";
 import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../transport/bounded-ndjson.js";
 
 class DaemonProtocolError extends Error {
@@ -50,6 +58,10 @@ const workspaceRootsValue: unknown = JSON.parse(process.env.AGENT_FABRIC_WORKSPA
 const workspaceRoots = Array.isArray(workspaceRootsValue) && workspaceRootsValue.every((value) => typeof value === "string")
   ? workspaceRootsValue
   : undefined;
+// Temporary compatibility fallback until every launcher supplies the persisted
+// runtime epoch. New bootstrap callers pass the authoritative generation.
+const daemonInstanceGenerationValue = process.env.AGENT_FABRIC_DAEMON_INSTANCE_GENERATION ?? "1";
+const daemonInstanceGeneration = Number(daemonInstanceGenerationValue);
 
 if (
   databasePath === undefined ||
@@ -65,6 +77,8 @@ if (
   || maximumConcurrentProviderTurns < 1
   || workspaceRoots === undefined
   || workspaceRoots.length === 0
+  || !Number.isSafeInteger(daemonInstanceGeneration)
+  || daemonInstanceGeneration < 1
 ) {
   throw new Error("agent fabric daemon environment is incomplete");
 }
@@ -103,24 +117,11 @@ const fabric = await openFabric({
 await fabric.recoverStartupState();
 const sockets = new Set<Socket>();
 let totalInFlight = 0;
-const server = createServer((socket) => {
+const serveLegacyConnection = (socket: Socket): void => {
   const writer = new BoundedNdjsonWriter(socket, {
     maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
     maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumInFlightPerConnection,
   });
-  if (sockets.size >= FABRIC_PROTOCOL_LIMITS.maximumConnections) {
-    void writer.write({
-      id: "connection",
-      error: {
-        name: "DaemonProtocolError",
-        code: "DAEMON_CONNECTION_LIMIT",
-        message: `daemon accepts at most ${String(FABRIC_PROTOCOL_LIMITS.maximumConnections)} connections`,
-      },
-    }).finally(() => socket.end());
-    return;
-  }
-  sockets.add(socket);
-  socket.once("close", () => sockets.delete(socket));
   let connectionInFlight = 0;
   let initializedCapability: string | undefined;
   let initializationComplete = false;
@@ -244,6 +245,71 @@ const server = createServer((socket) => {
     },
   });
   socket.once("close", () => reader.close());
+};
+
+const servePublicConnection = (socket: Socket): void => {
+  servePublicProtocolConnection(socket, {
+    daemonVersion: FABRIC_DAEMON_VERSION,
+    daemonInstanceGeneration,
+    offeredFeatures: PROTOCOL_FEATURES,
+    limits: PROTOCOL_LIMITS,
+    verifyCredential: (credential) => {
+      if (secretEqual(credential, bootstrapCapability)) {
+        throw new DaemonProtocolError(
+          "AUTHENTICATION_FAILED",
+          "bootstrap discovery capability is not a public protocol principal",
+        );
+      }
+      return fabric.verifyProtocolCredential(credential);
+    },
+    dispatch: async (context, operation, input) => {
+      if (totalInFlight >= FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight) {
+        throw Object.assign(new Error(
+          `daemon permits ${String(FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight)} in-flight commands`,
+        ), { code: "OVERLOADED" });
+      }
+      totalInFlight += 1;
+      try {
+        return await fabric.dispatchPublicProtocol(context, operation, input);
+      } finally {
+        totalInFlight -= 1;
+      }
+    },
+  });
+};
+
+const server = createServer((socket) => {
+  if (sockets.size >= FABRIC_PROTOCOL_LIMITS.maximumConnections) {
+    const writer = new BoundedNdjsonWriter(socket, {
+      maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+      maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumInFlightPerConnection,
+    });
+    void writer.write({
+      id: "connection",
+      error: {
+        name: "DaemonProtocolError",
+        code: "DAEMON_CONNECTION_LIMIT",
+        message: `daemon accepts at most ${String(FABRIC_PROTOCOL_LIMITS.maximumConnections)} connections`,
+      },
+    }).catch(() => undefined).finally(() => socket.end());
+    return;
+  }
+  sockets.add(socket);
+  socket.once("close", () => sockets.delete(socket));
+  routeDaemonConnection(socket, {
+    maximumFirstFrameBytes: Math.min(
+      FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
+      PROTOCOL_LIMITS.maximumFrameBytes,
+    ),
+    idleTimeoutMs: Math.min(
+      FABRIC_PROTOCOL_LIMITS.idleTimeoutMs,
+      PROTOCOL_LIMITS.idleTimeoutMs,
+    ),
+    onRoute: (protocol, routedSocket) => {
+      if (protocol === "public-v1") servePublicConnection(routedSocket);
+      else serveLegacyConnection(routedSocket);
+    },
+  });
 });
 
 await new Promise<void>((resolve, reject) => {
