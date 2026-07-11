@@ -1355,6 +1355,13 @@ export class Fabric {
         principalGeneration: context.principal.principalGeneration,
       };
       switch (operation) {
+        case FABRIC_OPERATIONS.intakeRevise: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRevise];
+          if (request.origin !== "chair") {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "agent intake revision requires chair origin");
+          }
+          return this.#intakes.revise(agent, request);
+        }
         case FABRIC_OPERATIONS.scopedGateCreate: {
           const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
           if (request.origin !== "chair") {
@@ -1523,6 +1530,15 @@ export class Fabric {
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
         return this.#intakes.submit(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.intakeRevise: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRevise];
+        if (request.origin !== "operator") {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "agent intake revision uses the chair dispatcher");
+        }
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#intakes.revise(credential.context, request);
       }
       case FABRIC_OPERATIONS.scopedGateCreate: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
