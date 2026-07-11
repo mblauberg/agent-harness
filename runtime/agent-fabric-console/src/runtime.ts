@@ -355,6 +355,7 @@ export class FabricConsoleRuntime {
       if (selected !== undefined) {
         this.#controller.select(selected.view, selected.stableId);
         this.#controller.setScrollAnchor(selected.view, selected.stableId);
+        this.#resetDetailScroll(selected.view);
         this.repaint();
       }
       return;
@@ -418,7 +419,7 @@ export class FabricConsoleRuntime {
     this.#pointer = reduced.state;
     for (const intent of reduced.intents) {
       if (intent.kind === "scroll") {
-        this.#page(intent.direction ?? 1);
+        this.#page(intent.direction ?? 1, intent.regionId);
         continue;
       }
       if (intent.kind === "move-splitter") {
@@ -447,7 +448,7 @@ export class FabricConsoleRuntime {
     this.repaint();
   }
 
-  #page(direction: -1 | 1): void {
+  #page(direction: -1 | 1, regionId: string | null = null): void {
     if (this.#controller.state.review !== null) {
       this.#ui = {
         ...this.#ui,
@@ -461,6 +462,38 @@ export class FabricConsoleRuntime {
       return;
     }
     const view = this.#controller.state.activeView;
+    const detailFocused =
+      regionId?.startsWith("detail:") === true ||
+      this.#ui.focusId?.startsWith("detail:") === true ||
+      (this.#frame.mode === "compact" && this.#ui.compactPane === "detail");
+    if (detailFocused) {
+      const detailRegion = this.#frame.hitRegions.find(
+        (region) =>
+          region.kind === "pager" &&
+          (region.id === regionId ||
+            region.id === this.#ui.focusId ||
+            region.binding?.view === view),
+      );
+      const maximum = Math.max(0, detailRegion?.scrollMaximum ?? 0);
+      const current = Math.min(
+        maximum,
+        Math.max(
+          0,
+          Math.trunc(this.#ui.detailScrollOffsetByView[view] ?? 0),
+        ),
+      );
+      const offset = Math.min(maximum, Math.max(0, current + direction * 5));
+      this.#ui = {
+        ...this.#ui,
+        detailScrollOffsetByView: {
+          ...this.#ui.detailScrollOffsetByView,
+          [view]: offset,
+        },
+        notice: null,
+      };
+      this.repaint();
+      return;
+    }
     const current = Math.max(0, Math.trunc(this.#ui.scrollOffsetByView[view] ?? 0));
     const maximum = Math.max(0, this.#controller.dataset.pages[view].rows.length - 1);
     const offset = Math.min(maximum, Math.max(0, current + direction * 5));
@@ -488,8 +521,19 @@ export class FabricConsoleRuntime {
     if (row === undefined) return;
     this.#controller.select(view, row.stableId);
     this.#controller.setScrollAnchor(view, row.stableId);
+    this.#resetDetailScroll(view);
     this.#ui = { ...this.#ui, focusId: `row:${view}:${row.stableId}`, notice: null };
     this.repaint();
+  }
+
+  #resetDetailScroll(view: FabricView): void {
+    this.#ui = {
+      ...this.#ui,
+      detailScrollOffsetByView: {
+        ...this.#ui.detailScrollOffsetByView,
+        [view]: 0,
+      },
+    };
   }
 
   #moveFocus(direction: -1 | 1): void {
@@ -532,14 +576,39 @@ export class FabricConsoleRuntime {
     if (region.kind === "row" && region.binding !== null) {
       this.#controller.select(region.binding.view, region.binding.itemId);
       this.#controller.setScrollAnchor(region.binding.view, region.binding.itemId);
+      this.#resetDetailScroll(region.binding.view);
       if (this.#frame.mode === "compact") {
         this.#ui = { ...this.#ui, compactPane: "detail" };
+      }
+      this.repaint();
+      try {
+        await this.#activate({
+          regionId: region.id,
+          binding: region.binding,
+          provenance,
+          eventId: this.#eventId(),
+        });
+      } catch (error) {
+        const failure = consoleFailureFromUnknown(error);
+        this.#ui = { ...this.#ui, notice: `Read failed: ${failure.code}` };
+      }
+      const detailId = `detail:${region.binding.view}:${region.binding.itemId}`;
+      if (
+        this.#frame.hitRegions.some(
+          (candidate) => candidate.kind === "pager" && candidate.id === detailId,
+        )
+      ) {
+        this.#ui = { ...this.#ui, focusId: detailId };
       }
       this.repaint();
       return;
     }
     if (region.kind === "detach") {
       await this.close("operator");
+      return;
+    }
+    if (region.kind === "pager") {
+      this.repaint();
       return;
     }
     if (region.kind === "splitter") return;

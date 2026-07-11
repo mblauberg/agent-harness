@@ -253,6 +253,8 @@ describe("Console bounded load gates", () => {
       readGate: async () => {
         throw new Error("unused");
       },
+      readMessageBody: null,
+      readRepository: null,
     };
     const adapter = new ConsoleProtocolAdapter({
       binding: { ok: true, port, readOnly: true, actions: null },

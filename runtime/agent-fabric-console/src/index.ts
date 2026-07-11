@@ -1,6 +1,11 @@
 import stringWidth from "string-width";
 import { splitGraphemes } from "unicode-segmenter/grapheme";
+import type {
+  GitPathPage,
+  GitRepositoryProjection,
+} from "@local/agent-fabric-protocol";
 import type { TerminalInputEvent } from "./input.js";
+import { presentMessageBodyWindow } from "./message.js";
 import type { ConsoleControllerState } from "./controller.js";
 import type { FabricView, Revision } from "./model.js";
 import {
@@ -1022,6 +1027,7 @@ export type FabricHitRegion = Readonly<{
   enabled: boolean;
   geometryKey: string;
   binding: FabricHitBinding | null;
+  scrollMaximum?: number;
 }>;
 
 export type FabricConsoleFrame = Readonly<{
@@ -1266,23 +1272,186 @@ function renderFabricDetail(
   rows: string[],
   columns: number,
   presentation: FabricConsolePresentation,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
   bounds: Rect,
 ): void {
-  const lines = presentation.detail?.lines ?? [
-    { label: "Detail", value: "Select an item to inspect canonical facts." },
-  ];
-  for (const [index, detail] of lines
-    .slice(0, bounds.y2 - bounds.y1 + 1)
-    .entries()) {
+  const inspection = dataset.inspection;
+  const height = bounds.y2 - bounds.y1 + 1;
+  const selected = presentation.masterRows.find(
+    (row) => row.stableId === presentation.detail?.stableId,
+  );
+  const detailId = selected === undefined
+    ? null
+    : `detail:${presentation.activeView}:${selected.stableId}`;
+  let detailScrollMaximum = 0;
+  let lines: readonly string[];
+  if (
+    inspection?.kind === "message" &&
+    inspection.binding.view === presentation.activeView &&
+    inspection.binding.itemId === presentation.detail?.stableId
+  ) {
+    if (inspection.state === "current") {
+      const window = presentMessageBodyWindow(
+        inspection.result,
+        {
+          columns: Math.max(1, bounds.x2 - bounds.x1 - 5),
+          rows: Math.max(1, height - 2),
+          offset: Math.max(
+            0,
+            Math.trunc(ui.detailScrollOffsetByView[presentation.activeView] ?? 0),
+          ),
+        },
+        { sanitizeDisplayText, graphemes, cellWidth },
+      );
+      detailScrollMaximum = Math.max(0, window.totalLines - 1);
+      lines = [
+        `Message: ${inspection.result.messageId} r${String(inspection.result.revision)}`,
+        "Safety: terminal-neutralised | capability-values-redacted",
+        ...window.lines.map((line) => `Body: ${line}`),
+      ];
+    } else {
+      lines = [
+        `Message: ${inspection.binding.itemId}`,
+        `Read: unavailable | ${inspection.reason}`,
+      ];
+    }
+  } else if (
+    inspection?.kind === "repository" &&
+    inspection.binding.view === presentation.activeView &&
+    inspection.binding.itemId === presentation.detail?.stableId
+  ) {
+    if (inspection.state === "current") {
+      const offset = Math.max(
+        0,
+        Math.trunc(ui.detailScrollOffsetByView[presentation.activeView] ?? 0),
+      );
+      const repositoryLines = repositoryDetailLines(inspection.repository);
+      detailScrollMaximum = Math.max(0, repositoryLines.length - 1);
+      lines = repositoryLines.slice(offset, offset + height);
+    } else {
+      lines = [
+        `Repository: ${inspection.binding.itemId}`,
+        `Read: unavailable | ${inspection.reason}`,
+      ];
+    }
+  } else {
+    lines = (presentation.detail?.lines ?? [
+      { label: "Detail", value: "Select an item to inspect canonical facts." },
+    ]).map((detail) => `${detail.label}: ${detail.value}`);
+  }
+  for (const [index, value] of lines.slice(0, height).entries()) {
     const y = bounds.y1 + index;
-    const value = `${detail.label}: ${detail.value}`;
+    const displayed = index === 0 && presentation.focusId === detailId
+      ? `>${value}`
+      : value;
     if (bounds.x1 === 1 && bounds.x2 === columns) {
-      setFabricRow(rows, y, columns, value);
+      setFabricRow(rows, y, columns, displayed);
     } else {
       const left = (rows[y - 1] ?? " ".repeat(columns)).slice(0, bounds.x1 - 1);
-      rows[y - 1] = `${left}${fitCells(chromeText(value), bounds.x2 - bounds.x1 + 1)}`;
+      rows[y - 1] = `${left}${fitCells(chromeText(displayed), bounds.x2 - bounds.x1 + 1)}`;
     }
   }
+  if (selected !== undefined && detailId !== null) {
+    hitRegions.push({
+      id: detailId,
+      kind: "pager",
+      rect: bounds,
+      enabled: true,
+      geometryKey,
+      binding: presentedBinding(dataset, selected),
+      scrollMaximum: detailScrollMaximum,
+    });
+  }
+}
+
+function gitPathLines(label: string, page: GitPathPage): readonly string[] {
+  return [
+    `${label}: ${String(page.paths.length)}${page.truncated ? " | TRUNCATED" : ""}`,
+    ...page.paths.map((path) => `${label} path: ${path}`),
+  ];
+}
+
+function hostedCheckLines(
+  hosted: GitRepositoryProjection["hostedChecks"],
+): readonly string[] {
+  const header = `GitHub checks: ${hosted.freshness.toUpperCase()} r${String(hosted.revision)} @ ${hosted.observedAt}`;
+  if (hosted.freshness === "unavailable") {
+    return [`${header} | ${hosted.reason}`];
+  }
+  if (hosted.freshness === "conflict") {
+    return [
+      `${header} | ${String(hosted.candidates.length)} candidates`,
+      ...hosted.candidates.map(
+        (candidate) =>
+          candidate === null
+            ? "GitHub candidate: none"
+            : `GitHub candidate: ${candidate.repository} | ${candidate.headObjectDigest} | ${candidate.state} ${String(candidate.passing)}/${String(candidate.total)}`,
+      ),
+    ];
+  }
+  if (hosted.value === null) return [`${header} | none`];
+  return [
+    `${header} | ${hosted.value.state} ${String(hosted.value.passing)}/${String(hosted.value.total)}`,
+    `GitHub target: ${hosted.value.repository} | ${hosted.value.headObjectDigest}`,
+    `GitHub counts: pass ${String(hosted.value.passing)} | fail ${String(hosted.value.failing)} | pending ${String(hosted.value.pending)} | total ${String(hosted.value.total)}`,
+  ];
+}
+
+function repositoryDetailLines(
+  repository: GitRepositoryProjection,
+): readonly string[] {
+  const head = repository.head.detached
+    ? `detached@${repository.head.objectDigest}`
+    : `${repository.head.refName}@${repository.head.objectDigest}`;
+  const upstream = repository.upstream === null
+    ? "none"
+    : `${repository.upstream.remoteName}/${repository.upstream.branchName} +${String(repository.upstream.ahead)} -${String(repository.upstream.behind)}`;
+  const logLines = repository.log.items.map(
+    (entry) => `Log: ${entry.objectDigest} | ${entry.authorTimestamp} | ${entry.subject}`,
+  );
+  const logCursorLines = repository.log.hasMore
+    ? [
+        `Next log cursor: state ${repository.log.nextCursor.repositoryStateDigest} | after ${repository.log.nextCursor.afterObjectDigest}`,
+      ]
+    : [];
+  const branchLines = repository.branches.items.map((branch) =>
+    `Branch: ${branch.checkedOut ? "*" : " "} ${branch.refName}@${branch.objectDigest}${
+      branch.upstream === null
+        ? ""
+        : ` -> ${branch.upstream.remoteName}/${branch.upstream.branchName}`
+    }`,
+  );
+  const worktreeLines = repository.worktrees.items.map((worktree) =>
+    `Worktree: ${worktree.current ? "CURRENT" : "other"}${worktree.locked ? " LOCKED" : ""} | ${worktree.canonicalPath}`,
+  );
+  return [
+    `Git: ${repository.freshness.toUpperCase()} r${String(repository.revision)} | ${repository.operationState.kind}`,
+    `Git observed: ${repository.observedAt}`,
+    `HEAD: ${head}`,
+    `Upstream: ${upstream}`,
+    ...hostedCheckLines(repository.hostedChecks),
+    `Root: ${repository.canonicalRepositoryRoot}`,
+    `Worktree: ${repository.canonicalWorktreePath}`,
+    `Repository state: ${repository.repositoryStateDigest}`,
+    `State digests: HEAD ${repository.headDigest} | index ${repository.indexDigest}`,
+    `State digests: worktree ${repository.worktreeDigest} | remote ${repository.remoteDigest}`,
+    ...gitPathLines("Staged", repository.changes.staged),
+    ...gitPathLines("Unstaged", repository.changes.unstaged),
+    ...gitPathLines("Untracked", repository.changes.untracked),
+    ...gitPathLines("Conflicted", repository.changes.conflicted),
+    `Diff: ${repository.diff.selector.kind} | ${repository.diff.baseDigest} -> ${repository.diff.targetDigest}`,
+    `Diff artifact: ${repository.diff.artifactRef.path}@${repository.diff.artifactRef.digest}`,
+    `Log page: ${String(repository.log.items.length)} | ${repository.log.hasMore ? "MORE" : "END"}`,
+    ...logLines,
+    ...logCursorLines,
+    `Branches: ${String(repository.branches.items.length)}${repository.branches.truncated ? " | TRUNCATED" : ""}`,
+    ...branchLines,
+    `Worktrees: ${String(repository.worktrees.items.length)}${repository.worktrees.truncated ? " | TRUNCATED" : ""}`,
+    ...worktreeLines,
+  ];
 }
 
 function reviewLines(presentation: FabricConsolePresentation): readonly string[] {
@@ -1614,7 +1783,16 @@ export function renderFabricConsoleFrame(
       geometryKey,
       binding: null,
     });
-    renderFabricDetail(rows, dimensions.columns, presentation, detail);
+    renderFabricDetail(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      ui,
+      geometryKey,
+      hitRegions,
+      detail,
+    );
   } else if (mode === "reference") {
     const splitRow = Math.min(
       body.y2 - 2,
@@ -1642,10 +1820,16 @@ export function renderFabricConsoleFrame(
       geometryKey,
       binding: null,
     });
-    renderFabricDetail(rows, dimensions.columns, presentation, {
-      ...body,
-      y1: splitRow + 1,
-    });
+    renderFabricDetail(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      ui,
+      geometryKey,
+      hitRegions,
+      { ...body, y1: splitRow + 1 },
+    );
   } else if (presentation.compactPane === "master") {
     renderFabricMaster(
       rows,
@@ -1658,7 +1842,16 @@ export function renderFabricConsoleFrame(
       body,
     );
   } else {
-    renderFabricDetail(rows, dimensions.columns, presentation, body);
+    renderFabricDetail(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      ui,
+      geometryKey,
+      hitRegions,
+      body,
+    );
   }
   renderFabricActions(
     rows,

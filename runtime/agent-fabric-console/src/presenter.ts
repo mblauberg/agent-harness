@@ -39,6 +39,7 @@ export type FabricConsoleUiState = Readonly<{
   mouseCapture: boolean;
   inputMode: "browse" | "editor" | "palette";
   scrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
+  detailScrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
   rejectedInputCount: number;
   notice: string | null;
   splitterRatio: number;
@@ -56,6 +57,7 @@ export function createFabricUiState(
     mouseCapture: overrides.mouseCapture ?? false,
     inputMode: overrides.inputMode ?? "browse",
     scrollOffsetByView: overrides.scrollOffsetByView ?? {},
+    detailScrollOffsetByView: overrides.detailScrollOffsetByView ?? {},
     rejectedInputCount: overrides.rejectedInputCount ?? 0,
     notice: overrides.notice ?? null,
     splitterRatio:

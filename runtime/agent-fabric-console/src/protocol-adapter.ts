@@ -1,5 +1,11 @@
 import type {
   NegotiatedOperatorClient,
+  GitRepositoryReadClient,
+  GitRepositoryReadRequest,
+  GitRepositoryProjection,
+  MessageBodyClient,
+  MessageBodyReadResult,
+  MessageBodyRef,
   OperatorActionClient,
   OperatorCapabilityCredential,
   OperatorDetailReadRequest,
@@ -15,6 +21,8 @@ import type {
   ScopedGateReadRequest,
   ScopedGateReadResult,
 } from "@local/agent-fabric-protocol";
+
+import { readConsoleMessageBody } from "./message.js";
 
 import {
   FABRIC_VIEWS,
@@ -42,6 +50,8 @@ export type ConsoleProtocolPort = Readonly<{
     request: OperatorDetailReadRequest,
   ): Promise<OperatorDetailReadResult>;
   readGate(request: ScopedGateReadRequest): Promise<ScopedGateReadResult>;
+  readMessageBody: MessageBodyClient["read"] | null;
+  readRepository: GitRepositoryReadClient["read"] | null;
 }>;
 
 export type ConsoleProtocolBinding =
@@ -85,6 +95,8 @@ export function bindConsoleProtocolClient(
       viewPage: (request) => consoleClient.projection.viewPage(request),
       readDetail: (request) => consoleClient.projection.readDetail(request),
       readGate: (request) => consoleClient.gates.read(request),
+      readMessageBody: client.messages?.read ?? null,
+      readRepository: client.repository?.read ?? null,
     },
   };
 }
@@ -104,6 +116,75 @@ export type ConsoleConnection =
       missingFeatures: readonly string[];
     }>;
 
+export type ConsoleInspectionBinding = Readonly<{
+  view: FabricView;
+  itemId: string;
+  itemRevision: Revision;
+  projectionRevision: Revision;
+}>;
+
+export type ConsoleReadInspection =
+  | Readonly<{
+      kind: "message";
+      state: "current";
+      binding: ConsoleInspectionBinding;
+      result: Extract<MessageBodyReadResult, { available: true }>;
+    }>
+  | Readonly<{
+      kind: "message";
+      state: "unavailable";
+      binding: ConsoleInspectionBinding;
+      reason:
+        | "feature-unavailable"
+        | "message-not-found"
+        | "message-forbidden"
+        | "message-expired"
+        | "projection-changed"
+        | "contract-invalid"
+        | "transport-failure";
+    }>
+  | Readonly<{
+      kind: "repository";
+      state: "current";
+      binding: ConsoleInspectionBinding;
+      readTransactionId: string;
+      repository: GitRepositoryProjection;
+    }>
+  | Readonly<{
+      kind: "repository";
+      state: "unavailable";
+      binding: ConsoleInspectionBinding;
+      reason:
+        | "feature-unavailable"
+        | "projection-changed"
+        | "detail-unavailable"
+        | "detail-conflict"
+        | "detail-invalid"
+        | "repository-resnapshot-required"
+        | "contract-invalid"
+        | "transport-failure";
+    }>;
+
+function unavailableMessage(
+  binding: ConsoleInspectionBinding,
+  reason: Extract<ConsoleReadInspection, { kind: "message"; state: "unavailable" }>["reason"],
+): ConsoleReadInspection {
+  return { kind: "message", state: "unavailable", binding, reason };
+}
+
+function unavailableRepository(
+  binding: ConsoleInspectionBinding,
+  reason: Extract<ConsoleReadInspection, { kind: "repository"; state: "unavailable" }>["reason"],
+): ConsoleReadInspection {
+  return { kind: "repository", state: "unavailable", binding, reason };
+}
+
+function failureCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const code = Reflect.get(error, "code");
+  return typeof code === "string" ? code : null;
+}
+
 export type FabricConsoleDataset = Readonly<{
   connection: ConsoleConnection;
   snapshot: OperatorProjectionSnapshot | null;
@@ -112,6 +193,7 @@ export type FabricConsoleDataset = Readonly<{
   pages: ConsoleViewPages;
   loadedAtMs: number;
   canMutate: boolean;
+  inspection?: ConsoleReadInspection;
 }>;
 
 export type ConsoleProtocolAdapterOptions = Readonly<{
@@ -298,6 +380,171 @@ export class ConsoleProtocolAdapter {
       return current;
     } catch (error) {
       return this.#fallbackFor(error);
+    }
+  }
+
+  async inspect(binding: ConsoleInspectionBinding): Promise<ConsoleReadInspection | null> {
+    const dataset = this.#lastGood;
+    if (binding.view === "project") {
+      const row = dataset?.pages.project.rows.find(
+        (candidate) => candidate.stableId === binding.itemId,
+      );
+      if (
+        dataset === null ||
+        dataset?.snapshotRevision !== binding.projectionRevision ||
+        row?.revision !== binding.itemRevision ||
+        row.detailRef === null
+      ) {
+        return unavailableRepository(binding, "projection-changed");
+      }
+      if (!this.#binding.ok) return unavailableRepository(binding, "feature-unavailable");
+      try {
+        const detail = await this.#binding.port.readDetail({
+          ...this.#readScope(),
+          snapshotRevision: revisionToProtocol(binding.projectionRevision),
+          detailRef: row.detailRef,
+        });
+        if (detail.status === "resnapshot-required") {
+          return unavailableRepository(binding, "projection-changed");
+        }
+        if (
+          detail.snapshotRevision !==
+            revisionToProtocol(binding.projectionRevision) ||
+          detail.detailRef.kind !== "project" ||
+          detail.detailRef.projectId !== row.detailRef.projectId ||
+          detail.detailRef.expectedRevision !== row.detailRef.expectedRevision ||
+          detail.detail.revision !== row.detailRef.expectedRevision
+        ) {
+          return unavailableRepository(binding, "contract-invalid");
+        }
+        if (detail.detail.freshness === "unavailable") {
+          return unavailableRepository(binding, "detail-unavailable");
+        }
+        if (detail.detail.freshness === "conflict") {
+          return unavailableRepository(binding, "detail-conflict");
+        }
+        const project = detail.detail.value;
+        if (project.kind !== "project" || project.projectId !== this.#projectId) {
+          return unavailableRepository(binding, "detail-invalid");
+        }
+        const read = this.#binding.port.readRepository;
+        if (read === null) return unavailableRepository(binding, "feature-unavailable");
+        const selectedWorktree =
+          project.repository !== undefined &&
+          project.repository.canonicalWorktreePath !== project.canonicalRoot
+            ? project.repository.canonicalWorktreePath
+            : null;
+        if (selectedWorktree !== null && this.#projectSessionId === undefined) {
+          return unavailableRepository(binding, "detail-invalid");
+        }
+        const requestBase = {
+          credential: this.#credential,
+          projectId: this.#projectId,
+          snapshotRevision: revisionToProtocol(binding.projectionRevision),
+          diff: { kind: "working-tree" },
+          log: { limit: 32 },
+        } as const;
+        let request: GitRepositoryReadRequest;
+        if (selectedWorktree === null) {
+          request = {
+            ...requestBase,
+            ...(this.#projectSessionId === undefined
+              ? {}
+              : { projectSessionId: this.#projectSessionId }),
+            target: { kind: "project-root" },
+          };
+        } else {
+          const projectSessionId = this.#projectSessionId;
+          if (projectSessionId === undefined) {
+            return unavailableRepository(binding, "detail-invalid");
+          }
+          request = {
+            ...requestBase,
+            projectSessionId,
+            target: {
+              kind: "session-worktree",
+              canonicalWorktreePath: selectedWorktree,
+            },
+          };
+        }
+        const result = await read(request);
+        if (result.status === "resnapshot-required") {
+          return unavailableRepository(binding, "repository-resnapshot-required");
+        }
+        if (
+          result.projectId !== this.#projectId ||
+          result.projectSessionId !== (this.#projectSessionId ?? null) ||
+          result.snapshotRevision !== revisionToProtocol(binding.projectionRevision) ||
+          result.repository.canonicalRepositoryRoot !== project.canonicalRoot ||
+          result.repository.canonicalWorktreePath !==
+            (selectedWorktree ?? project.canonicalRoot)
+        ) {
+          return unavailableRepository(binding, "contract-invalid");
+        }
+        return {
+          kind: "repository",
+          state: "current",
+          binding,
+          readTransactionId: result.readTransactionId,
+          repository: result.repository,
+        };
+      } catch (error: unknown) {
+        const code = failureCode(error);
+        return unavailableRepository(
+          binding,
+          code === "STALE_REVISION"
+            ? "projection-changed"
+            : code === "PROJECTION_RESNAPSHOT_REQUIRED"
+              ? "repository-resnapshot-required"
+              : "transport-failure",
+        );
+      }
+    }
+    if (binding.view !== "activity") return null;
+    const row = dataset?.pages.activity.rows.find(
+      (candidate) => candidate.stableId === binding.itemId,
+    );
+    if (
+      dataset === null ||
+      dataset?.snapshotRevision !== binding.projectionRevision ||
+      row?.revision !== binding.itemRevision
+    ) {
+      return unavailableMessage(binding, "projection-changed");
+    }
+    if (
+      row.summary?.kind !== "activity" ||
+      row.summary.activityKind !== "message"
+    ) {
+      return null;
+    }
+    const reference: MessageBodyRef = row.summary.messageBodyRef;
+    const read = this.#binding.ok ? this.#binding.port.readMessageBody : null;
+    if (read === null) return unavailableMessage(binding, "feature-unavailable");
+    try {
+      const result = await readConsoleMessageBody(
+        { read },
+        { credential: this.#credential, ...reference },
+      );
+      if (!result.available) {
+        const reason = {
+          "not-found": "message-not-found",
+          forbidden: "message-forbidden",
+          expired: "message-expired",
+        } as const;
+        return unavailableMessage(binding, reason[result.reason]);
+      }
+      return { kind: "message", state: "current", binding, result };
+    } catch (error: unknown) {
+      const code = failureCode(error);
+      return unavailableMessage(
+        binding,
+        error instanceof Error && error.message.startsWith("message body contract")
+          ? "contract-invalid"
+          : code === "STALE_REVISION" ||
+              code === "PROJECTION_RESNAPSHOT_REQUIRED"
+            ? "projection-changed"
+          : "transport-failure",
+      );
     }
   }
 

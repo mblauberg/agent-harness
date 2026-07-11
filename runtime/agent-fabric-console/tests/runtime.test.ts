@@ -313,6 +313,65 @@ describe("Fabric Console runtime routing", () => {
     expect(activations[1]).toMatchObject({ binding: action.binding });
   });
 
+  it("uses the same exact row binding for keyboard and mouse reads", async () => {
+    const activations: unknown[] = [];
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({
+        focusId: "row:attention:attention:1",
+        mouseCapture: true,
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async (activation) => {
+        activations.push(activation);
+      },
+      eventId: (() => {
+        let value = 0;
+        return () => `event-row-${String(++value)}`;
+      })(),
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    const row = runtime.frame.hitRegions.find(
+      ({ id }) => id === "row:attention:attention:1",
+    );
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+    await runtime.handleInput({ kind: "key", key: "enter" });
+    await runtime.handleInput({
+      kind: "mouse",
+      phase: "press",
+      button: "left",
+      x: row.rect.x1,
+      y: row.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    });
+    await runtime.handleInput({
+      kind: "mouse",
+      phase: "release",
+      button: "left",
+      x: row.rect.x1,
+      y: row.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    });
+
+    expect(activations).toEqual([
+      expect.objectContaining({
+        regionId: row.id,
+        binding: row.binding,
+        provenance: "keyboard",
+      }),
+      expect.objectContaining({
+        regionId: row.id,
+        binding: row.binding,
+        provenance: "mouse",
+      }),
+    ]);
+  });
+
   it("reflows on every resize without changing drafts, selection, scroll or pending commands", () => {
     const controller = new FakeController();
     const activate = vi.fn(async () => {});
@@ -323,6 +382,7 @@ describe("Fabric Console runtime routing", () => {
       ui: createFabricUiState({
         draft: "keep this draft",
         scrollOffsetByView: { attention: 4 },
+        detailScrollOffsetByView: { attention: 7 },
         focusId: "row:attention:attention:1",
       }),
       draw: () => {},
@@ -426,6 +486,120 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.compactPane).toBe("master");
     expect(runtime.frame.rows.join("\n")).toContain("Resume blocked task");
     expect(runtime.ui.draft).toBe("compact-safe");
+  });
+
+  it("keeps a bounded independently scrollable message detail window", async () => {
+    const controller = new FakeController();
+    const messageRow: ConsoleRow<"activity"> = {
+      view: "activity",
+      stableId: "event-message",
+      revision: revisionFromProtocol(4),
+      urgency: "normal",
+      freshness: {
+        state: "live",
+        source: "fabric",
+        revision: revisionFromProtocol(4),
+        observedAt: timestamp,
+        ageMs: 0,
+      },
+      summary: {
+        kind: "activity",
+        activityKind: "message",
+        summary: "Long message",
+        occurredAt: timestamp,
+        messageBodyRef: {
+          projectSessionId: "session-1" as never,
+          messageId: "message-1" as never,
+          expectedRevision: 4,
+        },
+      },
+      detailRef: { kind: "activity", eventId: "event-message", expectedRevision: 4 },
+      actionAvailability: { state: "read-only", reason: "state-ineligible" },
+    };
+    controller.dataset = {
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        activity: {
+          view: "activity",
+          rows: [messageRow],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: revisionFromProtocol(11),
+          readTransactionId: "activity-read",
+        },
+      },
+      inspection: {
+        kind: "message",
+        state: "current",
+        binding: {
+          view: "activity",
+          itemId: "event-message",
+          itemRevision: revisionFromProtocol(4),
+          projectionRevision: revisionFromProtocol(11),
+        },
+        result: {
+          available: true,
+          messageId: "message-1" as never,
+          revision: 4,
+          body: Array.from({ length: 30 }, (_, index) => `line-${String(index).padStart(2, "0")}`).join("\n"),
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          artifactRefs: [],
+        },
+      },
+    };
+    controller.state = {
+      ...controller.state,
+      activeView: "activity",
+      selectionByView: {
+        ...controller.state.selectionByView,
+        activity: { stableId: "event-message", revision: revisionFromProtocol(4) },
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 60, rows: 18 },
+      ui: createFabricUiState({ compactPane: "detail", mouseCapture: true }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-scroll",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    expect(runtime.frame.rows.join("\n")).toContain("line-00");
+    expect(runtime.frame.rows.join("\n")).not.toContain("line-13");
+    await runtime.handleInput({ kind: "key", key: "page-down" });
+
+    expect(runtime.ui.detailScrollOffsetByView.activity).toBe(5);
+    expect(runtime.frame.rows.join("\n")).toContain("line-13");
+    expect(runtime.ui.scrollOffsetByView.activity).toBeUndefined();
+
+    const detail = runtime.frame.hitRegions.find(
+      ({ id }) => id === "detail:activity:event-message",
+    );
+    expect(detail).toBeDefined();
+    if (detail === undefined) return;
+    await runtime.handleInput({
+      kind: "mouse",
+      phase: "wheel",
+      button: "wheel-down",
+      x: detail.rect.x1,
+      y: detail.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    });
+
+    expect(runtime.ui.detailScrollOffsetByView.activity).toBe(10);
+    expect(runtime.frame.rows.join("\n")).toContain("line-18");
+    expect(runtime.ui.scrollOffsetByView.activity).toBeUndefined();
+
+    for (let index = 0; index < 10; index += 1) {
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+    }
+    expect(runtime.ui.detailScrollOffsetByView.activity).toBe(29);
+    expect(runtime.frame.rows.join("\n")).toContain("line-29");
   });
 
   it("detaches exactly once, never stops work, and ignores late input", async () => {

@@ -19,7 +19,7 @@ import {
   type ConsoleProtocolBinding,
   type ConsoleProtocolPort,
 } from "../src/protocol-adapter.js";
-import { FABRIC_VIEWS } from "../src/model.js";
+import { FABRIC_VIEWS, revisionFromProtocol } from "../src/model.js";
 
 const projectId = "project-1" as ProjectId;
 const credential = {
@@ -115,6 +115,8 @@ function fakePort(
     readGate: vi.fn(async () => {
       throw new Error("unused gate read");
     }),
+    readMessageBody: null,
+    readRepository: null,
     ...overrides,
   };
 }
@@ -343,6 +345,115 @@ describe("public protocol adapter", () => {
       snapshot: null,
       canMutate: false,
     });
+  });
+
+  it("binds negotiated message and repository reads through the Console protocol port", () => {
+    const messageRead = vi.fn();
+    const repositoryRead = vi.fn();
+    const negotiated = {
+      kind: "operator",
+      features: [
+        "operator-projection.v1",
+        "operator-projection.v2",
+        "scoped-gate-read.v1",
+        "message-body-read.v1",
+        "operator-repository-read.v1",
+      ],
+      projection: {},
+      console: {
+        readOnly: true,
+        gates: { read: vi.fn() },
+        projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+      },
+      messages: { read: messageRead },
+      repository: { read: repositoryRead },
+    } as never;
+
+    const bound = bindConsoleProtocolClient(negotiated);
+
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect(Reflect.get(bound.port, "readMessageBody")).toBe(messageRead);
+    expect(Reflect.get(bound.port, "readRepository")).toBe(repositoryRead);
+
+    const withoutOptionalReads = bindConsoleProtocolClient({
+      kind: "operator",
+      features: [
+        "operator-projection.v1",
+        "operator-projection.v2",
+        "scoped-gate-read.v1",
+      ],
+      projection: {},
+      console: {
+        readOnly: true,
+        gates: { read: vi.fn() },
+        projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+      },
+    } as never);
+    expect(withoutOptionalReads.ok).toBe(true);
+    if (!withoutOptionalReads.ok) return;
+    expect(withoutOptionalReads.port.readMessageBody).toBeNull();
+    expect(withoutOptionalReads.port.readRepository).toBeNull();
+  });
+
+  it("does not misrepresent a non-message Activity row as a failed message read", async () => {
+    const port = fakePort({
+      viewPage: vi.fn(async (request) => {
+        if (request.view !== "activity") {
+          return emptyPage(request.view, request.snapshotRevision);
+        }
+        return {
+          status: "page",
+          view: "activity",
+          rows: [{
+            itemId: "activity-lifecycle",
+            itemRevision: 4,
+            fact: {
+              freshness: "live",
+              source: "fabric",
+              revision: 4,
+              observedAt,
+              value: {
+                summary: {
+                  kind: "activity",
+                  activityKind: "lifecycle",
+                  summary: "Run completed",
+                  occurredAt: observedAt,
+                },
+                detailRef: {
+                  kind: "activity",
+                  eventId: "activity-lifecycle",
+                  expectedRevision: 4,
+                },
+                actionAvailability: {
+                  state: "read-only",
+                  reason: "state-ineligible",
+                },
+              },
+            },
+          }],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: request.snapshotRevision,
+          readTransactionId: "activity-lifecycle-read",
+        } as OperatorViewPageResult;
+      }),
+    });
+    const adapter = new ConsoleProtocolAdapter({
+      binding: binding(port),
+      credential,
+      projectId,
+    });
+    await adapter.open();
+
+    const inspection = await adapter.inspect({
+      view: "activity",
+      itemId: "activity-lifecycle",
+      itemRevision: revisionFromProtocol(4),
+      projectionRevision: revisionFromProtocol(1),
+    });
+
+    expect(inspection).toBeNull();
   });
 
   it("imports only the public protocol package across the Console source tree", async () => {

@@ -242,10 +242,16 @@ export class FabricConsoleApplication {
 
   async refresh(): Promise<FabricConsoleDataset> {
     if (this.#adapter === null) return this.dataset;
+    const inspection = this.dataset.inspection;
     const next = await this.#adapter.poll();
-    const visible = this.#plannerEnablesMutation
+    const mutationVisible = this.#plannerEnablesMutation
       ? next
       : { ...next, canMutate: false };
+    const visible =
+      inspection !== undefined &&
+      inspection.binding.projectionRevision === mutationVisible.snapshotRevision
+        ? { ...mutationVisible, inspection }
+        : mutationVisible;
     this.#runtime.updateDataset(visible);
     return visible;
   }
@@ -255,6 +261,17 @@ export class FabricConsoleApplication {
   }
 
   async handleActivation(activation: FabricRuntimeActivation): Promise<void> {
+    if (
+      activation.regionId.startsWith("row:") &&
+      activation.binding !== null &&
+      this.#adapter !== null
+    ) {
+      const inspection = await this.#adapter.inspect(activation.binding);
+      if (inspection !== null) {
+        this.#runtime.updateDataset({ ...this.dataset, inspection });
+      }
+      return;
+    }
     const controller = this.#mutationController;
     const planner = this.#planner;
     if (controller === null || planner === undefined) return;
