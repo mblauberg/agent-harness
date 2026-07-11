@@ -100,6 +100,7 @@ export class ScopedGateStore {
           projectSessionId: identity.projectSessionId,
           sessionGeneration: identity.sessionGeneration,
           requiredAction: "decide",
+          commandPayload: { origin: request.origin, intent: request.intent },
         },
         () => ({ revision: identity.dependencyRevision, value: { dependencyRevision: identity.dependencyRevision } }),
         () => this.#insertGate(`operator:${context.operatorId}`, request),
@@ -130,6 +131,11 @@ export class ScopedGateStore {
         projectSessionId: identity.projectSessionId,
         sessionGeneration: identity.sessionGeneration,
         requiredAction: "decide",
+        commandPayload: {
+          gateId: request.gateId,
+          status: request.status,
+          decisionEvidence: request.decisionEvidence,
+        },
       },
       () => {
         const gate = this.getGate(request.gateId);
