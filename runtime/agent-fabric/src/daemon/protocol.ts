@@ -2,6 +2,7 @@ import type { FabricClient } from "../core/fabric.js";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import { FABRIC_PROTOCOL_LIMITS, type FabricProtocolLimits } from "../transport/bounded-ndjson.js";
+import { OPERATOR_ACTIONS, type OperatorAction } from "@local/agent-fabric-protocol";
 
 export const FABRIC_PROTOCOL_VERSION = 1 as const;
 export const FABRIC_DAEMON_VERSION = "0.1.0";
@@ -40,6 +41,36 @@ export type DaemonRequest = {
 export type DaemonResponse =
   | { id: string; result: unknown }
   | { id: string; error: { name: string; code: string; message: string } };
+
+export type ProvisionLocalOperatorInput = {
+  canonicalRoot: string;
+  trustRecordDigest: string;
+  projectAuthorityGeneration: number;
+  principalGeneration: number;
+  actions: Array<"read" | "launch">;
+  expiresAt: string;
+};
+
+export type IssueLocalOperatorSessionCapabilityInput = {
+  projectId: string;
+  canonicalRoot: string;
+  trustRecordDigest: string;
+  projectCapability: { capabilityId: string; token: string };
+  projectSessionId: string;
+  sessionGeneration: number;
+  actions: Array<Exclude<OperatorAction, "takeover">>;
+  expiresAt: string;
+  launchEnvelopeExpiresAt: string;
+};
+
+export type RotateLocalOperatorPrincipalInput = {
+  projectId: string;
+  operatorId: string;
+  canonicalRoot: string;
+  trustRecordDigest: string;
+  projectAuthorityGeneration: number;
+  expectedPrincipalGeneration: number;
+};
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -144,6 +175,31 @@ function requiredRecord(params: Record<string, unknown>, field: string): Record<
     throw new TypeError(`${field} must be an object`);
   }
   return value;
+}
+
+function exactFields(value: Record<string, unknown>, fields: readonly string[], name: string): void {
+  const expected = new Set(fields);
+  const unknown = Object.keys(value).filter((field) => !expected.has(field));
+  const missing = fields.filter((field) => !Object.hasOwn(value, field));
+  if (unknown.length > 0 || missing.length > 0) {
+    throw new TypeError(`${name} fields are invalid`);
+  }
+}
+
+function uniqueActions<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  field: string,
+): T[] {
+  const actions = stringArray(value, field);
+  if (
+    actions.length === 0 ||
+    new Set(actions).size !== actions.length ||
+    actions.some((action) => !allowed.includes(action as T))
+  ) {
+    throw new TypeError(`${field} must contain unique allowed actions`);
+  }
+  return actions as T[];
 }
 
 function stringArray(value: unknown, field: string): string[] {
@@ -732,5 +788,80 @@ export function createRunInput(params: Record<string, unknown>): {
       agentId: requiredString(chairValue, "agentId"),
       authority: authority(chairValue.authority),
     },
+  };
+}
+
+export function provisionLocalOperatorInput(
+  params: Record<string, unknown>,
+): ProvisionLocalOperatorInput {
+  exactFields(params, [
+    "canonicalRoot",
+    "trustRecordDigest",
+    "projectAuthorityGeneration",
+    "principalGeneration",
+    "actions",
+    "expiresAt",
+  ], "local operator provisioning");
+  return {
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    trustRecordDigest: requiredString(params, "trustRecordDigest"),
+    projectAuthorityGeneration: requiredPositiveInteger(params, "projectAuthorityGeneration"),
+    principalGeneration: requiredPositiveInteger(params, "principalGeneration"),
+    actions: uniqueActions(params.actions, ["read", "launch"] as const, "actions"),
+    expiresAt: requiredString(params, "expiresAt"),
+  };
+}
+
+export function issueLocalOperatorSessionCapabilityInput(
+  params: Record<string, unknown>,
+): IssueLocalOperatorSessionCapabilityInput {
+  exactFields(params, [
+    "projectId",
+    "canonicalRoot",
+    "trustRecordDigest",
+    "projectCapability",
+    "projectSessionId",
+    "sessionGeneration",
+    "actions",
+    "expiresAt",
+    "launchEnvelopeExpiresAt",
+  ], "local operator session capability");
+  const projectCapability = requiredRecord(params, "projectCapability");
+  exactFields(projectCapability, ["capabilityId", "token"], "project capability credential");
+  const allowed = OPERATOR_ACTIONS.filter((action): action is Exclude<OperatorAction, "takeover"> => action !== "takeover");
+  return {
+    projectId: requiredString(params, "projectId"),
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    trustRecordDigest: requiredString(params, "trustRecordDigest"),
+    projectCapability: {
+      capabilityId: requiredString(projectCapability, "capabilityId"),
+      token: requiredString(projectCapability, "token"),
+    },
+    projectSessionId: requiredString(params, "projectSessionId"),
+    sessionGeneration: requiredPositiveInteger(params, "sessionGeneration"),
+    actions: uniqueActions(params.actions, allowed, "actions"),
+    expiresAt: requiredString(params, "expiresAt"),
+    launchEnvelopeExpiresAt: requiredString(params, "launchEnvelopeExpiresAt"),
+  };
+}
+
+export function rotateLocalOperatorPrincipalInput(
+  params: Record<string, unknown>,
+): RotateLocalOperatorPrincipalInput {
+  exactFields(params, [
+    "projectId",
+    "operatorId",
+    "canonicalRoot",
+    "trustRecordDigest",
+    "projectAuthorityGeneration",
+    "expectedPrincipalGeneration",
+  ], "local operator principal rotation");
+  return {
+    projectId: requiredString(params, "projectId"),
+    operatorId: requiredString(params, "operatorId"),
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    trustRecordDigest: requiredString(params, "trustRecordDigest"),
+    projectAuthorityGeneration: requiredPositiveInteger(params, "projectAuthorityGeneration"),
+    expectedPrincipalGeneration: requiredPositiveInteger(params, "expectedPrincipalGeneration"),
   };
 }

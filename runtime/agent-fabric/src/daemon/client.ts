@@ -7,10 +7,19 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import { OPERATOR_ACTIONS, type OperatorAction } from "@local/agent-fabric-protocol";
 
 import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
 import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
+import type {
+  LocalOperatorPrincipalRotationInput,
+  LocalOperatorPrincipalRotationResult,
+  LocalOperatorProvisioningInput,
+  LocalOperatorProvisioningResult,
+  LocalOperatorSessionCapabilityInput,
+  LocalOperatorSessionCapabilityResult,
+} from "../operator/store.js";
 import { FabricRemoteError, TimedNdjsonTransport } from "../transport/ndjson-rpc.js";
 import { attachOrStartDaemon, BootstrapSpawnPhaseError, type DaemonHandshakeResult } from "./bootstrap-client.js";
 import { BootstrapElection, type BootstrapReadyReceipt } from "./bootstrap-election.js";
@@ -113,6 +122,147 @@ function budgetResult(value: unknown): BudgetResult {
     state: value.state,
     dimensions: value.dimensions,
     returned: value.returned,
+  };
+}
+
+function exactResultFields(value: Record<string, unknown>, fields: readonly string[], name: string): void {
+  const expected = new Set(fields);
+  if (Object.keys(value).some((field) => !expected.has(field))) {
+    throw new Error(`daemon returned an invalid ${name}`);
+  }
+}
+
+function operatorCredential(value: unknown): { capabilityId: string; token: string } | undefined {
+  if (!isRecord(value)) return undefined;
+  exactResultFields(value, ["capabilityId", "token"], "operator credential");
+  return typeof value.capabilityId === "string" && typeof value.token === "string"
+    ? { capabilityId: value.capabilityId, token: value.token }
+    : undefined;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function localOperatorProvisioningResult(value: unknown): LocalOperatorProvisioningResult {
+  if (!isRecord(value)) throw new Error("daemon returned an invalid local operator provisioning result");
+  const fields = [
+    "projectId", "operatorId", "capabilityId", "projectAuthorityGeneration", "principalGeneration",
+    "kind", "actions", "issuedAt", "expiresAt", "issued",
+    ...(value.issued === true ? ["credential"] : []),
+  ];
+  exactResultFields(value, fields, "local operator provisioning result");
+  const valid =
+    typeof value.projectId === "string" &&
+    typeof value.operatorId === "string" &&
+    typeof value.capabilityId === "string" &&
+    isPositiveInteger(value.projectAuthorityGeneration) &&
+    isPositiveInteger(value.principalGeneration) &&
+    value.kind === "project-launch" &&
+    Array.isArray(value.actions) &&
+    value.actions.length > 0 &&
+    new Set(value.actions).size === value.actions.length &&
+    value.actions.every((action) => action === "read" || action === "launch") &&
+    typeof value.issuedAt === "string" &&
+    typeof value.expiresAt === "string";
+  if (!valid) throw new Error("daemon returned an invalid local operator provisioning result");
+  const common = {
+    projectId: value.projectId as string,
+    operatorId: value.operatorId as string,
+    capabilityId: value.capabilityId as string,
+    projectAuthorityGeneration: value.projectAuthorityGeneration as number,
+    principalGeneration: value.principalGeneration as number,
+    kind: "project-launch" as const,
+    actions: value.actions as Array<"read" | "launch">,
+    issuedAt: value.issuedAt as string,
+    expiresAt: value.expiresAt as string,
+  };
+  if (value.issued === true) {
+    const credential = operatorCredential(value.credential);
+    if (credential === undefined || credential.capabilityId !== value.capabilityId) {
+      throw new Error("daemon returned an invalid local operator provisioning result");
+    }
+    return { ...common, issued: true, credential };
+  }
+  if (value.issued !== false || value.credential !== undefined) {
+    throw new Error("daemon returned an invalid local operator provisioning result");
+  }
+  return { ...common, issued: false };
+}
+
+function localOperatorSessionCapabilityResult(value: unknown): LocalOperatorSessionCapabilityResult {
+  if (!isRecord(value)) throw new Error("daemon returned an invalid local operator session capability result");
+  const fields = [
+    "projectId", "operatorId", "capabilityId", "projectSessionId", "projectAuthorityGeneration",
+    "sessionGeneration", "principalGeneration", "kind", "actions", "issuedAt", "expiresAt", "issued",
+    ...(value.issued === true ? ["credential"] : []),
+  ];
+  exactResultFields(value, fields, "local operator session capability result");
+  const actions = Array.isArray(value.actions) &&
+    value.actions.length > 0 &&
+    new Set(value.actions).size === value.actions.length &&
+    value.actions.every((action) => typeof action === "string" && action !== "takeover" && OPERATOR_ACTIONS.includes(action as OperatorAction))
+    ? value.actions as Array<Exclude<OperatorAction, "takeover">>
+    : undefined;
+  const valid =
+    typeof value.projectId === "string" &&
+    typeof value.operatorId === "string" &&
+    typeof value.capabilityId === "string" &&
+    typeof value.projectSessionId === "string" &&
+    isPositiveInteger(value.projectAuthorityGeneration) &&
+    isPositiveInteger(value.sessionGeneration) &&
+    isPositiveInteger(value.principalGeneration) &&
+    value.kind === "session" &&
+    actions !== undefined &&
+    typeof value.issuedAt === "string" &&
+    typeof value.expiresAt === "string";
+  if (!valid) throw new Error("daemon returned an invalid local operator session capability result");
+  const common = {
+    projectId: value.projectId as string,
+    operatorId: value.operatorId as string,
+    capabilityId: value.capabilityId as string,
+    projectSessionId: value.projectSessionId as string,
+    projectAuthorityGeneration: value.projectAuthorityGeneration as number,
+    sessionGeneration: value.sessionGeneration as number,
+    principalGeneration: value.principalGeneration as number,
+    kind: "session" as const,
+    actions: actions as Array<Exclude<OperatorAction, "takeover">>,
+    issuedAt: value.issuedAt as string,
+    expiresAt: value.expiresAt as string,
+  };
+  if (value.issued === true) {
+    const credential = operatorCredential(value.credential);
+    if (credential === undefined || credential.capabilityId !== value.capabilityId) {
+      throw new Error("daemon returned an invalid local operator session capability result");
+    }
+    return { ...common, issued: true, credential };
+  }
+  if (value.issued !== false || value.credential !== undefined) {
+    throw new Error("daemon returned an invalid local operator session capability result");
+  }
+  return { ...common, issued: false };
+}
+
+function localOperatorPrincipalRotationResult(value: unknown): LocalOperatorPrincipalRotationResult {
+  if (!isRecord(value)) throw new Error("daemon returned an invalid local operator principal rotation result");
+  exactResultFields(value, [
+    "projectId", "operatorId", "principalGeneration", "revokedCapabilityCount",
+  ], "local operator principal rotation result");
+  if (
+    typeof value.projectId !== "string" ||
+    typeof value.operatorId !== "string" ||
+    !isPositiveInteger(value.principalGeneration) ||
+    typeof value.revokedCapabilityCount !== "number" ||
+    !Number.isSafeInteger(value.revokedCapabilityCount) ||
+    value.revokedCapabilityCount < 0
+  ) {
+    throw new Error("daemon returned an invalid local operator principal rotation result");
+  }
+  return {
+    projectId: value.projectId,
+    operatorId: value.operatorId,
+    principalGeneration: value.principalGeneration,
+    revokedCapabilityCount: value.revokedCapabilityCount,
   };
 }
 
@@ -927,6 +1077,28 @@ export class FabricDaemonClient {
       throw new Error("daemon returned an invalid run result");
     }
     return { runId: result.runId, chairAuthorityId: result.chairAuthorityId, chairCapability: result.chairCapability };
+  }
+
+  async provisionLocalOperator(
+    input: Omit<LocalOperatorProvisioningInput, "authenticatedSubjectHash">,
+  ): Promise<LocalOperatorProvisioningResult> {
+    return localOperatorProvisioningResult(await this.#call("provisionLocalOperator", input));
+  }
+
+  async issueLocalOperatorSessionCapability(
+    input: Omit<LocalOperatorSessionCapabilityInput, "authenticatedSubjectHash">,
+  ): Promise<LocalOperatorSessionCapabilityResult> {
+    return localOperatorSessionCapabilityResult(
+      await this.#call("issueLocalOperatorSessionCapability", input),
+    );
+  }
+
+  async rotateLocalOperatorPrincipal(
+    input: Omit<LocalOperatorPrincipalRotationInput, "authenticatedSubjectHash">,
+  ): Promise<LocalOperatorPrincipalRotationResult> {
+    return localOperatorPrincipalRotationResult(
+      await this.#call("rotateLocalOperatorPrincipal", input),
+    );
   }
 
   async delegateAuthority(input: {

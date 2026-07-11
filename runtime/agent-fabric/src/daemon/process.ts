@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 
@@ -15,8 +15,11 @@ import {
   daemonInitializeResult,
   dispatchClientMethod,
   FABRIC_PROTOCOL_VERSION,
+  issueLocalOperatorSessionCapabilityInput,
   isDaemonRequest,
   isRecord,
+  provisionLocalOperatorInput,
+  rotateLocalOperatorPrincipalInput,
   type DaemonRequest,
 } from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
@@ -24,6 +27,7 @@ import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "
 import { routeDaemonConnection } from "./connection-router.js";
 import { servePublicProtocolConnection } from "./public-protocol.js";
 import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../transport/bounded-ndjson.js";
+import { trustedWorkspaceIdentity } from "../cli/workspace-trust.js";
 
 class DaemonProtocolError extends Error {
   readonly code: string;
@@ -39,6 +43,18 @@ function secretEqual(left: string, right: string): boolean {
   const leftDigest = createHash("sha256").update(left).digest();
   const rightDigest = createHash("sha256").update(right).digest();
   return timingSafeEqual(leftDigest, rightDigest);
+}
+
+function localAuthenticatedSubjectHash(key: string): `sha256:${string}` {
+  if (typeof process.getuid !== "function") {
+    throw new DaemonProtocolError(
+      "LOCAL_SUBJECT_UNAVAILABLE",
+      "local operator provisioning requires an authenticated Unix process owner",
+    );
+  }
+  return `sha256:${createHmac("sha256", key)
+    .update(`agent-fabric.local-operator.v1\0uid:${String(process.getuid())}`)
+    .digest("hex")}`;
 }
 
 const databasePath = process.env.AGENT_FABRIC_DATABASE_PATH;
@@ -92,6 +108,39 @@ if (
   || daemonInstanceGeneration < 1
 ) {
   throw new Error("agent fabric daemon environment is incomplete");
+}
+
+const localSubjectHash = localAuthenticatedSubjectHash(capabilityKey);
+const trustedStateDirectory = stateDirectory;
+const trustedExecutionProfile = executionProfile;
+
+async function withTrustedLocalSubject<T extends {
+  canonicalRoot: string;
+  trustRecordDigest: string;
+}>(input: T): Promise<T & { authenticatedSubjectHash: string }> {
+  let trusted: Awaited<ReturnType<typeof trustedWorkspaceIdentity>>;
+  try {
+    trusted = await trustedWorkspaceIdentity({
+      stateDirectory: trustedStateDirectory,
+      canonicalRoot: input.canonicalRoot,
+      executionProfile: trustedExecutionProfile,
+    });
+  } catch {
+    throw new DaemonProtocolError(
+      "WORKSPACE_TRUST_INVALID",
+      "local operator workspace trust could not be revalidated",
+    );
+  }
+  if (
+    trusted.canonicalRoot !== input.canonicalRoot ||
+    trusted.trustRecordDigest !== input.trustRecordDigest
+  ) {
+    throw new DaemonProtocolError(
+      "TRUST_RECORD_CHANGED",
+      "local operator workspace trust binding changed",
+    );
+  }
+  return { ...input, authenticatedSubjectHash: localSubjectHash };
 }
 
 mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
@@ -190,13 +239,30 @@ const serveLegacyConnection = (socket: Socket): void => {
         "daemon capability cannot change after initialization",
       );
     }
-    return secretEqual(request.capability, bootstrapCapability)
-      ? request.method === "createRun"
-        ? await fabric.createRun(createRunInput(request.params))
-        : (() => {
-            throw new DaemonProtocolError("BOOTSTRAP_SCOPE_VIOLATION", "bootstrap capability may only create a run");
-          })()
-      : await dispatchClientMethod(fabric.connect(request.capability), request.method, request.params);
+    if (secretEqual(request.capability, bootstrapCapability)) {
+      switch (request.method) {
+        case "createRun":
+          return await fabric.createRun(createRunInput(request.params));
+        case "provisionLocalOperator":
+          return fabric.provisionLocalOperator(await withTrustedLocalSubject(
+            provisionLocalOperatorInput(request.params),
+          ));
+        case "issueLocalOperatorSessionCapability":
+          return fabric.issueLocalOperatorSessionCapability(await withTrustedLocalSubject(
+            issueLocalOperatorSessionCapabilityInput(request.params),
+          ));
+        case "rotateLocalOperatorPrincipal":
+          return fabric.rotateLocalOperatorPrincipal(await withTrustedLocalSubject(
+            rotateLocalOperatorPrincipalInput(request.params),
+          ));
+        default:
+          throw new DaemonProtocolError(
+            "BOOTSTRAP_SCOPE_VIOLATION",
+            "bootstrap capability is limited to private local bootstrap control methods",
+          );
+      }
+    }
+    return await dispatchClientMethod(fabric.connect(request.capability), request.method, request.params);
   };
 
   const reader = new BoundedNdjsonReader(socket, {

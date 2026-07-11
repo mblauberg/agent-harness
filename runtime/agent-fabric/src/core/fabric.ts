@@ -41,7 +41,16 @@ import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
 import { renderSafePreview } from "../visibility/safe-preview.js";
-import { OperatorStore, type AuthenticatedOperatorCredential } from "../operator/store.js";
+import {
+  OperatorStore,
+  type AuthenticatedOperatorCredential,
+  type LocalOperatorPrincipalRotationInput,
+  type LocalOperatorPrincipalRotationResult,
+  type LocalOperatorProvisioningInput,
+  type LocalOperatorProvisioningResult,
+  type LocalOperatorSessionCapabilityInput,
+  type LocalOperatorSessionCapabilityResult,
+} from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
 import {
   OperatorActionStore,
@@ -900,6 +909,22 @@ export class Fabric {
       instanceGeneration,
       now: this.#clock(),
     });
+  }
+
+  provisionLocalOperator(input: LocalOperatorProvisioningInput): LocalOperatorProvisioningResult {
+    return this.#operatorStore.provisionLocalOperator(input);
+  }
+
+  issueLocalOperatorSessionCapability(
+    input: LocalOperatorSessionCapabilityInput,
+  ): LocalOperatorSessionCapabilityResult {
+    return this.#operatorStore.issueLocalOperatorSessionCapability(input);
+  }
+
+  rotateLocalOperatorPrincipal(
+    input: LocalOperatorPrincipalRotationInput,
+  ): LocalOperatorPrincipalRotationResult {
+    return this.#operatorStore.rotatePrincipal(input);
   }
 
   #selectWorkspaceRoot(
