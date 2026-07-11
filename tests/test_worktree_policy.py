@@ -106,6 +106,27 @@ def test_ignore_rule_is_repository_local_and_idempotent(tmp_path, capsys):
     ).returncode == 0
 
 
+def test_check_reports_only_direct_project_local_registered_worktrees(tmp_path, capsys):
+    repo = tmp_path / "project"
+    head = init_repo(repo)
+    assert worktree_policy.main([
+        "create", "valid", "--repo", str(repo), "--detach", head, "--human-authorised",
+    ]) == 0
+    capsys.readouterr()
+
+    assert worktree_policy.main(["check", "--repo", str(repo)]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "pass"
+    assert receipt["findings"] == []
+
+    outside = tmp_path / "outside"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "--detach", str(outside), head], check=True)
+    assert worktree_policy.main(["check", "--repo", str(repo)]) == 2
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "fail"
+    assert any("outside canonical .worktrees" in finding for finding in receipt["findings"])
+
+
 def test_symlinked_or_tracked_shared_root_is_rejected(tmp_path, capsys):
     repo = tmp_path / "project"
     head = init_repo(repo)
