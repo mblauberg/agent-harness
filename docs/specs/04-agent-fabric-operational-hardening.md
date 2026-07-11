@@ -2015,20 +2015,36 @@ three affected projection operations on the authenticated connection's
 negotiated features and the client can enforce the same condition after
 decoding.
 
+The closed v1 summary is within the exact operator credential's existing
+project/session Attention visibility. It exposes no destination, bearer value,
+deep link or cross-scope integration record. No per-field redaction arm exists
+in v1 because every authorised Attention reader is authorised for this bounded
+status; any future visibility or payload change requires another feature
+version.
+
 The generated wire codecs represent `nativeNotification` as an optional schema
 property solely because the affected operations each have two negotiated
 closed shapes. The connection-aware boundaries restore strictness: server
 dispatch passes an explicit include/omit mode into snapshot, projection-page
 and view-page construction; the client rejects absence in include mode and
 presence in omit mode before the value reaches the Console. Internal callers
-use omit mode unless they request the extension explicitly. Console protocol
-binding records whether the feature was negotiated. A Console-local
-discriminated presentation value separates a
-real `daemon-journal` summary from `legacy-fallback`; the fallback is never
+use omit mode unless they request the extension explicitly. Validation
+recursively walks every Attention-typed value and conflict candidate at the
+single public send and receive choke points. Mixed presence invalidates the
+whole result. A mismatch closes the attempted attach and emits typed
+`protocol-incompatible` state; no cached, replayed, partial or fallback
+projection from that result may enter the Console.
+
+Console protocol binding records whether the feature was negotiated. A
+Console-local discriminated presentation value separates a real
+`daemon-journal` summary from `legacy-fallback`; the fallback is never
 inserted into the wire `NativeNotificationDeliverySummary`. In valid legacy
 mode its presenter, evaluation and export say `notification status unavailable
 (feature not negotiated)` and do not fabricate a journal state, delivery
 revision, claim generation, integration observation or observation time.
+It contributes neither zero nor an empty bucket to notification aggregates,
+and exports retain explicit unknown/unavailable state. Protocol incompatibility
+is a connection failure, never a per-row delivery summary or legacy fallback.
 
 The local Console connector owns one bounded legacy retry because a daemon
 predating this amendment rejects the new optional feature while parsing the
@@ -2039,15 +2055,27 @@ commit `af548f8`, the last strict-name parser with the genuine pre-notification
 result shape. This one retry removes every later optional extension together;
 it never guesses from error text, loops per feature or silently drops a required
 feature. It occurs only after the locally validated first request receives
-`PROTOCOL_INVALID`, before any attach or other operation. A second failure is
-final. The intermediate `466e5c7` daemon already emitted the required field
-without negotiation, so a separate fixture must prove that it fails the
+the structured remote code `PROTOCOL_INVALID`, before any attach or other
+operation. Authentication, transport, timeout, required-feature and other
+failure codes never retry. A second failure is final and preserves the original
+failure as primary with the retry failure as an annotation. A successful retry
+marks System/connection state `legacy-compatibility` with the pinned profile;
+the downgrade is not silent. The intermediate `466e5c7` daemon already emitted
+the required field without negotiation, so a separate fixture must prove that
+it fails the
 unnegotiated-extra check after retry; it is not a compatibility target. These
 are vintage built daemon fixtures, not current parsers with mocked offers. The
 amended request parser separately admits no more than 64 unique well-formed
-feature names of at most 64 bytes, ignores unknown optional names during
-negotiation and reports unknown required names as unavailable. Unknown names
+feature names combined across required and optional arrays, each at most 64
+bytes, ignores unknown optional names during negotiation and reports unknown
+required names as unavailable. Unknown names
 can never enter the offered result feature set or operation-grant calculation.
+Count overflow, duplicates, uppercase or invalid grammar, non-ASCII or
+over-64-byte names reject the whole request as `PROTOCOL_INVALID` before
+classification. Comparison is exact ASCII byte equality with no truncation,
+folding or Unicode normalisation. The exact grammar is
+`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*\.v[1-9][0-9]*$`;
+duplicates within or across the two arrays reject.
 
 Migration 0010 adds `AFTER INSERT`, `AFTER UPDATE` and `AFTER DELETE` triggers
 on `notification_deliveries` that increment `daemon_global_state.revision` in
@@ -2058,20 +2086,35 @@ not create events, Attention mutations or delivery retries. Existing
 than duplicated. Migration preflight/postflight rejects missing trigger
 coverage before the new result-shape feature is advertised.
 
+Multiple row-trigger increments in one SQLite transaction are valid. The
+Console preserves stable IDs, focus, scroll, drafts and pending actions when an
+eventless revision change reloads otherwise identical rows, and load tests
+bound repeated refresh work under notification churn. The gate uses one
+Console, 1,000 open Attention rows, 2,000 delivery transitions in 200
+transactions of 10 over a simulated 10 seconds and exactly twenty 500 ms poll
+ticks. After warm-up it requires no overlapping refresh, at most twenty
+completed resnapshots, p95 refresh at most 250 ms, total wall and process CPU
+time at most five seconds and additional heap at most 32 MiB; host and Node
+version are recorded.
+
 Deterministic verification additionally covers:
 
 - negotiated and unnegotiated server responses for snapshot, projection-page
-  Attention and view-page,
-  including closed unknown/missing/malformed field negatives;
+  Attention and view-page, including closed unknown/missing/malformed, mixed-
+  presence and conflict-candidate negatives at both mandatory choke points;
 - independently versioned client/server fixtures proving legacy peers receive
   byte-shape-compatible results and new peers require the extension, including
   one real pre-feature initialise rejection followed by a fresh-nonce retry
   with the exact `af548f8` optional profile and unchanged required features,
-  plus fail-closed rejection of the `466e5c7` unnegotiated-extra shape;
+  plus fail-closed whole-result/attach rejection of the `466e5c7`
+  unnegotiated-extra shape and no partial/fallback projection;
 - forward-compatible bounded unknown-feature parsing, client-side legacy
-  fallback honesty and zero fabricated journal/freshness claims;
+  fallback honesty, explicit successful downgrade, original-error retention,
+  non-retry error classes, combined-count/cross-list duplicate and exact-
+  grammar rejection and zero fabricated or aggregate journal/freshness claims;
 - delivery insert/update/delete plus availability changes advancing revision,
-  invalidating a stale page/read transaction and refreshing Console polling;
+  invalidating a stale page/read transaction and refreshing Console polling
+  while resize/resnapshot preserves UI state under bounded churn;
   and
 - migration restart/checksum behavior and absence of any notification-caused
   Attention acknowledgement, approval, focus or other authority effect.

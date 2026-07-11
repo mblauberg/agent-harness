@@ -3294,6 +3294,14 @@ otherwise valid projection frames. Negotiated result-shape feature
 `fabric.v1.operator-projection.view-page` Attention result. It grants no
 operation and cannot widen operator authority.
 
+The summary is part of the already-authorised exact project/session Attention
+read. It exposes only the fixed `native-desktop` integration identifier and
+bounded delivery/availability state; it carries no destination, credential,
+actionable link or unrelated integration data. Negotiation never changes an
+authorisation decision. A future need to hide or add summary data requires a
+new closed result-shape feature rather than omission or field-level redaction
+inside v1. The v1 summary shape is otherwise frozen.
+
 Without that negotiated feature, all three operations retain their pre-extension
 closed shapes and omit `nativeNotification`. With the feature, every Attention
 item in a snapshot and every Attention view-row summary requires exactly one
@@ -3309,16 +3317,32 @@ negotiated, then renders an explicit client-side `unavailable` fallback; it
 must not imply a delivery journal observation. When the feature was negotiated,
 a missing or malformed extension fails closed as a protocol result error. An
 extension received without negotiation likewise fails closed in the new
-client. The Console first attempts the richer optional feature. Because a
+client. The presence invariant is structural: every Attention-typed node
+reachable from one result root, including every `ProjectionFact` value and
+conflict candidate, uses the same mode. Mixed presence invalidates the whole
+result. A presence, absence or malformed-shape violation terminates that attach;
+the client consumes no partial projection and never converts a protocol-
+violating daemon into the benign legacy fallback. The operator receives a
+typed `protocol-incompatible` connection failure with the rejected operation
+and closed reason, not a fabricated Attention row.
+
+The Console first attempts the richer optional feature. Because a
 pre-extension daemon rejects an unknown optional feature before negotiation,
 the local connector may make exactly one fresh-connection retry after the first
-locally valid initialise request receives `PROTOCOL_INVALID`. The retry keeps
-every required feature and narrows optional features to an immutable
+locally valid initialise request receives the structured remote code
+`PROTOCOL_INVALID`. Authentication, transport, timeout, required-feature and
+all other failures never retry. The retry keeps every required feature and
+narrows optional features to an immutable
 `strict-v1` compatibility profile captured from the last daemon whose parser
 rejected unknown names while still emitting the true pre-extension result
 shape; it does not guess one rejected name or progressively downgrade. The
 retry uses a fresh nonce and performs no attach or other mutation before
 initialise succeeds. If it fails, the original incompatibility remains visible.
+The client retains the original failure as primary and records the retry result
+as an annotation. A successful fallback marks the connection
+`legacy-compatibility` and exposes that downgrade in System state/export; it is
+never silent.
+
 An intermediate daemon that emits `nativeNotification` without negotiating the
 feature is intentionally incompatible and fails closed; the client never
 accepts its extra field as legacy. Thus new-client/compatible-old-daemon and
@@ -3329,16 +3353,41 @@ For future additive features, the amended daemon accepts bounded, unique,
 well-formed feature names in initialise requests. An unknown required name
 produces `required-features-unavailable`; an unknown optional name is ignored.
 Names use the closed lowercase dotted-version grammar, are at most 64 bytes and
-each feature array contains at most 64 entries. Initialise results still carry
+the required and optional arrays contain at most 64 names combined. The exact
+ASCII grammar is
+`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*\.v[1-9][0-9]*$`.
+No exact name may repeat within or across the two arrays. Initialise results
+still carry
 only features known to and negotiated by both peers. This forward-tolerance
-does not grant an unknown operation or relax result validation.
+does not grant an unknown operation or relax result validation. A count,
+duplicate, ASCII-byte-length or grammar violation rejects the entire initialise
+request as `PROTOCOL_INVALID` before required/optional classification. Parsing
+uses exact ASCII byte equality without truncation, case folding or Unicode
+normalisation. The pinned compatibility profile satisfies the same checks.
+
+The Console's valid legacy presentation contains only `unavailable` and
+`feature-not-negotiated`. It has no timestamp, count, empty journal state or
+synthetic zero. Notification aggregates exclude that branch rather than
+treating unavailable as zero; Markdown/JSON exports preserve the explicit
+unknown state.
 
 Every insert, update or delete that can change the projected native delivery
 summary advances `daemon_global_state.revision` in the same SQLite transaction.
 This includes `notification_deliveries`; `integration_availability` remains
 covered by its existing revision triggers. The next snapshot/page therefore
 cannot reuse a revision or state digest after a pending, claimed, sent, failed,
-deduplicated or ambiguous transition.
+deduplicated or ambiguous transition. An eventless resnapshot that otherwise
+returns the same stable rows preserves selection, focus, scroll, draft and
+pending command state as required by Spec 05. Load evaluation bounds refresh
+work under delivery churn; correctness never depends on coalescing multiple
+row triggers into one revision increment.
+
+The deterministic churn gate starts from 1,000 open Attention rows and one
+attached Console, applies 2,000 delivery transitions in 200 transactions of 10
+across a simulated 10-second interval, and drives exactly twenty 500 ms poll
+ticks. After warm-up it permits at most twenty completed resnapshots, zero
+overlapping refreshes, 250 ms p95 refresh latency, five seconds total wall and
+process CPU time, and 32 MiB additional heap. It records host and Node version.
 
 Added requirements are:
 
@@ -3350,6 +3399,9 @@ Added requirements are:
 - **NFR-029:** Protocol initialise shall ignore bounded well-formed unknown
   optional features, report unknown required features as unavailable and never
   derive an operation grant from an unknown name.
+- **NFR-030:** Result-shape validation shall cover every Attention node at one
+  mandatory send/receive boundary, reject mixed or wrong negotiated presence as
+  a whole-result incompatibility and never expose partial data.
 
 Acceptance additionally requires:
 
@@ -3361,10 +3413,18 @@ Acceptance additionally requires:
   optional-feature profile, preserved required features, fresh nonce, absence
   of any pre-initialise mutation and honest unavailable UI. A separate
   `466e5c7` fixture proves the unnegotiated required-field intermediate fails
-  closed. Future-name fixtures prove
-  unknown optional names are ignored and unknown required names fail as
-  unavailable. Migration tests prove insert/update/delete delivery
+  closed with no fallback row or partial projection. Retry fixtures prove only
+  structured `PROTOCOL_INVALID` retries, all other error classes do not, the
+  original error remains primary on second failure and successful downgrade is
+  visible. Future-name fixtures prove unknown optional names are ignored,
+  unknown required names fail as unavailable and malformed, duplicate,
+  65-combined-entry, 64-plus-64, cross-array duplicate, over-64-byte or non-
+  ASCII names reject without truncation or normalisation. Shape fixtures include
+  mixed presence and every conflict candidate. Legacy evaluation/export
+  fixtures prove no zero-fill, timestamp or
+  aggregate claim. Migration tests prove insert/update/delete delivery
   changes advance global revision exactly as defined, force resnapshot for a
   stale page, and cause a polling Console to observe pending-to-terminal state
-  without an unrelated Fabric event. No notification state change
+  without an unrelated Fabric event while resize/resnapshot preserves stable UI
+  state and bounded load. No notification state change
   acknowledges, approves, focuses or otherwise mutates its Attention item.
