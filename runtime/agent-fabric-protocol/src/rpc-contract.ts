@@ -109,7 +109,12 @@ export type ProtocolPrincipal =
 export type ProtocolInitializeRequest = {
   protocolVersion: 1;
   client: { name: string; version: string };
-  principal: ProtocolPrincipal;
+  authentication: {
+    scheme: "capability";
+    credential: string;
+    clientNonce: string;
+  };
+  expectedPrincipalKind: ProtocolPrincipal["kind"];
   requiredFeatures: readonly ProtocolFeature[];
   optionalFeatures: readonly ProtocolFeature[];
 };
@@ -118,7 +123,11 @@ export type ProtocolInitializeResult = {
   protocolVersion: 1;
   daemonVersion: string;
   daemonInstanceGeneration: number;
+  principal: ProtocolPrincipal;
+  clientNonce: string;
+  connectionNonce: string;
   features: readonly ProtocolFeature[];
+  allowedOperations: readonly FabricOperation[];
   limits: ProtocolLimits;
 };
 

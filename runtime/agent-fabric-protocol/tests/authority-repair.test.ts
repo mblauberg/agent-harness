@@ -10,11 +10,22 @@ import {
   type OperationInputMap,
   type OperationResultMap,
   type ProtocolFeature,
+  type ProtocolPrincipal,
   type ProtocolRpcTransport,
 } from "../src/index.js";
 
 class NoopTransport implements ProtocolRpcTransport {
   readonly features: readonly ProtocolFeature[] = ["scoped-gates.v1", "input-attestation.v1"];
+  readonly principal: ProtocolPrincipal = {
+    kind: "operator",
+    operatorId: "operator_01" as never,
+    projectId: "project_01" as never,
+    principalGeneration: 1,
+  };
+  readonly allowedOperations: ReadonlySet<FabricOperation> = new Set([
+    "fabric.v1.scoped-gate.create",
+    "fabric.v1.scoped-gate.resolve",
+  ]);
 
   call<Operation extends keyof OperationInputMap & FabricOperation>(
     _operation: Operation,

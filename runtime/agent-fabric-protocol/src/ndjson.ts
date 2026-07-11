@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { Duplex, Readable, Writable } from "node:stream";
 
-import { negotiateProtocol, operationsForFeatures, PROTOCOL_FEATURES, type ProtocolFeature } from "./features.js";
+import {
+  parseProtocolInitializeRequest,
+  parseProtocolInitializeResult,
+  ProtocolAuthenticationError,
+} from "./authentication.js";
+import { negotiateProtocol, type ProtocolFeature } from "./features.js";
 import { isFabricOperation, type FabricOperation } from "./operations.js";
 import { parseOperationInput, parseOperationResult } from "./operation-codecs.js";
 import { parseJsonValue, strictRecord, type JsonValue } from "./primitives.js";
@@ -279,57 +284,6 @@ type PendingCall = {
 
 type QueuedCall = { id: string; request: { id: string; operation: string; input: unknown } };
 
-function parseLimits(value: unknown): ProtocolLimits {
-  const record = strictRecord(value, "initialize.result.limits", Object.keys(PROTOCOL_LIMITS));
-  const parsed: Record<string, number> = {};
-  for (const [key, maximum] of Object.entries(PROTOCOL_LIMITS)) {
-    const limit = record[key];
-    if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > maximum) {
-      throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", `initialize limit ${key} is invalid`);
-    }
-    parsed[key] = limit;
-  }
-  return {
-    maximumFrameBytes: parsed.maximumFrameBytes ?? PROTOCOL_LIMITS.maximumFrameBytes,
-    maximumPendingCalls: parsed.maximumPendingCalls ?? PROTOCOL_LIMITS.maximumPendingCalls,
-    maximumInFlightPerConnection: parsed.maximumInFlightPerConnection ?? PROTOCOL_LIMITS.maximumInFlightPerConnection,
-    idleTimeoutMs: parsed.idleTimeoutMs ?? PROTOCOL_LIMITS.idleTimeoutMs,
-    requestTimeoutMs: parsed.requestTimeoutMs ?? PROTOCOL_LIMITS.requestTimeoutMs,
-  };
-}
-
-function parseInitializeResult(value: unknown): ProtocolInitializeResult {
-  const record = strictRecord(value, "initialize.result", [
-    "protocolVersion",
-    "daemonVersion",
-    "daemonInstanceGeneration",
-    "features",
-    "limits",
-  ]);
-  if (record.protocolVersion !== 1 || typeof record.daemonVersion !== "string") {
-    throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", "initialize result version is invalid");
-  }
-  if (typeof record.daemonInstanceGeneration !== "number" || !Number.isSafeInteger(record.daemonInstanceGeneration) || record.daemonInstanceGeneration < 1) {
-    throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", "daemon instance generation is invalid");
-  }
-  if (!Array.isArray(record.features)) throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", "features must be an array");
-  const known: ProtocolFeature[] = [];
-  for (const feature of record.features) {
-    if (typeof feature !== "string" || !PROTOCOL_FEATURES.some((candidate) => candidate === feature)) {
-      throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", `unknown negotiated feature: ${String(feature)}`);
-    }
-    const matched = PROTOCOL_FEATURES.find((candidate) => candidate === feature);
-    if (matched !== undefined) known.push(matched);
-  }
-  return {
-    protocolVersion: 1,
-    daemonVersion: record.daemonVersion,
-    daemonInstanceGeneration: record.daemonInstanceGeneration,
-    features: known,
-    limits: parseLimits(record.limits),
-  };
-}
-
 export class NdjsonRpcTransport implements ProtocolRpcTransport {
   readonly #stream: Duplex;
   readonly #reader: BoundedNdjsonReader;
@@ -339,6 +293,7 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
   #inFlight = 0;
   #limits: ProtocolLimits = PROTOCOL_LIMITS;
   #features: readonly ProtocolFeature[] = [];
+  #principal: ProtocolInitializeResult["principal"] | undefined;
   #allowedOperations: ReadonlySet<FabricOperation> = new Set();
   #terminalError: Error | undefined;
   #closed = false;
@@ -363,14 +318,22 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
   static async connect(stream: Duplex, request: ProtocolInitializeRequest): Promise<NdjsonRpcTransport> {
     const transport = new NdjsonRpcTransport(stream);
     try {
-      const raw = await transport.#wireCall("initialize", request);
-      const initialized = parseInitializeResult(raw);
-      const negotiation = negotiateProtocol(request, initialized);
+      const parsedRequest = parseProtocolInitializeRequest(request);
+      const raw = await transport.#wireCall("initialize", parsedRequest);
+      const initialized = parseProtocolInitializeResult(raw);
+      if (initialized.clientNonce !== parsedRequest.authentication.clientNonce) {
+        throw new ProtocolAuthenticationError("initialize response is not bound to the client nonce");
+      }
+      if (initialized.principal.kind !== parsedRequest.expectedPrincipalKind) {
+        throw new ProtocolAuthenticationError("initialize response principal kind does not match the credential expectation");
+      }
+      const negotiation = negotiateProtocol(parsedRequest, initialized);
       if (!negotiation.ok) {
         throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", `protocol negotiation failed: ${negotiation.reason}`);
       }
       transport.#features = negotiation.features;
-      transport.#allowedOperations = operationsForFeatures(negotiation.features);
+      transport.#principal = initialized.principal;
+      transport.#allowedOperations = new Set(initialized.allowedOperations);
       transport.#limits = initialized.limits;
       transport.#reader.tightenLimits({
         maximumFrameBytes: initialized.limits.maximumFrameBytes,
@@ -378,13 +341,24 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       });
       return transport;
     } catch (error: unknown) {
-      stream.destroy();
+      transport.#terminate(
+        error instanceof Error ? error : new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", String(error)),
+      );
       throw error;
     }
   }
 
   get features(): readonly ProtocolFeature[] {
     return this.#features;
+  }
+
+  get principal(): ProtocolInitializeResult["principal"] {
+    if (this.#principal === undefined) throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", "transport is not initialized");
+    return this.#principal;
+  }
+
+  get allowedOperations(): ReadonlySet<FabricOperation> {
+    return this.#allowedOperations;
   }
 
   async call<Operation extends ProtocolOperation>(
@@ -508,7 +482,7 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     }
   }
 
-  #fail(error: Error): void {
+  #terminate(error: Error): void {
     if (this.#closed) return;
     this.#closed = true;
     this.#terminalError = error;
@@ -520,13 +494,15 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     this.#pending.clear();
     this.#queue.length = 0;
     this.#inFlight = 0;
+    this.#stream.destroy();
+  }
+
+  #fail(error: Error): void {
+    this.#terminate(error);
   }
 
   async close(): Promise<void> {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#reader.close();
-    this.#stream.end();
+    this.#terminate(new ProtocolTransportError("PROTOCOL_DISCONNECTED", "protocol transport closed"));
   }
 }
 

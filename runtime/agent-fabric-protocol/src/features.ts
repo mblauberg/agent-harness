@@ -27,6 +27,7 @@ function buildFeatureOperations(): Readonly<Record<ProtocolFeature, readonly Fab
   const grouped = Object.fromEntries(PROTOCOL_FEATURES.map((feature) => [feature, [] as FabricOperation[]])) as
     Record<ProtocolFeature, FabricOperation[]>;
   for (const [operation, definition] of Object.entries(OPERATION_REGISTRY)) {
+    if (definition.kind === "retired") continue;
     grouped[definition.feature].push(operation as FabricOperation);
   }
   for (const operations of Object.values(grouped)) Object.freeze(operations);

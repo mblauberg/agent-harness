@@ -61,6 +61,8 @@ export type RunProjection = {
 
 export type OperatorProjectionSnapshot = {
   schemaVersion: 1;
+  snapshotRevision: number;
+  readTransactionId: string;
   project: ProjectionFact<{ projectId: ProjectId; canonicalRoot: string }>;
   session: ProjectionFact<ProjectSession | null>;
   runs: ProjectionFact<readonly RunProjection[]>;
@@ -91,8 +93,17 @@ export type ProjectionEventsRequest = ProjectionSnapshotRequest & {
 };
 
 export type ProjectionEventsResult = {
+  status: "continuation";
   events: readonly ProjectionEvent[];
   nextCursor: ProjectionCursor;
+  hasMore: boolean;
+  snapshotRevision: number;
+  readTransactionId: string;
+} | {
+  status: "resnapshot-required";
+  reason: "retention-gap" | "project-cursor-mismatch" | "cursor-overflow";
+  currentSnapshotRevision: number;
+  snapshotCursor: ProjectionCursor;
 };
 
 export type ProjectSessionDiscovery = {
@@ -244,14 +255,17 @@ export type MessageBodyReadResult =
 
 export type OperatorAttachment = {
   clientId: string;
-  projectSessionId: ProjectSessionId;
+  projectId: ProjectId;
+  projectSessionId: ProjectSessionId | null;
   generation: number;
   expiresAt: Timestamp;
 };
 
 export type OperatorAttachRequest = {
   command: OperatorMutationContext;
-  projectSessionId: ProjectSessionId;
+  projectId: ProjectId;
+  projectSessionId?: ProjectSessionId;
+  expectedAttachmentGeneration?: number;
   requestedExpiresAt: Timestamp;
 };
 export type OperatorDetachRequest = { command: OperatorMutationContext; attachmentGeneration: number };

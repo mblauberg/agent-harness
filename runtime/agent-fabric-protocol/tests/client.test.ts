@@ -2,23 +2,36 @@ import { describe, expect, it } from "vitest";
 
 import {
   FABRIC_OPERATIONS,
+  OPERATION_REGISTRY,
   createAgentClient,
   createOperatorClient,
+  operationsForFeatures,
   type FabricOperation,
   type OperationInputMap,
   type OperationResultMap,
   type ProtocolFeature,
   type ProtocolRpcTransport,
+  type ProtocolPrincipal,
 } from "../src/index.js";
 
 class RecordingTransport implements ProtocolRpcTransport {
   readonly features: readonly ProtocolFeature[];
   readonly calls: Array<{ operation: FabricOperation; input: unknown }> = [];
+  readonly principal: ProtocolPrincipal;
+  readonly allowedOperations: ReadonlySet<FabricOperation>;
   readonly #result: unknown;
 
-  constructor(features: readonly ProtocolFeature[], result: unknown) {
+  constructor(features: readonly ProtocolFeature[], result: unknown, kind: ProtocolPrincipal["kind"] = "operator") {
     this.features = features;
     this.#result = result;
+    this.principal = kind === "operator"
+      ? { kind, operatorId: "operator_01" as never, projectId: "project_01" as never, principalGeneration: 1 }
+      : kind === "agent"
+        ? { kind, agentId: "agent_01" as never, projectSessionId: "ps_01" as never, runId: "run_01", principalGeneration: 1 }
+        : { kind, integrationId: "integration_01" as never, projectId: "project_01" as never, principalGeneration: 1 };
+    this.allowedOperations = new Set(
+      [...operationsForFeatures(features)].filter((operation) => OPERATION_REGISTRY[operation].principals.includes(kind)),
+    );
   }
 
   call<Operation extends FabricOperation>(
@@ -80,7 +93,7 @@ describe("negotiated operator client", () => {
 
 describe("negotiated baseline agent client", () => {
   it("exposes the full typed baseline call surface only when fabric-core is negotiated", async () => {
-    const transport = new RecordingTransport(["fabric-core.v1"], { messageId: "message_01" });
+    const transport = new RecordingTransport(["fabric-core.v1"], { messageId: "message_01" }, "agent");
     const client = createAgentClient(transport);
     if (client.core === undefined) throw new Error("expected baseline core feature");
 

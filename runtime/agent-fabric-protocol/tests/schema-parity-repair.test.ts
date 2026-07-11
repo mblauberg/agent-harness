@@ -53,6 +53,71 @@ describe("operation-correlated schema and parser parity", () => {
     ).toBe(true);
   });
 
+  it("publishes the same failed project-session terminal path accepted by the runtime parser", () => {
+    const operation = "fabric.v1.project-session.close" as const;
+    const fixture = OPERATION_CONTRACT_FIXTURES[operation];
+    const result = {
+      ...(fixture.result as Record<string, unknown>),
+      state: "closed",
+      terminalPath: {
+        kind: "failed",
+        reason: "provider terminated",
+        failureRef: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    };
+
+    expect(() => parseOperationResult(operation, result)).not.toThrow();
+    const successSchema = protocolResponseSchemasFor(operation)[0];
+    if (successSchema === undefined) throw new Error("missing success schema");
+    const validator = ajv.compile(successSchema);
+    expect(
+      validator({ id: "request_01", operation, ok: true, result }),
+      ajv.errorsText(validator.errors),
+    ).toBe(true);
+  });
+
+  it("enforces codec bounds before applying a domain parser", () => {
+    const operation = "fabric.v1.project-session.close" as const;
+    const fixture = OPERATION_CONTRACT_FIXTURES[operation];
+    const result = {
+      ...(fixture.result as Record<string, unknown>),
+      state: "closed",
+      terminalPath: { kind: "cancelled", reason: "x".repeat(4097) },
+    };
+
+    expect(() => parseOperationResult(operation, result)).toThrowError(/reason.*UTF-8 bytes/iu);
+  });
+
+  it("keeps terminal-path state correlation identical in schema and parser", () => {
+    const operation = "fabric.v1.project-session.close" as const;
+    const fixture = OPERATION_CONTRACT_FIXTURES[operation];
+    const result = {
+      ...(fixture.result as Record<string, unknown>),
+      state: "active",
+      terminalPath: { kind: "cancelled", reason: "not terminal" },
+    };
+
+    expect(() => parseOperationResult(operation, result)).toThrowError(/terminalPath|state/iu);
+    const successSchema = protocolResponseSchemasFor(operation)[0];
+    if (successSchema === undefined) throw new Error("missing success schema");
+    const validator = ajv.compile(successSchema);
+    expect(validator({ id: "request_01", operation, ok: true, result })).toBe(false);
+  });
+
+  it("requires the enforcement target selected by a scoped-gate check", () => {
+    const operation = "fabric.v1.scoped-gate.check" as const;
+    const input = {
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 1,
+      enforcementPoint: "operation",
+    };
+
+    expect(() => parseOperationInput(operation, input)).toThrowError(/operationId is required/iu);
+    const validator = ajv.compile(protocolRequestSchemaFor(operation));
+    expect(validator({ id: "request_01", operation, input })).toBe(false);
+  });
+
   it.each(EXTENSION_OPERATIONS)("rejects the %s fixture under its declared wrong operation", (operation) => {
     const fixture = OPERATION_CONTRACT_FIXTURES[operation];
     const wrongOperation = fixture.wrongOperation as ProtocolOperation;

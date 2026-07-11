@@ -37,11 +37,24 @@ class ControlledLoopback extends Duplex {
       const request: WireRequest = JSON.parse(line);
       this.requests.push(request);
       if (request.operation === "initialize") {
+        const initializeInput = request.input as { authentication: { clientNonce: string } };
         this.respond(request, {
           protocolVersion: 1,
           daemonVersion: "1.0.0",
           daemonInstanceGeneration: 1,
+          principal: { kind: "operator", operatorId: "operator_01", projectId: "project_01", principalGeneration: 1 },
+          clientNonce: initializeInput.authentication.clientNonce,
+          connectionNonce: "connection_01",
           features: this.#features,
+          allowedOperations: this.#features.includes("project-sessions.v1")
+            ? [
+                "fabric.v1.project-session.create",
+                "fabric.v1.project-session.read",
+                "fabric.v1.project-session.transition",
+                "fabric.v1.project-session.close",
+                "fabric.v1.project-session.membership.bind",
+              ]
+            : [],
           limits: {
             maximumFrameBytes: this.#maximumFrameBytes,
             maximumPendingCalls: 8,
@@ -68,12 +81,8 @@ class ControlledLoopback extends Duplex {
 const initialize = {
   protocolVersion: 1,
   client: { name: "test", version: "1.0.0" },
-  principal: {
-    kind: "operator",
-    operatorId: "operator_01" as never,
-    projectId: "project_01" as never,
-    principalGeneration: 1,
-  },
+  authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+  expectedPrincipalKind: "operator",
   requiredFeatures: ["project-sessions.v1"],
   optionalFeatures: [],
 } as const;
@@ -102,7 +111,7 @@ describe("validated NDJSON results", () => {
     if (request === undefined) throw new Error("missing request");
     stream.respond(request, { spoof: true });
 
-    await expect(result).rejects.toThrow(/project-session\.read\.result/);
+    await expect(result).rejects.toThrow(/project-session\.read\.result|projectSession has unknown field/);
     stream.destroy();
   });
 
@@ -152,5 +161,19 @@ describe("negotiated in-flight limit", () => {
     stream.fail(secondRequest, { code: "NOT_FOUND", message: "missing", retryable: false });
     await second.catch(() => undefined);
     stream.destroy();
+  });
+
+  it("terminally rejects queued and in-flight calls and destroys the stream on close", async () => {
+    const stream = new ControlledLoopback({ features: ["project-sessions.v1"], maximumInFlight: 1 });
+    const transport = await NdjsonRpcTransport.connect(stream, initialize);
+    const first = transport.call(FABRIC_OPERATIONS.projectSessionGet, getInput);
+    const queued = transport.call(FABRIC_OPERATIONS.projectSessionGet, getInput);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await transport.close();
+
+    await expect(first).rejects.toThrow(/closed|disconnected/iu);
+    await expect(queued).rejects.toThrow(/closed|disconnected/iu);
+    expect(stream.destroyed).toBe(true);
   });
 });

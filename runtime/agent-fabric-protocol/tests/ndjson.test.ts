@@ -55,7 +55,7 @@ class ProtocolLoopback extends Duplex {
     while (newline >= 0) {
       const line = this.#buffer.slice(0, newline);
       this.#buffer = this.#buffer.slice(newline + 1);
-      const request: { id: string; operation: string } = JSON.parse(line);
+      const request: { id: string; operation: string; input: { authentication?: { clientNonce?: string } } } = JSON.parse(line);
       this.operations.push(request.operation);
       if (request.operation === "initialize") {
         this.push(`${JSON.stringify({
@@ -66,7 +66,11 @@ class ProtocolLoopback extends Duplex {
             protocolVersion: 1,
             daemonVersion: "0.2.0",
             daemonInstanceGeneration: 4,
+            principal: { kind: "operator", operatorId: "operator_01", projectId: "project_01", principalGeneration: 1 },
+            clientNonce: request.input.authentication?.clientNonce,
+            connectionNonce: "connection_01",
             features: ["project-sessions.v1"],
+            allowedOperations: ["fabric.v1.project-session.create", "fabric.v1.project-session.read", "fabric.v1.project-session.transition", "fabric.v1.project-session.close"],
             limits: {
               maximumFrameBytes: 1048576,
               maximumPendingCalls: 32,
@@ -90,12 +94,8 @@ describe("negotiated NDJSON RPC transport", () => {
     const transport = await NdjsonRpcTransport.connect(stream, {
       protocolVersion: 1,
       client: { name: "test", version: "1.0.0" },
-      principal: {
-        kind: "operator",
-        operatorId: "operator_01" as never,
-        projectId: "project_01" as never,
-        principalGeneration: 1,
-      },
+      authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+      expectedPrincipalKind: "operator",
       requiredFeatures: ["project-sessions.v1"],
       optionalFeatures: ["intakes.v1"],
     });
@@ -110,12 +110,8 @@ describe("negotiated NDJSON RPC transport", () => {
     const transport = await NdjsonRpcTransport.connect(stream, {
       protocolVersion: 1,
       client: { name: "test", version: "1.0.0" },
-      principal: {
-        kind: "operator",
-        operatorId: "operator_01" as never,
-        projectId: "project_01" as never,
-        principalGeneration: 1,
-      },
+      authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+      expectedPrincipalKind: "operator",
       requiredFeatures: ["project-sessions.v1"],
       optionalFeatures: [],
     });

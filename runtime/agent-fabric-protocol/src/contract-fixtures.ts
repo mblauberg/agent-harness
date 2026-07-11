@@ -1,6 +1,6 @@
 import { OPERATION_REGISTRY, FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
-import { OPERATION_INPUT_SHAPES, OPERATION_RESULT_SHAPES, type WireShape } from "./operation-codecs.js";
-import type { JsonValue } from "./primitives.js";
+import { OPERATION_CODECS } from "./operation-codecs.js";
+import { parseJsonValue, type JsonValue } from "./primitives.js";
 import type { ProtocolOperation } from "./rpc-contract.js";
 
 const digestA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -108,7 +108,7 @@ const gate = {
   affectedTaskIds: ["task_01"],
   dependencyRevision: 1,
   blockedOperationIds: [FABRIC_OPERATIONS.taskCompleteWithReply],
-  enforcementPoints: ["task-readiness"],
+  enforcementPoints: ["task-readiness", "operation"],
   question: "Proceed?",
   reason: "Decision required.",
   options: ["Approve", "Reject"],
@@ -146,29 +146,14 @@ const attestation = {
   recordedAt: timestamp,
 };
 
-function valueForField(field: string): JsonValue {
-  if (field === "command") return operatorCommand;
-  if (/^(?:is|has|allowed|required|detached|closed)$/u.test(field)) return true;
-  if (/revision|generation|cursor|count|limit|timeout|ttl|attempt|depth|bytes|cost|tokens|at$/iu.test(field)) return 1;
-  if (/^(?:items|events|tasks|agents|receipts|members|evidenceRefs|artifactRefs|gateIds|path|amounts|capacity|features)$/u.test(field)) return [];
-  if (/^(?:command|credential|transition|terminalPath|scope|payload|provenance|project|session|runs|attention|page|error)$/u.test(field)) return {};
-  return `${field}_01`;
-}
-
-function fixtureForShape(shape: WireShape): JsonValue {
-  if (shape.kind === "null") return null;
-  if (shape.kind === "array") return [];
-  return Object.fromEntries(shape.required.map((field) => [field, valueForField(field)]));
-}
-
 type ContractFixture = { input: JsonValue; result: JsonValue; wrongOperation: FabricOperation };
 
 function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
   const fixtures: Partial<Record<ProtocolOperation, ContractFixture>> = {};
   for (const operation of Object.keys(OPERATION_REGISTRY) as ProtocolOperation[]) {
     fixtures[operation] = {
-      input: fixtureForShape(OPERATION_INPUT_SHAPES[operation]),
-      result: fixtureForShape(OPERATION_RESULT_SHAPES[operation]),
+      input: parseJsonValue(OPERATION_CODECS[operation].input.example, `${operation}.input.fixture`),
+      result: parseJsonValue(OPERATION_CODECS[operation].result.example, `${operation}.result.fixture`),
       wrongOperation: FABRIC_OPERATIONS.acknowledgeDelivery,
     };
   }
@@ -251,7 +236,23 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     artifactRefs: [artifact],
     gateIds: ["gate_01"],
   });
-  set(FABRIC_OPERATIONS.scopedGateCreate, { command: operatorCommand, gate }, gate);
+  set(FABRIC_OPERATIONS.scopedGateCreate, {
+    command: operatorCommand,
+    intent: {
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      dedupeKey: "gate_intent_01",
+      scope: { kind: "task", taskId: "task_01" },
+      blockedOperationIds: [FABRIC_OPERATIONS.taskCompleteWithReply],
+      enforcementPoints: ["task-readiness", "operation"],
+      question: "Proceed?",
+      reason: "Decision required.",
+      options: ["Approve", "Reject"],
+      recommendation: "Approve",
+      consequences: ["Implementation continues."],
+      evidenceRefs: [artifact],
+    },
+  }, gate);
   set(FABRIC_OPERATIONS.scopedGateResolve, {
     command: operatorCommand,
     gateId: "gate_01",
@@ -310,10 +311,22 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     reservationId: "reservation_01",
     revision: 1,
     state: "active",
-    path: [],
-    amounts: {},
-    capacity: {},
+    path: [
+      { kind: "project", scopeId: "scope_project", projectId: "project_01" },
+      { kind: "project-session", scopeId: "scope_session", projectId: "project_01", projectSessionId: "ps_01" },
+    ],
+    amounts: { concurrent_turns: 1 },
+    capacity: {
+      concurrent_turns: { unknown: false, used: 0, reserved: 1, remaining: 1 },
+    },
   });
+  const resourceFixture = fixtures[FABRIC_OPERATIONS.resourceReserve];
+  if (resourceFixture !== undefined) {
+    for (const operation of [FABRIC_OPERATIONS.resourceRelease, FABRIC_OPERATIONS.resourceReconcile] as const) {
+      const existing = fixtures[operation];
+      if (existing !== undefined) fixtures[operation] = { ...existing, result: resourceFixture.result };
+    }
+  }
   set(FABRIC_OPERATIONS.scopedGateCheck, {
     projectSessionId: "ps_01",
     coordinationRunId: "run_01",

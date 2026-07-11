@@ -1,4 +1,4 @@
-import { isFabricOperation, type FabricOperation } from "./operations.js";
+import { isActiveFabricOperation, type FabricOperation } from "./operations.js";
 import { parseOperatorMutationContext, type OperatorMutationContext } from "./operator.js";
 import {
   oneOf,
@@ -63,10 +63,17 @@ type ScopedGateBase = {
 
 export type GateResolution = {
   operatorId: OperatorId;
-  attestationId: string;
   decidedAt: Timestamp;
   evidenceRefs: readonly ArtifactRef[];
-};
+} & (
+  | { kind: "typed-console"; confirmationCommandId: CommandId }
+  | {
+      kind: "attested-input";
+      attestationId: InputAttestationId;
+      integrationId: string;
+      integrationGeneration: number;
+    }
+);
 
 export type ScopedGate =
   | (ScopedGateBase & { status: "pending" | "deferred"; releaseBinding?: ReleaseBinding })
@@ -76,21 +83,38 @@ export type ScopedGate =
       releaseBinding?: ReleaseBinding;
     });
 
+export type ScopedGateIntent = {
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  dedupeKey: string;
+  scope: GateScope;
+  blockedOperationIds: readonly FabricOperation[];
+  enforcementPoints: readonly GateEnforcementPoint[];
+  question: string;
+  reason: string;
+  options: readonly string[];
+  recommendation: string;
+  consequences: readonly string[];
+  evidenceRefs: readonly ArtifactRef[];
+  deadline?: Timestamp;
+  default?: string;
+  releaseBinding?: ReleaseBinding;
+};
+
 export type ScopedGateCreateRequest = {
   command: OperatorMutationContext;
-  gate: ScopedGate & { status: "pending" };
+  intent: ScopedGateIntent;
 };
 export type ScopedGateResolveRequest = {
   command: OperatorMutationContext;
   gateId: GateId;
   status: "approved" | "rejected" | "deferred" | "cancelled";
   decisionEvidence:
-    | { kind: "typed-console"; confirmationCommandId?: string }
+    | { kind: "typed-console"; confirmationCommandId: CommandId }
     | {
         kind: "attested-input";
         attestationId: InputAttestationId;
         expectedIntegrationGeneration: number;
-        confirmationCommandId?: string;
       };
 };
 type ScopedGateCheckBase = {
@@ -108,12 +132,70 @@ export type ScopedGateCheckResult =
   | { allowed: false; blockingGateIds: readonly GateId[]; checkedGateRevisions: Readonly<Record<string, number>> };
 
 export function parseScopedGateCreateRequest(value: unknown): ScopedGateCreateRequest {
-  const record = strictRecord(value, "scopedGateCreate", ["command", "gate"]);
-  const gate = parseScopedGate(record.gate);
-  if (gate.status !== "pending") throw new TypeError("scopedGateCreate.gate.status must be pending");
+  const record = strictRecord(value, "scopedGateCreate", ["command", "intent"]);
+  const intentRecord = strictRecord(record.intent, "scopedGateCreate.intent", [
+    "projectSessionId",
+    "coordinationRunId",
+    "dedupeKey",
+    "scope",
+    "blockedOperationIds",
+    "enforcementPoints",
+    "question",
+    "reason",
+    "options",
+    "recommendation",
+    "consequences",
+    "evidenceRefs",
+    "deadline",
+    "default",
+    "releaseBinding",
+  ]);
+  const scope = parseScope(intentRecord.scope);
+  const { blockedOperationIds, enforcementPoints } = parseEnforcementTargets(
+    intentRecord.blockedOperationIds,
+    intentRecord.enforcementPoints,
+    "scopedGateCreate.intent",
+  );
+  if (!Array.isArray(intentRecord.evidenceRefs)) {
+    throw new TypeError("scopedGateCreate.intent.evidenceRefs must be an array");
+  }
+  const releaseBinding = scope.kind === "release"
+    ? parseReleaseBinding(intentRecord.releaseBinding)
+    : intentRecord.releaseBinding === undefined
+      ? undefined
+      : (() => { throw new TypeError("scopedGateCreate.intent.releaseBinding is forbidden outside release scope"); })();
   return {
     command: parseOperatorMutationContext(record.command, "scopedGateCreate.command"),
-    gate: { ...gate, status: "pending" },
+    intent: {
+      projectSessionId: parseIdentifier<"ProjectSessionId">(
+        intentRecord.projectSessionId,
+        "scopedGateCreate.intent.projectSessionId",
+      ),
+      coordinationRunId: parseIdentifier<"CoordinationRunId">(
+        intentRecord.coordinationRunId,
+        "scopedGateCreate.intent.coordinationRunId",
+      ),
+      dedupeKey: requiredString(intentRecord.dedupeKey, "scopedGateCreate.intent.dedupeKey"),
+      scope,
+      blockedOperationIds,
+      enforcementPoints,
+      question: requiredString(intentRecord.question, "scopedGateCreate.intent.question"),
+      reason: requiredString(intentRecord.reason, "scopedGateCreate.intent.reason"),
+      options: stringArray(intentRecord.options, "scopedGateCreate.intent.options", 1),
+      recommendation: typeof intentRecord.recommendation === "string" ? intentRecord.recommendation : "",
+      consequences: stringArray(intentRecord.consequences, "scopedGateCreate.intent.consequences"),
+      evidenceRefs: intentRecord.evidenceRefs.map((entry, index) => parseArtifactRef(
+        entry,
+        `scopedGateCreate.intent.evidenceRefs[${String(index)}]`,
+      )),
+      ...(intentRecord.deadline === undefined
+        ? {}
+        : { deadline: parseTimestamp(intentRecord.deadline, "scopedGateCreate.intent.deadline") }),
+      ...(intentRecord.default === undefined
+        ? {}
+        : { default: requiredString(intentRecord.default, "scopedGateCreate.intent.default") }),
+      ...(releaseBinding === undefined ? {} : { releaseBinding }),
+    },
   };
 }
 
@@ -129,20 +211,19 @@ export function parseScopedGateResolveRequest(value: unknown): ScopedGateResolve
       "kind",
       "confirmationCommandId",
     ]);
+    if (evidence.confirmationCommandId === undefined) {
+      throw new TypeError("scopedGateResolve.decisionEvidence.confirmationCommandId is required");
+    }
     return {
       command: parseOperatorMutationContext(record.command, "scopedGateResolve.command"),
       gateId: parseIdentifier<"GateId">(record.gateId, "scopedGateResolve.gateId"),
       status,
       decisionEvidence: {
         kind,
-        ...(evidence.confirmationCommandId === undefined
-          ? {}
-          : {
-              confirmationCommandId: parseIdentifier<"CommandId">(
-                evidence.confirmationCommandId,
-                "scopedGateResolve.decisionEvidence.confirmationCommandId",
-              ) as CommandId,
-            }),
+        confirmationCommandId: parseIdentifier<"CommandId">(
+          evidence.confirmationCommandId,
+          "scopedGateResolve.decisionEvidence.confirmationCommandId",
+        ) as CommandId,
       },
     };
   }
@@ -151,7 +232,6 @@ export function parseScopedGateResolveRequest(value: unknown): ScopedGateResolve
       "kind",
       "attestationId",
       "expectedIntegrationGeneration",
-      "confirmationCommandId",
     ]);
     return {
       command: parseOperatorMutationContext(record.command, "scopedGateResolve.command"),
@@ -168,14 +248,6 @@ export function parseScopedGateResolveRequest(value: unknown): ScopedGateResolve
           "scopedGateResolve.decisionEvidence.expectedIntegrationGeneration",
           1,
         ),
-        ...(evidence.confirmationCommandId === undefined
-          ? {}
-          : {
-              confirmationCommandId: parseIdentifier<"CommandId">(
-                evidence.confirmationCommandId,
-                "scopedGateResolve.decisionEvidence.confirmationCommandId",
-              ) as CommandId,
-            }),
       },
     };
   }
@@ -219,7 +291,7 @@ export function parseScopedGateCheckRequest(value: unknown): ScopedGateCheckRequ
   }
   if (enforcementPoint === "operation") {
     if (record.operationId === undefined) throw new TypeError("scopedGateCheck.operationId is required");
-    if (typeof record.operationId !== "string" || !isFabricOperation(record.operationId)) {
+    if (typeof record.operationId !== "string" || !isActiveFabricOperation(record.operationId)) {
       throw new TypeError("scopedGateCheck.operationId is not a protocol operation");
     }
     return { ...base, enforcementPoint, operationId: record.operationId };
@@ -272,19 +344,89 @@ function parseReleaseBinding(value: unknown): ReleaseBinding {
   };
 }
 
+function parseEnforcementTargets(
+  blockedValue: unknown,
+  enforcementValue: unknown,
+  path: string,
+): { blockedOperationIds: FabricOperation[]; enforcementPoints: GateEnforcementPoint[] } {
+  if (!Array.isArray(blockedValue)) throw new TypeError(`${path}.blockedOperationIds must be an array`);
+  const blockedOperationIds = blockedValue.map((operation, index) => {
+    if (typeof operation !== "string" || !isActiveFabricOperation(operation)) {
+      throw new TypeError(`${path}.blockedOperationIds[${String(index)}] is not an active protocol operation`);
+    }
+    return operation;
+  });
+  if (new Set(blockedOperationIds).size !== blockedOperationIds.length) {
+    throw new TypeError(`${path}.blockedOperationIds must not contain duplicates`);
+  }
+  if (!Array.isArray(enforcementValue) || enforcementValue.length === 0) {
+    throw new TypeError(`${path}.enforcementPoints must be non-empty`);
+  }
+  const enforcementPoints = enforcementValue.map((point, index) => {
+    const match = GATE_ENFORCEMENT_POINTS.find((candidate) => candidate === point);
+    if (match === undefined) throw new TypeError(`${path}.enforcementPoints[${String(index)}] is invalid`);
+    return match;
+  });
+  if (new Set(enforcementPoints).size !== enforcementPoints.length) {
+    throw new TypeError(`${path}.enforcementPoints must not contain duplicates`);
+  }
+  if (enforcementPoints.includes("operation") && blockedOperationIds.length === 0) {
+    throw new TypeError(`${path}.blockedOperationIds must be non-empty for operation enforcement`);
+  }
+  if (!enforcementPoints.includes("operation") && blockedOperationIds.length > 0) {
+    throw new TypeError(`${path}.blockedOperationIds require the operation enforcement point`);
+  }
+  return { blockedOperationIds, enforcementPoints };
+}
+
 function parseResolution(value: unknown): GateResolution {
   if (value === undefined) throw new TypeError("scopedGate.resolution is required for resolved status");
-  const record = strictRecord(value, "scopedGate.resolution", ["operatorId", "attestationId", "decidedAt", "evidenceRefs"]);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("scopedGate.resolution must be an object");
+  }
+  const kind: unknown = Reflect.get(value, "kind");
+  const fields = kind === "typed-console"
+    ? ["kind", "operatorId", "confirmationCommandId", "decidedAt", "evidenceRefs"]
+    : kind === "attested-input"
+      ? ["kind", "operatorId", "attestationId", "integrationId", "integrationGeneration", "decidedAt", "evidenceRefs"]
+      : ["kind"];
+  const record = strictRecord(value, "scopedGate.resolution", fields);
   if (!Array.isArray(record.evidenceRefs)) throw new TypeError("scopedGate.resolution.evidenceRefs must be an array");
-  return {
+  const base = {
     operatorId: parseIdentifier<"OperatorId">(record.operatorId, "scopedGate.resolution.operatorId"),
-    attestationId: requiredString(record.attestationId, "scopedGate.resolution.attestationId"),
     decidedAt: parseTimestamp(record.decidedAt, "scopedGate.resolution.decidedAt"),
     evidenceRefs: record.evidenceRefs.map((entry, index) => parseArtifactRef(
       entry,
       `scopedGate.resolution.evidenceRefs[${String(index)}]`,
     )),
   };
+  if (kind === "typed-console") {
+    return {
+      ...base,
+      kind,
+      confirmationCommandId: parseIdentifier<"CommandId">(
+        record.confirmationCommandId,
+        "scopedGate.resolution.confirmationCommandId",
+      ) as CommandId,
+    };
+  }
+  if (kind === "attested-input") {
+    return {
+      ...base,
+      kind,
+      attestationId: parseIdentifier<"InputAttestationId">(
+        record.attestationId,
+        "scopedGate.resolution.attestationId",
+      ),
+      integrationId: requiredString(record.integrationId, "scopedGate.resolution.integrationId"),
+      integrationGeneration: safeInteger(
+        record.integrationGeneration,
+        "scopedGate.resolution.integrationGeneration",
+        1,
+      ),
+    };
+  }
+  throw new TypeError("scopedGate.resolution.kind is invalid");
 }
 
 export function parseScopedGate(value: unknown): ScopedGate {
@@ -314,22 +456,11 @@ export function parseScopedGate(value: unknown): ScopedGate {
   ]);
   const scope = parseScope(record.scope);
   if (!Array.isArray(record.affectedTaskIds)) throw new TypeError("scopedGate.affectedTaskIds must be an array");
-  if (!Array.isArray(record.blockedOperationIds)) throw new TypeError("scopedGate.blockedOperationIds must be an array");
-  const blockedOperationIds = record.blockedOperationIds.map((operation, index) => {
-    if (typeof operation !== "string" || !isFabricOperation(operation)) {
-      throw new TypeError(`scopedGate.blockedOperationIds[${String(index)}] is not a protocol operation`);
-    }
-    return operation;
-  });
-  if (!Array.isArray(record.enforcementPoints)) throw new TypeError("scopedGate.enforcementPoints must be an array");
-  const enforcementPoints = record.enforcementPoints.map((point, index) => {
-    const match = GATE_ENFORCEMENT_POINTS.find((candidate) => candidate === point);
-    if (match === undefined) throw new TypeError(`scopedGate.enforcementPoints[${String(index)}] is invalid`);
-    return match;
-  });
-  if (new Set(enforcementPoints).size !== enforcementPoints.length) {
-    throw new TypeError("scopedGate.enforcementPoints must not contain duplicates");
-  }
+  const { blockedOperationIds, enforcementPoints } = parseEnforcementTargets(
+    record.blockedOperationIds,
+    record.enforcementPoints,
+    "scopedGate",
+  );
   if (!Array.isArray(record.evidenceRefs)) throw new TypeError("scopedGate.evidenceRefs must be an array");
   const base: ScopedGateBase = {
     gateId: parseIdentifier<"GateId">(record.gateId, "scopedGate.gateId"),

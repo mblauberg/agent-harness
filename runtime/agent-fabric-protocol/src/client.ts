@@ -8,7 +8,14 @@ import type {
 } from "./gates.js";
 import type { Intake, IntakeRevisionRequest, IntakeSubmission } from "./intake.js";
 import type { MembershipBindRequest, MembershipBindResult } from "./membership.js";
-import { FABRIC_OPERATIONS, type BaselineOperation, type FabricOperation } from "./operations.js";
+import {
+  FABRIC_OPERATIONS,
+  OPERATION_REGISTRY,
+  type BaselineOperation,
+  type FabricOperation,
+  type OperationPrincipalKind,
+  type PrincipalOperation,
+} from "./operations.js";
 import type {
   ChairTakeoverRequest,
   IntegrationInputAttestationRequest,
@@ -48,6 +55,7 @@ import type {
   DaemonLifecycleResult,
   OperationInputMap,
   OperationResultMap,
+  ProtocolPrincipal,
   TaskCompletionCommit,
   TaskRequestCommit,
 } from "./rpc-contract.js";
@@ -71,6 +79,8 @@ import type {
 
 export interface ProtocolRpcTransport {
   readonly features: readonly ProtocolFeature[];
+  readonly principal: ProtocolPrincipal;
+  readonly allowedOperations: ReadonlySet<FabricOperation>;
   call<Operation extends keyof OperationInputMap & FabricOperation>(
     operation: Operation,
     input: OperationInputMap[Operation],
@@ -111,6 +121,8 @@ export interface ScopedGateClient {
   check(input: ScopedGateCheckRequest): Promise<ScopedGateCheckResult>;
 }
 
+export type OperatorScopedGateClient = Pick<ScopedGateClient, "create" | "resolve">;
+
 export interface ResourceReservationClient {
   reserve(input: ResourceReservationRequest): Promise<ResourceReservation>;
   release(input: ResourceReleaseRequest): Promise<ResourceReservation>;
@@ -127,6 +139,14 @@ export interface RequestResultClient {
   reassign(input: ResultDeliveryReassignRequest): Promise<ResultDelivery>;
   abandon(input: ResultDeliveryAbandonRequest): Promise<ResultDelivery>;
 }
+
+export type AgentRequestResultClient = Omit<RequestResultClient, "providerAccept">;
+
+export type PrincipalOperationFacade<Principal extends OperationPrincipalKind> = {
+  readonly [Operation in PrincipalOperation<Principal> & keyof OperationInputMap]?: (
+    input: OperationInputMap[Operation],
+  ) => Promise<OperationResultMap[Operation]>;
+};
 
 export interface TakeoverClient {
   takeOver(input: ChairTakeoverRequest): Promise<ChairTakeoverResult>;
@@ -160,8 +180,8 @@ export type NegotiatedOperatorClient = {
   projectSessions?: ProjectSessionClient;
   operatorControl?: OperatorControlClient;
   intakes?: IntakeClient;
-  gates?: ScopedGateClient;
-  resources?: ResourceReservationClient;
+  operations: PrincipalOperationFacade<"operator">;
+  gates?: OperatorScopedGateClient;
   takeover?: TakeoverClient;
   projection?: ProjectionClient;
   messages?: MessageBodyClient;
@@ -172,22 +192,49 @@ export type NegotiatedOperatorClient = {
 export type NegotiatedAgentClient = {
   kind: "agent";
   features: readonly ProtocolFeature[];
+  operations: PrincipalOperationFacade<"agent">;
   core?: BaselineFabricClient;
   gates?: Pick<ScopedGateClient, "check">;
   resources?: ResourceReservationClient;
-  requestResults?: RequestResultClient;
+  requestResults?: AgentRequestResultClient;
   close(): Promise<void>;
 };
 
 export type NegotiatedIntegrationClient = {
   kind: "integration";
   features: readonly ProtocolFeature[];
+  operations: PrincipalOperationFacade<"integration">;
   inputAttestation?: InputAttestationClient;
   close(): Promise<void>;
 };
 
 function hasFeature(transport: ProtocolRpcTransport, feature: ProtocolFeature): boolean {
   return transport.features.includes(feature);
+}
+
+function hasOperation(transport: ProtocolRpcTransport, operation: FabricOperation): boolean {
+  return transport.allowedOperations.has(operation);
+}
+
+function hasOperations(transport: ProtocolRpcTransport, operations: readonly FabricOperation[]): boolean {
+  return operations.every((operation) => hasOperation(transport, operation));
+}
+
+function principalOperations<Principal extends OperationPrincipalKind>(
+  principal: Principal,
+  transport: ProtocolRpcTransport,
+): PrincipalOperationFacade<Principal> {
+  if (transport.principal.kind !== principal) {
+    throw new TypeError(`transport principal is ${transport.principal.kind}, not ${principal}`);
+  }
+  const facade: Partial<Record<FabricOperation, (input: never) => Promise<unknown>>> = {};
+  for (const operation of transport.allowedOperations) {
+    if (!OPERATION_REGISTRY[operation].principals.includes(principal)) {
+      throw new TypeError(`transport granted ${operation} to illegal ${principal} principal`);
+    }
+    facade[operation] = (input) => transport.call(operation, input);
+  }
+  return facade as PrincipalOperationFacade<Principal>;
 }
 
 function projectSessions(transport: ProtocolRpcTransport): ProjectSessionClient {
@@ -216,32 +263,11 @@ function intakes(transport: ProtocolRpcTransport): IntakeClient {
   };
 }
 
-function gates(transport: ProtocolRpcTransport): ScopedGateClient {
-  return {
-    create: (input) => transport.call(FABRIC_OPERATIONS.scopedGateCreate, input),
-    resolve: (input) => transport.call(FABRIC_OPERATIONS.scopedGateResolve, input),
-    check: (input) => transport.call(FABRIC_OPERATIONS.scopedGateCheck, input),
-  };
-}
-
 function resources(transport: ProtocolRpcTransport): ResourceReservationClient {
   return {
     reserve: (input) => transport.call(FABRIC_OPERATIONS.resourceReserve, input),
     release: (input) => transport.call(FABRIC_OPERATIONS.resourceRelease, input),
     reconcile: (input) => transport.call(FABRIC_OPERATIONS.resourceReconcile, input),
-  };
-}
-
-function requestResults(transport: ProtocolRpcTransport): RequestResultClient {
-  return {
-    request: (input) => transport.call(FABRIC_OPERATIONS.taskRequest, input),
-    completeWithReply: (input) => transport.call(FABRIC_OPERATIONS.taskCompleteWithReply, input),
-    claim: (input) => transport.call(FABRIC_OPERATIONS.resultDeliveryClaim, input),
-    providerAccept: (input) => transport.call(FABRIC_OPERATIONS.resultDeliveryProviderAccept, input),
-    consume: (input) => transport.call(FABRIC_OPERATIONS.resultDeliveryConsume, input),
-    retry: (input) => transport.call(FABRIC_OPERATIONS.resultDeliveryRetry, input),
-    reassign: (input) => transport.call(FABRIC_OPERATIONS.resultDeliveryReassign, input),
-    abandon: (input) => transport.call(FABRIC_OPERATIONS.resultDeliveryAbandon, input),
   };
 }
 
@@ -258,15 +284,42 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
   return {
     kind: "operator",
     features: [...transport.features],
-    ...(hasFeature(transport, "project-sessions.v1") ? { projectSessions: projectSessions(transport) } : {}),
-    ...(hasFeature(transport, "operator-control.v1") ? { operatorControl: operatorControl(transport) } : {}),
-    ...(hasFeature(transport, "intakes.v1") ? { intakes: intakes(transport) } : {}),
-    ...(hasFeature(transport, "scoped-gates.v1") ? { gates: gates(transport) } : {}),
-    ...(hasFeature(transport, "resource-reservations.v1") ? { resources: resources(transport) } : {}),
-    ...(hasFeature(transport, "chair-takeover.v1")
+    operations: principalOperations("operator", transport),
+    ...(hasFeature(transport, "project-sessions.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.projectSessionCreate,
+      FABRIC_OPERATIONS.projectSessionGet,
+      FABRIC_OPERATIONS.projectSessionTransition,
+      FABRIC_OPERATIONS.projectSessionClose,
+      FABRIC_OPERATIONS.membershipBind,
+    ]) ? { projectSessions: projectSessions(transport) } : {}),
+    ...(hasFeature(transport, "operator-control.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.operatorAttach,
+      FABRIC_OPERATIONS.operatorDetach,
+      FABRIC_OPERATIONS.operatorHeartbeat,
+      FABRIC_OPERATIONS.operatorCommand,
+    ]) ? { operatorControl: operatorControl(transport) } : {}),
+    ...(hasFeature(transport, "intakes.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.intakeSubmit,
+      FABRIC_OPERATIONS.intakeRevise,
+    ]) ? { intakes: intakes(transport) } : {}),
+    ...(hasFeature(transport, "scoped-gates.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.scopedGateCreate,
+      FABRIC_OPERATIONS.scopedGateResolve,
+    ]) ? {
+      gates: {
+        create: (input: ScopedGateCreateRequest) => transport.call(FABRIC_OPERATIONS.scopedGateCreate, input),
+        resolve: (input: ScopedGateResolveRequest) => transport.call(FABRIC_OPERATIONS.scopedGateResolve, input),
+      },
+    } : {}),
+    ...(hasFeature(transport, "chair-takeover.v1") && hasOperation(transport, FABRIC_OPERATIONS.chairTakeover)
       ? { takeover: { takeOver: (input: ChairTakeoverRequest) => transport.call(FABRIC_OPERATIONS.chairTakeover, input) } }
       : {}),
-    ...(hasFeature(transport, "operator-projection.v1")
+    ...(hasFeature(transport, "operator-projection.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.projectDiscover,
+      FABRIC_OPERATIONS.projectionSnapshot,
+      FABRIC_OPERATIONS.projectionPage,
+      FABRIC_OPERATIONS.projectionEvents,
+    ])
       ? {
           projection: {
             discover: (input: ProjectDiscoveryRequest) => transport.call(FABRIC_OPERATIONS.projectDiscover, input),
@@ -276,10 +329,15 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
           },
         }
       : {}),
-    ...(hasFeature(transport, "message-body-read.v1")
+    ...(hasFeature(transport, "message-body-read.v1") && hasOperation(transport, FABRIC_OPERATIONS.messageBodyRead)
       ? { messages: { read: (input: MessageBodyReadRequest) => transport.call(FABRIC_OPERATIONS.messageBodyRead, input) } }
       : {}),
-    ...(hasFeature(transport, "lifecycle-control.v1") ? { lifecycle: lifecycle(transport) } : {}),
+    ...(hasFeature(transport, "lifecycle-control.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.projectSessionDrain,
+      FABRIC_OPERATIONS.projectSessionStop,
+      FABRIC_OPERATIONS.daemonDrain,
+      FABRIC_OPERATIONS.daemonStop,
+    ]) ? { lifecycle: lifecycle(transport) } : {}),
     close: () => transport.close(),
   };
 }
@@ -288,6 +346,7 @@ export function createAgentClient(transport: ProtocolRpcTransport): NegotiatedAg
   return {
     kind: "agent",
     features: [...transport.features],
+    operations: principalOperations("agent", transport),
     ...(hasFeature(transport, "fabric-core.v1")
       ? {
           core: {
@@ -298,11 +357,33 @@ export function createAgentClient(transport: ProtocolRpcTransport): NegotiatedAg
           },
         }
       : {}),
-    ...(hasFeature(transport, "scoped-gates.v1")
+    ...(hasFeature(transport, "scoped-gates.v1") && hasOperation(transport, FABRIC_OPERATIONS.scopedGateCheck)
       ? { gates: { check: (input: ScopedGateCheckRequest) => transport.call(FABRIC_OPERATIONS.scopedGateCheck, input) } }
       : {}),
-    ...(hasFeature(transport, "resource-reservations.v1") ? { resources: resources(transport) } : {}),
-    ...(hasFeature(transport, "request-results.v1") ? { requestResults: requestResults(transport) } : {}),
+    ...(hasFeature(transport, "resource-reservations.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.resourceReserve,
+      FABRIC_OPERATIONS.resourceRelease,
+      FABRIC_OPERATIONS.resourceReconcile,
+    ]) ? { resources: resources(transport) } : {}),
+    ...(hasFeature(transport, "request-results.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.taskRequest,
+      FABRIC_OPERATIONS.taskCompleteWithReply,
+      FABRIC_OPERATIONS.resultDeliveryClaim,
+      FABRIC_OPERATIONS.resultDeliveryConsume,
+      FABRIC_OPERATIONS.resultDeliveryRetry,
+      FABRIC_OPERATIONS.resultDeliveryReassign,
+      FABRIC_OPERATIONS.resultDeliveryAbandon,
+    ]) ? {
+      requestResults: {
+        request: (input: TaskRequest) => transport.call(FABRIC_OPERATIONS.taskRequest, input),
+        completeWithReply: (input: TaskCompleteWithReply) => transport.call(FABRIC_OPERATIONS.taskCompleteWithReply, input),
+        claim: (input: ResultDeliveryClaimRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryClaim, input),
+        consume: (input: ResultDeliveryConsumeRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryConsume, input),
+        retry: (input: ResultDeliveryRetryRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryRetry, input),
+        reassign: (input: ResultDeliveryReassignRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryReassign, input),
+        abandon: (input: ResultDeliveryAbandonRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryAbandon, input),
+      },
+    } : {}),
     close: () => transport.close(),
   };
 }
@@ -311,7 +392,8 @@ export function createIntegrationClient(transport: ProtocolRpcTransport): Negoti
   return {
     kind: "integration",
     features: [...transport.features],
-    ...(hasFeature(transport, "input-attestation.v1")
+    operations: principalOperations("integration", transport),
+    ...(hasFeature(transport, "input-attestation.v1") && hasOperation(transport, FABRIC_OPERATIONS.integrationInputAttest)
       ? {
           inputAttestation: {
             attestInput: (input: IntegrationInputAttestationRequest) =>

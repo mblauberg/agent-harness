@@ -1,4 +1,5 @@
-export type OperationPrincipalKind = "agent" | "operator" | "integration" | "bootstrap";
+// Bootstrap has a separate daemon-election handshake and no public project RPC.
+export type OperationPrincipalKind = "agent" | "operator" | "integration";
 
 export type OperationFeature =
   | "fabric-core.v1"
@@ -18,9 +19,10 @@ type OperationDefinition = {
   operation: `fabric.v1.${string}`;
   feature: OperationFeature;
   principals: readonly OperationPrincipalKind[];
-  kind: "baseline" | "extension" | "legacy-alias";
+  kind: "baseline" | "extension" | "retired";
   gateOwner?: "scoped-gate";
-  canonicalOperation?: `fabric.v1.${string}`;
+  replacementOperation?: `fabric.v1.${string}`;
+  retirementReason?: string;
 };
 
 function defineOperations<const Registry extends Record<string, OperationDefinition>>(registry: Registry): Registry {
@@ -45,10 +47,11 @@ const DEFINITIONS = defineOperations({
   resolveHumanGate: {
     operation: "fabric.v1.task.human-gate.resolve",
     feature: "fabric-core.v1",
-    principals: ["agent"],
-    kind: "legacy-alias",
+    principals: [],
+    kind: "retired",
     gateOwner: "scoped-gate",
-    canonicalOperation: "fabric.v1.scoped-gate.resolve",
+    replacementOperation: "fabric.v1.scoped-gate.resolve",
+    retirementReason: "identifier-only task gates migrated to daemon-owned scoped gates",
   },
   acknowledgeTaskHandoff: { operation: "fabric.v1.task.handoff.acknowledge", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   getTask: { operation: "fabric.v1.task.read", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
@@ -141,9 +144,19 @@ function buildOperationConstants(): OperationConstants {
 export const FABRIC_OPERATIONS = buildOperationConstants();
 export type FabricOperation = (typeof FABRIC_OPERATIONS)[keyof typeof FABRIC_OPERATIONS];
 export type BaselineOperation = {
-  [Key in keyof typeof DEFINITIONS]: (typeof DEFINITIONS)[Key]["kind"] extends "extension"
-    ? never
-    : (typeof DEFINITIONS)[Key]["operation"];
+  [Key in keyof typeof DEFINITIONS]: (typeof DEFINITIONS)[Key]["kind"] extends "baseline"
+    ? (typeof DEFINITIONS)[Key]["operation"]
+    : never;
+}[keyof typeof DEFINITIONS];
+export type RetiredOperation = {
+  [Key in keyof typeof DEFINITIONS]: (typeof DEFINITIONS)[Key]["kind"] extends "retired"
+    ? (typeof DEFINITIONS)[Key]["operation"]
+    : never;
+}[keyof typeof DEFINITIONS];
+export type PrincipalOperation<Principal extends OperationPrincipalKind> = {
+  [Key in keyof typeof DEFINITIONS]: Principal extends (typeof DEFINITIONS)[Key]["principals"][number]
+    ? (typeof DEFINITIONS)[Key]["operation"]
+    : never;
 }[keyof typeof DEFINITIONS];
 
 export type OperationRegistryEntry = OperationDefinition & { key: keyof typeof DEFINITIONS };
@@ -161,8 +174,14 @@ export const OPERATION_REGISTRY = buildWireRegistry();
 
 export const BASELINE_OPERATIONS = Object.freeze(
   Object.entries(OPERATION_REGISTRY)
-    .filter(([, definition]) => definition.kind !== "extension")
+    .filter(([, definition]) => definition.kind === "baseline")
     .map(([operation]) => operation as BaselineOperation),
+);
+
+export const RETIRED_OPERATIONS = Object.freeze(
+  Object.entries(OPERATION_REGISTRY)
+    .filter(([, definition]) => definition.kind === "retired")
+    .map(([operation]) => operation as RetiredOperation),
 );
 
 const operationSet: ReadonlySet<string> = new Set(Object.keys(OPERATION_REGISTRY));
@@ -172,10 +191,22 @@ export function isFabricOperation(value: string): value is FabricOperation {
 }
 
 export function isBaselineOperation(operation: FabricOperation): boolean {
-  return OPERATION_REGISTRY[operation].kind !== "extension";
+  return OPERATION_REGISTRY[operation].kind === "baseline";
 }
 
-export function canonicalOperation(operation: FabricOperation): FabricOperation {
-  const canonical = OPERATION_REGISTRY[operation].canonicalOperation;
-  return canonical === undefined ? operation : canonical as FabricOperation;
+export function isActiveFabricOperation(value: string): value is Exclude<FabricOperation, RetiredOperation> {
+  return isFabricOperation(value) && OPERATION_REGISTRY[value].kind !== "retired";
+}
+
+export function isRetiredOperation(operation: FabricOperation): operation is RetiredOperation {
+  return OPERATION_REGISTRY[operation].kind === "retired";
+}
+
+export function operationsForPrincipal<Principal extends OperationPrincipalKind>(
+  principal: Principal,
+): ReadonlySet<PrincipalOperation<Principal>> {
+  const operations = Object.entries(OPERATION_REGISTRY)
+    .filter(([, definition]) => definition.kind !== "retired" && definition.principals.includes(principal))
+    .map(([operation]) => operation as PrincipalOperation<Principal>);
+  return new Set(operations);
 }

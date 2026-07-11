@@ -70,13 +70,15 @@ describe("canonical exhaustive operation registry", () => {
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.scoped-gate.rebind");
   });
 
-  it("routes the legacy human-gate wire operation to the scoped-gate owner", () => {
+  it("recognises but never grants the retired legacy human-gate wire operation", () => {
     const registry: unknown = Reflect.get(protocol, "OPERATION_REGISTRY");
 
     expect(registry).toMatchObject({
       "fabric.v1.task.human-gate.resolve": {
+        kind: "retired",
+        principals: [],
         gateOwner: "scoped-gate",
-        canonicalOperation: "fabric.v1.scoped-gate.resolve",
+        replacementOperation: "fabric.v1.scoped-gate.resolve",
       },
     });
   });
