@@ -1,12 +1,13 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.9
+Version: 1.10
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
+Version 1.10 closes the review-discovered destroyed-conflict recovery dead end.
 Version 1.9 closes the implementation-discovered typed Git grant, effect-custody
 and recovery gap. Version 1.8 closes the review-discovered retained-child-
 bridge and attestation descriptor gaps. Version 1.7 closes the review-discovered MCP bootstrap,
@@ -1139,13 +1140,21 @@ CREATE TABLE operator_git_effect_bindings (
   lock_plan_digest TEXT NOT NULL,
   lookup_generation INTEGER NOT NULL CHECK (lookup_generation >= 0),
   lookup_evidence_digest TEXT,
+  lookup_outcome TEXT CHECK (lookup_outcome IS NULL OR lookup_outcome IN
+    ('exact-conflict','exact-applied','exact-no-effect','incomplete',
+     'unavailable','inconsistent','inspector-unavailable',
+     'remote-proof-permanently-unavailable','mixed-local-remote-evidence',
+     'evidence-integrity-failure','conflict-state-unverifiable')),
+  lookup_failure_signature_digest TEXT,
+  lookup_observed_at INTEGER,
   resolution_eligible INTEGER NOT NULL CHECK (resolution_eligible IN (0,1)),
   resolution_eligible_lookup_generation INTEGER,
   resolution_eligible_evidence_digest TEXT,
   resolution_eligibility_reason TEXT CHECK (
     resolution_eligibility_reason IS NULL OR resolution_eligibility_reason IN
       ('inspector-unavailable','remote-proof-permanently-unavailable',
-       'mixed-local-remote-evidence','evidence-integrity-failure')),
+       'mixed-local-remote-evidence','evidence-integrity-failure',
+       'conflict-state-unverifiable')),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (project_session_id, coordination_run_id)
@@ -1181,12 +1190,42 @@ CREATE TABLE operator_git_effect_bindings (
   CHECK ((remote_registration_id IS NULL)=(remote_target_digest IS NULL)),
   CHECK ((predecessor_custody_id IS NULL)=
          (predecessor_conflict_generation IS NULL)),
+  CHECK ((lookup_generation=0)=(lookup_evidence_digest IS NULL)),
+  CHECK ((lookup_generation=0)=(lookup_outcome IS NULL)),
+  CHECK ((lookup_generation=0)=(lookup_observed_at IS NULL)),
+  CHECK (lookup_evidence_digest IS NULL OR
+         (length(lookup_evidence_digest)=71 AND
+          substr(lookup_evidence_digest,1,7)='sha256:')),
+  CHECK (lookup_failure_signature_digest IS NULL OR
+         (length(lookup_failure_signature_digest)=71 AND
+          substr(lookup_failure_signature_digest,1,7)='sha256:')),
+  CHECK (
+    (lookup_outcome IN
+      ('incomplete','unavailable','inconsistent','inspector-unavailable',
+       'remote-proof-permanently-unavailable','mixed-local-remote-evidence',
+       'evidence-integrity-failure') AND
+     lookup_failure_signature_digest IS NOT NULL) OR
+    ((lookup_outcome IS NULL OR lookup_outcome NOT IN
+      ('incomplete','unavailable','inconsistent','inspector-unavailable',
+       'remote-proof-permanently-unavailable','mixed-local-remote-evidence',
+       'evidence-integrity-failure')) AND
+     lookup_failure_signature_digest IS NULL)),
   CHECK ((resolution_eligible=0)=
          (resolution_eligible_lookup_generation IS NULL)),
   CHECK ((resolution_eligible=0)=
          (resolution_eligible_evidence_digest IS NULL)),
   CHECK ((resolution_eligible=0)=
-         (resolution_eligibility_reason IS NULL))
+         (resolution_eligibility_reason IS NULL)),
+  CHECK (resolution_eligible=0 OR
+         resolution_eligible_lookup_generation=lookup_generation),
+  CHECK (resolution_eligible=0 OR
+         resolution_eligible_evidence_digest=lookup_evidence_digest),
+  CHECK (resolution_eligible=0 OR
+         resolution_eligibility_reason=lookup_outcome),
+  CHECK (resolution_eligibility_reason<>'conflict-state-unverifiable' OR
+         (state='quarantined' AND
+          (owned_conflict_generation IS NOT NULL OR
+           predecessor_conflict_generation IS NOT NULL)))
 );
 ```
 
@@ -1210,6 +1249,7 @@ and update every named row in one transaction:
 | final Commit prepared | `prepared` | `prepared` | `authorised` | `reserved` | yes |
 | dispatch begins | `dispatching` | `dispatching` | `executing` | `dispatching` | yes |
 | exact bounded conflict | `conflict` | `conflict` | `conflict` | `conflict` | yes |
+| persisted owned/inherited conflict proved destroyed/altered | `quarantined` | `quarantined` | `quarantined` | `quarantined` | yes |
 | outcome unknown | `ambiguous` | `ambiguous` | `ambiguous` | `ambiguous` | yes |
 | machine proof permanently unavailable | `quarantined` | `quarantined` | `quarantined` | `quarantined` | yes |
 | machine-proved applied | `applied` | `terminal` | `terminal` | `released` | no |
@@ -1227,6 +1267,110 @@ row combination, a conflict without one positive
 the latest lookup. There is exactly one current conflict owner and one active
 reservation for a Git common directory.
 
+An explicit authenticated conflict reconciliation binds the exact custody,
+lineage generation, binding state revision, common-directory identity and prior
+evidence. The Git-only `owned-conflict` form requires outer/binding state
+`conflict`, positive owned generation and exact nullable predecessor
+generation. The Git-only `inherited-successor` form requires positive
+predecessor generation, null owned generation and one exact mapping of outer
+status to binding state: `pending -> prepared`, `ambiguous -> ambiguous` or
+`quarantined -> quarantined`. Both forms name the original target command and
+compare-and-set reservation generation, lookup generation and nullable prior
+evidence digest, and require the current resolution-eligibility discriminator
+to be `none`. The original target's project/session are reauthenticated, but
+the discriminator requires the distinct `git-custody-resolve` capability; the
+original `git` capability alone is insufficient. Missing/stale/crossed lineage
+fields, an existing eligibility marker or use by another action family changes
+nothing. The inspector uses only
+the sealed no-process typed local reader.
+Complete proof that native operation state, index stages or the bounded
+conflict-path manifest no longer equals the persisted conflict atomically
+increments lookup and binding-state revisions, records the complete evidence
+digest/outcome/time, moves the
+Git binding, generic custody, admission and reservation from `conflict` to
+`quarantined`, and sets the matching generation-bound `resolution_eligible`
+marker with reason `conflict-state-unverifiable`. The reservation and liveness
+blocker remain. Exact intact proof retains `conflict`; incomplete, unavailable
+or internally inconsistent observation also retains it and creates no
+eligibility marker; each accepted inspection still appends the next bounded
+lookup evidence/outcome/time so a later request can compare-and-set it. This
+transition invokes no Git process, remote call or mutation and cannot continue,
+abort or restore the native operation.
+
+For an inherited successor, exact intact proof atomically changes
+`prepared|ambiguous|quarantined` to `conflict`, assigns the next positive owned
+generation and retains the reservation. Complete proof that the inherited
+native state/index/path manifest no longer holds atomically changes or retains
+all four owners as `quarantined`, keeps owned generation null, retains the
+positive predecessor generation and reservation, and sets the matching
+`conflict-state-unverifiable` eligibility tuple. Incomplete, unavailable or
+inconsistent proof moves `prepared` to `ambiguous` or retains the existing
+ambiguity/quarantine without eligibility. No branch releases the transferred
+reservation or rewrites predecessor machine evidence.
+
+The same owned/inherited all-four-owner quarantine mapping is used for a closed
+permanent `inspector-unavailable` or `evidence-integrity-failure` outcome, with
+that exact outcome as the eligibility reason. Immediate permanent classification
+is permitted only when the digest-pinned reader or trusted execution-profile
+contract is absent/revoked for the target generation, or the sealed reader can
+read the bounded canonical files but proves their format/hash relationship
+cannot yield any complete observation. Otherwise `unavailable` and
+`inconsistent` are transient. They become permanent only on the third
+consecutive accepted lookup for the same custody/lineage and identical
+normalised failure-signature digest, under distinct reconciliation commands
+spanning at least 60 seconds with no intervening different outcome/signature.
+The immutable reconciliation command results are the streak owner; the current
+binding mirrors only the latest signature digest. Project files, operator text
+and the caller cannot select a permanent code. Attempts one and two retain the
+existing conflict or ambiguity/quarantine blocker without eligibility. The
+third final-CAS transaction persists the permanent code/evidence/time, moves or
+retains every owner in `quarantined`, retains the reservation and sets the exact
+latest-generation eligibility tuple. Any different outcome/signature resets
+the derived streak.
+
+The public reconciliation codec is the exhaustive three-variant union in Spec
+01: the legacy `pending|ambiguous` form rejects `git_conflict`; the
+`owned-conflict` form requires `conflict -> conflict`; and the
+`inherited-successor` form requires one of the three exact outer/binding-state
+mappings above. Each Git form requires every custody, lineage, binding-state,
+reservation, common-directory and lookup compare-and-set field and rejects
+extras, including any target whose resolution eligibility is not `none`. Their
+required operator action is `git-custody-resolve`. The
+daemon first journals the reconciliation command as observe-only/in-flight,
+projected as `pending/observing` at exactly the next attempt generation, then
+performs the bounded read. Its final transaction rechecks every requested
+field, increments lookup and binding-state revisions, persists the closed
+outcome/evidence/time, fixes the target at that same next attempt generation,
+applies either the all-four-owner retained-conflict or
+all-four-owner quarantine mapping, and stores the closed resulting
+`OperatorActionStatus` snapshot in the same command row. A stale final recheck
+atomically changes no custody/admission/reservation row and instead stores a
+terminal `rejected` result with `state-changed` for a custody tuple mismatch,
+`generation-stale` for principal/session generation mismatch or
+`authority-insufficient` for expired/revoked/insufficient capability, plus the
+target intent digest and original bounded evidence references in that
+reconciliation command row. Crash
+before either final branch leaves no custody transition; exact retry may repeat
+only the read-only inspection. Once a status snapshot or stale rejection
+commits, exact replay performs no inspection, status returns it immutably and
+changed replay under that command ID conflicts. A later inspection uses a new
+command over the latest target tuple.
+
+`fabric.v1.operator-action.status` projects Git custody in `pending/prepared`,
+`ambiguous`, `conflict` and `quarantined` only
+through the closed `git_custody` status union in Spec 01. A target-command query
+reads the current binding/generic-custody/admission/reservation join and rejects
+an impossible combination. Only an inherited successor with binding
+`prepared`, positive predecessor lineage, null owned generation and no
+eligibility may use the `pending` status with `phase=prepared`; generic pending
+effects retain the legacy status without `git_custody`. A
+reconciliation-command query returns
+`pending/observing` while its bounded read has no terminal command result, then returns
+the immutable stored status snapshot or closed stale rejection;
+it never parses either as an operator-action receipt. Status requires `read`,
+has no inspection side effect and exposes no repository path, Git output,
+credential or command vector.
+
 Confirmed Commit of `merge-continue`, `merge-abort`, `rebase-continue` or
 `rebase-abort` revalidates the current conflict owner and generation. In one
 transaction it terminalises that predecessor as `conflict-transferred`,
@@ -1236,7 +1380,9 @@ successor never dispatches, or dispatch proves the identical conflict remains
 with no other effect, recovery uses the sealed no-process typed local reader to
 move the successor to `conflict` and make it the new owner instead of releasing
 the repository. If exact unchanged-conflict proof is unavailable it becomes
-ambiguous/quarantined. Exact resolution releases
+ambiguous/quarantined without eligibility and defers any destroyed/altered
+classification to the explicit `inherited-successor` observe path above. Exact
+resolution releases
 the reservation; another exact conflict records a higher owned generation;
 ambiguity/quarantine follows the table. An old owner/generation, concurrent
 successor or partial transfer fails atomically.
@@ -1268,7 +1414,8 @@ CREATE TABLE git_custody_resolutions (
   lookup_evidence_digest TEXT NOT NULL,
   eligibility_reason TEXT NOT NULL CHECK (eligibility_reason IN
     ('inspector-unavailable','remote-proof-permanently-unavailable',
-     'mixed-local-remote-evidence','evidence-integrity-failure')),
+     'mixed-local-remote-evidence','evidence-integrity-failure',
+     'conflict-state-unverifiable')),
   adjudication TEXT NOT NULL CHECK (adjudication IN
     ('applied','no-effect','quarantine-accepted')),
   reason TEXT NOT NULL,
@@ -1465,7 +1612,10 @@ Startup and live reconciliation use this closed policy:
   uses the sealed no-process typed local reader to prove the inherited conflict
   unchanged and atomically becomes the current `conflict` owner/reservation
   without executing its requested action; unavailable/mismatched proof retains
-  an ambiguity/quarantine blocker rather than releasing it;
+  an ambiguity/quarantine blocker without eligibility rather than releasing
+  it, and only an explicit `git-custody-resolve`-capable
+  `inherited-successor` observation may classify complete destroyed/altered
+  proof;
 - `dispatching` or `ambiguous`: call only the fixed read-only Git effect
   inspector for the exact custody ID and increment `lookup_generation`; never
   execute, abort, continue, retry or reconstruct the mutation;
@@ -1473,9 +1623,35 @@ Startup and live reconciliation use this closed policy:
   reconciliation request may call only that same inspector and either append a
   higher lookup generation with machine proof or retain quarantine; it never
   mutates Git;
-- exact bounded conflict proof: retain the predecessor conflict record and
-  reservation for a separately previewed typed continue/abort decision; lookup
-  itself never changes the conflict;
+- `conflict`: startup and passive supervision perform no lookup. An explicit
+  authenticated request bound to the exact custody, owned conflict generation,
+  state revision, reservation generation, common-directory identity, lookup
+  generation and nullable prior evidence may call only
+  the sealed no-process typed local reader. Every accepted observation appends
+  exactly one lookup generation with bounded evidence, outcome and time under a
+  final compare-and-set. Exact bounded conflict proof retains the predecessor
+  and reservation for a separately previewed typed
+  continue/abort decision. Complete proof that the persisted native state,
+  index stages or conflict-path manifest was destroyed or altered out of band
+  atomically moves all four owners to `quarantined`, retains the reservation,
+  and sets only the matching
+  `conflict-state-unverifiable` eligibility marker. Incomplete, unavailable or
+  inconsistent proof retains `conflict` without eligibility while transient;
+  a closed permanent inspector/integrity outcome moves all four owners to
+  `quarantined` with matching eligibility. The inspection
+  never invokes a Git process, remote call, continue, abort, restore or other
+  mutation;
+- inherited typed successor in `prepared|ambiguous|quarantined`: an explicit
+  `git-custody-resolve`-capable request bound to the exact predecessor
+  generation and null owned generation uses the same one-lookup/final-CAS
+  protocol. Exact intact proof assigns the next owned conflict generation and
+  moves every owner to `conflict`; complete destroyed/altered proof retains the
+  transferred reservation and moves/retains every owner in `quarantined` with
+  matching `conflict-state-unverifiable` eligibility; incomplete, unavailable
+  or inconsistent proof retains an ambiguity/quarantine blocker without
+  eligibility while transient, while a closed permanent inspector/integrity
+  outcome uses the same retained-reservation quarantine/eligibility mapping.
+  It performs no Git process, remote call or mutation;
 - exact applied proof: record terminal success and the after-state digest once;
 - exact no-effect proof: record terminal no-effect once;
 - incomplete, unavailable, conflicting or mixed local/remote evidence: retain
@@ -1575,6 +1751,33 @@ Acceptance additionally requires deterministic oracles for:
   successor transfer and one-reservation checks. Crash before successor
   dispatch makes the successor the conflict owner without Git I/O; old-owner,
   concurrent-successor, automatic recovery and start gate/admission reuse fail;
+- an out-of-band abort, manual resolution or conflict-state edit makes the
+  persisted predecessor conflict, or the inherited conflict after successor
+  Commit but before successor dispatch, fail a complete sealed-reader comparison.
+  Explicit reconciliation atomically quarantines every owner, retains the
+  reservation and records `conflict-state-unverifiable`; incomplete evidence
+  and the first two identical transient unavailable/inconsistent signatures
+  advance only the bounded lookup audit and retain the blocker. A missing/
+  revoked pinned inspector, proved canonical-evidence integrity failure or the
+  third identical failure signature under the bounded time/command rule
+  quarantines every owner with matching `inspector-unavailable` or
+  `evidence-integrity-failure` eligibility. A different signature resets the
+  streak. Closed
+  codec negatives reject missing/extra/cross-variant fields, nullable-evidence
+  mismatch, stale binding/conflict/reservation/lookup generations and `git`
+  without `git-custody-resolve`. Target and reconciliation command status
+  queries distinguish target `pending/prepared`, `ambiguous`, `conflict` and
+  `quarantined`, plus reconciliation-command `pending/observing`, for both owned
+  and inherited-successor lineage;
+  exact replay returns the immutable snapshot with zero inspection, changed
+  replay conflicts, and a crash before final CAS may repeat only the read-only
+  inspection. A race that transfers custody or completes another lookup between
+  inspection and final CAS stores one terminal closed rejection command
+  with zero owner update; exact replay performs no second inspection and a new
+  command must bind the latest tuple. A separately drafted/gated custody adjudication
+  then releases or retires exactly that reservation with zero Git/remote/
+  process/filesystem mutation, while an unchanged conflict still permits only
+  typed continue/abort;
 - fault injection before binding/reservation insert, after generic custody,
   after prepare commit, after private lock, after each native lock, before the
   SQLite CAS and immediately before the first mutation/CAS for index, ref,
@@ -1590,8 +1793,9 @@ Acceptance additionally requires deterministic oracles for:
   partial pull and unavailable remote observation remaining honest;
 - unresolved Git custody blocking project-session closure and surviving daemon
   and Console restart without a duplicate effect, followed by
-  `git-custody-resolve` negatives for ineligible/conflict custody, stale lookup/
-  evidence, wrong gate/capability/human provenance and changed replay. Faults
+  `git-custody-resolve` negatives for ineligible or intact-conflict custody,
+  stale lookup/evidence, wrong gate/capability/human provenance and changed
+  replay. Faults
   before/after every resolution statement leave all rows unchanged or one
   immutable human-labelled result, make zero Git/remote/process call, preserve
   machine evidence, release/retire one reservation and remove only its closure

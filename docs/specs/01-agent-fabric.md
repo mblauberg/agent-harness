@@ -1,13 +1,14 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.13
+Version: 0.14
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
+Version 0.14 closes the review-discovered destroyed-conflict recovery dead end.
 Version 0.13 closes the implementation-discovered typed Git authority and
 operation-semantics gap. Version 0.12 closes the review-discovered retained-
 child-bridge and attestation descriptor gaps. Version 0.11 closes the review-discovered MCP bootstrap,
@@ -2668,6 +2669,193 @@ semantics:
   recipe. `merge-abort` and `rebase-abort` are also typed gate-bound actions and
   may restore only the predecessor's exact before state. No generic command,
   automatic abort/continue or reuse of the start gate is permitted.
+  Startup performs no automatic inspection of a current conflict owner. An
+  explicit authenticated reconciliation of the exact custody and conflict
+  lineage generation may use only the
+  sealed no-process typed local reader. Exact complete conflict proof retains
+  the conflict for those typed successors. Complete proof that the persisted
+  native operation state, index stages or conflict-path manifest was destroyed
+  or altered out of band atomically moves the four custody owners to
+  `quarantined`, retains the common-directory reservation, records the new
+  lookup evidence and marks only that generation
+  `conflict-state-unverifiable`. One transient incomplete, unavailable or
+  inconsistent observation retains the conflict without an eligibility marker.
+  A closed machine-classified permanent `inspector-unavailable` or
+  `evidence-integrity-failure` outcome instead uses the same all-four-owner
+  quarantine/eligibility mapping with its exact reason. Reconciliation never
+  continues, aborts, restores or otherwise mutates Git.
+  The existing observe-only operator-action reconciliation surface adds two
+  Git-only `git_conflict` discriminators: `owned-conflict` for a current
+  conflict owner and `inherited-successor` for the typed continue/abort custody
+  holding a transferred reservation before it has proved itself the new owner.
+  Each requires the original target command, exact custody lineage, binding
+  state revision, reservation generation, common-directory identity digest,
+  lookup generation and nullable prior evidence digest. Both reauthenticate the
+  exact project/session and require the distinct `git-custody-resolve`
+  capability; the target action's `git` capability alone is insufficient.
+  Missing or stale fields change nothing, and no other action family may use
+  either discriminator.
+
+  The additive closed request variants are:
+
+  ```yaml
+  operator_action_reconcile:
+    command: exact-operator-mutation-context
+    project_id: exact-authenticated-project
+    target_command_id: exact-original-git-command
+    expected_status: conflict
+    expected_attempt_generation: compare-and-set-integer
+    mode: observe-only
+    git_conflict:
+      kind: owned-conflict
+      custody_id: exact-target-custody
+      expected_binding_state: conflict
+      expected_binding_state_revision: compare-and-set-integer
+      expected_owned_conflict_generation: compare-and-set-integer
+      expected_predecessor_custody_id: null-or-exact-custody
+      expected_predecessor_conflict_generation: null-or-compare-and-set-integer
+      expected_reservation_generation: compare-and-set-integer
+      expected_common_directory_identity_digest: exact-sha256
+      expected_lookup_generation: compare-and-set-non-negative-integer
+      expected_lookup_evidence_digest: null-or-exact-sha256
+      expected_resolution_eligibility: none
+  ```
+
+  ```yaml
+  operator_action_reconcile:
+    command: exact-operator-mutation-context
+    project_id: exact-authenticated-project
+    target_command_id: exact-typed-successor-git-command
+    expected_status: pending-or-ambiguous-or-quarantined
+    expected_attempt_generation: compare-and-set-integer
+    mode: observe-only
+    git_conflict:
+      kind: inherited-successor
+      custody_id: exact-target-custody
+      expected_binding_state: prepared-or-ambiguous-or-quarantined
+      expected_binding_state_revision: compare-and-set-integer
+      expected_owned_conflict_generation: null
+      expected_predecessor_custody_id: exact-predecessor-custody
+      expected_predecessor_conflict_generation: compare-and-set-integer
+      expected_reservation_generation: compare-and-set-integer
+      expected_common_directory_identity_digest: exact-sha256
+      expected_lookup_generation: compare-and-set-non-negative-integer
+      expected_lookup_evidence_digest: null-or-exact-sha256
+      expected_resolution_eligibility: none
+  ```
+
+  The outer status and binding state must map `pending -> prepared`,
+  `ambiguous -> ambiguous` or `quarantined -> quarantined`. An
+  `owned-conflict` request instead requires `conflict -> conflict`, positive
+  owned generation and the exact nullable predecessor generation. The existing
+  legacy `pending`/`ambiguous` request rejects `git_conflict`; `quarantined` is
+  accepted only for the inherited-successor form. Both Git forms reject their
+  absence, crossed lineage fields, an existing eligibility marker or any
+  unknown field. The nullable expected evidence
+  value shall exactly equal the stored value and is null only before the first
+  lookup. An accepted inspection increments lookup and binding-state revision,
+  advances attempt generation exactly once, persists a bounded
+  outcome/evidence/timestamp and returns the exact current target-command status
+  below. It does not change reservation generation,
+  conflict-lineage generations or common-directory identity. Exact conflict
+  retains an owned conflict or atomically promotes an intact inherited
+  successor to the next owned conflict generation. Incomplete, unavailable or
+  inconsistent observation retains an existing conflict, otherwise leaves or
+  moves the inherited successor to `ambiguous`/`quarantined`, and creates no
+  resolution eligibility while transient. Complete proof that the persisted
+  owned or inherited conflict no longer holds, or one closed permanent
+  inspector/integrity outcome, returns `quarantined` with the matching
+  eligibility tuple and retained reservation.
+
+  ```yaml
+  operator_action_git_custody_status:
+    status: pending-or-ambiguous-or-conflict-or-quarantined
+    phase: prepared-when-status-pending-otherwise-absent
+    command_id: exact-original-git-command
+    intent_digest: exact-sha256
+    attempt_generation: positive-integer
+    git_custody:
+      custody_id: exact-target-custody
+      binding_state_revision: positive-integer
+      reservation_generation: positive-integer
+      common_directory_identity_digest: exact-sha256
+      predecessor_custody_id: exact-custody-or-null
+      predecessor_conflict_generation: positive-integer-or-null
+      owned_conflict_generation: positive-integer-or-null
+      lookup_generation: non-negative-integer
+      lookup_evidence_digest: null-or-exact-sha256
+      lookup_outcome: null-or-closed-outcome-code
+      lookup_failure_signature_digest: null-or-exact-sha256
+      lookup_observed_at: null-or-timestamp
+      resolution_eligibility:
+        kind: none-or-eligible
+        lookup_generation: absent-unless-eligible-current-generation
+        evidence_digest: absent-unless-eligible-current-sha256
+        reason: absent-unless-eligible-closed-permanent-unprovability-code
+  ```
+
+  The `pending` form is allowed only for an inherited typed successor whose
+  binding is `prepared`; it requires `phase: prepared`, the complete positive
+  predecessor custody/generation pair, null owned generation and
+  `resolution_eligibility.kind: none`. No other generic pending action receives
+  `git_custody`, and `phase` is absent from the other three forms. A `conflict`
+  status requires a positive owned conflict generation and
+  `resolution_eligibility.kind: none`. A `quarantined` status may retain the
+  positive predecessor conflict generation;
+  `conflict-state-unverifiable` requires at least one positive owned or
+  predecessor conflict generation. Predecessor custody ID and generation are
+  both null or both present. An inherited successor has their exact positive
+  pair and null owned generation until exact intact proof assigns the next owned
+  generation. Lookup
+  evidence, outcome and observed time are all null exactly at generation zero
+  and all present thereafter. Eligibility, when present, exactly equals the
+  latest lookup generation/evidence and its outcome code. The closed lookup
+  outcomes are `exact-conflict`, `exact-applied`, `exact-no-effect`,
+  `incomplete`, `unavailable`, `inconsistent`, `inspector-unavailable`,
+  `remote-proof-permanently-unavailable`, `mixed-local-remote-evidence`,
+  `evidence-integrity-failure` and `conflict-state-unverifiable`.
+  `lookup_failure_signature_digest` is present only for `incomplete`,
+  `unavailable`, `inconsistent`, `inspector-unavailable`,
+  `remote-proof-permanently-unavailable`, `mixed-local-remote-evidence` or
+  `evidence-integrity-failure`; it is null at generation zero and for exact
+  state outcomes. It hashes only the normalised bounded failure class and
+  stable machine facts, excluding time, command/operator identity and text.
+
+  `inspector-unavailable` is permanent only when the digest-pinned reader or its
+  trusted execution-profile contract is absent/revoked for the target
+  generation, or after three consecutive accepted `unavailable` observations
+  for the same custody/lineage and normalised failure-signature digest under
+  distinct reconciliation commands spanning at least 60 seconds. An
+  `evidence-integrity-failure` is permanent only when the sealed reader can read
+  the bounded canonical files but proves their format/hash relationship cannot
+  yield any complete observation, or after the equivalent three-observation
+  rule for one identical normalised `inconsistent` signature. The daemon
+  derives the streak from immutable reconciliation-command results; project
+  files, operator text and the caller cannot select a permanent code. Any
+  intervening different outcome/signature resets the streak. Attempts one and
+  two remain non-eligible and retain the blocker. The third final-CAS
+  transaction persists the permanent outcome, moves all four owners to
+  `quarantined` and sets only the matching latest-generation eligibility tuple.
+
+  Reconcile response and exact command replay return the same closed status
+  snapshot without another inspection. Reuse of the reconciliation command ID
+  with any changed field is a dedupe conflict. Status query by the original
+  target command returns its current custody status; status query by the
+  reconciliation command returns that command's immutable result snapshot,
+  not an operator-action receipt. Both queries require `read` and perform no
+  inspection or state change. A new reconciliation command must compare-and-set
+  the latest returned tuple.
+
+  If any requested authority or custody field becomes stale after the bounded
+  read but before final compare-and-set, the final transaction changes no
+  custody, admission or reservation row and terminalises the reconciliation
+  command as a closed rejection: `state-changed` for a custody tuple mismatch,
+  `generation-stale` for a principal/session generation mismatch or
+  `authority-insufficient` for expired/revoked/insufficient capability. Its command ID,
+  target intent digest and original evidence references are preserved. Exact
+  replay and status query return that immutable rejection with no inspection;
+  changed replay conflicts, and another inspection requires a new command over
+  the latest target tuple.
 - **Push:** names one registered remote, one exact local source ref and one
   exact remote destination ref. `fast-forward-only` relies on the remote's
   atomic non-fast-forward rejection. `force-with-lease` additionally binds the
@@ -2729,7 +2917,13 @@ git_custody_resolve:
 The target must already carry a daemon-persisted `resolution_eligible` marker
 for that lookup generation and evidence digest after the bounded inspector has
 declared machine proof permanently unavailable. Ordinary pending lookup and
-typed conflict are ineligible. Draft creation uses the
+an intact, still-observable typed conflict are ineligible. A prior conflict is
+eligible only after the exact observe path atomically transitions every custody
+owner to `quarantined` and records either complete destroyed/altered proof with
+`conflict-state-unverifiable`, or one of the closed machine-derived permanent
+`inspector-unavailable`/`evidence-integrity-failure` outcomes above. Transient
+incomplete/unavailable/inconsistent evidence never suffices. Draft creation
+uses the
 `custody-resolution` binding. Its payload digest covers the exact current
 project/session/run authority, target custody/state, lookup generation/evidence,
 eligibility reason, adjudication and human reason, but excludes the later
@@ -2815,10 +3009,14 @@ Added requirements are:
   one immutable operation ID and binding digest in a typed no-authority draft
   before gate creation; only confirmed final Commit may consume that draft and
   create or resolve effect custody.
-- **FR-043:** Permanently unprovable ambiguous/quarantined Git custody shall
+- **FR-043:** Permanently unprovable ambiguous/quarantined Git custody,
+  including a persisted conflict whose exact bounded state is proved destroyed
+  or altered out of band, shall
   remain blocking until machine proof or one exact, independently attested,
   gate-bound `git-custody-resolve` adjudication; human adjudication shall remain
-  distinguishable from machine proof in every receipt and projection.
+  distinguishable from machine proof in every receipt and projection. Only the
+  exact `git-custody-resolve`-capable Git-only observe reconciliation may
+  classify a persisted conflict as `conflict-state-unverifiable`.
 - **NFR-022:** Typed Git execution shall use one fixed bounded port with no
   arbitrary shell, command, option, hook, editor, pager, executable or
   environment injection surface.
@@ -2877,8 +3075,30 @@ Acceptance additionally requires:
   nothing, and crash at every draft/gate/Commit boundary grants no mutation.
 - **AC-036:** every conflict, ambiguity, quarantine, typed successor and
   terminal outcome matches the four-owner persistence table across restart.
-  `git-custody-resolve` rejects stale generation/evidence, ineligible/conflict
-  custody, wrong gate/capability/provenance and replay with changed reason or
-  adjudication; exact Commit makes zero Git call, atomically releases/retires
-  the reservation, preserves machine evidence, records the human-labelled
-  result and removes only the exact closure blocker.
+  `git-custody-resolve` rejects stale generation/evidence, ineligible custody,
+  every custody still in `conflict`, wrong gate/capability/provenance and
+  replay with changed reason or adjudication. An explicit reconcile of an
+  intact owned or inherited conflict retains/promotes exactly one owner with
+  zero Git mutation; complete proof that its
+  persisted conflict state was destroyed or altered out of band, including
+  after successor Commit but before dispatch, atomically
+  quarantines all four owners, retains the reservation and records
+  `conflict-state-unverifiable`; incomplete observation advances only the
+  bounded lookup evidence/audit revision and retains every owner without
+  eligibility while transient. Immediate machine proof of pinned-inspector
+  absence/revocation or canonical-evidence integrity failure, and exactly the
+  third identical unavailable/inconsistent failure signature under the bounded
+  rule, instead quarantines every owner with the matching permanent eligibility
+  reason; a different signature resets the streak.
+  The subsequent exact adjudication Commit makes zero Git call, atomically
+  releases/retires the reservation, preserves machine evidence, records the
+  human-labelled result and removes only the exact closure blocker. Closed
+  request/status codecs reject missing, extra, crossed-lineage and cross-
+  variant fields; target and reconciliation command queries expose exact
+  target `pending/prepared`, `ambiguous`, `conflict`, `quarantined` or
+  reconciliation-command `pending/observing` state. Exact
+  reconcile replay is read-only and stable, changed replay conflicts, and
+  incomplete evidence cannot set eligibility. A transfer or competing lookup
+  between inspection and final CAS terminalises only the reconciliation command
+  with that exact closed rejection; exact replay makes no inspection, no
+  custody row changes and a new command must bind the current tuple.
