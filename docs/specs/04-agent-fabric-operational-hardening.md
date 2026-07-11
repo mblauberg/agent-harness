@@ -1,13 +1,16 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.10
+Version: 1.11
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.10 closes the review-discovered destroyed-conflict recovery dead end.
+Version 1.11 owns the evidence-registry migration, accepted-scope persistence,
+root/digest compatibility and bounded no-follow artifact-content read required
+by Spec 01 v0.15. Version 1.10 closes the review-discovered destroyed-conflict
+recovery dead end.
 Version 1.9 closes the implementation-discovered typed Git grant, effect-custody
 and recovery gap. Version 1.8 closes the review-discovered retained-child-
 bridge and attestation descriptor gaps. Version 1.7 closes the review-discovered MCP bootstrap,
@@ -1803,3 +1806,200 @@ Acceptance additionally requires deterministic oracles for:
 - capability, remote-credential, command, output and receipt canaries proving
   that no secret, arbitrary argument or unbounded process output reaches
   persistence, projection, logs or Console rendering.
+
+### 9.14 Artifact-content read boundary
+
+Spec 01 section 32.14 owns the public operation and result semantics. This
+section owns its daemon implementation, filesystem containment, bounded codec,
+negotiation and restart behaviour. It adds no artifact authority and no second
+artifact store.
+
+The operation registry and generated protocol manifests shall advertise
+`artifact-registry.v1` / `fabric.v1.evidence.publish` and
+`artifact-content-read.v1` /
+`fabric.v1.operator-artifact-content.read` only when their complete closed
+codecs and daemon handlers are available. A client without the latter exact
+feature/operation has no `artifacts.readContent` surface. Feature absence is an
+honest unavailable state, not a fallback to direct filesystem access.
+
+The handler uses two short SQLite transactions with bounded filesystem work
+between them. It never holds a database transaction or the synchronous daemon
+owner across file I/O:
+
+1. phase A authenticates the `afop_` credential at point of use for the exact
+   project, optional session, current principal generation and `read` action;
+2. phase A selects one active `artifacts` registration, compares its revision
+   and complete ref, captures the exact project/session/run/source/publisher
+   tuple and derives its trusted source root;
+3. outside SQLite, the daemon canonicalises that root, rejects traversal and
+   opens the exact regular file read-only with a no-follow primitive;
+4. it rejects a symbolic link, link count other than one, non-regular file or
+   any pre-open/post-open path, device or inode mismatch;
+5. it reads at most 1 MiB plus an overflow sentinel, rechecks device, inode,
+   size and modification time and verifies raw source SHA-256 before strict
+   UTF-8/media validation;
+6. it applies whole-artifact terminal/credential safety transformation, bounds
+   the inert rendering, validates the cursor and returns one monotonic UTF-8-
+   bounded page with complete-rendering/page digests and an exact whole/start/
+   middle/end line-fragment label; and
+7. phase B opens a fresh transaction, reauthenticates every credential/
+   principal/project/session generation and compares the captured evidence,
+   source-owner/root and ref tuple immediately before response. Any change is
+   `stale`. Unrelated global Fabric activity is not an artifact-content fence.
+
+A second database connection must be able to commit while a deliberately slow
+filesystem read is between phase A and phase B. The final transaction must see
+that connection's relevant changes; SQLite snapshot reuse or event-loop
+serialization is not proof of stability.
+
+Source routing is closed and registration-owned. `project-file` joins the
+canonical project root and is admitted only when an authenticated agent's
+artifact-path authority covered the path at registration. `run-file` joins the
+project root to the run's normalised project-relative artifact directory;
+content projection requires that directory to be a dedicated strict descendant
+of the project root. `git-private-diff` joins the configured canonical daemon-
+private root and exact reserved
+`private/git-diffs/<source-digest-without-prefix>.patch`; only the fixed Git
+service may register it. Caller values never select a route or root.
+
+The daemon shall not resolve through process current directory or a symlinked
+ancestor. It rejects absent/non-canonical roots, sensitive path classes such as
+credential stores, VCS internals and environment/secret files, and any
+`project-file` registration outside its sealed publication authority. A
+platform that cannot prove the no-follow and identity invariants reports the
+operation unavailable. Reading never shells out, executes a renderer, follows
+an include, invokes a pager or parses project-controlled configuration. JSON
+validation is an in-process bounded syntax parse only. Markdown, diff and plain
+text are projected as inert text; they are not rendered into terminal control
+sequences.
+
+The source inspection ceiling is independent of the caller's response limits.
+`maximumBytes` (`4..131072`) and `maximumLines` (`1..2000`) may narrow the response but never widen the
+131,072-byte, 2,000-line page maxima, 1 MiB source ceiling or 2 MiB inert-
+rendering ceiling. Safety transformation precedes pagination. Each cursor is a
+bounded integrity-protected, stateless encoding of the exact evidence revision,
+source/rendered digests, algorithm version, page index and next rendered byte/
+boundary. The pager prefers the last LF within the requested byte limit; when
+one logical line exceeds that limit it advances at a UTF-8 code-point boundary
+and labels the fragment without changing the complete rendered line count. It
+expires when any binding changes and cannot be used to skip,
+repeat or reorder a page as a complete review. The handler retains no source
+bytes after the response and writes no cache, event, acknowledgement or audit
+row merely for reading. Ordinary bounded request telemetry may record only the
+operation name and closed error code, never content, path-derived filesystem
+authority or credential text.
+
+The shared message/artifact redactor derives current bearer families from the
+credential registries and includes `afb_`, `afc_` and `afop_` as mandatory
+canaries. Its versioned daemon-owned credential classifier also covers exact
+runtime-known secret values, private-key blocks, authorisation headers, URL
+userinfo, recognised cloud/provider token forms and assignment values whose
+closed key vocabulary denotes password, token, secret, credential or private
+key. It replaces a complete classified value before pagination and cannot leave
+a prefix, suffix or length-correlated fragment. If a sensitive construct cannot
+be boundedly classified/redacted, the result is `unsafe-content`, not a partial
+rendering. This deterministic vocabulary is a safety boundary; project content
+cannot add or remove patterns.
+
+Terminal neutralisation covers CSI, OSC, DCS, APC, PM, SOS, C0/C1 controls,
+carriage-return rewrites, bidi overrides and other sequences able to alter or
+disguise the operator display. Newline and ordinary tab semantics may be
+preserved only within page bounds. The source, complete rendered and page
+digests are calculated over their explicitly named byte domains after the
+closed transformation order.
+
+Migration 0010 rebuilds `artifacts` as the one evidence metadata registry while
+leaving all bytes with their existing owners. Additive closed columns are exact
+`project_id`, nullable `project_session_id`/`run_id`/`task_id`, publisher kind
+and ref, source kind, evidence kind, canonical prefixed SHA-256, registry state,
+quarantine reason and positive revision. Active source/scope/path/digest are
+immutable. Partial unique indexes enforce one project-, session- or run-scoped
+identity. `project-file`, `run-file` and `git-private-diff` have disjoint CHECK
+shapes and producer-owned namespaces. Evidence projection reads only active
+rows and takes kind, revision, ref and provenance from this registry rather
+than hard-coding them.
+
+The migration normalises every valid bare 64-hex legacy artifact digest to the
+wire `sha256:` form. Legacy `artifact.publish` still accepts/returns bare hex
+but normalises before database comparison. A historical row below a strict-
+descendant run root backfills as `run-file`. When the normalised run root is
+`.` instead, it backfills as `project-file` only if the publishing agent's
+persisted artifact-path authority covered the canonical, non-sensitive path or
+the fixed receipt exporter supplies its exact daemon-created source record;
+otherwise it is quarantined. New compatibility publication applies the same
+closed classification; result completion must prove the replying agent's
+persisted path authority and rejects an unprovable root-equal registration.
+`fabric.v1.evidence.publish` and every other registry producer apply that same
+derive/reclassify-or-reject rule regardless of the requested source kind. A
+database invariant/postflight query rejects every active `run-file` whose
+normalised run root is `.`.
+Invalid paths or digest-identity collisions likewise remain explicitly
+quarantined and unprojected rather than crashing a codec or guessing
+provenance. Existing receipts and intake bindings gain exact registry IDs.
+Every new intake binding has a foreign key and trigger proving its repeated
+path/digest equal one active same-scope registry row.
+
+`intakes` and `intake_revisions` gain an accepted-scope registry ID and closed
+state. New accepted revisions require the one explicit registered
+`acceptedScopeRef`; other states forbid one. A legacy accepted intake binds only
+when exactly one active registered candidate proves the ref. Zero, multiple or
+quarantined candidates enter `recovery-required`, project no accepted scope and
+create one deduplicated Attention item; migration never chooses the first ref.
+Changing accepted scope increments the project revision in the same transaction
+so Project row/detail references cannot remain current.
+
+Migration 0010 also adds an explicit run-directory basis. Operator-launched
+relative roots resolve only beneath joined `projects.canonical_root`; legacy
+absolute roots must re-canonicalise, prove containment beneath that same root
+and convert losslessly to project-relative form (with `.` as the root sentinel).
+Outside, ambiguous or symlinked roots fail preflight before schema change. One
+shared `resolveRunArtifactRoot` replaces direct/cwd-relative use in publish,
+results, receipts, checkpoints, provider evidence, retention and content reads.
+
+Preflight stages every normalised row and binding before table replacement;
+postflight runs foreign-key/integrity checks, identity/count reconciliation,
+canonical path/digest queries and registry-trigger probes. Fault injection at
+each staging, rebuild, binding and migration-record boundary exposes the
+complete old or complete new schema. `artifact-registry.v1` and
+`artifact-content-read.v1` advertise only after postflight passes. Spec 05 owns
+all Console paging, disclosure, acceptance and viewport behaviour; this spec
+owns only the daemon/client capability boundary.
+
+Deterministic verification additionally covers:
+
+- zero filesystem I/O for wrong/expired/revoked credential, action, project,
+  session, generation, evidence revision, ID, ref or cursor;
+- exact project/run/private source routing and rejection of caller-selected
+  source/root, arbitrary, absolute, traversal, sensitive, replaced-ancestor,
+  symlink, hard-link, FIFO, device and socket paths, including races before
+  open, during read and before response;
+- source digest mismatch, size growth/shrink, inode replacement, invalid UTF-8,
+  NUL/binary content, malformed or deeply nested bounded JSON, unsupported
+  extension, unsafe credential construct and source/rendering overflow;
+- byte/line caps at below, exact and above bounds, empty source, CRLF,
+  combining/multibyte characters and transformation/page boundaries, including
+  complete multi-page reconstruction and duplicate/skip/reorder/cross-ref
+  cursor negatives;
+- every terminal family, bidi control and bootstrap/agent/operator capability
+  plus private-key/auth-header/URL/provider/assignment canaries proving literal
+  safety flags only when output is inert and no credential fragment remains;
+- untransformed source/rendered/page digest equality and independent transformed
+  complete-rendering and per-page digest verification;
+- concurrent credential/session/evidence/source-root/file changes producing
+  only `stale`, never mixed/current content, while unrelated global activity
+  does not starve a valid read;
+- a second connection committing a relevant change between the two short
+  transactions, and a writer completing during slow filesystem I/O;
+- migration of operator-relative and legacy-absolute roots, bare/prefixed
+  digests, receipts/intake bindings and accepted scope; invalid/ambiguous roots
+  roll back, while unrepresentable artifacts quarantine without parser crash;
+- idempotent authorised project/run publication, result/receipt registration,
+  private Git-diff registration and exact intake/gate/acceptance binding, with
+  cross-scope/unregistered refs rejected atomically; root-equal requests from
+  every producer reclassify only with exact authority proof or reject, and no
+  active root-equal `run-file` survives direct SQL/postflight checks;
+- negotiated client presence/absence, malformed closed variants, restart and
+  at least 32 concurrent bounded reads without unbounded memory, descriptor
+  drift or database writer starvation; and
+- the Spec 05 production Console evidence workflow over every source kind, with
+  raw terminal output free of controls and credential canaries.

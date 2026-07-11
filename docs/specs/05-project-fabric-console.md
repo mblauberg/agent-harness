@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.1
+Version: 1.2
 Date: 11 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,7 +10,10 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.1 records the human's implementation clarification of 11 July 2026:
+Version 1.2 closes the implementation-review finding that bounded evidence
+content, continuation, safety disclosure and acceptance behaviour must remain
+owned by this Console specification rather than Spec 04. Version 1.1 records
+the human's implementation clarification of 11 July 2026:
 80x24 is the default/reference acceptance viewport, not a fixed-only terminal
 size. The Console follows current terminal dimensions, reflows dynamically and
 preserves operator state across resize events.
@@ -272,6 +275,34 @@ not authoritative. The Console shall provide an artifact view containing:
 - exact paths, revisions and digests;
 - `Discuss`, `Accept`, `Request changes`, `Defer` and `Implement...` actions.
 
+Artifact bytes are read only through negotiated
+`artifact-content-read.v1`. The Console requests pages of at most 131,072 UTF-8
+bytes and 2,000 lines, follows only daemon-issued monotonic cursors and can
+continue until `nextCursor` is null. It never opens a project or private path
+directly. Feature absence, unsupported/unsafe content and unavailable pages
+leave the metadata view usable but visibly incomplete.
+
+Every content pane displays, adjacent to the bytes, the exact source path and
+digest, evidence revision, publisher provenance, evidence kind, current page/
+coverage, source and complete-rendering sizes, complete-rendering digest and
+the transformation label. The source digest is explicitly labelled as
+certifying the immutable source, not displayed bytes, whenever transformation
+is not `none`. Each returned page digest is verified before display; after all
+pages, their ordered bytes must reproduce the complete-rendering digest.
+Missing, duplicate, skipped, reordered, stale or cross-artifact cursors discard
+the local review coverage and require a fresh detail/read sequence.
+
+`Accept` and `Implement...` remain disabled while any content page is missing,
+unverified, stale, unsafe or unavailable. A terminal-neutralised complete view
+requires a distinct explicit confirmation that names the transformation and
+source digest. A capability- or credential-redacted view cannot be accepted or
+implemented from the Console because material source bytes are hidden;
+`Discuss` and `Request changes` remain available to obtain a clean replacement.
+The confirmation preview records complete page coverage and the verified
+source/rendered digests but the reads themselves create no acknowledgement or
+authority. Resize, detach and restart preserve only cursor/review UI state that
+still matches the exact evidence revision; they never convert it into approval.
+
 Natural-language acceptance in the active chair conversation may satisfy a
 gate only when a contract-tested provider/Herdr integration identifies it as
 direct human input and binds it to the operator principal, expected revision,
@@ -354,13 +385,14 @@ Required views are:
 
 - **Attention:** decisions, blockers, quarantines, expiring authority and
   acceptance-ready work.
-- **Project:** goal, accepted scope, work map, repository and optional GitHub
-  summary.
+- **Project:** goal, explicitly registered accepted-scope ref, work map,
+  repository and optional GitHub summary.
 - **Runs:** active/history runs, leads, dependencies, evidence and completion.
 - **Work:** task graph, write scopes, worktrees, barriers and checks.
 - **Agents:** chair, leads, workers, provider/model, state, current task,
   context pressure and pane/session references.
-- **Evidence:** artifacts, diffs, tests, reviews, receipts and provenance.
+- **Evidence:** registered project/run artifacts, private Git diffs, tests,
+  reviews, receipts, revision, publisher provenance and content safety/coverage.
 - **Activity:** readable messages, decisions and lifecycle events.
 - **System:** daemon, adapters, trust, seats, expiry and degraded integrations.
 
@@ -720,11 +752,22 @@ Implementation is accepted only when objective tests demonstrate:
     cover every configured dimension and the Console projects remaining or
     unknown capacity honestly.
 33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
+34. A real scoping intake registers a spec, ADR, decision/finding and Git diff;
+    Project/Evidence row and detail preserve exact accepted scope, kind,
+    revision, provenance and source digest. Multi-page content continues without
+    gaps or replay, verifies page and complete-rendering digests and survives
+    compact/80x24/wide resize without losing valid coverage. Metadata-only,
+    stale, unsafe, incomplete or credential-redacted views cannot `Accept` or
+    `Implement...`; terminal-neutralised complete content requires a distinct
+    transformation/source-digest confirmation. Raw PTY output contains no
+    terminal-control or credential canary.
 
 ## 16. Implementation gate
 
 Spec 05 v1.0 records the human-approved product direction. The direct
 instruction of 11 July 2026 launched canonical run AFAB-004 from a fresh
 context, authorised the local implementation and later clarified dynamic
-terminal resizing in v1.1. Final human acceptance remains pending; Git push,
+terminal resizing in v1.1. Version 1.2 records the review-required Console
+evidence UX needed to implement that approved artifact-review outcome without
+changing effect authority. Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.
