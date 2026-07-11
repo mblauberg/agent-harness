@@ -46,6 +46,9 @@ const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH;
 const stateDirectory = process.env.AGENT_FABRIC_STATE_DIRECTORY;
 const runtimeDirectory = process.env.AGENT_FABRIC_RUNTIME_DIRECTORY;
 const bootstrapCapability = process.env.AGENT_FABRIC_BOOTSTRAP_CAPABILITY;
+const bootstrapMode = process.env.AGENT_FABRIC_BOOTSTRAP_MODE;
+const bootstrapActionId = process.env.AGENT_FABRIC_BOOTSTRAP_ACTION_ID;
+const bootstrapElectionGeneration = Number(process.env.AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION);
 const daemonLockPathsValue: unknown = JSON.parse(process.env.AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON ?? "[]");
 const daemonLockPaths = Array.isArray(daemonLockPathsValue) && daemonLockPathsValue.every((value) => typeof value === "string")
   ? daemonLockPathsValue
@@ -69,8 +72,16 @@ if (
   stateDirectory === undefined ||
   runtimeDirectory === undefined ||
   bootstrapCapability === undefined
-  || daemonLockPaths === undefined
-  || daemonLockPaths.length !== 2
+  || (bootstrapMode !== "production-election" && bootstrapMode !== "test-forced-process-locks")
+  || (bootstrapMode === "production-election" && (
+    bootstrapActionId === undefined ||
+    bootstrapActionId.trim().length === 0 ||
+    !Number.isSafeInteger(bootstrapElectionGeneration) ||
+    bootstrapElectionGeneration < 1
+  ))
+  || (bootstrapMode === "test-forced-process-locks" && (
+    daemonLockPaths === undefined || daemonLockPaths.length !== 2
+  ))
   || capabilityKey === undefined
   || executionProfile === undefined
   || !Number.isInteger(maximumConcurrentProviderTurns)
@@ -87,20 +98,22 @@ mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
 mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 });
 chmodSync(stateDirectory, 0o700);
 chmodSync(runtimeDirectory, 0o700);
-let daemonLocks: Awaited<ReturnType<typeof acquireDaemonLocks>>;
-try {
-  daemonLocks = await acquireDaemonLocks(daemonLockPaths);
-  for (const lock of daemonLocks) {
-    await writeDaemonLockReceipt(lock.path, { pid: process.pid, token: lock.token, socketPath });
+let daemonLocks: Awaited<ReturnType<typeof acquireDaemonLocks>> = [];
+if (bootstrapMode === "test-forced-process-locks") {
+  try {
+    daemonLocks = await acquireDaemonLocks(daemonLockPaths as string[]);
+    for (const lock of daemonLocks) {
+      await writeDaemonLockReceipt(lock.path, { pid: process.pid, token: lock.token, socketPath });
+    }
+  } catch (error: unknown) {
+    const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "DAEMON_LOCKED";
+    const message = error instanceof Error ? error.message : String(error);
+    await new Promise<void>((resolve) => process.stdout.write(`${JSON.stringify({ ready: false, error: { code, message } })}\n`, () => resolve()));
+    process.exit(1);
+    throw error;
   }
-} catch (error: unknown) {
-  const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-    ? error.code
-    : "DAEMON_LOCKED";
-  const message = error instanceof Error ? error.message : String(error);
-  await new Promise<void>((resolve) => process.stdout.write(`${JSON.stringify({ ready: false, error: { code, message } })}\n`, () => resolve()));
-  process.exit(1);
-  throw error;
 }
 rmSync(socketPath, { force: true });
 

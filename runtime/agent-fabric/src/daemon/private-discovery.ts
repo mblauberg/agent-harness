@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -316,6 +316,19 @@ export async function readPrivateDiscovery(paths: PrivateDiscoveryPaths, socketP
     return { status: "ambiguous", message: "daemon discovery receipt does not match its generation-bound owner", owner, receipt };
   }
   return { status: "active", receipt, owner };
+}
+
+export async function readPrivateDiscoveryOwner(
+  paths: PrivateDiscoveryPaths,
+): Promise<PrivateDiscoveryOwner | undefined> {
+  await ensurePrivateDirectory(paths.runtimeDirectory);
+  const value = await readPrivateJson(paths.ownerPath);
+  if (value === undefined) return undefined;
+  const candidate = record(value, "daemon discovery owner");
+  if (typeof candidate.socketPath !== "string" || !isAbsolute(candidate.socketPath)) {
+    throw new PrivateDiscoveryError("DAEMON_DISCOVERY_INVALID", "daemon discovery owner socket path is invalid");
+  }
+  return parseOwner(value, candidate.socketPath);
 }
 
 export async function publishPrivateDiscovery(input: {

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
+import { dirname } from "node:path";
 
 import { verifyFabricReceiptLink } from "../exports/receipt.js";
 import { runForegroundDaemon } from "./daemon-run.js";
@@ -12,32 +11,36 @@ import { resolveFabricPaths } from "./paths.js";
 import { runRetentionCli } from "./retention.js";
 import { fabricDoctor, fabricStatus } from "./status.js";
 import { runWorkspaceTrust } from "./workspace-trust.js";
+import {
+  privateDiscoveryPaths,
+  readPrivateDiscovery,
+  readPrivateDiscoveryOwner,
+} from "../daemon/private-discovery.js";
 
 function option(arguments_: string[], name: string): string | undefined {
   const index = arguments_.indexOf(name);
   return index === -1 ? undefined : arguments_[index + 1];
 }
 
-function servingSocketPath(databasePath: string, fallback: string): string {
+async function servingSocketPath(runtimeDirectory: string, fallback: string): Promise<string> {
   try {
-    const value: unknown = JSON.parse(readFileSync(`${databasePath}.daemon.lock`, "utf8"));
-    if (
-      typeof value !== "object" || value === null ||
-      !("pid" in value) || typeof value.pid !== "number" ||
-      !("socketPath" in value) || typeof value.socketPath !== "string" ||
-      !isAbsolute(value.socketPath)
-    ) return fallback;
-    process.kill(value.pid, 0);
-    return value.socketPath;
+    const discoveryPaths = privateDiscoveryPaths(runtimeDirectory);
+    const owner = await readPrivateDiscoveryOwner(discoveryPaths);
+    if (owner === undefined || owner.state !== "active") return fallback;
+    const discovery = await readPrivateDiscovery(discoveryPaths, owner.socketPath);
+    if (discovery.status !== "active") return fallback;
+    process.kill(discovery.owner.pid, 0);
+    return discovery.receipt.socketPath;
   } catch {
     return fallback;
   }
 }
 
-function inspect(arguments_: string[]): void {
+async function inspect(arguments_: string[]): Promise<void> {
   const paths = resolveFabricPaths();
   const databasePath = option(arguments_, "--database") ?? paths.databasePath;
-  const socketPath = servingSocketPath(databasePath, paths.socketPath);
+  const runtimeDirectory = option(arguments_, "--runtime-directory") ?? paths.runtimeDirectory;
+  const socketPath = await servingSocketPath(runtimeDirectory, paths.socketPath);
   const database = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
     const rows = database.prepare("SELECT run_id, chair_agent_id FROM runs ORDER BY run_id").all();
@@ -90,7 +93,7 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   if (arguments_[0] === "inspect") {
-    inspect(arguments_.slice(1));
+    await inspect(arguments_.slice(1));
     return;
   }
   if (arguments_[0] === "receipt" && arguments_[1] === "verify") {
@@ -134,7 +137,7 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   throw new Error(
-    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--json] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | mcp provision --project PATH --chair SEAT --seats SEAT,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
+    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--runtime-directory PATH] [--json] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | mcp provision --project PATH --chair SEAT --seats SEAT,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
   );
 }
 

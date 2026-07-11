@@ -1,6 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -15,6 +18,61 @@ afterEach(async () => {
 });
 
 describe("production daemon bootstrap wiring", () => {
+  it("accepts a production election proof without placeholder process-lock paths", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-production-process-proof-"));
+    roots.push(root);
+    const stateDirectory = join(root, "s");
+    const runtimeDirectory = join(root, "r");
+    await Promise.all([
+      mkdir(stateDirectory, { recursive: true, mode: 0o700 }),
+      mkdir(runtimeDirectory, { recursive: true, mode: 0o700 }),
+    ]);
+    const processPath = fileURLToPath(new URL("../../../src/daemon/process.ts", import.meta.url));
+    const child = spawn(process.execPath, ["--import", "tsx", processPath], {
+      cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: process.env.HOME ?? root,
+        AGENT_FABRIC_DATABASE_PATH: join(stateDirectory, "fabric.sqlite3"),
+        AGENT_FABRIC_SOCKET_PATH: join(runtimeDirectory, "f.sock"),
+        AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
+        AGENT_FABRIC_RUNTIME_DIRECTORY: runtimeDirectory,
+        AGENT_FABRIC_BOOTSTRAP_CAPABILITY: `afb_${"a".repeat(43)}`,
+        AGENT_FABRIC_BOOTSTRAP_MODE: "production-election",
+        AGENT_FABRIC_BOOTSTRAP_ACTION_ID: "bootstrap_process_proof_01",
+        AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION: "1",
+        AGENT_FABRIC_DAEMON_INSTANCE_GENERATION: "1",
+        AGENT_FABRIC_CAPABILITY_KEY: "b".repeat(43),
+        AGENT_FABRIC_EXECUTION_PROFILE: "headless",
+        AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: "1",
+        AGENT_FABRIC_WORKSPACE_ROOTS_JSON: JSON.stringify([root]),
+        AGENT_FABRIC_ADAPTERS_JSON: "{}",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (child.stdout === null || child.stderr === null) throw new Error("daemon proof child pipes are unavailable");
+    let childStderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { childStderr += chunk; });
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    const firstLine = await new Promise<string>((resolvePromise, reject) => {
+      const timeout = setTimeout(() => reject(new Error("daemon proof child did not report readiness")), 10_000);
+      lines.once("line", (line) => {
+        clearTimeout(timeout);
+        resolvePromise(line);
+      });
+      child.once("exit", (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`daemon proof child exited before readiness: ${String(code)} ${childStderr}`));
+      });
+    });
+    expect(JSON.parse(firstLine)).toEqual({ ready: true });
+    child.kill("SIGTERM");
+    await new Promise<void>((resolvePromise, reject) => {
+      child.once("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`daemon proof child exit ${String(code)}`)));
+    });
+  });
+
   it("handshakes first and coalesces repeated starts through one flock election without lock databases", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-production-bootstrap-"));
     roots.push(root);

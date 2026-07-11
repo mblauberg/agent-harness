@@ -202,7 +202,9 @@ function childEnvironment(
     AGENT_FABRIC_BOOTSTRAP_ACTION_ID: bootstrap.actionId,
     AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION: String(bootstrap.electionGeneration),
     AGENT_FABRIC_DAEMON_INSTANCE_GENERATION: String(bootstrap.daemonInstanceGeneration),
-    AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON: JSON.stringify(lockPaths),
+    ...(bootstrap.mode === "test-forced-process-locks"
+      ? { AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON: JSON.stringify(lockPaths) }
+      : {}),
     AGENT_FABRIC_CAPABILITY_KEY: capabilityKey,
     AGENT_FABRIC_EXECUTION_PROFILE: options.executionProfile ?? "headless",
     AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: String(options.maximumConcurrentProviderTurns ?? 8),
@@ -420,10 +422,9 @@ async function spawnDaemonChild(
   bootstrap: DaemonBootstrapEnvironment,
 ): Promise<SpawnedDaemonChild> {
   const capabilityKey = await loadOrCreateCapabilityKey(options.stateDirectory);
-  const lockPaths = [
-    `${options.socketPath}.lock`,
-    `${options.databasePath}.daemon.lock`,
-  ];
+  const lockPaths = bootstrap.mode === "test-forced-process-locks"
+    ? [`${options.socketPath}.lock`, `${options.databasePath}.daemon.lock`]
+    : [];
   const bootstrapCapability = `afb_${randomBytes(32).toString("base64url")}`;
   const sourceMode = import.meta.url.endsWith(".ts");
   const processUrl = new URL(sourceMode ? "./process.ts" : "./process.js", import.meta.url);

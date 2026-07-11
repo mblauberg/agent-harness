@@ -58,7 +58,7 @@ describe("Stage 1 command-line inspection", () => {
     });
   });
 
-  it("reports the live serving socket recorded by the database owner lock", async () => {
+  it("reports the live serving socket recorded by private generation-bound discovery", async () => {
     const root = await mkdtemp(join(tmpdir(), "afcli-"));
     const databasePath = join(root, "state", "fabric.sqlite3");
     const runtimeDirectory = join(root, "r");
@@ -75,7 +75,14 @@ describe("Stage 1 command-line inspection", () => {
       await rm(root, { recursive: true, force: true });
     });
 
-    const result = await runSourceCli(["inspect", "--database", databasePath, "--json"]);
+    const result = await runSourceCli([
+      "inspect",
+      "--database",
+      databasePath,
+      "--runtime-directory",
+      runtimeDirectory,
+      "--json",
+    ]);
     expect(parseCliJson(result)).toMatchObject({ databasePath, runtimeDirectory, socketPath });
   });
 
