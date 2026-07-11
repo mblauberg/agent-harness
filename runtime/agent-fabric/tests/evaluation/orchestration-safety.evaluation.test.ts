@@ -408,7 +408,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
   it("records the manual review-independence oracle as bounded evidence", () => {
     expect(evaluationCase("review-independence-after-shared-authorship").oracle.kind).toBe("manual");
     const review = readFileSync(
-      new URL("../../../../.agent-run/AFAB-001/reviews/stage5-evaluation-independent.md", import.meta.url),
+      new URL("./fixtures/stage5-evaluation-independent.md", import.meta.url),
       "utf8",
     );
     expect(review).toContain("Verdict: PASS (bounded behavioural evaluation only)");
