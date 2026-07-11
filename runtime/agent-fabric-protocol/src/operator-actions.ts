@@ -7,6 +7,7 @@ import type {
   IntegrationId,
   ProjectId,
   ProjectSessionId,
+  ProviderActionId,
   Sha256Digest,
   TaskId,
   Timestamp,
@@ -78,6 +79,20 @@ export type OperatorLifecycleIntent =
       expectedGlobalStateRevision: number;
       drainReceiptRef: ArtifactRef;
     };
+
+export type ProjectSessionLaunchIntent = {
+  kind: "project-session-launch";
+  projectId: ProjectId;
+  projectSessionId: ProjectSessionId;
+  expectedSessionRevision: number;
+  expectedSessionGeneration: number;
+  launchPacketRef: ArtifactRef;
+  authorityRef: Sha256Digest;
+  budgetRef: string;
+  resourcePlanRef: ArtifactRef;
+  providerAdapterId: string;
+  providerActionId: ProviderActionId;
+};
 
 export type GitRepositoryBinding = {
   repositoryRoot: string;
@@ -265,6 +280,7 @@ export function assertPromotionIntentGate(intent: PromotionIntent, gate: ScopedG
 
 export type OperatorActionIntent =
   | OperatorControlIntent
+  | ProjectSessionLaunchIntent
   | OperatorLifecycleIntent
   | OperatorGitIntent
   | RegisteredExternalEffectIntent
@@ -272,6 +288,7 @@ export type OperatorActionIntent =
 
 export function requiredOperatorActionForIntent(intent: OperatorActionIntent): OperatorAction {
   if (intent.kind === "control") return intent.action;
+  if (intent.kind === "project-session-launch") return "launch";
   if (intent.kind === "project-session-drain" || intent.kind === "daemon-drain") return "drain";
   if (intent.kind === "project-session-stop" || intent.kind === "daemon-stop") return "stop";
   if (intent.kind === "git") return "git";
@@ -285,6 +302,7 @@ export type OperatorAvailableAction =
   | "resume"
   | "cancel"
   | "steer"
+  | "project-session-launch"
   | "project-session-drain"
   | "project-session-stop"
   | "daemon-drain"

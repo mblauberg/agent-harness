@@ -209,6 +209,7 @@ describe("closed operator action capability mapping", () => {
       [{ kind: "control", action: "resume" }, "resume"],
       [{ kind: "control", action: "cancel" }, "cancel"],
       [{ kind: "control", action: "steer" }, "steer"],
+      [{ kind: "project-session-launch" }, "launch"],
       [{ kind: "project-session-drain" }, "drain"],
       [{ kind: "project-session-stop" }, "stop"],
       [{ kind: "daemon-drain" }, "drain"],
@@ -278,6 +279,19 @@ const promotionIntent = {
   expectedGateStatus: "approved",
   releaseBinding,
 } as const;
+const launchIntent = {
+  kind: "project-session-launch",
+  projectId: "project_01",
+  projectSessionId: "ps_01",
+  expectedSessionRevision: 4,
+  expectedSessionGeneration: 2,
+  launchPacketRef: artifact,
+  authorityRef: digestA,
+  budgetRef: "budget_01",
+  resourcePlanRef: { path: "launch/resources.json", digest: digestA },
+  providerAdapterId: "claude-agent-sdk",
+  providerActionId: "provider_action_launch_01",
+} as const;
 
 describe("closed two-phase action intents", () => {
   it.each([
@@ -285,6 +299,7 @@ describe("closed two-phase action intents", () => {
     { kind: "control", action: "resume", target: taskTarget },
     { kind: "control", action: "cancel", target: taskTarget, reason: "Scope cancelled" },
     { kind: "control", action: "steer", target: taskTarget, instruction: "Use the accepted design.", evidenceRefs: [artifact] },
+    launchIntent,
     { kind: "project-session-drain", projectSessionId: "ps_01", expectedSessionRevision: 4, expectedSessionGeneration: 2, expectedGlobalStateRevision: 8 },
     { kind: "project-session-stop", projectSessionId: "ps_01", expectedSessionRevision: 4, expectedSessionGeneration: 2, expectedGlobalStateRevision: 8, drainReceiptRef: artifact },
     { kind: "daemon-drain", expectedDaemonGeneration: 2, expectedGlobalStateRevision: 8 },

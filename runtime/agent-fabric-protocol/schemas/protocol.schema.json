@@ -17427,6 +17427,120 @@
                       "additionalProperties": false,
                       "required": [
                         "kind",
+                        "projectId",
+                        "projectSessionId",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "launchPacketRef",
+                        "authorityRef",
+                        "budgetRef",
+                        "resourcePlanRef",
+                        "providerAdapterId",
+                        "providerActionId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "project-session-launch"
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "launchPacketRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "path",
+                            "digest"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            },
+                            "digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "authorityRef": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "budgetRef": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "resourcePlanRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "path",
+                            "digest"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            },
+                            "digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerActionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
                         "projectSessionId",
                         "expectedSessionRevision",
                         "expectedSessionGeneration",
@@ -56665,6 +56779,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -56675,7 +56790,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -57072,6 +57187,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -57082,7 +57198,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -57316,6 +57432,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -57326,7 +57443,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -57524,6 +57641,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -57534,7 +57652,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -57779,6 +57897,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -57789,7 +57908,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -57998,6 +58117,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -58008,7 +58128,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -58244,6 +58364,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -58254,7 +58375,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -58454,6 +58575,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -58464,7 +58586,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -58710,6 +58832,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -58720,7 +58843,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -58930,6 +59053,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -58940,7 +59064,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -59187,6 +59311,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -59197,7 +59322,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -59408,6 +59533,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -59418,7 +59544,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -59659,6 +59785,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -59669,7 +59796,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -59874,6 +60001,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -59884,7 +60012,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -60132,6 +60260,7 @@
                                                     "resume",
                                                     "cancel",
                                                     "steer",
+                                                    "project-session-launch",
                                                     "project-session-drain",
                                                     "project-session-stop",
                                                     "daemon-drain",
@@ -60142,7 +60271,7 @@
                                                   ]
                                                 },
                                                 "minItems": 1,
-                                                "maxItems": 11,
+                                                "maxItems": 12,
                                                 "uniqueItems": true
                                               },
                                               "requiresPreview": {
@@ -60354,6 +60483,7 @@
                                                       "resume",
                                                       "cancel",
                                                       "steer",
+                                                      "project-session-launch",
                                                       "project-session-drain",
                                                       "project-session-stop",
                                                       "daemon-drain",
@@ -60364,7 +60494,7 @@
                                                     ]
                                                   },
                                                   "minItems": 1,
-                                                  "maxItems": 11,
+                                                  "maxItems": 12,
                                                   "uniqueItems": true
                                                 },
                                                 "requiresPreview": {
@@ -62756,6 +62886,120 @@
                           },
                           "minItems": 0,
                           "maxItems": 128
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "projectId",
+                        "projectSessionId",
+                        "expectedSessionRevision",
+                        "expectedSessionGeneration",
+                        "launchPacketRef",
+                        "authorityRef",
+                        "budgetRef",
+                        "resourcePlanRef",
+                        "providerAdapterId",
+                        "providerActionId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "project-session-launch"
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedSessionRevision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedSessionGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "launchPacketRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "path",
+                            "digest"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            },
+                            "digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "authorityRef": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "budgetRef": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "resourcePlanRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "path",
+                            "digest"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            },
+                            "digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "providerAdapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerActionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
                       }
                     },
