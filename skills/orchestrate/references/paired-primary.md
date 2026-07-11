@@ -6,8 +6,10 @@ topology, not a separate skill.
 
 ## Trigger
 
-Use it when the human asks for a Claude/Codex pair, or when substantial,
-multi-stage, low-oracle work benefits from continuous cross-family challenge.
+Use it when the human asks for a Claude/Codex pair, or when the chair determines
+that substantial, multi-stage, low-oracle work benefits from continuous
+cross-family challenge within the approved project/session authority envelope.
+Human policy may pin or prohibit pairing.
 Skip it for routine edits, tightly coupled debugging, latency-sensitive work,
 uncleared data, or work whose only shared write surface cannot be serialised.
 
@@ -31,14 +33,17 @@ use a fresh-context reviewer and record independence explicitly.
 
 ## Durable communication
 
-Herdr carries wakeups, steering and bounded status messages. The run directory
-is authoritative. Never make pane scrollback the only record.
+Fabric carries answer-bearing task/request/reply, acknowledgement and terminal
+state. Herdr carries wakeups, fire-and-forget steering and bounded status
+messages. The run directory owns durable artifacts and lifecycle evidence.
+Never make pane scrollback the only record.
 Messages are delta-only and normally under 4 KiB: `stage | revision | artifact
 path | sha256 | requested action | blocker`. Long context belongs in immutable
 namespaced artifacts. Before either primary compacts or hands off, it closes a
 stage checkpoint and the peer acknowledges the exact generation/revision.
 
-Before dispatch, the chair records an assignment envelope:
+Before dispatch, the chair records an assignment envelope and correlated
+request through Fabric:
 
 ```text
 task_id | stage | chair | owner | peer | base_revision
@@ -46,11 +51,12 @@ source_write_scope | artifact_scope | prohibited_actions
 expected_output | objective_checks | human_gates | deadline
 ```
 
-The peer acknowledges, then returns supported claims, challenges, evidence
-paths, unresolved questions and its artifact path. The owner returns artifact
-paths, scoped diff/hash, checks and blockers. The chair closes the barrier
-before rotating ownership. Baton transfer requires a completed prior stage,
-acknowledgement, result revision/hash and no unowned in-flight worker.
+The peer acknowledges the exact delivery, then returns supported claims,
+challenges, evidence paths, unresolved questions and its artifact path through
+the correlated Fabric reply. The owner returns artifact paths, scoped diff/hash,
+checks and blockers. The chair closes the barrier before rotating ownership.
+Baton transfer requires a completed prior stage, acknowledgement, result
+revision/hash and no unowned in-flight worker.
 Each stage ledger records writer actors and safe relative paths; overlapping
 cross-family writer scopes fail the machine gate.
 
@@ -73,7 +79,10 @@ needs durable peer exchange. Only the chair mutates shared pair state.
 
 Use `skills/orchestrate/scripts/lease.py` for atomic acquire/renew/transfer/
 release of the chair or autonomous-loop lease. Transfers require the expected
-generation; a stale or competing holder fails closed.
+generation; a stale or competing holder fails closed. Its `takeover` action is
+deliberately expired-lease-only. Active-chair loss first needs Fabric
+freeze/revocation plus a generation-bound recovery proof; never remove the
+active-lease guard to force promotion.
 
 Autonomous labs have exactly one active loop driver/orchestrator lease. The
 other primary owns bounded stages, workflows or audits, never a competing loop.

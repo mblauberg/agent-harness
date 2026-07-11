@@ -1,11 +1,14 @@
 # Project Fabric Console and adaptive session orchestration
 
-Status: Draft; human approval pending
-Version: 0.1
+Status: Approved; implementation pending fresh-session launch
+Version: 1.0
 Date: 11 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
 Design chairs: Codex with Claude Code adversarial review
+Independent review: native architecture, operator UX and implementability;
+Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
+Review result: no unresolved P0-P2 on the approved revision
 
 ## 1. Decision and relationship to existing specs
 
@@ -16,13 +19,21 @@ explicitly requested project sessions and typed operator actions, but it is not
 another task orchestrator or authority store.
 
 - Spec 01 remains the coordination, authority and provider-session contract.
+  Its amendment in this implementation shall own project-session entities,
+  operator principals, scoped gates, result-delivery state and atomic
+  request/reply/task completion.
 - Spec 02 remains the adaptive harness and delivery-lifecycle contract.
 - Spec 03 remains the model-adapter activation and Herdr observation contract.
 - Spec 04 remains the protocol, persistence, trust and operational-hardening
-  contract.
+  contract. Its amendment shall own lock-safe on-demand bootstrap, global
+  daemon liveness/stop predicates, persistence migration and crash recovery.
 - This spec owns the project Console, operator projection, adaptive session
   launch, human-attention workflow, Herdr control integration and optional Git
   and GitHub operator adapters.
+
+Specs 01 and 04 shall be amended and accepted before implementation can claim
+this spec complete. Product requirements remain here; transaction, schema and
+daemon invariants remain with their existing canonical owners.
 
 The Console is local and project-scoped. GitHub is an optional project adapter,
 not a prerequisite or authority store. No browser application is included in
@@ -40,7 +51,7 @@ envelope.
 
 The design optimises human attention rather than maximising approval events.
 Google's agentic architecture guidance distinguishes dynamic orchestration,
-where agents plan and delegate, from human-in-the-loop checkpoints for
+where agents plan and delegate, from human checkpoints for
 subjective, high-stakes or final decisions. This Console applies that split:
 routine work continues autonomously; only affected dependency subtrees wait at
 genuine human gates.
@@ -80,8 +91,10 @@ project artifacts + Git/GitHub + Herdr + Fabric
 The Console shall never write SQLite directly or infer task completion from a
 pane. It shall use a distinct authenticated human-operator principal, never a
 chair or agent identity. Its independently revocable capability shall separate
-read, decide, steer, pause, cancel, launch and external-effect actions, bind the
-exact project and generation, and expire no later than the project session. It
+read, decide, steer, pause, cancel, launch, takeover and external-effect
+actions, bind the exact project and generation, and expire no later than the
+project session. A takeover grant also binds the handoff digest, expected chair
+generation and compare-and-set revision. It
 shall label every projected fact with source, revision and freshness: `live`,
 `snapshot`, `stale`, `unavailable` or `conflict`.
 
@@ -123,14 +136,16 @@ independent mode, each coordination run has its own chair and no implicit
 cross-run authority. Coordinated mode is the recommendation, not a hard
 default.
 
-Pressing an explicit Console `Start project session` or `Launch run` action is
-the human starting that chair. The Console submits the reviewed launch packet,
+Pressing `Start project session`, or launching an independent-mode run, is the
+human starting that coordination chair. In coordinated mode, `Launch run`
+creates a delivery run/workstream with a lead under the existing chair; it does
+not create another chair. The Console submits the reviewed launch packet,
 Fabric records and validates authority, and Herdr or a provider adapter performs
 the external process action. The Console shall not autonomously invent a chair
 or broaden its authority.
 
 Parallel source writers shall use non-overlapping write scopes and separate
-repository-owned `.worktrees/<run-or-agent>` worktrees when the project/session
+repository-owned `.worktrees/<task-agent>` worktrees when the project/session
 launch packet grants worktree creation. This spec's human acceptance approves
 that capability as an available envelope field; each active project/session
 still records its chosen grant. Without it, the chair shall serialise
@@ -144,6 +159,14 @@ launch.
 
 The Console shall provide a task input with an expandable structured plan. The
 human may instead open a detailed form or choose `Discuss/scoping first`.
+
+Each intake is a Fabric-owned revisioned entity with a stable `intake_id` and
+states `draft`, `awaiting-chair`, `discussing`, `awaiting-human`, `accepted`,
+`deferred` or `cancelled`. `Discuss/scoping first` commits a correlated Fabric
+request containing that intake revision, gate and artifact references before
+Herdr focuses the chair. Chair replies, revised plans and artifact digests
+update the same intake. Duplicate submission is idempotent; restart or
+compaction resumes the persisted state instead of creating another discussion.
 
 The chair assesses:
 
@@ -172,11 +195,23 @@ approval:
 - increase or reduce resource use within configured ceilings;
 - replan after failures, discoveries or changed estimates.
 
+Resource authority is persisted hierarchically from project to project session,
+coordination run, team and agent across concurrency, provider turns, tokens/cost
+where reported, and any project-defined dimension. Child limits only narrow the
+parent. Admission atomically reserves aggregate capacity before dispatch and
+releases or reconciles it after terminal/ambiguous effects and restart. Unknown
+usage is shown as unknown and fails closed for new provider turns when the
+remaining parent capacity cannot be proven; already-authorised in-flight work
+may reach its bounded terminal state. The Console shows used, reserved,
+remaining and unknown capacity at each level.
+
 Paired programming is chair-selectable within authority and is not a default
 requirement. The human may pin or prohibit a pair, chair family, model family,
 visibility mode or resource ceiling at project, session, run or task level.
 Preference precedence is `task > run > session > project > harness`; lower
-levels may narrow authority automatically.
+levels may narrow authority automatically. Resolution is
+intersection/minimum/earliest-expiry only; no lower layer overrides platform
+policy, explicit human authority or a mandatory safety gate.
 
 Human acceptance of this spec is the constitutional decision to amend the
 harness so that `paired-primary` is chair-selectable inside an approved
@@ -200,13 +235,17 @@ implementation. It shall create an accepted scope artifact and launch a fresh
 implementation session from a compact, digest-bound handoff. Fresh means a new
 provider context/session; it does not mean deleting or mutating the scoping
 session. The old session remains resumable or is closed under retention policy.
+Within a coordinated run, that fresh context is a lead under the existing chair
+or replaces the chair only through checkpoint, handoff and generation-bound
+takeover. An independent coordination run may start its own chair. No Fabric
+run ever has two concurrent chairs.
 
 A fresh implementation session is also required when any of these apply:
 
 - a spec or ADR controls the work;
 - multiple concurrent writers or worktrees are proposed;
 - the work crosses major modules or is expected to span sessions;
-- migration, weak-oracle or crucial-risk behaviour is present;
+- migration, weak-oracle or crucial-tier behaviour is present;
 - the scoping context is materially polluted or near its safe context limit.
 
 The chair may choose a fresh session earlier. A deterministic policy sets the
@@ -232,16 +271,22 @@ Natural-language acceptance in the active chair conversation may satisfy a
 gate only when a contract-tested provider/Herdr integration identifies it as
 direct human input and binds it to the operator principal, expected revision,
 exact gate and artifact digests. Echoed text, agent-authored text, unavailable
-direct-input provenance or raw pane scraping cannot approve. The adapter shall
-record the provider message ID, exact human utterance, artifact digests and
-interpreted decision. Ambiguity shall trigger clarification and shall not
-silently approve; the human may always use the typed Console action instead.
+direct-input provenance, raw pane scraping or CLI/pane-injected text cannot
+approve. The integration must attest the operator input channel independently
+of terminal content. The adapter shall record the provider message ID, exact
+human utterance, artifact digests and interpreted decision. Ambiguity shall
+trigger clarification and shall not silently approve. One-way, destructive,
+external-effect, release and final-acceptance decisions require an interpreted
+decision preview showing the gate, revision, digests and consequence plus an
+explicit confirmation; low-consequence decisions may commit directly when the
+gate reference is explicit. The human may always use the typed Console action.
 
 After acceptance, `Implement...` shall prepare an editable launch packet. It
-may target the current chair for minor work or a fresh Claude/Codex chair for
-substantial work. The prompt shall reference artifact paths and digests and
-require the receiving chair to reopen them. It shall not paste large artifacts
-into the prompt.
+may target the current chair for minor work, a fresh lead/provider context under
+the coordinated chair, a handoff-based chair replacement, or an independent
+run chair. The prompt shall reference artifact paths and digests and require the
+receiving owner to reopen them. It shall not paste large artifacts into the
+prompt.
 
 ## 7. Human-attention policy
 
@@ -264,6 +309,17 @@ create blocking gates. Material authorised changes may notify without blocking.
 A pending task-scoped gate blocks only its dependent subtree or barrier;
 unrelated runnable work continues.
 
+Each gate therefore records `scope_kind` (`task`, `subtree`, `run` or
+`release`), affected task IDs, dependency revision, blocked operation IDs and
+enforcement points (`task-readiness`, `operation` and/or `scoped-barrier`). The
+daemon checks gates before task claim/start/resume, before a named consequential
+operation and before scoped-barrier closure. The affected task and, when the
+scope requires it, its dependent descendants are blocked; unrelated siblings
+remain runnable. Run closure evaluates the union of scoped barriers and does
+not treat an unrelated task gate as a global stop. Gate creation/resolution and
+dependency changes are transactional, and negative tests exercise each
+enforcement point.
+
 Every gate shall include the question, affected run/task/subtree, reason,
 options, recommendation, consequences, evidence, revision, approver and any
 deadline/default. No gate auto-approves on timeout.
@@ -282,6 +338,13 @@ The default `Attention` view shall let the human identify project, session,
 active runs, current phase, owners, next milestone, health and required
 judgement within 10 seconds.
 
+It shall group duplicate events into one attention item and order items by:
+safety/integrity, critical-path blocked, expiring authority, acceptance-ready,
+then advisory. Every row is labelled `Decision`, `Approval`, `Blocked` or `FYI`
+and shows source freshness plus last-event age. Progress displays current/next
+milestone and declared finite counts only; it shall never infer a percentage
+from message volume, elapsed time or agent activity.
+
 Required views are:
 
 - **Attention:** decisions, blockers, quarantines, expiring authority and
@@ -296,11 +359,19 @@ Required views are:
 - **Activity:** readable messages, decisions and lifecycle events.
 - **System:** daemon, adapters, trust, seats, expiry and degraded integrations.
 
-The TUI shall remain usable at 80x24, keyboard-only, with visible focus and
-non-colour urgency indicators. Normal message bodies shall be readable on
-demand; default list previews remain bounded and terminal-neutralised. The UI
-shall not suppress ordinary content merely because the machine is private, but
-shall not render capability tokens or unrelated credential values.
+The TUI shall remain fully usable at 80x24 with a keyboard, visible focus and
+non-colour urgency indicators. It shall also accept mouse input inside and
+outside Herdr: click to focus/select/activate, wheel to scroll, and pointer
+actions for tabs, lists, links, buttons and split resizing where the terminal
+supports them. Mouse and keyboard actions shall use the same command,
+confirmation and audit paths; pointer input cannot bypass a consequential-action
+review. Mouse capture shall be configurable and preserve an explicit terminal
+text-selection gesture. No required information or action may be hover-only.
+
+Normal message bodies shall be readable on demand; default list previews remain
+bounded and terminal-neutralised. The UI shall not suppress ordinary content
+merely because the machine is private, but shall not render capability tokens
+or unrelated credential values.
 
 Closing the Console detaches the UI. It shall not stop agents or the daemon.
 `Stop project session` is a distinct action that shows checkpoint, drain,
@@ -325,7 +396,49 @@ agent becomes ready.
 
 Prompts shall normally travel through Fabric to a managed provider adapter.
 Direct terminal text injection is a compatibility fallback and remains
-`delivery-unconfirmed` until the provider or agent acknowledges the message.
+`dispatched-unconfirmed`; only Fabric mailbox/request-result paths use delivery
+states or acknowledgements.
+
+### 9.1 Reliable paired request/reply
+
+Any assignment whose result a chair or lead needs shall be committed before
+wake-up as a Fabric task plus correlated request message. The request includes
+task and revision, conversation and message IDs, expected output/artifacts,
+`requires_ack`, dedupe key, response deadline and exact target session/agent.
+Herdr may wake, focus or expose the peer; it is never the reply channel.
+
+At a safe turn boundary, the peer integration shall pull and acknowledge the
+request, then commit its correlated reply, terminal task result and pending
+callback in one Fabric transaction or transactional-outbox invariant. A crash
+between any of those logical effects shall replay one stable action rather than
+expose partial completion. The requesting chair/lead integration shall
+subscribe to or await that terminal result. It shall inject the unread result
+at the requester's next safe turn boundary, waking an idle requester without
+interrupting an active tool/model turn. The Console may show the result
+immediately but shall not consume it for the requester.
+
+The distinct request-result delivery obligation is persisted, not represented
+by an in-memory callback and not conflated with Spec 01 mailbox delivery state:
+`pending -> claimed -> provider-accepted -> consumed`, with `overdue`,
+`abandoned` and retry recovery transitions. Claim generation,
+request/reply/task revisions and stable callback ID make provider injection and
+consumption idempotent across daemon, Console and requester restart or
+compaction. A response deadline moves the obligation to `overdue`, alerts the
+chair and keeps its dependent barrier open. The chair may retry the same stable
+action, reassign or abandon with reason; it shall never blindly redispatch. A
+late reply remains linked evidence but cannot silently complete reassigned or
+abandoned work.
+
+Pane status and scrollback cannot mark a reply delivered. An integration
+without structured round-trip capability must declare degradation and use a
+named artifact plus an explicit bounded collection step.
+
+The direct Herdr prompt helper shall require an explicit `--fire-and-forget`
+flag and caller-supplied task/message reference. The current shell helper marks
+that reference unverified; the implemented Fabric-backed operation shall
+validate it authoritatively before pane injection. It is reserved for steering
+a tracked task where no answer is expected; the flag is an explicit operator
+acknowledgement, not semantic prompt classification.
 
 ## 10. Git and optional GitHub adapters
 
@@ -372,6 +485,15 @@ SQLite transaction domain as runs and leases. The Console derives no lifecycle
 state from local UI files. Draft launch content may live in a project artifact,
 but its Fabric session record owns status, identity and active revision.
 
+Project-session membership explicitly lists every coordination run, delivery
+run/workstream, lease, provider action, required message, artifact obligation
+and gate. `quiescing` freezes new membership. `awaiting_acceptance` requires all
+members terminal or explicitly abandoned with reason, all required messages and
+artifacts reconciled, no active lease/provider action and every scoped barrier
+closed. `closed` additionally requires final acceptance or an explicit
+cancel/failure terminal path. Membership and transition checks occur in one
+transaction; concurrent close/reopen attempts use compare-and-set revisions.
+
 Required behaviour:
 
 - Console crash: agents continue; the Console resumes from Fabric state.
@@ -382,34 +504,88 @@ Required behaviour:
 - Ambiguous launch: reconcile by stable action ID; never blindly duplicate it.
 - Stale artifact digest or base revision: invalidate the pending launch and
   return it to review.
-- Chair loss: require a persisted handoff and explicit takeover; never silently
-  promote a peer.
+- Chair loss: freeze/revoke the old chair generation, require a persisted
+  handoff and explicit takeover; never silently promote a peer or bypass an
+  active lease.
 - Overlapping writer or unreconciled predecessor: quarantine the affected
   scope while unrelated work continues.
 - Direct terminal intervention: journal it where detectable and reconcile the
   affected task revision.
 
-Fabric services start on demand when the first project session starts. A
-machine-wide daemon/supervisor, not a project Console, arbitrates the shared
-socket and transaction owner. It may stop the daemon only after global
-authoritative state proves that no active project session, run, lease, provider
-action or attached Console remains. Concurrent project close requests are
-idempotent and cannot stop another project's work. These services are not login
-services under this spec.
+On the first Console/Fabric read or command, the client library uses a
+lock-safe, idempotent bootstrap protocol to attach to the existing machine-wide
+daemon or spawn it if the socket is absent. The daemon becomes the sole shared
+socket and transaction owner before project-session creation. A short bootstrap
+lease prevents duplicate starts and is reconciled after crash.
+
+The daemon may stop only after global authoritative state proves that no active
+project session, run, lease, provider action, bootstrap lease or attached
+operator client remains. An attached Console intentionally keeps it alive
+because the operator is working; closing the final Console allows idle shutdown
+when no work remains. Concurrent project close and client detach requests are
+idempotent and cannot stop another project's work. These services are on-demand,
+not login services.
 
 ## 12. Notifications and exports
 
 V1 uses the TUI and native desktop notifications. Notify only for consequential
 gates, critical-path blockage, quarantine, expiring authority, integrity
 failure and completion/acceptance readiness. Deduplicate repeated alerts and
-roll routine activity into summaries.
+roll routine activity into summaries. While project work remains active, the
+daemon-owned notification worker emits best-effort desktop notifications even
+when the Console is detached; Herdr may project the same durable attention item
+but is not required. Sent, deduplicated and failed delivery state is journalled.
+The Attention inbox remains authoritative, and the Console labels notification
+delivery `available`, `unavailable` or `stale`.
+
+V1 notifications are non-authoritative and need not be actionable. A click may
+focus an exact revision only when the discovered terminal/Herdr integration has
+a contract-tested link/action capability. Otherwise the notification merely
+directs the human to the Console Attention view. A notification never
+acknowledges, approves or consumes its item.
 
 Markdown and JSON are generated snapshots from the operator projection. They
 are portable handoff/status artifacts, never interactive authority or a second
 state store. Telegram or other messaging is a later optional notification and
 deep-link adapter.
 
-## 13. Explicit exclusions
+## 13. Skill and lifecycle alignment
+
+Implementation shall review and update the portable harness skills whose
+behaviour contracts change. The purpose is to express the adaptive SDLC once,
+not to embed Console-specific workflow into every skill.
+
+At minimum, the implementation review shall cover:
+
+- `scope` and `grill-me`: conversational scoping, explicit decision context and
+  digest-bound handoff;
+- `implement`: automatic minor work, fresh substantial implementation sessions
+  and adaptive rather than frozen implementation plans;
+- `orchestrate`: chair-selected pairing, dynamic leaders/teams, model routing
+  and isolated concurrent writers;
+- `session`: fresh-session thresholds, checkpoint/handoff, compaction and safe
+  provider-session retention;
+- `deliver`: canonical `delivery-run` ownership and explicit project-session,
+  coordination-run and workstream relationships;
+- `work-map`: project/run/lead dependencies without becoming live task truth;
+- `release`: exact accepted-artifact and target-bound promotion gates;
+- `retrospect`: human-attention, gate latency and unnecessary-interruption
+  evidence feeding the next scope cycle.
+
+Only affected skills shall change. Existing trigger boundaries remain explicit:
+`scope` decides, `implement` builds, `orchestrate` forms teams, `deliver` owns
+acceptance evidence and `release` promotes. A skill shall not import the
+Console, parse its screen, require Herdr or write Fabric persistence directly.
+The Console shall not parse `SKILL.md` prose or reproduce skill logic. Skills
+and the Console communicate only through stable project artifacts and typed
+Fabric lifecycle/events.
+
+Every changed skill shall receive focused positive, negative and adjacent
+trigger evaluations plus portability coverage proving that its workflow still
+works when the Console, Herdr and GitHub adapters are absent. Shared lifecycle
+schema belongs to the protocol/delivery contract, not to any UI package.
+
+## 14. Explicit exclusions
 
 - No mandatory GitHub account, issue tracker or project board.
 - No browser/HTML Console in this implementation scope.
@@ -419,26 +595,33 @@ deep-link adapter.
 - No arbitrary shell terminal inside the Console.
 - No full provider TUI for every short-lived worker.
 - No silent session deletion, context clearing or automatic chair takeover.
-- No global daemon that runs when no project session is active.
+- No unattended/login daemon. An attached operator client or active project
+  work may keep the on-demand daemon alive; it shuts down when neither remains.
 
-## 14. Verification and acceptance
+## 15. Verification and acceptance
 
 Implementation is accepted only when objective tests demonstrate:
 
 1. The Console runs inside and outside Herdr against the same protocol.
 2. Closing/restarting the Console neither stops nor duplicates active work.
 3. A human can identify project/run/phase/owner/next milestone/health/attention
-   within 10 seconds in an 80x24 terminal.
+   within 10 seconds in an 80x24 terminal; safety/critical-path items outrank
+   FYIs, duplicates group, freshness is visible and no inferred percentage is
+   displayed.
 4. A consequential gate appears within two seconds of the committed event with
    scope, revision, evidence, consequence and available actions.
-5. Natural-language acceptance is bound to the exact gate and artifact digests;
-   ambiguous language cannot approve.
+5. Natural-language acceptance is bound to an independently attested operator
+   input channel, exact gate and artifact digests; CLI/pane injection, echo and
+   ambiguous language cannot approve. Consequential decisions require preview
+   and explicit confirmation.
 6. Minor routine work may continue automatically, while substantial work
    produces a fresh digest-bound implementation session.
 7. The chair can dynamically change topology, pairing, models, leads and
    worktrees inside authority without approval.
-8. A task-scoped gate leaves an independent sibling runnable and prevents only
-   the dependent barrier from closing.
+8. A gate's persisted scope, dependency revision, blocked operations and
+   enforcement points reject affected task claim/start/resume, named operations
+   and scoped-barrier closure as applicable. Dependent descendants block when
+   required; unrelated siblings remain runnable.
 9. Duplicate commands have one effect; stale commands fail closed with a
    visible state diff.
 10. Parallel writers cannot acquire overlapping scopes and use separate
@@ -457,25 +640,67 @@ Implementation is accepted only when objective tests demonstrate:
 17. Conversational approval succeeds only for authenticated direct human input
     bound to the expected gate revision; echo, injection and unavailable-input
     provenance fail closed.
-18. Two projects can start and close concurrently without duplicating or
-    prematurely stopping the shared daemon.
+18. A first Console read lock-safely starts or attaches the daemon before
+    project-session creation. Two projects can start/close and clients can
+    attach/detach concurrently without duplicating or prematurely stopping it.
 19. Pause, steer, resume, cancel, drain and stop enforce authority, survive
     Console restart and reconcile ambiguous external effects.
-20. Native notifications deduplicate repeated events and focus the exact
-    project/run/gate when actioned.
-21. A scripted keyboard-only usability evaluation at 80x24 verifies every
-    required view and action, visible focus and non-colour urgency; a timed
-    operator study with at least three representative project fixtures records
-    task correctness and time-to-identification for criterion 3.
-22. Project-session draft, launch, active and close states survive daemon and
-    Console restart without loss, duplication or state inferred from panes.
+20. Native notifications deduplicate repeated events, journal delivery and
+    label unavailable/stale state. They never approve or acknowledge; exact
+    focus is enabled only for a contract-tested actionable integration.
+21. Scripted keyboard-only and mouse usability evaluations at 80x24 verify
+    every required view and action, visible focus, non-colour urgency, click
+    targets, scrolling, resizing, configurable capture and preserved text
+    selection. Mouse activation cannot duplicate a command or bypass review. A
+    versioned usability-fixture manifest covers: empty/healthy work; concurrent
+    multi-run work; and consequential-gate plus degraded/stale/conflict state.
+    Each fixture declares the expected top attention item and correct
+    project/run/phase/owner/next-milestone/health answers. Across three timed
+    repetitions per fixture, the top item is always correct and at least 95% of
+    required fields are identified within 10 seconds.
+22. Project-session draft, launch, active, quiescing, acceptance and close
+    states survive daemon/Console restart. Membership and closure predicates
+    prevent terminal state while any required run, lease, provider action,
+    message, artifact, gate or barrier remains unresolved.
 23. Broad project/session authority cannot release or deploy; promotion accepts
     only exact accepted-artifact digests and target-bound release authority.
-24. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
+24. Every affected lifecycle skill has focused trigger, boundary and
+    Console/Herdr/GitHub-absent portability evaluations; no skill or Console
+    package imports the other's implementation details.
+25. Answer-bearing paired work creates a correlated Fabric task/request before
+    Herdr wake-up. Reply, terminal task result and pending delivery commit
+    atomically or through a transactional outbox; crash-point tests expose no
+    partial completion.
+26. The requesting chair or lead receives the result at its next safe turn. A
+    busy requester is not interrupted; an idle requester is woken. Persisted
+    callback IDs, claims and delivery states survive daemon, Console and
+    requester restart/compaction without loss, reinjection or pane scraping.
+27. Response-deadline, overdue, same-action retry, reassignment, abandonment and
+    late-reply tests keep dependent barriers open and never blindly redispatch
+    or silently complete superseded work.
+28. The direct Herdr prompt helper requires `--fire-and-forget` plus a
+    caller-supplied task/message reference and labels it unverified. The shipped
+    Fabric-backed operation rejects unknown references before injection;
+    steering cannot satisfy an expected result or completion barrier. The
+    documented degraded artifact/collection path works before structured
+    provider callback integration ships.
+29. On chair loss, the run remains blocked until the old generation is
+    frozen/revoked, a persisted handoff exists and a takeover-authorised,
+    generation/revision-bound command reassigns the chair. Active-lease bypass
+    and peer promotion without all evidence fail closed.
+30. A scoping intake and its correlated chair discussion survive duplicate
+    submission, daemon/Console/provider restart and compaction while updating
+    one revisioned Console item.
+31. HARNESS and paired-primary references reflect chair-selectable pairing
+    inside approved authority while preserving one chair and one stage owner.
+32. Concurrent runs cannot overbook a shared project/session budget. Atomic
+    reserve/release, exhaustion, unknown usage and restart reconciliation tests
+    cover every configured dimension and the Console projects remaining or
+    unknown capacity honestly.
+33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
 
-## 15. Implementation gate
+## 16. Implementation gate
 
-This draft records the decided product direction. It does not authorise
-implementation. Implementation begins only after the human accepts this exact
-spec revision through a Console/chat decision or an explicit instruction in the
-current session.
+This spec records the human-approved product direction. Implementation remains
+pending an explicit fresh-session launch after the human reviews the final
+committed revision and prompt.

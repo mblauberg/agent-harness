@@ -1,8 +1,9 @@
 # Shared worktree policy
 
-Linked worktrees require direct human authorisation. Authority to use a
-worktree does not imply authority to create or delete a branch, force-remove
-state, integrate changes or let agents write overlapping scopes.
+Linked worktrees require human authority supplied either directly or through an
+active human-approved project/session envelope. Authority to use a worktree
+does not imply authority to delete a branch, force-remove state, integrate
+changes or let agents write overlapping scopes.
 
 ## Canonical location
 
@@ -23,7 +24,9 @@ instruction may make a one-run location exception.
 
 ## Helper
 
-Use the checked helper after authorisation:
+Use the checked helper after authorisation. `--human-authorised` attests that
+the current operation is covered by a direct instruction or an active approved
+envelope; the run receipt records which source supplied that authority:
 
 ```sh
 scripts/worktree create NAME --human-authorised --detach REV

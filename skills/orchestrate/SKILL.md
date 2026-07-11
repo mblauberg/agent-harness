@@ -21,6 +21,9 @@ Use `autonomous-lab` instead for a standing run-until-STOP job.
   owner; never use agent count as a quality target.
 - **No concurrent shared-state writes.** Partition source scopes; otherwise
   workers are read-only or patch-only with namespaced artifacts.
+- **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
+  Pane injection is fire-and-forget steering. Without a tested callback, record
+  `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded collection.
 - Choose and record each worker's task-relevant cwd. Never assume one global
   repository.
 - **Workers write full output to files** when scratch authority exists and
@@ -55,15 +58,13 @@ tightly coupled or unpartitionable tasks.
 
 ## Worker Contract
 
-State worker identity, objective, inherited authority, inputs, owned paths,
-prohibited actions, typed output, checks, stop condition and per-wave
-agent/turn/tool/time/retry budget. Validate worker payloads before reduction;
-never infer permission from another agent. Forbid source edits unless explicitly
-partitioned and forbid git restore/checkout/stash outside scope. Stop a lane at
-its budget or repeated invariant failure; record the circuit break and residual
-work. Handoffs preserve claim, source, confidence, unresolved issues,
-prohibited actions and validation. Independent certification requires a
-non-authoring reviewer and verified evidence. Best-effort routes scout only.
+State identity, objective, authority, inputs, owned/prohibited paths, output,
+checks, stop condition and budget. Validate payloads; never infer permission.
+Forbid source edits unless partitioned and git restore/checkout/stash outside
+scope. Stop at budget or repeated invariant failure and record residual work.
+Handoffs preserve claim, source, confidence, issues, prohibitions and
+validation. Independent certification needs a non-authoring reviewer and
+verified evidence. Best-effort routes scout only.
 
 ## References
 

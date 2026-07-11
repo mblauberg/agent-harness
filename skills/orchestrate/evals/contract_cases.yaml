@@ -19,6 +19,8 @@ doctrine_invariants:
   - "Final gate"
   - "auth/preflight smoke tests"
   - "Document update wave"
+  - "Answer-bearing external work uses Fabric request/reply"
+  - "Pane injection is fire-and-forget steering"
 
 reference_invariants:
   - "trigger-boundary.md"
@@ -41,3 +43,4 @@ reference_invariants:
   - "dynamic-workflows.md"
   - "ultracode"
   - "paired-primary.md"
+  - "FABRIC-ROUNDTRIP-UNAVAILABLE"

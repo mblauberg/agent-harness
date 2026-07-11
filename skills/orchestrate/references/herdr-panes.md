@@ -57,21 +57,54 @@ panes remain owned by the session chair when stage ownership rotates. Record
 the pane/terminal ID and actual adapter, provider family
 and resolved model in the run receipt.
 
-## Send work
+## Send steering
 
-Use the bundled helper; it resolves the pane, calls Herdr's `pane run`, waits
-for paste settlement, then sends a harmless trailing Enter because Herdr 0.7.3
-can leave long Claude/Codex drafts unsubmitted. Its result is
-`dispatched-unconfirmed`, not proof that the target process consumed the prompt:
+Use the bundled helper only for fire-and-forget steering with no expected
+answer. It resolves the pane, calls Herdr's `pane run`, waits for paste
+settlement, then sends a harmless trailing Enter because Herdr 0.7.3 can leave
+long Claude/Codex drafts unsubmitted. Its result is `dispatched-unconfirmed`,
+not proof that the target process consumed the prompt:
 
 ```sh
 printf '%s' '<bounded prompt>' | \
-  "${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/herdr_prompt.sh" <name>
+  "${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/herdr_prompt.sh" \
+  <name> --fire-and-forget --task-ref <task-or-message-id>
 ```
 
-The helper never waits for the worker; collection remains a separate lead
-decision. Prefer it or direct `herdr pane run`; do not coordinate separate
-text and key sends.
+The helper never waits and cannot return an answer. Do not use it for an
+assignment, review, research request or any work the lead must consume. Prefer
+it over separate raw text/key sends only for steering an already tracked task.
+The current shell helper records the caller-supplied reference but cannot prove
+that it exists; its receipt therefore says `task-ref-unverified`. Authoritative
+task validation belongs to the Fabric-backed Console/provider operation in
+Spec 05.
+
+## Send answer-bearing work
+
+Before waking a peer, create a structured Fabric task and request message with
+the owning task/revision, conversation and message IDs, expected output or
+artifact, `reply_to`, acknowledgement requirement, dedupe key and deadline.
+Herdr then wakes or focuses the peer; it is not the transport of record.
+
+The peer consumes and acknowledges the request through Fabric at a safe turn
+boundary. Reply, terminal task result and pending request-result delivery commit
+in one transaction or transactional outbox before completion-ready. The
+requesting chair/lead integration subscribes to the correlated terminal result
+and receives it at its next safe turn boundary. An idle requester is woken; an
+active requester is not interrupted mid-tool or mid-turn. The Console may
+display the committed reply before requester consumption, but does not
+acknowledge it on the requester's behalf.
+
+Response deadlines persist as barrier-blocking obligations. On overdue work,
+the chair may retry the same stable action, reassign or abandon with reason; it
+never blindly redispatches. Late replies remain evidence but do not silently
+complete superseded work. Claim generation and stable callback IDs make
+provider acceptance and requester consumption idempotent across restart.
+
+If the active integration cannot provide Fabric request/reply, record
+`FABRIC-ROUNDTRIP-UNAVAILABLE`, use a named artifact plus an explicit bounded
+collection step, and report the degraded manual path. Never describe pane
+status or scrollback as an automatic callback.
 
 Observed raw-send failure modes (2026-07-10, one session lost ~20 min to these —
 use the helper instead):
@@ -93,13 +126,14 @@ are permitted. For long-running work, prefer artifact-only writes plus a
 compressed return over full output in the lead context. Do not paste secrets or
 uncleared project data into an external provider pane.
 
-For paired-primary work, send a bounded notification plus an assignment or
-artifact path/hash. The durable envelope records task/stage, chair, owner,
-peer, base revision, write scopes, prohibited actions, expected output,
-objective checks and human gates. The peer acknowledges through its namespaced
-artifact; pane scrollback is never the authoritative negotiation.
+For paired-primary work, persist the assignment through Fabric and use Herdr
+only for the bounded wake-up notification. The durable envelope records
+task/stage, chair, owner, peer, base revision, write scopes, prohibited actions,
+expected output, objective checks and human gates. The peer replies through the
+correlated Fabric exchange and writes any named artifact; pane scrollback is
+never the authoritative negotiation.
 
-## Observe without poll loops
+## Observe steering without poll loops
 
 - Continue useful local work after dispatch.
 - Check once near expected completion with `herdr agent get <name>` or
@@ -118,6 +152,10 @@ declaring failure.
 completion and `idle` is a seen/waiting completion. Accept either after checking
 the pane record and bounded output. A `blocked` agent needs input; `unknown`
 means integration/detection is not yet reliable.
+
+For answer-bearing Fabric work, await or subscribe to the correlated terminal
+result instead of polling pane state. Delivery to the lead occurs at a safe turn
+boundary and survives lead compaction or restart as unread Fabric state.
 
 ## Finish
 

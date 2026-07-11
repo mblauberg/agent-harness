@@ -11,8 +11,9 @@ before any decision about orchestration, model choice, delegation, or memory.
 - **Memory:** durable project knowledge lands in the project's repo docs
   (state file / specs / ADRs / context digests) — never only in
   harness-private memory. Private memory = cross-project user prefs only.
-- **Git:** never create branches or worktrees unless directly told to. When
-  authorised, linked worktrees live only at the owning repository's
+- **Git:** never create branches or worktrees unless directly told to or an
+  active human-approved project/session authority envelope explicitly grants
+  them. When authorised, linked worktrees live only at the owning repository's
   `.worktrees/<task-agent>` path; see `docs/worktrees.md`.
 - **Style:** $caveman by default (terse; technical substance intact).
 

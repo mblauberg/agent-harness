@@ -16,11 +16,12 @@ started is the session chair: it owns authority allocation, user communication,
 run state, gates and final synthesis. Equal-primary does not mean two concurrent
 bosses.
 
-For substantial work, the chair should use native subagents and the other
-primary family. Opt-in paired-primary mode gives Claude and Codex rotating stage
-ownership while keeping exactly one chair and one owner per active stage. Herdr
-is the preferred observable transport; durable communication lives in run
-artifacts, not pane transcripts. See
+For substantial work, chair uses native subagents and the other primary. An
+approved project/session envelope may let it select paired-primary mode unless
+human policy pins or prohibits pairing. Claude and Codex may rotate stages;
+each stage keeps one owner and the session one chair. Herdr provides visibility;
+durable communication lives in run artifacts,
+not pane transcripts. See
 `skills/orchestrate/references/paired-primary.md` and `herdr-panes.md`.
 
 No overlapping concurrent source writers. Partition scopes or use patch-only
@@ -59,7 +60,9 @@ Scope emits the minimum risk tier (`routine`, `substantial`, `crucial`,
 allowed source/artifact paths, prohibited paths/actions, disclosure, secrets,
 deployment, irreversible actions, expiry and approver. Delegation only narrows
 authority. Full-host access, credentials or subscription availability never
-grant permission. Never create branches or worktrees unless the human asks.
+grant permission. Never create branches or worktrees unless the human asks or
+an active human-approved project/session authority envelope explicitly grants
+them.
 When authorised, linked worktrees use the owning repository's
 `.worktrees/<task-agent>` path and `docs/worktrees.md`; platforms must not hide
 them in private caches or temporary directories.
