@@ -2,16 +2,19 @@ import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  createSdkMcpServer,
   getSessionInfo,
   query,
-  tool,
   type Options,
   type Query,
   type SDKMessage,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import type { McpToolDescriptor } from "@local/agent-fabric-protocol";
 
 import { createProviderAdapter, type ProviderBoundary } from "./adapter.js";
 import {
@@ -211,15 +214,24 @@ type ClaudeNativeFabricInvocation = {
 
 export type ClaudeChairMcpBridge = {
   serverName: string;
-  server: ReturnType<typeof createSdkMcpServer>;
+  server: { type: "sdk"; name: string; instance: McpServer };
+  descriptors: readonly McpToolDescriptor[];
+  allowedToolNames: readonly string[];
   attestationToolName: string;
   mailboxToolName: string;
-  attestationTool: { handler(args: { challengeResponse: string }, extra: unknown): Promise<unknown> };
-  mailboxTool: { handler(args: Record<string, never>, extra: unknown): Promise<unknown> };
+  providerToolName(name: string): McpToolDescriptor["name"] | undefined;
+  invokeTool(name: McpToolDescriptor["name"], args: Record<string, unknown>): Promise<{
+    content: readonly [{ type: "text"; text: string }];
+    structuredContent: Record<string, unknown>;
+  }>;
 };
 
 function boundedClaudeNativeRef(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 512;
+}
+
+function isFabricToolName(value: string): value is McpToolDescriptor["name"] {
+  return /^fabric_[a-z0-9_]+$/u.test(value);
 }
 
 function observeClaudeFabricToolUses(
@@ -241,10 +253,13 @@ function observeClaudeFabricToolUses(
     !boundedClaudeNativeRef(turnRef)
   ) return;
   for (const block of message.message.content) {
+    const providerToolName = isRecord(block) && typeof block.name === "string"
+      ? mcp.providerToolName(block.name)
+      : undefined;
     if (
       !isRecord(block) ||
       block.type !== "tool_use" ||
-      (block.name !== mcp.attestationToolName && block.name !== mcp.mailboxToolName) ||
+      providerToolName === undefined ||
       !boundedClaudeNativeRef(block.id) ||
       !isRecord(block.input)
     ) continue;
@@ -263,7 +278,7 @@ function observeClaudeFabricToolUses(
       );
     }
     session.nativeFabricInvocations.push({
-      toolName: block.name,
+      toolName: providerToolName,
       providerTurnRef: turnRef,
       providerInvocationRef: block.id,
       input: block.input,
@@ -301,73 +316,83 @@ function consumeClaudeFabricInvocation(
 
 export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeChairMcpBridge {
   const serverName = "agent_fabric_session";
-  const attestationToolName = `mcp__${serverName}__${session.bridge.challengeToolName}`;
-  const mailboxToolName = `mcp__${serverName}__fabric_get_mailbox_state`;
-  const attestationTool = tool(
-    session.bridge.challengeToolName,
-    "Required one-use Agent Fabric provider-session continuity challenge.",
-    { challengeResponse: z.string().regex(/^[0-9a-f]{64}$/u) },
-    async ({ challengeResponse }) => {
-      if (session.providerSessionRef === undefined) {
+  const descriptors = session.bridge.descriptors;
+  const descriptorsByName = new Map(descriptors.map((descriptor) => [descriptor.name, descriptor]));
+  const qualifiedByName = new Map(descriptors.map((descriptor) => [
+    descriptor.name,
+    `mcp__${serverName}__${descriptor.name}`,
+  ]));
+  const nameByQualified = new Map([...qualifiedByName.entries()].map(([name, qualified]) => [qualified, name]));
+  const attestationToolName = qualifiedByName.get(session.bridge.challengeToolName);
+  const mailboxToolName = qualifiedByName.get("fabric_mailbox_read");
+  if (attestationToolName === undefined || mailboxToolName === undefined) {
+    throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "Claude chair launch grant lacks required Fabric descriptors");
+  }
+  const instance = new McpServer(
+    { name: serverName, version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  const bridge: ClaudeChairMcpBridge = {
+    serverName,
+    server: { type: "sdk", name: serverName, instance },
+    descriptors,
+    allowedToolNames: [...qualifiedByName.values()],
+    attestationToolName,
+    mailboxToolName,
+    providerToolName(name) {
+      return nameByQualified.get(name);
+    },
+    async invokeTool(name, args) {
+      const descriptor = descriptorsByName.get(name);
+      if (descriptor === undefined || session.providerSessionRef === undefined) {
         throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude MCP invocation lacks native session, turn or tool-call evidence");
       }
-      const invocation = consumeClaudeFabricInvocation(
-        session,
-        attestationToolName,
-        { challengeResponse },
-      );
-      await session.bridge.attest({
+      const invocation = consumeClaudeFabricInvocation(session, name, args);
+      const result = await session.bridge.invokeTool(name, args, {
         providerSessionRef: session.providerSessionRef,
         providerSessionGeneration: session.providerSessionGeneration,
         providerTurnRef: invocation.providerTurnRef,
         providerInvocationRef: invocation.providerInvocationRef,
-        challengeResponse,
       });
-      session.attested = true;
-      session.nativeFabricInvocations.length = 0;
+      if (name === session.bridge.challengeToolName) {
+        session.attested = true;
+        session.nativeFabricInvocations.length = 0;
+      }
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({
-          attested: true,
-          challengeDigest: session.bridge.challengeDigest,
-        }) }],
+        content: [{ type: "text", text: result.receipt }],
+        structuredContent: result.structuredContent,
       };
     },
-    { alwaysLoad: true },
-  );
-  const mailboxTool = tool(
-    "fabric_get_mailbox_state",
-    "Read this chair's mailbox state through its retained Agent Fabric bridge.",
-    {},
-    async (args) => {
-      if (session.attested !== true) {
-        throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude Fabric tools are unavailable before launch attestation");
-      }
-      if (!isRecord(args) || Object.keys(args).length !== 0) {
-        throw new ProviderAdapterError("MCP_INPUT_INVALID", "Claude mailbox tool expects a closed empty object");
-      }
-      consumeClaudeFabricInvocation(session, mailboxToolName, args);
+  };
+  instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: descriptors.map(({ name, description, inputSchema, outputSchema }) => ({
+      name,
+      description,
+      inputSchema,
+      outputSchema,
+      ...(name === session.bridge.challengeToolName
+        ? { _meta: { "anthropic/alwaysLoad": true } }
+        : {}),
+    })),
+  }));
+  instance.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const args = request.params.arguments ?? {};
+    if (!isRecord(args) || !isFabricToolName(request.params.name)) {
+      return { content: [{ type: "text", text: "invalid Fabric tool arguments" }], isError: true };
+    }
+    try {
+      return await bridge.invokeTool(request.params.name, args);
+    } catch (error: unknown) {
       return {
         content: [{
-          type: "text" as const,
-          text: JSON.stringify(await session.bridge.call("getMailboxState", {})),
+          type: "text",
+          text: error instanceof ProviderAdapterError ? error.code : "FABRIC_TOOL_FAILED",
         }],
+        isError: true,
       };
-    },
-    { alwaysLoad: true },
-  );
-  return {
-    serverName,
-    server: createSdkMcpServer({
-      name: serverName,
-      version: "1.0.0",
-      alwaysLoad: true,
-      tools: [attestationTool, mailboxTool],
-    }),
-    attestationToolName,
-    mailboxToolName,
-    attestationTool,
-    mailboxTool,
-  };
+    }
+  });
+  return bridge;
 }
 
 function claudeChairOptions(
@@ -379,7 +404,7 @@ function claudeChairOptions(
   return {
     ...claudeReadOnlyOptions(payload, resume, executable),
     mcpServers: { [mcp.serverName]: mcp.server },
-    allowedTools: [mcp.attestationToolName, mcp.mailboxToolName],
+    allowedTools: [...mcp.allowedToolNames],
   };
 }
 

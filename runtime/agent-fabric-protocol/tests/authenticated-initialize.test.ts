@@ -3,6 +3,7 @@ import { Duplex } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import {
+  FABRIC_OPERATIONS,
   allowedOperationsForPrincipal,
   authorizeProtocolInitialize,
   createProtocolInitializeResult,
@@ -47,6 +48,31 @@ class InitializeLoopback extends Duplex {
 }
 
 describe("authenticated initialize", () => {
+  it("never grants the launch-only attestation operation to a standalone protocol connection", () => {
+    const request = {
+      protocolVersion: 1,
+      client: { name: "standalone-agent", version: "1" },
+      authentication: { scheme: "capability", credential: "agent-secret-000001", clientNonce: "client_01" },
+      expectedPrincipalKind: "agent",
+      requiredFeatures: ["fabric-core.v1"],
+      optionalFeatures: ["launch-attestation.v1"],
+    } as const satisfies ProtocolInitializeRequest;
+    const principal = {
+      kind: "agent" as const,
+      agentId: "agent_01" as never,
+      projectSessionId: "ps_01" as never,
+      runId: "run_01",
+      principalGeneration: 1,
+    };
+
+    expect(authorizeProtocolInitialize(request, {
+      principal,
+      grantedOperations: [FABRIC_OPERATIONS.getMailboxState, FABRIC_OPERATIONS.launchAttest],
+    }).allowedOperations).toStrictEqual([FABRIC_OPERATIONS.getMailboxState]);
+    expect(allowedOperationsForPrincipal(principal, ["launch-attestation.v1"]))
+      .not.toContain(FABRIC_OPERATIONS.launchAttest);
+  });
+
   it("enforces the same credential bounds in the runtime parser and published schema", () => {
     expect(() => parseProtocolInitializeRequest({
       protocolVersion: 1,

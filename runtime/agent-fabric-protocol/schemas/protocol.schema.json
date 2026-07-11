@@ -393,6 +393,7 @@
                   "fabric.v1.agent.list",
                   "fabric.v1.receipt.list",
                   "fabric.v1.receipt.export",
+                  "fabric.v1.launch.attest",
                   "fabric.v1.project-session.membership.bind",
                   "fabric.v1.intake.revise",
                   "fabric.v1.scoped-gate.create",
@@ -575,6 +576,7 @@
                   "fabric.v1.agent.list",
                   "fabric.v1.receipt.list",
                   "fabric.v1.receipt.export",
+                  "fabric.v1.launch.attest",
                   "fabric.v1.project-session.membership.bind",
                   "fabric.v1.intake.revise",
                   "fabric.v1.scoped-gate.create",
@@ -1389,6 +1391,7 @@
         "fabric.v1.agent.list",
         "fabric.v1.receipt.list",
         "fabric.v1.receipt.export",
+        "fabric.v1.launch.attest",
         "fabric.v1.project-session.create",
         "fabric.v1.project-session.read",
         "fabric.v1.project-session.transition",
@@ -1493,6 +1496,7 @@
         "fabric.v1.agent.list",
         "fabric.v1.receipt.list",
         "fabric.v1.receipt.export",
+        "fabric.v1.launch.attest",
         "fabric.v1.project-session.create",
         "fabric.v1.project-session.read",
         "fabric.v1.project-session.transition",
@@ -2202,7 +2206,7 @@
         },
         "requiredFeatures": {
           "type": "array",
-          "maxItems": 17,
+          "maxItems": 18,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2220,6 +2224,7 @@
               "operator-projection.v2",
               "operator-actions.v1",
               "launch-custody.v1",
+              "launch-attestation.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
               "lifecycle-control.v1"
@@ -2228,7 +2233,7 @@
         },
         "optionalFeatures": {
           "type": "array",
-          "maxItems": 17,
+          "maxItems": 18,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2246,6 +2251,7 @@
               "operator-projection.v2",
               "operator-actions.v1",
               "launch-custody.v1",
+              "launch-attestation.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
               "lifecycle-control.v1"
@@ -2388,7 +2394,7 @@
         },
         "features": {
           "type": "array",
-          "maxItems": 17,
+          "maxItems": 18,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2406,6 +2412,7 @@
               "operator-projection.v2",
               "operator-actions.v1",
               "launch-custody.v1",
+              "launch-attestation.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
               "lifecycle-control.v1"
@@ -2414,7 +2421,7 @@
         },
         "allowedOperations": {
           "type": "array",
-          "maxItems": 95,
+          "maxItems": 96,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2471,6 +2478,7 @@
               "fabric.v1.agent.list",
               "fabric.v1.receipt.list",
               "fabric.v1.receipt.export",
+              "fabric.v1.launch.attest",
               "fabric.v1.project-session.create",
               "fabric.v1.project-session.read",
               "fabric.v1.project-session.transition",
@@ -2646,7 +2654,7 @@
             },
             "requiredFeatures": {
               "type": "array",
-              "maxItems": 17,
+              "maxItems": 18,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2664,6 +2672,7 @@
                   "operator-projection.v2",
                   "operator-actions.v1",
                   "launch-custody.v1",
+                  "launch-attestation.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
                   "lifecycle-control.v1"
@@ -2672,7 +2681,7 @@
             },
             "optionalFeatures": {
               "type": "array",
-              "maxItems": 17,
+              "maxItems": 18,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2690,6 +2699,7 @@
                   "operator-projection.v2",
                   "operator-actions.v1",
                   "launch-custody.v1",
+                  "launch-attestation.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
                   "lifecycle-control.v1"
@@ -2854,7 +2864,7 @@
             },
             "features": {
               "type": "array",
-              "maxItems": 17,
+              "maxItems": 18,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2872,6 +2882,7 @@
                   "operator-projection.v2",
                   "operator-actions.v1",
                   "launch-custody.v1",
+                  "launch-attestation.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
                   "lifecycle-control.v1"
@@ -2880,7 +2891,7 @@
             },
             "allowedOperations": {
               "type": "array",
-              "maxItems": 95,
+              "maxItems": 96,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2937,6 +2948,7 @@
                   "fabric.v1.agent.list",
                   "fabric.v1.receipt.list",
                   "fabric.v1.receipt.export",
+                  "fabric.v1.launch.attest",
                   "fabric.v1.project-session.create",
                   "fabric.v1.project-session.read",
                   "fabric.v1.project-session.transition",
@@ -3243,6 +3255,7 @@
                           "fabric.v1.discussion-group.create",
                           "fabric.v1.events.observe",
                           "fabric.v1.intake.revise",
+                          "fabric.v1.launch.attest",
                           "fabric.v1.lease.revocation-proof.record",
                           "fabric.v1.lifecycle.read",
                           "fabric.v1.lifecycle.request",
@@ -3418,6 +3431,7 @@
                           "fabric.v1.discussion-group.create",
                           "fabric.v1.events.observe",
                           "fabric.v1.intake.revise",
+                          "fabric.v1.launch.attest",
                           "fabric.v1.lease.revocation-proof.record",
                           "fabric.v1.lifecycle.read",
                           "fabric.v1.lifecycle.request",
@@ -5980,6 +5994,7 @@
                                   "fabric.v1.discussion-group.create",
                                   "fabric.v1.events.observe",
                                   "fabric.v1.intake.revise",
+                                  "fabric.v1.launch.attest",
                                   "fabric.v1.lease.revocation-proof.record",
                                   "fabric.v1.lifecycle.read",
                                   "fabric.v1.lifecycle.request",
@@ -6155,6 +6170,7 @@
                                   "fabric.v1.discussion-group.create",
                                   "fabric.v1.events.observe",
                                   "fabric.v1.intake.revise",
+                                  "fabric.v1.launch.attest",
                                   "fabric.v1.lease.revocation-proof.record",
                                   "fabric.v1.lifecycle.read",
                                   "fabric.v1.lifecycle.request",
@@ -6337,6 +6353,7 @@
                                     "fabric.v1.discussion-group.create",
                                     "fabric.v1.events.observe",
                                     "fabric.v1.intake.revise",
+                                    "fabric.v1.launch.attest",
                                     "fabric.v1.lease.revocation-proof.record",
                                     "fabric.v1.lifecycle.read",
                                     "fabric.v1.lifecycle.request",
@@ -6512,6 +6529,7 @@
                                     "fabric.v1.discussion-group.create",
                                     "fabric.v1.events.observe",
                                     "fabric.v1.intake.revise",
+                                    "fabric.v1.launch.attest",
                                     "fabric.v1.lease.revocation-proof.record",
                                     "fabric.v1.lifecycle.read",
                                     "fabric.v1.lifecycle.request",
@@ -7610,6 +7628,41 @@
                   "x-minUtf8Bytes": 1,
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "input"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.launch.attest"
+            },
+            "input": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "challengeResponse"
+              ],
+              "properties": {
+                "challengeResponse": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "x-minUtf8Bytes": 64,
+                  "x-maxUtf8Bytes": 64,
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }
@@ -14377,6 +14430,7 @@
                               "fabric.v1.agent.list",
                               "fabric.v1.receipt.list",
                               "fabric.v1.receipt.export",
+                              "fabric.v1.launch.attest",
                               "fabric.v1.project-session.create",
                               "fabric.v1.project-session.read",
                               "fabric.v1.project-session.transition",
@@ -14828,6 +14882,7 @@
                               "fabric.v1.agent.list",
                               "fabric.v1.receipt.list",
                               "fabric.v1.receipt.export",
+                              "fabric.v1.launch.attest",
                               "fabric.v1.project-session.create",
                               "fabric.v1.project-session.read",
                               "fabric.v1.project-session.transition",
@@ -15433,6 +15488,7 @@
                         "fabric.v1.agent.list",
                         "fabric.v1.receipt.list",
                         "fabric.v1.receipt.export",
+                        "fabric.v1.launch.attest",
                         "fabric.v1.project-session.create",
                         "fabric.v1.project-session.read",
                         "fabric.v1.project-session.transition",
@@ -33337,6 +33393,157 @@
             },
             "operation": {
               "const": "fabric.v1.receipt.export"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "PROTOCOL_INVALID",
+                    "PROTOCOL_UNSUPPORTED",
+                    "FEATURE_UNAVAILABLE",
+                    "AUTHENTICATION_FAILED",
+                    "AUTHORITY_WIDENING",
+                    "ARTIFACT_DIGEST_INVALID",
+                    "ARTIFACT_PATH_FORBIDDEN",
+                    "ADAPTER_ARTIFACT_MISSING",
+                    "ADAPTER_COMPATIBILITY_INVALID",
+                    "ADAPTER_DISABLED",
+                    "ADAPTER_HASH_MISMATCH",
+                    "ADAPTER_PIN_UNRESOLVED",
+                    "ADAPTER_MODEL_REQUIRED",
+                    "ADAPTER_FAMILY_FORBIDDEN",
+                    "BARRIER_PRECONDITION_FAILED",
+                    "BUDGET_EXCEEDED",
+                    "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_EXPIRED",
+                    "CAPABILITY_REVOKED",
+                    "CONFIG_UNTRUSTED_FIELD",
+                    "CONFIG_WIDENING_FORBIDDEN",
+                    "DEDUPE_CONFLICT",
+                    "DELIVERY_ALREADY_RESOLVED",
+                    "DELIVERY_REASON_REQUIRED",
+                    "LEASE_NOT_EXPIRED",
+                    "LEASE_EXPIRED",
+                    "LEASE_QUARANTINED",
+                    "CHECKPOINT_INCOMPLETE",
+                    "CONTEXT_UNRECONCILED",
+                    "LIFECYCLE_PRECONDITION_FAILED",
+                    "MODEL_REQUIRED",
+                    "MODEL_NOT_ALLOWED",
+                    "MODEL_FAMILY_NOT_ALLOWED",
+                    "MESSAGE_RELATIONSHIP_FORBIDDEN",
+                    "MESSAGE_HOP_LIMIT_EXCEEDED",
+                    "MESSAGE_QUOTA_EXCEEDED",
+                    "NOT_FOUND",
+                    "PROVIDER_TURN_ACTIVE",
+                    "STALE_LEASE_GENERATION",
+                    "STALE_PRINCIPAL_GENERATION",
+                    "TASK_NOT_OWNER",
+                    "TASK_DEPENDENCY_BLOCKED",
+                    "TASK_SUBTREE_CONFLICT",
+                    "TASK_REVISION_CONFLICT",
+                    "TEAM_DEPTH_EXCEEDED",
+                    "STALE_TEAM_GENERATION",
+                    "BUDGET_USAGE_UNKNOWN",
+                    "WRITE_SCOPE_CONFLICT",
+                    "WRITE_SCOPE_RECOVERY_REQUIRED",
+                    "WRITE_SCOPE_QUARANTINED",
+                    "WRONG_PROJECT",
+                    "STALE_GENERATION",
+                    "STALE_REVISION",
+                    "GATE_BLOCKED",
+                    "RESOURCE_EXHAUSTED",
+                    "RESOURCE_USAGE_UNKNOWN",
+                    "OVERLOADED",
+                    "DEADLINE_EXCEEDED",
+                    "CONFLICT",
+                    "RECOVERY_REQUIRED",
+                    "PROJECTION_RESNAPSHOT_REQUIRED"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "details": {
+                  "$ref": "#/$defs/boundedJsonValue"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "result"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.launch.attest"
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "attested",
+                "challengeDigest"
+              ],
+              "properties": {
+                "attested": {
+                  "const": true
+                },
+                "challengeDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "error"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.launch.attest"
             },
             "ok": {
               "const": false

@@ -133,6 +133,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.listAgents]: object(["runId"]),
   [FABRIC_OPERATIONS.listReceipts]: object(["runId"]),
   [FABRIC_OPERATIONS.exportReceipt]: object(["commandId"]),
+  [FABRIC_OPERATIONS.launchAttest]: object(["challengeResponse"]),
   [FABRIC_OPERATIONS.projectSessionCreate]: object(["command", "projectSessionId", "projectId", "mode", "generation", "authorityRef", "budgetRef", "launchPacketRef"]),
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectId", "projectSessionId", "expectedGeneration"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["command", "projectSessionId", "expectedGeneration", "transition"]),
@@ -239,6 +240,7 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.listAgents]: object(["agents"]),
   [FABRIC_OPERATIONS.listReceipts]: object(["receipts"]),
   [FABRIC_OPERATIONS.exportReceipt]: object(["relativePath", "schemaVersion", "sha256"]),
+  [FABRIC_OPERATIONS.launchAttest]: object(["attested", "challengeDigest"]),
   [FABRIC_OPERATIONS.projectSessionCreate]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
@@ -1942,6 +1944,18 @@ const observerEventCodec = objectCodec({
   summary: text,
 });
 const receiptCodec = objectCodec({ relativePath, schemaVersion: unionOf([literal(1), literal(2)]), sha256: sha256Hex });
+const launchAttestationInputCodec = objectCodec({
+  challengeResponse: boundedString({
+    minBytes: 64,
+    maxBytes: 64,
+    pattern: "^[a-f0-9]{64}$",
+    example: "ab".repeat(32),
+  }),
+});
+const launchAttestationResultCodec = objectCodec({
+  attested: literal(true),
+  challengeDigest: sha256,
+});
 
 type CodecDirection = "input" | "result";
 
@@ -2288,6 +2302,7 @@ const budgetResultOperations: ReadonlySet<ProtocolOperation> = new Set([
 ]);
 
 function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
+  if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationInputCodec;
   if (operation === FABRIC_OPERATIONS.sendMessage) return legacyMessageCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateCodec;
   if (operation === FABRIC_OPERATIONS.intakeDraftCreate) return intakeDraftCreateCodec;
@@ -2316,6 +2331,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
 }
 
 function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
+  if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationResultCodec;
   if (taskResultOperations.has(operation)) return taskResultCodec;
   if (leaseResultOperations.has(operation)) return leaseResultCodec;
   if (lifecycleResultOperations.has(operation)) return lifecycleResultCodec;

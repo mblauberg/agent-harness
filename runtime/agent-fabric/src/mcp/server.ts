@@ -15,6 +15,7 @@ import {
   ProtocolRemoteError,
   ProtocolTransportError,
   buildMcpDescriptorSet,
+  isDaemonGrantableOperation,
   operationsForPrincipal,
   parseOperationInputForPrincipal,
   parseOperationResult,
@@ -37,7 +38,9 @@ export type FabricMcpServerHandle = {
 };
 
 const agentFeatures = Object.freeze([...new Set(
-  [...operationsForPrincipal("agent")].map((operation) => OPERATION_REGISTRY[operation].feature),
+  [...operationsForPrincipal("agent")]
+    .filter(isDaemonGrantableOperation)
+    .map((operation) => OPERATION_REGISTRY[operation].feature),
 )].sort()) as readonly ProtocolFeature[];
 
 function errorPayload(error: unknown): { code: string; message: string } {

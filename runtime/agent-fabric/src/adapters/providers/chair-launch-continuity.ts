@@ -1,6 +1,17 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createConnection } from "node:net";
 
-import { TimedNdjsonTransport } from "../../transport/ndjson-rpc.js";
+import {
+  FABRIC_OPERATIONS,
+  NdjsonRpcTransport,
+  OPERATION_REGISTRY,
+  operationsForPrincipal,
+  parseOperationInput,
+  parseOperationResult,
+  type FabricOperation,
+  type McpToolDescriptor,
+  type ProtocolFeature,
+} from "@local/agent-fabric-protocol";
 import {
   CHAIR_ATTESTATION_METHOD,
   CHAIR_BRIDGE_CONTRACT,
@@ -11,6 +22,11 @@ import {
   type ChairLaunchAttestationBinding,
   type ChairLaunchProviderResult,
 } from "./types.js";
+import {
+  ProviderSessionFabricSurface,
+  type ProviderSessionProtocolTransport,
+  type ProviderSessionToolResult,
+} from "./provider-session-fabric-surface.js";
 
 export type ChairLaunchFabricBridgeInput = ChairLaunchAttestationBinding & {
   capability: string;
@@ -19,36 +35,57 @@ export type ChairLaunchFabricBridgeInput = ChairLaunchAttestationBinding & {
 };
 
 export type ChairLaunchFabricBridgeDependencies = {
-  connect(input: { socketPath: string; capability: string }): Promise<{
-    readonly closed?: boolean;
-    call(method: string, params: Record<string, unknown>): Promise<unknown>;
-    close(): Promise<void>;
-  }>;
+  connect(input: { socketPath: string; capability: string }): Promise<ProviderSessionProtocolTransport>;
 };
+
+const agentFeatures = Object.freeze([...new Set(
+  [...operationsForPrincipal("agent")]
+    .map((operation) => OPERATION_REGISTRY[operation].feature),
+)].sort()) as readonly ProtocolFeature[];
 
 const defaultDependencies: ChairLaunchFabricBridgeDependencies = {
   async connect(input) {
-    return await TimedNdjsonTransport.connect({
-      ...input,
-      connectTimeoutMs: 5_000,
-      requestTimeoutMs: 5_000,
+    if (!/^afc_[A-Za-z0-9_-]{43}$/u.test(input.capability)) {
+      throw new TypeError("provider-session bridge requires an Agent Fabric agent capability");
+    }
+    const socket = createConnection(input.socketPath);
+    let closed = false;
+    socket.once("close", () => {
+      closed = true;
     });
+    const protocol = await NdjsonRpcTransport.connect(socket, {
+      protocolVersion: 1,
+      client: { name: "agent-fabric-provider-session", version: "1.0.0" },
+      authentication: {
+        scheme: "capability",
+        credential: input.capability,
+        clientNonce: `provider_${randomUUID()}`,
+      },
+      expectedPrincipalKind: "agent",
+      requiredFeatures: ["fabric-core.v1"],
+      optionalFeatures: agentFeatures.filter((feature) => feature !== "fabric-core.v1"),
+    });
+    if (protocol.principal.kind !== "agent") {
+      await protocol.close();
+      throw new TypeError("provider-session bridge credential did not resolve to an agent principal");
+    }
+    return {
+      get closed() {
+        return closed;
+      },
+      features: protocol.features,
+      principal: protocol.principal,
+      allowedOperations: protocol.allowedOperations,
+      async call(operation: FabricOperation, value: unknown): Promise<unknown> {
+        return await protocol.call(operation, parseOperationInput(operation, value));
+      },
+      async close(): Promise<void> {
+        closed = true;
+        await protocol.close();
+      },
+    };
   },
 };
-
-function validMailboxState(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    Object.keys(value).length === 2 &&
-    typeof value.contiguousWatermark === "number" &&
-    Number.isSafeInteger(value.contiguousWatermark) &&
-    value.contiguousWatermark >= 0 &&
-    Array.isArray(value.acknowledgedAboveWatermark) &&
-    value.acknowledgedAboveWatermark.every(
-      (sequence) => typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0,
-    )
-  );
-}
 
 function boundedNativeRef(value: string): boolean {
   return value.length > 0 && Buffer.byteLength(value, "utf8") <= 512;
@@ -59,15 +96,15 @@ export type ChairLaunchProviderInvocation = {
   providerSessionGeneration: number;
   providerTurnRef: string;
   providerInvocationRef: string;
-  challengeResponse: string;
 };
 
 export class ChairLaunchFabricBridge {
-  readonly challengeToolName: string;
+  readonly challengeToolName: McpToolDescriptor["name"];
   readonly challengeDigest: string;
   readonly #challenge: Buffer;
   readonly #binding: ChairLaunchAttestationBinding;
-  readonly #transport: Awaited<ReturnType<ChairLaunchFabricBridgeDependencies["connect"]>>;
+  readonly #transport: ProviderSessionProtocolTransport;
+  readonly #surface: ProviderSessionFabricSurface;
   #session: { providerSessionRef: string; providerSessionGeneration: number } | undefined;
   #providerTurnRef: string | undefined;
   #invocationRef: string | undefined;
@@ -92,8 +129,20 @@ export class ChairLaunchFabricBridge {
     };
     this.#transport = transport;
     this.#challenge = Buffer.from(input.attestationChallenge, "hex");
-    this.challengeToolName = "fabric_attest_continuity";
     this.challengeDigest = input.challengeDigest;
+    this.#surface = new ProviderSessionFabricSurface(transport, [{
+      operation: FABRIC_OPERATIONS.launchAttest,
+      invoke: async (value, context) => await this.#attest(value, context),
+    }]);
+    const challengeDescriptor = this.#surface.descriptors.find(
+      (descriptor) => descriptor.operation === FABRIC_OPERATIONS.launchAttest,
+    );
+    if (challengeDescriptor === undefined) throw new TypeError("launch attestation descriptor is unavailable");
+    this.challengeToolName = challengeDescriptor.name;
+  }
+
+  get descriptors(): readonly McpToolDescriptor[] {
+    return this.#surface.descriptors;
   }
 
   get challengeResponse(): string {
@@ -118,24 +167,30 @@ export class ChairLaunchFabricBridge {
     this.#session = { providerSessionRef, providerSessionGeneration };
   }
 
-  async attest(invocation: ChairLaunchProviderInvocation): Promise<void> {
+  async #attest(value: unknown, context: unknown): Promise<unknown> {
     if (this.closed) throw continuityError("chair bridge is closed");
     if (this.#invoked) {
       throw new ProviderAdapterError("CHAIR_ATTESTATION_REPLAY", "chair attestation challenge was already invoked");
     }
     if (
+      !isRecord(value) ||
+      !isRecord(context) ||
       this.#session === undefined ||
-      invocation.providerSessionRef !== this.#session.providerSessionRef ||
-      invocation.providerSessionGeneration !== this.#session.providerSessionGeneration ||
-      !boundedNativeRef(invocation.providerTurnRef) ||
-      !boundedNativeRef(invocation.providerInvocationRef) ||
-      typeof invocation.challengeResponse !== "string"
+      typeof context.providerSessionRef !== "string" ||
+      typeof context.providerSessionGeneration !== "number" ||
+      typeof context.providerTurnRef !== "string" ||
+      typeof context.providerInvocationRef !== "string" ||
+      context.providerSessionRef !== this.#session.providerSessionRef ||
+      context.providerSessionGeneration !== this.#session.providerSessionGeneration ||
+      !boundedNativeRef(context.providerTurnRef) ||
+      !boundedNativeRef(context.providerInvocationRef) ||
+      typeof value.challengeResponse !== "string"
     ) {
       throw continuityError("chair attestation invocation is not attributable to the bound provider session");
     }
     let response: Buffer;
     try {
-      response = Buffer.from(invocation.challengeResponse, "hex");
+      response = Buffer.from(value.challengeResponse, "hex");
     } catch {
       throw continuityError("chair attestation challenge response is invalid");
     }
@@ -143,15 +198,34 @@ export class ChairLaunchFabricBridge {
       throw continuityError("chair attestation challenge response does not match");
     }
     this.#invoked = true;
-    const mailbox = await this.#transport.call("getMailboxState", {});
-    if (!validMailboxState(mailbox)) throw continuityError("Fabric bridge returned an invalid mailbox state");
-    this.#providerTurnRef = invocation.providerTurnRef;
-    this.#invocationRef = invocation.providerInvocationRef;
+    parseOperationResult(
+      FABRIC_OPERATIONS.getMailboxState,
+      await this.#transport.call(FABRIC_OPERATIONS.getMailboxState, {}),
+    );
+    this.#providerTurnRef = context.providerTurnRef;
+    this.#invocationRef = context.providerInvocationRef;
+    return { attested: true, challengeDigest: this.challengeDigest };
   }
 
-  async call(method: string, params: Record<string, unknown>): Promise<unknown> {
+  async invokeTool(
+    name: string,
+    args: unknown,
+    invocation: ChairLaunchProviderInvocation,
+  ): Promise<ProviderSessionToolResult> {
     if (this.closed) throw continuityError("chair bridge is closed");
-    return await this.#transport.call(method, params);
+    const descriptor = this.#surface.descriptor(name);
+    if (descriptor === undefined) throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "provider requested an unknown Fabric tool");
+    if (descriptor.operation !== FABRIC_OPERATIONS.launchAttest && !this.#invoked) {
+      throw continuityError("chair Fabric tools are unavailable before launch attestation");
+    }
+    try {
+      return await this.#surface.invoke(name, args, invocation);
+    } catch (error: unknown) {
+      if (descriptor.operation === FABRIC_OPERATIONS.launchAttest && error instanceof TypeError) {
+        throw continuityError("chair attestation input is invalid");
+      }
+      throw error;
+    }
   }
 
   async result(): Promise<ChairLaunchProviderResult> {

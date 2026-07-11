@@ -45,6 +45,7 @@ describe("registry-owned MCP projection", () => {
     })));
     expect(listed.tools.map(({ name }) => name)).not.toEqual(expect.arrayContaining([
       "fabric_run_create",
+      "fabric_launch_attest",
       "fabric_agent_steer",
       "fabric_agent_release",
     ]));

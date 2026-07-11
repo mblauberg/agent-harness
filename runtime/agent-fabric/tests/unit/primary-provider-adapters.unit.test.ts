@@ -4,9 +4,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Socket } from "node:net";
 import { createInterface } from "node:readline";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
+import {
+  FABRIC_OPERATIONS,
+  PROTOCOL_LIMITS,
+} from "@local/agent-fabric-protocol";
 
 import {
   claudeReadOnlyOptions,
@@ -24,6 +30,7 @@ import {
   type CodexAppServerBoundary,
 } from "../../src/adapters/providers/codex-app-server.ts";
 import { createChairLaunchFabricBridge } from "../../src/adapters/providers/chair-launch-continuity.ts";
+import type { ProviderSessionProtocolTransport } from "../../src/adapters/providers/provider-session-fabric-surface.ts";
 import { SqliteAdapterActionJournal } from "../../src/adapters/providers/journal.ts";
 import * as providerTypes from "../../src/adapters/providers/types.ts";
 import {
@@ -36,6 +43,25 @@ const ATTESTATION_CHALLENGE_DIGEST = chairLaunchChallengeDigest(ATTESTATION_CHAL
 
 const temporaryDirectories: string[] = [];
 const temporaryClosures: Array<() => Promise<void>> = [];
+
+function providerSessionProtocolTransport(
+  call: ProviderSessionProtocolTransport["call"],
+  close: ProviderSessionProtocolTransport["close"],
+): ProviderSessionProtocolTransport {
+  return {
+    features: ["fabric-core.v1", "launch-attestation.v1"],
+    principal: {
+      kind: "agent",
+      agentId: "chair" as never,
+      projectSessionId: "session-1" as never,
+      runId: "run-1",
+      principalGeneration: 1,
+    },
+    allowedOperations: new Set([FABRIC_OPERATIONS.getMailboxState]),
+    call,
+    close,
+  };
+}
 
 async function journal(): Promise<SqliteAdapterActionJournal> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-provider-adapter-"));
@@ -58,31 +84,41 @@ async function fabricSocketFixture(): Promise<{
     socket.once("close", () => sockets.delete(socket));
     const lines = createInterface({ input: socket, crlfDelay: Infinity });
     lines.on("line", (line) => {
-      const request = JSON.parse(line) as { id: string; method: string };
-      if (request.method === "initialize") {
+      const request = JSON.parse(line) as {
+        id: string;
+        operation: string;
+        input?: { authentication?: { clientNonce?: string } };
+      };
+      if (request.operation === "initialize") {
         socket.write(`${JSON.stringify({
           id: request.id,
+          operation: request.operation,
+          ok: true,
           result: {
             protocolVersion: 1,
             daemonVersion: "0.1.0",
-            capabilities: ["rpc"],
-            activeAdapters: [],
-            limits: {
-              maximumFrameBytes: 1_048_576,
-              maximumConnections: 32,
-              maximumInFlightPerConnection: 16,
-              maximumTotalInFlight: 128,
-              maximumClientPending: 32,
-              maximumAdapterInFlight: 8,
-              idleTimeoutMs: 300_000,
+            daemonInstanceGeneration: 1,
+            principal: {
+              kind: "agent",
+              agentId: "chair",
+              projectSessionId: "session-1",
+              runId: "run-1",
+              principalGeneration: 1,
             },
+            clientNonce: request.input?.authentication?.clientNonce,
+            connectionNonce: "provider-test-connection",
+            features: ["fabric-core.v1", "launch-attestation.v1"],
+            allowedOperations: [FABRIC_OPERATIONS.getMailboxState],
+            limits: PROTOCOL_LIMITS,
           },
         })}\n`);
         return;
       }
-      rpcCall(request.method);
+      rpcCall(request.operation);
       socket.write(`${JSON.stringify({
         id: request.id,
+        operation: request.operation,
+        ok: true,
         result: { contiguousWatermark: 0, acknowledgedAboveWatermark: [] },
       })}\n`);
     });
@@ -676,6 +712,8 @@ describe("installed Claude chair launch boundary", () => {
     let directMailboxError: unknown;
     let mismatchedMailboxError: unknown;
     let replayedMailboxError: unknown;
+    let attestationProjection: unknown;
+    let mailboxProjection: unknown;
     const queryFactory = vi.fn((input: unknown) => {
       queryCount += 1;
       const thisQuery = queryCount;
@@ -700,9 +738,9 @@ describe("installed Claude chair launch boundary", () => {
                 }],
               },
             };
-            await mcp.attestationTool.handler({ challengeResponse: bridge.challengeResponse }, {});
+            attestationProjection = await mcp.invokeTool(bridge.challengeToolName, { challengeResponse: bridge.challengeResponse });
           } else {
-            directMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
+            directMailboxError = await mcp.invokeTool("fabric_mailbox_read", {}).catch((error: unknown) => error);
             yield {
               type: "assistant",
               session_id: "claude-chair-session-1",
@@ -718,7 +756,7 @@ describe("installed Claude chair launch boundary", () => {
                 }],
               },
             };
-            mismatchedMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
+            mismatchedMailboxError = await mcp.invokeTool("fabric_mailbox_read", {}).catch((error: unknown) => error);
             yield {
               type: "assistant",
               session_id: "claude-chair-session-1",
@@ -734,8 +772,8 @@ describe("installed Claude chair launch boundary", () => {
                 }],
               },
             };
-            await mcp.mailboxTool.handler({}, {});
-            replayedMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
+            mailboxProjection = await mcp.invokeTool("fabric_mailbox_read", {});
+            replayedMailboxError = await mcp.invokeTool("fabric_mailbox_read", {}).catch((error: unknown) => error);
           }
           yield {
             type: "result",
@@ -763,7 +801,7 @@ describe("installed Claude chair launch boundary", () => {
       },
       mcpBridgeFactory,
     }]);
-    const capability = "claude-private-capability-canary";
+    const capability = `afc_${"c".repeat(43)}`;
     const socketPath = fabricServer.socketPath;
     const adapter = createClaudeAgentSdkAdapter({
       boundary,
@@ -804,8 +842,41 @@ describe("installed Claude chair launch boundary", () => {
     expect(queryInput.options.env).toBeUndefined();
     expect(queryInput.prompt).not.toContain(capability);
     expect(queryInput.prompt).not.toContain(socketPath);
+    expect(Reflect.get(mcp ?? {}, "descriptors")).toStrictEqual(bridge?.descriptors);
+    expect(Reflect.get(mcp ?? {}, "invokeTool")).toBeTypeOf("function");
+    expect(queryInput.options.allowedTools).toStrictEqual(bridge?.descriptors.map(
+      (descriptor) => `mcp__agent_fabric_session__${descriptor.name}`,
+    ));
+    if (mcp === undefined) throw new Error("Claude MCP bridge missing");
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const mcpClient = new Client({ name: "claude-parity-test", version: "1.0.0" });
+    await Promise.all([
+      mcp.server.instance.connect(serverTransport),
+      mcpClient.connect(clientTransport),
+    ]);
+    const listed = await mcpClient.listTools();
+    expect(listed.tools).toStrictEqual(mcp.descriptors.map(({ name, description, inputSchema, outputSchema }) => ({
+      name,
+      description,
+      inputSchema,
+      outputSchema,
+      ...(name === bridge?.challengeToolName
+        ? { _meta: { "anthropic/alwaysLoad": true } }
+        : {}),
+    })));
+    await mcpClient.close();
+    expect(attestationProjection).toStrictEqual({
+      content: [{ type: "text", text: "launch continuity attested" }],
+      structuredContent: { attested: true, challengeDigest: bridge?.challengeDigest },
+    });
     expect(rpcCall).toHaveBeenCalledOnce();
     await boundary.sendTurn({ resumeReference: "claude-chair-session-1", prompt: "later work" });
+    expect(mailboxProjection).toStrictEqual({
+      content: [{ type: "text", text: "fabric_mailbox_read completed" }],
+      structuredContent: { contiguousWatermark: 0, acknowledgedAboveWatermark: [] },
+    });
+    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(bridge?.challengeResponse);
+    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(capability);
     expect(directMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(mismatchedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(replayedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
@@ -839,10 +910,10 @@ describe("installed Claude chair launch boundary", () => {
       async *[Symbol.asyncIterator]() {
         yield { type: "system", subtype: "init", session_id: "claude-chair-orphan-session" };
         if (bridge === undefined || mcp === undefined) throw new Error("test bridge missing");
-        preAttestationMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
-        directInvocationError = await mcp.attestationTool.handler({
+        preAttestationMailboxError = await mcp.invokeTool("fabric_mailbox_read", {}).catch((error: unknown) => error);
+        directInvocationError = await mcp.invokeTool(bridge.challengeToolName, {
           challengeResponse: bridge.challengeResponse,
-        }, {}).catch((error: unknown) => error);
+        }).catch((error: unknown) => error);
         yield {
           type: "result",
           subtype: "success",
@@ -858,10 +929,10 @@ describe("installed Claude chair launch boundary", () => {
       query: queryFactory,
       bridgeFactory: async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
         bridge = await createChairLaunchFabricBridge(input, {
-          connect: vi.fn(async () => ({
-            call: vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })),
-            close: rpcClose,
-          })),
+          connect: vi.fn(async () => providerSessionProtocolTransport(
+            vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })),
+            rpcClose,
+          )),
         });
         return bridge;
       },
@@ -944,6 +1015,8 @@ describe("installed Codex chair launch boundary", () => {
     let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
     let serverRequestHandler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
     const providerServerRequestIds: number[] = [];
+    let attestationProjection: unknown;
+    let mailboxProjection: unknown;
     let turnCount = 0;
     let currentTurnId = "";
     let connectionClosed = false;
@@ -1001,7 +1074,7 @@ describe("installed Codex chair launch boundary", () => {
             tool: bridge.challengeToolName,
             turnId: currentTurnId,
           })).rejects.toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
-          await serverRequestHandler({
+          attestationProjection = await serverRequestHandler({
             arguments: { challengeResponse: bridge.challengeResponse },
             callId: "codex-provider-tool-call-1",
             threadId: "codex-chair-thread-1",
@@ -1013,14 +1086,14 @@ describe("installed Codex chair launch boundary", () => {
             arguments: {},
             callId: "codex-provider-mailbox-call-1",
             threadId: "codex-chair-thread-1",
-            tool: "fabric_get_mailbox_state",
+            tool: "fabric_mailbox_read",
             turnId: currentTurnId,
           };
           const invokeServerRequest = async (jsonRpcId: number): Promise<unknown> => {
             providerServerRequestIds.push(jsonRpcId);
             return await serverRequestHandler?.({ ...mailboxInvocation });
           };
-          await invokeServerRequest(901);
+          mailboxProjection = await invokeServerRequest(901);
           await expect(invokeServerRequest(902)).rejects.toMatchObject({
             code: "CHAIR_CONTINUITY_UNPROVEN",
           });
@@ -1038,7 +1111,7 @@ describe("installed Codex chair launch boundary", () => {
       return bridge;
     };
     const boundary = Reflect.construct(InstalledCodexAppServerBoundary, [connectionFactory, bridgeFactory]);
-    const capability = "codex-private-capability-canary";
+    const capability = `afc_${"d".repeat(43)}`;
     const socketPath = fabricServer.socketPath;
     const adapter = createCodexAppServerAdapter({
       boundary,
@@ -1070,15 +1143,24 @@ describe("installed Codex chair launch boundary", () => {
     ));
 
     expect(connectionFactory).toHaveBeenCalledWith(undefined);
-    expect(requests[0]).toMatchObject({
+    expect(requests[0]).toStrictEqual({
       method: "thread/start",
-      params: { dynamicTools: expect.arrayContaining([
-        expect.objectContaining({
-          name: bridge?.challengeToolName,
-          inputSchema: expect.objectContaining({ required: ["challengeResponse"] }),
+      params: {
+        ...codexThreadConfiguration({
+          cwd: "/workspace/project",
+          modelFamily: "openai",
+          model: "gpt-test",
+          prompt: "begin chair coordination",
+          ephemeral: false,
         }),
-        expect.objectContaining({ name: "fabric_get_mailbox_state" }),
-      ]) },
+        dynamicTools: bridge?.descriptors.map((descriptor) => ({
+          type: "function",
+          name: descriptor.name,
+          description: descriptor.description,
+          inputSchema: descriptor.inputSchema,
+          deferLoading: false,
+        })),
+      },
     });
     expect(requests[1]).toMatchObject({
       method: "turn/start",
@@ -1086,6 +1168,13 @@ describe("installed Codex chair launch boundary", () => {
     });
     expect(JSON.stringify(requests)).not.toContain(capability);
     expect(JSON.stringify(requests)).not.toContain(socketPath);
+    expect(attestationProjection).toStrictEqual({
+      contentItems: [
+        { type: "inputText", text: "launch continuity attested" },
+        { type: "inputText", text: JSON.stringify({ attested: true, challengeDigest: bridge?.challengeDigest }) },
+      ],
+      success: true,
+    });
     expect(connectionFactory).toHaveBeenCalledOnce();
     expect(connection.close).not.toHaveBeenCalled();
     expect(rpcCall).toHaveBeenCalledOnce();
@@ -1093,10 +1182,19 @@ describe("installed Codex chair launch boundary", () => {
       arguments: {},
       callId: "late-provider-call",
       threadId: "codex-chair-thread-1",
-      tool: "fabric_get_mailbox_state",
+      tool: "fabric_mailbox_read",
       turnId: "codex-chair-turn-1",
     })).rejects.toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     await boundary.sendTurn({ resumeReference: "codex-chair-thread-1", prompt: "later work" });
+    expect(mailboxProjection).toStrictEqual({
+      contentItems: [
+        { type: "inputText", text: "fabric_mailbox_read completed" },
+        { type: "inputText", text: JSON.stringify({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }) },
+      ],
+      success: true,
+    });
+    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(bridge?.challengeResponse);
+    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(capability);
     expect(rpcCall).toHaveBeenCalledTimes(2);
     expect(providerServerRequestIds).toEqual([901, 902]);
     expect(connectionFactory).toHaveBeenCalledOnce();
@@ -1172,7 +1270,7 @@ describe("installed Codex chair launch boundary", () => {
             arguments: {},
             callId: `capacity-call-${index}`,
             threadId: "codex-capacity-thread",
-            tool: "fabric_get_mailbox_state",
+            tool: "fabric_mailbox_read",
             turnId: currentTurnId,
           });
         }
@@ -1180,14 +1278,14 @@ describe("installed Codex chair launch boundary", () => {
           arguments: {},
           callId: "capacity-call-256",
           threadId: "codex-capacity-thread",
-          tool: "fabric_get_mailbox_state",
+          tool: "fabric_mailbox_read",
           turnId: currentTurnId,
         }).catch((error: unknown) => error);
         replayError = await serverRequestHandler({
           arguments: {},
           callId: "capacity-call-0",
           threadId: "codex-capacity-thread",
-          tool: "fabric_get_mailbox_state",
+          tool: "fabric_mailbox_read",
           turnId: currentTurnId,
         }).catch((error: unknown) => error);
         throw new Error("capacity-fenced provider connection");
@@ -1197,10 +1295,10 @@ describe("installed Codex chair launch boundary", () => {
       vi.fn(() => connection),
       async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
         bridge = await createChairLaunchFabricBridge(input, {
-          connect: vi.fn(async () => ({
-            call: rpcCall,
-            close: vi.fn(async () => undefined),
-          })),
+          connect: vi.fn(async () => providerSessionProtocolTransport(
+            rpcCall,
+            vi.fn(async () => undefined),
+          )),
         });
         return bridge;
       },

@@ -8,6 +8,7 @@ import {
 import {
   isFabricOperation,
   isActiveFabricOperation,
+  isDaemonGrantableOperation,
   OPERATION_REGISTRY,
   operationsForPrincipal,
   type FabricOperation,
@@ -167,7 +168,7 @@ export function allowedOperationsForPrincipal(
   const featureOperations = operationsForFeatures(features);
   const principalOperations = operationsForPrincipal(principal.kind);
   return [...featureOperations]
-    .filter((operation) => principalOperations.has(operation as never))
+    .filter((operation) => isDaemonGrantableOperation(operation) && principalOperations.has(operation as never))
     .sort();
 }
 
@@ -187,6 +188,7 @@ export function authorizeProtocolInitialize(
   const allowedOperations = [...new Set(verifiedCredential.grantedOperations)]
     .filter((operation) => (
       isActiveFabricOperation(operation) &&
+      isDaemonGrantableOperation(operation) &&
       featureOperations.has(operation) &&
       principalOperations.has(operation as never)
     ))

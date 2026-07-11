@@ -21,14 +21,20 @@ describe("shared fabric operation registry", () => {
     });
   });
 
-  it("keeps agent authority vocabulary and expansion exactly aligned with active principal operations", () => {
-    const agentOperations = [...protocol.operationsForPrincipal("agent")].sort();
+  it("keeps agent authority vocabulary aligned with daemon-grantable principal operations", () => {
+    const agentOperations = [...protocol.operationsForPrincipal("agent")]
+      .filter(protocol.isDaemonGrantableOperation)
+      .sort();
     const vocabularyOperations = AUTHORITY_ACTION_VOCABULARY.filter(protocol.isActiveFabricOperation).sort();
 
     expect(vocabularyOperations).toStrictEqual(agentOperations);
     for (const operation of agentOperations) {
       expect(expandAuthorityActions([operation])).toStrictEqual({ ok: true, operations: [operation] });
     }
+    expect(expandAuthorityActions([FABRIC_OPERATIONS.launchAttest])).toStrictEqual({
+      ok: false,
+      unknownActions: [FABRIC_OPERATIONS.launchAttest],
+    });
     expect(expandAuthorityActions([FABRIC_OPERATIONS.daemonStop])).toStrictEqual({
       ok: false,
       unknownActions: [FABRIC_OPERATIONS.daemonStop],

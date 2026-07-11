@@ -162,6 +162,7 @@ export type ProtocolInitializeResult = {
 };
 
 type ExtensionOperationInputMap = {
+  [FABRIC_OPERATIONS.launchAttest]: { challengeResponse: string };
   [FABRIC_OPERATIONS.projectSessionCreate]: ProjectSessionCreateRequest;
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSessionGetRequest;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSessionTransitionRequest;
@@ -241,6 +242,7 @@ export type DaemonLifecycleResult = {
 };
 
 type ExtensionOperationResultMap = {
+  [FABRIC_OPERATIONS.launchAttest]: { attested: true; challengeDigest: Sha256Digest };
   [FABRIC_OPERATIONS.projectSessionCreate]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSession;

@@ -420,6 +420,12 @@
       "name": "fabric_result_delivery_abandon",
       "description": "Invoke the closed fabric.v1.result-delivery.abandon operation as the authenticated Agent Fabric principal.",
       "receiptRenderer": "generic-v1"
+    },
+    "fabric.v1.launch.attest": {
+      "projection": "tool",
+      "name": "fabric_launch_attest",
+      "description": "Invoke the closed fabric.v1.launch.attest operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "launch-attestation-v1"
     }
   },
   "tools": [
@@ -773,6 +779,7 @@
               "fabric.v1.discussion-group.create",
               "fabric.v1.events.observe",
               "fabric.v1.intake.revise",
+              "fabric.v1.launch.attest",
               "fabric.v1.lease.revocation-proof.record",
               "fabric.v1.lifecycle.read",
               "fabric.v1.lifecycle.request",
@@ -856,7 +863,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:ae94afa330d399b3373a5d8dd06db3d7cf8efa7fb75b351716c5456f0ccdfde9",
+      "inputCodecDigest": "sha256:805b5bdd2cfc40286cb12587a8d32fd53cf837e90d960d3a5ce45e1ecb3096e4",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -2389,6 +2396,49 @@
       },
       "inputCodecDigest": "sha256:0f03f8314de5f4d58df9ab712f9ef1f98592a7185bc614d36587aebc9a27ecab",
       "outputCodecDigest": "sha256:5811f0ea63e157031b7ec0b7a40877d25ce4c0ddd16ce0426491f0656f374b67"
+    },
+    {
+      "operation": "fabric.v1.launch.attest",
+      "name": "fabric_launch_attest",
+      "description": "Invoke the closed fabric.v1.launch.attest operation as the authenticated Agent Fabric principal.",
+      "feature": "launch-attestation.v1",
+      "receiptRenderer": "launch-attestation-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "challengeResponse"
+        ],
+        "properties": {
+          "challengeResponse": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "x-minUtf8Bytes": 64,
+            "x-maxUtf8Bytes": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attested",
+          "challengeDigest"
+        ],
+        "properties": {
+          "attested": {
+            "const": true
+          },
+          "challengeDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:d5ea1988a43516e7a9b710fe950df47ef732b8164c860a5c64d9e2d03ea88fae",
+      "outputCodecDigest": "sha256:d2fbcc0ef9af23e29b615bff1d5643e43478e101c27a804b7d6a682969a5c0fb"
     },
     {
       "operation": "fabric.v1.lease.revocation-proof.record",
@@ -10288,6 +10338,7 @@
                   "fabric.v1.agent.list",
                   "fabric.v1.receipt.list",
                   "fabric.v1.receipt.export",
+                  "fabric.v1.launch.attest",
                   "fabric.v1.project-session.create",
                   "fabric.v1.project-session.read",
                   "fabric.v1.project-session.transition",
@@ -10411,7 +10462,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:efd97c5784ff9946c160c405689c2994a4c020c8f89b100e55bcfe228166a41c",
+      "inputCodecDigest": "sha256:3c674761e8b8b5fe81cf1457ab436c41c28a61c3d2b82e187fdc0221032b8919",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -10629,6 +10680,7 @@
                     "fabric.v1.agent.list",
                     "fabric.v1.receipt.list",
                     "fabric.v1.receipt.export",
+                    "fabric.v1.launch.attest",
                     "fabric.v1.project-session.create",
                     "fabric.v1.project-session.read",
                     "fabric.v1.project-session.transition",
@@ -11172,7 +11224,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:2aac9057b197b039b8d0f819a0540a9a366f21f823bfd6544b709e8849e2b209",
+      "inputCodecDigest": "sha256:b2f3de6f55852251bd6bc44a14ad2dce26fd6cf33d72dac9e36372e61c01efe6",
       "outputCodecDigest": "sha256:32d143b94b062880b03ba675e7ae97905cc7e72789206a9efbc2969e0475c9e7"
     },
     {

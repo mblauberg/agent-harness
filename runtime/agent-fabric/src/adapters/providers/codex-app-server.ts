@@ -24,6 +24,7 @@ import {
   type ChairLaunchProviderResult,
   type ProviderAdapterCapabilities,
 } from "./types.js";
+import type { ProviderSessionToolResult } from "./provider-session-fabric-surface.js";
 
 export type CodexAppServerBoundary = ProviderBoundary & {
   steer(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -218,32 +219,21 @@ function consumeCodexNativeInvocation(
 }
 
 function codexChairDynamicTools(bridge: ChairLaunchFabricBridge): Record<string, unknown>[] {
-  return [
-    {
-      type: "function",
-      name: bridge.challengeToolName,
-      description: "Required one-use Agent Fabric provider-session continuity challenge.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: { challengeResponse: { type: "string", pattern: "^[0-9a-f]{64}$" } },
-        required: ["challengeResponse"],
-      },
-      deferLoading: false,
-    },
-    {
-      type: "function",
-      name: "fabric_get_mailbox_state",
-      description: "Read this chair's mailbox state through its retained Agent Fabric bridge.",
-      inputSchema: { type: "object", additionalProperties: false, properties: {}, required: [] },
-      deferLoading: false,
-    },
-  ];
+  return bridge.descriptors.map((descriptor) => ({
+    type: "function",
+    name: descriptor.name,
+    description: descriptor.description,
+    inputSchema: descriptor.inputSchema,
+    deferLoading: false,
+  }));
 }
 
-function dynamicToolResponse(value: unknown): Record<string, unknown> {
+function dynamicToolResponse(value: ProviderSessionToolResult): Record<string, unknown> {
   return {
-    contentItems: [{ type: "inputText", text: JSON.stringify(value) }],
+    contentItems: [
+      { type: "inputText", text: value.receipt },
+      { type: "inputText", text: JSON.stringify(value.structuredContent) },
+    ],
     success: true,
   };
 }
@@ -439,30 +429,15 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
             "Codex native provider tool-call capacity was exceeded",
           );
         }
-        if (params.tool === bridge.challengeToolName) {
-          if (
-            !isRecord(params.arguments) ||
-            Object.keys(params.arguments).length !== 1 ||
-            typeof params.arguments.challengeResponse !== "string"
-          ) {
-            throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex attestation omitted its challenge response");
-          }
-          await bridge.attest({
-            providerSessionRef: chairSession.providerSessionRef,
-            providerSessionGeneration: chairSession.providerSessionGeneration,
-            providerTurnRef: params.turnId,
-            providerInvocationRef: params.callId,
-            challengeResponse: params.arguments.challengeResponse,
-          });
-          return dynamicToolResponse({ attested: true, challengeDigest: bridge.challengeDigest });
+        if (!isRecord(params.arguments)) {
+          throw new ProviderAdapterError("MCP_INPUT_INVALID", "Codex Fabric tool arguments must be an object");
         }
-        if (params.tool === "fabric_get_mailbox_state") {
-          if (!isRecord(params.arguments) || Object.keys(params.arguments).length !== 0) {
-            throw new ProviderAdapterError("MCP_INPUT_INVALID", "Codex mailbox tool expects a closed empty object");
-          }
-          return dynamicToolResponse(await bridge.call("getMailboxState", {}));
-        }
-        throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "Codex requested an unknown chair bridge tool");
+        return dynamicToolResponse(await bridge.invokeTool(params.tool, params.arguments, {
+          providerSessionRef: chairSession.providerSessionRef,
+          providerSessionGeneration: chairSession.providerSessionGeneration,
+          providerTurnRef: params.turnId,
+          providerInvocationRef: params.callId,
+        }));
       });
       const response = await connection.request("thread/start", {
         ...codexThreadConfiguration(input.payload),

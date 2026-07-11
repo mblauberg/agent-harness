@@ -40,6 +40,35 @@ function digest(value: unknown): string {
 }
 
 describe("registry-owned current-agent MCP projection", () => {
+  it("owns a launch-scoped one-use attestation descriptor", () => {
+    const launchAttestation = FABRIC_OPERATIONS.launchAttest;
+
+    expect(launchAttestation).toBe("fabric.v1.launch.attest");
+    const descriptor = buildMcpDescriptorSet(new Set<FabricOperation>([launchAttestation])).tools[0];
+    expect(descriptor).toMatchObject({
+      operation: "fabric.v1.launch.attest",
+      name: "fabric_launch_attest",
+      feature: "launch-attestation.v1",
+      receiptRenderer: "launch-attestation-v1",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["challengeResponse"],
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["attested", "challengeDigest"],
+      },
+    });
+    if (descriptor === undefined) throw new Error("launch attestation descriptor is missing");
+    expect(renderMcpReceipt(
+      descriptor,
+      { challengeResponse: "challenge-must-not-render" },
+      { attested: true, challengeDigest: `sha256:${"a".repeat(64)}` },
+    )).toBe("launch continuity attested");
+  });
+
   it("classifies every active agent operation exactly once", () => {
     const activeAgentOperations = [...operationsForPrincipal("agent")]
       .filter((operation) => OPERATION_REGISTRY[operation].kind !== "retired")

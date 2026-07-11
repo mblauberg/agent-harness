@@ -8,11 +8,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
-      "sha256": "19508a60fe07977f082fc3fbfa5ad97b0789df9139280fddb66c91a73a331165"
+      "sha256": "44242f6c658d2d5bf3d57df5ba9f1b3838b1ca4b02b0d406a8b0329bf2ae14af"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js",
-      "sha256": "8ec1bd182c98e78ab8cb0599a21d612df942240c8e0f87592331213248d21952"
+      "sha256": "c246ce48068f09a5c71ca3824666d4706cdd03b2172182be3d9742e886fc60b0"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-json-rpc.js",
@@ -23,6 +23,10 @@
       "sha256": "cb4123db5454e3a0cf6c9db014e926703e86b068a55e21727b6f0bdf37578df4"
     },
     {
+      "path": "runtime/agent-fabric/dist/adapters/providers/provider-session-fabric-surface.js",
+      "sha256": "075d87021de76a7e06c6207c3be66f7c3f095ba4409dc225f9c242bf7c5e56eb"
+    },
+    {
       "path": "runtime/agent-fabric/dist/adapters/providers/server.js",
       "sha256": "e9342bf9300595f8ce9a6e30e44034212ebcef18c8739db14e04b519b3006dc3"
     },
@@ -31,20 +35,8 @@
       "sha256": "bcc7c6f039d01b0e2ef2654a73a57321a8f09fb5e13e8051180d50319b7b7a6d"
     },
     {
-      "path": "runtime/agent-fabric/dist/daemon/protocol.js",
-      "sha256": "ef6c9201c7091fb2f54948b5725efb1874172a2cba6f08ff11e973e7b23a5fc4"
-    },
-    {
-      "path": "runtime/agent-fabric/dist/domain/unit-keys.js",
-      "sha256": "786ee96647be4b96e373cac674ffb64794dceb5cf94ebce1ebca6882a086c290"
-    },
-    {
       "path": "runtime/agent-fabric/dist/transport/bounded-ndjson.js",
       "sha256": "f4de18ca4b1fe4f705afa4a2bcccc84a9ee2f2ab8b5632611b83ed2c033a7950"
-    },
-    {
-      "path": "runtime/agent-fabric/dist/transport/ndjson-rpc.js",
-      "sha256": "548e575276bd77efd431f79e0a9c9db3c1b40e2a3da48f0f12be93508e433f0a"
     }
   ]
 }

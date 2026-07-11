@@ -49,6 +49,7 @@ export type McpReceiptRenderer =
   | "delivery-ack-v1"
   | "delivery-abandon-v1"
   | "generic-v1"
+  | "launch-attestation-v1"
   | "message-receive-v1"
   | "message-send-v1"
   | "task-v1";
@@ -70,7 +71,9 @@ function tool(
   operation: AgentOperation,
   resource?: Extract<McpProjection, { projection: "tool" }>["resource"],
 ): Extract<McpProjection, { projection: "tool" }> {
-  const receiptRenderer: McpReceiptRenderer = operation === FABRIC_OPERATIONS.sendMessage
+  const receiptRenderer: McpReceiptRenderer = operation === FABRIC_OPERATIONS.launchAttest
+    ? "launch-attestation-v1"
+    : operation === FABRIC_OPERATIONS.sendMessage
     ? "message-send-v1"
     : operation === FABRIC_OPERATIONS.receiveMessages
       ? "message-receive-v1"
@@ -187,6 +190,7 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.resultDeliveryRetry]: tool(FABRIC_OPERATIONS.resultDeliveryRetry),
   [FABRIC_OPERATIONS.resultDeliveryReassign]: tool(FABRIC_OPERATIONS.resultDeliveryReassign),
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: tool(FABRIC_OPERATIONS.resultDeliveryAbandon),
+  [FABRIC_OPERATIONS.launchAttest]: tool(FABRIC_OPERATIONS.launchAttest),
 } as const satisfies Record<AgentOperation, McpProjection>);
 
 function hasSensitiveSchema(value: unknown): boolean {
@@ -407,6 +411,8 @@ export function renderMcpReceipt(
       return `${descriptor.name.endsWith("spawn") ? "spawned" : "attached"} ${stringValue(structured.agentId) ?? stringValue(args.agentId) ?? "agent"} · bridge ${stringValue(structured.bridgeState) ?? "unknown"}`;
     case "task-v1":
       return `task ${stringValue(structured.taskId) ?? stringValue(args.taskId) ?? "unknown"} · rev ${String(structured.revision ?? "unknown")} · ${stringValue(structured.state) ?? "updated"}`;
+    case "launch-attestation-v1":
+      return "launch continuity attested";
     case "generic-v1":
       return `${descriptor.name} completed`;
   }

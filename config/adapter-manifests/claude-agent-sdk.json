@@ -8,11 +8,15 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
-      "sha256": "19508a60fe07977f082fc3fbfa5ad97b0789df9139280fddb66c91a73a331165"
+      "sha256": "44242f6c658d2d5bf3d57df5ba9f1b3838b1ca4b02b0d406a8b0329bf2ae14af"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
-      "sha256": "204b96929e15a203bef06ad528c007ea0ca3b3f3977d55c16b6961c3c9787ccf"
+      "sha256": "396b1c78e10b7cd800c50fbdfdf7161ae89243a3668fcb582efd54ad7a0f8e6e"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/provider-session-fabric-surface.js",
+      "sha256": "075d87021de76a7e06c6207c3be66f7c3f095ba4409dc225f9c242bf7c5e56eb"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
@@ -27,20 +31,8 @@
       "sha256": "bcc7c6f039d01b0e2ef2654a73a57321a8f09fb5e13e8051180d50319b7b7a6d"
     },
     {
-      "path": "runtime/agent-fabric/dist/daemon/protocol.js",
-      "sha256": "ef6c9201c7091fb2f54948b5725efb1874172a2cba6f08ff11e973e7b23a5fc4"
-    },
-    {
-      "path": "runtime/agent-fabric/dist/domain/unit-keys.js",
-      "sha256": "786ee96647be4b96e373cac674ffb64794dceb5cf94ebce1ebca6882a086c290"
-    },
-    {
       "path": "runtime/agent-fabric/dist/transport/bounded-ndjson.js",
       "sha256": "f4de18ca4b1fe4f705afa4a2bcccc84a9ee2f2ab8b5632611b83ed2c033a7950"
-    },
-    {
-      "path": "runtime/agent-fabric/dist/transport/ndjson-rpc.js",
-      "sha256": "548e575276bd77efd431f79e0a9c9db3c1b40e2a3da48f0f12be93508e433f0a"
     }
   ]
 }

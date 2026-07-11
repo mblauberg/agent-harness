@@ -1,6 +1,7 @@
 import {
   FABRIC_OPERATIONS,
   isActiveFabricOperation,
+  isDaemonGrantableOperation,
   OPERATION_REGISTRY,
   operationsForPrincipal,
   type FabricOperation,
@@ -79,7 +80,7 @@ export const LEGACY_OPERATION_BUNDLES: Record<LegacyAuthorityAction, readonly Fa
 
 export const AGENT_AUTHORITY_OPERATIONS: readonly FabricOperation[] = Object.freeze([
   ...operationsForPrincipal("agent"),
-]);
+].filter(isDaemonGrantableOperation));
 
 export const AUTHORITY_ACTION_VOCABULARY: readonly string[] = Object.freeze([
   ...LEGACY_AUTHORITY_ACTIONS,

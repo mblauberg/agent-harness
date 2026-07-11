@@ -16,6 +16,7 @@ export type OperationFeature =
   | "operator-projection.v2"
   | "operator-actions.v1"
   | "launch-custody.v1"
+  | "launch-attestation.v1"
   | "message-body-read.v1"
   | "operator-repository-read.v1"
   | "lifecycle-control.v1";
@@ -25,6 +26,7 @@ type OperationDefinition = {
   feature: OperationFeature;
   principals: readonly OperationPrincipalKind[];
   kind: "baseline" | "extension" | "retired";
+  grantScope?: "provider-launch";
   gateOwner?: "scoped-gate";
   replacementOperation?: `fabric.v1.${string}`;
   retirementReason?: string;
@@ -97,6 +99,14 @@ const DEFINITIONS = defineOperations({
   listAgents: { operation: "fabric.v1.agent.list", feature: "fabric-core.v1", principals: ["agent", "operator"], kind: "baseline" },
   listReceipts: { operation: "fabric.v1.receipt.list", feature: "fabric-core.v1", principals: ["agent", "operator"], kind: "baseline" },
   exportReceipt: { operation: "fabric.v1.receipt.export", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
+
+  launchAttest: {
+    operation: "fabric.v1.launch.attest",
+    feature: "launch-attestation.v1",
+    principals: ["agent"],
+    kind: "extension",
+    grantScope: "provider-launch",
+  },
 
   projectSessionCreate: { operation: "fabric.v1.project-session.create", feature: "project-sessions.v1", principals: ["operator"], kind: "extension" },
   projectSessionGet: { operation: "fabric.v1.project-session.read", feature: "project-sessions.v1", principals: ["operator"], kind: "extension" },
@@ -243,6 +253,11 @@ export function isActiveFabricOperation(value: string): value is Exclude<FabricO
 
 export function isRetiredOperation(operation: FabricOperation): operation is RetiredOperation {
   return OPERATION_REGISTRY[operation].kind === "retired";
+}
+
+export function isDaemonGrantableOperation(operation: FabricOperation): boolean {
+  return OPERATION_REGISTRY[operation].kind !== "retired" &&
+    OPERATION_REGISTRY[operation].grantScope !== "provider-launch";
 }
 
 export function operationsForPrincipal<Principal extends OperationPrincipalKind>(
