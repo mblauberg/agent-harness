@@ -11,6 +11,8 @@ import {
   type ProjectSessionTransitionRequest,
   type ProjectId,
   type ProjectSessionId,
+  type ChairTakeoverRequest,
+  type ChairTakeoverResult,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
@@ -59,7 +61,19 @@ export class ProjectSessionStore {
     return this.#operatorStore.executeCommand(
       context,
       request.command,
-      { projectId: request.projectId, requiredAction: "launch" },
+      {
+        projectId: request.projectId,
+        requiredAction: "launch",
+        commandPayload: {
+          projectSessionId: request.projectSessionId,
+          projectId: request.projectId,
+          mode: request.mode,
+          generation: request.generation,
+          authorityRef: request.authorityRef,
+          budgetRef: request.budgetRef,
+          launchPacketRef: request.launchPacketRef,
+        },
+      },
       () => this.#projectRevision(request.projectId),
       () => {
         this.#fault("session:create");
@@ -118,6 +132,11 @@ export class ProjectSessionStore {
         projectSessionId: request.projectSessionId,
         sessionGeneration: request.expectedGeneration,
         requiredAction: "decide",
+        commandPayload: {
+          projectSessionId: request.projectSessionId,
+          expectedGeneration: request.expectedGeneration,
+          transition: request.transition,
+        },
       },
       () => this.#sessionRevision(request.projectSessionId),
       () => {
@@ -165,6 +184,11 @@ export class ProjectSessionStore {
         projectSessionId: request.projectSessionId,
         sessionGeneration: request.expectedGeneration,
         requiredAction: "decide",
+        commandPayload: {
+          projectSessionId: request.projectSessionId,
+          expectedGeneration: request.expectedGeneration,
+          terminalPath: request.terminalPath,
+        },
       },
       () => this.#sessionRevision(request.projectSessionId),
       () => {
@@ -210,6 +234,12 @@ export class ProjectSessionStore {
         projectSessionId: request.projectSessionId,
         sessionGeneration: identity.generation,
         requiredAction: "decide",
+        commandPayload: {
+          projectSessionId: request.projectSessionId,
+          coordinationRunId: request.coordinationRunId,
+          expectedMembershipRevision: request.expectedMembershipRevision,
+          members: request.members,
+        },
       },
       () => this.#membershipRevision(request.projectSessionId),
       () => {
@@ -256,6 +286,166 @@ export class ProjectSessionStore {
           coordinationRunId: request.coordinationRunId,
           membershipRevision: request.expectedMembershipRevision + 1,
           members: request.members,
+        };
+      },
+    );
+  }
+
+  takeoverChair(
+    context: AuthenticatedOperatorContext,
+    request: ChairTakeoverRequest,
+  ): ChairTakeoverResult {
+    const session = this.#sessionIdentity(request.projectSessionId);
+    return this.#operatorStore.executeCommand(
+      context,
+      request.command,
+      {
+        projectId: session.projectId,
+        projectSessionId: request.projectSessionId,
+        sessionGeneration: request.expectedSessionGeneration,
+        requiredAction: "takeover",
+        commandPayload: {
+          projectSessionId: request.projectSessionId,
+          runId: request.runId,
+          expectedChairAgentId: request.expectedChairAgentId,
+          successorChairAgentId: request.successorChairAgentId,
+          expectedChairGeneration: request.expectedChairGeneration,
+          expectedSessionGeneration: request.expectedSessionGeneration,
+          handoffRef: request.handoffRef,
+          targetRevision: request.targetRevision,
+        },
+      },
+      () => this.#sessionRevision(request.projectSessionId),
+      () => {
+        const currentSession = this.#sessionIdentity(request.projectSessionId);
+        if (currentSession.generation !== request.expectedSessionGeneration) {
+          throw new ProjectFabricCoreError("STALE_GENERATION", "project-session generation changed");
+        }
+        const run = row(this.#database.prepare(`
+          SELECT chair_agent_id, chair_generation, chair_lease_id, revision
+            FROM runs WHERE project_session_id=? AND run_id=?
+        `).get(request.projectSessionId, request.runId), "coordination run");
+        if (
+          text(run, "chair_agent_id") !== request.expectedChairAgentId ||
+          integer(run, "chair_generation") !== request.expectedChairGeneration ||
+          integer(run, "revision") + 1 !== request.targetRevision
+        ) {
+          throw new ProjectFabricCoreError("STALE_REVISION", "chair identity, generation or target revision changed");
+        }
+        const capability = row(this.#database.prepare(`
+          SELECT kind, handoff_digest, old_chair_generation, expected_run_id,
+                 expected_run_revision, expected_session_revision, cas_target_revision
+            FROM operator_capabilities WHERE capability_id=?
+        `).get(request.command.credential.capabilityId), "takeover capability");
+        if (
+          text(capability, "kind") !== "takeover" ||
+          text(capability, "handoff_digest") !== request.handoffRef.digest ||
+          integer(capability, "old_chair_generation") !== request.expectedChairGeneration ||
+          text(capability, "expected_run_id") !== request.runId ||
+          integer(capability, "expected_run_revision") !== integer(run, "revision") ||
+          integer(capability, "expected_session_revision") !== currentSession.revision ||
+          integer(capability, "cas_target_revision") !== request.targetRevision
+        ) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "takeover capability binding does not match current state");
+        }
+        const handoff = this.#database.prepare(`
+          SELECT 1 FROM artifacts
+           WHERE run_id=? AND relative_path=? AND sha256=? AND publisher_agent_id=?
+        `).get(request.runId, request.handoffRef.path, request.handoffRef.digest, request.expectedChairAgentId);
+        if (handoff === undefined) {
+          throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "persisted chair handoff does not match the takeover binding");
+        }
+        const currentLease = this.#database.prepare(`
+          SELECT 1 FROM run_chair_leases
+           WHERE project_session_id=? AND run_id=? AND lease_id=? AND holder_agent_id=?
+             AND generation=? AND status='active'
+        `).get(
+          request.projectSessionId,
+          request.runId,
+          text(run, "chair_lease_id"),
+          request.expectedChairAgentId,
+          request.expectedChairGeneration,
+        );
+        if (currentLease === undefined) {
+          throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "old chair generation is not an active fenced lease");
+        }
+        if (this.#database.prepare(`
+          SELECT 1 FROM leases
+           WHERE run_id=? AND holder_agent_id=? AND status IN ('active','quarantined') LIMIT 1
+        `).get(request.runId, request.expectedChairAgentId) !== undefined) {
+          throw new ProjectFabricCoreError(
+            "WRITE_SCOPE_RECOVERY_REQUIRED",
+            "old chair still owns an unreconciled write scope",
+          );
+        }
+        if (this.#database.prepare(`
+          SELECT 1 FROM agents WHERE run_id=? AND agent_id=?
+        `).get(request.runId, request.successorChairAgentId) === undefined) {
+          throw new ProjectFabricCoreError("NOT_FOUND", "successor chair agent was not found");
+        }
+        const nextGeneration = request.expectedChairGeneration + 1;
+        const nextLeaseId = `chair:${request.runId}:${String(nextGeneration)}`;
+        this.#fault("takeover:fence");
+        this.#database.prepare(`
+          UPDATE run_chair_leases
+             SET status='frozen', handoff_digest=?, updated_at=?
+           WHERE project_session_id=? AND run_id=? AND generation=? AND status='active'
+        `).run(
+          request.handoffRef.digest,
+          this.#clock(),
+          request.projectSessionId,
+          request.runId,
+          request.expectedChairGeneration,
+        );
+        this.#database.prepare(`
+          INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
+          VALUES (?, ?, 'chair-takeover', ?)
+          ON CONFLICT(run_id, agent_id) DO UPDATE SET reason=excluded.reason
+        `).run(request.runId, request.expectedChairAgentId, this.#clock());
+        this.#fault("takeover:chair");
+        this.#database.prepare(`
+          UPDATE runs
+             SET chair_agent_id=?, chair_generation=?, chair_lease_id=?, revision=revision+1
+           WHERE run_id=? AND project_session_id=? AND revision=? AND chair_generation=?
+        `).run(
+          request.successorChairAgentId,
+          nextGeneration,
+          nextLeaseId,
+          request.runId,
+          request.projectSessionId,
+          integer(run, "revision"),
+          request.expectedChairGeneration,
+        );
+        this.#database.prepare(`
+          UPDATE project_sessions
+             SET generation=generation+1, revision=revision+1, updated_at=?
+           WHERE project_session_id=? AND generation=? AND revision=?
+        `).run(
+          this.#clock(),
+          request.projectSessionId,
+          request.expectedSessionGeneration,
+          currentSession.revision,
+        );
+        this.#fault("takeover:lease");
+        this.#database.prepare(`
+          INSERT INTO run_chair_leases(
+            project_session_id, run_id, lease_id, holder_agent_id, generation, status, handoff_digest, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+        `).run(
+          request.projectSessionId,
+          request.runId,
+          nextLeaseId,
+          request.successorChairAgentId,
+          nextGeneration,
+          request.handoffRef.digest,
+          this.#clock(),
+        );
+        return {
+          projectSessionId: request.projectSessionId,
+          sessionRevision: currentSession.revision + 1,
+          runRevision: request.targetRevision,
+          chairAgentId: request.successorChairAgentId,
+          chairGeneration: nextGeneration,
         };
       },
     );

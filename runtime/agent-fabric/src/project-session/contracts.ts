@@ -2,6 +2,7 @@ import type {
   AgentId,
   CoordinationRunId,
   OperatorId,
+  IntegrationId,
   ProjectId,
   ProjectSessionId,
   ProtocolErrorCode,
@@ -27,6 +28,12 @@ export type AuthenticatedAgentContext = {
   agentId: AgentId;
   projectSessionId: ProjectSessionId;
   coordinationRunId: CoordinationRunId;
+  principalGeneration: number;
+};
+
+export type AuthenticatedIntegrationContext = {
+  integrationId: IntegrationId;
+  projectId: ProjectId;
   principalGeneration: number;
 };
 

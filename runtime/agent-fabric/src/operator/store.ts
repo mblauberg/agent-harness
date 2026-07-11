@@ -5,12 +5,19 @@ import {
   type OperatorCapabilityGrant,
   type OperatorMutationContext,
   type OperatorAuthorityBinding,
+  type OperatorAttachRequest,
+  type OperatorAttachment,
+  type OperatorDetachRequest,
+  type OperatorHeartbeatRequest,
+  type IntegrationInputAttestationRequest,
+  type OperatorInputAttestation,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
 import {
   ProjectFabricCoreError,
   type AuthenticatedOperatorContext,
+  type AuthenticatedIntegrationContext,
   type CoreServiceOptions,
 } from "../project-session/contracts.js";
 import {
@@ -30,6 +37,7 @@ export type OperatorCommandTarget = {
   projectSessionId?: string;
   sessionGeneration?: number;
   requiredAction: OperatorAction;
+  commandPayload: JsonValue;
 };
 
 type CapabilityRow = Row & {
@@ -173,6 +181,292 @@ export class OperatorStore {
     if (changed.changes !== 1) throw new ProjectFabricCoreError("NOT_FOUND", "capability was not active");
   }
 
+  attach(
+    context: AuthenticatedOperatorContext,
+    request: OperatorAttachRequest,
+    daemonInstanceGeneration: number,
+  ): OperatorAttachment {
+    const clientId = this.#clientId(request.command);
+    const session = request.projectSessionId === undefined
+      ? undefined
+      : row(this.database.prepare(`
+          SELECT generation, revision FROM project_sessions WHERE project_session_id=? AND project_id=?
+        `).get(request.projectSessionId, request.projectId), "project session");
+    return this.executeCommand(
+      context,
+      request.command,
+      {
+        projectId: request.projectId,
+        ...(request.projectSessionId === undefined ? {} : {
+          projectSessionId: request.projectSessionId,
+          sessionGeneration: integer(session as Row, "generation"),
+        }),
+        requiredAction: "read",
+        commandPayload: {
+          projectId: request.projectId,
+          ...(request.projectSessionId === undefined ? {} : { projectSessionId: request.projectSessionId }),
+          ...(request.expectedAttachmentGeneration === undefined
+            ? {}
+            : { expectedAttachmentGeneration: request.expectedAttachmentGeneration }),
+          requestedExpiresAt: request.requestedExpiresAt,
+          daemonInstanceGeneration,
+        },
+      },
+      () => request.projectSessionId === undefined
+        ? this.#projectRevision(request.projectId)
+        : {
+            revision: integer(session as Row, "revision"),
+            value: { projectSessionId: request.projectSessionId, revision: integer(session as Row, "revision") },
+          },
+      () => {
+        const requestedExpiry = timestampToMillis(request.requestedExpiresAt);
+        const capability = row(this.database.prepare(`
+          SELECT expires_at FROM operator_capabilities WHERE capability_id=?
+        `).get(request.command.credential.capabilityId), "operator capability");
+        if (requestedExpiry > integer(capability, "expires_at")) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "attachment cannot outlive its capability");
+        }
+        const existing = this.database.prepare(`
+          SELECT lease_generation, state, project_id, project_session_id
+            FROM operator_client_attachments WHERE attachment_id=?
+        `).get(clientId);
+        const now = this.#clock();
+        if (isRow(existing)) {
+          if (
+            text(existing, "project_id") !== request.projectId ||
+            text(existing, "state") !== "active" ||
+            integer(existing, "lease_generation") !== request.expectedAttachmentGeneration
+          ) {
+            throw new ProjectFabricCoreError("STALE_GENERATION", "operator attachment generation changed");
+          }
+          const priorSession = nullableText(existing, "project_session_id");
+          if (priorSession !== null && priorSession !== request.projectSessionId) {
+            throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "attachment cannot widen or switch sessions");
+          }
+          this.database.prepare(`
+            UPDATE operator_client_attachments
+               SET project_session_id=?, session_generation=?, daemon_instance_generation=?,
+                   lease_generation=lease_generation+1, expires_at=?, revision=revision+1,
+                   updated_at=?
+             WHERE attachment_id=?
+          `).run(
+            request.projectSessionId ?? null,
+            session === undefined ? null : integer(session, "generation"),
+            daemonInstanceGeneration,
+            requestedExpiry,
+            now,
+            clientId,
+          );
+        } else {
+          if (request.expectedAttachmentGeneration !== undefined) {
+            throw new ProjectFabricCoreError("STALE_GENERATION", "operator attachment does not exist");
+          }
+          this.database.prepare(`
+            INSERT INTO operator_client_attachments(
+              attachment_id, operator_id, project_id, project_authority_generation,
+              project_session_id, session_generation, daemon_instance_generation,
+              lease_generation, state, expires_at, revision, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, 1, ?, ?)
+          `).run(
+            clientId,
+            context.operatorId,
+            request.projectId,
+            context.projectAuthorityGeneration,
+            request.projectSessionId ?? null,
+            session === undefined ? null : integer(session, "generation"),
+            daemonInstanceGeneration,
+            requestedExpiry,
+            now,
+            now,
+          );
+        }
+        return this.#attachment(clientId);
+      },
+    );
+  }
+
+  heartbeat(
+    context: AuthenticatedOperatorContext,
+    request: OperatorHeartbeatRequest,
+  ): OperatorAttachment {
+    const clientId = this.#clientId(request.command);
+    const current = this.#attachmentRow(clientId);
+    const projectSessionId = nullableText(current, "project_session_id");
+    return this.executeCommand(
+      context,
+      request.command,
+      {
+        projectId: text(current, "project_id"),
+        ...(projectSessionId === null ? {} : {
+          projectSessionId,
+          sessionGeneration: integer(current, "session_generation"),
+        }),
+        requiredAction: "read",
+        commandPayload: {
+          attachmentGeneration: request.attachmentGeneration,
+          extendUntil: request.extendUntil,
+        },
+      },
+      () => ({ revision: integer(this.#attachmentRow(clientId), "revision"), value: this.#attachment(clientId) }),
+      () => {
+        if (integer(current, "lease_generation") !== request.attachmentGeneration) {
+          throw new ProjectFabricCoreError("STALE_GENERATION", "operator attachment generation changed");
+        }
+        const expiry = timestampToMillis(request.extendUntil);
+        const capability = row(this.database.prepare(`
+          SELECT expires_at FROM operator_capabilities WHERE capability_id=?
+        `).get(request.command.credential.capabilityId), "operator capability");
+        if (expiry > integer(capability, "expires_at")) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "attachment cannot outlive its capability");
+        }
+        this.database.prepare(`
+          UPDATE operator_client_attachments
+             SET lease_generation=lease_generation+1, expires_at=?, revision=revision+1, updated_at=?
+           WHERE attachment_id=? AND state='active'
+        `).run(expiry, this.#clock(), clientId);
+        return this.#attachment(clientId);
+      },
+    );
+  }
+
+  detach(
+    context: AuthenticatedOperatorContext,
+    request: OperatorDetachRequest,
+  ): { detached: true; revision: number } {
+    const clientId = this.#clientId(request.command);
+    const current = this.#attachmentRow(clientId);
+    const projectSessionId = nullableText(current, "project_session_id");
+    return this.executeCommand(
+      context,
+      request.command,
+      {
+        projectId: text(current, "project_id"),
+        ...(projectSessionId === null ? {} : {
+          projectSessionId,
+          sessionGeneration: integer(current, "session_generation"),
+        }),
+        requiredAction: "read",
+        commandPayload: { attachmentGeneration: request.attachmentGeneration },
+      },
+      () => ({ revision: integer(this.#attachmentRow(clientId), "revision"), value: this.#attachment(clientId) }),
+      () => {
+        if (integer(current, "lease_generation") !== request.attachmentGeneration) {
+          throw new ProjectFabricCoreError("STALE_GENERATION", "operator attachment generation changed");
+        }
+        const revision = integer(current, "revision") + 1;
+        this.database.prepare(`
+          UPDATE operator_client_attachments SET state='detached', revision=?, updated_at=?
+           WHERE attachment_id=? AND state='active'
+        `).run(revision, this.#clock(), clientId);
+        return { detached: true as const, revision };
+      },
+    );
+  }
+
+  recordInputAttestation(
+    context: AuthenticatedIntegrationContext,
+    request: IntegrationInputAttestationRequest,
+  ): OperatorInputAttestation {
+    const action = this.database.transaction((): OperatorInputAttestation => {
+      if (
+        context.integrationId !== request.context.integrationId ||
+        context.integrationId !== request.attestation.integrationId ||
+        context.principalGeneration !== request.context.expectedIntegrationGeneration ||
+        context.principalGeneration !== request.attestation.integrationGeneration
+      ) {
+        throw new ProjectFabricCoreError("STALE_PRINCIPAL_GENERATION", "integration identity or generation changed");
+      }
+      if (context.projectId !== request.attestation.projectId) {
+        throw new ProjectFabricCoreError("WRONG_PROJECT", "attestation is bound to another project");
+      }
+      if (
+        request.context.eventId !== request.attestation.providerEvent.inputEventId ||
+        request.context.eventDigest !== request.attestation.providerEvent.eventDigest ||
+        request.attestation.providerEvent.classification !== "direct-human"
+      ) {
+        throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "attestation does not match the immutable direct-human event");
+      }
+      const existing = this.database.prepare(`
+        SELECT provider_event_json, exact_utterance, artifact_digests_json,
+               expected_gate_revision, interpreted_decision
+          FROM operator_input_attestations
+         WHERE attestation_id=? OR (project_session_id=? AND provider_message_id=?)
+      `).get(
+        request.attestation.attestationId,
+        request.attestation.projectSessionId,
+        request.attestation.providerEvent.providerMessageId,
+      );
+      if (isRow(existing)) {
+        const reconstructed = canonicalJson({
+          providerEvent: JSON.parse(text(existing, "provider_event_json")),
+          humanUtterance: text(existing, "exact_utterance"),
+          expectedGateRevision: integer(existing, "expected_gate_revision"),
+          artifactDigests: JSON.parse(text(existing, "artifact_digests_json")),
+          interpretedDecision: text(existing, "interpreted_decision"),
+        });
+        const incoming = canonicalJson({
+          providerEvent: request.attestation.providerEvent,
+          humanUtterance: request.attestation.humanUtterance,
+          expectedGateRevision: request.attestation.gateBinding.expectedGateRevision,
+          artifactDigests: request.attestation.gateBinding.artifactDigests,
+          interpretedDecision: request.attestation.gateBinding.interpretedDecision,
+        });
+        if (reconstructed !== incoming) {
+          throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "attestation identity was reused with changed evidence");
+        }
+        return request.attestation;
+      }
+      const gate = row(this.database.prepare(`
+        SELECT g.coordination_run_id, g.revision, g.expected_approver_ref, s.project_id
+          FROM scoped_gates g
+          JOIN project_sessions s ON s.project_session_id=g.project_session_id
+         WHERE g.gate_id=? AND g.project_session_id=?
+      `).get(request.attestation.gateBinding.gateId, request.attestation.projectSessionId), "scoped gate");
+      if (text(gate, "project_id") !== context.projectId) {
+        throw new ProjectFabricCoreError("WRONG_PROJECT", "gate is outside the integration project");
+      }
+      if (integer(gate, "revision") !== request.attestation.gateBinding.expectedGateRevision) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "gate revision changed");
+      }
+      const principal = row(this.database.prepare(`
+        SELECT project_id, state FROM operator_principals WHERE operator_id=?
+      `).get(request.attestation.operatorId), "operator principal");
+      if (text(principal, "project_id") !== context.projectId || text(principal, "state") !== "active") {
+        throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "attested operator is not active for the project");
+      }
+      const expectedApprover = text(gate, "expected_approver_ref");
+      if (expectedApprover !== request.attestation.operatorId && expectedApprover !== "authenticated-operator") {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "attested operator is not the expected approver");
+      }
+      this.database.prepare(`
+        INSERT INTO operator_input_attestations(
+          attestation_id, integration_id, integration_generation, operator_id,
+          project_id, project_session_id, coordination_run_id, gate_id,
+          provider_message_id, exact_utterance, provider_event_json,
+          expected_gate_revision, artifact_digests_json, interpreted_decision, recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        request.attestation.attestationId,
+        context.integrationId,
+        context.principalGeneration,
+        request.attestation.operatorId,
+        context.projectId,
+        request.attestation.projectSessionId,
+        text(gate, "coordination_run_id"),
+        request.attestation.gateBinding.gateId,
+        request.attestation.providerEvent.providerMessageId,
+        request.attestation.humanUtterance,
+        canonicalJson(request.attestation.providerEvent),
+        request.attestation.gateBinding.expectedGateRevision,
+        canonicalJson(request.attestation.gateBinding.artifactDigests),
+        request.attestation.gateBinding.interpretedDecision,
+        timestampToMillis(request.attestation.recordedAt),
+      );
+      return request.attestation;
+    });
+    return action();
+  }
+
   executeCommand<Result>(
     context: AuthenticatedOperatorContext,
     command: OperatorMutationContext,
@@ -181,7 +475,6 @@ export class OperatorStore {
     mutate: () => Result,
   ): Result {
     const execute = this.database.transaction((): Result => {
-      const capability = this.#authenticate(context, command, target);
       const payload = {
         capabilityId: command.credential.capabilityId,
         commandId: command.commandId,
@@ -200,9 +493,11 @@ export class OperatorStore {
         if (text(existing, "payload_hash") !== payloadHash) {
           throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "command ID was reused with changed input");
         }
+        this.#authenticate(context, command, target, true);
         return JSON.parse(text(existing, "result_json")) as Result;
       }
 
+      const capability = this.#authenticate(context, command, target, false);
       const before = load();
       if (before.revision !== command.expectedRevision) {
         throw new ProjectFabricCoreError("STALE_REVISION", "operator command revision changed", {
@@ -244,6 +539,7 @@ export class OperatorStore {
     context: AuthenticatedOperatorContext,
     command: OperatorMutationContext,
     target: OperatorCommandTarget,
+    replay: boolean,
   ): CapabilityRow {
     if (command.actor !== context.operatorId || context.projectId !== target.projectId) {
       throw new ProjectFabricCoreError("WRONG_PROJECT", "operator connection does not own the command target");
@@ -285,7 +581,10 @@ export class OperatorStore {
         SELECT generation FROM project_sessions WHERE project_session_id=? AND project_id=?
       `).get(target.projectSessionId, target.projectId), "project session");
       const generation = integer(session, "generation");
-      if (generation !== target.sessionGeneration || capability.session_generation !== generation) {
+      if (
+        capability.session_generation !== target.sessionGeneration ||
+        (!replay && generation !== target.sessionGeneration)
+      ) {
         throw new ProjectFabricCoreError("STALE_GENERATION", "project-session generation is stale");
       }
     } else if (text(capability, "kind") !== "project-launch") {
@@ -296,5 +595,37 @@ export class OperatorStore {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", `capability lacks ${target.requiredAction}`);
     }
     return capability;
+  }
+
+  #projectRevision(projectId: string): { revision: number; value: { projectId: string; revision: number } } {
+    const project = row(this.database.prepare("SELECT revision FROM projects WHERE project_id=?").get(projectId), "project");
+    const revision = integer(project, "revision");
+    return { revision, value: { projectId, revision } };
+  }
+
+  #clientId(command: OperatorMutationContext): string {
+    if (command.provenance.kind !== "console-direct-input") {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator attachment requires direct Console provenance");
+    }
+    return command.provenance.clientId;
+  }
+
+  #attachmentRow(clientId: string): Row {
+    return row(this.database.prepare(`
+      SELECT * FROM operator_client_attachments WHERE attachment_id=?
+    `).get(clientId), "operator attachment");
+  }
+
+  #attachment(clientId: string): OperatorAttachment {
+    const stored = this.#attachmentRow(clientId);
+    const session = nullableText(stored, "project_session_id");
+    return {
+      clientId,
+      projectId: text(stored, "project_id") as never,
+      projectAuthorityGeneration: integer(stored, "project_authority_generation"),
+      projectSessionId: session as never,
+      generation: integer(stored, "lease_generation"),
+      expiresAt: new Date(integer(stored, "expires_at")).toISOString() as never,
+    };
   }
 }
