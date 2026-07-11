@@ -239,6 +239,14 @@ BEFORE UPDATE OF token_hash, run_id, agent_id, principal_generation ON capabilit
 WHEN (
   OLD.token_hash<>NEW.token_hash OR OLD.run_id<>NEW.run_id OR
   OLD.agent_id<>NEW.agent_id OR OLD.principal_generation<>NEW.principal_generation
+) AND NOT (
+  OLD.token_hash=NEW.token_hash AND OLD.run_id=NEW.run_id AND OLD.agent_id=NEW.agent_id AND
+  NEW.principal_generation=OLD.principal_generation+1 AND
+  OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL AND EXISTS (
+    SELECT 1 FROM chair_bridge_recovery_custody terminal_recovery
+     WHERE terminal_recovery.path='rebind' AND terminal_recovery.state='terminal'
+       AND terminal_recovery.new_capability_hash=OLD.token_hash
+  )
 ) AND EXISTS (
   SELECT 1 FROM chair_bridge_recovery_custody recovery
    WHERE recovery.path='rebind'

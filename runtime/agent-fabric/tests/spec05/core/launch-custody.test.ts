@@ -279,6 +279,7 @@ function probeRecoveryCapabilityIdentityGuards(database: Database.Database): {
   identityUpdateBlocked: boolean;
   deleteBlocked: boolean;
   mutableMetadataAllowed: boolean;
+  canonicalRevocationAllowed: boolean;
 } {
   const recovery = database.prepare(`
     SELECT new_capability_hash FROM chair_bridge_recovery_custody WHERE path='rebind'
@@ -318,7 +319,21 @@ function probeRecoveryCapabilityIdentityGuards(database: Database.Database): {
     database.exec("ROLLBACK TO probe_recovery_mutable_metadata");
     database.exec("RELEASE probe_recovery_mutable_metadata");
   }
-  return { identityUpdateBlocked, deleteBlocked, mutableMetadataAllowed };
+  let canonicalRevocationAllowed = true;
+  database.exec("SAVEPOINT probe_recovery_canonical_revocation");
+  try {
+    const result = database.prepare(`
+      UPDATE capabilities SET revoked_at=?, principal_generation=principal_generation+1
+       WHERE token_hash=? AND revoked_at IS NULL
+    `).run(now, recovery.new_capability_hash);
+    canonicalRevocationAllowed = result.changes === 1;
+  } catch {
+    canonicalRevocationAllowed = false;
+  } finally {
+    database.exec("ROLLBACK TO probe_recovery_canonical_revocation");
+    database.exec("RELEASE probe_recovery_canonical_revocation");
+  }
+  return { identityUpdateBlocked, deleteBlocked, mutableMetadataAllowed, canonicalRevocationAllowed };
 }
 
 async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promise<{
@@ -1133,6 +1148,13 @@ describe("launch custody", () => {
       identityUpdateBlocked: true,
       deleteBlocked: true,
       mutableMetadataAllowed: true,
+      canonicalRevocationAllowed: false,
+    });
+    expect(probeRecoveryCapabilityIdentityGuards(fixture.database)).toEqual({
+      identityUpdateBlocked: true,
+      deleteBlocked: true,
+      mutableMetadataAllowed: true,
+      canonicalRevocationAllowed: true,
     });
     expect(fixture.database.prepare(`
       SELECT chair_agent_id, provider_action_id, provider_session_generation,
@@ -1497,6 +1519,7 @@ describe("launch custody", () => {
       identityUpdateBlocked: true,
       deleteBlocked: true,
       mutableMetadataAllowed: true,
+      canonicalRevocationAllowed: false,
     });
     await fixture.service.recover();
     expect(recoveryEffects).toBe(1);
