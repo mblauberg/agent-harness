@@ -26,7 +26,13 @@ describe("public protocol credential routing", () => {
       try {
         const run = await fabric.createRun({
           runId: "run_protocol_credential",
-          chair: { agentId: "chair", authority: ROOT_AUTHORITY },
+          chair: {
+            agentId: "chair",
+            authority: {
+              ...ROOT_AUTHORITY,
+              actions: [...ROOT_AUTHORITY.actions, FABRIC_OPERATIONS.scopedGateCheck],
+            },
+          },
         });
         const verified = fabric.verifyProtocolCredential(run.chairCapability);
         expect(verified.principal).toMatchObject({
@@ -38,6 +44,7 @@ describe("public protocol credential routing", () => {
         expect(verified.grantedOperations).toEqual(expect.arrayContaining([
           FABRIC_OPERATIONS.createTask,
           FABRIC_OPERATIONS.observeEvents,
+          FABRIC_OPERATIONS.scopedGateCheck,
         ]));
         expect(verified.grantedOperations).not.toContain(FABRIC_OPERATIONS.projectSessionCreate);
         const principal = verified.principal;
@@ -63,6 +70,17 @@ describe("public protocol credential routing", () => {
           FABRIC_OPERATIONS.getRunStatus,
           { runId: "run_protocol_credential" },
         )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+        await expect(fabric.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.scopedGateCheck,
+          {
+            projectSessionId: principal.projectSessionId,
+            coordinationRunId: principal.runId as never,
+            dependencyRevision: 1,
+            enforcementPoint: "task-readiness",
+            taskId: "unknown_task" as never,
+          },
+        )).resolves.toEqual({ allowed: true, checkedGateRevisions: {} });
       } finally {
         await fabric.close();
       }

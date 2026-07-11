@@ -52,6 +52,9 @@ import {
   type AuthenticatedAgentContext,
 } from "../project-session/contracts.js";
 import { ScopedGateStore } from "../gates/store.js";
+import { HierarchicalAdmissionStore } from "../resources/store.js";
+import { AtomicDeliveryStore } from "../results/store.js";
+import { NotificationOutbox } from "../attention/outbox.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
@@ -776,6 +779,9 @@ export class Fabric {
   readonly #projectSessions: ProjectSessionStore;
   readonly #intakes: IntakeStore;
   readonly #gates: ScopedGateStore;
+  readonly #resources: HierarchicalAdmissionStore;
+  readonly #results: AtomicDeliveryStore;
+  readonly #notifications: NotificationOutbox;
 
   constructor(options: FabricOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -797,16 +803,31 @@ export class Fabric {
       operatorStore: this.#operatorStore,
       clock: this.#clock,
     });
+    this.#results = new AtomicDeliveryStore({ database: this.#database, clock: this.#clock });
     this.#intakes = new IntakeStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
       clock: this.#clock,
+      requestCommitter: {
+        commitTaskRequest: (request) => {
+          const run = rowOrNotFound(this.#database.prepare(`
+            SELECT chair_agent_id FROM runs
+             WHERE run_id=? AND project_session_id=?
+          `).get(request.coordinationRunId, request.projectSessionId), "intake coordination run");
+          return this.#results.request(
+            this.#agentContext(request.coordinationRunId, stringField(run, "chair_agent_id")),
+            request,
+          );
+        },
+      },
     });
     this.#gates = new ScopedGateStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
       clock: this.#clock,
     });
+    this.#resources = new HierarchicalAdmissionStore({ database: this.#database, clock: this.#clock });
+    this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
     this.#providerSessions = new ProviderSessionCoordinator({
@@ -912,6 +933,8 @@ export class Fabric {
     sessionsDegraded: number;
     deliveriesReleased: number;
   }> {
+    this.#results.recover();
+    this.#notifications.recover();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")
@@ -1254,19 +1277,95 @@ export class Fabric {
     }
     if (context.principal.kind === "agent") {
       const definition = OPERATION_REGISTRY[operation];
-      if (definition.kind !== "baseline" || !definition.principals.includes("agent")) {
+      if (!definition.principals.includes("agent")) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "operation is not available to agent principals");
       }
-      return dispatchAgentProtocol(
-        new FabricClient(
-          this,
-          context.principal.runId,
-          context.principal.agentId,
-          context.credentialHash,
-        ),
-        operation as never,
-        input as never,
-      );
+      if (definition.kind === "baseline") {
+        return dispatchAgentProtocol(
+          new FabricClient(
+            this,
+            context.principal.runId,
+            context.principal.agentId,
+            context.credentialHash,
+          ),
+          operation as never,
+          input as never,
+        );
+      }
+      const agent = {
+        agentId: context.principal.agentId,
+        projectSessionId: context.principal.projectSessionId,
+        coordinationRunId: context.principal.runId as never,
+        principalGeneration: context.principal.principalGeneration,
+      };
+      switch (operation) {
+        case FABRIC_OPERATIONS.scopedGateCreate: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
+          if (request.origin !== "chair") {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "agent gate creation requires chair origin");
+          }
+          return this.#gates.createGate(agent, request);
+        }
+        case FABRIC_OPERATIONS.scopedGateCheck:
+          return this.#gates.check(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCheck],
+          );
+        case FABRIC_OPERATIONS.resourceReserve:
+          return this.#resources.reserve(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceReserve],
+          );
+        case FABRIC_OPERATIONS.resourceRelease:
+          return this.#resources.release(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceRelease],
+          );
+        case FABRIC_OPERATIONS.resourceReconcile:
+          return this.#resources.reconcile(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceReconcile],
+          );
+        case FABRIC_OPERATIONS.taskRequest:
+          return this.#results.request(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.taskRequest],
+          );
+        case FABRIC_OPERATIONS.taskCompleteWithReply:
+          return this.#results.completeWithReply(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.taskCompleteWithReply],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryClaim:
+          return this.#results.claim(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryClaim],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryConsume:
+          return this.#results.consume(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryConsume],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryRetry:
+          return this.#results.retry(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryRetry],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryReassign:
+          return this.#results.reassign(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryReassign],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryAbandon:
+          return this.#results.abandon(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryAbandon],
+          );
+        default:
+          throw Object.assign(new Error(`agent protocol operation is not wired: ${operation}`), {
+            code: "PROTOCOL_UNSUPPORTED",
+          });
+      }
     }
     const operatorCredential = (): AuthenticatedOperatorCredential => {
       if (context.principal.kind !== "operator") {
@@ -1362,6 +1461,56 @@ export class Fabric {
         const intake = this.#intakes.get(request.intakeId);
         if (intake.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "intake is outside the operator project");
         return intake;
+      }
+      case FABRIC_OPERATIONS.intakeSubmit: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeSubmit];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#intakes.submit(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.scopedGateCreate: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
+        if (request.origin !== "operator") {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "operator gate creation requires operator origin");
+        }
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#gates.createGate(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.scopedGateResolve: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateResolve];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#gates.resolveGate(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.scopedGateRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateRead];
+        const credential = operatorCredential();
+        if (
+          request.credential.capabilityId !== credential.capabilityId ||
+          sha256(request.credential.token) !== context.credentialHash
+        ) {
+          throw new FabricError("AUTHENTICATION_FAILED", "gate read credential differs from its connection");
+        }
+        if (request.projectId !== credential.context.projectId) {
+          throw new ProjectFabricCoreError("WRONG_PROJECT", "gate is outside the operator project");
+        }
+        const gate = this.#gates.getGate(request.gateId);
+        if (gate.projectSessionId !== request.projectSessionId) {
+          throw new ProjectFabricCoreError("WRONG_PROJECT", "gate is outside the requested session");
+        }
+        const stateDigest = sha256Digest(canonicalJson(gate)) as never;
+        const readTransactionId = `read_${sha256(`${context.connectionNonce}\0${gate.gateId}\0${String(gate.revision)}`).slice(0, 24)}`;
+        if (request.expectedRevision !== undefined && request.expectedRevision !== gate.revision) {
+          return {
+            status: "changed",
+            expectedRevision: request.expectedRevision,
+            gate,
+            readTransactionId,
+            stateDigest,
+          };
+        }
+        return { status: "current", gate, readTransactionId, stateDigest };
       }
       case FABRIC_OPERATIONS.chairTakeover: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.chairTakeover];
@@ -4148,7 +4297,11 @@ export class Fabric {
       `SELECT COUNT(*) AS count FROM task_objective_checks WHERE run_id = ? AND task_id IN (${placeholders}) AND status != 'pass'`,
     );
     const unresolvedGates = count(
-      `SELECT COUNT(*) AS count FROM task_human_gates WHERE run_id = ? AND task_id IN (${placeholders}) AND status != 'approved'`,
+      `SELECT COUNT(DISTINCT g.gate_id) AS count
+         FROM scoped_gates g
+         JOIN scoped_gate_tasks t ON t.gate_id=g.gate_id
+        WHERE g.coordination_run_id=? AND t.task_id IN (${placeholders})
+          AND g.status IN ('pending','deferred')`,
     );
     const missingCheckpoints = count(
       `SELECT COUNT(*) AS count FROM tasks t JOIN agents a ON a.run_id = t.run_id AND a.agent_id = t.owner_agent_id WHERE t.run_id = ? AND t.task_id IN (${placeholders}) AND a.provider_session_ref IS NOT NULL AND NOT EXISTS (SELECT 1 FROM lifecycle_checkpoints c WHERE c.run_id = t.run_id AND c.task_id = t.task_id AND c.task_revision = t.revision)`,
