@@ -1627,15 +1627,29 @@ is not a public operator operation and does not make the bootstrap principal an
 operator. The daemon shall:
 
 - recheck the canonical root against the machine-local workspace-trust
-  registry and bind one deterministic project identity to that root;
+  registry and bind one deterministic project identity plus the exact current
+  trust-record digest to that root;
 - derive the local operator subject from the trusted launcher context, create
   or revalidate its generation-fenced principal, and issue only the requested
   bounded project capability;
-- require exact idempotent replay or an explicit generation-bound rotation;
+- require exact idempotent replay or an explicit generation-bound rotation
+  through `OperatorStore.rotatePrincipal`, which increments the principal
+  generation and revokes every prior-generation capability;
 - persist only capability hashes and return plaintext launch credentials once
   over the private local channel; and
 - never write the operator credential to discovery files, audit journals,
   project artifacts, Console state, projections or rendered output.
+
+The initial capability is `project-launch` kind and can create only a draft
+session or a project-bound intake. It cannot authorise a session-targeted
+command. After draft creation, the private control plane method
+`issueLocalOperatorSessionCapability` rechecks the same local subject, project
+trust digest, session ID and generation, then issues a session-bound capability
+carrying only the requested actions, including `launch` when requested. Its
+expiry may not exceed the project capability or the reviewed launch-envelope
+expiry. Phase-two launch always authenticates with this session capability and
+therefore uses the existing session-generation fence; the public session-create
+result never contains a credential.
 
 Starting the first coordination chair is a separate consequential action over
 an existing draft or `awaiting_launch` project session. The operator action
@@ -1661,26 +1675,43 @@ project run directory, narrowed chair authority, resource limits, topology and
 provider launch input. The daemon derives the workspace root from the trusted
 project; packet paths may only narrow it. Preview reads the current session,
 packet, adapter contract and resource state and persists their exact digests.
-Commit rechecks every revision and digest, then atomically creates the
+Commit rechecks every revision and digest, then atomically advances
+`awaiting_launch -> launching` and creates the
 coordination run, chair identity and capability hash, current chair lease,
 required membership, hierarchical resource scopes and prepared provider
 action before dispatching through the registered adapter with the stable
 action ID. The plaintext chair credential is handed only to that internal
 launch boundary and is never returned in an operator result or projection.
 
-A failure proven before provider acceptance enters `launch_failed`; a dispatch
-whose outcome cannot be proven enters `launch_ambiguous` and retains its run,
+A launch-custody reconciler is a daemon-internal, non-operator authority keyed
+by the stable provider action ID. It alone advances `launching` to `active`,
+`launch_failed` or `launch_ambiguous` by compare-and-set from the persisted
+provider-action outcome. The operator command journal records the committed
+launch preparation and provider action ID; `OperatorActionStatus` and its
+terminal receipt derive from the provider-action journal rather than mutating
+history with a synthetic later operator command.
+
+A failure proved before provider acceptance enters `launch_failed`; a dispatch
+whose outcome cannot be proved enters `launch_ambiguous` and retains its run,
 lease, resource reservation and action identity for observe-only
 reconciliation. Neither the Console nor restart blindly repeats it. A new
 attempt after a proved failure requires a fresh current-state preview. The
 coordinated/independent one-chair rules in section 32.1 are checked in the same
 transaction as run creation.
 
+Startup never rederives or redispatches a lost plaintext launch credential. If
+an action is still `prepared`, the daemon performs no effect: it revokes that
+prepared chair capability hash and requires a fresh preview/attempt generation
+that mints a new token. The custody boundary persists `dispatched` before
+calling the adapter; therefore any crash from that point is ambiguous and
+observe-only until adapter lookup proves the outcome.
+
 Acceptance additionally requires:
 
 - **AC-021:** an untrusted/wrong-root bootstrap request, changed idempotent
-  replay, stale operator generation or widened capability fails closed without
-  creating a project or plaintext credential residue; and
+  replay, stale trust digest, stale operator generation, invalid rotation or
+  widened capability fails closed without creating a project or plaintext
+  credential residue; and
 - **AC-022:** duplicate, stale, failed and ambiguous chair launch produces one
   project session, at most one run/action effect for the stable identity, no
   second coordinated chair and no secret in protocol responses, projections,

@@ -405,11 +405,25 @@ initialisation handshake with the current private bootstrap capability. The
 method rechecks an exact canonical root and trust-record digest, derives the
 local subject binding, and transactionally creates or revalidates the project,
 operator principal and bounded project capability described by Spec 01
-section 32.9. It cannot widen an existing project/root binding. Exact replay is
-idempotent; changed input or stale generation fails closed. The returned
+section 32.9. `projects.canonical_root` plus a nullable
+`projects.trust_record_digest` own that binding; legacy-migration projects may
+remain null, but operator provisioning requires an exact current digest. It
+cannot widen an existing project/root binding. Exact replay is idempotent;
+changed input or stale generation fails closed. `OperatorStore.rotatePrincipal`
+is the only rotation surface: it compare-and-sets and increments
+`principal_generation` and revokes every older capability in the same
+transaction. The returned
 plaintext token is a one-time local handoff and is never placed in the daemon
 discovery receipt or durable audit. Revocation and later bounded issuance use
 the same generation fences.
+
+After the public `projectSessionCreate` call has committed a draft, the private
+method `issueLocalOperatorSessionCapability` rechecks the local subject,
+project/trust binding, session generation and requested action subset. It
+returns a session-bound token whose expiry is no later than the project
+capability and reviewed launch-envelope expiry. A `project-launch` capability
+remains forbidden for session-targeted commands, and neither public creation
+nor projections return credentials.
 
 The public operator connection may create a draft session but may launch a
 chair only through preview/commit of `ProjectSessionLaunchIntent`. The daemon
@@ -417,20 +431,30 @@ owns a launch-custody port behind the operator action service. On commit it:
 
 1. revalidates the trusted project root, session generation/revision, launch
    packet and resource-plan digests and registered adapter contract;
-2. in one SQLite transaction creates the run, one chair, hashed capability,
-   chair lease, membership and project/session/run resource hierarchy, and a
-   prepared provider action with the stable action ID;
+2. in one SQLite transaction advances `awaiting_launch` to `launching`, creates
+   the run, one chair, hashed capability, chair lease, membership and
+   project/session/run resource hierarchy, and a prepared provider action with
+   the stable action ID;
 3. passes the plaintext chair credential directly to the registered local
    adapter without returning or journalling it on the operator protocol; and
-4. records accepted/terminal, proved failure or ambiguity before advancing the
-   session to `active`, `launch_failed` or `launch_ambiguous` respectively.
+4. lets the daemon-internal launch-custody reconciler CAS `launching` to
+   `active`, `launch_failed` or `launch_ambiguous` from the persisted provider
+   action outcome; no later operator credential or fabricated operator command
+   performs that transition.
+
+The operator command journal commits the local preparation and stable provider
+action ID. Pending, ambiguous and terminal `OperatorActionStatus` values and
+the terminal receipt are projections of the provider-action journal; the
+daemon does not rewrite the original operator command's before/after audit as
+though the asynchronous effect were already terminal.
 
 Startup recovery never reconstructs or redispatches plaintext launch
-material. A prepared action may resume only when the daemon proves no dispatch
-occurred and can deterministically rederive the same credential from the
-machine-private capability key. Dispatched or uncertain actions are
-observe-only until adapter lookup proves their outcome. Global liveness counts
-the prepared/ambiguous run and action throughout reconciliation.
+material. A still-prepared action has no external effect: recovery revokes its
+prepared chair capability hash and requires a fresh preview/attempt generation
+with a newly minted token. Launch custody persists `dispatched` before calling
+the adapter, so dispatched or uncertain actions are observe-only until adapter
+lookup proves their outcome. Global liveness counts the prepared/ambiguous run
+and action throughout reconciliation.
 
 Deterministic gates cover private/public principal separation, trust-root
 recheck, secret non-disclosure, duplicate provision, launch crash injection at
