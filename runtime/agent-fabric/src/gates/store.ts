@@ -255,7 +255,7 @@ export class ScopedGateStore {
     context: AuthenticatedAgentContext,
     request: DependencyMutationRequest,
   ): { dependencyRevision: number; edgeCount: number; bindingCount: number } {
-    this.#assertChair(context);
+    this.#assertChair(context, request);
     return this.#executeChairCommand(
       context,
       request,
@@ -684,7 +684,12 @@ export class ScopedGateStore {
 
   #assertChair(context: AuthenticatedAgentContext, command?: ChairCommand): void {
     const lease = this.#activeChairLease(context);
-    if (text(lease, "holder_agent_id") !== context.agentId || text(lease, "status") !== "active") {
+    const status = text(lease, "status");
+    const compatibilityCommand = command !== undefined && !this.#isProtocolChairCommand(command);
+    if (
+      text(lease, "holder_agent_id") !== context.agentId ||
+      (status !== "active" && !(status === "frozen" && compatibilityCommand))
+    ) {
       throw new ProjectFabricCoreError("TASK_NOT_OWNER", "authenticated agent is not the active chair");
     }
     if (command !== undefined && this.#isProtocolChairCommand(command)) {

@@ -47,7 +47,11 @@ import type { PublicProtocolContext } from "../daemon/public-protocol.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { IntakeStore } from "../project-session/intake-store.js";
-import { ProjectFabricCoreError } from "../project-session/contracts.js";
+import {
+  ProjectFabricCoreError,
+  type AuthenticatedAgentContext,
+} from "../project-session/contracts.js";
+import { ScopedGateStore } from "../gates/store.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
@@ -771,6 +775,7 @@ export class Fabric {
   readonly #operatorStore: OperatorStore;
   readonly #projectSessions: ProjectSessionStore;
   readonly #intakes: IntakeStore;
+  readonly #gates: ScopedGateStore;
 
   constructor(options: FabricOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -793,6 +798,11 @@ export class Fabric {
       clock: this.#clock,
     });
     this.#intakes = new IntakeStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    this.#gates = new ScopedGateStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
       clock: this.#clock,
@@ -863,6 +873,23 @@ export class Fabric {
   #workspaceRootForRun(runId: string): string {
     const run = rowOrNotFound(this.#database.prepare("SELECT workspace_root FROM runs WHERE run_id = ?").get(runId), "run");
     return stringField(run, "workspace_root");
+  }
+
+  #agentContext(runId: string, agentId: string): AuthenticatedAgentContext {
+    const identity = rowOrNotFound(this.#database.prepare(`
+      SELECT r.project_session_id, c.principal_generation
+        FROM runs r
+        JOIN capabilities c ON c.run_id=r.run_id AND c.agent_id=?
+       WHERE r.run_id=? AND c.revoked_at IS NULL
+       ORDER BY c.principal_generation DESC
+       LIMIT 1
+    `).get(agentId, runId), "authenticated agent context");
+    return {
+      agentId: agentId as never,
+      projectSessionId: stringField(identity, "project_session_id") as never,
+      coordinationRunId: runId as never,
+      principalGeneration: numberField(identity, "principal_generation"),
+    };
   }
 
   async close(): Promise<void> {
@@ -2029,6 +2056,14 @@ export class Fabric {
     },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      const agentContext = this.#agentContext(runId, actorAgentId);
+      const dependencyRevision = numberField(
+        rowOrNotFound(
+          this.#database.prepare("SELECT dependency_revision FROM runs WHERE run_id=?").get(runId),
+          "coordination run",
+        ),
+        "dependency_revision",
+      );
       const actor = rowOrNotFound(
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
         "agent",
@@ -2093,11 +2128,6 @@ export class Fabric {
           agentId,
         );
       }
-      for (const dependencyTaskId of dependencies) {
-        this.#database
-          .prepare("INSERT INTO task_dependencies(run_id, task_id, dependency_task_id) VALUES (?, ?, ?)")
-          .run(runId, input.taskId, dependencyTaskId);
-      }
       for (const relativePath of [...new Set(input.expectedArtifacts ?? [])].sort()) {
         if (relativePath.length === 0 || isAbsolute(relativePath) || relativePath.split(/[\\/]/u).includes("..")) {
           throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "expected artifact path must be relative and traversal-free");
@@ -2111,10 +2141,22 @@ export class Fabric {
           .prepare("INSERT INTO task_objective_checks(run_id, task_id, check_id) VALUES (?, ?, ?)")
           .run(runId, input.taskId, checkId);
       }
-      for (const gateId of [...new Set(input.humanGates ?? [])].sort()) {
-        this.#database
-          .prepare("INSERT INTO task_human_gates(run_id, task_id, gate_id) VALUES (?, ?, ?)")
-          .run(runId, input.taskId, gateId);
+      const dependencyMutation = dependencies.length === 0
+        ? { dependencyRevision }
+        : this.#gates.setTaskDependencies(agentContext, {
+            commandId: `${input.commandId}:dependencies`,
+            expectedRevision: dependencyRevision,
+            taskId: input.taskId,
+            dependencyTaskIds: dependencies,
+          });
+      const humanGates = [...new Set(input.humanGates ?? [])].sort();
+      if (humanGates.length > 0) {
+        this.#gates.createCompatibilityTaskGates(agentContext, {
+          commandId: `${input.commandId}:gates`,
+          expectedDependencyRevision: dependencyMutation.dependencyRevision,
+          taskId: input.taskId,
+          humanGateIds: humanGates,
+        });
       }
       const result = this.getTask(runId, input.taskId);
       this.#event(runId, "task-created", actorAgentId, result);
