@@ -406,6 +406,7 @@ function actionLabel(action: OperatorAvailableAction): string {
     resume: "Resume",
     cancel: "Cancel",
     steer: "Steer",
+    "project-session-launch": "Launch run",
     "project-session-drain": "Drain session",
     "project-session-stop": "Stop session",
     "daemon-drain": "Drain daemon",
@@ -487,6 +488,27 @@ function presentIntent(
       { label: "Expected worktree", value: intent.repository.expectedWorktreeDigest },
       { label: "Expected remote", value: intent.repository.expectedRemoteDigest },
       { label: "Operation", value: JSON.stringify(intent.operation) },
+    ];
+  }
+  if (intent.kind === "project-session-launch") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Project", value: intent.projectId },
+      { label: "Session", value: intent.projectSessionId },
+      { label: "Expected revision", value: String(intent.expectedSessionRevision) },
+      { label: "Expected generation", value: String(intent.expectedSessionGeneration) },
+      {
+        label: "Launch packet",
+        value: `${intent.launchPacketRef.path}@${intent.launchPacketRef.digest}`,
+      },
+      { label: "Authority", value: intent.authorityRef },
+      { label: "Budget", value: intent.budgetRef },
+      {
+        label: "Resource plan",
+        value: `${intent.resourcePlanRef.path}@${intent.resourcePlanRef.digest}`,
+      },
+      { label: "Adapter", value: intent.providerAdapterId },
+      { label: "Provider action", value: intent.providerActionId },
     ];
   }
   if (intent.kind === "registered-external-effect") {

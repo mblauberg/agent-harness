@@ -103,10 +103,59 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
     assert "test -f ../agent-fabric-protocol/dist/index.d.ts" in fabric_commands
 
 
+def test_ci_runs_console_and_herdr_product_gates() -> None:
+    document = _workflow()
+    expected = {
+        "console": {
+            "directory": "runtime/agent-fabric-console",
+            "lockfiles": {
+                "runtime/agent-fabric-console/package-lock.json",
+                "runtime/agent-fabric-protocol/package-lock.json",
+            },
+            "commands": {
+                "npm ci",
+                "npm run check",
+                "npm run test:evaluation",
+                "npm run test:load",
+                "npm audit --omit=dev --audit-level=high",
+            },
+        },
+        "herdr": {
+            "directory": "runtime/agent-fabric-herdr",
+            "lockfiles": {
+                "runtime/agent-fabric-herdr/package-lock.json",
+                "runtime/agent-fabric-protocol/package-lock.json",
+            },
+            "commands": {
+                "npm ci",
+                "npm run check",
+                "npm audit --omit=dev --audit-level=high",
+            },
+        },
+    }
+    for job_name, contract in expected.items():
+        steps = _steps(_job(document, job_name))
+        node_setup = next(
+            step for step in steps if str(step.get("uses", "")).startswith("actions/setup-node@")
+        )
+        assert node_setup.get("with", {}).get("node-version") == "24"
+        cache_paths = set(
+            str(node_setup.get("with", {}).get("cache-dependency-path", "")).splitlines()
+        )
+        assert contract["lockfiles"] <= cache_paths
+        run_steps = [step for step in steps if "run" in step]
+        assert all(step.get("working-directory") == contract["directory"] for step in run_steps)
+        commands = "\n".join(str(step.get("run", "")) for step in run_steps)
+        assert all(command in commands for command in contract["commands"])
+
+
 def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
     codeowners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
     for path in (
         "/runtime/agent-fabric/",
+        "/runtime/agent-fabric-protocol/",
+        "/runtime/agent-fabric-console/",
+        "/runtime/agent-fabric-herdr/",
         "/runtime/agent-fabric/migrations/",
         "/runtime/agent-fabric/schemas/",
         "/config/model-routing.json",
@@ -117,7 +166,16 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
 
     dependabot = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
     updates = dependabot.get("updates", [])
-    assert any(item.get("package-ecosystem") == "npm" and item.get("directory") == "/runtime/agent-fabric" for item in updates)
+    for directory in (
+        "/runtime/agent-fabric",
+        "/runtime/agent-fabric-protocol",
+        "/runtime/agent-fabric-console",
+        "/runtime/agent-fabric-herdr",
+    ):
+        assert any(
+            item.get("package-ecosystem") == "npm" and item.get("directory") == directory
+            for item in updates
+        )
     assert any(item.get("package-ecosystem") == "github-actions" and item.get("directory") == "/" for item in updates)
 
     template = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8").lower()

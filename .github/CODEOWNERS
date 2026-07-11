@@ -5,6 +5,9 @@
 
 # Agent fabric runtime, persistence and contracts
 /runtime/agent-fabric/ @mblauberg
+/runtime/agent-fabric-protocol/ @mblauberg
+/runtime/agent-fabric-console/ @mblauberg
+/runtime/agent-fabric-herdr/ @mblauberg
 /runtime/agent-fabric/migrations/ @mblauberg
 /runtime/agent-fabric/schemas/ @mblauberg
 
