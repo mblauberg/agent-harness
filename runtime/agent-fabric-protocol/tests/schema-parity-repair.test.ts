@@ -106,16 +106,25 @@ describe("operation-correlated schema and parser parity", () => {
 
   it("requires the enforcement target selected by a scoped-gate check", () => {
     const operation = "fabric.v1.scoped-gate.check" as const;
-    const input = {
+    const targetless = {
       projectSessionId: "ps_01",
       coordinationRunId: "run_01",
       dependencyRevision: 1,
       enforcementPoint: "operation",
+      operationId: "fabric.v1.operator-action.preview",
     };
-
-    expect(() => parseOperationInput(operation, input)).toThrowError(/operationId is required/iu);
     const validator = ajv.compile(protocolRequestSchemaFor(operation));
-    expect(validator({ id: "request_01", operation, input })).toBe(false);
+
+    expect(() => parseOperationInput(operation, targetless)).toThrowError(/operationTarget is required/iu);
+    expect(validator({ id: "request_01", operation, input: targetless })).toBe(false);
+
+    const targeted = { ...targetless, operationTarget: { kind: "task", taskId: "task_01" } };
+    expect(() => parseOperationInput(operation, targeted)).not.toThrow();
+    expect(validator({ id: "request_02", operation, input: targeted })).toBe(true);
+
+    const stale = { ...targeted, dependencyRevision: 0 };
+    expect(() => parseOperationInput(operation, stale)).toThrowError(/dependencyRevision/iu);
+    expect(validator({ id: "request_03", operation, input: stale })).toBe(false);
   });
 
   it.each(EXTENSION_OPERATIONS)("rejects the %s fixture under its declared wrong operation", (operation) => {

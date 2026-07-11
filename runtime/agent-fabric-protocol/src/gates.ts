@@ -131,9 +131,12 @@ type ScopedGateCheckBase = {
   coordinationRunId: CoordinationRunId;
   dependencyRevision: number;
 };
+export type GateOperationTarget =
+  | { kind: "run" }
+  | { kind: "task"; taskId: TaskId };
 export type ScopedGateCheckRequest = ScopedGateCheckBase & (
   | { enforcementPoint: "task-readiness"; taskId: TaskId }
-  | { enforcementPoint: "operation"; operationId: FabricOperation }
+  | { enforcementPoint: "operation"; operationId: FabricOperation; operationTarget: GateOperationTarget }
   | { enforcementPoint: "scoped-barrier"; barrierId: BarrierId }
 );
 export type ScopedGateCheckResult =
@@ -316,6 +319,7 @@ export function parseScopedGateCheckRequest(value: unknown): ScopedGateCheckRequ
     "dependencyRevision",
     "enforcementPoint",
     ...(targetField === undefined ? [] : [targetField]),
+    ...(enforcementPoint === "operation" ? ["operationTarget"] : []),
   ]);
   const base: ScopedGateCheckBase = {
     projectSessionId: parseIdentifier<"ProjectSessionId">(record.projectSessionId, "scopedGateCheck.projectSessionId"),
@@ -323,7 +327,7 @@ export function parseScopedGateCheckRequest(value: unknown): ScopedGateCheckRequ
       record.coordinationRunId,
       "scopedGateCheck.coordinationRunId",
     ),
-    dependencyRevision: safeInteger(record.dependencyRevision, "scopedGateCheck.dependencyRevision"),
+    dependencyRevision: safeInteger(record.dependencyRevision, "scopedGateCheck.dependencyRevision", 1),
   };
   if (enforcementPoint === "task-readiness") {
     if (record.taskId === undefined) throw new TypeError("scopedGateCheck.taskId is required");
@@ -335,10 +339,16 @@ export function parseScopedGateCheckRequest(value: unknown): ScopedGateCheckRequ
   }
   if (enforcementPoint === "operation") {
     if (record.operationId === undefined) throw new TypeError("scopedGateCheck.operationId is required");
+    if (record.operationTarget === undefined) throw new TypeError("scopedGateCheck.operationTarget is required");
     if (typeof record.operationId !== "string" || !isActiveFabricOperation(record.operationId)) {
       throw new TypeError("scopedGateCheck.operationId is not a protocol operation");
     }
-    return { ...base, enforcementPoint, operationId: record.operationId };
+    return {
+      ...base,
+      enforcementPoint,
+      operationId: record.operationId,
+      operationTarget: parseGateOperationTarget(record.operationTarget),
+    };
   }
   if (enforcementPoint === "scoped-barrier") {
     if (record.barrierId === undefined) throw new TypeError("scopedGateCheck.barrierId is required");
@@ -349,6 +359,25 @@ export function parseScopedGateCheckRequest(value: unknown): ScopedGateCheckRequ
     };
   }
   throw new TypeError("scopedGateCheck.enforcementPoint is invalid");
+}
+
+function parseGateOperationTarget(value: unknown): GateOperationTarget {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("scopedGateCheck.operationTarget must be an object");
+  }
+  const kind: unknown = Reflect.get(value, "kind");
+  if (kind === "run") {
+    strictRecord(value, "scopedGateCheck.operationTarget", ["kind"]);
+    return { kind };
+  }
+  if (kind === "task") {
+    const record = strictRecord(value, "scopedGateCheck.operationTarget", ["kind", "taskId"]);
+    return {
+      kind,
+      taskId: parseIdentifier<"TaskId">(record.taskId, "scopedGateCheck.operationTarget.taskId"),
+    };
+  }
+  throw new TypeError("scopedGateCheck.operationTarget.kind is invalid");
 }
 
 function parseScope(value: unknown): GateScope {

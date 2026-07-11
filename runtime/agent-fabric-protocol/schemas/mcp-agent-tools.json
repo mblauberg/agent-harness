@@ -11116,7 +11116,7 @@
               },
               "dependencyRevision": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 1
               },
               "enforcementPoint": {
                 "const": "task-readiness"
@@ -11134,7 +11134,8 @@
               "coordinationRunId",
               "dependencyRevision",
               "enforcementPoint",
-              "operationId"
+              "operationId",
+              "operationTarget"
             ],
             "properties": {
               "projectSessionId": {
@@ -11145,7 +11146,7 @@
               },
               "dependencyRevision": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 1
               },
               "enforcementPoint": {
                 "const": "operation"
@@ -11252,6 +11253,38 @@
                   "fabric.v1.evidence.publish",
                   "fabric.v1.operator-artifact-content.read"
                 ]
+              },
+              "operationTarget": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "run"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "taskId"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "task"
+                      },
+                      "taskId": {
+                        "$ref": "#/$defs/generated_1"
+                      }
+                    }
+                  }
+                ]
               }
             }
           },
@@ -11274,7 +11307,7 @@
               },
               "dependencyRevision": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 1
               },
               "enforcementPoint": {
                 "const": "scoped-barrier"
@@ -11332,7 +11365,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:a96c1a9681eb91ad6ec587496a3bacc8a6fe8fc81c8abf1e5de7aba8246c7f37",
+      "inputCodecDigest": "sha256:05e8581f70b7ae8ddf9e2feed8832d143a05f34d6a4ccd0bb6acbd8b1b7b4b9e",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {

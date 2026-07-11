@@ -73,7 +73,11 @@ describe("operator mutation surface", () => {
 describe("discriminated gate enforcement checks", () => {
   it.each([
     { enforcementPoint: "task-readiness", taskId: "task_01" },
-    { enforcementPoint: "operation", operationId: "fabric.v1.operator-action.preview" },
+    {
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.operator-action.preview",
+      operationTarget: { kind: "task", taskId: "task_01" },
+    },
     { enforcementPoint: "scoped-barrier", barrierId: "barrier_01" },
   ] as const)("accepts a targeted $enforcementPoint check", (target) => {
     expect(parseScopedGateCheckRequest({
@@ -90,7 +94,46 @@ describe("discriminated gate enforcement checks", () => {
       coordinationRunId: "run_01",
       dependencyRevision: 3,
       enforcementPoint: "operation",
-    })).toThrowError(/operationId is required/);
+      operationId: "fabric.v1.operator-action.preview",
+    })).toThrowError(/operationTarget is required/);
+  });
+
+  it("rejects an operation target without a positive dependency revision", () => {
+    expect(() => parseScopedGateCheckRequest({
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 0,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.operator-action.preview",
+      operationTarget: { kind: "run" },
+    })).toThrowError(/dependencyRevision.*greater than or equal to 1/);
+  });
+
+  it("accepts the closed run operation target", () => {
+    expect(parseScopedGateCheckRequest({
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 3,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.operator-action.preview",
+      operationTarget: { kind: "run" },
+    })).toMatchObject({ operationTarget: { kind: "run" } });
+  });
+
+  it.each([
+    { kind: "run", taskId: "task_01" },
+    { kind: "task" },
+    { kind: "task", taskId: "task_01", coordinationRunId: "run_other" },
+    { kind: "project" },
+  ])("rejects a non-closed operation target %#", (operationTarget) => {
+    expect(() => parseScopedGateCheckRequest({
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 3,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.operator-action.preview",
+      operationTarget,
+    })).toThrowError(/operationTarget/);
   });
 });
 

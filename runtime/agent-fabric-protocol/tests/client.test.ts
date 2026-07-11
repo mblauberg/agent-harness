@@ -194,4 +194,25 @@ describe("negotiated baseline agent client", () => {
       input,
     }]);
   });
+
+  it("preserves the exact run/task target on a scoped operation check", async () => {
+    const result = { allowed: true, checkedGateRevisions: {} };
+    const transport = new RecordingTransport(["scoped-gates.v1"], result, "agent");
+    const client = createAgentClient(transport);
+    if (client.gates === undefined) throw new Error("expected scoped-gate feature");
+    const input = {
+      projectSessionId: "ps_01" as never,
+      coordinationRunId: "run_01" as never,
+      dependencyRevision: 4,
+      enforcementPoint: "operation",
+      operationId: FABRIC_OPERATIONS.taskCompleteWithReply,
+      operationTarget: { kind: "task", taskId: "task_01" as never },
+    } as const;
+
+    await expect(client.gates.check(input)).resolves.toBe(result);
+    expect(transport.calls).toStrictEqual([{
+      operation: FABRIC_OPERATIONS.scopedGateCheck,
+      input,
+    }]);
+  });
 });

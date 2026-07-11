@@ -16545,7 +16545,7 @@
                     },
                     "dependencyRevision": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 1
                     },
                     "enforcementPoint": {
                       "const": "task-readiness"
@@ -16568,7 +16568,8 @@
                     "coordinationRunId",
                     "dependencyRevision",
                     "enforcementPoint",
-                    "operationId"
+                    "operationId",
+                    "operationTarget"
                   ],
                   "properties": {
                     "projectSessionId": {
@@ -16589,7 +16590,7 @@
                     },
                     "dependencyRevision": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 1
                     },
                     "enforcementPoint": {
                       "const": "operation"
@@ -16696,6 +16697,43 @@
                         "fabric.v1.evidence.publish",
                         "fabric.v1.operator-artifact-content.read"
                       ]
+                    },
+                    "operationTarget": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "run"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind",
+                            "taskId"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "task"
+                            },
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            }
+                          }
+                        }
+                      ]
                     }
                   }
                 },
@@ -16728,7 +16766,7 @@
                     },
                     "dependencyRevision": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 1
                     },
                     "enforcementPoint": {
                       "const": "scoped-barrier"
