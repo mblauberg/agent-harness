@@ -511,8 +511,15 @@ export class OperatorActionStore {
     }
     const intentSessionId = sessionIdForIntent(intent);
     if (intent.kind === "project-session-launch") {
-      if (authenticated.kind !== "project-launch" || intent.projectId !== projectId) {
-        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "project launch intent lacks exact project authority");
+      if (
+        authenticated.kind !== "session" ||
+        authenticated.projectSessionId !== intent.projectSessionId ||
+        intent.projectId !== projectId
+      ) {
+        throw new ProjectFabricCoreError(
+          "CAPABILITY_FORBIDDEN",
+          "project-session launch requires exact session-bound launch authority",
+        );
       }
       if (!isRow(this.#database.prepare(`
         SELECT project_session_id FROM project_sessions WHERE project_session_id=? AND project_id=?

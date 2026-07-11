@@ -1045,9 +1045,25 @@ describe("operator action store", () => {
         'operator-launch', 'operator_01', ${now - 200}, ${now - 100}
       );
     `);
+    const projectLaunchCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_project_launch_01"),
+      token: "project-launch-secret-01",
+    };
+    fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: projectLaunchCredential.capabilityId,
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "project-launch",
+      actions: ["read", "launch"],
+    }), projectLaunchCredential.token);
     const launchCredential: OperatorCapabilityCredential = {
-      capabilityId: identifier<"CapabilityId">("cap_launch_01"),
-      token: "launch-secret-01",
+      capabilityId: identifier<"CapabilityId">("cap_session_launch_01"),
+      token: "session-launch-secret-01",
     };
     fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
       capabilityId: launchCredential.capabilityId,
@@ -1058,7 +1074,9 @@ describe("operator action store", () => {
       issuedAt: "2026-01-01T00:00:00Z",
       expiresAt: "2099-01-01T00:00:00Z",
       status: "active",
-      kind: "project-launch",
+      kind: "session",
+      projectSessionId: "session_launch_01",
+      sessionGeneration: 1,
       actions: ["read", "launch"],
     }), launchCredential.token);
     const projectId = identifier<"ProjectId">("project_01");
@@ -1120,6 +1138,15 @@ describe("operator action store", () => {
       projectId,
       intent,
     };
+
+    await expect(actions.preview(fixture.context, {
+      ...request,
+      command: {
+        ...request.command,
+        credential: projectLaunchCredential,
+        commandId: identifier<"CommandId">("preview_launch_project_capability_01"),
+      },
+    })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
 
     const preview = await actions.preview(fixture.context, request);
     expect(preview).toMatchObject({
@@ -1188,7 +1215,7 @@ describe("operator action store", () => {
         commandId: identifier<"CommandId">("preview_launch_foreign_session_01"),
       },
       intent: { ...intent, projectSessionId: foreignSessionId },
-    })).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+    })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
   });
 });
 
