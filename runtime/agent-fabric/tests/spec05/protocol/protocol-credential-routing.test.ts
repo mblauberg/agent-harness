@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   FABRIC_OPERATIONS,
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   operationsForPrincipal,
   parseOperatorCapabilityGrant,
 } from "@local/agent-fabric-protocol";
@@ -175,6 +176,20 @@ describe("public protocol credential routing", () => {
           sessionGeneration: identity.generation,
           actions: ["read", "decide", "pause"],
         }), "operator-protocol-secret");
+        database.prepare(`
+          INSERT INTO attention_items(
+            item_id, project_session_id, coordination_run_id, kind, severity,
+            revision, state, dedupe_key, payload_json, created_at, updated_at
+          ) VALUES (?, ?, ?, 'approval', 'critical', 1, 'open', ?, ?, ?, ?)
+        `).run(
+          "attention_protocol_01",
+          identity.project_session_id,
+          "run_operator_protocol",
+          "attention:protocol:01",
+          JSON.stringify({ title: "Protocol attention" }),
+          Date.parse("2027-01-01T00:00:00Z"),
+          Date.parse("2027-01-01T00:00:00Z"),
+        );
       } finally {
         database.close();
       }
@@ -230,6 +245,42 @@ describe("public protocol credential routing", () => {
           project: { value: { projectId: principal.projectId } },
           session: { value: { projectSessionId } },
         });
+        const legacyPage = await reopened.dispatchPublicProtocol(
+          { ...context, features: ["project-sessions.v1", "operator-projection.v1"] },
+          FABRIC_OPERATIONS.projectionPage,
+          {
+            credential: { capabilityId: "cap_operator_protocol", token: "operator-protocol-secret" },
+            projectId: principal.projectId,
+            projectSessionId: projectSessionId as never,
+            view: "attention",
+            after: 0,
+            limit: 10,
+          },
+        );
+        expect(legacyPage).toMatchObject({
+          view: "attention",
+          page: { value: { items: [{ itemId: "attention_protocol_01" }] } },
+        });
+        expect(legacyPage).not.toHaveProperty("page.value.items.0.nativeNotification");
+        await expect(reopened.dispatchPublicProtocol(
+          {
+            ...context,
+            features: [
+              "project-sessions.v1",
+              "operator-projection.v1",
+              NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+            ],
+          },
+          FABRIC_OPERATIONS.projectionPage,
+          {
+            credential: { capabilityId: "cap_operator_protocol", token: "operator-protocol-secret" },
+            projectId: principal.projectId,
+            projectSessionId: projectSessionId as never,
+            view: "attention",
+            after: 0,
+            limit: 10,
+          },
+        )).resolves.toHaveProperty("page.value.items.0.nativeNotification");
         const preview = await reopened.dispatchPublicProtocol(
           context,
           FABRIC_OPERATIONS.operatorActionPreview,

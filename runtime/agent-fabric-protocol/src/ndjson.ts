@@ -10,6 +10,10 @@ import { protocolFailureMessage } from "./codec.js";
 import { negotiateProtocol, operationsForFeatures, type ProtocolFeature } from "./features.js";
 import { isFabricOperation, type FabricOperation } from "./operations.js";
 import { parseOperationInputForPrincipal, parseOperationResult } from "./operation-codecs.js";
+import {
+  ProtocolResultShapeError,
+  assertOperationResultFeatureShape,
+} from "./result-feature-shape.js";
 import { parseJsonValue, strictRecord, type JsonValue } from "./primitives.js";
 import {
   PROTOCOL_LIMITS,
@@ -249,6 +253,7 @@ export type ProtocolTransportErrorCode =
   | "PROTOCOL_OVERLOADED"
   | "PROTOCOL_FEATURE_UNAVAILABLE"
   | "PROTOCOL_NEGOTIATION_FAILED"
+  | "PROTOCOL_INCOMPATIBLE"
   | "PROTOCOL_RESULT_INVALID";
 
 export class ProtocolTransportError extends Error {
@@ -464,8 +469,21 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       if (record.ok) {
         if (record.operation !== "initialize" && isFabricOperation(record.operation)) {
           try {
-            parseOperationResult(record.operation, record.result);
+            const parsed = parseOperationResult(record.operation, record.result);
+            assertOperationResultFeatureShape(
+              record.operation,
+              this.#features,
+              parsed,
+            );
           } catch (cause: unknown) {
+            if (cause instanceof ProtocolResultShapeError) {
+              this.#fail(new ProtocolTransportError(
+                "PROTOCOL_INCOMPATIBLE",
+                cause.message,
+                { cause },
+              ));
+              return;
+            }
             const completed = this.#completePending(record.id);
             completed?.reject(new ProtocolTransportError(
               "PROTOCOL_RESULT_INVALID",
@@ -479,7 +497,16 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       }
       else {
         const failure = parseProtocolFailure(record.error);
-        this.#completePending(record.id)?.reject(new ProtocolRemoteError(failure));
+        const remote = new ProtocolRemoteError(failure);
+        if (failure.code === "PROTOCOL_INCOMPATIBLE") {
+          this.#fail(new ProtocolTransportError(
+            "PROTOCOL_INCOMPATIBLE",
+            failure.message,
+            { cause: remote },
+          ));
+          return;
+        }
+        this.#completePending(record.id)?.reject(remote);
       }
     } catch (error: unknown) {
       this.#fail(new ProtocolTransportError(

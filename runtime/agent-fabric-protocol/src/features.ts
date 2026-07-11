@@ -6,7 +6,7 @@ import {
 
 export const FABRIC_PROTOCOL_VERSION = 1 as const;
 
-export const PROTOCOL_FEATURES = [
+export const OPERATION_FEATURES = [
   "fabric-core.v1",
   "project-sessions.v1",
   "operator-control.v1",
@@ -27,9 +27,23 @@ export const PROTOCOL_FEATURES = [
   "artifact-registry.v1",
   "artifact-content-read.v1",
   "lifecycle-control.v1",
+] as const satisfies readonly OperationFeature[];
+
+export const RESULT_SHAPE_FEATURES = [
+  "native-notification-projection.v1",
 ] as const;
 
-export type ProtocolFeature = OperationFeature;
+export const PROTOCOL_FEATURES = [
+  ...OPERATION_FEATURES,
+  ...RESULT_SHAPE_FEATURES,
+] as const;
+
+export const PROTOCOL_FEATURE_NAME_PATTERN =
+  "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*\\.v[1-9][0-9]*$";
+export const MAXIMUM_PROTOCOL_FEATURE_NAMES = 64;
+export const MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES = 64;
+
+export type ProtocolFeature = (typeof PROTOCOL_FEATURES)[number];
 
 function buildFeatureOperations(): Readonly<Record<ProtocolFeature, readonly FabricOperation[]>> {
   const grouped = Object.fromEntries(PROTOCOL_FEATURES.map((feature) => [feature, [] as FabricOperation[]])) as
@@ -44,14 +58,19 @@ function buildFeatureOperations(): Readonly<Record<ProtocolFeature, readonly Fab
 
 export const FEATURE_OPERATIONS = buildFeatureOperations();
 
-export function operationsForFeatures(features: readonly ProtocolFeature[]): ReadonlySet<FabricOperation> {
-  return new Set(features.flatMap((feature) => FEATURE_OPERATIONS[feature]));
+export function operationsForFeatures(features: readonly string[]): ReadonlySet<FabricOperation> {
+  const operations: FabricOperation[] = [];
+  for (const feature of features) {
+    const owned = FEATURE_OPERATIONS[feature as ProtocolFeature];
+    if (owned !== undefined) operations.push(...owned);
+  }
+  return new Set(operations);
 }
 
 export type ProtocolNegotiationRequest = {
   protocolVersion: number;
-  requiredFeatures: readonly ProtocolFeature[];
-  optionalFeatures: readonly ProtocolFeature[];
+  requiredFeatures: readonly string[];
+  optionalFeatures: readonly string[];
 };
 
 export type ProtocolOffer = {
@@ -74,7 +93,7 @@ export type ProtocolNegotiationResult =
   | {
       ok: false;
       reason: "required-features-unavailable";
-      missingFeatures: ProtocolFeature[];
+      missingFeatures: string[];
     };
 
 export function negotiateProtocol(
@@ -93,7 +112,7 @@ export function negotiateProtocol(
     };
   }
 
-  const available = new Set(offer.features);
+  const available = new Set<string>(offer.features);
   const missingFeatures = request.requiredFeatures.filter((feature) => !available.has(feature));
   if (missingFeatures.length > 0) {
     return { ok: false, reason: "required-features-unavailable", missingFeatures };

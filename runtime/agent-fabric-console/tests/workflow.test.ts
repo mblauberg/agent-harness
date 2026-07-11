@@ -89,7 +89,7 @@ function dataset(withSession = true): FabricConsoleDataset {
     stateDigest: digest,
   };
   return {
-    connection: { state: "live" },
+    connection: { state: "live", compatibility: { mode: "current" } },
     snapshot,
     snapshotRevision: revisionFromProtocol(11),
     cursor: 0,

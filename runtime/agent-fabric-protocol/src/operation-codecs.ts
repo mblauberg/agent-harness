@@ -726,8 +726,7 @@ const attentionItemCodec = objectCodec({
   sourceFreshness: enumeration(["live", "snapshot", "stale", "unavailable", "conflict"]),
   lastEventAt: timestamp,
   duplicateCount: integer(),
-  nativeNotification: nativeNotificationDeliverySummaryCodec,
-});
+}, { nativeNotification: nativeNotificationDeliverySummaryCodec });
 const projectionSourceCodec = enumeration(["fabric", "delivery-run", "git", "github", "herdr", "provider"]);
 
 function projectionFact(
@@ -1684,8 +1683,7 @@ const attentionSummaryCodec = objectCodec({
   label: enumeration(["Decision", "Approval", "Blocked", "FYI"]),
   priority: enumeration(["safety-integrity", "critical-path", "expiring-authority", "acceptance-ready", "advisory"]),
   title: text,
-  nativeNotification: nativeNotificationDeliverySummaryCodec,
-});
+}, { nativeNotification: nativeNotificationDeliverySummaryCodec });
 const projectSummaryCodec = objectCodec(
   { kind: literal("project"), goal: text, acceptedScopeRef: nullable(artifactRefCodec), repositoryRevision: text },
   { repository: gitRepositorySummaryCodec },

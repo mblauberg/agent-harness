@@ -20,6 +20,7 @@ import type {
 import type {
   ConsoleActionPlanner,
   ConsoleBootstrapPort,
+  ConsoleBootstrapResult,
 } from "./application.js";
 import { operatorIntentRevision } from "./action-revision.js";
 import type { ConsoleControllerState } from "./controller.js";
@@ -27,6 +28,7 @@ import { revisionToProtocol, type ConsoleRow } from "./model.js";
 import {
   bindConsoleProtocolClient,
   type ConsoleProtocolBinding,
+  type ConsoleSessionCompatibility,
   type FabricConsoleDataset,
 } from "./protocol-adapter.js";
 import type { FabricRuntimeActivation } from "./runtime.js";
@@ -294,6 +296,7 @@ function requiredIntentRevision(intent: OperatorActionIntent): number {
 
 type PublicLocalOperatorConsoleSession = Readonly<{
   client: NegotiatedOperatorClient;
+  compatibility: ConsoleSessionCompatibility;
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
   operatorId: OperatorId;
@@ -332,6 +335,7 @@ function publicSession(value: unknown): PublicLocalOperatorConsoleSession {
   if (
     !isRecord(value) ||
     !isRecord(value.client) ||
+    !isRecord(value.compatibility) ||
     !isRecord(value.credential) ||
     typeof value.credential.capabilityId !== "string" ||
     typeof value.credential.token !== "string" ||
@@ -343,6 +347,12 @@ function publicSession(value: unknown): PublicLocalOperatorConsoleSession {
     typeof value.close !== "function"
   ) {
     throw new TypeError("public agent-fabric Console session is invalid");
+  }
+  if (
+    value.compatibility.mode !== "current" &&
+    value.compatibility.mode !== "legacy-compatibility"
+  ) {
+    throw new TypeError("public agent-fabric Console compatibility state is invalid");
   }
   return value as PublicLocalOperatorConsoleSession;
 }
@@ -367,6 +377,54 @@ function unavailableReason(error: unknown):
   return "start-failed";
 }
 
+function protocolIncompatibleResult(
+  error: unknown,
+): Extract<ConsoleBootstrapResult, { status: "protocol-incompatible" }> | null {
+  if (!isRecord(error) || error.code !== "CONSOLE_PROTOCOL_INCOMPATIBLE") return null;
+  const primaryValue = error.primary;
+  if (
+    !isRecord(primaryValue) ||
+    typeof primaryValue.code !== "string" ||
+    typeof primaryValue.message !== "string"
+  ) return null;
+  const retryValue = error.retry;
+  const retry = isRecord(retryValue) &&
+      (retryValue.status === "succeeded" || retryValue.status === "failed") &&
+      retryValue.profile === "strict-v1"
+    ? {
+        status: retryValue.status as "succeeded" | "failed",
+        profile: "strict-v1" as const,
+        ...(isRecord(retryValue.failure) &&
+          typeof retryValue.failure.code === "string" &&
+          typeof retryValue.failure.message === "string"
+          ? {
+              failure: {
+                code: retryValue.failure.code,
+                message: retryValue.failure.message,
+              },
+            }
+          : {}),
+      }
+    : undefined;
+  const resultValue = error.result;
+  const result = isRecord(resultValue) &&
+      typeof resultValue.code === "string" &&
+      typeof resultValue.message === "string"
+    ? {
+        code: resultValue.code,
+        message: resultValue.message,
+        ...(typeof resultValue.operation === "string" ? { operation: resultValue.operation } : {}),
+        ...(typeof resultValue.closedReason === "string" ? { closedReason: resultValue.closedReason } : {}),
+      }
+    : undefined;
+  return {
+    status: "protocol-incompatible",
+    primary: { code: primaryValue.code, message: primaryValue.message },
+    ...(retry === undefined ? {} : { retry }),
+    ...(result === undefined ? {} : { result }),
+  };
+}
+
 export function createProductionConsoleBootstrap(
   options: ProductionConsoleBootstrapOptions = {},
 ): ConsoleBootstrapPort {
@@ -383,7 +441,7 @@ export function createProductionConsoleBootstrap(
         return {
           status: "connected",
           binding: restrictProductionActions(
-            bindConsoleProtocolClient(session.client),
+            bindConsoleProtocolClient(session.client, session.compatibility),
           ),
           credential: session.credential,
           projectId: session.projectId,
@@ -414,7 +472,10 @@ export function createProductionConsoleBootstrap(
             Reflect.apply(openedSession.close, openedSession, []),
           ).catch(() => undefined);
         }
-        return { status: "unavailable", reason: unavailableReason(error) };
+        return protocolIncompatibleResult(error) ?? {
+          status: "unavailable",
+          reason: unavailableReason(error),
+        };
       }
     },
   };

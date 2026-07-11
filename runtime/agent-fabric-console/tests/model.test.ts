@@ -113,7 +113,7 @@ describe("structured Console model", () => {
       "safety-integrity",
     );
 
-    const row = mapProtocolRow("attention", source, Date.parse(observedAt) + 2_500);
+    const row = mapProtocolRow("attention", source, Date.parse(observedAt) + 2_500, "daemon-journal");
 
     expect(row).toMatchObject({
       view: "attention",
@@ -144,6 +144,41 @@ describe("structured Console model", () => {
     expect(JSON.stringify(row)).not.toMatch(/percent|percentage/i);
   });
 
+  it("creates only the explicit unavailable fallback for a valid legacy Attention row", () => {
+    const extended = attentionRow(
+      { itemId: "attention:legacy", itemRevision: 3 },
+      "critical-path",
+    );
+    if (extended.fact.freshness !== "live") throw new Error("expected a live fixture row");
+    const { nativeNotification: _notification, ...legacySummary } = extended.fact.value.summary;
+    const legacy: OperatorViewRow<"attention"> = {
+      ...extended,
+      fact: {
+        ...extended.fact,
+        value: { ...extended.fact.value, summary: legacySummary },
+      },
+    };
+
+    const row = mapProtocolRow(
+      "attention",
+      legacy,
+      Date.parse(observedAt),
+      "legacy-fallback",
+    );
+    expect(row.summary?.kind).toBe("attention");
+    if (row.summary?.kind !== "attention") throw new Error("expected Attention summary");
+    expect(row.summary.nativeNotification).toStrictEqual({
+      kind: "legacy-fallback",
+      status: "unavailable",
+      reason: "feature-not-negotiated",
+    });
+    expect(Object.keys(row.summary.nativeNotification).sort()).toStrictEqual([
+      "kind",
+      "reason",
+      "status",
+    ]);
+  });
+
   it("ranks attention deterministically by binding urgency and stable identity", () => {
     const rows = [
       attentionRow({ itemId: "z-advisory", itemRevision: 1 }, "advisory"),
@@ -158,7 +193,7 @@ describe("structured Console model", () => {
         { itemId: "z-expiring", itemRevision: 1 },
         "expiring-authority",
       ),
-    ].map((row) => mapProtocolRow("attention", row, Date.parse(observedAt)));
+    ].map((row) => mapProtocolRow("attention", row, Date.parse(observedAt), "daemon-journal"));
 
     expect(rankConsoleRows(rows).map(({ stableId }) => stableId)).toStrictEqual([
       "a-safety",
@@ -231,7 +266,7 @@ describe("structured Console model", () => {
       },
     };
 
-    expect(mapProtocolRow("system", unavailable, Date.parse(observedAt))).toMatchObject({
+    expect(mapProtocolRow("system", unavailable, Date.parse(observedAt), "daemon-journal")).toMatchObject({
       stableId: "github",
       summary: null,
       detailRef: null,
@@ -241,7 +276,7 @@ describe("structured Console model", () => {
       },
       freshness: { state: "unavailable", reason: "adapter disabled" },
     });
-    expect(mapProtocolRow("system", conflict, Date.parse(observedAt))).toMatchObject({
+    expect(mapProtocolRow("system", conflict, Date.parse(observedAt), "daemon-journal")).toMatchObject({
       stableId: "daemon",
       summary: null,
       detailRef: null,

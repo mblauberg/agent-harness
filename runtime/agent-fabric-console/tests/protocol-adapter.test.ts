@@ -126,10 +126,80 @@ function fakePort(
 }
 
 function binding(port: ConsoleProtocolPort): ConsoleProtocolBinding {
-  return { ok: true, port, readOnly: true, actions: null };
+  return {
+    ok: true,
+    port,
+    readOnly: true,
+    actions: null,
+    nativeNotificationProjection: "daemon-journal",
+    compatibility: { mode: "current" },
+  };
 }
 
 describe("public protocol adapter", () => {
+  it("maps a valid legacy Attention page to the Console-only unavailable branch", async () => {
+    const port = fakePort({
+      viewPage: vi.fn(async (request): Promise<OperatorViewPageResult> => {
+        if (request.view !== "attention") {
+          return emptyPage(request.view, request.snapshotRevision);
+        }
+        return {
+          status: "page",
+          view: "attention",
+          rows: [{
+            itemId: "attention-legacy",
+            itemRevision: 1,
+            fact: {
+              freshness: "live",
+              source: "fabric",
+              revision: 1,
+              observedAt,
+              value: {
+                summary: {
+                  kind: "attention",
+                  label: "FYI",
+                  priority: "advisory",
+                  title: "Legacy notification state",
+                },
+                detailRef: { kind: "system", componentId: "native", expectedRevision: 1 },
+                actionAvailability: { state: "read-only", reason: "state-ineligible" },
+              },
+            },
+          }],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: request.snapshotRevision,
+          readTransactionId: "legacy-page",
+        };
+      }),
+    });
+    const adapter = new ConsoleProtocolAdapter({
+      binding: {
+        ok: true,
+        port,
+        readOnly: true,
+        actions: null,
+        nativeNotificationProjection: "legacy-fallback",
+        compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
+      },
+      credential,
+      projectId,
+    });
+
+    const loaded = await adapter.open();
+    expect(loaded.connection).toStrictEqual({
+      state: "live",
+      compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
+    });
+    expect(loaded.pages.attention.rows[0]?.summary).toMatchObject({
+      nativeNotification: {
+        kind: "legacy-fallback",
+        status: "unavailable",
+        reason: "feature-not-negotiated",
+      },
+    });
+  });
+
   it("loads one canonical snapshot and all eight cursor-paged views", async () => {
     const calls: Array<{ view: string; cursor: number; revision: number }> = [];
     const port = fakePort({
@@ -205,7 +275,10 @@ describe("public protocol adapter", () => {
 
     const result = await adapter.open();
 
-    expect(result.connection).toStrictEqual({ state: "live" });
+    expect(result.connection).toStrictEqual({
+      state: "live",
+      compatibility: { mode: "current" },
+    });
     expect(result.snapshot?.snapshotRevision).toBe(1);
     expect(result.snapshotRevision).toBe("1");
     expect(result.cursor).toBe(1);
@@ -245,7 +318,10 @@ describe("public protocol adapter", () => {
 
     const result = await adapter.open();
 
-    expect(result.connection).toStrictEqual({ state: "live" });
+    expect(result.connection).toStrictEqual({
+      state: "live",
+      compatibility: { mode: "current" },
+    });
     expect(result.snapshotRevision).toBe("2");
     expect(port.snapshot).toHaveBeenCalledTimes(2);
     expect(
@@ -266,7 +342,14 @@ describe("public protocol adapter", () => {
       }),
     });
     const adapter = new ConsoleProtocolAdapter({
-      binding: { ok: true, port, readOnly: false, actions: {} as never },
+      binding: {
+        ok: true,
+        port,
+        readOnly: false,
+        actions: {} as never,
+        nativeNotificationProjection: "daemon-journal",
+        compatibility: { mode: "current" },
+      },
       credential,
       projectId,
     });
@@ -284,6 +367,45 @@ describe("public protocol adapter", () => {
       reason: "transport-failure",
     });
     expect(JSON.stringify(degraded)).not.toContain("secret-never-render");
+  });
+
+  it("turns result-shape incompatibility into a connection failure without cached rows", async () => {
+    const port = fakePort();
+    const adapter = new ConsoleProtocolAdapter({
+      binding: binding(port),
+      credential,
+      projectId,
+    });
+    const current = await adapter.open();
+    expect(current.snapshot).not.toBeNull();
+    vi.mocked(port.events).mockRejectedValueOnce(Object.assign(
+      new Error("incompatible projection"),
+      {
+        code: "PROTOCOL_INCOMPATIBLE",
+        cause: {
+          operation: "fabric.v1.operator-projection.snapshot",
+          reason: "missing-negotiated-field",
+        },
+      },
+    ));
+
+    const rejected = await adapter.poll();
+
+    expect(rejected.connection).toStrictEqual({
+      state: "protocol-incompatible",
+      code: "PROTOCOL_INCOMPATIBLE",
+      message: "incompatible projection",
+      operation: "fabric.v1.operator-projection.snapshot",
+      closedReason: "missing-negotiated-field",
+      primary: {
+        code: "PROTOCOL_INCOMPATIBLE",
+        message: "incompatible projection",
+      },
+    });
+    expect(rejected.snapshot).toBeNull();
+    expect(rejected.pages.attention.rows).toStrictEqual([]);
+    expect(rejected.canMutate).toBe(false);
+    expect(adapter.actionClient).toBeNull();
   });
 
   it("resumes from the durable cursor and reloads on opaque committed events", async () => {
@@ -324,6 +446,87 @@ describe("public protocol adapter", () => {
     expect(refreshed.snapshotRevision).toBe("4");
     expect(refreshed.cursor).toBe(41);
     expect(port.snapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("resnapshots an eventless revision change and observes the notification transition", async () => {
+    const snapshots = [snapshot(7, 70), snapshot(8, 70)];
+    const pageRevision = { value: 7 };
+    const port = fakePort({
+      snapshot: vi.fn(async () => {
+        const next = snapshots.shift() ?? snapshot(8, 70);
+        pageRevision.value = next.snapshotRevision;
+        return next;
+      }),
+      events: vi.fn(async (): Promise<ProjectionEventsResult> => ({
+        status: "continuation",
+        events: [],
+        nextCursor: 70,
+        hasMore: false,
+        snapshotRevision: 8,
+        readTransactionId: "events-eventless-8",
+      })),
+      viewPage: vi.fn(async (request): Promise<OperatorViewPageResult> => {
+        if (request.view !== "attention") return emptyPage(request.view, request.snapshotRevision);
+        const terminal = pageRevision.value === 8;
+        return {
+          status: "page",
+          view: "attention",
+          rows: [{
+            itemId: "attention-eventless",
+            itemRevision: 2,
+            fact: {
+              freshness: "live",
+              source: "fabric",
+              revision: 2,
+              observedAt,
+              value: {
+                summary: {
+                  kind: "attention",
+                  label: "FYI",
+                  priority: "advisory",
+                  title: "Delivery transition",
+                  nativeNotification: {
+                    targetIntegration: "native-desktop",
+                    status: "available",
+                    journalState: terminal ? "sent" : "pending",
+                    deliveryItemRevision: 2,
+                    claimGeneration: terminal ? 2 : 1,
+                    integrationState: "available",
+                    observedAt,
+                  },
+                },
+                detailRef: { kind: "system", componentId: "native", expectedRevision: 2 },
+                actionAvailability: { state: "read-only", reason: "state-ineligible" },
+              },
+            },
+          }],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: request.snapshotRevision,
+          readTransactionId: `attention-${String(request.snapshotRevision)}`,
+        };
+      }),
+    });
+    const adapter = new ConsoleProtocolAdapter({
+      binding: binding(port),
+      credential,
+      projectId,
+    });
+
+    const initial = await adapter.open();
+    const refreshed = await adapter.poll();
+    const initialNotification = initial.pages.attention.rows[0]?.summary?.kind === "attention"
+      ? initial.pages.attention.rows[0].summary.nativeNotification
+      : null;
+    const refreshedNotification = refreshed.pages.attention.rows[0]?.summary?.kind === "attention"
+      ? refreshed.pages.attention.rows[0].summary.nativeNotification
+      : null;
+
+    expect(initialNotification).toMatchObject({ kind: "daemon-journal", journalState: "pending" });
+    expect(refreshedNotification).toMatchObject({ kind: "daemon-journal", journalState: "sent" });
+    expect(port.events).toHaveBeenCalledTimes(1);
+    expect(port.snapshot).toHaveBeenCalledTimes(2);
+    expect(refreshed.cursor).toBe(70);
   });
 
   it("fails closed when the negotiated client lacks the Console feature surface", async () => {

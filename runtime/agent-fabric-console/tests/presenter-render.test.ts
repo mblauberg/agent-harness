@@ -30,6 +30,7 @@ import {
 } from "../src/model.js";
 import { presentFabricConsole } from "../src/presenter.js";
 import type { FabricConsoleDataset } from "../src/protocol-adapter.js";
+import { renderConsoleSnapshot } from "../src/snapshot.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digestA = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
@@ -118,6 +119,7 @@ function richDataset(
           priority: "safety-integrity",
           title: "Approve quarantine recovery",
           nativeNotification: {
+            kind: "daemon-journal",
             targetIntegration: "native-desktop",
             status: "stale",
             journalState: "ambiguous",
@@ -138,6 +140,7 @@ function richDataset(
           priority: "advisory",
           title: "Routine evaluation complete",
           nativeNotification: {
+            kind: "daemon-journal",
             targetIntegration: "native-desktop",
             status: "unavailable",
             journalState: "missing",
@@ -226,7 +229,7 @@ function richDataset(
     ]),
   ) as never;
   return {
-    connection: { state: "live" },
+    connection: { state: "live", compatibility: { mode: "current" } },
     snapshot: {
       schemaVersion: 1,
       snapshotRevision,
@@ -559,7 +562,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
     (status, journalState) => {
       const dataset = richDataset();
       const first = dataset.pages.attention.rows[0];
-      if (first?.summary?.kind !== "attention") {
+      if (
+        first?.summary?.kind !== "attention" ||
+        first.summary.nativeNotification.kind !== "daemon-journal"
+      ) {
         throw new Error("expected attention fixture");
       }
       const notification = {
@@ -637,6 +643,82 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect(projected).toStrictEqual(datasetBefore);
     },
   );
+
+  it("renders and exports legacy notification state without synthetic journal observations", () => {
+    const dataset = richDataset();
+    const first = dataset.pages.attention.rows[0];
+    if (first?.summary?.kind !== "attention") throw new Error("expected Attention fixture");
+    const legacyRow: ConsoleRow<"attention"> = {
+      ...first,
+      summary: {
+        ...first.summary,
+        nativeNotification: {
+          kind: "legacy-fallback",
+          status: "unavailable",
+          reason: "feature-not-negotiated",
+        },
+      },
+    };
+    const legacy: FabricConsoleDataset = {
+      ...dataset,
+      connection: {
+        state: "live",
+        compatibility: {
+          mode: "legacy-compatibility",
+          profile: "strict-v1",
+          primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
+        },
+      },
+      pages: {
+        ...dataset.pages,
+        attention: {
+          ...dataset.pages.attention,
+          rows: [legacyRow, ...dataset.pages.attention.rows.slice(1)],
+        },
+      },
+    };
+    const state = controllerState();
+    const ui = createFabricUiState();
+    const presentation = presentFabricConsole(legacy, state, ui, { columns: 80, rows: 24 });
+
+    expect(presentation.connection).toBe("LEGACY-COMPATIBILITY");
+    expect(presentation.masterRows[0]?.secondary).toContain(
+      "notify unavailable/feature-not-negotiated",
+    );
+    expect(presentation.detail?.lines).toEqual(expect.arrayContaining([{
+      label: "Native notification",
+      value: "unavailable | feature-not-negotiated",
+    }]));
+    expect(presentation.detail?.lines.some((line) => line.label === "Notification basis")).toBe(false);
+
+    const exported = JSON.parse(renderConsoleSnapshot({
+      dataset: legacy,
+      controller: state,
+      ui,
+      viewport: { columns: 80, rows: 24 },
+    }, "json")) as {
+      connection: string;
+      connectionDetail: FabricConsoleDataset["connection"];
+      views: { attention: { rows: readonly { secondary: string }[]; detail: { lines: readonly { label: string; value: string }[] } } };
+    };
+    expect(exported.connection).toBe("LEGACY-COMPATIBILITY");
+    expect(exported.connectionDetail).toMatchObject({
+      state: "live",
+      compatibility: {
+        mode: "legacy-compatibility",
+        primary: { code: "PROTOCOL_INVALID" },
+      },
+    });
+    expect(exported.views.attention.rows[0]?.secondary).toContain("feature-not-negotiated");
+    const notificationLines = exported.views.attention.detail.lines.filter((line) =>
+      line.label.startsWith("Notification") || line.label === "Native notification"
+    );
+    expect(notificationLines).toStrictEqual([{
+      label: "Native notification",
+      value: "unavailable | feature-not-negotiated",
+    }]);
+    expect(JSON.stringify(notificationLines)).not.toMatch(/journal|timestamp|observed|delivery|claim|integration|\b0\b/iu);
+  });
 
   it("uses a full-frame Review containing every consequential binding", () => {
     const presentation = presentFabricConsole(

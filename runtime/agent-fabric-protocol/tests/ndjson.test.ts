@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BoundedNdjsonReader,
+  FABRIC_OPERATIONS,
   NdjsonRpcTransport,
   ProtocolTransportError,
 } from "../src/index.js";
@@ -93,7 +94,106 @@ class ProtocolLoopback extends Duplex {
   }
 }
 
+class ProjectionShapeLoopback extends Duplex {
+  #buffer = "";
+
+  override _read(): void {}
+
+  override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+    this.#buffer += chunk.toString("utf8");
+    let newline = this.#buffer.indexOf("\n");
+    while (newline >= 0) {
+      const request = JSON.parse(this.#buffer.slice(0, newline)) as {
+        id: string;
+        operation: string;
+        input: { authentication?: { clientNonce?: string }; snapshotRevision?: number };
+      };
+      this.#buffer = this.#buffer.slice(newline + 1);
+      const result = request.operation === "initialize"
+        ? {
+            protocolVersion: 1,
+            daemonVersion: "0.2.0",
+            daemonInstanceGeneration: 1,
+            principal: {
+              kind: "operator",
+              operatorId: "operator_01",
+              projectId: "project_01",
+              projectAuthorityGeneration: 1,
+              principalGeneration: 1,
+            },
+            clientNonce: request.input.authentication?.clientNonce,
+            connectionNonce: "connection_01",
+            features: ["operator-projection.v2", "native-notification-projection.v1"],
+            allowedOperations: [FABRIC_OPERATIONS.projectionViewPage],
+            limits: {
+              maximumFrameBytes: 1048576,
+              maximumPendingCalls: 32,
+              maximumInFlightPerConnection: 16,
+              idleTimeoutMs: 300000,
+              requestTimeoutMs: 30000,
+            },
+          }
+        : {
+            status: "page",
+            view: "attention",
+            rows: [{
+              itemId: "attention_01",
+              itemRevision: 1,
+              fact: {
+                freshness: "live",
+                source: "fabric",
+                revision: 1,
+                observedAt: "2026-07-11T10:00:00Z",
+                value: {
+                  summary: {
+                    kind: "attention",
+                    label: "Decision",
+                    priority: "critical-path",
+                    title: "Choose",
+                  },
+                  detailRef: { kind: "task", taskId: "task_01", expectedRevision: 1 },
+                  actionAvailability: { state: "read-only", reason: "feature-unavailable" },
+                },
+              },
+            }],
+            nextCursor: 1,
+            hasMore: false,
+            snapshotRevision: request.input.snapshotRevision,
+            readTransactionId: "read_01",
+          };
+      this.push(`${JSON.stringify({ id: request.id, operation: request.operation, ok: true, result })}\n`);
+      newline = this.#buffer.indexOf("\n");
+    }
+    callback();
+  }
+}
+
 describe("negotiated NDJSON RPC transport", () => {
+  it("terminates the whole connection on a negotiated notification shape violation", async () => {
+    const stream = new ProjectionShapeLoopback();
+    const transport = await NdjsonRpcTransport.connect(stream, {
+      protocolVersion: 1,
+      client: { name: "test", version: "1.0.0" },
+      authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+      expectedPrincipalKind: "operator",
+      requiredFeatures: ["operator-projection.v2"],
+      optionalFeatures: ["native-notification-projection.v1"],
+    });
+    const request = {
+      credential: { capabilityId: "capability_01", token: "operator-secret-0001" },
+      projectId: "project_01",
+      view: "attention" as const,
+      snapshotRevision: 1,
+      cursor: 0,
+      limit: 10,
+    };
+
+    await expect(transport.call(FABRIC_OPERATIONS.projectionViewPage, request as never))
+      .rejects.toMatchObject({ code: "PROTOCOL_INCOMPATIBLE" });
+    await expect(transport.call(FABRIC_OPERATIONS.projectionViewPage, request as never))
+      .rejects.toMatchObject({ code: "PROTOCOL_INCOMPATIBLE" });
+  });
+
   it("handshakes before exposing negotiated features", async () => {
     const stream = new ProtocolLoopback();
 

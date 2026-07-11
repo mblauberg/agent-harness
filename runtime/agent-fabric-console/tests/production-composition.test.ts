@@ -85,7 +85,7 @@ function dataset(): FabricConsoleDataset {
     stateDigest: digest,
   };
   return {
-    connection: { state: "live" },
+    connection: { state: "live", compatibility: { mode: "current" } },
     snapshot,
     snapshotRevision: revisionFromProtocol(11),
     cursor: 0,
@@ -420,7 +420,12 @@ describe("production Console package-root bootstrap", () => {
     const clientId = "console_client_production" as never;
     const client = {
       kind: "operator",
-      features: ["operator-projection.v1", "operator-projection.v2", "scoped-gate-read.v1"],
+      features: [
+        "operator-projection.v1",
+        "operator-projection.v2",
+        "scoped-gate-read.v1",
+        "native-notification-projection.v1",
+      ],
       projection: {
         snapshot: async () => dataset().snapshot,
         events: async () => ({
@@ -454,6 +459,7 @@ describe("production Console package-root bootstrap", () => {
       loadFabric: async () => ({
         openLocalOperatorConsoleSession: async () => ({
           client,
+          compatibility: { mode: "current" },
           credential,
           projectId,
           projectSessionId,
@@ -496,7 +502,12 @@ describe("production Console package-root bootstrap", () => {
         openLocalOperatorConsoleSession: async () => ({
           client: {
             kind: "operator",
-            features: ["operator-projection.v1", "operator-projection.v2", "scoped-gate-read.v1"],
+            features: [
+              "operator-projection.v1",
+              "operator-projection.v2",
+              "scoped-gate-read.v1",
+              "native-notification-projection.v1",
+            ],
             projection: {
               snapshot: async () => dataset().snapshot,
               events: async () => { throw new Error("unused"); },
@@ -558,6 +569,7 @@ describe("production Console package-root bootstrap", () => {
             operations: {},
             close,
           },
+          compatibility: { mode: "current" },
           credential,
           projectId,
           projectSessionId,
@@ -622,12 +634,48 @@ describe("production Console package-root bootstrap", () => {
     })).resolves.toStrictEqual({ status: "unavailable", reason: expected });
   });
 
+  it("preserves protocol incompatibility and retry evidence as a connection-level bootstrap result", async () => {
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => {
+          throw Object.assign(new Error("Console protocol incompatible"), {
+            code: "CONSOLE_PROTOCOL_INCOMPATIBLE",
+            primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
+            retry: { status: "succeeded", profile: "strict-v1" },
+            result: {
+              code: "PROTOCOL_INCOMPATIBLE",
+              message: "unnegotiated notification field",
+              operation: "fabric.v1.operator-projection.snapshot",
+              closedReason: "unnegotiated-field",
+            },
+          });
+        },
+      }),
+    });
+
+    await expect(bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    })).resolves.toStrictEqual({
+      status: "protocol-incompatible",
+      primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
+      retry: { status: "succeeded", profile: "strict-v1" },
+      result: {
+        code: "PROTOCOL_INCOMPATIBLE",
+        message: "unnegotiated notification field",
+        operation: "fabric.v1.operator-projection.snapshot",
+        closedReason: "unnegotiated-field",
+      },
+    });
+  });
+
   it("closes an attached public session when protocol binding fails", async () => {
     let closeCount = 0;
     const bootstrap = createProductionConsoleBootstrap({
       loadFabric: async () => ({
         openLocalOperatorConsoleSession: async () => ({
           client: { features: {} },
+          compatibility: { mode: "current" },
           credential,
           projectId,
           operatorId: "operator_console_production",

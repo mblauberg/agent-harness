@@ -22,6 +22,7 @@ import {
 import {
   ConsoleProtocolAdapter,
   createBootstrapUnavailableDataset,
+  createProtocolIncompatibleDataset,
   type BootstrapUnavailableReason,
   type ConsoleProtocolBinding,
   type FabricConsoleDataset,
@@ -59,6 +60,21 @@ export type ConsoleBootstrapResult =
   | Readonly<{
       status: "unavailable";
       reason: BootstrapUnavailableReason;
+    }>
+  | Readonly<{
+      status: "protocol-incompatible";
+      primary: Readonly<{ code: string; message: string }>;
+      retry?: Readonly<{
+        status: "succeeded" | "failed";
+        profile: "strict-v1";
+        failure?: Readonly<{ code: string; message: string }>;
+      }>;
+      result?: Readonly<{
+        code: string;
+        message: string;
+        operation?: string;
+        closedReason?: string;
+      }>;
     }>;
 
 export type ConsoleBootstrapPort = Readonly<{
@@ -537,6 +553,9 @@ async function openConsoleApplicationConnection(
   let workflowPlanner: ConsoleWorkflowPlanner | undefined;
   if (bootstrap.status === "unavailable") {
     dataset = createBootstrapUnavailableDataset(bootstrap.reason);
+    controller = new ReadOnlyProjectionController(dataset);
+  } else if (bootstrap.status === "protocol-incompatible") {
+    dataset = createProtocolIncompatibleDataset(bootstrap);
     controller = new ReadOnlyProjectionController(dataset);
   } else {
     connected = bootstrap;

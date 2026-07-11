@@ -5,7 +5,11 @@ import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 
 import {
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   NdjsonRpcTransport,
+  ProtocolRemoteError,
+  ProtocolResultShapeError,
+  ProtocolTransportError,
   createOperatorClient,
   type CommandId,
   type NegotiatedOperatorClient,
@@ -44,11 +48,11 @@ const SESSION_ACTIONS = [
   "stop",
 ] as const satisfies readonly NonTakeoverOperatorAction[];
 const NON_ATTACHABLE_SESSION_STATES = new Set(["closed", "cancelled", "launch_failed"]);
-const REQUIRED_FEATURES = [
+const REQUIRED_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "operator-control.v1",
   "operator-projection.v1",
-] as const satisfies readonly ProtocolFeature[];
-const OPTIONAL_FEATURES = [
+] as const satisfies readonly ProtocolFeature[]);
+export const STRICT_V1_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "project-sessions.v1",
   "operator-projection.v2",
   "scoped-gate-read.v1",
@@ -59,7 +63,11 @@ const OPTIONAL_FEATURES = [
   "operator-repository-read.v1",
   "lifecycle-control.v1",
   "launch-custody.v1",
-] as const satisfies readonly ProtocolFeature[];
+] as const satisfies readonly ProtocolFeature[]);
+const OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  ...STRICT_V1_OPTIONAL_FEATURES,
+]);
 
 export type LocalOperatorConsoleUnavailableReason =
   | "configuration-missing"
@@ -85,6 +93,50 @@ export class LocalOperatorConsoleUnavailableError extends Error {
   }
 }
 
+export type LocalOperatorConsoleCompatibility =
+  | Readonly<{ mode: "current" }>
+  | Readonly<{
+      mode: "legacy-compatibility";
+      primary: ProtocolFailureAnnotation;
+      retry: Readonly<{ status: "succeeded"; profile: "strict-v1" }>;
+    }>;
+
+export type ProtocolFailureAnnotation = Readonly<{
+  code: string;
+  message: string;
+}>;
+
+type CompatibilityRetryAnnotation =
+  | Readonly<{ status: "succeeded"; profile: "strict-v1" }>
+  | Readonly<{
+      status: "failed";
+      profile: "strict-v1";
+      failure: ProtocolFailureAnnotation;
+    }>;
+
+export class LocalOperatorConsoleProtocolIncompatibleError extends Error {
+  readonly code = "CONSOLE_PROTOCOL_INCOMPATIBLE" as const;
+  readonly primary: ProtocolFailureAnnotation;
+  readonly retry: CompatibilityRetryAnnotation | undefined;
+  readonly result: (ProtocolFailureAnnotation & {
+    operation?: string;
+    closedReason?: string;
+  }) | undefined;
+
+  constructor(input: Readonly<{
+    primary: ProtocolFailureAnnotation;
+    retry?: CompatibilityRetryAnnotation;
+    result?: ProtocolFailureAnnotation & { operation?: string; closedReason?: string };
+    cause: Error;
+  }>) {
+    super(`local Console protocol incompatible: ${input.primary.message}`, { cause: input.cause });
+    this.name = "LocalOperatorConsoleProtocolIncompatibleError";
+    this.primary = input.primary;
+    this.retry = input.retry;
+    this.result = input.result;
+  }
+}
+
 export type LocalOperatorConsoleSessionOptions = Readonly<{
   projectRoot: string;
   surface: "standalone" | "herdr";
@@ -107,6 +159,7 @@ export type LocalOperatorConsoleSessionOptions = Readonly<{
 
 export type LocalOperatorConsoleSession = Readonly<{
   client: NegotiatedOperatorClient;
+  compatibility: LocalOperatorConsoleCompatibility;
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
   operatorId: OperatorId;
@@ -218,28 +271,90 @@ function defaultDaemonOptions(
   };
 }
 
-async function operatorClient(
-  socketPath: string,
-  credentialValue: OperatorCapabilityCredential,
-  surface: "standalone" | "herdr",
-): Promise<NegotiatedOperatorClient> {
-  const initialize: ProtocolInitializeRequest = {
+function protocolFailureAnnotation(error: Error): ProtocolFailureAnnotation {
+  const code = "code" in error && typeof error.code === "string" ? error.code : error.name;
+  return { code, message: error.message };
+}
+
+function operatorInitializeRequest(input: Readonly<{
+  credential: OperatorCapabilityCredential;
+  surface: "standalone" | "herdr";
+  optionalFeatures: readonly ProtocolFeature[];
+}>): ProtocolInitializeRequest {
+  return {
     protocolVersion: 1,
-    client: { name: `agent-fabric-console-${surface}`, version: "0.1.0" },
+    client: { name: `agent-fabric-console-${input.surface}`, version: "0.1.0" },
     authentication: {
       scheme: "capability",
-      credential: credentialValue.token,
+      credential: input.credential.token,
       clientNonce: `console_${randomUUID()}`,
     },
     expectedPrincipalKind: "operator",
     requiredFeatures: REQUIRED_FEATURES,
-    optionalFeatures: OPTIONAL_FEATURES,
+    optionalFeatures: input.optionalFeatures,
   };
-  const transport = await NdjsonRpcTransport.connect(
-    createConnection(socketPath),
-    initialize,
-  );
-  return createOperatorClient(transport);
+}
+
+export async function connectLocalOperatorConsoleClient(input: Readonly<{
+  socketPath: string;
+  credential: OperatorCapabilityCredential;
+  surface: "standalone" | "herdr";
+}>): Promise<Readonly<{
+  client: NegotiatedOperatorClient;
+  compatibility: LocalOperatorConsoleCompatibility;
+}>> {
+  const connect = async (optionalFeatures: readonly ProtocolFeature[]): Promise<NegotiatedOperatorClient> => {
+    const transport = await NdjsonRpcTransport.connect(
+      createConnection(input.socketPath),
+      operatorInitializeRequest({ ...input, optionalFeatures }),
+    );
+    return createOperatorClient(transport);
+  };
+  try {
+    return { client: await connect(OPTIONAL_FEATURES), compatibility: { mode: "current" } };
+  } catch (primary: unknown) {
+    if (!(primary instanceof ProtocolRemoteError) || primary.code !== "PROTOCOL_INVALID") throw primary;
+    try {
+      return {
+        client: await connect(STRICT_V1_OPTIONAL_FEATURES),
+        compatibility: {
+          mode: "legacy-compatibility",
+          primary: protocolFailureAnnotation(primary),
+          retry: { status: "succeeded", profile: "strict-v1" },
+        },
+      };
+    } catch (retry: unknown) {
+      const retryError = retry instanceof Error ? retry : new Error(String(retry));
+      throw new LocalOperatorConsoleProtocolIncompatibleError({
+        primary: protocolFailureAnnotation(primary),
+        retry: {
+          status: "failed",
+          profile: "strict-v1",
+          failure: protocolFailureAnnotation(retryError),
+        },
+        cause: primary,
+      });
+    }
+  }
+}
+
+function resultProtocolIncompatible(
+  error: ProtocolTransportError,
+  compatibility: LocalOperatorConsoleCompatibility | undefined,
+): LocalOperatorConsoleProtocolIncompatibleError {
+  const shape = error.cause instanceof ProtocolResultShapeError ? error.cause : undefined;
+  const result = {
+    ...protocolFailureAnnotation(error),
+    ...(shape === undefined ? {} : { operation: shape.operation, closedReason: shape.reason }),
+  };
+  return new LocalOperatorConsoleProtocolIncompatibleError({
+    primary: compatibility?.mode === "legacy-compatibility"
+      ? compatibility.primary
+      : protocolFailureAnnotation(error),
+    ...(compatibility?.mode === "legacy-compatibility" ? { retry: compatibility.retry } : {}),
+    result,
+    cause: error,
+  });
 }
 
 function selectedSession(
@@ -442,6 +557,7 @@ export async function openLocalOperatorConsoleSession(
 
   let privateClient: FabricDaemonClient | undefined;
   let publicClient: NegotiatedOperatorClient | undefined;
+  let publicCompatibility: LocalOperatorConsoleCompatibility | undefined;
   try {
     privateClient = await FabricDaemonClient.connect(
       daemon.address.path,
@@ -454,11 +570,13 @@ export async function openLocalOperatorConsoleSession(
       now(),
       credentialLifetimeMs,
     );
-    publicClient = await operatorClient(
-      daemon.address.path,
-      project.credential as OperatorCapabilityCredential,
-      options.surface,
-    );
+    const projectConnection = await connectLocalOperatorConsoleClient({
+      socketPath: daemon.address.path,
+      credential: project.credential as OperatorCapabilityCredential,
+      surface: options.surface,
+    });
+    publicClient = projectConnection.client;
+    publicCompatibility = projectConnection.compatibility;
     const selected = await discoverSelectedSession({
       client: publicClient,
       credential: project.credential as OperatorCapabilityCredential,
@@ -477,11 +595,13 @@ export async function openLocalOperatorConsoleSession(
         credentialLifetimeMs,
       );
       await publicClient.close();
-      publicClient = await operatorClient(
-        daemon.address.path,
-        issued.credential as OperatorCapabilityCredential,
-        options.surface,
-      );
+      const sessionConnection = await connectLocalOperatorConsoleClient({
+        socketPath: daemon.address.path,
+        credential: issued.credential as OperatorCapabilityCredential,
+        surface: options.surface,
+      });
+      publicClient = sessionConnection.client;
+      publicCompatibility = sessionConnection.compatibility;
       activeCredential = issued.credential as OperatorCapabilityCredential;
       activeCredentialExpiresAt = issued.expiresAt;
     }
@@ -550,6 +670,7 @@ export async function openLocalOperatorConsoleSession(
     });
     return {
       client: publicClient,
+      compatibility: publicCompatibility ?? { mode: "current" },
       credential: activeCredential,
       projectId,
       operatorId,
@@ -564,7 +685,13 @@ export async function openLocalOperatorConsoleSession(
       privateClient?.close() ?? Promise.resolve(),
       publicClient?.close() ?? Promise.resolve(),
     ]);
-    if (error instanceof LocalOperatorConsoleUnavailableError) throw error;
+    if (
+      error instanceof LocalOperatorConsoleUnavailableError ||
+      error instanceof LocalOperatorConsoleProtocolIncompatibleError
+    ) throw error;
+    if (error instanceof ProtocolTransportError && error.code === "PROTOCOL_INCOMPATIBLE") {
+      throw resultProtocolIncompatible(error, publicCompatibility);
+    }
     throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
   }
 }

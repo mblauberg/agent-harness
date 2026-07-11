@@ -1,11 +1,15 @@
 import { mkdtemp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   FABRIC_OPERATIONS,
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  NdjsonRpcTransport,
+  createOperatorClient,
   type OperatorMutationContext,
 } from "@local/agent-fabric-protocol";
 
@@ -14,7 +18,10 @@ import {
   startFabricDaemon,
   type FabricDaemonHandle,
 } from "../../../src/index.ts";
-import { openLocalOperatorConsoleSession } from "../../../src/operator/local-console-session.ts";
+import {
+  STRICT_V1_OPTIONAL_FEATURES,
+  openLocalOperatorConsoleSession,
+} from "../../../src/operator/local-console-session.ts";
 import { runWorkspaceTrust } from "../../../src/cli/workspace-trust.ts";
 
 const roots: string[] = [];
@@ -125,6 +132,8 @@ describe("public local operator Console session", () => {
     expect(otherProject.projectId).not.toBe(first.projectId);
     expect(first.projectSessionId).toBeUndefined();
     expect(first.client.console?.readOnly).toBe(true);
+    expect(first.compatibility).toEqual({ mode: "current" });
+    expect(first.client.features).toContain(NATIVE_NOTIFICATION_PROJECTION_FEATURE);
 
     await Promise.all([
       first.detach({ reason: "operator" }),
@@ -196,6 +205,27 @@ describe("public local operator Console session", () => {
     });
     await project.close();
 
+    const seed = await import("better-sqlite3").then(({ default: Database }) =>
+      new Database(paths.databasePath, { fileMustExist: true }),
+    );
+    try {
+      seed.prepare(`
+        INSERT INTO attention_items(
+          item_id, project_session_id, coordination_run_id, kind, severity,
+          revision, state, dedupe_key, payload_json, created_at, updated_at
+        ) VALUES (?, ?, NULL, 'approval', 'critical', 1, 'open', ?, ?, ?, ?)
+      `).run(
+        "attention_console_compatibility_01",
+        "session_console_existing_01",
+        "attention:console:compatibility:01",
+        JSON.stringify({ title: "Compatibility status" }),
+        Date.parse("2027-01-01T00:00:00Z"),
+        Date.parse("2027-01-01T00:00:00Z"),
+      );
+    } finally {
+      seed.close();
+    }
+
     const [first, replay] = await Promise.all([
       openLocalOperatorConsoleSession({
         projectRoot: projectA,
@@ -224,6 +254,50 @@ describe("public local operator Console session", () => {
     expect(first.client.projectSessions?.transition).toBeTypeOf("function");
     expect(first.client.projectSessions?.close).toBeTypeOf("function");
     expect(first.client.console?.launchAvailable).toBe(true);
+    const selectedSessionId = first.projectSessionId;
+    if (selectedSessionId === undefined) throw new Error("expected selected session");
+    const currentSnapshot = await first.client.projection?.snapshot({
+      credential: first.credential,
+      projectId: first.projectId,
+      projectSessionId: selectedSessionId,
+    });
+    expect(currentSnapshot?.attention).toMatchObject({
+      value: [{
+        itemId: "attention_console_compatibility_01",
+        nativeNotification: expect.any(Object),
+      }],
+    });
+
+    const legacyTransport = await NdjsonRpcTransport.connect(
+      createConnection(paths.socketPath),
+      {
+        protocolVersion: 1,
+        client: { name: "frozen-pre-notification-client", version: "af548f8" },
+        authentication: {
+          scheme: "capability",
+          credential: first.credential.token,
+          clientNonce: "legacy_client_new_daemon_nonce_01",
+        },
+        expectedPrincipalKind: "operator",
+        requiredFeatures: ["operator-control.v1", "operator-projection.v1"],
+        optionalFeatures: STRICT_V1_OPTIONAL_FEATURES,
+      },
+    );
+    try {
+      const legacyClient = createOperatorClient(legacyTransport);
+      const legacySnapshot = await legacyClient.projection?.snapshot({
+        credential: first.credential,
+        projectId: first.projectId,
+        projectSessionId: selectedSessionId,
+      });
+      expect(legacySnapshot?.attention).toMatchObject({
+        value: [{ itemId: "attention_console_compatibility_01" }],
+      });
+      expect(legacySnapshot).not.toHaveProperty("attention.value.0.nativeNotification");
+      await legacyClient.close();
+    } finally {
+      await legacyTransport.close();
+    }
     await Promise.all([first.close(), replay.close()]);
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],

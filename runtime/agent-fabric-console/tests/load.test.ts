@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { hostname, platform, release } from "node:os";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -29,10 +30,12 @@ import {
 } from "../src/model.js";
 import { createFabricUiState } from "../src/presenter.js";
 import { TerminalInputDecoder } from "../src/input.js";
+import { startConsoleRefreshLoop } from "../src/cli.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digest = (`sha256:${"e".repeat(64)}`) as Sha256Digest;
 const nativeNotification = {
+  kind: "daemon-journal",
   targetIntegration: "native-desktop",
   status: "available",
   journalState: "sent",
@@ -80,7 +83,10 @@ function largeFixture(count: number) {
   );
   const empty = createEmptyViewPages();
   const dataset = {
-    connection: { state: "live" as const },
+    connection: {
+      state: "live" as const,
+      compatibility: { mode: "current" as const },
+    },
     snapshot: {
       schemaVersion: 1 as const,
       snapshotRevision: 11,
@@ -271,7 +277,14 @@ describe("Console bounded load gates", () => {
       readArtifactContent: null,
     };
     const adapter = new ConsoleProtocolAdapter({
-      binding: { ok: true, port, readOnly: true, actions: null },
+      binding: {
+        ok: true,
+        port,
+        readOnly: true,
+        actions: null,
+        nativeNotificationProjection: "daemon-journal",
+        compatibility: { mode: "current" },
+      },
       credential,
       projectId,
       maxPagesPerView: 3,
@@ -286,4 +299,209 @@ describe("Console bounded load gates", () => {
     });
     expect(viewPage).toHaveBeenCalledTimes(3);
   });
+
+  it("bounds the exact eventless notification churn workload", async () => {
+    const rowCount = 1_000;
+    const transactionCount = 200;
+    const transitionsPerTransaction = 10;
+    const pollTicks = 20;
+    const pollIntervalMs = 500;
+    const credential = {
+      capabilityId: "capability-churn",
+      token: "token-churn-never-render",
+    } as OperatorCapabilityCredential;
+    const projectId = "project-churn" as ProjectId;
+    const journalStates = Array.from({ length: rowCount }, () => "pending" as "pending" | "sent");
+    let revision = 1;
+    let transactionIndex = 0;
+    let transitionIndex = 0;
+    let snapshotCalls = 0;
+    let activeRefreshes = 0;
+    let maximumConcurrentRefreshes = 0;
+    let completedRefreshes = 0;
+    const refreshLatencies: number[] = [];
+    const baseSnapshot = largeFixture(0).dataset.snapshot as OperatorProjectionSnapshot;
+    const port: ConsoleProtocolPort = {
+      snapshot: async () => {
+        snapshotCalls += 1;
+        return { ...baseSnapshot, snapshotRevision: revision, cursor: 0 };
+      },
+      events: async () => ({
+        status: "continuation",
+        events: [],
+        nextCursor: 0,
+        hasMore: false,
+        snapshotRevision: revision,
+        readTransactionId: `churn-events-${String(revision)}`,
+      }),
+      viewPage: async (request) => {
+        if (request.view !== "attention") {
+          return {
+            status: "page",
+            view: request.view,
+            rows: [],
+            nextCursor: 0,
+            hasMore: false,
+            snapshotRevision: request.snapshotRevision,
+            readTransactionId: `churn-${request.view}-${String(revision)}`,
+          } as OperatorViewPageResult;
+        }
+        const end = Math.min(request.cursor + request.limit, rowCount);
+        const rows = Array.from({ length: end - request.cursor }, (_, offset) => {
+          const index = request.cursor + offset;
+          const itemRevision = index + 1;
+          return {
+            itemId: `attention-churn-${String(index).padStart(4, "0")}`,
+            itemRevision,
+            fact: {
+              freshness: "live" as const,
+              source: "fabric" as const,
+              revision: itemRevision,
+              observedAt: timestamp,
+              value: {
+                summary: {
+                  kind: "attention" as const,
+                  label: "FYI" as const,
+                  priority: "advisory" as const,
+                  title: `Churn row ${String(index)}`,
+                  nativeNotification: {
+                    targetIntegration: "native-desktop" as const,
+                    status: "available" as const,
+                    journalState: journalStates[index] ?? "pending",
+                    deliveryItemRevision: itemRevision,
+                    claimGeneration: 1,
+                    integrationState: "available" as const,
+                    observedAt: timestamp,
+                  },
+                },
+                detailRef: {
+                  kind: "system" as const,
+                  componentId: `native-${String(index)}`,
+                  expectedRevision: itemRevision,
+                },
+                actionAvailability: {
+                  state: "read-only" as const,
+                  reason: "state-ineligible" as const,
+                },
+              },
+            },
+          };
+        });
+        return {
+          status: "page",
+          view: "attention",
+          rows,
+          nextCursor: end,
+          hasMore: end < rowCount,
+          snapshotRevision: request.snapshotRevision,
+          readTransactionId: `churn-attention-${String(revision)}`,
+        };
+      },
+      readDetail: async () => ({
+        status: "resnapshot-required",
+        reason: "snapshot-mismatch",
+        currentSnapshotRevision: revision,
+      }),
+      readGate: async () => { throw new Error("unused"); },
+      readMessageBody: null,
+      readRepository: null,
+      readArtifactContent: null,
+    };
+    const adapter = new ConsoleProtocolAdapter({
+      binding: {
+        ok: true,
+        port,
+        readOnly: true,
+        actions: null,
+        nativeNotificationProjection: "daemon-journal",
+        compatibility: { mode: "current" },
+      },
+      credential,
+      projectId,
+      pageLimit: 100,
+    });
+    await adapter.open();
+    const warmSnapshotCalls = snapshotCalls;
+    let scheduledTick: (() => void) | undefined;
+    const loop = startConsoleRefreshLoop({
+      intervalMs: pollIntervalMs,
+      isClosed: () => false,
+      onClosed: () => {},
+      schedule: (callback) => {
+        scheduledTick = callback;
+        return "deterministic-churn-loop";
+      },
+      clear: () => {},
+      refresh: async () => {
+        activeRefreshes += 1;
+        maximumConcurrentRefreshes = Math.max(maximumConcurrentRefreshes, activeRefreshes);
+        const started = performance.now();
+        try {
+          await adapter.poll();
+        } finally {
+          refreshLatencies.push(performance.now() - started);
+          activeRefreshes -= 1;
+          completedRefreshes += 1;
+        }
+      },
+    });
+    if (scheduledTick === undefined) throw new Error("deterministic refresh callback was not installed");
+    const heapBefore = process.memoryUsage().heapUsed;
+    const cpuBefore = process.cpuUsage();
+    const wallStarted = performance.now();
+
+    for (let tick = 0; tick < pollTicks; tick += 1) {
+      for (let batch = 0; batch < transactionCount / pollTicks; batch += 1) {
+        for (let transition = 0; transition < transitionsPerTransaction; transition += 1) {
+          const index = transitionIndex % rowCount;
+          journalStates[index] = journalStates[index] === "pending" ? "sent" : "pending";
+          transitionIndex += 1;
+          revision += 1;
+        }
+        transactionIndex += 1;
+      }
+      const expectedRefreshes = completedRefreshes + 1;
+      scheduledTick();
+      while (completedRefreshes < expectedRefreshes) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+    await loop.stop();
+
+    const wallMs = performance.now() - wallStarted;
+    const cpu = process.cpuUsage(cpuBefore);
+    const cpuMs = (cpu.user + cpu.system) / 1_000;
+    const heapDelta = Math.max(0, process.memoryUsage().heapUsed - heapBefore);
+    const sortedLatencies = [...refreshLatencies].sort((left, right) => left - right);
+    const p95Index = Math.max(0, Math.ceil(sortedLatencies.length * 0.95) - 1);
+    const p95Ms = sortedLatencies[p95Index] ?? Number.POSITIVE_INFINITY;
+    const resnapshots = snapshotCalls - warmSnapshotCalls;
+    const record = {
+      gate: "spec01-32.15-notification-churn",
+      host: { hostname: hostname(), platform: platform(), release: release() },
+      node: process.version,
+      workload: {
+        consoles: 1,
+        openAttentionRows: rowCount,
+        transitions: transitionIndex,
+        transactions: transactionIndex,
+        simulatedMs: pollTicks * pollIntervalMs,
+        pollTicks,
+      },
+      result: { resnapshots, maximumConcurrentRefreshes, p95Ms, wallMs, cpuMs, heapDelta },
+    };
+    console.info(JSON.stringify(record));
+
+    expect(transactionIndex).toBe(transactionCount);
+    expect(transitionIndex).toBe(transactionCount * transitionsPerTransaction);
+    expect(completedRefreshes).toBe(pollTicks);
+    expect(resnapshots).toBeLessThanOrEqual(pollTicks);
+    expect(maximumConcurrentRefreshes).toBe(1);
+    expect(p95Ms).toBeLessThanOrEqual(250);
+    expect(wallMs).toBeLessThanOrEqual(5_000);
+    expect(cpuMs).toBeLessThanOrEqual(5_000);
+    expect(heapDelta).toBeLessThanOrEqual(32 * 1024 * 1024);
+    expect(record.host.hostname.length).toBeGreaterThan(0);
+    expect(record.node).toMatch(/^v/u);
+  }, 10_000);
 });

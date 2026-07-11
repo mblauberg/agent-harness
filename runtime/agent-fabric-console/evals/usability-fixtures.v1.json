@@ -191,6 +191,55 @@
         "nextMilestone": "Resolve release-bound gate",
         "health": "quarantined"
       }
+    },
+    {
+      "id": "legacy-notification-compatibility",
+      "description": "Pre-notification daemon with an explicit unavailable compatibility projection.",
+      "project": "proj-legacy",
+      "session": "session-legacy",
+      "notificationProjection": "legacy-fallback",
+      "runs": [
+        {
+          "id": "run-legacy",
+          "phase": "observe",
+          "owner": "chair-legacy",
+          "nextMilestone": "Upgrade daemon",
+          "health": "healthy"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attention-legacy",
+          "label": "FYI",
+          "priority": "advisory",
+          "title": "Notification status is not negotiated",
+          "freshness": "live",
+          "ageMs": 500,
+          "duplicateCount": 1,
+          "nativeNotification": {
+            "status": "unavailable",
+            "journalState": "missing",
+            "integrationState": "absent"
+          }
+        }
+      ],
+      "system": [
+        {
+          "id": "github",
+          "state": "healthy",
+          "freshness": "live",
+          "detail": "optional adapter ready"
+        }
+      ],
+      "expectedTopAttentionId": "attention-legacy",
+      "expectedAnswers": {
+        "project": "proj-legacy",
+        "run": "run-legacy",
+        "phase": "observe",
+        "owner": "chair-legacy",
+        "nextMilestone": "Upgrade daemon",
+        "health": "healthy"
+      }
     }
   ]
 }

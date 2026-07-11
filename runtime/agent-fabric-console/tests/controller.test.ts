@@ -44,6 +44,7 @@ const credential = {
 } as OperatorCapabilityCredential;
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const nativeNotification = {
+  kind: "daemon-journal",
   targetIntegration: "native-desktop",
   status: "available",
   journalState: "sent",
@@ -173,7 +174,10 @@ function row(itemRevision = 7): ConsoleRow<"attention"> {
 function dataset(
   itemRevision = 7,
   snapshotRevision = 11,
-  connection: FabricConsoleDataset["connection"] = { state: "live" },
+  connection: FabricConsoleDataset["connection"] = {
+    state: "live",
+    compatibility: { mode: "current" },
+  },
 ): FabricConsoleDataset {
   const pages = createEmptyViewPages();
   return {
@@ -552,6 +556,7 @@ describe("Console controller and two-phase actions", () => {
       confirmationId: () => "confirmation-1",
     });
     controller.select("attention", "attention:task-1");
+    controller.setScrollAnchor("attention", "attention:task-1");
     await controller.beginAction(actionRequest());
     controller.armConfirmation(activation("event-arm"));
     const command = context("commit-1", "event-confirm");
@@ -560,6 +565,13 @@ describe("Console controller and two-phase actions", () => {
     const duplicate = controller.confirmAction(activation("event-confirm"), command);
     expect(service.commit).toHaveBeenCalledTimes(1);
     expect(controller.state.pendingCommandIds).toStrictEqual(["commit-1"]);
+    controller.updateDataset(dataset(7, 12));
+    expect(controller.state.pendingCommandIds).toStrictEqual(["commit-1"]);
+    expect(controller.state.selectionByView.attention).toStrictEqual({
+      stableId: "attention:task-1",
+      revision: "7",
+    });
+    expect(controller.state.scrollAnchorByView.attention).toBe("attention:task-1");
     resolveCommit?.(receipt());
 
     await expect(first).resolves.toMatchObject({ status: "committed" });

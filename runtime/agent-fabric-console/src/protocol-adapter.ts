@@ -1,39 +1,40 @@
 import { createHash } from "node:crypto";
 
-import type {
-  ArtifactContentClient,
-  ArtifactContentReadResult,
-  ArtifactContentTransformation,
-  ArtifactLineFragment,
-  ArtifactMediaType,
-  ArtifactRef,
-  CoordinationRunId,
-  EvidenceKind,
-  EvidenceSourceKind,
-  NegotiatedOperatorClient,
-  GitRepositoryReadClient,
-  GitRepositoryReadRequest,
-  GitRepositoryProjection,
-  MessageBodyClient,
-  MessageBodyReadResult,
-  MessageBodyRef,
-  OperatorActionClient,
-  OperatorCapabilityCredential,
-  OperatorDetailReadRequest,
-  OperatorDetailReadResult,
-  OperatorProjectionSnapshot,
-  OperatorViewPageRequest,
-  OperatorViewPageResult,
-  ProjectId,
-  ProjectSessionId,
-  ProjectionEventsRequest,
-  ProjectionEventsResult,
-  ProjectionSnapshotRequest,
-  ScopedGateReadRequest,
-  ScopedGateReadResult,
-  Sha256Digest,
-  TaskId,
-  Timestamp,
+import {
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  type ArtifactContentClient,
+  type ArtifactContentReadResult,
+  type ArtifactContentTransformation,
+  type ArtifactLineFragment,
+  type ArtifactMediaType,
+  type ArtifactRef,
+  type CoordinationRunId,
+  type EvidenceKind,
+  type EvidenceSourceKind,
+  type NegotiatedOperatorClient,
+  type GitRepositoryReadClient,
+  type GitRepositoryReadRequest,
+  type GitRepositoryProjection,
+  type MessageBodyClient,
+  type MessageBodyReadResult,
+  type MessageBodyRef,
+  type OperatorActionClient,
+  type OperatorCapabilityCredential,
+  type OperatorDetailReadRequest,
+  type OperatorDetailReadResult,
+  type OperatorProjectionSnapshot,
+  type OperatorViewPageRequest,
+  type OperatorViewPageResult,
+  type ProjectId,
+  type ProjectSessionId,
+  type ProjectionEventsRequest,
+  type ProjectionEventsResult,
+  type ProjectionSnapshotRequest,
+  type ScopedGateReadRequest,
+  type ScopedGateReadResult,
+  type Sha256Digest,
+  type TaskId,
+  type Timestamp,
 } from "@local/agent-fabric-protocol";
 import { parseArtifactContentReadResult } from "@local/agent-fabric-protocol";
 
@@ -114,14 +115,33 @@ export type ConsoleProtocolBinding =
       port: ConsoleProtocolPort;
       readOnly: boolean;
       actions: OperatorActionClient | null;
+      nativeNotificationProjection: "daemon-journal" | "legacy-fallback";
+      compatibility: ConsoleProtocolCompatibility;
     }>
   | Readonly<{
       ok: false;
       missingFeatures: readonly string[];
     }>;
 
+export type ConsoleProtocolCompatibility =
+  | Readonly<{ mode: "current" }>
+  | Readonly<{
+      mode: "legacy-compatibility";
+      profile: "strict-v1";
+      primary?: Readonly<{ code: string; message: string }>;
+    }>;
+
+export type ConsoleSessionCompatibility =
+  | Readonly<{ mode: "current" }>
+  | Readonly<{
+      mode: "legacy-compatibility";
+      primary: Readonly<{ code: string; message: string }>;
+      retry: Readonly<{ status: "succeeded"; profile: "strict-v1" }>;
+    }>;
+
 export function bindConsoleProtocolClient(
   client: NegotiatedOperatorClient,
+  sessionCompatibility?: ConsoleSessionCompatibility,
 ): ConsoleProtocolBinding {
   if (client.projection === undefined || client.console === undefined) {
     const available = new Set<string>(client.features);
@@ -139,6 +159,27 @@ export function bindConsoleProtocolClient(
   }
   const projection = client.projection;
   const consoleClient = client.console;
+  const nativeNotificationProjection = client.features.includes(
+    NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  ) ? "daemon-journal" : "legacy-fallback";
+  if (
+    (sessionCompatibility?.mode === "current") !==
+      (nativeNotificationProjection === "daemon-journal") &&
+    sessionCompatibility !== undefined
+  ) {
+    throw new TypeError("Console session compatibility contradicts negotiated notification projection");
+  }
+  const compatibility: ConsoleProtocolCompatibility = sessionCompatibility === undefined
+    ? nativeNotificationProjection === "daemon-journal"
+      ? { mode: "current" }
+      : { mode: "legacy-compatibility", profile: "strict-v1" }
+    : sessionCompatibility.mode === "current"
+      ? sessionCompatibility
+      : {
+          mode: "legacy-compatibility",
+          profile: sessionCompatibility.retry.profile,
+          primary: sessionCompatibility.primary,
+        };
   const artifacts = client.artifacts;
   const artifactRead: ArtifactContentClient["readContent"] | null =
     artifacts === undefined
@@ -148,6 +189,8 @@ export function bindConsoleProtocolClient(
     ok: true,
     readOnly: consoleClient.readOnly,
     actions: consoleClient.readOnly ? null : consoleClient.actions,
+    nativeNotificationProjection,
+    compatibility,
     port: {
       snapshot: (request) => projection.snapshot(request),
       events: (request) => projection.events(request),
@@ -162,7 +205,10 @@ export function bindConsoleProtocolClient(
 }
 
 export type ConsoleConnection =
-  | Readonly<{ state: "live" }>
+  | Readonly<{
+      state: "live";
+      compatibility: ConsoleProtocolCompatibility;
+    }>
   | Readonly<{
       state: "degraded" | "unavailable";
       reason:
@@ -174,6 +220,19 @@ export type ConsoleConnection =
   | Readonly<{
       state: "unsupported";
       missingFeatures: readonly string[];
+    }>
+  | Readonly<{
+      state: "protocol-incompatible";
+      code: "PROTOCOL_INCOMPATIBLE" | "CONSOLE_PROTOCOL_INCOMPATIBLE";
+      message: string;
+      operation: string | null;
+      closedReason: string | null;
+      primary: Readonly<{ code: string; message: string }>;
+      retry?: Readonly<{
+        status: "succeeded" | "failed";
+        profile: "strict-v1";
+        failure?: Readonly<{ code: string; message: string }>;
+      }>;
     }>;
 
 export type ConsoleInspectionBinding = Readonly<{
@@ -276,6 +335,10 @@ function failureCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null;
   const code = Reflect.get(error, "code");
   return typeof code === "string" ? code : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const MAX_ARTIFACT_PAGES = 2_048;
@@ -400,6 +463,41 @@ export function createBootstrapUnavailableDataset(
   };
 }
 
+export function createProtocolIncompatibleDataset(
+  input: Readonly<{
+    primary: Readonly<{ code: string; message: string }>;
+    retry?: Readonly<{
+      status: "succeeded" | "failed";
+      profile: "strict-v1";
+      failure?: Readonly<{ code: string; message: string }>;
+    }>;
+    result?: Readonly<{
+      operation?: string;
+      closedReason?: string;
+      message?: string;
+    }>;
+  }>,
+  nowMs = Date.now(),
+): FabricConsoleDataset {
+  return {
+    connection: {
+      state: "protocol-incompatible",
+      code: "CONSOLE_PROTOCOL_INCOMPATIBLE",
+      message: input.result?.message ?? input.primary.message,
+      operation: input.result?.operation ?? null,
+      closedReason: input.result?.closedReason ?? null,
+      primary: input.primary,
+      ...(input.retry === undefined ? {} : { retry: input.retry }),
+    },
+    snapshot: null,
+    snapshotRevision: null,
+    cursor: 0,
+    pages: createEmptyViewPages(),
+    loadedAtMs: nowMs,
+    canMutate: false,
+  };
+}
+
 class ResnapshotRequiredError extends Error {
   constructor() {
     super("projection resnapshot required");
@@ -510,7 +608,10 @@ export class ConsoleProtocolAdapter {
       const current: FabricConsoleDataset = {
         ...this.#lastGood,
         cursor: result.nextCursor,
-        connection: { state: "live" },
+        connection: {
+          state: "live",
+          compatibility: this.#binding.compatibility,
+        },
         loadedAtMs: this.#now(),
         canMutate: !this.#binding.readOnly && this.#binding.actions !== null,
       };
@@ -917,7 +1018,10 @@ export class ConsoleProtocolAdapter {
       try {
         const pages = await this.#loadPages(snapshot.snapshotRevision);
         return {
-          connection: { state: "live" },
+          connection: {
+            state: "live",
+            compatibility: this.#binding.compatibility,
+          },
           snapshot,
           snapshotRevision,
           cursor: snapshot.cursor,
@@ -970,7 +1074,12 @@ export class ConsoleProtocolAdapter {
       }
       readTransactionId = result.readTransactionId;
       for (const row of result.rows) {
-        rows.push(mapProtocolRow(view, row, this.#now()));
+        rows.push(mapProtocolRow(
+          view,
+          row,
+          this.#now(),
+          this.#binding.nativeNotificationProjection,
+        ));
       }
       if (!result.hasMore) {
         return {
@@ -1006,6 +1115,58 @@ export class ConsoleProtocolAdapter {
   }
 
   #fallbackFor(error: unknown): FabricConsoleDataset {
+    const code = failureCode(error);
+    if (code === "PROTOCOL_INCOMPATIBLE" || code === "CONSOLE_PROTOCOL_INCOMPATIBLE") {
+      const cause = isRecord(error) && isRecord(error.cause) ? error.cause : null;
+      const result = isRecord(error) && isRecord(error.result) ? error.result : null;
+      const operation = result?.operation ?? cause?.operation;
+      const closedReason = result?.closedReason ?? cause?.reason;
+      const primaryValue = isRecord(error) && isRecord(error.primary) ? error.primary : null;
+      const primary = primaryValue !== null &&
+          typeof primaryValue.code === "string" &&
+          typeof primaryValue.message === "string"
+        ? { code: primaryValue.code, message: primaryValue.message }
+        : {
+            code,
+            message: error instanceof Error ? error.message : "protocol result is incompatible",
+          };
+      const retryValue = isRecord(error) && isRecord(error.retry) ? error.retry : null;
+      const retry = retryValue !== null &&
+          (retryValue.status === "succeeded" || retryValue.status === "failed") &&
+          retryValue.profile === "strict-v1"
+        ? {
+            status: retryValue.status as "succeeded" | "failed",
+            profile: "strict-v1" as const,
+            ...(isRecord(retryValue.failure) &&
+              typeof retryValue.failure.code === "string" &&
+              typeof retryValue.failure.message === "string"
+              ? {
+                  failure: {
+                    code: retryValue.failure.code,
+                    message: retryValue.failure.message,
+                  },
+                }
+              : {}),
+          }
+        : undefined;
+      return {
+        connection: {
+          state: "protocol-incompatible",
+          code,
+          message: error instanceof Error ? error.message : "protocol result is incompatible",
+          operation: typeof operation === "string" ? operation : null,
+          closedReason: typeof closedReason === "string" ? closedReason : null,
+          primary,
+          ...(retry === undefined ? {} : { retry }),
+        },
+        snapshot: null,
+        snapshotRevision: null,
+        cursor: 0,
+        pages: createEmptyViewPages(),
+        loadedAtMs: this.#now(),
+        canMutate: false,
+      };
+    }
     const reason =
       error instanceof ProjectionInvalidError
         ? error.message === "resnapshot attempts exhausted"

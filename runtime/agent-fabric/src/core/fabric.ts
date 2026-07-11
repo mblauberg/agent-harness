@@ -4,13 +4,14 @@ import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolv
 
 import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
-import type {
-  AgentCustodyResult,
-  EvidenceArtifactRegistration,
-  EvidencePublishRequest,
-  OperationInputMap,
-  ProtocolOperation,
-  VerifiedProtocolCredential,
+import {
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  type AgentCustodyResult,
+  type EvidenceArtifactRegistration,
+  type EvidencePublishRequest,
+  type OperationInputMap,
+  type ProtocolOperation,
+  type VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
 import { parseEvidenceArtifactRegistration } from "@local/agent-fabric-protocol";
 
@@ -2137,7 +2138,19 @@ export class Fabric {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionSnapshot];
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
-        return this.#operatorProjections.snapshot(request);
+        return this.#operatorProjections.snapshot(
+          request,
+          context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
+      }
+      case FABRIC_OPERATIONS.projectionPage: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionPage];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.page(
+          request,
+          context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
       }
       case FABRIC_OPERATIONS.projectionEvents: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionEvents];
@@ -2149,7 +2162,10 @@ export class Fabric {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionViewPage];
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
-        return this.#operatorProjections.viewPage(request);
+        return this.#operatorProjections.viewPage(
+          request,
+          context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
       }
       case FABRIC_OPERATIONS.projectionDetailRead: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionDetailRead];

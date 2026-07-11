@@ -21,6 +21,7 @@ import {
   rankConsoleRows,
   revisionFromProtocol,
   type ConsoleFreshness,
+  type ConsoleNativeNotification,
   type ConsoleRow,
   type FabricView,
 } from "./model.js";
@@ -100,6 +101,7 @@ export type UsabilityFixture = Readonly<{
   attention: readonly UsabilityAttention[];
   system: readonly UsabilitySystem[];
   evidenceReview: UsabilityEvidenceReview | null;
+  notificationProjection: "daemon-journal" | "legacy-fallback";
   expectedTopAttentionId: string | null;
   expectedAnswers: UsabilityExpectedAnswers;
 }>;
@@ -346,6 +348,11 @@ function parseFixture(value: unknown, path: string): UsabilityFixture {
     evidenceReview: fixture.evidenceReview === undefined
       ? null
       : parseEvidenceReview(fixture.evidenceReview, `${path}.evidenceReview`),
+    notificationProjection: choice(
+      fixture.notificationProjection ?? "daemon-journal",
+      ["daemon-journal", "legacy-fallback"],
+      `${path}.notificationProjection`,
+    ),
     expectedTopAttentionId: expectedTop,
     expectedAnswers: parseAnswers(
       fixture.expectedAnswers,
@@ -425,7 +432,10 @@ function freshness(
   return { state, ...common };
 }
 
-function attentionRow(item: UsabilityAttention): ConsoleRow<"attention"> {
+function attentionRow(
+  item: UsabilityAttention,
+  notificationProjection: UsabilityFixture["notificationProjection"],
+): ConsoleRow<"attention"> {
   const factFreshness = freshness(item.freshness, item.ageMs);
   return {
     view: "attention",
@@ -444,7 +454,13 @@ function attentionRow(item: UsabilityAttention): ConsoleRow<"attention"> {
               item.duplicateCount > 1
                 ? `${item.title} (${String(item.duplicateCount)} grouped)`
                 : item.title,
-            nativeNotification: notificationSummary(item),
+            nativeNotification: notificationProjection === "daemon-journal"
+              ? notificationSummary(item)
+              : {
+                  kind: "legacy-fallback",
+                  status: "unavailable",
+                  reason: "feature-not-negotiated",
+                },
           },
     detailRef:
       item.freshness === "unavailable" || item.freshness === "conflict"
@@ -458,6 +474,12 @@ function attentionRow(item: UsabilityAttention): ConsoleRow<"attention"> {
 }
 
 function notificationSummary(
+  item: UsabilityAttention,
+): ConsoleNativeNotification {
+  return { kind: "daemon-journal", ...daemonNotification(item) };
+}
+
+function daemonNotification(
   item: UsabilityAttention,
 ): NativeNotificationDeliverySummary {
   const journalState = item.nativeNotification.journalState;
@@ -518,7 +540,9 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     nextMilestone: run.nextMilestone,
     health: run.health,
   }));
-  const attentionRows = rankConsoleRows(fixture.attention.map(attentionRow));
+  const attentionRows = rankConsoleRows(fixture.attention.map((item) =>
+    attentionRow(item, fixture.notificationProjection)
+  ));
   const systemRows = fixture.system.map(systemRow);
   const evidenceReview = fixture.evidenceReview;
   const evidenceRows: readonly ConsoleRow<"evidence">[] = evidenceReview === null
@@ -556,10 +580,17 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     sourceFreshness: item.freshness,
     lastEventAt: timestamp,
     duplicateCount: item.duplicateCount,
-    nativeNotification: notificationSummary(item),
+    ...(fixture.notificationProjection === "daemon-journal"
+      ? { nativeNotification: daemonNotification(item) }
+      : {}),
   }));
   return {
-    connection: { state: "live" },
+    connection: fixture.notificationProjection === "daemon-journal"
+      ? { state: "live", compatibility: { mode: "current" } }
+      : {
+          state: "live",
+          compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
+        },
     snapshot: {
       schemaVersion: 1,
       snapshotRevision: revision,
@@ -833,9 +864,11 @@ function observe(
       (dataset.connection.state === "live" && presentation.connection === "LIVE"),
     nativeNotificationVisible:
       topNotification === null ||
-      frameText.includes(
-        `${topNotification.status} | journal ${topNotification.journalState}`,
-      ),
+      (topNotification.kind === "legacy-fallback"
+        ? frameText.includes("unavailable | feature-not-negotiated")
+        : frameText.includes(
+            `${topNotification.status} | journal ${topNotification.journalState}`,
+          )),
     dynamicResizeSafe,
     artifactReviewSafe,
     exactViewport:

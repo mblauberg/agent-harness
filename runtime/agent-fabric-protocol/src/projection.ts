@@ -60,7 +60,7 @@ export type AttentionItem = {
   sourceFreshness: "live" | "snapshot" | "stale" | "unavailable" | "conflict";
   lastEventAt: Timestamp;
   duplicateCount: number;
-  nativeNotification: NativeNotificationDeliverySummary;
+  nativeNotification?: NativeNotificationDeliverySummary;
 };
 
 export type RunProjection = {
@@ -431,7 +431,7 @@ export type OperatorViewSummaryMap = {
     label: AttentionItem["label"];
     priority: AttentionItem["priority"];
     title: string;
-    nativeNotification: NativeNotificationDeliverySummary;
+    nativeNotification?: NativeNotificationDeliverySummary;
   };
   project: {
     kind: "project";

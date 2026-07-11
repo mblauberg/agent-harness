@@ -380,6 +380,12 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
   }
   switch (summary.kind) {
     case "attention":
+      if (summary.nativeNotification.kind === "legacy-fallback") {
+        return [
+          summary.title,
+          `${summary.label} | ${summary.priority} | notify unavailable/feature-not-negotiated`,
+        ];
+      }
       return [
         summary.title,
         `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}`,
@@ -439,24 +445,31 @@ function detailLines(row: ConsoleRow): PresentedDetail {
   ];
   if (row.summary?.kind === "attention") {
     const notification = row.summary.nativeNotification;
-    lines.push(
-      {
+    if (notification.kind === "legacy-fallback") {
+      lines.push({
         label: "Native notification",
-        value: `${notification.status} | journal ${notification.journalState}`,
-      },
-      {
-        label: "Notification basis",
-        value: `integration ${notification.integrationState} | delivery ${
-          notification.deliveryItemRevision === null
-            ? "missing"
-            : `r${String(notification.deliveryItemRevision)}`
-        } | claim ${
-          notification.claimGeneration === null
-            ? "none"
-            : `g${String(notification.claimGeneration)}`
-        } | observed ${notification.observedAt}`,
-      },
-    );
+        value: "unavailable | feature-not-negotiated",
+      });
+    } else {
+      lines.push(
+        {
+          label: "Native notification",
+          value: `${notification.status} | journal ${notification.journalState}`,
+        },
+        {
+          label: "Notification basis",
+          value: `integration ${notification.integrationState} | delivery ${
+            notification.deliveryItemRevision === null
+              ? "missing"
+              : `r${String(notification.deliveryItemRevision)}`
+          } | claim ${
+            notification.claimGeneration === null
+              ? "none"
+              : `g${String(notification.claimGeneration)}`
+          } | observed ${notification.observedAt}`,
+        },
+      );
+    }
   }
   lines.push(
     { label: "Source", value: row.freshness.source },
@@ -832,7 +845,9 @@ export function presentFabricConsole(
     mode: responsiveModeFor(viewport),
     connection:
       dataset.connection.state === "live"
-        ? "LIVE"
+        ? dataset.connection.compatibility.mode === "legacy-compatibility"
+          ? "LEGACY-COMPATIBILITY"
+          : "LIVE"
         : dataset.connection.state.toUpperCase(),
     header: presentHeader(dataset),
     views: FABRIC_VIEWS.map((view, index) => ({

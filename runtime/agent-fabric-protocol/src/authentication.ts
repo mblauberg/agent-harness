@@ -2,8 +2,12 @@ import { protocolClientField, secret } from "./codec.js";
 import {
   negotiateProtocol,
   operationsForFeatures,
+  MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES,
+  MAXIMUM_PROTOCOL_FEATURE_NAMES,
+  PROTOCOL_FEATURE_NAME_PATTERN,
   PROTOCOL_FEATURES,
   type ProtocolFeature,
+  type ProtocolNegotiationResult,
 } from "./features.js";
 import {
   isFabricOperation,
@@ -40,20 +44,55 @@ export class ProtocolAuthenticationError extends Error {
   }
 }
 
+export class ProtocolNegotiationError extends TypeError {
+  readonly code: "FEATURE_UNAVAILABLE" | "PROTOCOL_INVALID";
+  readonly details: Readonly<Record<string, unknown>>;
+
+  constructor(
+    reason: Extract<ProtocolNegotiationResult, { ok: false }>["reason"],
+    result: Extract<ProtocolNegotiationResult, { ok: false }>,
+  ) {
+    super(`protocol negotiation failed: ${reason}`);
+    this.name = "ProtocolNegotiationError";
+    this.code = reason === "required-features-unavailable"
+      ? "FEATURE_UNAVAILABLE"
+      : "PROTOCOL_INVALID";
+    this.details = result;
+  }
+}
+
 export type VerifiedProtocolCredential = {
   readonly principal: ProtocolPrincipal;
   readonly grantedOperations: readonly FabricOperation[];
 };
 
-function parseFeatureArray(value: unknown, path: string): ProtocolFeature[] {
+const protocolFeatureNamePattern = new RegExp(PROTOCOL_FEATURE_NAME_PATTERN, "u");
+
+function parseFeatureArray(value: unknown, path: string): string[] {
   if (!Array.isArray(value)) throw new TypeError(`${path} must be an array`);
+  if (value.length > MAXIMUM_PROTOCOL_FEATURE_NAMES) {
+    throw new TypeError(`${path} must contain at most ${String(MAXIMUM_PROTOCOL_FEATURE_NAMES)} names`);
+  }
   const features = value.map((feature, index) => {
-    const matched = PROTOCOL_FEATURES.find((candidate) => candidate === feature);
-    if (matched === undefined) throw new TypeError(`${path}[${String(index)}] is not a protocol feature`);
-    return matched;
+    if (
+      typeof feature !== "string" ||
+      Buffer.byteLength(feature, "utf8") > MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES ||
+      !protocolFeatureNamePattern.test(feature)
+    ) {
+      throw new TypeError(`${path}[${String(index)}] is not a valid protocol feature name`);
+    }
+    return feature;
   });
   if (new Set(features).size !== features.length) throw new TypeError(`${path} must not contain duplicates`);
   return features;
+}
+
+function parseKnownFeatureArray(value: unknown, path: string): ProtocolFeature[] {
+  return parseFeatureArray(value, path).map((feature, index) => {
+    const matched = PROTOCOL_FEATURES.find((candidate) => candidate === feature);
+    if (matched === undefined) throw new TypeError(`${path}[${String(index)}] is not a negotiated protocol feature`);
+    return matched;
+  });
 }
 
 export function parseProtocolPrincipal(value: unknown, path = "principal"): ProtocolPrincipal {
@@ -128,6 +167,15 @@ export function parseProtocolInitializeRequest(value: unknown): ProtocolInitiali
   if (expectedPrincipalKind !== "operator" && expectedPrincipalKind !== "agent" && expectedPrincipalKind !== "integration") {
     throw new TypeError("initialize expectedPrincipalKind is invalid");
   }
+  const requiredFeatures = parseFeatureArray(record.requiredFeatures, "initialize.input.requiredFeatures");
+  const optionalFeatures = parseFeatureArray(record.optionalFeatures, "initialize.input.optionalFeatures");
+  const combined = [...requiredFeatures, ...optionalFeatures];
+  if (combined.length > MAXIMUM_PROTOCOL_FEATURE_NAMES) {
+    throw new TypeError(`initialize feature lists must contain at most ${String(MAXIMUM_PROTOCOL_FEATURE_NAMES)} names combined`);
+  }
+  if (new Set(combined).size !== combined.length) {
+    throw new TypeError("initialize feature lists must not contain duplicates within or across required and optional features");
+  }
   return {
     protocolVersion: 1,
     client: {
@@ -143,8 +191,8 @@ export function parseProtocolInitializeRequest(value: unknown): ProtocolInitiali
       ),
     },
     expectedPrincipalKind,
-    requiredFeatures: parseFeatureArray(record.requiredFeatures, "initialize.input.requiredFeatures"),
-    optionalFeatures: parseFeatureArray(record.optionalFeatures, "initialize.input.optionalFeatures"),
+    requiredFeatures,
+    optionalFeatures,
   };
 }
 
@@ -163,7 +211,7 @@ function parseLimits(value: unknown): ProtocolLimits {
 
 export function allowedOperationsForPrincipal(
   principal: ProtocolPrincipal,
-  features: readonly ProtocolFeature[],
+  features: readonly string[],
 ): FabricOperation[] {
   const featureOperations = operationsForFeatures(features);
   const principalOperations = operationsForPrincipal(principal.kind);
@@ -175,7 +223,7 @@ export function allowedOperationsForPrincipal(
 export function authorizeProtocolInitialize(
   request: ProtocolInitializeRequest,
   verifiedCredential: VerifiedProtocolCredential,
-  negotiatedFeatures: readonly ProtocolFeature[] = [...request.requiredFeatures, ...request.optionalFeatures],
+  negotiatedFeatures: readonly string[] = [...request.requiredFeatures, ...request.optionalFeatures],
 ): { principal: ProtocolPrincipal; allowedOperations: FabricOperation[] } {
   const verifiedPrincipal = verifiedCredential.principal;
   if (verifiedPrincipal.kind !== request.expectedPrincipalKind) {
@@ -212,7 +260,9 @@ export function createProtocolInitializeResult(options: {
     protocolVersion: 1,
     features: options.offeredFeatures,
   });
-  if (!negotiation.ok) throw new TypeError(`protocol negotiation failed: ${negotiation.reason}`);
+  if (!negotiation.ok) {
+    throw new ProtocolNegotiationError(negotiation.reason, negotiation);
+  }
   const authorization = authorizeProtocolInitialize(
     options.request,
     options.verifiedCredential,
@@ -245,7 +295,7 @@ export function parseProtocolInitializeResult(value: unknown): ProtocolInitializ
   ]);
   if (record.protocolVersion !== 1) throw new TypeError("initialize.result.protocolVersion must be 1");
   const principal = parseProtocolPrincipal(record.principal, "initialize.result.principal");
-  const features = parseFeatureArray(record.features, "initialize.result.features");
+  const features = parseKnownFeatureArray(record.features, "initialize.result.features");
   if (!Array.isArray(record.allowedOperations)) throw new TypeError("initialize.result.allowedOperations must be an array");
   const legalOperations = new Set(allowedOperationsForPrincipal(principal, features));
   const allowedOperations = record.allowedOperations.map((operation, index) => {

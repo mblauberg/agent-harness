@@ -6,6 +6,7 @@ import { createConnection, createServer, type Server } from "node:net";
 import {
   FABRIC_OPERATIONS,
   NdjsonRpcTransport,
+  OPERATION_CONTRACT_FIXTURES,
   PROTOCOL_FEATURES,
   PROTOCOL_LIMITS,
   parseProjectSession,
@@ -61,6 +62,10 @@ const credential: VerifiedProtocolCredential = {
 async function connectServer(
   dispatch: Parameters<typeof servePublicProtocolConnection>[1]["dispatch"],
   afterResponse?: Parameters<typeof servePublicProtocolConnection>[1]["afterResponse"],
+  configuration: Readonly<{
+    initialize: ProtocolInitializeRequest;
+    credential: VerifiedProtocolCredential;
+  }> = { initialize, credential },
 ): Promise<NdjsonRpcTransport> {
   const root = await mkdtemp(join(tmpdir(), "fabric-public-protocol-"));
   roots.push(root);
@@ -72,10 +77,10 @@ async function connectServer(
       offeredFeatures: PROTOCOL_FEATURES,
       limits: PROTOCOL_LIMITS,
       verifyCredential: async (value) => {
-        if (value !== initialize.authentication.credential) {
+        if (value !== configuration.initialize.authentication.credential) {
           throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "credential is invalid");
         }
-        return credential;
+        return configuration.credential;
       },
       dispatch,
       ...(afterResponse === undefined ? {} : { afterResponse }),
@@ -84,7 +89,7 @@ async function connectServer(
   servers.push(server);
   await new Promise<void>((resolve, reject) => server.listen(socketPath, resolve).once("error", reject));
   const stream = createConnection(socketPath);
-  return await NdjsonRpcTransport.connect(stream, initialize);
+  return await NdjsonRpcTransport.connect(stream, configuration.initialize);
 }
 
 afterEach(async () => {
@@ -95,6 +100,200 @@ afterEach(async () => {
 });
 
 describe("public protocol server", () => {
+  it.each([
+    FABRIC_OPERATIONS.projectionSnapshot,
+    FABRIC_OPERATIONS.projectionPage,
+    FABRIC_OPERATIONS.projectionViewPage,
+  ] as const)("rejects a negotiated missing notification field for %s before sending", async (operation) => {
+    const projectionFeature = operation === FABRIC_OPERATIONS.projectionViewPage
+      ? "operator-projection.v2"
+      : "operator-projection.v1";
+    const projectionInitialize: ProtocolInitializeRequest = {
+      protocolVersion: 1,
+      client: { name: "extended-console", version: "1.0.0" },
+      authentication: {
+        scheme: "capability",
+        credential: "operator-secret-extended",
+        clientNonce: `extended_${operation}`,
+      },
+      expectedPrincipalKind: "operator",
+      requiredFeatures: [projectionFeature],
+      optionalFeatures: ["native-notification-projection.v1"],
+    };
+    const projectionCredential: VerifiedProtocolCredential = {
+      principal: credential.principal,
+      grantedOperations: [operation],
+    };
+    const legacyAttention = {
+      itemId: "attention_01",
+      revision: 1,
+      label: "Decision",
+      priority: "critical-path",
+      title: "Choose",
+      sourceFreshness: "live",
+      lastEventAt: "2026-07-11T10:00:00Z",
+      duplicateCount: 1,
+    };
+    const result = operation === FABRIC_OPERATIONS.projectionSnapshot
+      ? {
+          ...(OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.projectionSnapshot].result as Record<string, unknown>),
+          attention: {
+            freshness: "live",
+            source: "fabric",
+            revision: 1,
+            observedAt: "2026-07-11T10:00:00Z",
+            value: [legacyAttention],
+          },
+        }
+      : operation === FABRIC_OPERATIONS.projectionPage
+        ? {
+            view: "attention",
+            page: {
+              freshness: "live",
+              source: "fabric",
+              revision: 1,
+              observedAt: "2026-07-11T10:00:00Z",
+              value: { items: [legacyAttention], nextCursor: 1, hasMore: false },
+            },
+          }
+        : {
+            status: "page",
+            view: "attention",
+            rows: [{
+              itemId: "attention_01",
+              itemRevision: 1,
+              fact: {
+                freshness: "live",
+                source: "fabric",
+                revision: 1,
+                observedAt: "2026-07-11T10:00:00Z",
+                value: {
+                  summary: {
+                    kind: "attention",
+                    label: "Decision",
+                    priority: "critical-path",
+                    title: "Choose",
+                  },
+                  detailRef: { kind: "task", taskId: "task_01", expectedRevision: 1 },
+                  actionAvailability: { state: "read-only", reason: "feature-unavailable" },
+                },
+              },
+            }],
+            nextCursor: 1,
+            hasMore: false,
+            snapshotRevision: 1,
+            readTransactionId: "read_01",
+          };
+    const input = operation === FABRIC_OPERATIONS.projectionSnapshot
+      ? {
+          credential: { capabilityId: "capability_01", token: "operator-secret-extended" },
+          projectId: "project_01",
+        }
+      : operation === FABRIC_OPERATIONS.projectionPage
+        ? {
+            credential: { capabilityId: "capability_01", token: "operator-secret-extended" },
+            projectId: "project_01",
+            view: "attention",
+            after: 0,
+            limit: 10,
+          }
+        : {
+            credential: { capabilityId: "capability_01", token: "operator-secret-extended" },
+            projectId: "project_01",
+            view: "attention",
+            snapshotRevision: 1,
+            cursor: 0,
+            limit: 10,
+          };
+    const transport = await connectServer(async () => result, undefined, {
+      initialize: projectionInitialize,
+      credential: projectionCredential,
+    });
+    try {
+      await expect(transport.call(operation, input as never)).rejects.toMatchObject({
+        name: "ProtocolTransportError",
+        code: "PROTOCOL_INCOMPATIBLE",
+      });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("rejects an unnegotiated notification field at the public response choke point", async () => {
+    const projectionInitialize: ProtocolInitializeRequest = {
+      protocolVersion: 1,
+      client: { name: "legacy-console", version: "1.0.0" },
+      authentication: {
+        scheme: "capability",
+        credential: "operator-secret-legacy",
+        clientNonce: "legacy_nonce_01",
+      },
+      expectedPrincipalKind: "operator",
+      requiredFeatures: ["operator-projection.v2"],
+      optionalFeatures: [],
+    };
+    const projectionCredential: VerifiedProtocolCredential = {
+      principal: credential.principal,
+      grantedOperations: [FABRIC_OPERATIONS.projectionViewPage],
+    };
+    const transport = await connectServer(async () => ({
+      status: "page",
+      view: "attention",
+      rows: [{
+        itemId: "attention_01",
+        itemRevision: 1,
+        fact: {
+          freshness: "live",
+          source: "fabric",
+          revision: 1,
+          observedAt: "2026-07-11T10:00:00Z",
+          value: {
+            summary: {
+              kind: "attention",
+              label: "Decision",
+              priority: "critical-path",
+              title: "Choose",
+              nativeNotification: {
+                targetIntegration: "native-desktop",
+                status: "available",
+                journalState: "sent",
+                deliveryItemRevision: 1,
+                claimGeneration: null,
+                integrationState: "available",
+                observedAt: "2026-07-11T10:00:00Z",
+              },
+            },
+            detailRef: { kind: "task", taskId: "task_01", expectedRevision: 1 },
+            actionAvailability: { state: "read-only", reason: "feature-unavailable" },
+          },
+        },
+      }],
+      nextCursor: 1,
+      hasMore: false,
+      snapshotRevision: 1,
+      readTransactionId: "read_01",
+    }), undefined, {
+      initialize: projectionInitialize,
+      credential: projectionCredential,
+    });
+
+    try {
+      await expect(transport.call(FABRIC_OPERATIONS.projectionViewPage, {
+        credential: { capabilityId: "capability_01", token: "operator-secret-legacy" } as never,
+        projectId: "project_01" as never,
+        view: "attention",
+        snapshotRevision: 1,
+        cursor: 0,
+        limit: 10,
+      })).rejects.toMatchObject({
+        name: "ProtocolTransportError",
+        code: "PROTOCOL_INCOMPATIBLE",
+      });
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("binds one credential-derived principal and validates operation results", async () => {
     const dispatch = vi.fn(async () => session);
     const transport = await connectServer(dispatch);

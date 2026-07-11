@@ -18,6 +18,7 @@ import {
   type OperatorViewPageRequest,
   type ProjectDiscoveryRequest,
   type ProjectionEventsRequest,
+  type ProjectionPageRequest,
   type ProjectionSnapshotRequest,
   type ScopedGate,
 } from "@local/agent-fabric-protocol";
@@ -212,7 +213,7 @@ describe("operator projection store", () => {
       projectId,
       projectSessionId,
     };
-    const snapshot = fixture.projections.snapshot(snapshotRequest);
+    const snapshot = fixture.projections.snapshot(snapshotRequest, "include");
     const globalRevision = fixture.database.prepare(
       "SELECT revision FROM daemon_global_state WHERE singleton=1",
     ).get() as { revision: number };
@@ -238,7 +239,7 @@ describe("operator projection store", () => {
       credential: fixture.credential,
       projectId,
       projectSessionId,
-    });
+    }, "include");
     const pageRequest: OperatorViewPageRequest<"attention"> = {
       credential: fixture.credential,
       projectId,
@@ -248,7 +249,7 @@ describe("operator projection store", () => {
       cursor: 0,
       limit: 1,
     };
-    const page = fixture.projections.viewPage(pageRequest);
+    const page = fixture.projections.viewPage(pageRequest, "include");
 
     expect(page).toMatchObject({
       status: "page",
@@ -309,7 +310,7 @@ describe("operator projection store", () => {
     });
 
     fixture.database.prepare("UPDATE tasks SET revision=revision+1 WHERE run_id='run_01' AND task_id='task_01'").run();
-    expect(fixture.projections.viewPage(pageRequest)).toMatchObject({
+    expect(fixture.projections.viewPage(pageRequest, "include")).toMatchObject({
       status: "resnapshot-required",
       view: "attention",
       reason: "snapshot-mismatch",
@@ -359,7 +360,7 @@ describe("operator projection store", () => {
         credential: fixture.credential,
         projectId,
         projectSessionId,
-      });
+      }, "include");
       const page = fixture.projections.viewPage({
         credential: fixture.credential,
         projectId,
@@ -368,7 +369,7 @@ describe("operator projection store", () => {
         snapshotRevision: snapshot.snapshotRevision,
         cursor: 0,
         limit: 10,
-      });
+      }, "include");
       const expectedNotification = {
         targetIntegration: "native-desktop",
         status: expectedStatus,
@@ -408,6 +409,55 @@ describe("operator projection store", () => {
       `).all()).toEqual(before);
     },
   );
+
+  it("projects native notification fields only when the caller explicitly includes them", () => {
+    const fixture = setupProjection();
+    const request = {
+      credential: fixture.credential,
+      projectId: identifier<"ProjectId">("project_01"),
+      projectSessionId: identifier<"ProjectSessionId">("session_01"),
+    };
+
+    const extendedSnapshot = fixture.projections.snapshot(request, "include");
+    const legacySnapshot = fixture.projections.snapshot(request, "omit");
+    if (extendedSnapshot.attention.freshness !== "live" || legacySnapshot.attention.freshness !== "live") {
+      throw new Error("expected live attention projections");
+    }
+    expect(extendedSnapshot.attention.value[0]).toHaveProperty("nativeNotification");
+    expect(legacySnapshot.attention.value[0]).not.toHaveProperty("nativeNotification");
+
+    const pageRequest: OperatorViewPageRequest<"attention"> = {
+      ...request,
+      view: "attention",
+      snapshotRevision: extendedSnapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    };
+    const extendedPage = fixture.projections.viewPage(pageRequest, "include");
+    const legacyPage = fixture.projections.viewPage(pageRequest, "omit");
+    if (extendedPage.status !== "page" || legacyPage.status !== "page") {
+      throw new Error("expected current attention pages");
+    }
+    expect(extendedPage.rows[0]?.fact).toMatchObject({
+      freshness: "live",
+      value: { summary: { nativeNotification: expect.any(Object) } },
+    });
+    expect(legacyPage.rows[0]?.fact).not.toHaveProperty("value.summary.nativeNotification");
+
+    const projectionPageRequest: ProjectionPageRequest<"attention"> = {
+      ...request,
+      view: "attention",
+      after: 0,
+      limit: 10,
+    };
+    const extendedProjectionPage = fixture.projections.page(projectionPageRequest, "include");
+    const legacyProjectionPage = fixture.projections.page(projectionPageRequest, "omit");
+    if (extendedProjectionPage.page.freshness !== "live" || legacyProjectionPage.page.freshness !== "live") {
+      throw new Error("expected live v1 attention pages");
+    }
+    expect(extendedProjectionPage.page.value.items[0]).toHaveProperty("nativeNotification");
+    expect(legacyProjectionPage.page.value.items[0]).not.toHaveProperty("nativeNotification");
+  });
 
   it("pages monotonic events and reads a revision-bound terminal-safe full message", () => {
     const fixture = setupProjection();
@@ -491,7 +541,7 @@ describe("operator projection store", () => {
       credential: fixture.credential,
       projectId,
       projectSessionId,
-    });
+    }, "include");
     const expectedItems = [
       ["attention", "attention_01"],
       ["project", "project_01"],
@@ -512,7 +562,7 @@ describe("operator projection store", () => {
         snapshotRevision: snapshot.snapshotRevision,
         cursor: 0,
         limit: 10,
-      });
+      }, "include");
       if (page.status !== "page") throw new Error(`expected ${view} page`);
       expect(page.rows).toHaveLength(1);
       expect(page.rows[0]).toMatchObject({ itemId: expectedItemId });
@@ -568,7 +618,7 @@ describe("operator projection store", () => {
       );
     `);
 
-    const snapshot = fixture.projections.snapshot({ credential: fixture.credential, projectId });
+    const snapshot = fixture.projections.snapshot({ credential: fixture.credential, projectId }, "include");
     expect(snapshot.session).toMatchObject({ value: { projectSessionId: "session_01" } });
     expect(snapshot.runs).toMatchObject({ value: [{ runId: "run_01" }] });
 

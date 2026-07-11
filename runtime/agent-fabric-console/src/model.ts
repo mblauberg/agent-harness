@@ -1,6 +1,7 @@
 import type {
   ConsoleView as ProtocolConsoleView,
   OperatorActionAvailability,
+  NativeNotificationDeliverySummary,
   OperatorViewDetailRefMap,
   OperatorViewRow,
   OperatorViewSummaryMap,
@@ -86,13 +87,37 @@ export type ConsoleActionAvailability =
       reason: "fact-unavailable" | "fact-conflict";
     }>;
 
+export type ConsoleNativeNotification =
+  | Readonly<NativeNotificationDeliverySummary & { kind: "daemon-journal" }>
+  | Readonly<{
+      kind: "legacy-fallback";
+      status: "unavailable";
+      reason: "feature-not-negotiated";
+    }>;
+
+export type ConsoleAttentionSummary = Readonly<
+  Omit<OperatorViewSummaryMap["attention"], "nativeNotification"> & {
+    nativeNotification: ConsoleNativeNotification;
+  }
+>;
+
+export type ConsoleViewSummaryMap = {
+  [View in FabricView]: View extends "attention"
+    ? ConsoleAttentionSummary
+    : OperatorViewSummaryMap[View];
+};
+
+export type NativeNotificationProjectionMode =
+  | "daemon-journal"
+  | "legacy-fallback";
+
 export type ConsoleRow<View extends FabricView = FabricView> = Readonly<{
   view: View;
   stableId: string;
   revision: Revision;
   urgency: ConsoleUrgency;
   freshness: ConsoleFreshness;
-  summary: OperatorViewSummaryMap[View] | null;
+  summary: ConsoleViewSummaryMap[View] | null;
   detailRef: OperatorViewDetailRefMap[View] | null;
   actionAvailability: ConsoleActionAvailability;
 }>;
@@ -136,7 +161,7 @@ function ageMs(observedAt: Timestamp, nowMs: number): number {
 
 function urgencyFor(
   view: FabricView,
-  summary: OperatorViewSummaryMap[FabricView],
+  summary: ConsoleViewSummaryMap[FabricView],
 ): ConsoleUrgency {
   if (view !== "attention") {
     return "normal";
@@ -145,10 +170,43 @@ function urgencyFor(
   return attention.priority;
 }
 
+function consoleSummary<View extends FabricView>(
+  view: View,
+  summary: OperatorViewSummaryMap[View],
+  nativeNotificationProjection: NativeNotificationProjectionMode,
+): ConsoleViewSummaryMap[View] {
+  if (view !== "attention") return summary as ConsoleViewSummaryMap[View];
+  const attention = summary as OperatorViewSummaryMap["attention"];
+  if (nativeNotificationProjection === "daemon-journal") {
+    if (attention.nativeNotification === undefined) {
+      throw new TypeError("negotiated Attention row has no native notification summary");
+    }
+    return {
+      ...attention,
+      nativeNotification: {
+        kind: "daemon-journal",
+        ...attention.nativeNotification,
+      },
+    } as ConsoleViewSummaryMap[View];
+  }
+  if (attention.nativeNotification !== undefined) {
+    throw new TypeError("legacy Attention row unexpectedly has a native notification summary");
+  }
+  return {
+    ...attention,
+    nativeNotification: {
+      kind: "legacy-fallback",
+      status: "unavailable",
+      reason: "feature-not-negotiated",
+    },
+  } as ConsoleViewSummaryMap[View];
+}
+
 export function mapProtocolRow<View extends FabricView>(
   view: View,
   row: OperatorViewRow<View>,
   nowMs: number,
+  nativeNotificationProjection: NativeNotificationProjectionMode,
 ): ConsoleRow<View> {
   const revision = revisionFromProtocol(row.itemRevision);
   const factRevision = revisionFromProtocol(row.fact.revision);
@@ -193,7 +251,11 @@ export function mapProtocolRow<View extends FabricView>(
     };
   }
 
-  const summary = row.fact.value.summary as OperatorViewSummaryMap[View];
+  const summary = consoleSummary(
+    view,
+    row.fact.value.summary as OperatorViewSummaryMap[View],
+    nativeNotificationProjection,
+  );
   const detailRef = row.fact.value.detailRef as OperatorViewDetailRefMap[View];
   return {
     ...common,

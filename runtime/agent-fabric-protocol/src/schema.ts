@@ -1,4 +1,9 @@
-import { PROTOCOL_FEATURES } from "./features.js";
+import {
+  MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES,
+  MAXIMUM_PROTOCOL_FEATURE_NAMES,
+  PROTOCOL_FEATURE_NAME_PATTERN,
+  PROTOCOL_FEATURES,
+} from "./features.js";
 import {
   BOUNDED_JSON_VALUE_SCHEMA,
   JSON_VALUE_NODE_SCHEMA,
@@ -140,9 +145,31 @@ const initializeInputSchema = {
       },
     },
     expectedPrincipalKind: { enum: ["operator", "agent", "integration"] },
-    requiredFeatures: { type: "array", maxItems: PROTOCOL_FEATURES.length, uniqueItems: true, items: { enum: PROTOCOL_FEATURES } },
-    optionalFeatures: { type: "array", maxItems: PROTOCOL_FEATURES.length, uniqueItems: true, items: { enum: PROTOCOL_FEATURES } },
+    requiredFeatures: {
+      type: "array",
+      maxItems: MAXIMUM_PROTOCOL_FEATURE_NAMES,
+      uniqueItems: true,
+      items: {
+        type: "string",
+        pattern: PROTOCOL_FEATURE_NAME_PATTERN,
+        maxLength: MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES,
+        "x-maxUtf8Bytes": MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES,
+      },
+    },
+    optionalFeatures: {
+      type: "array",
+      maxItems: MAXIMUM_PROTOCOL_FEATURE_NAMES,
+      uniqueItems: true,
+      items: {
+        type: "string",
+        pattern: PROTOCOL_FEATURE_NAME_PATTERN,
+        maxLength: MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES,
+        "x-maxUtf8Bytes": MAXIMUM_PROTOCOL_FEATURE_NAME_BYTES,
+      },
+    },
   },
+  "x-combinedMaxFeatureNames": MAXIMUM_PROTOCOL_FEATURE_NAMES,
+  "x-crossArrayUnique": ["requiredFeatures", "optionalFeatures"],
 } as const;
 
 const initializeResultSchema = {

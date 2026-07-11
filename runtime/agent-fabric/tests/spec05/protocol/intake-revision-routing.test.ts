@@ -456,7 +456,7 @@ describe("intake revision public routing", () => {
           credential,
           projectId: fixture.projectId as never,
           projectSessionId: fixture.projectSessionId as never,
-        });
+        }, "include");
         const page = projection.viewPage({
           credential,
           projectId: fixture.projectId as never,
@@ -465,7 +465,7 @@ describe("intake revision public routing", () => {
           snapshotRevision: snapshot.snapshotRevision,
           cursor: 0,
           limit: 10,
-        });
+        }, "include");
         expect(page).toMatchObject({
           status: "page",
           rows: [{

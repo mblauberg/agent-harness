@@ -6,6 +6,7 @@ import {
   BoundedNdjsonWriter,
   PROTOCOL_ERROR_CODES,
   PROTOCOL_LIMITS,
+  assertOperationResultFeatureShape,
   createProtocolInitializeResult,
   isActiveFabricOperation,
   parseIdentifier,
@@ -204,6 +205,7 @@ export function servePublicProtocolConnection(
       const input = parseOperationInputForPrincipal(operation, context.principal.kind, request.input);
       const dispatched = await options.dispatch(context, operation, input);
       const result = parseOperationResult(operation, dispatched);
+      assertOperationResultFeatureShape(operation, context.features, result);
       await write({ id: request.id, operation, ok: true, result });
       try {
         options.afterResponse?.({ context, operation, input, result });

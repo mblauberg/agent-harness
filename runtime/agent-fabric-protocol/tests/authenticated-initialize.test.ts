@@ -8,8 +8,10 @@ import {
   authorizeProtocolInitialize,
   createProtocolInitializeResult,
   NdjsonRpcTransport,
+  operationsForFeatures,
   parseProtocolInitializeRequest,
   parseProtocolInitializeResult,
+  PROTOCOL_FEATURES,
   PROTOCOL_SCHEMA,
   type ProtocolInitializeRequest,
 } from "../src/index.js";
@@ -48,6 +50,146 @@ class InitializeLoopback extends Duplex {
 }
 
 describe("authenticated initialize", () => {
+  it("negotiates the notification result shape without granting an operation", () => {
+    expect(PROTOCOL_FEATURES).toContain("native-notification-projection.v1");
+    expect([...operationsForFeatures(["native-notification-projection.v1"])]).toStrictEqual([]);
+
+    const result = createProtocolInitializeResult({
+      request: {
+        protocolVersion: 1,
+        client: { name: "console", version: "1" },
+        authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+        expectedPrincipalKind: "operator",
+        requiredFeatures: ["operator-projection.v1"],
+        optionalFeatures: ["native-notification-projection.v1"],
+      },
+      verifiedCredential: {
+        principal: {
+          kind: "operator",
+          operatorId: "operator_01" as never,
+          projectId: "project_01" as never,
+          projectAuthorityGeneration: 1,
+          principalGeneration: 1,
+        },
+        grantedOperations: [FABRIC_OPERATIONS.projectionSnapshot],
+      },
+      daemonVersion: "1.0.0",
+      daemonInstanceGeneration: 1,
+      offeredFeatures: ["operator-projection.v1", "native-notification-projection.v1"],
+      limits: {
+        maximumFrameBytes: 1048576,
+        maximumPendingCalls: 32,
+        maximumInFlightPerConnection: 16,
+        idleTimeoutMs: 300000,
+        requestTimeoutMs: 30000,
+      },
+      connectionNonce: "connection_01",
+    });
+
+    expect(result.features).toStrictEqual([
+      "operator-projection.v1",
+      "native-notification-projection.v1",
+    ]);
+    expect(result.allowedOperations).toStrictEqual([FABRIC_OPERATIONS.projectionSnapshot]);
+  });
+
+  it("ignores a well-formed unknown optional feature and reports an unknown required feature unavailable", () => {
+    const base = {
+      protocolVersion: 1,
+      client: { name: "future-console", version: "1" },
+      authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+      expectedPrincipalKind: "operator",
+      requiredFeatures: ["operator-projection.v1"],
+      optionalFeatures: ["future-result-shape.v7"],
+    } as const;
+    const parsed = parseProtocolInitializeRequest(base);
+    expect(parsed.optionalFeatures).toStrictEqual(["future-result-shape.v7"]);
+
+    const result = createProtocolInitializeResult({
+      request: parsed,
+      verifiedCredential: {
+        principal: {
+          kind: "operator",
+          operatorId: "operator_01" as never,
+          projectId: "project_01" as never,
+          projectAuthorityGeneration: 1,
+          principalGeneration: 1,
+        },
+        grantedOperations: [FABRIC_OPERATIONS.projectionSnapshot],
+      },
+      daemonVersion: "1.0.0",
+      daemonInstanceGeneration: 1,
+      offeredFeatures: ["operator-projection.v1"],
+      limits: {
+        maximumFrameBytes: 1048576,
+        maximumPendingCalls: 32,
+        maximumInFlightPerConnection: 16,
+        idleTimeoutMs: 300000,
+        requestTimeoutMs: 30000,
+      },
+      connectionNonce: "connection_01",
+    });
+    expect(result.features).toStrictEqual(["operator-projection.v1"]);
+
+    const required = parseProtocolInitializeRequest({
+      ...base,
+      requiredFeatures: ["operator-projection.v1", "future-required.v3"],
+      optionalFeatures: [],
+    });
+    expect(() => createProtocolInitializeResult({
+      request: required,
+      verifiedCredential: {
+        principal: result.principal,
+        grantedOperations: [FABRIC_OPERATIONS.projectionSnapshot],
+      },
+      daemonVersion: "1.0.0",
+      daemonInstanceGeneration: 1,
+      offeredFeatures: ["operator-projection.v1"],
+      limits: result.limits,
+      connectionNonce: "connection_02",
+    })).toThrow(expect.objectContaining({ code: "FEATURE_UNAVAILABLE" }));
+  });
+
+  it("rejects malformed, oversized and duplicate feature lists before classification", () => {
+    const request = {
+      protocolVersion: 1,
+      client: { name: "console", version: "1" },
+      authentication: { scheme: "capability", credential: "operator-secret-0001", clientNonce: "client_01" },
+      expectedPrincipalKind: "operator",
+      requiredFeatures: ["operator-projection.v1"],
+      optionalFeatures: [],
+    } as const;
+    for (const feature of [
+      "Operator-projection.v1",
+      "operator_projection.v1",
+      "operator-projection.v0",
+      "operator-projection.١v1",
+      `${"a".repeat(62)}.v1`,
+    ]) {
+      expect(() => parseProtocolInitializeRequest({
+        ...request,
+        optionalFeatures: [feature],
+      })).toThrow(/feature/iu);
+    }
+    expect(() => parseProtocolInitializeRequest({
+      ...request,
+      requiredFeatures: ["operator-projection.v1", "operator-projection.v1"],
+    })).toThrow(/duplicate/iu);
+    expect(() => parseProtocolInitializeRequest({
+      ...request,
+      optionalFeatures: ["operator-projection.v1"],
+    })).toThrow(/duplicate/iu);
+    expect(() => parseProtocolInitializeRequest({
+      ...request,
+      requiredFeatures: Array.from({ length: 64 }, (_, index) => `required-${String(index)}.v1`),
+      optionalFeatures: Array.from({ length: 64 }, (_, index) => `optional-${String(index)}.v1`),
+    })).toThrow(/64/iu);
+    expect(() => parseProtocolInitializeRequest({
+      ...request,
+      requiredFeatures: Array.from({ length: 65 }, (_, index) => `feature-${String(index)}.v1`),
+    })).toThrow(/64/iu);
+  });
+
   it("never grants the launch-only attestation operation to a standalone protocol connection", () => {
     const request = {
       protocolVersion: 1,

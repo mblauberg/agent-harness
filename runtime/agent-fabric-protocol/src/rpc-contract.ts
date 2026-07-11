@@ -151,8 +151,8 @@ export type ProtocolInitializeRequest = {
     clientNonce: string;
   };
   expectedPrincipalKind: ProtocolPrincipal["kind"];
-  requiredFeatures: readonly ProtocolFeature[];
-  optionalFeatures: readonly ProtocolFeature[];
+  requiredFeatures: readonly string[];
+  optionalFeatures: readonly string[];
 };
 
 export type ProtocolInitializeResult = {
@@ -312,6 +312,7 @@ export type ProtocolRequest<Operation extends ProtocolOperation = ProtocolOperat
 
 export const PROTOCOL_ERROR_CODES = [
   "PROTOCOL_INVALID",
+  "PROTOCOL_INCOMPATIBLE",
   "PROTOCOL_UNSUPPORTED",
   "FEATURE_UNAVAILABLE",
   "AUTHENTICATION_FAILED",

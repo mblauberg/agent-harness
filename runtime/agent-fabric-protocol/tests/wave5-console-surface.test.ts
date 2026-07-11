@@ -5,6 +5,8 @@ import {
   FABRIC_OPERATIONS,
   OPERATION_CONTRACT_FIXTURES,
   OPERATION_REGISTRY,
+  ProtocolResultShapeError,
+  assertOperationResultFeatureShape,
   createOperatorClient,
   parseOperationInput,
   parseOperationResult,
@@ -84,21 +86,22 @@ describe("canonical scoped-gate read", () => {
 });
 
 const observedAt = "2026-07-11T10:00:00.000Z";
+const nativeNotification = {
+  targetIntegration: "native-desktop",
+  status: "available",
+  journalState: "sent",
+  deliveryItemRevision: 1,
+  claimGeneration: null,
+  integrationState: "available",
+  observedAt,
+} as const;
 const rowCases = [
   ["attention", {
     kind: "attention",
     label: "Decision",
     priority: "critical-path",
     title: "Choose",
-    nativeNotification: {
-      targetIntegration: "native-desktop",
-      status: "available",
-      journalState: "sent",
-      deliveryItemRevision: 1,
-      claimGeneration: null,
-      integrationState: "available",
-      observedAt,
-    },
+    nativeNotification,
   }, { kind: "task", taskId: "task_01", expectedRevision: 1 }],
   ["project", { kind: "project", goal: "Ship", acceptedScopeRef: null, repositoryRevision: "revision_01" }, { kind: "project", projectId: "project_01", expectedRevision: 1 }],
   ["runs", { kind: "run", phase: "reviewing", health: "healthy", nextMilestone: "acceptance" }, { kind: "run", coordinationRunId: "run_01", expectedRevision: 1 }],
@@ -140,7 +143,7 @@ describe("rich operator projection v2", () => {
     })).toMatchObject({ status: "page", view });
   });
 
-  it("requires the closed native notification summary on attention rows", () => {
+  it("keeps the closed native notification summary optional only in the context-free codec", () => {
     const [, validSummary, detailRef] = rowCases[0];
     const { nativeNotification: _omitted, ...missingNotification } = validSummary;
     const page = (summary: unknown) => ({
@@ -153,12 +156,10 @@ describe("rich operator projection v2", () => {
       readTransactionId: "read_tx_01",
     });
 
-    expect(() =>
-      parseOperationResult(
-        FABRIC_OPERATIONS.projectionViewPage,
-        page(missingNotification),
-      ),
-    ).toThrowError(/nativeNotification is required/u);
+    expect(parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      page(missingNotification),
+    )).toMatchObject({ status: "page", view: "attention" });
     expect(() =>
       parseOperationResult(
         FABRIC_OPERATIONS.projectionViewPage,
@@ -193,6 +194,198 @@ describe("rich operator projection v2", () => {
       currentSnapshotRevision: 5,
       snapshotCursor: 9,
     })).toMatchObject({ status: "resnapshot-required", reason: "snapshot-mismatch" });
+  });
+});
+
+describe("negotiated notification result shape", () => {
+  const legacyAttention = {
+    itemId: "attention_01",
+    revision: 1,
+    label: "Decision",
+    priority: "critical-path",
+    title: "Choose",
+    sourceFreshness: "live",
+    lastEventAt: observedAt,
+    duplicateCount: 1,
+  } as const;
+  const extendedAttention = { ...legacyAttention, nativeNotification };
+  const legacyFeatures = ["operator-projection.v1", "operator-projection.v2"] as const;
+  const extendedFeatures = [...legacyFeatures, "native-notification-projection.v1"] as const;
+
+  it("covers negotiated, legacy, wrong-mode and malformed frames for all three Attention operations", () => {
+    const snapshotBase = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.projectionSnapshot].result as Record<string, unknown>;
+    const [, validSummary, detailRef] = rowCases[0];
+    const { nativeNotification: _omitted, ...legacySummary } = validSummary;
+    const fact = (value: unknown) => ({
+      freshness: "live",
+      source: "fabric",
+      revision: 1,
+      observedAt,
+      value,
+    });
+    const malformedAttention = {
+      ...extendedAttention,
+      nativeNotification: { ...nativeNotification, status: "unknown" },
+    };
+    const malformedSummary = {
+      ...validSummary,
+      nativeNotification: { ...nativeNotification, status: "unknown" },
+    };
+    const cases = [
+      {
+        operation: FABRIC_OPERATIONS.projectionSnapshot,
+        legacy: { ...snapshotBase, attention: fact([legacyAttention]) },
+        extended: { ...snapshotBase, attention: fact([extendedAttention]) },
+        malformed: { ...snapshotBase, attention: fact([malformedAttention]) },
+      },
+      {
+        operation: FABRIC_OPERATIONS.projectionPage,
+        legacy: { view: "attention", page: fact({ items: [legacyAttention], nextCursor: 1, hasMore: false }) },
+        extended: { view: "attention", page: fact({ items: [extendedAttention], nextCursor: 1, hasMore: false }) },
+        malformed: { view: "attention", page: fact({ items: [malformedAttention], nextCursor: 1, hasMore: false }) },
+      },
+      {
+        operation: FABRIC_OPERATIONS.projectionViewPage,
+        legacy: {
+          status: "page",
+          view: "attention",
+          rows: [row(legacySummary, detailRef)],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: 1,
+          readTransactionId: "read_legacy",
+        },
+        extended: {
+          status: "page",
+          view: "attention",
+          rows: [row(validSummary, detailRef)],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: 1,
+          readTransactionId: "read_extended",
+        },
+        malformed: {
+          status: "page",
+          view: "attention",
+          rows: [row(malformedSummary, detailRef)],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: 1,
+          readTransactionId: "read_malformed",
+        },
+      },
+    ] as const;
+
+    for (const fixture of cases) {
+      const legacy = parseOperationResult(fixture.operation, fixture.legacy);
+      const extended = parseOperationResult(fixture.operation, fixture.extended);
+      expect(assertOperationResultFeatureShape(fixture.operation, legacyFeatures, legacy)).toBe(legacy);
+      expect(assertOperationResultFeatureShape(fixture.operation, extendedFeatures, extended)).toBe(extended);
+      expect(() => assertOperationResultFeatureShape(
+        fixture.operation,
+        extendedFeatures,
+        legacy,
+      )).toThrow(expect.objectContaining({ reason: "missing-negotiated-field" }));
+      expect(() => assertOperationResultFeatureShape(
+        fixture.operation,
+        legacyFeatures,
+        extended,
+      )).toThrow(expect.objectContaining({ reason: "unnegotiated-field" }));
+      expect(() => parseOperationResult(fixture.operation, fixture.malformed)).toThrow(/nativeNotification.status/u);
+    }
+  });
+
+  it("enforces negotiated presence for every snapshot Attention conflict candidate", () => {
+    const base = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.projectionSnapshot].result as Record<string, unknown>;
+    const mixed = parseOperationResult(FABRIC_OPERATIONS.projectionSnapshot, {
+      ...base,
+      attention: {
+        freshness: "conflict",
+        source: "fabric",
+        revision: 1,
+        observedAt,
+        candidates: [[extendedAttention], [legacyAttention]],
+      },
+    });
+
+    expect(() => assertOperationResultFeatureShape(
+      FABRIC_OPERATIONS.projectionSnapshot,
+      extendedFeatures,
+      mixed,
+    )).toThrow(expect.objectContaining({ code: "PROTOCOL_INCOMPATIBLE" }));
+    expect(() => assertOperationResultFeatureShape(
+      FABRIC_OPERATIONS.projectionSnapshot,
+      legacyFeatures,
+      mixed,
+    )).toThrow(ProtocolResultShapeError);
+  });
+
+  it("enforces negotiated presence for every projection-page Attention candidate", () => {
+    const base = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.projectionPage].result as Record<string, unknown>;
+    const extended = parseOperationResult(FABRIC_OPERATIONS.projectionPage, {
+      ...base,
+      page: {
+        freshness: "conflict",
+        source: "fabric",
+        revision: 1,
+        observedAt,
+        candidates: [
+          { items: [extendedAttention], nextCursor: 1, hasMore: false },
+          { items: [extendedAttention], nextCursor: 1, hasMore: false },
+        ],
+      },
+    });
+    expect(assertOperationResultFeatureShape(
+      FABRIC_OPERATIONS.projectionPage,
+      extendedFeatures,
+      extended,
+    )).toBe(extended);
+    expect(() => assertOperationResultFeatureShape(
+      FABRIC_OPERATIONS.projectionPage,
+      legacyFeatures,
+      extended,
+    )).toThrow(ProtocolResultShapeError);
+  });
+
+  it("rejects the whole view-page result when one nested conflict candidate has the wrong mode", () => {
+    const [, validSummary, detailRef] = rowCases[0];
+    const { nativeNotification: _omitted, ...legacySummary } = validSummary;
+    const result = parseOperationResult(FABRIC_OPERATIONS.projectionViewPage, {
+      status: "page",
+      view: "attention",
+      rows: [{
+        itemId: "attention_01",
+        itemRevision: 1,
+        fact: {
+          freshness: "conflict",
+          source: "fabric",
+          revision: 1,
+          observedAt,
+          candidates: [
+            {
+              summary: validSummary,
+              detailRef,
+              actionAvailability: { state: "read-only", reason: "feature-unavailable" },
+            },
+            {
+              summary: legacySummary,
+              detailRef,
+              actionAvailability: { state: "read-only", reason: "feature-unavailable" },
+            },
+          ],
+        },
+      }],
+      nextCursor: 1,
+      hasMore: false,
+      snapshotRevision: 1,
+      readTransactionId: "read_tx_01",
+    });
+
+    expect(() => assertOperationResultFeatureShape(
+      FABRIC_OPERATIONS.projectionViewPage,
+      extendedFeatures,
+      result,
+    )).toThrow(ProtocolResultShapeError);
   });
 });
 

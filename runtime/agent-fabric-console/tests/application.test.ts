@@ -28,7 +28,10 @@ import {
   reduceFabricPointer,
   renderFabricConsoleFrame,
 } from "../src/index.js";
-import type { ConsoleProtocolPort } from "../src/protocol-adapter.js";
+import type {
+  ConsoleProtocolBinding,
+  ConsoleProtocolPort,
+} from "../src/protocol-adapter.js";
 import { FABRIC_VIEWS } from "../src/model.js";
 import type { ConsoleWorkflowReview } from "../src/workflow.js";
 
@@ -39,6 +42,21 @@ const credential = {
   capabilityId: "capability-application",
   token: "token-never-render",
 } as OperatorCapabilityCredential;
+
+function currentBinding(
+  port: ConsoleProtocolPort,
+  readOnly: boolean,
+  actions: Extract<ConsoleProtocolBinding, { ok: true }>["actions"],
+): ConsoleProtocolBinding {
+  return {
+    ok: true,
+    port,
+    readOnly,
+    actions,
+    nativeNotificationProjection: "daemon-journal",
+    compatibility: { mode: "current" },
+  };
+}
 
 function snapshot(): OperatorProjectionSnapshot {
   return {
@@ -288,6 +306,48 @@ describe("typed Console application bootstrap boundary", () => {
     await application.close("operator");
   });
 
+  it("renders protocol incompatibility as an empty connection failure rather than a fallback row", async () => {
+    const bootstrap: ConsoleBootstrapPort = {
+      startOrAttach: vi.fn(async (): Promise<ConsoleBootstrapResult> => ({
+        status: "protocol-incompatible",
+        primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
+        retry: { status: "succeeded", profile: "strict-v1" },
+        result: {
+          code: "PROTOCOL_INCOMPATIBLE",
+          message: "unnegotiated notification field",
+          operation: "fabric.v1.operator-projection.snapshot",
+          closedReason: "unnegotiated-field",
+        },
+      })),
+    };
+
+    const application = await startFabricConsoleApplication({
+      bootstrap,
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => "event-incompatible",
+      confirmationId: () => "confirmation-incompatible",
+      ...runtimeDependencies,
+    });
+
+    expect(application.dataset.connection).toStrictEqual({
+      state: "protocol-incompatible",
+      code: "CONSOLE_PROTOCOL_INCOMPATIBLE",
+      message: "unnegotiated notification field",
+      operation: "fabric.v1.operator-projection.snapshot",
+      closedReason: "unnegotiated-field",
+      primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
+      retry: { status: "succeeded", profile: "strict-v1" },
+    });
+    expect(application.dataset.pages.attention.rows).toStrictEqual([]);
+    expect(application.dataset.canMutate).toBe(false);
+    expect(application.frame.rows.join("\n")).toContain("PROTOCOL-INCOMPATIBLE");
+    expect(application.frame.rows.join("\n")).not.toContain("feature-not-negotiated");
+    await application.close("operator");
+  });
+
   it.each(["standalone", "herdr"] as const)(
     "uses the same public projection protocol on the %s surface and never replays commands",
     async (surface) => {
@@ -297,7 +357,7 @@ describe("typed Console application bootstrap boundary", () => {
       const bootstrap: ConsoleBootstrapPort = {
         startOrAttach: vi.fn(async (): Promise<ConsoleBootstrapResult> => ({
           status: "connected",
-          binding: { ok: true, port, readOnly: true, actions: null },
+          binding: currentBinding(port, true, null),
           credential,
           projectId,
           detach,
@@ -315,7 +375,10 @@ describe("typed Console application bootstrap boundary", () => {
         ...runtimeDependencies,
       });
 
-      expect(application.dataset.connection).toStrictEqual({ state: "live" });
+      expect(application.dataset.connection).toStrictEqual({
+        state: "live",
+        compatibility: { mode: "current" },
+      });
       expect(application.dataset.canMutate).toBe(false);
       expect(Object.keys(application.dataset.pages)).toStrictEqual(FABRIC_VIEWS);
       await application.refresh();
@@ -351,7 +414,7 @@ describe("typed Console application bootstrap boundary", () => {
       bootstrap: {
         startOrAttach: async () => ({
           status: "connected",
-          binding: { ok: true, port, readOnly: false, actions },
+          binding: currentBinding(port, false, actions),
           credential,
           projectId,
           actionPlanner,
@@ -410,7 +473,7 @@ describe("typed Console application bootstrap boundary", () => {
       bootstrap: {
         startOrAttach: async () => ({
           status: "connected",
-          binding: { ok: true, port, readOnly: false, actions: null },
+          binding: currentBinding(port, false, null),
           credential,
           projectId,
           workflowPlanner: { prepare, arm, commit },
@@ -493,7 +556,7 @@ describe("typed Console application bootstrap boundary", () => {
     const startOrAttach = vi.fn()
       .mockResolvedValueOnce({
         status: "connected",
-        binding: { ok: true, port, readOnly: false, actions: null },
+        binding: currentBinding(port, false, null),
         credential,
         projectId,
         workflowPlanner,
@@ -502,7 +565,7 @@ describe("typed Console application bootstrap boundary", () => {
       })
       .mockResolvedValueOnce({
         status: "connected",
-        binding: { ok: true, port, readOnly: false, actions: null },
+        binding: currentBinding(port, false, null),
         credential,
         projectId,
         projectSessionId: "session-created" as ProjectSessionId,
@@ -568,7 +631,7 @@ describe("typed Console application bootstrap boundary", () => {
     const bootstrap: ConsoleBootstrapPort = {
       startOrAttach: async () => ({
         status: "connected",
-        binding: { ok: true, port, readOnly: true, actions: null },
+        binding: currentBinding(port, true, null),
         credential,
         projectId,
         projectSessionId,
@@ -631,7 +694,7 @@ describe("typed Console application bootstrap boundary", () => {
       bootstrap: {
         startOrAttach: async () => ({
           status: "connected",
-          binding: { ok: true, port, readOnly: true, actions: null },
+          binding: currentBinding(port, true, null),
           credential,
           projectId,
           projectSessionId,
@@ -657,7 +720,10 @@ describe("typed Console application bootstrap boundary", () => {
       state: "unavailable",
       reason: "feature-unavailable",
     });
-    expect(application.dataset.connection).toStrictEqual({ state: "live" });
+    expect(application.dataset.connection).toStrictEqual({
+      state: "live",
+      compatibility: { mode: "current" },
+    });
     expect(application.dataset.canMutate).toBe(false);
     expect(application.frame.rows.join("\n")).toContain("feature-unavailable");
     await application.close("operator");
@@ -787,7 +853,7 @@ describe("typed Console application bootstrap boundary", () => {
       bootstrap: {
         startOrAttach: async () => ({
           status: "connected",
-          binding: { ok: true, port, readOnly: true, actions: null },
+          binding: currentBinding(port, true, null),
           credential,
           projectId,
           projectSessionId,
@@ -827,7 +893,10 @@ describe("typed Console application bootstrap boundary", () => {
     const rendered = application.frame.rows.join("\n");
     expect(rendered).toContain("Git: LIVE");
     expect(rendered).toContain("GitHub checks: UNAVAILABLE r1");
-    expect(application.dataset.connection).toStrictEqual({ state: "live" });
+    expect(application.dataset.connection).toStrictEqual({
+      state: "live",
+      compatibility: { mode: "current" },
+    });
 
     selectedWorktree = "/repo/.worktrees/selected";
     await application.handleInput({ kind: "key", key: "shift-tab" });

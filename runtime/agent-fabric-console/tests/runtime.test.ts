@@ -30,6 +30,7 @@ import {
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digest = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
 const nativeNotification = {
+  kind: "daemon-journal",
   targetIntegration: "native-desktop",
   status: "available",
   journalState: "sent",
@@ -73,7 +74,7 @@ function fixtureDataset(revision = 11): FabricConsoleDataset {
   };
   const empty = createEmptyViewPages();
   return {
-    connection: { state: "live" },
+    connection: { state: "live", compatibility: { mode: "current" } },
     snapshot: {
       schemaVersion: 1,
       snapshotRevision: revision,
