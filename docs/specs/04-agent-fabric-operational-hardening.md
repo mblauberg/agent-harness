@@ -1,11 +1,14 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.1
+Version: 1.2
 Date: 11 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
+
+Version 1.2 closes the implementation-discovered private operator bootstrap
+and generation-bound chair-launch boundary required by Spec 05.
 
 ## 1. Decision and relationship to existing specs
 
@@ -61,7 +64,10 @@ access and Herdr's non-authoritative visibility role.
    commands fail closed.
 4. Response writes respect stream backpressure. Overload returns typed errors;
    it does not start more work and hope the process survives.
-5. Bootstrap authority remains create-run-only after initialisation.
+5. Bootstrap authority remains limited after initialisation to legacy
+   create-run compatibility and exact-root local operator provisioning as
+   defined in section 9.7. It is never accepted on the public operator
+   protocol and cannot perform project-session, gate, Git or provider actions.
 
 ### 3.3 Exact workspace trust
 
@@ -390,3 +396,43 @@ Acceptance requires deterministic tests for:
 Load evidence shall cover concurrent session membership, scoped-gate reads,
 budget admission, result callbacks and operator projection alongside the
 existing 32-agent/1,000-operation coordination mix.
+
+### 9.7 Private project/operator provisioning and launch custody
+
+The daemon's private legacy/control connection owns one additional bootstrap
+method, `provisionLocalOperator`. It is available only after the normal daemon
+initialisation handshake with the current private bootstrap capability. The
+method rechecks an exact canonical root and trust-record digest, derives the
+local subject binding, and transactionally creates or revalidates the project,
+operator principal and bounded project capability described by Spec 01
+section 32.9. It cannot widen an existing project/root binding. Exact replay is
+idempotent; changed input or stale generation fails closed. The returned
+plaintext token is a one-time local handoff and is never placed in the daemon
+discovery receipt or durable audit. Revocation and later bounded issuance use
+the same generation fences.
+
+The public operator connection may create a draft session but may launch a
+chair only through preview/commit of `ProjectSessionLaunchIntent`. The daemon
+owns a launch-custody port behind the operator action service. On commit it:
+
+1. revalidates the trusted project root, session generation/revision, launch
+   packet and resource-plan digests and registered adapter contract;
+2. in one SQLite transaction creates the run, one chair, hashed capability,
+   chair lease, membership and project/session/run resource hierarchy, and a
+   prepared provider action with the stable action ID;
+3. passes the plaintext chair credential directly to the registered local
+   adapter without returning or journalling it on the operator protocol; and
+4. records accepted/terminal, proved failure or ambiguity before advancing the
+   session to `active`, `launch_failed` or `launch_ambiguous` respectively.
+
+Startup recovery never reconstructs or redispatches plaintext launch
+material. A prepared action may resume only when the daemon proves no dispatch
+occurred and can deterministically rederive the same credential from the
+machine-private capability key. Dispatched or uncertain actions are
+observe-only until adapter lookup proves their outcome. Global liveness counts
+the prepared/ambiguous run and action throughout reconciliation.
+
+Deterministic gates cover private/public principal separation, trust-root
+recheck, secret non-disclosure, duplicate provision, launch crash injection at
+every transaction/effect boundary, coordinated-mode double-chair races and
+restart without blind provider respawn.

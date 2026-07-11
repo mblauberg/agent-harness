@@ -1,12 +1,16 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.4
+Version: 0.5
 Date: 11 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
+
+Version 0.5 closes the implementation-discovered local operator-provisioning
+and reviewed chair-launch gap. It does not change Spec 05 product scope or
+authorise provider login, push, release or unattended daemon operation.
 
 ## 1. Decision requested
 
@@ -1613,6 +1617,74 @@ not include them.
   values.
 - **NFR-014:** Project-session protocol shall remain usable without Console,
   Herdr or GitHub.
+
+### 32.9 Local operator bootstrap and reviewed chair launch
+
+`projectSessionCreate` creates only a Fabric-owned draft and has no provider,
+process or Git effect. Before that call, the private machine-local control
+plane may provision the first operator for an exact trusted project root. This
+is not a public operator operation and does not make the bootstrap principal an
+operator. The daemon shall:
+
+- recheck the canonical root against the machine-local workspace-trust
+  registry and bind one deterministic project identity to that root;
+- derive the local operator subject from the trusted launcher context, create
+  or revalidate its generation-fenced principal, and issue only the requested
+  bounded project capability;
+- require exact idempotent replay or an explicit generation-bound rotation;
+- persist only capability hashes and return plaintext launch credentials once
+  over the private local channel; and
+- never write the operator credential to discovery files, audit journals,
+  project artifacts, Console state, projections or rendered output.
+
+Starting the first coordination chair is a separate consequential action over
+an existing draft or `awaiting_launch` project session. The operator action
+protocol adds `ProjectSessionLaunchIntent` to `OperatorActionIntent` and maps
+it to the `launch` capability. The intent binds:
+
+```yaml
+project_session_launch:
+  project_id: exact-project
+  project_session_id: existing-draft-session
+  expected_session_revision: compare-and-set-integer
+  expected_session_generation: fenced-generation
+  launch_packet_ref: exact-path-and-sha256
+  authority_ref: exact-sha256
+  budget_ref: exact-reference
+  resource_plan_ref: exact-path-and-sha256
+  provider_adapter_id: registered-adapter
+  provider_action_id: stable-id
+```
+
+The schema-validated launch packet supplies the run ID, one chair agent ID,
+project run directory, narrowed chair authority, resource limits, topology and
+provider launch input. The daemon derives the workspace root from the trusted
+project; packet paths may only narrow it. Preview reads the current session,
+packet, adapter contract and resource state and persists their exact digests.
+Commit rechecks every revision and digest, then atomically creates the
+coordination run, chair identity and capability hash, current chair lease,
+required membership, hierarchical resource scopes and prepared provider
+action before dispatching through the registered adapter with the stable
+action ID. The plaintext chair credential is handed only to that internal
+launch boundary and is never returned in an operator result or projection.
+
+A failure proven before provider acceptance enters `launch_failed`; a dispatch
+whose outcome cannot be proven enters `launch_ambiguous` and retains its run,
+lease, resource reservation and action identity for observe-only
+reconciliation. Neither the Console nor restart blindly repeats it. A new
+attempt after a proved failure requires a fresh current-state preview. The
+coordinated/independent one-chair rules in section 32.1 are checked in the same
+transaction as run creation.
+
+Acceptance additionally requires:
+
+- **AC-021:** an untrusted/wrong-root bootstrap request, changed idempotent
+  replay, stale operator generation or widened capability fails closed without
+  creating a project or plaintext credential residue; and
+- **AC-022:** duplicate, stale, failed and ambiguous chair launch produces one
+  project session, at most one run/action effect for the stable identity, no
+  second coordinated chair and no secret in protocol responses, projections,
+  logs or receipts.
 
 Acceptance adds:
 
