@@ -13,6 +13,7 @@ import {
   type AgentProvisionProviderResult,
   type ChairLaunchHandoff,
   type ChairLaunchProviderResult,
+  type AgentFabricPrincipalBinding,
 } from "./providers/types.js";
 
 export type AdapterProcessDefinition = {
@@ -49,6 +50,18 @@ export type AdapterAgentProvisionRequest = {
 export type RetainedChildBridge = Readonly<{
   runId: string;
   agentId: string;
+  adapterId: string;
+  actionId: string;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+}>;
+
+export type RetainedChairBridge = Readonly<{
+  projectSessionId: string;
+  runId: string;
+  agentId: string;
+  principalGeneration: number;
   adapterId: string;
   actionId: string;
   providerSessionRef: string;
@@ -114,6 +127,7 @@ function isRetainedChairLoss(error: unknown, transport: AdapterProcessTransport)
   return (
     transport.closed ||
     error instanceof AdapterTransportError ||
+    (error instanceof ProviderAdapterError && error.code === "CHAIR_BRIDGE_LOST") ||
     (error instanceof Error && [
       "CHAIR_BRIDGE_LOST",
       "PROVIDER_CLOSED",
@@ -128,6 +142,7 @@ function isRetainedChildLoss(error: unknown, transport: AdapterProcessTransport)
   return (
     transport.closed ||
     error instanceof AdapterTransportError ||
+    (error instanceof ProviderAdapterError && error.code === "AGENT_BRIDGE_LOST") ||
     (error instanceof Error && [
       "AGENT_BRIDGE_LOST",
       "PROVIDER_CLOSED",
@@ -136,6 +151,14 @@ function isRetainedChildLoss(error: unknown, transport: AdapterProcessTransport)
       "PROVIDER_STDIN_FAILED",
     ].includes(error.name))
   );
+}
+
+function validExpectedPrincipal(value: AgentFabricPrincipalBinding): boolean {
+  return typeof value === "object" && value !== null &&
+    typeof value.agentId === "string" && value.agentId.length > 0 &&
+    typeof value.projectSessionId === "string" && value.projectSessionId.length > 0 &&
+    typeof value.runId === "string" && value.runId.length > 0 &&
+    Number.isSafeInteger(value.principalGeneration) && value.principalGeneration >= 1;
 }
 
 function enforceModelPolicy(adapterId: string, definition: AdapterProcessDefinition, method: string, params: Record<string, unknown>): void {
@@ -163,6 +186,7 @@ export class AdapterSupervisor {
   readonly #chairTransports = new Map<string, AdapterProcessTransport>();
   readonly #knownChairSessions = new Map<string, number>();
   readonly #chairSessionByAction = new Map<string, string>();
+  readonly #chairEntryBySession = new Map<string, RetainedChairBridge>();
   readonly #consumedChairHandoffHashes = new Set<string>();
   readonly #childTransports = new Map<string, AdapterProcessTransport>();
   readonly #knownChildSessions = new Map<string, number>();
@@ -170,6 +194,7 @@ export class AdapterSupervisor {
   readonly #childEntryBySession = new Map<string, RetainedChildBridge>();
   readonly #lostChildSessions = new Set<string>();
   readonly #consumedChildHandoffHashes = new Set<string>();
+  #chairLossHandler: ((entry: RetainedChairBridge, reason: string) => void) | undefined;
   #childLossHandler: ((entry: RetainedChildBridge, reason: string) => void) | undefined;
   readonly #controlTimeoutMs: number;
   readonly #providerTurnTimeoutMs: number;
@@ -182,6 +207,10 @@ export class AdapterSupervisor {
 
   setChildBridgeLossHandler(handler: (entry: RetainedChildBridge, reason: string) => void): void {
     this.#childLossHandler = handler;
+  }
+
+  setChairBridgeLossHandler(handler: (entry: RetainedChairBridge, reason: string) => void): void {
+    this.#chairLossHandler = handler;
   }
 
   async request(adapterId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -270,7 +299,7 @@ export class AdapterSupervisor {
     let transport = retainedChairTransport ?? retainedChildTransport ?? this.#transports.get(adapterId);
     if (transport === undefined || transport.closed) {
       if (retainedChairTransport?.closed === true && chairKey !== undefined) {
-        this.#chairTransports.delete(chairKey);
+        this.#loseChairBridge(chairKey, "retained chair bridge is unavailable");
         throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} retained chair bridge is unavailable`);
       }
       transport = new AdapterProcessTransport(definition);
@@ -281,7 +310,7 @@ export class AdapterSupervisor {
         timeoutMs: isLongProviderOperation(method, params) ? this.#providerTurnTimeoutMs : this.#controlTimeoutMs,
       });
       if (retainedChairTransport !== undefined && chairKey !== undefined && isReleaseRequest(method, params)) {
-        this.#chairTransports.delete(chairKey);
+        this.#removeChairBridge(chairKey);
         await transport.close().catch(() => undefined);
       }
       if (retainedChildTransport !== undefined && childKey !== undefined && isReleaseRequest(method, params)) {
@@ -292,7 +321,7 @@ export class AdapterSupervisor {
     } catch (error: unknown) {
       if (retainedChairTransport !== undefined && chairKey !== undefined) {
         if (!isRetainedChairLoss(error, transport)) throw error;
-        this.#chairTransports.delete(chairKey);
+        this.#loseChairBridge(chairKey, error instanceof Error ? error.message : "retained chair bridge lost");
       } else if (retainedChildTransport !== undefined && childKey !== undefined) {
         if (!isRetainedChildLoss(error, transport)) throw error;
         this.#loseChildBridge(childKey, error instanceof Error ? error.message : "retained child bridge lost");
@@ -414,6 +443,18 @@ export class AdapterSupervisor {
     }
   }
 
+  #removeChairBridge(key: string): void {
+    this.#chairTransports.delete(key);
+    this.#chairEntryBySession.delete(key);
+  }
+
+  #loseChairBridge(key: string, reason: string): void {
+    const entry = this.#chairEntryBySession.get(key);
+    this.#chairTransports.delete(key);
+    this.#chairEntryBySession.delete(key);
+    if (entry !== undefined) this.#chairLossHandler?.(entry, reason);
+  }
+
   async launchChair(
     adapterId: string,
     request: AdapterChairLaunchRequest,
@@ -428,7 +469,8 @@ export class AdapterSupervisor {
       handoff.socketPath.length === 0 ||
       !isAbsolute(handoff.socketPath) ||
       typeof handoff.attestationChallenge !== "string" ||
-      !/^[0-9a-f]{64}$/u.test(handoff.attestationChallenge)
+      !/^[0-9a-f]{64}$/u.test(handoff.attestationChallenge) ||
+      !validExpectedPrincipal(handoff.expectedPrincipal)
     ) {
       throw new ProviderAdapterError(
         "PRIVATE_HANDOFF_UNAVAILABLE",
@@ -449,6 +491,10 @@ export class AdapterSupervisor {
         AGENT_FABRIC_CAPABILITY: handoff.capability,
         AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
         AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.attestationChallenge,
+        AGENT_FABRIC_EXPECTED_AGENT_ID: handoff.expectedPrincipal.agentId,
+        AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: handoff.expectedPrincipal.projectSessionId,
+        AGENT_FABRIC_EXPECTED_RUN_ID: handoff.expectedPrincipal.runId,
+        AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(handoff.expectedPrincipal.principalGeneration),
       },
     });
     try {
@@ -467,12 +513,26 @@ export class AdapterSupervisor {
         throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} chair bridge closed before terminal handoff`);
       }
       const key = chairTransportKey(adapterId, result.resumeReference);
-      if (this.#chairTransports.has(key)) {
+      if (this.#knownChairSessions.has(key)) {
         throw new ProviderAdapterError("CHAIR_BRIDGE_CONFLICT", `${adapterId} already owns the provider chair session`);
       }
       this.#chairTransports.set(key, transport);
       this.#knownChairSessions.set(key, result.providerSessionGeneration);
       this.#chairSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
+      const entry: RetainedChairBridge = Object.freeze({
+        ...handoff.expectedPrincipal,
+        adapterId,
+        actionId: request.actionId,
+        providerSessionRef: result.resumeReference,
+        providerSessionGeneration: result.providerSessionGeneration,
+        bridgeGeneration: 1,
+      });
+      this.#chairEntryBySession.set(key, entry);
+      transport.onClose(() => {
+        if (this.#chairTransports.get(key) === transport) {
+          this.#loseChairBridge(key, "retained adapter transport closed");
+        }
+      });
       return result;
     } catch {
       await transport.close().catch(() => undefined);
@@ -480,10 +540,24 @@ export class AdapterSupervisor {
     }
   }
 
+  hasRetainedChairBridge(entry: RetainedChairBridge): boolean {
+    const key = chairTransportKey(entry.adapterId, entry.providerSessionRef);
+    const current = this.#chairEntryBySession.get(key);
+    return current !== undefined && current.actionId === entry.actionId &&
+      current.projectSessionId === entry.projectSessionId && current.runId === entry.runId &&
+      current.agentId === entry.agentId && current.principalGeneration === entry.principalGeneration &&
+      current.providerSessionGeneration === entry.providerSessionGeneration &&
+      current.bridgeGeneration === entry.bridgeGeneration &&
+      this.#chairTransports.get(key)?.closed === false;
+  }
+
   async close(): Promise<void> {
     const transports = [...new Set([...this.#transports.values(), ...this.#chairTransports.values(), ...this.#childTransports.values()])];
     this.#transports.clear();
     this.#chairTransports.clear();
+    this.#knownChairSessions.clear();
+    this.#chairSessionByAction.clear();
+    this.#chairEntryBySession.clear();
     this.#lostChildSessions.clear();
     for (const key of [...this.#childTransports.keys()]) this.#removeChildBridge(key);
     await Promise.allSettled(transports.map((transport) => transport.close()));

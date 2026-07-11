@@ -57,7 +57,6 @@ lines.on("line", async (line) => {
     providerSessionRef: "fixture-chair-session",
     providerSessionGeneration: 1,
     providerTurnRef: "fixture-provider-turn",
-    challengeResponse: String(attestationChallenge),
     challengeDigest: chairLaunchChallengeDigest(String(attestationChallenge)),
     providerInvocationRef: "fixture-provider-tool-call",
   };
@@ -72,6 +71,9 @@ lines.on("line", async (line) => {
       }
     : { method: request.method, pid: process.pid };
   process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`, () => {
-    if (request.method === "launch_chair" && process.env.SUPERVISOR_EXIT_AFTER_LAUNCH === "1") process.exit(0);
+    if (request.method !== "launch_chair") return;
+    if (process.env.SUPERVISOR_EXIT_AFTER_LAUNCH === "1") process.exit(0);
+    const passiveExitDelay = Number(process.env.SUPERVISOR_PASSIVE_EXIT_DELAY_MS ?? "0");
+    if (passiveExitDelay > 0) setTimeout(() => process.exit(0), passiveExitDelay);
   });
 });

@@ -40,6 +40,12 @@ import {
 
 const ATTESTATION_CHALLENGE = "ab".repeat(32);
 const ATTESTATION_CHALLENGE_DIGEST = chairLaunchChallengeDigest(ATTESTATION_CHALLENGE);
+const EXPECTED_CHAIR_PRINCIPAL = {
+  agentId: "chair",
+  projectSessionId: "session-1",
+  runId: "run-1",
+  principalGeneration: 1,
+} as const;
 
 const temporaryDirectories: string[] = [];
 const temporaryClosures: Array<() => Promise<void>> = [];
@@ -47,16 +53,14 @@ const temporaryClosures: Array<() => Promise<void>> = [];
 function providerSessionProtocolTransport(
   call: ProviderSessionProtocolTransport["call"],
   close: ProviderSessionProtocolTransport["close"],
+  principal: ProviderSessionProtocolTransport["principal"] = {
+    kind: "agent",
+    ...EXPECTED_CHAIR_PRINCIPAL,
+  } as ProviderSessionProtocolTransport["principal"],
 ): ProviderSessionProtocolTransport {
   return {
     features: ["fabric-core.v1", "launch-attestation.v1"],
-    principal: {
-      kind: "agent",
-      agentId: "chair" as never,
-      projectSessionId: "session-1" as never,
-      runId: "run-1",
-      principalGeneration: 1,
-    },
+    principal,
     allowedOperations: new Set([FABRIC_OPERATIONS.getMailboxState]),
     call,
     close,
@@ -148,7 +152,6 @@ function provedChairLaunch(
   challengeDigest = ATTESTATION_CHALLENGE_DIGEST,
   providerInvocationRef = "provider-tool-call-1",
   providerTurnRef = "provider-turn-1",
-  challengeResponse = ATTESTATION_CHALLENGE,
 ) {
   const unsigned = {
     schemaVersion: 1 as const,
@@ -161,7 +164,6 @@ function provedChairLaunch(
     providerSessionRef: resumeReference,
     providerSessionGeneration: 1,
     providerTurnRef,
-    challengeResponse,
     challengeDigest,
     providerInvocationRef,
   };
@@ -173,6 +175,16 @@ function provedChairLaunch(
       attestationDigest: chairLaunchAttestationDigest(unsigned),
     },
   } as const;
+}
+
+async function expectJournalFilesNotToContain(path: string, canary: string): Promise<void> {
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
+    const bytes = await readFile(candidate).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return Buffer.alloc(0);
+      throw error;
+    });
+    expect(bytes.includes(Buffer.from(canary, "utf8")), candidate).toBe(false);
+  }
 }
 
 afterEach(async () => {
@@ -188,6 +200,10 @@ describe("private chair launch environment", () => {
       AGENT_FABRIC_CAPABILITY: "environment-capability-canary",
       AGENT_FABRIC_SOCKET_PATH: "/private/environment-fabric.sock",
       AGENT_FABRIC_ATTESTATION_CHALLENGE: ATTESTATION_CHALLENGE,
+      AGENT_FABRIC_EXPECTED_AGENT_ID: EXPECTED_CHAIR_PRINCIPAL.agentId,
+      AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: EXPECTED_CHAIR_PRINCIPAL.projectSessionId,
+      AGENT_FABRIC_EXPECTED_RUN_ID: EXPECTED_CHAIR_PRINCIPAL.runId,
+      AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(EXPECTED_CHAIR_PRINCIPAL.principalGeneration),
       KEEP: "retained",
     };
 
@@ -199,6 +215,7 @@ describe("private chair launch environment", () => {
       capability: "environment-capability-canary",
       socketPath: "/private/environment-fabric.sock",
       attestationChallenge: ATTESTATION_CHALLENGE,
+      expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
     });
     expect(environment).toEqual({ KEEP: "retained" });
     expect(Reflect.apply(
@@ -214,16 +231,73 @@ describe("private chair launch environment", () => {
       AGENT_FABRIC_CAPABILITY: "relative-socket-capability-canary",
       AGENT_FABRIC_SOCKET_PATH: "relative/fabric.sock",
       AGENT_FABRIC_ATTESTATION_CHALLENGE: ATTESTATION_CHALLENGE,
+      AGENT_FABRIC_EXPECTED_AGENT_ID: EXPECTED_CHAIR_PRINCIPAL.agentId,
+      AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: EXPECTED_CHAIR_PRINCIPAL.projectSessionId,
+      AGENT_FABRIC_EXPECTED_RUN_ID: EXPECTED_CHAIR_PRINCIPAL.runId,
+      AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(EXPECTED_CHAIR_PRINCIPAL.principalGeneration),
     };
 
     expect(() => Reflect.apply(
       takeChairLaunchHandoff as (...arguments_: unknown[]) => unknown,
       undefined,
       [environment],
-    )).toThrowError("chair launch private environment must contain a capability, 32-byte challenge and absolute socket path");
+    )).toThrowError("chair launch private environment must contain a capability, 32-byte challenge, exact agent principal and absolute socket path");
     expect(environment).toEqual({});
   });
 
+});
+
+describe("installed primary chair principal binding", () => {
+  const variants = [
+    ["agent", { agentId: "wrong-chair" }],
+    ["project session", { projectSessionId: "wrong-session" }],
+    ["run", { runId: "wrong-run" }],
+    ["principal generation", { principalGeneration: 9 }],
+  ] as const;
+
+  it.each(["Claude", "Codex"] as const)("rejects every wrong authenticated launch principal in the %s adapter before provider I/O", async (provider) => {
+    for (const [_label, principalChange] of variants) {
+      const providerIo = vi.fn(() => {
+        throw new Error("provider I/O must not run for a substituted Fabric principal");
+      });
+      const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+      const close = vi.fn(async () => undefined);
+      const bridgeFactory = async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => (
+        await createChairLaunchFabricBridge(input, {
+          connect: vi.fn(async () => providerSessionProtocolTransport(call, close, {
+            kind: "agent",
+            ...EXPECTED_CHAIR_PRINCIPAL,
+            ...principalChange,
+          } as ProviderSessionProtocolTransport["principal"])),
+        })
+      );
+      const boundary = provider === "Claude"
+        ? new InstalledClaudeAgentSdkBoundary({ query: providerIo as never, bridgeFactory })
+        : new InstalledCodexAppServerBoundary(providerIo as never, bridgeFactory);
+
+      await expect(boundary.launchChair({
+        actionId: `${provider.toLowerCase()}-wrong-principal`,
+        providerAdapterId: provider === "Claude" ? "claude-agent-sdk" : "codex-app-server",
+        providerContractDigest: `sha256:${"b".repeat(64)}`,
+        challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+        payload: {
+          cwd: "/workspace/project",
+          modelFamily: provider === "Claude" ? "anthropic" : "openai",
+          model: provider === "Claude" ? "claude-test" : "gpt-test",
+          prompt: "reviewed work",
+        },
+        environment: {
+          AGENT_FABRIC_CAPABILITY: "wrong-principal-capability-canary",
+          AGENT_FABRIC_SOCKET_PATH: "/private/wrong-principal.sock",
+          AGENT_FABRIC_ATTESTATION_CHALLENGE: ATTESTATION_CHALLENGE,
+        },
+      } as never)).rejects.toMatchObject({ code: "CHAIR_PRINCIPAL_MISMATCH" });
+      expect(providerIo).not.toHaveBeenCalled();
+      expect(call).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledOnce();
+    }
+  });
 });
 
 function claudeBoundary(): ClaudeAgentSdkBoundary {
@@ -368,7 +442,12 @@ describe("Claude Agent SDK fabric adapter", () => {
     const adapterOptions = {
       boundary,
       journal: actionJournal,
-      chairLaunchHandoff: { capability, socketPath, attestationChallenge: ATTESTATION_CHALLENGE },
+      chairLaunchHandoff: {
+        capability,
+        socketPath,
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      },
     };
     const adapter = createClaudeAgentSdkAdapter(adapterOptions);
     const request = {
@@ -430,6 +509,7 @@ describe("Claude Agent SDK fabric adapter", () => {
       providerAdapterId: "claude-agent-sdk",
       providerContractDigest: request.providerContractDigest,
       challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+      expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       payload: request.payload,
       environment: {
         AGENT_FABRIC_CAPABILITY: capability,
@@ -488,8 +568,10 @@ describe("Claude Agent SDK fabric adapter", () => {
         capability: "chair-restart-capability-canary",
         socketPath: "/private/chair-restart.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       },
     }).request("launch_chair", request);
+    await expectJournalFilesNotToContain(path, ATTESTATION_CHALLENGE);
     for (const journalFile of [path, `${path}-wal`, `${path}-shm`]) {
       expect((await stat(journalFile)).mode & 0o777).toBe(0o600);
     }
@@ -510,6 +592,29 @@ describe("Claude Agent SDK fabric adapter", () => {
     reopenedJournal.close();
   });
 
+  it("sanitises raw attestation material from ambiguous adapter-journal evidence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-chair-journal-ambiguity-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "actions.sqlite3");
+    const actionJournal = new SqliteAdapterActionJournal(path);
+    actionJournal.prepare(
+      "chair-ambiguous-challenge-canary",
+      "launch_chair",
+      { providerContractDigest: `sha256:${"d".repeat(64)}` },
+      [ATTESTATION_CHALLENGE],
+    );
+    actionJournal.markDispatched("chair-ambiguous-challenge-canary");
+    const record = actionJournal.markAmbiguous(
+      "chair-ambiguous-challenge-canary",
+      { providerError: `native failure echoed ${ATTESTATION_CHALLENGE}` },
+      [ATTESTATION_CHALLENGE],
+    );
+
+    expect(JSON.stringify(record)).not.toContain(ATTESTATION_CHALLENGE);
+    await expectJournalFilesNotToContain(path, ATTESTATION_CHALLENGE);
+    actionJournal.close();
+  });
+
   it("rejects a changed chair-launch replay against the persisted public contract digest", async () => {
     const actionJournal = await journal();
     const boundary = claudeBoundary();
@@ -524,6 +629,7 @@ describe("Claude Agent SDK fabric adapter", () => {
         capability: "changed-replay-capability-canary",
         socketPath: "/private/changed-replay.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       },
     };
     const adapter = createClaudeAgentSdkAdapter(adapterOptions);
@@ -561,6 +667,7 @@ describe("Claude Agent SDK fabric adapter", () => {
         capability,
         socketPath: "/private/identifier.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       },
     };
     const adapter = createClaudeAgentSdkAdapter(adapterOptions);
@@ -595,6 +702,7 @@ describe("Claude Agent SDK fabric adapter", () => {
         capability: "open-result-capability-canary",
         socketPath: "/private/open-result.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       },
     });
 
@@ -637,6 +745,7 @@ describe("Claude Agent SDK fabric adapter", () => {
         capability: "wrong-contract-capability-canary",
         socketPath: "/private/wrong-contract.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       },
     });
 
@@ -668,7 +777,12 @@ describe("Claude Agent SDK fabric adapter", () => {
     const adapter = createClaudeAgentSdkAdapter({
       boundary,
       journal: actionJournal,
-      chairLaunchHandoff: { capability, socketPath, attestationChallenge: ATTESTATION_CHALLENGE },
+      chairLaunchHandoff: {
+        capability,
+        socketPath,
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      },
     });
 
     const error = await adapter.request("launch_chair", {
@@ -806,7 +920,12 @@ describe("installed Claude chair launch boundary", () => {
     const adapter = createClaudeAgentSdkAdapter({
       boundary,
       journal: actionJournal,
-      chairLaunchHandoff: { capability, socketPath, attestationChallenge: ATTESTATION_CHALLENGE },
+      chairLaunchHandoff: {
+        capability,
+        socketPath,
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      },
     });
 
     const launched = await adapter.request("launch_chair", {
@@ -828,11 +947,8 @@ describe("installed Claude chair launch boundary", () => {
       bridge?.challengeDigest,
       "claude-tool-call-1",
       "claude-turn-1",
-      bridge?.challengeResponse,
     ));
-    expect(launched).toMatchObject({
-      fabricContinuity: { challengeResponse: ATTESTATION_CHALLENGE },
-    });
+    expect(JSON.stringify(launched)).not.toContain(ATTESTATION_CHALLENGE);
 
     const queryInput = queryFactory.mock.calls[0]?.[0] as {
       prompt: string;
@@ -875,7 +991,7 @@ describe("installed Claude chair launch boundary", () => {
       content: [{ type: "text", text: "fabric_mailbox_read completed" }],
       structuredContent: { contiguousWatermark: 0, acknowledgedAboveWatermark: [] },
     });
-    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(bridge?.challengeResponse);
+    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(ATTESTATION_CHALLENGE);
     expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(capability);
     expect(directMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(mismatchedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
@@ -944,7 +1060,12 @@ describe("installed Claude chair launch boundary", () => {
     const adapter = createClaudeAgentSdkAdapter({
       boundary,
       journal: actionJournal,
-      chairLaunchHandoff: { capability, socketPath, attestationChallenge: ATTESTATION_CHALLENGE },
+      chairLaunchHandoff: {
+        capability,
+        socketPath,
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      },
     });
     const providerContractDigest = `sha256:${"5".repeat(64)}`;
 
@@ -1116,7 +1237,12 @@ describe("installed Codex chair launch boundary", () => {
     const adapter = createCodexAppServerAdapter({
       boundary,
       journal: actionJournal,
-      chairLaunchHandoff: { capability, socketPath, attestationChallenge: ATTESTATION_CHALLENGE },
+      chairLaunchHandoff: {
+        capability,
+        socketPath,
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      },
     });
 
     const launched = await adapter.request("launch_chair", {
@@ -1139,8 +1265,8 @@ describe("installed Codex chair launch boundary", () => {
       bridge?.challengeDigest,
       "codex-provider-tool-call-1",
       "codex-chair-turn-1",
-      bridge?.challengeResponse,
     ));
+    expect(JSON.stringify(launched)).not.toContain(ATTESTATION_CHALLENGE);
 
     expect(connectionFactory).toHaveBeenCalledWith(undefined);
     expect(requests[0]).toStrictEqual({
@@ -1193,7 +1319,7 @@ describe("installed Codex chair launch boundary", () => {
       ],
       success: true,
     });
-    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(bridge?.challengeResponse);
+    expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(ATTESTATION_CHALLENGE);
     expect(JSON.stringify([attestationProjection, mailboxProjection])).not.toContain(capability);
     expect(rpcCall).toHaveBeenCalledTimes(2);
     expect(providerServerRequestIds).toEqual([901, 902]);
@@ -1308,6 +1434,7 @@ describe("installed Codex chair launch boundary", () => {
       providerAdapterId: "codex-app-server",
       providerContractDigest: `sha256:${"8".repeat(64)}`,
       challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+      expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       payload: {
         cwd: "/workspace/project",
         modelFamily: "openai",
@@ -1350,6 +1477,7 @@ describe("Codex chair launch contract", () => {
         capability: "codex-contract-capability-canary",
         socketPath: "/private/codex-contract.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       },
     });
     const request = {

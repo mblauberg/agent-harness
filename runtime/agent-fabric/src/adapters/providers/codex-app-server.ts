@@ -321,9 +321,11 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     attestationToolName?: string,
   ): Promise<Record<string, unknown>> {
     if (chairSession !== undefined) chairSession.nativeInvocationKeys.clear();
-    const invocationArguments = chairSession?.bridgeGeneration === undefined
-      ? `{"challengeResponse":"${(chairSession?.bridge as ChairLaunchFabricBridge | undefined)?.challengeResponse ?? ""}"}`
-      : "{}";
+    const invocationArguments = attestationToolName === undefined
+      ? "{}"
+      : chairSession !== undefined && chairSession.bridgeGeneration === undefined
+        ? `{"challengeResponse":"${(chairSession.bridge as ChairLaunchFabricBridge).challengeResponse}"}`
+        : "{}";
     const instruction = attestationToolName === undefined
       ? textInput(payload)
       : [{
@@ -438,6 +440,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       capability: input.environment.AGENT_FABRIC_CAPABILITY,
       socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
       attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+      expectedPrincipal: input.expectedPrincipal,
     });
     let connection: CodexConnection | undefined;
     let evidence: {

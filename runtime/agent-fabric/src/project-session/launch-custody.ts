@@ -191,7 +191,27 @@ export type LaunchDispatchHandle = Readonly<{
   socketPath: string;
   attestationChallenge: string;
   attestationChallengeDigest: Digest;
+  expectedPrincipal: Readonly<{
+    agentId: string;
+    projectSessionId: string;
+    runId: string;
+    principalGeneration: number;
+  }>;
 }>;
+
+export type RetainedChairBridge = Readonly<{
+  projectSessionId: string;
+  runId: string;
+  agentId: string;
+  principalGeneration: number;
+  adapterId: string;
+  actionId: string;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+}>;
+
+export type ChairBridgeLossObservation = RetainedChairBridge & Readonly<{ reason: string }>;
 
 type LaunchOutcomeBase = Readonly<{
   schemaVersion: 1;
@@ -264,6 +284,7 @@ type LaunchCustodyServiceOptions = Readonly<{
       providerContractDigest: Digest;
       attestationChallengeDigest: Digest;
     }>): Promise<unknown>;
+    hasRetainedChairBridge?(entry: RetainedChairBridge): boolean;
   };
   agentEffects?: {
     dispatch(handle: AgentDispatchHandle): Promise<unknown>;
@@ -679,6 +700,195 @@ export class LaunchCustodyService {
     this.#agentEffects = options.agentEffects;
     this.#daemonInstanceGeneration = options.daemonInstanceGeneration ?? (() => 1);
     if (!isAbsolute(this.#fabricSocketPath)) throw new TypeError("Fabric socket path must be absolute");
+  }
+
+  observeChairBridgeLoss(input: ChairBridgeLossObservation): boolean {
+    return this.#database.transaction(() => this.#persistChairBridgeLoss(input))();
+  }
+
+  #persistChairBridgeLoss(input: ChairBridgeLossObservation): boolean {
+    const stateValue = this.#database.prepare(`
+      SELECT * FROM launched_chair_bridge_state
+       WHERE project_session_id=? AND coordination_run_id=?
+    `).get(input.projectSessionId, input.runId);
+    if (!isRow(stateValue)) return false;
+    const state = stateValue;
+    const exact =
+      text(state, "chair_agent_id") === input.agentId &&
+      text(state, "provider_adapter_id") === input.adapterId &&
+      text(state, "provider_action_id") === input.actionId &&
+      text(state, "provider_session_ref") === input.providerSessionRef &&
+      integer(state, "provider_session_generation") === input.providerSessionGeneration &&
+      integer(state, "principal_generation") === input.principalGeneration &&
+      integer(state, "bridge_generation") === input.bridgeGeneration;
+    if (!exact) throw new ProjectFabricCoreError("STALE_GENERATION", "chair bridge loss does not match retained custody");
+    if (text(state, "state") === "lost") return false;
+    if (text(state, "state") !== "active") {
+      throw new ProjectFabricCoreError("CONFLICT", "chair bridge is not active");
+    }
+    const reason = input.reason.slice(0, 160) || "retained chair bridge lost";
+    const now = this.#clock();
+    const daemonInstanceGeneration = this.#daemonInstanceGeneration();
+    const recoveryManifestDigest = this.#chairRecoveryManifestDigest(input);
+    const lossBinding = {
+      projectSessionId: input.projectSessionId,
+      runId: input.runId,
+      agentId: input.agentId,
+      principalGeneration: input.principalGeneration,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+      providerSessionRef: input.providerSessionRef,
+      providerSessionGeneration: input.providerSessionGeneration,
+      bridgeGeneration: input.bridgeGeneration,
+      daemonInstanceGeneration,
+      reason,
+      recoveryManifestDigest,
+    };
+    const lossId = `chair-bridge-loss:${sha256(canonicalJson({
+      runId: input.runId,
+      bridgeGeneration: input.bridgeGeneration,
+      capabilityHash: text(state, "capability_hash"),
+    }))}`;
+    const evidenceDigest = jsonEvidenceDigest(lossBinding);
+    this.#database.prepare(`
+      INSERT INTO chair_bridge_losses(
+        loss_id, project_session_id, coordination_run_id, chair_agent_id,
+        provider_adapter_id, provider_action_id, provider_session_ref,
+        provider_session_generation, principal_generation, lost_bridge_generation,
+        next_bridge_generation, capability_hash, daemon_instance_generation,
+        reason, evidence_digest, recovery_manifest_digest, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      lossId,
+      input.projectSessionId,
+      input.runId,
+      input.agentId,
+      input.adapterId,
+      input.actionId,
+      input.providerSessionRef,
+      input.providerSessionGeneration,
+      input.principalGeneration,
+      input.bridgeGeneration,
+      input.bridgeGeneration + 1,
+      text(state, "capability_hash"),
+      daemonInstanceGeneration,
+      reason,
+      evidenceDigest,
+      recoveryManifestDigest,
+      now,
+    );
+    const changed = this.#database.prepare(`
+      UPDATE launched_chair_bridge_state
+         SET state='lost', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND coordination_run_id=?
+         AND state='active' AND revision=?
+    `).run(now, input.projectSessionId, input.runId, integer(state, "revision"));
+    if (changed.changes !== 1) stale("chair bridge state changed during loss fencing");
+    this.#database.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
+      .run(now, text(state, "capability_hash"));
+    this.#database.prepare(`
+      UPDATE run_chair_leases SET status='frozen', updated_at=?
+       WHERE project_session_id=? AND run_id=? AND holder_agent_id=? AND status='active'
+    `).run(now, input.projectSessionId, input.runId, input.agentId);
+    this.#database.prepare(`
+      INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(run_id, agent_id) DO UPDATE SET
+        reason=excluded.reason, created_at=excluded.created_at
+    `).run(input.runId, input.agentId, lossId, now);
+    this.#database.prepare("UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=?")
+      .run(input.runId, input.agentId);
+    this.#database.prepare(`
+      UPDATE runs SET lifecycle_state='recovery_required', revision=revision+1
+       WHERE run_id=? AND lifecycle_state IN (
+         'active','quiescing','awaiting_acceptance','visibility_degraded',
+         'reconciling','quarantined'
+       )
+    `).run(input.runId);
+    this.#database.prepare(`
+      UPDATE project_sessions SET state='recovery_required', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND state IN (
+         'active','quiescing','awaiting_acceptance','visibility_degraded',
+         'reconciling','quarantined'
+       )
+    `).run(now, input.projectSessionId);
+    return true;
+  }
+
+  #chairRecoveryManifestDigest(input: RetainedChairBridge): Digest {
+    const manifest = {
+      schemaVersion: 1,
+      projectSession: this.#database.prepare(`
+        SELECT project_session_id, state, revision, generation, membership_revision
+          FROM project_sessions WHERE project_session_id=?
+      `).get(input.projectSessionId),
+      run: this.#database.prepare(`
+        SELECT run_id, lifecycle_state, revision, chair_agent_id, chair_generation,
+               chair_lease_id, authority_ref, dependency_revision
+          FROM runs WHERE run_id=?
+      `).get(input.runId),
+      tasks: this.#database.prepare(`
+        SELECT task_id, state, owner_agent_id, revision, owner_lease_generation
+          FROM tasks WHERE run_id=? ORDER BY task_id
+      `).all(input.runId),
+      mailbox: this.#database.prepare(`
+        SELECT recipient_id, next_sequence, contiguous_watermark
+          FROM mailbox_state WHERE run_id=? ORDER BY recipient_id
+      `).all(input.runId),
+      leases: this.#database.prepare(`
+        SELECT lease_id, kind, holder_agent_id, generation, status, expires_at
+          FROM leases WHERE run_id=? ORDER BY lease_id
+      `).all(input.runId),
+      chairLeases: this.#database.prepare(`
+        SELECT lease_id, holder_agent_id, generation, status, handoff_digest
+          FROM run_chair_leases WHERE run_id=? ORDER BY generation
+      `).all(input.runId),
+      checkpoints: this.#database.prepare(`
+        SELECT checkpoint_id, agent_id, task_id, task_revision, sha256, created_at
+          FROM lifecycle_checkpoints WHERE run_id=? ORDER BY checkpoint_id
+      `).all(input.runId),
+      provider: this.#database.prepare(`
+        SELECT provider_session_generation, context_revision, reconciled_checkpoint_sha256
+          FROM provider_state WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId),
+      providerAction: this.#database.prepare(`
+        SELECT status, journal_revision, provider_session_generation, effect_count
+          FROM provider_actions WHERE adapter_id=? AND action_id=?
+      `).get(input.adapterId, input.actionId),
+      memberships: this.#database.prepare(`
+        SELECT member_kind, member_id, required, state, revision, abandoned_reason
+          FROM project_session_memberships
+         WHERE project_session_id=? AND coordination_run_id=?
+         ORDER BY member_kind, member_id
+      `).all(input.projectSessionId, input.runId),
+    };
+    return jsonEvidenceDigest(manifest);
+  }
+
+  #auditRetainedChairBridges(result: { recoveryRequired: number }): void {
+    const hasRetainedBridge = this.#adapterEffects.hasRetainedChairBridge;
+    if (hasRetainedBridge === undefined) return;
+    const active = this.#database.prepare(`
+      SELECT * FROM launched_chair_bridge_state WHERE state='active'
+       ORDER BY project_session_id, coordination_run_id
+    `).all().filter(isRow);
+    for (const state of active) {
+      const entry: RetainedChairBridge = {
+        projectSessionId: text(state, "project_session_id"),
+        runId: text(state, "coordination_run_id"),
+        agentId: text(state, "chair_agent_id"),
+        principalGeneration: integer(state, "principal_generation"),
+        adapterId: text(state, "provider_adapter_id"),
+        actionId: text(state, "provider_action_id"),
+        providerSessionRef: text(state, "provider_session_ref"),
+        providerSessionGeneration: integer(state, "provider_session_generation"),
+        bridgeGeneration: integer(state, "bridge_generation"),
+      };
+      if (!hasRetainedBridge(entry) && this.#persistChairBridgeLoss({
+        ...entry,
+        reason: "daemon startup found no exact retained chair bridge",
+      })) result.recoveryRequired += 1;
+    }
   }
 
   async provisionAgent(input: AgentCustodyInput): Promise<AgentCustodyResult> {
@@ -1550,6 +1760,12 @@ export class LaunchCustodyService {
       socketPath: this.#fabricSocketPath,
       attestationChallenge,
       attestationChallengeDigest,
+      expectedPrincipal: {
+        agentId: packet.chairAgentId,
+        projectSessionId: intent.projectSessionId,
+        runId: packet.runId,
+        principalGeneration: 1,
+      },
     };
   }
 
@@ -2051,6 +2267,7 @@ export class LaunchCustodyService {
       const disposition = this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
       result[disposition] += 1;
     }
+    this.#database.transaction(() => this.#auditRetainedChairBridges(result))();
     return result;
   }
 
@@ -2315,6 +2532,26 @@ export class LaunchCustodyService {
       outcome.outcome.providerSessionGeneration,
     );
     this.#database.prepare(`
+      INSERT INTO launched_chair_bridge_state(
+        project_session_id, coordination_run_id, chair_agent_id,
+        provider_adapter_id, provider_action_id, provider_session_ref,
+        provider_session_generation, principal_generation, bridge_generation,
+        capability_hash, activation_evidence_digest, state, revision, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 'active', 1, ?, ?)
+    `).run(
+      text(custody, "project_session_id"),
+      text(custody, "coordination_run_id"),
+      text(custody, "chair_agent_id"),
+      adapterId,
+      actionId,
+      outcome.outcome.providerSessionRef,
+      outcome.outcome.providerSessionGeneration,
+      text(custody, "capability_hash"),
+      outcome.outcome.effectDigest,
+      now,
+      now,
+    );
+    this.#database.prepare(`
       UPDATE project_sessions SET state='active', revision=revision+1, updated_at=?
        WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')
     `).run(now, text(custody, "project_session_id"));
@@ -2333,6 +2570,27 @@ export class LaunchCustodyService {
       text(custody, "coordination_run_id"),
       actionId,
     );
+    const retainedEntry: RetainedChairBridge = {
+      projectSessionId: text(custody, "project_session_id"),
+      runId: text(custody, "coordination_run_id"),
+      agentId: text(custody, "chair_agent_id"),
+      principalGeneration: 1,
+      adapterId,
+      actionId,
+      providerSessionRef: outcome.outcome.providerSessionRef,
+      providerSessionGeneration: outcome.outcome.providerSessionGeneration,
+      bridgeGeneration: 1,
+    };
+    if (
+      this.#adapterEffects.hasRetainedChairBridge !== undefined &&
+      !this.#adapterEffects.hasRetainedChairBridge(retainedEntry)
+    ) {
+      this.#persistChairBridgeLoss({
+        ...retainedEntry,
+        reason: "retained chair bridge closed during activation commit",
+      });
+      return "recoveryRequired";
+    }
     return "activated";
   }
 

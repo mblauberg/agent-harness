@@ -3,12 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AdapterSupervisor } from "../../src/adapters/supervisor.ts";
 
 const fixturePath = fileURLToPath(new URL("../support/supervisor-fixture.ts", import.meta.url));
 const ATTESTATION_CHALLENGE = "cd".repeat(32);
+const EXPECTED_CHAIR_PRINCIPAL = {
+  agentId: "chair",
+  projectSessionId: "session-1",
+  runId: "run-1",
+  principalGeneration: 1,
+} as const;
 
 describe("persistent adapter supervision", () => {
   it("reuses one healthy adapter process across requests", async () => {
@@ -71,6 +77,7 @@ describe("persistent adapter supervision", () => {
       capability: "chair-capability-secret-canary",
       socketPath: "/private/agent-fabric.sock",
       attestationChallenge: ATTESTATION_CHALLENGE,
+      expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
     };
     try {
       const launchChair: unknown = Reflect.get(supervisor, "launchChair");
@@ -95,7 +102,6 @@ describe("persistent adapter supervision", () => {
           providerSessionGeneration: 1,
           providerTurnRef: "fixture-provider-turn",
           providerInvocationRef: "fixture-provider-tool-call",
-          challengeResponse: ATTESTATION_CHALLENGE,
           challengeDigest: expect.stringMatching(/^sha256:/u),
           attestationDigest: expect.stringMatching(/^sha256:/u),
         },
@@ -216,7 +222,51 @@ describe("persistent adapter supervision", () => {
         capability: "teardown-capability-canary",
         socketPath: "/private/teardown.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       })).rejects.toMatchObject({ code: "CHAIR_LAUNCH_FAILED" });
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports one exact retained-chair loss when the adapter socket closes passively", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-passive-loss-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: {
+          SUPERVISOR_COUNT_PATH: countPath,
+          SUPERVISOR_PASSIVE_EXIT_DELAY_MS: "500",
+        },
+      },
+    });
+    const loss = vi.fn();
+    supervisor.setChairBridgeLossHandler(loss);
+    try {
+      await supervisor.launchChair("fake", {
+        schemaVersion: 1,
+        actionId: "chair-launch-passive-loss",
+        providerContractDigest: `sha256:${"c".repeat(64)}`,
+        payload: { cwd: "/workspace/project", modelFamily: "fixture", model: "provider-test" },
+      }, {
+        capability: "passive-loss-capability-canary",
+        socketPath: "/private/passive-loss.sock",
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      });
+      await vi.waitFor(() => expect(loss).toHaveBeenCalledOnce(), { timeout: 3_000 });
+      expect(loss).toHaveBeenCalledWith({
+        ...EXPECTED_CHAIR_PRINCIPAL,
+        adapterId: "fake",
+        actionId: "chair-launch-passive-loss",
+        providerSessionRef: "fixture-chair-session",
+        providerSessionGeneration: 1,
+        bridgeGeneration: 1,
+      }, "retained adapter transport closed");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(loss).toHaveBeenCalledOnce();
     } finally {
       await supervisor.close();
       await rm(directory, { recursive: true, force: true });
@@ -242,6 +292,7 @@ describe("persistent adapter supervision", () => {
         capability: "invalid-socket-capability-canary",
         socketPath: "relative/fabric.sock",
         attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       })).rejects.toMatchObject({ code: "PRIVATE_HANDOFF_UNAVAILABLE" });
       await expect(supervisor.launchChair("fake", {
         schemaVersion: 1,
@@ -252,6 +303,7 @@ describe("persistent adapter supervision", () => {
         capability: "invalid-challenge-capability-canary",
         socketPath: "/private/fabric.sock",
         attestationChallenge: "not-a-32-byte-challenge",
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
       })).rejects.toMatchObject({ code: "PRIVATE_HANDOFF_UNAVAILABLE" });
       await expect(readFile(countPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     } finally {

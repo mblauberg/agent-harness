@@ -19,8 +19,19 @@ const baseBinding = {
   providerContractDigest: `sha256:${"a".repeat(64)}`,
 };
 
+const expectedPrincipal = {
+  agentId: "chair",
+  projectSessionId: "session-1",
+  runId: "run-1",
+  principalGeneration: 1,
+} as const;
+
 function binding(challenge: string) {
-  return { ...baseBinding, challengeDigest: chairLaunchChallengeDigest(challenge) };
+  return {
+    ...baseBinding,
+    challengeDigest: chairLaunchChallengeDigest(challenge),
+    expectedPrincipal,
+  };
 }
 
 function protocolTransport(
@@ -44,6 +55,35 @@ function protocolTransport(
 }
 
 describe("provider-session Fabric continuity", () => {
+  it.each([
+    ["agent", { agentId: "another-chair" }],
+    ["project session", { projectSessionId: "another-session" }],
+    ["run", { runId: "another-run" }],
+    ["principal generation", { principalGeneration: 2 }],
+  ])("rejects the wrong authenticated %s before projecting tools", async (_label, principalChange) => {
+    const challenge = "fe".repeat(32);
+    const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+    const close = vi.fn(async () => undefined);
+
+    await expect(createChairLaunchFabricBridge({
+      ...binding(challenge),
+      capability: "wrong-principal-capability-canary",
+      socketPath: "/private/fabric.sock",
+      attestationChallenge: challenge,
+    }, {
+      connect: vi.fn(async () => ({
+        ...protocolTransport(call, close),
+        principal: {
+          kind: "agent" as const,
+          ...expectedPrincipal,
+          ...principalChange,
+        } as ProviderSessionProtocolTransport["principal"],
+      })),
+    })).rejects.toMatchObject({ code: "CHAIR_PRINCIPAL_MISMATCH" });
+    expect(call).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("rejects a launch-local operation when its feature was not negotiated", async () => {
     const challenge = "ff".repeat(32);
     const close = vi.fn(async () => undefined);
@@ -161,6 +201,7 @@ describe("provider-session Fabric continuity", () => {
       structuredContent: { attested: true, challengeDigest: chairLaunchChallengeDigest(challenge) },
     });
     expect(JSON.stringify(attested)).not.toContain(challenge);
+    expect(() => bridge.challengeResponse).toThrow(/challenge was consumed/iu);
     await expect(bridge.invokeTool(bridge.challengeToolName, {
       challengeResponse: challenge,
     }, {
@@ -183,7 +224,6 @@ describe("provider-session Fabric continuity", () => {
         providerSessionRef: "thread-1",
         providerSessionGeneration: 1,
         providerTurnRef: "turn-1",
-        challengeResponse: challenge,
         challengeDigest: chairLaunchChallengeDigest(challenge),
         providerInvocationRef: "tool-call-1",
         attestationDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
@@ -191,6 +231,7 @@ describe("provider-session Fabric continuity", () => {
     });
     expect(() => parseChairLaunchProviderResult(result, binding(challenge))).not.toThrow();
     expect(JSON.stringify(result)).not.toContain("provider-origin-capability-canary");
+    expect(JSON.stringify(result)).not.toContain(challenge);
     expect(close).not.toHaveBeenCalled();
 
     await expect(bridge.invokeTool("fabric_mailbox_read", {}, {

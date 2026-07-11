@@ -104,6 +104,7 @@ function createFixture(options: Readonly<{
   lookup?: (input: Parameters<LaunchCustodyService["lookup"]>[0]) => Promise<unknown>;
   fault?: (label: string) => void;
   persistent?: boolean;
+  retainedChairBridge?: boolean;
 }> = {}): {
   database: Database.Database;
   databasePath: string;
@@ -222,6 +223,7 @@ function createFixture(options: Readonly<{
     adapterEffects: {
       dispatch: options.dispatch ?? (async () => { throw new Error("not expected during preparation"); }),
       lookup: options.lookup ?? (async () => { throw new Error("not expected during preparation"); }),
+      hasRetainedChairBridge: () => options.retainedChairBridge ?? true,
     },
   });
   const intent: LaunchCustodyIntent = parseProjectSessionLaunchIntent({
@@ -322,6 +324,12 @@ describe("launch custody", () => {
       socketPath: "/private/agent-fabric.sock",
       attestationChallenge,
       attestationChallengeDigest,
+      expectedPrincipal: {
+        agentId: "chair_launch_01",
+        projectSessionId: "session_launch_01",
+        runId: "run_launch_01",
+        principalGeneration: 1,
+      },
     });
     expect(fixture.database.prepare(`
       SELECT state, revision FROM project_sessions WHERE project_session_id='session_launch_01'
@@ -523,6 +531,150 @@ describe("launch custody", () => {
       journalRevision: 3,
       outcomeKind: "terminal-success",
     });
+    expect(fixture.database.prepare(`
+      SELECT state, bridge_generation, principal_generation, provider_session_generation
+        FROM launched_chair_bridge_state WHERE coordination_run_id='run_launch_01'
+    `).get()).toEqual({
+      state: "active",
+      bridge_generation: 1,
+      principal_generation: 1,
+      provider_session_generation: 2,
+    });
+  });
+
+  it("persists and fences one exact live chair-bridge loss idempotently", async () => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return",
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success",
+        providerSessionRef: "claude-chair-live-loss-01",
+        providerSessionGeneration: 3,
+        effectDigest: digest("provider-live-loss-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    const loss = {
+      projectSessionId: "session_launch_01",
+      runId: "run_launch_01",
+      agentId: "chair_launch_01",
+      principalGeneration: 1,
+      adapterId: "claude-agent-sdk",
+      actionId: "provider_launch_01",
+      providerSessionRef: "claude-chair-live-loss-01",
+      providerSessionGeneration: 3,
+      bridgeGeneration: 1,
+      reason: "retained adapter socket closed",
+    };
+
+    expect(() => fixture.service.observeChairBridgeLoss({
+      ...loss,
+      bridgeGeneration: 2,
+    })).toThrow(/does not match retained custody/u);
+    expect(fixture.database.prepare(`
+      SELECT state FROM launched_chair_bridge_state WHERE coordination_run_id='run_launch_01'
+    `).get()).toEqual({ state: "active" });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM chair_bridge_losses WHERE coordination_run_id='run_launch_01'
+    `).get()).toEqual({ count: 0 });
+    expect(fixture.service.observeChairBridgeLoss(loss)).toBe(true);
+    expect(fixture.service.observeChairBridgeLoss(loss)).toBe(false);
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM chair_bridge_losses WHERE coordination_run_id='run_launch_01'
+    `).get()).toEqual({ count: 1 });
+    expect(fixture.database.prepare(`
+      SELECT state, bridge_generation, revision FROM launched_chair_bridge_state
+       WHERE coordination_run_id='run_launch_01'
+    `).get()).toEqual({ state: "lost", bridge_generation: 1, revision: 2 });
+    expect(fixture.database.prepare(`
+      SELECT state FROM project_sessions WHERE project_session_id='session_launch_01'
+    `).get()).toEqual({ state: "recovery_required" });
+    expect(fixture.database.prepare(`
+      SELECT lifecycle_state FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({ lifecycle_state: "recovery_required" });
+    expect(fixture.database.prepare(`
+      SELECT status FROM run_chair_leases WHERE run_id='run_launch_01'
+    `).get()).toEqual({ status: "frozen" });
+    expect(fixture.database.prepare(`
+      SELECT revoked_at FROM capabilities
+       WHERE token_hash=(SELECT capability_hash FROM project_session_launch_custody)
+    `).get()).toEqual({ revoked_at: now });
+    expect(fixture.database.prepare(`
+      SELECT reason FROM delivery_freezes WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
+    `).get()).toMatchObject({ reason: expect.stringMatching(/^chair-bridge-loss:/u) });
+    expect(() => fixture.database.prepare(`
+      INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+      VALUES ('forbidden-after-chair-loss', 'run_launch_01', 'chair_launch_01', 2, ${now + 60_000})
+    `).run()).toThrow(/INVARIANT_chair_bridge_loss_freezes_grants/u);
+    expect(() => fixture.database.prepare(`
+      INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
+      VALUES ('forbidden-authority-after-chair-loss', 'run_launch_01', NULL, '{}', 'hash', ${now})
+    `).run()).toThrow(/INVARIANT_chair_bridge_loss_freezes_grants/u);
+  });
+
+  it("fences an activated launched chair on restart without a retained bridge or generic status call", async () => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return",
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success",
+        providerSessionRef: "claude-chair-restart-loss-01",
+        providerSessionGeneration: 4,
+        effectDigest: digest("provider-restart-loss-effect"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true, persistent: true });
+    const { handle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(handle);
+    closeTrackedDatabase(fixture.database);
+    const callsPath = join(fixture.root, "chair-restart-calls.jsonl");
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.root],
+      fabricSocketPath: join(fixture.root, "fabric.sock"),
+      adapters: {
+        "claude-agent-sdk": {
+          command: [process.execPath, "--import", "tsx", recoveryAdapter],
+          environment: {
+            LAUNCH_RECOVERY_CALLS_PATH: callsPath,
+            LAUNCH_RECOVERY_CONTRACT_JSON: canonicalJson(contract),
+          },
+        },
+      },
+    });
+
+    await runtime.recoverStartupState();
+    await runtime.recoverStartupState();
+    await runtime.close();
+    expect(() => readFileSync(callsPath, "utf8")).toThrow();
+    const state = new Database(fixture.databasePath, { readonly: true });
+    expect(state.prepare(`
+      SELECT COUNT(*) AS count FROM chair_bridge_losses WHERE coordination_run_id='run_launch_01'
+    `).get()).toEqual({ count: 1 });
+    expect(state.prepare(`
+      SELECT s.state, r.lifecycle_state, b.state AS bridge_state
+        FROM project_sessions s
+        JOIN runs r ON r.project_session_id=s.project_session_id
+        JOIN launched_chair_bridge_state b ON b.coordination_run_id=r.run_id
+       WHERE r.run_id='run_launch_01'
+    `).get()).toEqual({
+      state: "recovery_required",
+      lifecycle_state: "recovery_required",
+      bridge_state: "lost",
+    });
+    state.close();
   });
 
   it("persists dispatched before I/O and recovers by lookup-only terminal success", async () => {

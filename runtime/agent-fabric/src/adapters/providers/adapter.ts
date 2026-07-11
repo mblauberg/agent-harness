@@ -297,7 +297,7 @@ export function createProviderAdapter(options: {
     if (containsPrivateValue({ actionId: request.actionId, payload: request.payload }, privateInputValues)) {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "chair launch payload contains private handoff material");
     }
-    const prepared = options.journal.prepare(request.actionId, "launch_chair", journalPayload);
+    const prepared = options.journal.prepare(request.actionId, "launch_chair", journalPayload, privateInputValues);
     if (!prepared.created) {
       chairLaunchHandoff = undefined;
       return replayOrConsumed(prepared.record);
@@ -309,17 +309,18 @@ export function createProviderAdapter(options: {
         ...request,
         providerAdapterId: capabilities.adapterId,
         challengeDigest: attestationBinding().challengeDigest,
+        expectedPrincipal: handoff.expectedPrincipal,
         environment: {
           AGENT_FABRIC_CAPABILITY: handoff.capability,
           AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
           AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.attestationChallenge,
         },
       }), attestationBinding());
-      if (containsPrivateValue(result, credentialValues)) {
+      if (containsPrivateValue(result, privateInputValues)) {
         throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "chair launch result contains private handoff material");
       }
       options.journal.markAccepted(request.actionId);
-      options.journal.markTerminal(request.actionId, result, true);
+      options.journal.markTerminal(request.actionId, result, true, privateInputValues);
       liveChairLaunchActions.add(request.actionId);
       liveChairActionBySession.set(result.resumeReference, request.actionId);
       liveChairSessionByAction.set(request.actionId, result.resumeReference);
@@ -343,7 +344,7 @@ export function createProviderAdapter(options: {
             );
           }
           options.journal.markAccepted(request.actionId);
-          options.journal.markAmbiguous(request.actionId, evidence);
+          options.journal.markAmbiguous(request.actionId, evidence, privateInputValues);
           current = options.journal.get(request.actionId);
         } catch {
           current = options.journal.get(request.actionId);

@@ -279,13 +279,22 @@ export type ChairLaunchHandoff = {
   capability: string;
   socketPath: string;
   attestationChallenge: string;
+  expectedPrincipal: AgentFabricPrincipalBinding;
 };
+
+export type AgentFabricPrincipalBinding = Readonly<{
+  agentId: string;
+  projectSessionId: string;
+  runId: string;
+  principalGeneration: number;
+}>;
 
 export type ChairLaunchBoundaryInput = {
   actionId: string;
   providerAdapterId: string;
   providerContractDigest: string;
   challengeDigest: string;
+  expectedPrincipal: AgentFabricPrincipalBinding;
   payload: Record<string, unknown>;
   environment: {
     AGENT_FABRIC_CAPABILITY: string;
@@ -311,7 +320,6 @@ export type ChairLaunchFabricContinuityEvidence = {
   providerSessionRef: string;
   providerSessionGeneration: number;
   providerTurnRef: string;
-  challengeResponse: string;
   challengeDigest: string;
   providerInvocationRef: string;
   attestationDigest: string;
@@ -342,7 +350,6 @@ export function chairLaunchAttestationDigest(attestation: ChairLaunchUnsignedAtt
     providerSessionRef: attestation.providerSessionRef,
     providerSessionGeneration: attestation.providerSessionGeneration,
     providerTurnRef: attestation.providerTurnRef,
-    challengeResponse: attestation.challengeResponse,
     challengeDigest: attestation.challengeDigest,
     providerInvocationRef: attestation.providerInvocationRef,
   });
@@ -410,7 +417,7 @@ export function parseChairLaunchProviderResult(
   }
   const continuity = value.fabricContinuity;
   if (
-    Object.keys(continuity).length !== 14 ||
+    Object.keys(continuity).length !== 13 ||
     continuity.schemaVersion !== 1 ||
     continuity.kind !== "provider-session-fabric-attestation" ||
     continuity.method !== CHAIR_ATTESTATION_METHOD ||
@@ -423,12 +430,9 @@ export function parseChairLaunchProviderResult(
     continuity.providerSessionRef !== value.resumeReference ||
     continuity.providerSessionGeneration !== value.providerSessionGeneration ||
     !isBoundedProviderEvidenceRef(continuity.providerTurnRef) ||
-    typeof continuity.challengeResponse !== "string" ||
-    !/^[0-9a-f]{64}$/u.test(continuity.challengeResponse) ||
     typeof continuity.challengeDigest !== "string" ||
     !/^sha256:[0-9a-f]{64}$/u.test(continuity.challengeDigest) ||
     continuity.challengeDigest !== expected.challengeDigest ||
-    chairLaunchChallengeDigest(continuity.challengeResponse) !== expected.challengeDigest ||
     !isBoundedProviderEvidenceRef(continuity.providerInvocationRef) ||
     typeof continuity.attestationDigest !== "string" ||
     !/^sha256:[0-9a-f]{64}$/u.test(continuity.attestationDigest)
@@ -449,7 +453,6 @@ export function parseChairLaunchProviderResult(
     providerSessionRef: value.resumeReference,
     providerSessionGeneration: value.providerSessionGeneration,
     providerTurnRef: continuity.providerTurnRef,
-    challengeResponse: continuity.challengeResponse,
     challengeDigest: expected.challengeDigest,
     providerInvocationRef: continuity.providerInvocationRef,
   };
@@ -474,11 +477,24 @@ export function takeChairLaunchHandoff(environment: NodeJS.ProcessEnv): ChairLau
   const capability = environment.AGENT_FABRIC_CAPABILITY;
   const socketPath = environment.AGENT_FABRIC_SOCKET_PATH;
   const attestationChallenge = environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  const agentId = environment.AGENT_FABRIC_EXPECTED_AGENT_ID;
+  const projectSessionId = environment.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID;
+  const runId = environment.AGENT_FABRIC_EXPECTED_RUN_ID;
+  const principalGenerationValue = environment.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION;
   delete environment.AGENT_FABRIC_CAPABILITY;
   delete environment.AGENT_FABRIC_SOCKET_PATH;
   delete environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  delete environment.AGENT_FABRIC_EXPECTED_AGENT_ID;
+  delete environment.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID;
+  delete environment.AGENT_FABRIC_EXPECTED_RUN_ID;
+  delete environment.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION;
   delete environment.AGENT_FABRIC_HANDOFF_KIND;
-  if (capability === undefined && socketPath === undefined && attestationChallenge === undefined) return undefined;
+  if (
+    capability === undefined && socketPath === undefined && attestationChallenge === undefined &&
+    agentId === undefined && projectSessionId === undefined && runId === undefined &&
+    principalGenerationValue === undefined
+  ) return undefined;
+  const principalGeneration = Number(principalGenerationValue);
   if (
     typeof capability !== "string" ||
     capability.length === 0 ||
@@ -486,14 +502,24 @@ export function takeChairLaunchHandoff(environment: NodeJS.ProcessEnv): ChairLau
     socketPath.length === 0 ||
     !isAbsolute(socketPath) ||
     typeof attestationChallenge !== "string" ||
-    !/^[0-9a-f]{64}$/u.test(attestationChallenge)
+    !/^[0-9a-f]{64}$/u.test(attestationChallenge) ||
+    !isBoundedProviderEvidenceRef(agentId) ||
+    !isBoundedProviderEvidenceRef(projectSessionId) ||
+    !isBoundedProviderEvidenceRef(runId) ||
+    !Number.isSafeInteger(principalGeneration) ||
+    principalGeneration < 1
   ) {
     throw new ProviderAdapterError(
       "PRIVATE_HANDOFF_INVALID",
-      "chair launch private environment must contain a capability, 32-byte challenge and absolute socket path",
+      "chair launch private environment must contain a capability, 32-byte challenge, exact agent principal and absolute socket path",
     );
   }
-  return { capability, socketPath, attestationChallenge };
+  return {
+    capability,
+    socketPath,
+    attestationChallenge,
+    expectedPrincipal: { agentId, projectSessionId, runId, principalGeneration },
+  };
 }
 
 export type AdapterRequestHandler = {

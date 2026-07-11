@@ -511,6 +511,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       capability: input.environment.AGENT_FABRIC_CAPABILITY,
       socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
       attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+      expectedPrincipal: input.expectedPrincipal,
     });
     const session: ClaudeChairSession = {
       bridge,

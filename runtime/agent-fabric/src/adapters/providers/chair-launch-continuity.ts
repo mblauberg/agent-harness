@@ -32,6 +32,12 @@ export type ChairLaunchFabricBridgeInput = ChairLaunchAttestationBinding & {
   capability: string;
   socketPath: string;
   attestationChallenge: string;
+  expectedPrincipal: Readonly<{
+    agentId: string;
+    projectSessionId: string;
+    runId: string;
+    principalGeneration: number;
+  }>;
 };
 
 export type ChairLaunchFabricBridgeDependencies = {
@@ -121,6 +127,19 @@ export class ChairLaunchFabricBridge {
     if (chairLaunchChallengeDigest(input.attestationChallenge) !== input.challengeDigest) {
       throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "chair attestation challenge does not match launch custody");
     }
+    const principal = transport.principal;
+    if (
+      principal.kind !== "agent" ||
+      principal.agentId !== input.expectedPrincipal.agentId ||
+      principal.projectSessionId !== input.expectedPrincipal.projectSessionId ||
+      principal.runId !== input.expectedPrincipal.runId ||
+      principal.principalGeneration !== input.expectedPrincipal.principalGeneration
+    ) {
+      throw new ProviderAdapterError(
+        "CHAIR_PRINCIPAL_MISMATCH",
+        "chair provider-session bridge authenticated as a different Fabric principal",
+      );
+    }
     this.#binding = {
       providerAdapterId: input.providerAdapterId,
       providerActionId: input.providerActionId,
@@ -146,6 +165,7 @@ export class ChairLaunchFabricBridge {
   }
 
   get challengeResponse(): string {
+    if (this.#invoked) throw continuityError("chair attestation challenge was consumed");
     return this.#challenge.toString("hex");
   }
 
@@ -194,10 +214,13 @@ export class ChairLaunchFabricBridge {
     } catch {
       throw continuityError("chair attestation challenge response is invalid");
     }
-    if (response.byteLength !== this.#challenge.byteLength || !timingSafeEqual(response, this.#challenge)) {
+    const matches = response.byteLength === this.#challenge.byteLength && timingSafeEqual(response, this.#challenge);
+    response.fill(0);
+    if (!matches) {
       throw continuityError("chair attestation challenge response does not match");
     }
     this.#invoked = true;
+    this.#challenge.fill(0);
     parseOperationResult(
       FABRIC_OPERATIONS.getMailboxState,
       await this.#transport.call(FABRIC_OPERATIONS.getMailboxState, {}),
@@ -245,7 +268,6 @@ export class ChairLaunchFabricBridge {
       ...this.#binding,
       ...this.#session,
       providerTurnRef: this.#providerTurnRef,
-      challengeResponse: this.challengeResponse,
       providerInvocationRef: this.#invocationRef,
     };
     return {

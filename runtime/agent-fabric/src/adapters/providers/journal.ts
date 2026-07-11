@@ -28,6 +28,25 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function containsPrivateValue(value: unknown, privateValues: readonly string[]): boolean {
+  if (typeof value === "string") return privateValues.some((candidate) => candidate.length > 0 && value.includes(candidate));
+  if (Array.isArray(value)) return value.some((entry) => containsPrivateValue(entry, privateValues));
+  return isRecord(value) && Object.values(value).some((entry) => containsPrivateValue(entry, privateValues));
+}
+
+function sanitisePrivateValues(value: unknown, privateValues: readonly string[]): unknown {
+  if (typeof value === "string") {
+    return privateValues
+      .filter((candidate) => candidate.length > 0)
+      .reduce((sanitised, candidate) => sanitised.split(candidate).join("[REDACTED_PRIVATE]"), value);
+  }
+  if (Array.isArray(value)) return value.map((entry) => sanitisePrivateValues(entry, privateValues));
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sanitisePrivateValues(entry, privateValues)]));
+  }
+  return value;
+}
+
 function isActionStatus(value: unknown): value is AdapterActionStatus {
   return (
     value === "prepared" ||
@@ -125,10 +144,13 @@ export class SqliteAdapterActionJournal {
     this.#database.close();
   }
 
-  prepare(actionId: string, operation: string, payload: Record<string, unknown>): {
+  prepare(actionId: string, operation: string, payload: Record<string, unknown>, privateValues: readonly string[] = []): {
     record: AdapterActionRecord;
     created: boolean;
   } {
+    if (containsPrivateValue({ actionId, operation, payload }, privateValues)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "adapter action input contains private handoff material");
+    }
     const payloadHash = sha256(canonicalJson(payload));
     const result = this.#database.transaction(() => {
       const existing = this.#read(actionId);
@@ -167,12 +189,24 @@ export class SqliteAdapterActionJournal {
     return this.#transition(actionId, "accepted", { effectDelta: 1 });
   }
 
-  markTerminal(actionId: string, result: unknown, idempotencyProven: boolean): AdapterActionRecord {
+  markTerminal(
+    actionId: string,
+    result: unknown,
+    idempotencyProven: boolean,
+    privateValues: readonly string[] = [],
+  ): AdapterActionRecord {
+    if (containsPrivateValue(result, privateValues)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "adapter terminal result contains private handoff material");
+    }
     return this.#transition(actionId, "terminal", { result, idempotencyProven });
   }
 
-  markAmbiguous(actionId: string, result?: unknown): AdapterActionRecord {
-    return this.#transition(actionId, "ambiguous", result === undefined ? {} : { result });
+  markAmbiguous(actionId: string, result?: unknown, privateValues: readonly string[] = []): AdapterActionRecord {
+    return this.#transition(
+      actionId,
+      "ambiguous",
+      result === undefined ? {} : { result: sanitisePrivateValues(result, privateValues) },
+    );
   }
 
   cancel(actionId: string): AdapterActionRecord {

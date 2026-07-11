@@ -46,6 +46,7 @@ const defaultMigrationFiles = [
   "0006-operator-lifecycle.sql",
   "0007-provider-bridge-custody.sql",
   "0008-external-effect-custody.sql",
+  "0009-launched-chair-bridge-loss.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {

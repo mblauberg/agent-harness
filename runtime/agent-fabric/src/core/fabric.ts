@@ -40,6 +40,7 @@ import { AdapterSupervisor } from "../adapters/supervisor.js";
 import {
   parseAgentBridgeCapability,
   parseChairLaunchProviderResult,
+  ProviderAdapterError,
   type AgentBridgeCapability,
 } from "../adapters/providers/types.js";
 import { assessAdapterModelPolicy } from "../adapters/model-selection.js";
@@ -911,6 +912,7 @@ export class Fabric {
           adapterEffects: {
             dispatch: async (handle) => await this.#dispatchLaunchAdapter(handle),
             lookup: async (input) => await this.#lookupLaunchAdapter(input),
+            hasRetainedChairBridge: (entry) => this.#adapterSupervisor.hasRetainedChairBridge(entry),
           },
           agentEffects: {
             dispatch: async (handle) => await this.#dispatchAgentAdapter(handle),
@@ -929,6 +931,9 @@ export class Fabric {
           daemonInstanceGeneration: () => this.#currentDaemonInstanceGeneration(),
         });
     if (this.#launchCustody !== undefined) {
+      this.#adapterSupervisor.setChairBridgeLossHandler((entry, reason) => {
+        this.#launchCustody?.observeChairBridgeLoss({ ...entry, reason });
+      });
       this.#adapterSupervisor.setChildBridgeLossHandler((entry, reason) => {
         this.#launchCustody?.observeChildBridgeLoss({ ...entry, reason });
       });
@@ -1371,8 +1376,19 @@ export class Fabric {
         capability: handle.capability,
         socketPath: handle.socketPath,
         attestationChallenge: handle.attestationChallenge,
+        expectedPrincipal: handle.expectedPrincipal,
       },
     );
+    if (!this.#adapterSupervisor.hasRetainedChairBridge({
+      ...handle.expectedPrincipal,
+      adapterId: handle.providerAdapterId,
+      actionId: handle.providerActionId,
+      providerSessionRef: result.resumeReference,
+      providerSessionGeneration: result.providerSessionGeneration,
+      bridgeGeneration: 1,
+    })) {
+      throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "chair bridge closed before launch activation");
+    }
     return this.#terminalLaunchOutcome(handle, result, "dispatch-return");
   }
 
@@ -1468,6 +1484,10 @@ export class Fabric {
       SELECT a.run_id, a.agent_id, a.provider_session_ref, b.adapter_id
         FROM agents a JOIN agent_adapter_bindings b ON b.run_id = a.run_id AND b.agent_id = a.agent_id
        WHERE a.provider_session_ref IS NOT NULL AND a.lifecycle NOT IN ('archived', 'suspended')
+         AND NOT EXISTS (
+           SELECT 1 FROM project_session_launch_custody launch
+            WHERE launch.coordination_run_id=a.run_id AND launch.chair_agent_id=a.agent_id
+         )
     `).all();
     for (const value of sessions) {
       const session = rowOrNotFound(value, "startup provider session");

@@ -1165,6 +1165,12 @@ describe("operator action store", () => {
         socketPath: "/private/fabric.sock",
         attestationChallenge: "ab".repeat(32),
         attestationChallengeDigest: authorityRef,
+        expectedPrincipal: {
+          agentId: "chair",
+          projectSessionId,
+          runId: "run_launch_01",
+          principalGeneration: 1,
+        },
       }),
       dispatchPrepared: async () => {
         launchTerminal = true;
