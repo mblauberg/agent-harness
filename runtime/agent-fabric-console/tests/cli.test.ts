@@ -7,6 +7,8 @@ import {
   runConsoleCli,
   startConsoleRefreshLoop,
 } from "../src/cli.js";
+import { createBootstrapUnavailableDataset } from "../src/protocol-adapter.js";
+import { FABRIC_VIEWS } from "../src/model.js";
 
 describe("standalone Console executable", () => {
   it("ships a non-interactive help path and honestly describes production bootstrap", () => {
@@ -66,6 +68,53 @@ describe("standalone Console executable", () => {
     })).rejects.toThrow("requires a TTY");
     expect(startApplication).not.toHaveBeenCalled();
   });
+
+  it.each(["json", "markdown"] as const)(
+    "exports a non-interactive deterministic %s snapshot and detaches cleanly",
+    async (format) => {
+      const writes: string[] = [];
+      const close = vi.fn(async () => {});
+      const dataset = createBootstrapUnavailableDataset("start-failed", 1_000);
+      const controller = {
+        state: {
+          activeView: "system",
+          selectionByView: Object.fromEntries(FABRIC_VIEWS.map((view) => [view, null])),
+          scrollAnchorByView: Object.fromEntries(FABRIC_VIEWS.map((view) => [view, null])),
+          review: null,
+          pendingCommandIds: [],
+          lastActionStatus: null,
+          lastReceipt: null,
+          lastFailure: null,
+        },
+      };
+      await runConsoleCli(["--export", format], {
+        input: {
+          isTTY: false,
+          isRaw: false,
+          readableFlowing: false,
+          setRawMode: () => {},
+          resume: () => {},
+          pause: () => {},
+          on: () => {},
+          off: () => {},
+        },
+        output: {
+          isTTY: false,
+          write: (value) => { writes.push(String(value)); return true; },
+          on: () => {},
+          removeListener: () => {},
+        },
+        startApplication: (async () => ({ dataset, controller, close })) as never,
+      });
+
+      expect(writes.join("")).toContain(
+        format === "json"
+          ? '"kind": "agent-fabric-console-snapshot"'
+          : "# Agent Fabric Console snapshot",
+      );
+      expect(close).toHaveBeenCalledWith("operator");
+    },
+  );
 
   it("closes and detaches an attached application when terminal construction fails", async () => {
     const close = vi.fn(async () => {});

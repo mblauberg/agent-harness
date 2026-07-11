@@ -379,6 +379,7 @@ describe("production Console mutation planner", () => {
       "cancel",
       "steer",
       "project-session-drain",
+      "project-session-stop",
     ] as const;
     const available: FabricConsoleDataset = {
       ...current,
@@ -403,7 +404,9 @@ describe("production Console mutation planner", () => {
         activation: activation(action, `input_${action}`),
         dataset: available,
         state: state(),
-        draft: "exact operator payload",
+        draft: action === "project-session-stop"
+          ? JSON.stringify({ path: "receipts/drain.json", digest })
+          : "exact operator payload",
       })).resolves.toMatchObject({ availableAction: action });
     }
   });
@@ -477,6 +480,11 @@ describe("production Console package-root bootstrap", () => {
       actionPlanner: expect.objectContaining({
         plan: expect.any(Function),
         confirmation: expect.any(Function),
+      }),
+      workflowPlanner: expect.objectContaining({
+        prepare: expect.any(Function),
+        arm: expect.any(Function),
+        commit: expect.any(Function),
       }),
     });
   });
@@ -582,7 +590,14 @@ describe("production Console package-root bootstrap", () => {
     }
     expect(page.rows[0].fact.value.actionAvailability).toStrictEqual({
       state: "available",
-      actions: ["pause", "resume", "cancel", "steer", "project-session-drain"],
+      actions: [
+        "pause",
+        "resume",
+        "cancel",
+        "steer",
+        "project-session-drain",
+        "project-session-stop",
+      ],
       requiresPreview: true,
     });
     await connected.close();

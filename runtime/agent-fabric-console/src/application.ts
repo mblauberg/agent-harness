@@ -33,8 +33,9 @@ import {
   type FabricRuntimeActivation,
   type FabricRuntimeController,
 } from "./runtime.js";
-import type { FabricViewport } from "./presenter.js";
+import type { FabricConsoleUiState, FabricViewport } from "./presenter.js";
 import type { FabricConsoleFrame } from "./index.js";
+import type { ConsoleWorkflowPlanner } from "./workflow.js";
 
 export type ConsoleBootstrapRequest = Readonly<{
   projectRoot: string;
@@ -48,6 +49,7 @@ export type ConsoleBootstrapConnection = Readonly<{
   projectId: ProjectId;
   projectSessionId?: ProjectSessionId;
   actionPlanner?: ConsoleActionPlanner;
+  workflowPlanner?: ConsoleWorkflowPlanner;
   detach(input: Readonly<{ reason: FabricDetachReason }>): Promise<void>;
   close(): Promise<void>;
 }>;
@@ -176,6 +178,42 @@ class ReadOnlyProjectionController implements FabricRuntimeController {
   }
 }
 
+class SwappableProjectionController implements FabricRuntimeController {
+  #target: FabricRuntimeController;
+
+  constructor(target: FabricRuntimeController) {
+    this.#target = target;
+  }
+
+  get dataset(): FabricConsoleDataset {
+    return this.#target.dataset;
+  }
+
+  get state(): ConsoleControllerState {
+    return this.#target.state;
+  }
+
+  swap(target: FabricRuntimeController): void {
+    this.#target = target;
+  }
+
+  activateView(view: FabricView): void {
+    this.#target.activateView(view);
+  }
+
+  select(view: FabricView, stableId: string): void {
+    this.#target.select(view, stableId);
+  }
+
+  setScrollAnchor(view: FabricView, stableId: string | null): void {
+    this.#target.setScrollAnchor(view, stableId);
+  }
+
+  updateDataset(dataset: FabricConsoleDataset): void {
+    this.#target.updateDataset(dataset);
+  }
+}
+
 const rejectingActions: OperatorActionClient = {
   preview: async () => Promise.reject(new Error("operator actions unavailable")),
   commit: async () => Promise.reject(new Error("operator actions unavailable")),
@@ -189,28 +227,42 @@ function directActivation(
   return { eventId: activation.eventId, source: activation.provenance };
 }
 
+type ConsoleApplicationConnection = Readonly<{
+  controller: FabricRuntimeController;
+  adapter: ConsoleProtocolAdapter | null;
+  planner: ConsoleActionPlanner | undefined;
+  workflowPlanner: ConsoleWorkflowPlanner | undefined;
+  mutationController: ConsoleController | null;
+  plannerEnablesMutation: boolean;
+  connected: ConsoleBootstrapConnection | null;
+}>;
+
 export class FabricConsoleApplication {
   readonly #runtime: FabricConsoleRuntime;
-  readonly #controller: FabricRuntimeController;
-  readonly #adapter: ConsoleProtocolAdapter | null;
-  readonly #planner: ConsoleActionPlanner | undefined;
-  readonly #mutationController: ConsoleController | null;
-  readonly #plannerEnablesMutation: boolean;
+  readonly #controller: SwappableProjectionController;
+  readonly #connect: () => Promise<ConsoleApplicationConnection>;
+  #adapter: ConsoleProtocolAdapter | null;
+  #planner: ConsoleActionPlanner | undefined;
+  #workflowPlanner: ConsoleWorkflowPlanner | undefined;
+  #mutationController: ConsoleController | null;
+  #plannerEnablesMutation: boolean;
+  #connected: ConsoleBootstrapConnection | null;
 
   constructor(input: Readonly<{
     runtime: FabricConsoleRuntime;
-    controller: FabricRuntimeController;
-    adapter: ConsoleProtocolAdapter | null;
-    planner: ConsoleActionPlanner | undefined;
-    mutationController: ConsoleController | null;
-    plannerEnablesMutation: boolean;
+    controller: SwappableProjectionController;
+    connection: ConsoleApplicationConnection;
+    connect: () => Promise<ConsoleApplicationConnection>;
   }>) {
     this.#runtime = input.runtime;
     this.#controller = input.controller;
-    this.#adapter = input.adapter;
-    this.#planner = input.planner;
-    this.#mutationController = input.mutationController;
-    this.#plannerEnablesMutation = input.plannerEnablesMutation;
+    this.#connect = input.connect;
+    this.#adapter = input.connection.adapter;
+    this.#planner = input.connection.planner;
+    this.#workflowPlanner = input.connection.workflowPlanner;
+    this.#mutationController = input.connection.mutationController;
+    this.#plannerEnablesMutation = input.connection.plannerEnablesMutation;
+    this.#connected = input.connection.connected;
   }
 
   get controller(): FabricRuntimeController {
@@ -223,6 +275,10 @@ export class FabricConsoleApplication {
 
   get frame(): FabricConsoleFrame {
     return this.#runtime.frame;
+  }
+
+  get ui(): FabricConsoleUiState {
+    return this.#runtime.ui;
   }
 
   get closed(): boolean {
@@ -261,6 +317,53 @@ export class FabricConsoleApplication {
     return this.#runtime.close(reason);
   }
 
+  async detachCurrent(reason: FabricDetachReason): Promise<void> {
+    const connected = this.#connected;
+    this.#connected = null;
+    if (connected === null) return;
+    try {
+      await connected.detach({ reason });
+    } finally {
+      await connected.close();
+    }
+  }
+
+  async #reconnectAfterProjectSessionCreate(): Promise<void> {
+    const next = await this.#connect();
+    if (
+      next.connected === null ||
+      next.connected.projectSessionId === undefined ||
+      next.workflowPlanner === undefined
+    ) {
+      if (next.connected !== null) {
+        try {
+          await next.connected.detach({ reason: "safety" });
+        } finally {
+          await next.connected.close();
+        }
+      }
+      throw Object.assign(new Error("created project session could not be attached"), {
+        code: "CONSOLE_REATTACH_FAILED",
+      });
+    }
+    const previous = this.#connected;
+    this.#controller.swap(next.controller);
+    this.#adapter = next.adapter;
+    this.#planner = next.planner;
+    this.#workflowPlanner = next.workflowPlanner;
+    this.#mutationController = next.mutationController;
+    this.#plannerEnablesMutation = next.plannerEnablesMutation;
+    this.#connected = next.connected;
+    this.#runtime.updateDataset(next.controller.dataset);
+    if (previous !== null) {
+      try {
+        await previous.detach({ reason: "operator" });
+      } finally {
+        await previous.close();
+      }
+    }
+  }
+
   async handleActivation(activation: FabricRuntimeActivation): Promise<void> {
     if (
       activation.regionId.startsWith("row:") &&
@@ -270,6 +373,53 @@ export class FabricConsoleApplication {
       const inspection = await this.#adapter.inspect(activation.binding);
       if (inspection !== null) {
         this.#runtime.updateDataset({ ...this.dataset, inspection });
+      }
+      return;
+    }
+    const workflowPlanner = this.#workflowPlanner;
+    const workflowReview = this.#runtime.ui.workflowReview;
+    if (activation.regionId === "palette:submit") {
+      if (workflowPlanner === undefined) {
+        throw new Error("typed Console workflows are unavailable");
+      }
+      const review = await workflowPlanner.prepare({
+        raw: this.#runtime.ui.draft,
+        dataset: this.dataset,
+        eventId: activation.eventId,
+      });
+      this.#runtime.setWorkflowReview(review);
+      return;
+    }
+    if (workflowReview !== null && activation.regionId.startsWith("review:")) {
+      if (workflowPlanner === undefined) {
+        throw new Error("typed Console workflow Review is unavailable");
+      }
+      if (
+        activation.regionId === "review:cancel" ||
+        activation.regionId === "review:close"
+      ) {
+        this.#runtime.setWorkflowReview(null);
+        return;
+      }
+      if (activation.regionId === "review:continue") {
+        this.#runtime.setWorkflowReview(
+          workflowPlanner.arm(workflowReview, activation.eventId),
+        );
+        return;
+      }
+      if (activation.regionId === "review:confirm") {
+        const committed = await workflowPlanner.commit({
+          review: workflowReview,
+          eventId: activation.eventId,
+          echoText: this.#runtime.ui.draft,
+        });
+        this.#runtime.setWorkflowReview(committed.review);
+        if (committed.reconnectRequired) {
+          await this.#reconnectAfterProjectSessionCreate();
+        } else {
+          await this.refresh();
+        }
+        return;
       }
       return;
     }
@@ -346,9 +496,9 @@ export class FabricConsoleApplication {
   }
 }
 
-export async function startFabricConsoleApplication(
+async function openConsoleApplicationConnection(
   options: ConsoleApplicationOptions,
-): Promise<FabricConsoleApplication> {
+): Promise<ConsoleApplicationConnection> {
   const bootstrap = await options.bootstrap.startOrAttach({
     projectRoot: options.projectRoot,
     surface: options.surface,
@@ -360,40 +510,71 @@ export async function startFabricConsoleApplication(
   let dataset: FabricConsoleDataset;
   let plannerEnablesMutation = false;
   let planner = options.actionPlanner;
+  let workflowPlanner: ConsoleWorkflowPlanner | undefined;
   if (bootstrap.status === "unavailable") {
     dataset = createBootstrapUnavailableDataset(bootstrap.reason);
     controller = new ReadOnlyProjectionController(dataset);
   } else {
     connected = bootstrap;
-    adapter = new ConsoleProtocolAdapter({
-      binding: bootstrap.binding,
-      credential: bootstrap.credential,
-      projectId: bootstrap.projectId,
-      ...(bootstrap.projectSessionId === undefined
-        ? {}
-        : { projectSessionId: bootstrap.projectSessionId }),
-    });
-    dataset = await adapter.open();
-    const actionClient = adapter.actionClient;
-    planner ??= bootstrap.actionPlanner;
-    plannerEnablesMutation =
-      actionClient !== null && planner !== undefined;
-    if (!plannerEnablesMutation) dataset = { ...dataset, canMutate: false };
-    mutationController = new ConsoleController({
-      dataset,
-      actions: actionClient ?? rejectingActions,
-      credential: bootstrap.credential,
-      projectId: bootstrap.projectId,
-      ...(bootstrap.projectSessionId === undefined
-        ? {}
-        : { projectSessionId: bootstrap.projectSessionId }),
-      ...(bootstrap.binding.ok
-        ? { readGate: bootstrap.binding.port.readGate }
-        : {}),
-      confirmationId: options.confirmationId,
-    });
-    controller = mutationController;
+    try {
+      adapter = new ConsoleProtocolAdapter({
+        binding: bootstrap.binding,
+        credential: bootstrap.credential,
+        projectId: bootstrap.projectId,
+        ...(bootstrap.projectSessionId === undefined
+          ? {}
+          : { projectSessionId: bootstrap.projectSessionId }),
+      });
+      dataset = await adapter.open();
+      const actionClient = adapter.actionClient;
+      planner ??= bootstrap.actionPlanner;
+      workflowPlanner = bootstrap.workflowPlanner;
+      plannerEnablesMutation =
+        (actionClient !== null && planner !== undefined) ||
+        workflowPlanner !== undefined;
+      if (!plannerEnablesMutation) dataset = { ...dataset, canMutate: false };
+      mutationController = new ConsoleController({
+        dataset,
+        actions: actionClient ?? rejectingActions,
+        credential: bootstrap.credential,
+        projectId: bootstrap.projectId,
+        ...(bootstrap.projectSessionId === undefined
+          ? {}
+          : { projectSessionId: bootstrap.projectSessionId }),
+        ...(bootstrap.binding.ok
+          ? { readGate: bootstrap.binding.port.readGate }
+          : {}),
+        confirmationId: options.confirmationId,
+      });
+      controller = mutationController;
+    } catch (error: unknown) {
+      try {
+        await bootstrap.detach({ reason: "safety" });
+      } finally {
+        await bootstrap.close();
+      }
+      throw error;
+    }
   }
+
+  return {
+    controller,
+    adapter,
+    planner,
+    workflowPlanner,
+    mutationController,
+    plannerEnablesMutation,
+    connected,
+  };
+}
+
+export async function startFabricConsoleApplication(
+  options: ConsoleApplicationOptions,
+): Promise<FabricConsoleApplication> {
+  const connect = async (): Promise<ConsoleApplicationConnection> =>
+    await openConsoleApplicationConnection(options);
+  const connection = await connect();
+  const controller = new SwappableProjectionController(connection.controller);
 
   let application: FabricConsoleApplication | null = null;
   const runtime = new FabricConsoleRuntime({
@@ -413,21 +594,14 @@ export async function startFabricConsoleApplication(
       await application?.handleActivation(activation);
     },
     detach: async ({ reason }) => {
-      if (connected === null) return;
-      try {
-        await connected.detach({ reason });
-      } finally {
-        await connected.close();
-      }
+      await application?.detachCurrent(reason);
     },
   });
   application = new FabricConsoleApplication({
     runtime,
     controller,
-    adapter,
-    planner,
-    mutationController,
-    plannerEnablesMutation,
+    connection,
+    connect,
   });
   // The runtime constructor is side-effect free so the bootstrap result is
   // complete before the first frame reaches the terminal.

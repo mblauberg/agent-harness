@@ -19,6 +19,7 @@ import {
   type Revision,
 } from "./model.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
+import type { ConsoleWorkflowReview } from "./workflow.js";
 
 export type FabricResponsiveMode =
   | "wide"
@@ -44,6 +45,7 @@ export type FabricConsoleUiState = Readonly<{
   notice: string | null;
   splitterRatio: number;
   reviewScrollOffset: number;
+  workflowReview: ConsoleWorkflowReview | null;
 }>;
 
 export function createFabricUiState(
@@ -69,6 +71,7 @@ export function createFabricUiState(
       !Number.isSafeInteger(overrides.reviewScrollOffset)
         ? 0
         : Math.max(0, overrides.reviewScrollOffset),
+    workflowReview: overrides.workflowReview ?? null,
   };
 }
 
@@ -191,6 +194,10 @@ export type PresentedReview = Readonly<{
     effect: string | null;
     committedAt: string;
   }> | null;
+  workflowId: string | null;
+  summary: string | null;
+  result: string | null;
+  failure: string | null;
 }>;
 
 export type FabricConsolePresentation = Readonly<{
@@ -207,6 +214,7 @@ export type FabricConsolePresentation = Readonly<{
   focusId: string | null;
   compactPane: "master" | "detail";
   draft: string;
+  inputMode: FabricConsoleUiState["inputMode"];
   mouseCapture: boolean;
   rejectedInputCount: number;
   notice: string | null;
@@ -589,6 +597,38 @@ function presentReview(review: ActionReview): PresentedReview {
             committedAt: review.status.receipt.committedAt,
           }
         : null,
+    workflowId: null,
+    summary: null,
+    result: null,
+    failure: null,
+  };
+}
+
+function presentWorkflowReview(
+  review: ConsoleWorkflowReview,
+  dataset: FabricConsoleDataset,
+): PresentedReview {
+  const projectionRevision = dataset.snapshotRevision ?? review.expectedRevision;
+  return {
+    stage: review.stage,
+    itemId: review.kind,
+    itemRevision: review.expectedRevision,
+    projectionRevision,
+    previewRevision: review.expectedRevision,
+    previewDigest: review.previewDigest,
+    intentDigest: review.previewDigest,
+    beforeStateDigest: dataset.snapshot?.stateDigest ?? "unavailable",
+    consequenceClass: review.consequenceClass,
+    confirmationMode: review.confirmationMode,
+    intent: review.details,
+    evidence: review.evidence,
+    gates: [],
+    changes: [],
+    receipt: null,
+    workflowId: review.workflowId,
+    summary: review.summary,
+    result: review.result,
+    failure: review.failure,
   };
 }
 
@@ -622,6 +662,31 @@ function reviewActions(review: ActionReview): readonly PresentedAction[] {
   ];
 }
 
+function workflowReviewActions(
+  review: ConsoleWorkflowReview,
+): readonly PresentedAction[] {
+  if (review.stage === "review") {
+    return [
+      { id: "review:continue", label: "Continue to confirmation", enabled: true, availableAction: null },
+      { id: "review:cancel", label: "Cancel Review", enabled: true, availableAction: null },
+    ];
+  }
+  if (review.stage === "confirm") {
+    return [
+      {
+        id: "review:confirm",
+        label: review.confirmationMode === "echo" ? "Confirm exact digest" : "Confirm workflow",
+        enabled: true,
+        availableAction: null,
+      },
+      { id: "review:cancel", label: "Cancel Review", enabled: true, availableAction: null },
+    ];
+  }
+  return [
+    { id: "review:close", label: "Close Review", enabled: true, availableAction: null },
+  ];
+}
+
 export function presentFabricConsole(
   dataset: FabricConsoleDataset,
   controller: ConsoleControllerState,
@@ -635,6 +700,7 @@ export function presentFabricConsole(
       ? null
       : activeRows.find((candidate) => candidate.stableId === selected.stableId) ?? null;
   const review = controller.review;
+  const workflowReview = review === null ? ui.workflowReview : null;
   return {
     mode: responsiveModeFor(viewport),
     connection:
@@ -667,16 +733,24 @@ export function presentFabricConsole(
           ),
     detail: selectedRow === null ? null : detailLines(selectedRow),
     actions:
-      review === null
+      review === null && workflowReview === null
         ? rowActions(
             selectedRow,
             dataset.canMutate && dataset.connection.state === "live",
           )
-        : reviewActions(review),
-    review: review === null ? null : presentReview(review),
+        : review === null
+          ? workflowReviewActions(workflowReview as ConsoleWorkflowReview)
+          : reviewActions(review),
+    review:
+      review !== null
+        ? presentReview(review)
+        : workflowReview === null
+          ? null
+          : presentWorkflowReview(workflowReview, dataset),
     focusId: ui.focusId,
     compactPane: ui.compactPane,
     draft: ui.draft,
+    inputMode: ui.inputMode,
     mouseCapture: ui.mouseCapture,
     rejectedInputCount: ui.rejectedInputCount,
     notice: ui.notice,

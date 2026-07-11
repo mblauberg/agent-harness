@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   NegotiatedOperatorClient,
   GitRepositoryReadClient,
@@ -52,7 +54,41 @@ export type ConsoleProtocolPort = Readonly<{
   readGate(request: ScopedGateReadRequest): Promise<ScopedGateReadResult>;
   readMessageBody: MessageBodyClient["read"] | null;
   readRepository: GitRepositoryReadClient["read"] | null;
+  readArtifactContent: ConsoleArtifactContentRead | null;
 }>;
+
+export type ConsoleArtifactContentRequest = Readonly<{
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  projectSessionId?: ProjectSessionId;
+  snapshotRevision: number;
+  evidenceId: string;
+  expectedEvidenceRevision: number;
+  artifactRef: Readonly<{ path: string; digest: string }>;
+  maximumBytes: number;
+  maximumLines: number;
+}>;
+
+export type ConsoleArtifactContentResult =
+  | Readonly<{
+      available: true;
+      artifactRef: Readonly<{ path: string; digest: string }>;
+      mediaType: "text/markdown" | "application/json" | "text/x-diff" | "text/plain";
+      content: string;
+      totalBytes: number;
+      truncated: boolean;
+      terminalNeutralised: true;
+      capabilityValuesRedacted: true;
+    }>
+  | Readonly<{
+      available: false;
+      artifactRef: Readonly<{ path: string; digest: string }>;
+      reason: "not-found" | "forbidden" | "unsupported-media" | "stale" | "oversized";
+    }>;
+
+export type ConsoleArtifactContentRead = (
+  request: ConsoleArtifactContentRequest,
+) => Promise<ConsoleArtifactContentResult>;
 
 export type ConsoleProtocolBinding =
   | Readonly<{
@@ -85,6 +121,21 @@ export function bindConsoleProtocolClient(
   }
   const projection = client.projection;
   const consoleClient = client.console;
+  const artifactSurface = Reflect.get(client, "artifacts");
+  const artifactReadMethod =
+    typeof artifactSurface === "object" &&
+    artifactSurface !== null &&
+    typeof Reflect.get(artifactSurface, "readContent") === "function"
+      ? Reflect.get(artifactSurface, "readContent") as ConsoleArtifactContentRead
+      : null;
+  const artifactRead: ConsoleArtifactContentRead | null =
+    artifactReadMethod === null
+      ? null
+      : async (request) => await Reflect.apply(
+          artifactReadMethod,
+          artifactSurface,
+          [request],
+        ) as ConsoleArtifactContentResult;
   return {
     ok: true,
     readOnly: consoleClient.readOnly,
@@ -97,6 +148,7 @@ export function bindConsoleProtocolClient(
       readGate: (request) => consoleClient.gates.read(request),
       readMessageBody: client.messages?.read ?? null,
       readRepository: client.repository?.read ?? null,
+      readArtifactContent: artifactRead,
     },
   };
 }
@@ -163,6 +215,31 @@ export type ConsoleReadInspection =
         | "repository-resnapshot-required"
         | "contract-invalid"
         | "transport-failure";
+    }>
+  | Readonly<{
+      kind: "artifact";
+      state: "current";
+      binding: ConsoleInspectionBinding;
+      readTransactionId: string;
+      result: Extract<ConsoleArtifactContentResult, { available: true }>;
+    }>
+  | Readonly<{
+      kind: "artifact";
+      state: "unavailable";
+      binding: ConsoleInspectionBinding;
+      reason:
+        | "feature-unavailable"
+        | "projection-changed"
+        | "detail-unavailable"
+        | "detail-conflict"
+        | "detail-invalid"
+        | "artifact-not-found"
+        | "artifact-forbidden"
+        | "artifact-unsupported-media"
+        | "artifact-stale"
+        | "artifact-oversized"
+        | "contract-invalid"
+        | "transport-failure";
     }>;
 
 function unavailableMessage(
@@ -179,10 +256,21 @@ function unavailableRepository(
   return { kind: "repository", state: "unavailable", binding, reason };
 }
 
+function unavailableArtifact(
+  binding: ConsoleInspectionBinding,
+  reason: Extract<ConsoleReadInspection, { kind: "artifact"; state: "unavailable" }>["reason"],
+): ConsoleReadInspection {
+  return { kind: "artifact", state: "unavailable", binding, reason };
+}
+
 function failureCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null;
   const code = Reflect.get(error, "code");
   return typeof code === "string" ? code : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export type FabricConsoleDataset = Readonly<{
@@ -385,6 +473,142 @@ export class ConsoleProtocolAdapter {
 
   async inspect(binding: ConsoleInspectionBinding): Promise<ConsoleReadInspection | null> {
     const dataset = this.#lastGood;
+    if (binding.view === "evidence") {
+      const row = dataset?.pages.evidence.rows.find(
+        (candidate) => candidate.stableId === binding.itemId,
+      );
+      if (
+        dataset === null ||
+        dataset?.snapshotRevision !== binding.projectionRevision ||
+        row?.revision !== binding.itemRevision ||
+        row.detailRef === null
+      ) {
+        return unavailableArtifact(binding, "projection-changed");
+      }
+      if (!this.#binding.ok) return unavailableArtifact(binding, "feature-unavailable");
+      try {
+        const detail = await this.#binding.port.readDetail({
+          ...this.#readScope(),
+          snapshotRevision: revisionToProtocol(binding.projectionRevision),
+          detailRef: row.detailRef,
+        });
+        if (detail.status === "resnapshot-required") {
+          return unavailableArtifact(binding, "projection-changed");
+        }
+        if (
+          detail.snapshotRevision !== revisionToProtocol(binding.projectionRevision) ||
+          detail.detailRef.kind !== "evidence" ||
+          detail.detailRef.evidenceId !== row.detailRef.evidenceId ||
+          detail.detailRef.expectedRevision !== row.detailRef.expectedRevision ||
+          detail.detail.revision !== row.detailRef.expectedRevision
+        ) {
+          return unavailableArtifact(binding, "contract-invalid");
+        }
+        if (detail.detail.freshness === "unavailable") {
+          return unavailableArtifact(binding, "detail-unavailable");
+        }
+        if (detail.detail.freshness === "conflict") {
+          return unavailableArtifact(binding, "detail-conflict");
+        }
+        const evidence = detail.detail.value;
+        if (
+          evidence.kind !== "evidence" ||
+          evidence.evidenceId !== binding.itemId
+        ) {
+          return unavailableArtifact(binding, "detail-invalid");
+        }
+        const read = this.#binding.port.readArtifactContent;
+        if (read === null) return unavailableArtifact(binding, "feature-unavailable");
+        const maximumBytes = 131_072;
+        const maximumLines = 2_000;
+        const rawResult: unknown = await read({
+          ...this.#readScope(),
+          snapshotRevision: revisionToProtocol(binding.projectionRevision),
+          evidenceId: evidence.evidenceId,
+          expectedEvidenceRevision: revisionToProtocol(binding.itemRevision),
+          artifactRef: evidence.artifactRef,
+          maximumBytes,
+          maximumLines,
+        });
+        if (
+          !isRecord(rawResult) ||
+          (rawResult.available !== true && rawResult.available !== false) ||
+          !isRecord(rawResult.artifactRef) ||
+          typeof rawResult.artifactRef.path !== "string" ||
+          typeof rawResult.artifactRef.digest !== "string"
+        ) {
+          return unavailableArtifact(binding, "contract-invalid");
+        }
+        const result = rawResult as ConsoleArtifactContentResult;
+        if (
+          result.artifactRef.path !== evidence.artifactRef.path ||
+          result.artifactRef.digest !== evidence.artifactRef.digest
+        ) {
+          return unavailableArtifact(binding, "contract-invalid");
+        }
+        if (!result.available) {
+          const reasons = {
+            "not-found": "artifact-not-found",
+            forbidden: "artifact-forbidden",
+            "unsupported-media": "artifact-unsupported-media",
+            stale: "artifact-stale",
+            oversized: "artifact-oversized",
+          } as const;
+          if (
+            typeof result.reason !== "string" ||
+            !(result.reason in reasons)
+          ) {
+            return unavailableArtifact(binding, "contract-invalid");
+          }
+          return unavailableArtifact(binding, reasons[result.reason]);
+        }
+        const contentBytes = typeof result.content === "string"
+          ? Buffer.byteLength(result.content)
+          : maximumBytes + 1;
+        const lineCount = typeof result.content === "string"
+          ? result.content.split("\n").length
+          : maximumLines + 1;
+        const mediaTypes = new Set([
+          "text/markdown",
+          "application/json",
+          "text/x-diff",
+          "text/plain",
+        ]);
+        const contentDigest = typeof result.content === "string"
+          ? `sha256:${createHash("sha256").update(result.content).digest("hex")}`
+          : null;
+        if (
+          !mediaTypes.has(result.mediaType) ||
+          typeof result.content !== "string" ||
+          result.terminalNeutralised !== true ||
+          result.capabilityValuesRedacted !== true ||
+          !Number.isSafeInteger(result.totalBytes) ||
+          result.totalBytes < contentBytes ||
+          contentBytes > maximumBytes ||
+          lineCount > maximumLines ||
+          typeof result.truncated !== "boolean" ||
+          (!result.truncated && result.totalBytes !== contentBytes) ||
+          (!result.truncated && contentDigest !== result.artifactRef.digest)
+        ) {
+          return unavailableArtifact(binding, "contract-invalid");
+        }
+        return {
+          kind: "artifact",
+          state: "current",
+          binding,
+          readTransactionId: detail.readTransactionId,
+          result,
+        };
+      } catch (error: unknown) {
+        const code = failureCode(error);
+        return unavailableArtifact(
+          binding,
+          code === "STALE_REVISION" || code === "PROJECTION_RESNAPSHOT_REQUIRED"
+            ? "projection-changed"
+            : "transport-failure",
+        );
+      }
+    }
     if (binding.view === "project") {
       const row = dataset?.pages.project.rows.find(
         (candidate) => candidate.stableId === binding.itemId,

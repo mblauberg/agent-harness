@@ -44,6 +44,41 @@ export type MessageBodyWindow = Readonly<{
   hasNext: boolean;
 }>;
 
+const CAPABILITY_VALUE = /\b(?:afb|afc|afop)_[A-Za-z0-9._~+/=-]{4,}\b/gu;
+
+export function presentSafeTextWindow(
+  body: string,
+  viewport: Readonly<{ columns: number; rows: number; offset: number }>,
+  dependencies: MessageDisplayDependencies,
+): MessageBodyWindow {
+  if (
+    !Number.isSafeInteger(viewport.columns) ||
+    !Number.isSafeInteger(viewport.rows) ||
+    !Number.isSafeInteger(viewport.offset) ||
+    viewport.columns < 1 ||
+    viewport.rows < 1 ||
+    viewport.offset < 0 ||
+    viewport.columns * viewport.rows > 250_000
+  ) {
+    throw new TypeError("message viewport is outside the bounded display range");
+  }
+  const safe = dependencies.sanitizeDisplayText(body, {
+    lineBreaks: "preserve",
+  }).replace(CAPABILITY_VALUE, "[REDACTED capability]");
+  const allLines = safe
+    .split("\n")
+    .flatMap((line) => wrapLine(line, viewport.columns, dependencies));
+  const maximumOffset = Math.max(0, allLines.length - 1);
+  const offset = Math.min(viewport.offset, maximumOffset);
+  return {
+    offset,
+    totalLines: allLines.length,
+    lines: allLines.slice(offset, offset + viewport.rows),
+    hasPrevious: offset > 0,
+    hasNext: offset + viewport.rows < allLines.length,
+  };
+}
+
 function splitLongToken(
   token: string,
   columns: number,
@@ -86,30 +121,5 @@ export function presentMessageBodyWindow(
   viewport: Readonly<{ columns: number; rows: number; offset: number }>,
   dependencies: MessageDisplayDependencies,
 ): MessageBodyWindow {
-  if (
-    !Number.isSafeInteger(viewport.columns) ||
-    !Number.isSafeInteger(viewport.rows) ||
-    !Number.isSafeInteger(viewport.offset) ||
-    viewport.columns < 1 ||
-    viewport.rows < 1 ||
-    viewport.offset < 0 ||
-    viewport.columns * viewport.rows > 250_000
-  ) {
-    throw new TypeError("message viewport is outside the bounded display range");
-  }
-  const safe = dependencies.sanitizeDisplayText(message.body, {
-    lineBreaks: "preserve",
-  });
-  const allLines = safe
-    .split("\n")
-    .flatMap((line) => wrapLine(line, viewport.columns, dependencies));
-  const maximumOffset = Math.max(0, allLines.length - 1);
-  const offset = Math.min(viewport.offset, maximumOffset);
-  return {
-    offset,
-    totalLines: allLines.length,
-    lines: allLines.slice(offset, offset + viewport.rows),
-    hasPrevious: offset > 0,
-    hasNext: offset + viewport.rows < allLines.length,
-  };
+  return presentSafeTextWindow(message.body, viewport, dependencies);
 }

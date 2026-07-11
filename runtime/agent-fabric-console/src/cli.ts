@@ -14,6 +14,8 @@ import {
   type FabricConsoleFrame,
 } from "./index.js";
 import { createProductionConsoleBootstrap } from "./production-composition.js";
+import { createFabricUiState } from "./presenter.js";
+import { renderConsoleSnapshot, type ConsoleSnapshotFormat } from "./snapshot.js";
 import {
   TerminalSession,
   type TerminalInput,
@@ -23,7 +25,7 @@ import {
 } from "./terminal.js";
 
 export const CONSOLE_CLI_USAGE =
-  "usage: agent-fabric-console [--project ABSOLUTE_ROOT] [--herdr]\n" +
+  "usage: agent-fabric-console [--project ABSOLUTE_ROOT] [--herdr] [--export json|markdown]\n" +
   "Starts or attaches through the lock-safe local Fabric bootstrap. If configuration, startup, or authority is unavailable, the explicit unavailable state remains read-only.\n";
 
 function option(arguments_: readonly string[], name: string): string | undefined {
@@ -37,13 +39,13 @@ function option(arguments_: readonly string[], name: string): string | undefined
 }
 
 function validateArguments(arguments_: readonly string[]): void {
-  const known = new Set(["--help", "-h", "--project", "--herdr"]);
+  const known = new Set(["--help", "-h", "--project", "--herdr", "--export"]);
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === undefined || !known.has(argument)) {
       throw new Error(`unknown Console argument: ${argument ?? ""}`);
     }
-    if (argument === "--project") index += 1;
+    if (argument === "--project" || argument === "--export") index += 1;
   }
 }
 
@@ -158,8 +160,50 @@ export async function runConsoleCli(
     output.write(CONSOLE_CLI_USAGE);
     return;
   }
-  assertInteractiveTerminal(input, output);
   const projectRoot = resolve(option(arguments_, "--project") ?? process.cwd());
+  const exportValue = option(arguments_, "--export");
+  if (
+    exportValue !== undefined &&
+    exportValue !== "json" &&
+    exportValue !== "markdown"
+  ) {
+    throw new Error("--export must be json or markdown");
+  }
+  if (exportValue !== undefined) {
+    const startApplication = dependencies.startApplication ?? startFabricConsoleApplication;
+    const application = await startApplication({
+      bootstrap: dependencies.bootstrap ?? createProductionConsoleBootstrap(),
+      projectRoot,
+      surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
+      viewport: {
+        columns: output.columns ?? 80,
+        rows: output.rows ?? 24,
+      },
+      draw: () => {},
+      eventId: () => "console-export",
+      confirmationId: () => "console-export-confirmation",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    try {
+      const ui = "ui" in application
+        ? application.ui
+        : createFabricUiState();
+      output.write(renderConsoleSnapshot({
+        dataset: application.dataset,
+        controller: application.controller.state,
+        ui,
+        viewport: {
+          columns: output.columns ?? 80,
+          rows: output.rows ?? 24,
+        },
+      }, exportValue as ConsoleSnapshotFormat));
+    } finally {
+      await application.close("operator");
+    }
+    return;
+  }
+  assertInteractiveTerminal(input, output);
   let terminalReady = false;
   let application:
     | Awaited<ReturnType<typeof startFabricConsoleApplication>>

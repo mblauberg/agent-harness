@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  ArtifactRef,
   CommandId,
   NegotiatedOperatorClient,
   OperatorActionIntent,
@@ -29,6 +30,7 @@ import {
   type FabricConsoleDataset,
 } from "./protocol-adapter.js";
 import type { FabricRuntimeActivation } from "./runtime.js";
+import { createProductionConsoleWorkflowPlanner } from "./workflow.js";
 
 export type ProductionConsoleActionPlannerOptions = Readonly<{
   credential: OperatorCapabilityCredential;
@@ -42,6 +44,7 @@ const supportedActions = [
   "cancel",
   "steer",
   "project-session-drain",
+  "project-session-stop",
 ] as const satisfies readonly OperatorAvailableAction[];
 type ProductionConsoleAction = typeof supportedActions[number];
 const supportedActionSet = new Set<OperatorAvailableAction>(supportedActions);
@@ -223,6 +226,19 @@ function plannedIntent(
       expectedGlobalStateRevision: revisionToProtocol(globalRevision),
     };
   }
+  if (action === "project-session-stop") {
+    const globalRevision = dataset.snapshotRevision;
+    const drainReceiptRef = parseArtifactRef(draft);
+    if (globalRevision === null || drainReceiptRef === null) return null;
+    return {
+      kind: "project-session-stop",
+      projectSessionId: session.projectSessionId,
+      expectedSessionRevision: session.revision,
+      expectedSessionGeneration: session.generation,
+      expectedGlobalStateRevision: revisionToProtocol(globalRevision),
+      drainReceiptRef,
+    };
+  }
   const target = controlTarget(row, session);
   if (target === null) return null;
   if (action === "pause" || action === "resume") {
@@ -239,6 +255,33 @@ function plannedIntent(
       : { kind: "control", action, target, instruction: draft, evidenceRefs: [] };
   }
   return null;
+}
+
+function parseArtifactRef(value: string): ArtifactRef | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) || Object.keys(parsed).sort().join(",") !== "digest,path") {
+    return null;
+  }
+  const path = parsed.path;
+  const digestValue = parsed.digest;
+  if (
+    typeof path !== "string" ||
+    path.length < 1 ||
+    path.length > 4_096 ||
+    path.startsWith("/") ||
+    path.includes("\\") ||
+    path.split("/").some((segment) => segment === "" || segment === "." || segment === "..") ||
+    typeof digestValue !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/u.test(digestValue)
+  ) {
+    return null;
+  }
+  return { path: path as ArtifactRef["path"], digest: digestValue as ArtifactRef["digest"] };
 }
 
 function requiredIntentRevision(intent: OperatorActionIntent): number {
@@ -351,6 +394,13 @@ export function createProductionConsoleBootstrap(
             credential: session.credential,
             operatorId: session.operatorId,
             clientId: session.clientId,
+          }),
+          workflowPlanner: createProductionConsoleWorkflowPlanner({
+            client: session.client,
+            credential: session.credential,
+            operatorId: session.operatorId,
+            clientId: session.clientId,
+            projectId: session.projectId,
           }),
           detach: (input) => session.detach(input),
           close: () => session.close(),

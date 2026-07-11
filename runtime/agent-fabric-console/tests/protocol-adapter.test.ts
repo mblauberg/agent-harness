@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -117,6 +118,7 @@ function fakePort(
     }),
     readMessageBody: null,
     readRepository: null,
+    readArtifactContent: null,
     ...overrides,
   };
 }
@@ -375,6 +377,7 @@ describe("public protocol adapter", () => {
     if (!bound.ok) return;
     expect(Reflect.get(bound.port, "readMessageBody")).toBe(messageRead);
     expect(Reflect.get(bound.port, "readRepository")).toBe(repositoryRead);
+    expect(bound.port.readArtifactContent).toBeNull();
 
     const withoutOptionalReads = bindConsoleProtocolClient({
       kind: "operator",
@@ -394,6 +397,127 @@ describe("public protocol adapter", () => {
     if (!withoutOptionalReads.ok) return;
     expect(withoutOptionalReads.port.readMessageBody).toBeNull();
     expect(withoutOptionalReads.port.readRepository).toBeNull();
+    expect(withoutOptionalReads.port.readArtifactContent).toBeNull();
+  });
+
+  it("fetches exact bounded artifact and diff content through the public read port", async () => {
+    const artifactContent = "# Reviewed spec\n\u001b[31m must be neutralised";
+    const artifactDigest = `sha256:${createHash("sha256").update(artifactContent).digest("hex")}` as Sha256Digest;
+    const artifactRead = vi.fn(async () => ({
+      available: true as const,
+      artifactRef: { path: "docs/spec.md", digest: artifactDigest },
+      mediaType: "text/markdown" as const,
+      content: artifactContent,
+      totalBytes: Buffer.byteLength(artifactContent),
+      truncated: false,
+      terminalNeutralised: true as const,
+      capabilityValuesRedacted: true as const,
+    }));
+    const port = fakePort({
+      viewPage: vi.fn(async (request) => {
+        if (request.view !== "evidence") {
+          return emptyPage(request.view, request.snapshotRevision);
+        }
+        return {
+          status: "page",
+          view: "evidence",
+          rows: [{
+            itemId: "artifact-spec",
+            itemRevision: 7,
+            fact: {
+              freshness: "live",
+              source: "fabric",
+              revision: 7,
+              observedAt,
+              value: {
+                summary: {
+                  kind: "evidence",
+                  evidenceKind: "artifact",
+                  status: "informational",
+                  provenance: "fabric:chair",
+                },
+                detailRef: { kind: "evidence", evidenceId: "artifact-spec", expectedRevision: 7 },
+                actionAvailability: { state: "read-only", reason: "state-ineligible" },
+              },
+            },
+          }],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: request.snapshotRevision,
+          readTransactionId: "evidence-page",
+        } as OperatorViewPageResult;
+      }),
+      readDetail: vi.fn(async () => ({
+        status: "current",
+        detailRef: { kind: "evidence", evidenceId: "artifact-spec", expectedRevision: 7 },
+        detail: {
+          freshness: "live",
+          source: "fabric",
+          revision: 7,
+          observedAt,
+          value: {
+            kind: "evidence",
+            evidenceId: "artifact-spec",
+            evidenceKind: "artifact",
+            artifactRef: { path: "docs/spec.md", digest: artifactDigest },
+            status: "informational",
+          },
+        },
+        snapshotRevision: 1,
+        readTransactionId: "evidence-detail",
+      }) as never),
+      readArtifactContent: artifactRead,
+    });
+    const adapter = new ConsoleProtocolAdapter({ binding: binding(port), credential, projectId });
+    await adapter.open();
+
+    const inspection = await adapter.inspect({
+      view: "evidence",
+      itemId: "artifact-spec",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(1),
+    });
+
+    expect(inspection).toMatchObject({
+      kind: "artifact",
+      state: "current",
+      result: {
+        artifactRef: { path: "docs/spec.md", digest: artifactDigest },
+        terminalNeutralised: true,
+        capabilityValuesRedacted: true,
+      },
+    });
+    expect(artifactRead).toHaveBeenCalledWith(expect.objectContaining({
+      credential,
+      projectId,
+      snapshotRevision: 1,
+      evidenceId: "artifact-spec",
+      expectedEvidenceRevision: 7,
+      artifactRef: { path: "docs/spec.md", digest: artifactDigest },
+      maximumBytes: 131_072,
+      maximumLines: 2_000,
+    }));
+
+    artifactRead.mockResolvedValueOnce({
+      available: true,
+      artifactRef: { path: "docs/spec.md", digest: artifactDigest },
+      mediaType: "text/markdown",
+      content: "tampered content",
+      totalBytes: Buffer.byteLength("tampered content"),
+      truncated: false,
+      terminalNeutralised: true,
+      capabilityValuesRedacted: true,
+    });
+    await expect(adapter.inspect({
+      view: "evidence",
+      itemId: "artifact-spec",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(1),
+    })).resolves.toMatchObject({
+      kind: "artifact",
+      state: "unavailable",
+      reason: "contract-invalid",
+    });
   });
 
   it("does not misrepresent a non-message Activity row as a failed message read", async () => {

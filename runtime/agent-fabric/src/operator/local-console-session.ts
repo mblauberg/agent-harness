@@ -34,11 +34,14 @@ import { trustedWorkspaceIdentity } from "../cli/workspace-trust.js";
 const PROJECT_ACTIONS = ["launch", "read"] as const;
 const SESSION_ACTIONS = [
   "read",
+  "decide",
+  "launch",
   "steer",
   "pause",
   "resume",
   "cancel",
   "drain",
+  "stop",
 ] as const satisfies readonly NonTakeoverOperatorAction[];
 const NON_ATTACHABLE_SESSION_STATES = new Set(["closed", "cancelled", "launch_failed"]);
 const REQUIRED_FEATURES = [
@@ -49,6 +52,8 @@ const OPTIONAL_FEATURES = [
   "project-sessions.v1",
   "operator-projection.v2",
   "scoped-gate-read.v1",
+  "scoped-gates.v1",
+  "intakes.v1",
   "operator-actions.v1",
   "message-body-read.v1",
   "operator-repository-read.v1",

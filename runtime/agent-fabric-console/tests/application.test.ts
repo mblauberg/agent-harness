@@ -30,6 +30,7 @@ import {
 } from "../src/index.js";
 import type { ConsoleProtocolPort } from "../src/protocol-adapter.js";
 import { FABRIC_VIEWS } from "../src/model.js";
+import type { ConsoleWorkflowReview } from "../src/workflow.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digest = (`sha256:${"f".repeat(64)}`) as Sha256Digest;
@@ -183,6 +184,7 @@ function protocolPort(): ConsoleProtocolPort {
     }),
     readMessageBody: null,
     readRepository: null,
+    readArtifactContent: null,
   };
 }
 
@@ -368,6 +370,172 @@ describe("typed Console application bootstrap boundary", () => {
 
     expect(application.dataset.canMutate).toBe(true);
     await application.close("operator");
+  });
+
+  it("routes the typed palette through full-frame Review and a distinct confirmation gesture", async () => {
+    const port = protocolPort();
+    const review: ConsoleWorkflowReview = {
+      workflowId: "workflow_application",
+      kind: "intake-draft-create",
+      source: "local-typed-preview",
+      stage: "review",
+      previewDigest: digest,
+      expectedRevision: "1" as never,
+      consequenceClass: "routine",
+      confirmationMode: "explicit",
+      summary: "intake-draft-create",
+      details: [{ label: "summary", value: '"Discuss scope"' }],
+      evidence: [],
+      openedByEventId: "workflow-event-1",
+      armedByEventId: null,
+      result: null,
+      failure: null,
+    };
+    const prepare = vi.fn(async () => review);
+    const arm = vi.fn((current: ConsoleWorkflowReview, eventId: string) => ({
+      ...current,
+      stage: "confirm" as const,
+      armedByEventId: eventId,
+    }));
+    const commit = vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => ({
+      reconnectRequired: false,
+      review: {
+        ...current,
+        stage: "committed" as const,
+        result: "intake-draft-create | intake_application | r1",
+      },
+    }));
+    let sequence = 0;
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: async () => ({
+          status: "connected",
+          binding: { ok: true, port, readOnly: false, actions: null },
+          credential,
+          projectId,
+          workflowPlanner: { prepare, arm, commit },
+          detach: async () => {},
+          close: async () => {},
+        }),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => `workflow-event-${String(++sequence)}`,
+      confirmationId: () => "confirmation-workflow",
+      ...runtimeDependencies,
+    });
+
+    await application.handleInput({ kind: "key", key: "text", text: ":" });
+    await application.handleInput({
+      kind: "paste",
+      text: '{"kind":"intake-draft-create","request":{"summary":"Discuss scope"}}',
+    });
+    await application.handleInput({ kind: "key", key: "enter" });
+
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+    expect(application.frame.rows.join("\n")).toContain("REVIEW REVIEW");
+    expect(application.frame.rows.join("\n")).toContain("Workflow: intake-draft-create");
+
+    await application.handleInput({ kind: "key", key: "enter" });
+    expect(arm).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+    expect(application.frame.rows.join("\n")).toContain("REVIEW CONFIRM");
+
+    await application.handleInput({ kind: "key", key: "text", text: "1" });
+    expect(commit).toHaveBeenCalledOnce();
+    expect(application.frame.rows.join("\n")).toContain("REVIEW COMMITTED");
+    expect(application.frame.rows.join("\n")).toContain("intake_application");
+    await application.close("operator");
+  });
+
+  it("reattaches with session-bound authority after a reviewed project-session creation", async () => {
+    const port = protocolPort();
+    const review: ConsoleWorkflowReview = {
+      workflowId: "workflow_project_create",
+      kind: "project-session-create",
+      source: "local-typed-preview",
+      stage: "review",
+      previewDigest: digest,
+      expectedRevision: "1" as never,
+      consequenceClass: "consequential",
+      confirmationMode: "explicit",
+      summary: "project-session-create",
+      details: [{ label: "projectSessionId", value: '"session-created"' }],
+      evidence: [],
+      openedByEventId: "create-event-1",
+      armedByEventId: null,
+      result: null,
+      failure: null,
+    };
+    const workflowPlanner = {
+      prepare: vi.fn(async () => review),
+      arm: vi.fn((current: ConsoleWorkflowReview, eventId: string) => ({
+        ...current,
+        stage: "confirm" as const,
+        armedByEventId: eventId,
+      })),
+      commit: vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => ({
+        reconnectRequired: true,
+        review: {
+          ...current,
+          stage: "committed" as const,
+          result: "project-session-create | session-created | draft | r1",
+        },
+      })),
+    };
+    const firstDetach = vi.fn(async () => {});
+    const firstClose = vi.fn(async () => {});
+    const nextDetach = vi.fn(async () => {});
+    const nextClose = vi.fn(async () => {});
+    const startOrAttach = vi.fn()
+      .mockResolvedValueOnce({
+        status: "connected",
+        binding: { ok: true, port, readOnly: false, actions: null },
+        credential,
+        projectId,
+        workflowPlanner,
+        detach: firstDetach,
+        close: firstClose,
+      })
+      .mockResolvedValueOnce({
+        status: "connected",
+        binding: { ok: true, port, readOnly: false, actions: null },
+        credential,
+        projectId,
+        projectSessionId: "session-created" as ProjectSessionId,
+        workflowPlanner,
+        detach: nextDetach,
+        close: nextClose,
+      });
+    let sequence = 0;
+    const application = await startFabricConsoleApplication({
+      bootstrap: { startOrAttach },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => `create-event-${String(++sequence)}`,
+      confirmationId: () => "confirmation-create",
+      ...runtimeDependencies,
+    });
+
+    await application.handleInput({ kind: "key", key: "text", text: ":" });
+    await application.handleInput({ kind: "paste", text: "{}" });
+    await application.handleInput({ kind: "key", key: "enter" });
+    await application.handleInput({ kind: "key", key: "enter" });
+    await application.handleInput({ kind: "key", key: "text", text: "1" });
+
+    expect(startOrAttach).toHaveBeenCalledTimes(2);
+    expect(firstDetach).toHaveBeenCalledWith({ reason: "operator" });
+    expect(firstClose).toHaveBeenCalledOnce();
+    expect(application.frame.rows.join("\n")).toContain("session-created");
+
+    await application.close("operator");
+    expect(nextDetach).toHaveBeenCalledWith({ reason: "operator" });
+    expect(nextClose).toHaveBeenCalledOnce();
   });
 
   it("reads an Activity message only from its exact revision-bound messageBodyRef on activation", async () => {

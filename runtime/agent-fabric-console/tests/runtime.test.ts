@@ -223,6 +223,80 @@ describe("Fabric Console runtime routing", () => {
     expect(setEditorActive).toHaveBeenLastCalledWith(false);
   });
 
+  it("opens the typed workflow palette and submits inert JSON only to Review", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "palette-event",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "text", text: ":" });
+    expect(runtime.ui.inputMode).toBe("palette");
+    await runtime.handleInput({
+      kind: "paste",
+      text: '{"kind":"intake-draft-create","request":{"summary":"Discuss first"}}',
+    });
+    expect(activate).not.toHaveBeenCalled();
+    expect(runtime.frame.rows.join("\n")).toContain("WORKFLOW JSON:");
+    expect(runtime.frame.rows.join("\n")).toContain("Enter opens Review");
+
+    await runtime.handleInput({ kind: "key", key: "enter" });
+
+    expect(activate).toHaveBeenCalledWith({
+      regionId: "palette:submit",
+      binding: null,
+      provenance: "keyboard",
+      eventId: "palette-event",
+    });
+    expect(runtime.ui.inputMode).toBe("browse");
+  });
+
+  it("collects an echo confirmation as inert editor text before activation", async () => {
+    const setEditorActive = vi.fn();
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "echo-event",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+      setEditorActive,
+    });
+    runtime.setWorkflowReview({
+      workflowId: "workflow_echo",
+      kind: "operator-action",
+      source: "daemon-preview",
+      stage: "confirm",
+      previewDigest: digest,
+      expectedRevision: revisionFromProtocol(7),
+      consequenceClass: "consequential",
+      confirmationMode: "echo",
+      summary: "operator-action:project-session-stop",
+      details: [],
+      evidence: [],
+      openedByEventId: "echo-open",
+      armedByEventId: "echo-arm",
+      result: null,
+      failure: null,
+    });
+
+    expect(runtime.ui.inputMode).toBe("editor");
+    expect(runtime.ui.draft).toBe("");
+    await runtime.handleInput({ kind: "paste", text: digest });
+    expect(runtime.ui.draft).toBe(digest);
+    await runtime.handleInput({ kind: "key", key: "escape" });
+    expect(runtime.ui.inputMode).toBe("browse");
+    expect(setEditorActive).toHaveBeenLastCalledWith(false);
+  });
+
   it("keeps bounded raw drafts, makes paste inert for actions and surfaces input drops", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({
@@ -600,6 +674,97 @@ describe("Fabric Console runtime routing", () => {
     }
     expect(runtime.ui.detailScrollOffsetByView.activity).toBe(29);
     expect(runtime.frame.rows.join("\n")).toContain("line-29");
+  });
+
+  it("renders bounded artifact content as inert text in the Evidence detail pane", () => {
+    const controller = new FakeController();
+    const row: ConsoleRow<"evidence"> = {
+      view: "evidence",
+      stableId: "artifact-spec",
+      revision: revisionFromProtocol(7),
+      urgency: "normal",
+      freshness: {
+        state: "live",
+        source: "fabric",
+        revision: revisionFromProtocol(7),
+        observedAt: timestamp,
+        ageMs: 0,
+      },
+      summary: {
+        kind: "evidence",
+        evidenceKind: "artifact",
+        status: "informational",
+        provenance: "fabric:chair",
+      },
+      detailRef: {
+        kind: "evidence",
+        evidenceId: "artifact-spec" as never,
+        expectedRevision: 7,
+      },
+      actionAvailability: { state: "read-only", reason: "state-ineligible" },
+    };
+    controller.dataset = {
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        evidence: {
+          view: "evidence",
+          rows: [row],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: revisionFromProtocol(11),
+          readTransactionId: "evidence-read",
+        },
+      },
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding: {
+          view: "evidence",
+          itemId: "artifact-spec",
+          itemRevision: revisionFromProtocol(7),
+          projectionRevision: revisionFromProtocol(11),
+        },
+        readTransactionId: "artifact-read",
+        result: {
+          available: true,
+          artifactRef: { path: "docs/spec.md" as never, digest },
+          mediaType: "text/markdown",
+          content: "# Actual reviewed spec\n\u001b[31mred must stay inert\nafop_hidden-token",
+          totalBytes: 100,
+          truncated: false,
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+        },
+      },
+    };
+    controller.state = {
+      ...controller.state,
+      activeView: "evidence",
+      selectionByView: {
+        ...controller.state.selectionByView,
+        evidence: { stableId: "artifact-spec", revision: revisionFromProtocol(7) },
+      },
+    };
+
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ compactPane: "detail" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-artifact",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const frame = runtime.frame.rows.join("\n");
+
+    expect(frame).toContain("# Actual reviewed spec");
+    expect(frame).toContain("<ESC>[31mred must stay inert");
+    expect(frame).toContain("[REDACTED capability]");
+    expect(frame).not.toContain("afop_hidden-token");
+    expect(frame).not.toContain("\u001b");
   });
 
   it("detaches exactly once, never stops work, and ignores late input", async () => {

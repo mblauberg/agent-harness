@@ -175,7 +175,35 @@ export class FabricConsoleRuntime {
   setInputMode(mode: FabricConsoleUiState["inputMode"]): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
     this.#ui = { ...this.#ui, inputMode: mode, notice: null };
-    this.#setEditorActive?.(mode === "editor");
+    this.#setEditorActive?.(mode === "editor" || mode === "palette");
+    return this.repaint();
+  }
+
+  setWorkflowReview(
+    review: FabricConsoleUiState["workflowReview"],
+  ): FabricConsoleFrame {
+    if (this.#closed) return this.#frame;
+    const echoInput =
+      review?.stage === "confirm" && review.confirmationMode === "echo";
+    this.#ui = {
+      ...this.#ui,
+      workflowReview: review,
+      inputMode: echoInput ? "editor" : "browse",
+      draft: echoInput ? "" : this.#ui.draft,
+      focusId:
+        review === null
+          ? null
+          : review.stage === "review"
+            ? "review:continue"
+            : review.stage === "confirm"
+              ? "review:confirm"
+              : "review:close",
+      reviewScrollOffset: 0,
+      notice: echoInput
+        ? "Enter the exact preview digest; Esc returns; then activate Confirm"
+        : null,
+    };
+    this.#setEditorActive?.(echoInput);
     return this.repaint();
   }
 
@@ -217,7 +245,7 @@ export class FabricConsoleRuntime {
       return;
     }
     if (this.#ui.inputMode !== "browse") {
-      this.#handleEditorInput(event);
+      await this.#handleEditorInput(event);
       return;
     }
     if (event.kind === "paste") {
@@ -230,7 +258,9 @@ export class FabricConsoleRuntime {
     await this.#handleBrowseKey(event);
   }
 
-  #handleEditorInput(event: Exclude<TerminalInputEvent, { kind: "fatal" | "rejected" }>): void {
+  async #handleEditorInput(
+    event: Exclude<TerminalInputEvent, { kind: "fatal" | "rejected" }>,
+  ): Promise<void> {
     if (event.kind === "mouse") return;
     if (event.kind === "paste") {
       this.#appendDraft(event.text);
@@ -252,6 +282,28 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "enter") {
+      if (this.#ui.inputMode === "palette") {
+        this.#ui = {
+          ...this.#ui,
+          inputMode: "browse",
+          notice: null,
+        };
+        this.#setEditorActive?.(false);
+        this.repaint();
+        try {
+          await this.#activate({
+            regionId: "palette:submit",
+            binding: null,
+            provenance: "keyboard",
+            eventId: this.#eventId(),
+          });
+        } catch (error) {
+          const failure = consoleFailureFromUnknown(error);
+          this.#ui = { ...this.#ui, notice: `Workflow failed: ${failure.code}` };
+        }
+        this.repaint();
+        return;
+      }
       this.#appendDraft("\n");
       return;
     }
@@ -298,8 +350,37 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "text" && event.text !== undefined) {
+      if (
+        event.text === ":" &&
+        this.#frame.presentation.review === null
+      ) {
+        this.#ui = {
+          ...this.#ui,
+          inputMode: "palette",
+          draft: "",
+          notice: "Paste one closed workflow JSON envelope; Enter reviews; Esc cancels",
+        };
+        this.#setEditorActive?.(true);
+        this.repaint();
+        return;
+      }
       if (event.text === "q") {
         await this.close("operator");
+        return;
+      }
+      if (event.text === "e") {
+        const echoInput =
+          this.#frame.presentation.review?.confirmationMode === "echo";
+        this.#ui = {
+          ...this.#ui,
+          inputMode: "editor",
+          draft: echoInput ? "" : this.#ui.draft,
+          notice: echoInput
+            ? "Enter the exact preview digest; Esc returns; then activate Confirm"
+            : "Edit bounded draft text; Esc returns to browse",
+        };
+        this.#setEditorActive?.(true);
+        this.repaint();
         return;
       }
       if (event.text === "[") {
@@ -330,7 +411,7 @@ export class FabricConsoleRuntime {
       if (event.text === "?") {
         this.#ui = {
           ...this.#ui,
-          notice: "Help: Alt-1..8 views; [ ] cycle; PgUp/PgDn scroll; q detach",
+          notice: "Help: Alt-1..8 views; [ ] cycle; e draft; : workflow; PgUp/PgDn; q detach",
         };
         this.repaint();
       }
@@ -341,7 +422,7 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "home" || event.key === "end") {
-      if (this.#controller.state.review !== null) {
+      if (this.#frame.presentation.review !== null) {
         this.#ui = {
           ...this.#ui,
           reviewScrollOffset: event.key === "home" ? 0 : 10_000,
@@ -449,7 +530,7 @@ export class FabricConsoleRuntime {
   }
 
   #page(direction: -1 | 1, regionId: string | null = null): void {
-    if (this.#controller.state.review !== null) {
+    if (this.#frame.presentation.review !== null) {
       this.#ui = {
         ...this.#ui,
         reviewScrollOffset: Math.min(

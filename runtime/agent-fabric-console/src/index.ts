@@ -5,7 +5,7 @@ import type {
   GitRepositoryProjection,
 } from "@local/agent-fabric-protocol";
 import type { TerminalInputEvent } from "./input.js";
-import { presentMessageBodyWindow } from "./message.js";
+import { presentMessageBodyWindow, presentSafeTextWindow } from "./message.js";
 import type { ConsoleControllerState } from "./controller.js";
 import type { FabricView, Revision } from "./model.js";
 import {
@@ -29,7 +29,9 @@ export * from "./model.js";
 export * from "./presenter.js";
 export * from "./protocol-adapter.js";
 export * from "./runtime.js";
+export * from "./snapshot.js";
 export * from "./terminal.js";
+export * from "./workflow.js";
 
 export const UNICODE_POLICY = Object.freeze({
   segmentation: "unicode-segmenter@0.17.0",
@@ -1107,7 +1109,7 @@ function reviewBinding(
   presentation: FabricConsolePresentation,
 ): FabricHitBinding | null {
   const review = presentation.review;
-  return review === null
+  return review === null || review.workflowId !== null
     ? null
     : {
         view: presentation.activeView,
@@ -1319,6 +1321,37 @@ function renderFabricDetail(
       ];
     }
   } else if (
+    inspection?.kind === "artifact" &&
+    inspection.binding.view === presentation.activeView &&
+    inspection.binding.itemId === presentation.detail?.stableId
+  ) {
+    if (inspection.state === "current") {
+      const window = presentSafeTextWindow(
+        inspection.result.content,
+        {
+          columns: Math.max(1, bounds.x2 - bounds.x1 - 5),
+          rows: Math.max(1, height - 3),
+          offset: Math.max(
+            0,
+            Math.trunc(ui.detailScrollOffsetByView[presentation.activeView] ?? 0),
+          ),
+        },
+        { sanitizeDisplayText, graphemes, cellWidth },
+      );
+      detailScrollMaximum = Math.max(0, window.totalLines - 1);
+      lines = [
+        `Artifact: ${inspection.result.artifactRef.path}`,
+        `Digest: ${inspection.result.artifactRef.digest}`,
+        `Content: ${inspection.result.mediaType} | ${String(inspection.result.totalBytes)} bytes${inspection.result.truncated ? " | TRUNCATED" : ""}`,
+        ...window.lines.map((line) => `Body: ${line}`),
+      ];
+    } else {
+      lines = [
+        `Artifact: ${inspection.binding.itemId}`,
+        `Read: unavailable | ${inspection.reason}`,
+      ];
+    }
+  } else if (
     inspection?.kind === "repository" &&
     inspection.binding.view === presentation.activeView &&
     inspection.binding.itemId === presentation.detail?.stableId
@@ -1459,6 +1492,12 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
   if (review === null) return [];
   const lines = [
     `REVIEW ${review.stage.toUpperCase()} — ${review.consequenceClass}`,
+    ...(review.workflowId === null
+      ? []
+      : [
+          `Workflow: ${review.summary ?? review.itemId}`,
+          `Workflow ID: ${review.workflowId}`,
+        ]),
     `Item: ${review.itemId}`,
     `Projection revision: ${review.projectionRevision} | Item revision: ${review.itemRevision} | Preview revision: ${review.previewRevision}`,
     `Preview:${review.previewDigest}`,
@@ -1501,6 +1540,8 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
       `Committed: ${review.receipt.committedAt}`,
     );
   }
+  if (review.result !== null) lines.push(`Result: ${review.result}`);
+  if (review.failure !== null) lines.push(`Failure: ${review.failure}`);
   return lines;
 }
 
@@ -1595,11 +1636,16 @@ function renderFabricFooter(
     statusRow,
     columns,
     presentation.notice ??
-      (presentation.failureCode === null
-        ? `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}${presentation.review === null ? "" : ` REVIEW+${String(presentation.reviewScrollOffset)}`}`
-        : `Action failed: ${presentation.failureCode}`),
+      (presentation.inputMode === "palette"
+        ? `WORKFLOW JSON: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels`
+        : presentation.inputMode === "editor"
+          ? `DRAFT: ${String(Buffer.byteLength(presentation.draft))} bytes | Esc returns to browse`
+          :
+          (presentation.failureCode === null
+            ? `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}${presentation.review === null ? "" : ` REVIEW+${String(presentation.reviewScrollOffset)}`}`
+            : `Action failed: ${presentation.failureCode}`)),
   );
-  const help = "? help | [ ] views | PgUp/PgDn | q detach";
+  const help = "? help | [ ] views | e draft | : workflow | PgUp/PgDn | q detach";
   setFabricRow(rows, helpRow, columns, help);
   const detachIndex = help.indexOf("q detach");
   if (detachIndex >= 0 && detachIndex + 8 <= columns) {
@@ -1651,7 +1697,10 @@ function renderFabricStrip(
       rows,
       rows.length - 1,
       columns,
-      `Health:${header.health} Attn:${String(header.attentionCount)} Next:${header.nextMilestone}`,
+      presentation.notice ??
+        (presentation.inputMode === "palette"
+          ? `WORKFLOW:${String(Buffer.byteLength(presentation.draft))}B Enter Review Esc cancel`
+          : `Health:${header.health} Attn:${String(header.attentionCount)} Next:${header.nextMilestone}`),
     );
     const help = "? help | q detach";
     setFabricRow(rows, rows.length, columns, help);

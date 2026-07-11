@@ -218,6 +218,12 @@ describe("public local operator Console session", () => {
     expect(first.credential.capabilityId).not.toBe(replay.credential.capabilityId);
     expect(first.client.console?.readOnly).toBe(false);
     expect(first.client.operations[FABRIC_OPERATIONS.operatorActionPreview]).toBeTypeOf("function");
+    expect(first.client.intakes?.submit).toBeTypeOf("function");
+    expect(first.client.intakes?.revise).toBeTypeOf("function");
+    expect(first.client.gates?.resolve).toBeTypeOf("function");
+    expect(first.client.projectSessions?.transition).toBeTypeOf("function");
+    expect(first.client.projectSessions?.close).toBeTypeOf("function");
+    expect(first.client.console?.launchAvailable).toBe(true);
     await Promise.all([first.close(), replay.close()]);
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],
