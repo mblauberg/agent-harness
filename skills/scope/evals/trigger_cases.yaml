@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: scope
 cases:
   - {id: q217, relation: positive, prompt: "Turn this vague feature idea into a decided spec with acceptance criteria and non-goals.", tags: [direct], expected: {primary_skill: scope, companion_skills: []}}

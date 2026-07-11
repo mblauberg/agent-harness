@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: typescript-clean-code
 cases:
   - {id: q271, relation: positive, prompt: "Model these TypeScript states with a discriminated union and exhaustive handling.", tags: [direct], expected: {primary_skill: typescript-clean-code, companion_skills: []}}

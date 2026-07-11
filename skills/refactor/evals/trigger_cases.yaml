@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: refactor
 cases:
   - {id: q190, relation: positive, prompt: "Refactor this module without changing behaviour, using characterisation tests and equivalence evidence.", tags: [direct], expected: {primary_skill: refactor, companion_skills: [implement]}}

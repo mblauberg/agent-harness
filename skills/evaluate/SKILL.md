@@ -5,13 +5,13 @@ description: "Use for repeatable quality or safety evaluation of stochastic or j
 
 # Evaluate
 
-Turn judgement into a versioned, repeatable assurance result. Deterministic
+Turn judgement into a frozen, repeatable assurance result. Deterministic
 tests still run; this skill covers behaviour whose quality cannot be proven by
 an exit code alone.
 
 ## Contract
 
-Freeze a schema-v2 plan before seeing results:
+Freeze the canonical evaluation plan before seeing results:
 
 - decision the evaluation informs and unacceptable failure modes;
 - hash-bound dataset/corpus, provenance, consent or licence, data policy and
@@ -25,7 +25,7 @@ Freeze a schema-v2 plan before seeing results:
 - enclosing delivery run when this evidence supports a non-trivial outcome.
 
 Use [EVALUATION.template.json](templates/EVALUATION.template.json) and the
-[receipt contract](references/receipt-v2.md). Keep raw examples outside the hot
+[receipt contract](references/receipt.md). Keep raw examples outside the hot
 receipt; link safe relative artifacts and SHA-256 digests.
 
 ## Run
@@ -41,7 +41,7 @@ receipt; link safe relative artifacts and SHA-256 digests.
 5. Blind independent graders to treatment identity. Record criterion evidence;
    send disagreements to a fresh adjudicator rather than majority vote.
 6. Compare with frozen thresholds and applicable arms. A post-hoc change creates
-   a new plan/version; it does not rewrite the run.
+   a fresh run; it does not rewrite the completed evidence.
 7. Preserve bounded failures and route product defects to `implement`, unclear
    requirements to `scope`, and operational regressions to `diagnose`.
 
@@ -57,6 +57,6 @@ ${AGENTS_HOME:-$HOME/.agents}/skills/evaluate/scripts/validate_evaluation.py \
 
 `pass` is a machine assurance result for the named distribution, not general
 safety or human acceptance. Attach it to the canonical delivery receipt; only
-that lifecycle's human gate can mark the outcome accepted. Schema v1 can be
-inspected with `--legacy-v1`, but is permanently non-gating and must be rerun
-from a frozen v2 plan.
+that lifecycle's human gate can mark the outcome accepted. Unsupported receipt
+shapes fail closed; rerun them from a freshly frozen plan instead of migrating
+or guessing missing evidence.

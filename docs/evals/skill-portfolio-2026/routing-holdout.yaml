@@ -1,100 +1,122 @@
 schema_version: 1
-dataset_id: skill-portfolio-routing-holdout-20260711-v2
-split: fresh-holdout
+dataset_id: skill-portfolio-routing-holdout-20260711
+split: canonical-holdout
 cases:
-  - id: r01
-    category: authority-boundary
+  - id: m01
+    category: requirements-before-build
     critical: true
-    prompt: Review the local diff read-only for correctness, regressions, architecture, and maintainability. Report findings with evidence; do not edit anything.
+    prompt: This feature request is still vague. Stress-test the trade-offs and turn it into an approved specification, user stories, acceptance criteria, and recorded decisions before anyone codes.
     expected:
-      primary_skill: code-review
+      primary_skill: scope
       required_companion_skills: []
-      allowed_companion_skills: []
-  - id: r02
-    category: structural-method
+      allowed_companion_skills: [engineering-docs, engineering-writing, grill-me, prototype]
+  - id: m02
+    category: first-failing-test
     critical: true
-    prompt: Simplify this module's structure without changing observable behaviour. Establish characterisation evidence, migrate callers in small slices, and remove the old path only after proving it unreachable.
+    prompt: Write the first failing public-interface test for this behaviour change, then stop at red so the implementation owner can take over.
     expected:
-      primary_skill: refactor
+      primary_skill: tdd
       required_companion_skills: []
-      allowed_companion_skills: [tdd]
-  - id: r03
-    category: lifecycle-owner
-    critical: true
-    prompt: Take the approved software specification through code changes, deterministic verification, independent review, bounded repair, and final human acceptance. Do not deploy it.
+      allowed_companion_skills: [implement]
+  - id: m03
+    category: session-continuity
+    critical: false
+    prompt: Start this substantial repository session by reading its live state and instructions, then maintain a compact handoff checkpoint if context compacts or the session ends.
     expected:
-      primary_skill: implement
+      primary_skill: session
       required_companion_skills: []
-      allowed_companion_skills: [code-review, evaluate, orchestrate, tdd]
-  - id: r04
-    category: authority-boundary
-    critical: true
-    prompt: Investigate why this test is failing and return the root cause with evidence. This is diagnosis only; do not make a permanent fix.
+      allowed_companion_skills: [work-map]
+  - id: m04
+    category: effort-continuity
+    critical: false
+    prompt: This migration spans several sessions and agents. Create the durable effort-level map of completed work, active slice, blockers, ownership, evidence, and next steps.
     expected:
-      primary_skill: diagnose
+      primary_skill: work-map
       required_companion_skills: []
-      allowed_companion_skills: []
-  - id: r05
-    category: promotion-authority
+      allowed_companion_skills: [orchestrate, session]
+  - id: m05
+    category: promotion-after-acceptance
     critical: true
-    prompt: The artifact is already accepted. With the human's explicit promotion authority, publish the pinned digest to the named external audience, verify visibility, and retain reversal and observation evidence.
+    prompt: The exact artifact digest has human acceptance and separate promotion authority. Activate it for the named external recipients, prove the visible outcome, and retain containment and observation evidence.
     expected:
       primary_skill: release
       required_companion_skills: []
       allowed_companion_skills: []
-  - id: r06
-    category: presentation-overlay
+  - id: m06
+    category: evidence-only-review
+    critical: true
+    prompt: Audit this commit and its dependency cone for defects, state and type boundary regressions, concurrency hazards, and structural simplification. Do not change files.
+    expected:
+      primary_skill: code-review
+      required_companion_skills: []
+      allowed_companion_skills: [typescript-clean-code]
+  - id: m07
+    category: structural-simplification
+    critical: true
+    prompt: Preserve all observable contracts while consolidating duplicate ownership and simplifying the structure in verified slices. Delete only after callers, registries, configuration, and fallback paths are disproved.
+    expected:
+      primary_skill: refactor
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, tdd]
+  - id: m08
+    category: ui-read-only-audit
+    critical: true
+    prompt: Return a read-only evidence matrix and prioritised findings for this frontend's accessibility, responsive states, hierarchy, interaction clarity, errors, and visual craft.
+    expected:
+      primary_skill: frontend-review
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, playwright, react-performance, web-stack-conventions]
+  - id: m09
+    category: skill-quality-diagnosis
+    critical: true
+    prompt: Examine the current skill for trigger collisions, false negatives, authority drift, token overhead, unsafe helpers, and weak eval coverage. Report the audit without editing it.
+    expected:
+      primary_skill: skill-audit
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, evaluate, orchestrate]
+  - id: m10
+    category: explicit-chat-compression
     critical: false
-    prompt: "Use caveman mode for the next low-risk status update: aggressively compressed chat, but preserve commands, numbers, uncertainty, and evidence qualifiers."
+    prompt: Answer this low-risk progress note in caveman adaptive mode. Be extremely compact while preserving the exact pass count, pending state, command, and uncertainty.
     expected:
       primary_skill: caveman
       required_companion_skills: []
       allowed_companion_skills: []
-  - id: r07
-    category: frontend-boundary
-    critical: true
-    prompt: Audit the existing checkout UI read-only across source and browser evidence for hierarchy, accessibility, responsive states, errors, and interaction clarity. Return findings only; do not redesign or edit it.
-    expected:
-      primary_skill: frontend-review
-      required_companion_skills: []
-      allowed_companion_skills: [playwright]
-  - id: r08
-    category: frontend-owner
+  - id: m11
+    category: finite-agent-coordination
     critical: false
-    prompt: Redesign and implement the existing settings screen in the repository, including responsive, accessible, loading, empty, validation, and error states.
-    expected:
-      primary_skill: frontend-design
-      required_companion_skills: []
-      allowed_companion_skills: [implement, playwright]
-  - id: r09
-    category: skill-maintenance
-    critical: true
-    prompt: Audit this existing agent skill for missed triggers, false triggers, overlap, token cost, and unsafe instructions. Diagnose it and report recommendations without changing the files.
-    expected:
-      primary_skill: skill-audit
-      required_companion_skills: []
-      allowed_companion_skills: [evaluate]
-  - id: r10
-    category: skill-creation
-    critical: true
-    prompt: Create a new portable agent skill from this approved workflow, including its SKILL.md, progressive-disclosure references, trigger fixtures, and provider sidecar.
-    expected:
-      primary_skill: skill-authoring
-      required_companion_skills: []
-      allowed_companion_skills: [evaluate]
-  - id: r11
-    category: topology
-    critical: false
-    prompt: Fan out this bounded repository-wide audit across several independent agents, give them non-overlapping scopes, and centrally adjudicate their evidence before returning one answer.
+    prompt: Split this finite cross-cutting review among independent agents with non-overlapping ownership, typed evidence returns, bounded budgets, and one central adjudicator.
     expected:
       primary_skill: orchestrate
       required_companion_skills: []
-      allowed_companion_skills: [code-review]
-  - id: r12
-    category: persistent-topology
+      allowed_companion_skills: [code-review, evaluate]
+  - id: m12
+    category: persistent-agent-lab
     critical: true
-    prompt: Run a large multi-session autonomous research lab with durable recovery state and human gates. Keep progressing across crashes and compactions until I explicitly write STOP.
+    prompt: Launch a durable autonomous lab for this open-ended programme, recover across sessions and crashes, preserve human gates, and keep making progress until I explicitly write STOP.
     expected:
       primary_skill: autonomous-lab
       required_companion_skills: []
-      allowed_companion_skills: [orchestrate]
+      allowed_companion_skills: [deliver, evaluate, orchestrate, session, work-map]
+  - id: m13
+    category: material-skill-revision
+    critical: true
+    prompt: >-
+      Materially revise this existing Agent Skill after its audit: tighten the
+      trigger boundary, progressive disclosure, resources, provider metadata,
+      fixtures, and fresh-context validation.
+    expected:
+      primary_skill: skill-authoring
+      required_companion_skills: []
+      allowed_companion_skills: [evaluate, implement, skill-audit]
+  - id: m14
+    category: governing-presentation-default
+    critical: false
+    prompt: >-
+      The governing project instructions set $caveman as the default. Return a
+      low-risk technical status update with exact test counts, the pending
+      state, and uncertainty preserved; no full or ultra mode was requested.
+    expected:
+      primary_skill: caveman
+      required_companion_skills: []
+      allowed_companion_skills: []

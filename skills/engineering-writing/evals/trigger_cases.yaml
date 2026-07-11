@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: engineering-writing
 cases:
   - {id: q082, relation: positive, prompt: "Tighten this README for engineers while preserving commands, versions, and behaviour.", tags: [direct], expected: {primary_skill: engineering-writing, companion_skills: []}}

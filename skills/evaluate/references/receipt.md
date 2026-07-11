@@ -1,4 +1,4 @@
-# Evaluation-run schema v2
+# Evaluation-run receipt
 
 `EVALUATION.json` is evidence, not a second delivery lifecycle. It records a
 machine evaluation from frozen plan to result. The enclosing `delivery-run`
@@ -72,7 +72,7 @@ adjudicator; unresolved disagreement blocks `pass`. Metric values,
 numerators/denominators, comparator deltas and non-inferiority decisions are
 recomputed from retained scores.
 
-## Validation and migration
+## Validation
 
 ```sh
 validate_evaluation.py EVALUATION.json --verify-hashes --require-pass \
@@ -95,12 +95,12 @@ errors = validate(
 )
 ```
 
-An empty error list proves only a schema-v2 machine pass. Before execution the
+An empty error list proves only a machine pass for the canonical receipt. Before execution the
 consumer anchors evaluation ID, plan digest and delivery run ID. Afterwards it
 binds the evaluation artifact's own SHA-256, loads it, requires
 `contract: evaluation-run`, `schema_version: 2`, and runs the API above. It must
 not trust copied dataset, threshold or summary fields.
 
-`--legacy-v1` performs structural inspection and exits `3` even when clean.
-Legacy receipts lack sufficient lineage and provenance to migrate truthfully;
-preserve them as historical evidence and rerun from a frozen v2 plan.
+Unsupported receipts lack sufficient lineage and provenance to migrate
+truthfully. Preserve them as historical evidence and rerun from a fresh frozen
+plan.

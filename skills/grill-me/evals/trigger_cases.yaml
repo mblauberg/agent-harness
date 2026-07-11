@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: grill-me
 cases:
   - {id: q118, relation: positive, prompt: "Grill me on this architecture one decision at a time and recommend an answer to each question.", tags: [direct], expected: {primary_skill: grill-me, companion_skills: []}}

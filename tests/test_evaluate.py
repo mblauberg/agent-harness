@@ -203,37 +203,6 @@ def final_receipt():
     return value
 
 
-def legacy_receipt():
-    return {
-        "schema_version": 1,
-        "evaluation_id": "legacy",
-        "updated_at": "2026-07-10T00:00:00Z",
-        "decision": "ship",
-        "status": "pass",
-        "dataset": {
-            "id": "set", "version": "1", "provenance": "owned",
-            "holdout_boundary": "frozen", "data_policy": "synthetic",
-        },
-        "runtime": {
-            "models": ["legacy-model"], "configuration": {"temperature": 0},
-            "seed_policy": "fixed", "seeds": [1], "sample_policy": "all",
-        },
-        "metrics": [{"name": "quality", "direction": "gte", "threshold": 0.8}],
-        "safety_applicability": "not-applicable",
-        "safety_cases": [],
-        "baseline": {
-            "id": "base", "regression_budget": 0.1,
-            "metrics": [{"name": "quality", "value": 0.85}],
-        },
-        "evaluator": {
-            "rubric_version": "1", "independent": True,
-            "disagreement_protocol": "adjudicate",
-        },
-        "results": {"metrics": [{"name": "quality", "value": 0.9}]},
-        "conclusion": {"status": "pass", "limitations": [], "evidence": ["legacy-results"]},
-    }
-
-
 def materialise(value, root):
     for item in value["artifacts"]:
         target = root / item["path"]
@@ -291,7 +260,7 @@ def add_disagreement(value, *, status):
     }]
 
 
-def test_shipped_template_is_a_valid_non_gating_schema_v2_plan():
+def test_shipped_template_is_a_valid_non_gating_plan():
     value = planned()
     assert value["contract"] == "evaluation-run"
     assert value["schema_version"] == 2
@@ -348,13 +317,12 @@ def test_machine_gate_requires_hash_verification_and_frozen_plan_bytes(tmp_path)
     assert any("frozen plan artifact does not match" in error for error in errors)
 
 
-def test_legacy_v1_is_inspection_only_and_never_a_gate(tmp_path):
-    value = legacy_receipt()
-    assert MODULE.inspect_legacy_v1(value) == []
-    assert "non-gating" in MODULE.validate(value)[0]
-    path = tmp_path / "legacy.json"
-    path.write_text(json.dumps(value))
-    assert MODULE.main([str(path), "--legacy-v1"]) == 3
+def test_noncanonical_schema_fails_closed():
+    value = planned()
+    value["schema_version"] = 1
+    assert MODULE.validate(value) == [
+        "receipt must use contract evaluation-run schema_version 2"
+    ]
 
 
 def test_false_pass_collections_and_null_evidence_fail_closed():

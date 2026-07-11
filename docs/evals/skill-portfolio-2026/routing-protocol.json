@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "contract": "skill-routing-regression-plan",
+  "evaluation_id": "skill-portfolio-routing-20260711",
+  "frozen_at": "2026-07-11T08:52:15Z",
+  "dataset": {
+    "path": "routing-holdout.yaml",
+    "sha256": "sha256:20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13",
+    "cases": 14,
+    "split": "fresh-holdout"
+  },
+  "catalogue": {
+    "sha256": "sha256:c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6",
+    "characters": 7548
+  },
+  "classifier": {
+    "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs.",
+    "instruction_sha256": "sha256:8ff0f0d50114cbf542b86f0abcbdd67e6824e7e3eafb3b6b9e62107dfafb2318",
+    "packet_sha256": "sha256:c9c9f29ffea12e6bb3f6cb3bdb0625a7324ccd7cf0cbf4a8a028ce8332f5aa72",
+    "runner_sha256": "sha256:1baf607105ac1b92fde1c3a7ce5f8bb567a316c9a7246755f0c8fc62b5a5ab68",
+    "output_schema_sha256": "sha256:faf1831b602103f2b0bdbcd1ec99b30985555930ac559baa57b0ea5e773049f6"
+  },
+  "rubric": {
+    "primary": "exact primary skill",
+    "companions": "all required companions present and no undeclared companion",
+    "primary_threshold": 1.0,
+    "companion_threshold": 0.9,
+    "critical_case_failure_blocks_pass": true
+  },
+  "schedule": {
+    "families": ["anthropic", "openai"],
+    "repetitions": 3,
+    "attempts": 6,
+    "case_rows": 84,
+    "retry_policy": "none"
+  },
+  "lineage": [
+    {
+      "family": "anthropic",
+      "requested_model": "fable",
+      "effective_model": "claude-opus-4-8",
+      "substitution_reason": "Fable returned HTTP 429 before generation; the live reviewer route selected Opus"
+    },
+    {
+      "family": "openai",
+      "requested_model": "gpt-5.6-sol",
+      "effective_model": "gpt-5.6-sol",
+      "substitution_reason": ""
+    }
+  ],
+  "retention": "retain every incomplete, tool-error, omitted, invalid, timed-out, and failed attempt with model lineage"
+}

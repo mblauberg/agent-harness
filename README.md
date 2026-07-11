@@ -9,8 +9,8 @@
 
 </div>
 
-Claude Code and Codex can each lead; substantial work uses the other for
-independent review. Other models add optional reviews.
+Claude Code and Codex can each lead and cross-review substantial work; other
+models are optional.
 
 Platform policy and explicit human authority lead. Project instructions may
 strengthen the harness, but cannot silently expand authority, weaken safety
@@ -31,7 +31,8 @@ export AGENTS_HOME="$HOME/.agents"
 "$AGENTS_HOME/scripts/install-harness" --platform codex
 ```
 
-The installer records links in a manifest and preserves unmanaged content.
+The installer preserves unmanaged content and disables Codex's bundled
+`skill-creator`, leaving portable `skill-authoring` canonical.
 
 Inspect or reconcile without overwriting unmanaged content:
 

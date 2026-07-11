@@ -1,5 +1,5 @@
 # Deterministic doctrine/reference cases for orchestrate.
-# Behavioural routing lives in schema-v2 fixtures and retained clean-context
+# Behavioural routing lives in canonical fixtures and retained clean-context
 # model receipts; this file makes no trigger-pass claim.
 
 schema_version: 1

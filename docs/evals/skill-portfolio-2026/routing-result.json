@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "contract": "skill-routing-regression",
+  "evaluation_id": "skill-portfolio-routing-20260711",
+  "generated_at": "2026-07-11T08:53:18.496723+00:00",
+  "plan": {
+    "path": "routing-protocol.json",
+    "sha256": "sha256:e4f58c062df27f5d85e2797bef99f314000951eec1dbf39d2f926036c80bffee"
+  },
+  "dataset": {
+    "path": "routing-holdout.yaml",
+    "sha256": "sha256:20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13",
+    "cases": 14
+  },
+  "catalogue": {
+    "sha256": "sha256:c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6",
+    "characters": 7548
+  },
+  "schedule": {
+    "families": ["anthropic", "openai"],
+    "repetitions": 3,
+    "attempts": 6,
+    "case_rows": 84
+  },
+  "lineage": [
+    {
+      "family": "anthropic",
+      "requested_model": "fable",
+      "actual_model": "claude-opus-4-8",
+      "substitution_reason": "Fable returned HTTP 429 before generation; the live reviewer route selected Opus"
+    },
+    {
+      "family": "openai",
+      "requested_model": "gpt-5.6-sol",
+      "actual_model": "gpt-5.6-sol",
+      "substitution_reason": ""
+    }
+  ],
+  "metrics": {
+    "primary_accuracy": {
+      "numerator": 84,
+      "denominator": 84,
+      "value": 1.0,
+      "threshold": 1.0,
+      "passed": true
+    },
+    "companion_fidelity": {
+      "numerator": 84,
+      "denominator": 84,
+      "value": 1.0,
+      "threshold": 0.9,
+      "passed": true
+    },
+    "critical_case_failures": 0
+  },
+  "raw_receipt": {
+    "evaluation_id": "candidate-routing-preauthor-v1",
+    "run_owned_path": ".agent-run/SKILLS-FLAT-20260711/routing-bound/receipt.json",
+    "sha256": "sha256:5857c43ed23cd70b28e1207c122b584e3de64941344f18b2d7fcb6f0add00c89",
+    "packet_sha256": "sha256:c9c9f29ffea12e6bb3f6cb3bdb0625a7324ccd7cf0cbf4a8a028ce8332f5aa72",
+    "attempts": 6,
+    "case_rows": 84
+  },
+  "human_acceptance": "external"
+}

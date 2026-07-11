@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: caveman
 cases:
   - {id: q028, relation: positive, prompt: "This repo's AGENTS.md says '$caveman by default'. Apply its adaptive mode to this low-risk progress reply.", tags: [governing-default], expected: {primary_skill: caveman, companion_skills: []}}

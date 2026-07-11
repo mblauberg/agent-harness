@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: code-review
 cases:
   - {id: q037, relation: positive, prompt: "Review this pull request source-read-only and trace defects beyond the changed lines.", tags: [direct], expected: {primary_skill: code-review, companion_skills: []}}

@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: d2-diagrams
 cases:
   - {id: q046, relation: positive, prompt: "Create and render a D2 architecture diagram for this service flow.", tags: [direct], expected: {primary_skill: d2-diagrams, companion_skills: []}}

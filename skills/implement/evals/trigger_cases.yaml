@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: implement
 cases:
   - {id: q127, relation: positive, prompt: "Implement this approved feature end-to-end, verify it, obtain independent review, and stop for acceptance.", tags: [direct], expected: {primary_skill: implement, companion_skills: []}}

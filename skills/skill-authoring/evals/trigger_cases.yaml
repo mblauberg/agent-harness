@@ -1,9 +1,9 @@
-schema_version: 2
+schema_version: 1
 target_skill: skill-authoring
 cases:
   - {id: q244, relation: positive, prompt: "Create a new Agent Skill with a compact SKILL.md, references, scripts, and trigger fixtures.", tags: [direct], expected: {primary_skill: skill-authoring, companion_skills: []}}
   - {id: q245, relation: positive, prompt: "Author a portable skill for this stable workflow and make its trigger boundary reliable.", tags: [direct], expected: {primary_skill: skill-authoring, companion_skills: []}}
-  - {id: q246, relation: positive, prompt: "Scaffold a new skill using progressive disclosure and executable validation for its repeated logic.", tags: [direct], expected: {primary_skill: skill-authoring, companion_skills: []}}
+  - {id: q246, relation: positive, prompt: "Materially revise this existing skill's trigger, progressive disclosure, fixtures, and validation after its audit.", tags: [direct], expected: {primary_skill: skill-authoring, companion_skills: []}}
   - {id: q247, relation: negative, prompt: "Audit this existing skill for overtriggering and instruction bloat without changing it.", tags: [adjacent], expected: {primary_skill: skill-audit, companion_skills: []}}
   - {id: q248, relation: negative, prompt: "Bundle these existing skills and MCP tools into a Codex plugin manifest.", tags: [no-skill], expected: {primary_skill: null, companion_skills: []}}
   - {id: q249, relation: negative, prompt: "Write a one-off system prompt for this single chat; it will not be reused.", tags: [no-skill], expected: {primary_skill: null, companion_skills: []}}

@@ -189,7 +189,7 @@ sidecars are compatibility outputs, not the portable source of authority.
 
 - The local metadata profile enforces matching names, compact descriptions,
   bounded entry bodies, sidecar shape and a rendered catalogue ceiling.
-- Every skill has schema-v2 positive, negative and boundary fixtures. Static
+- Every skill has canonical positive, negative and boundary fixtures. Static
   fixtures validate relation and routing intent rather than pretending lexical
   overlap proves model selection.
 - Held-out selection is run in clean contexts across both primary model
@@ -223,17 +223,14 @@ failure-reproduction prompt; one added `pdf:pdf` to a D2 vector-PDF export.
 Infrastructure failures therefore stay separate from semantic accuracy, and
 the unadjusted 43/72 denominator is retained only as a failed-run warning.
 
-The delivery-gating series then exposed and retained four non-passes before a
-machine pass. v2 stopped before generation because its preflight interpreter
-lacked `pytest`; v3 stopped because two repetitions were below the
-agent-product profile minimum. v4 and v5 each selected the correct primary on
-72/72 rows but failed one critical row because the frozen fixture treated a
-legitimate companion (`work-map`, then `engineering-writing`) as a routing
-failure. v6 froze primary accuracy and companion fidelity as separate metrics
-on a fresh 12-case holdout before execution. Three trials on each primary
-family passed 72/72 primary and 72/72 bounded companion dispositions. The v2-v5
-receipts remain bound as incomplete/failed evidence; v6 is a machine gate, not
-human acceptance or a claim of universal routing accuracy.
+The final portfolio uses one canonical 14-case holdout. Three clean trials on
+each primary family passed all 84 exact primary-plus-bounded-companion rows,
+including the `skill-audit`/`skill-authoring`/`implement` confusion boundary
+and the governing Caveman adaptive default.
+The first Anthropic route stopped before generation on a Fable quota response;
+the live router selected Opus and the entire holdout was rerun fresh. Provider
+availability remains separate from semantic accuracy. This regression is not
+human acceptance or a claim of universal production routing accuracy.
 
 The tracked [evaluation appendix](../evals/skill-portfolio-2026/README.md)
 records datasets, frozen protocols, hashes, lineage, failures and limitations;

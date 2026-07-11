@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: agy-headless
 cases:
   - {id: q010, relation: positive, prompt: "Use agy for one read-only breadth-first scan of this repository.", tags: [direct], expected: {primary_skill: agy-headless, companion_skills: []}}

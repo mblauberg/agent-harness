@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: academic-writing
 cases:
   - {id: q001, relation: positive, prompt: "Rewrite this thesis discussion in Australian English without changing citations or claims.", tags: [direct], expected: {primary_skill: academic-writing, companion_skills: []}}

@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: evaluate
 cases:
   - {id: q091, relation: positive, prompt: "Design a versioned held-out benchmark to compare these two agent prompts.", tags: [direct], expected: {primary_skill: evaluate, companion_skills: []}}

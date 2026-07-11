@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: diagnose
 cases:
   - {id: q064, relation: positive, prompt: "Reproduce this crash and identify the root cause without making a permanent fix.", tags: [direct], expected: {primary_skill: diagnose, companion_skills: []}}

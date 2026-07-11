@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: playwright
 cases:
   - {id: q163, relation: positive, prompt: "Drive the real browser from the terminal, snapshot the page, and capture the checkout result.", tags: [direct], expected: {primary_skill: playwright, companion_skills: []}}

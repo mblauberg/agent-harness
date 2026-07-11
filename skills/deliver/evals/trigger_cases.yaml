@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: deliver
 cases:
   - {id: q055, relation: positive, prompt: "Take this approved research report through evidence, independent review, and human acceptance.", tags: [direct], expected: {primary_skill: deliver, companion_skills: []}}

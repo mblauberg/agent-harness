@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: release
 cases:
   - {id: q199, relation: positive, prompt: "Deploy the accepted build to production under the approved rollout, rollback, and observation plan.", tags: [direct], expected: {primary_skill: release, companion_skills: []}}
