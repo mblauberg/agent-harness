@@ -217,7 +217,7 @@ function richDataset(
         source: "fabric",
         revision: snapshotRevision,
         observedAt: timestamp,
-        value: { projectId, canonicalRoot: "/Users/user/.agents" },
+        value: { projectId, canonicalRoot: "/workspace/project" },
       },
       session: {
         freshness: "live",
