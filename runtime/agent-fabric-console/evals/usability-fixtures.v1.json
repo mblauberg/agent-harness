@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "referenceViewport": { "columns": 80, "rows": 24 },
+  "repetitions": 3,
+  "maximumIdentificationMs": 10000,
+  "minimumFieldSuccessRate": 0.95,
+  "fixtures": [
+    {
+      "id": "empty-healthy-work",
+      "description": "Healthy project session with no human-attention item.",
+      "project": "project-empty",
+      "session": "session-empty",
+      "runs": [
+        {
+          "id": "run-empty",
+          "phase": "observe",
+          "owner": "chair-empty",
+          "nextMilestone": "Await new work",
+          "health": "healthy"
+        }
+      ],
+      "attention": [],
+      "system": [
+        {
+          "id": "github",
+          "state": "healthy",
+          "freshness": "live",
+          "detail": "optional adapter ready"
+        }
+      ],
+      "expectedTopAttentionId": null,
+      "expectedAnswers": {
+        "project": "project-empty",
+        "run": "run-empty",
+        "phase": "observe",
+        "owner": "chair-empty",
+        "nextMilestone": "Await new work",
+        "health": "healthy"
+      }
+    },
+    {
+      "id": "concurrent-multi-run",
+      "description": "Two concurrent runs with grouped critical and advisory attention.",
+      "project": "project-concurrent",
+      "session": "session-concurrent",
+      "runs": [
+        {
+          "id": "run-primary",
+          "phase": "implement",
+          "owner": "chair-primary",
+          "nextMilestone": "Merge isolated worktrees",
+          "health": "blocked"
+        },
+        {
+          "id": "run-evaluation",
+          "phase": "evaluate",
+          "owner": "chair-evaluation",
+          "nextMilestone": "Complete three repetitions",
+          "health": "healthy"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attention-critical-path",
+          "label": "Blocked",
+          "priority": "critical-path",
+          "title": "Worktree merge awaits evidence",
+          "freshness": "live",
+          "ageMs": 2000,
+          "duplicateCount": 3
+        },
+        {
+          "id": "attention-advisory",
+          "label": "FYI",
+          "priority": "advisory",
+          "title": "Evaluation worker completed",
+          "freshness": "live",
+          "ageMs": 1000,
+          "duplicateCount": 1
+        }
+      ],
+      "system": [
+        {
+          "id": "github",
+          "state": "healthy",
+          "freshness": "live",
+          "detail": "checks current"
+        }
+      ],
+      "expectedTopAttentionId": "attention-critical-path",
+      "expectedAnswers": {
+        "project": "project-concurrent",
+        "run": "run-primary",
+        "phase": "implement",
+        "owner": "chair-primary",
+        "nextMilestone": "Merge isolated worktrees",
+        "health": "blocked"
+      }
+    },
+    {
+      "id": "gate-degraded-stale-conflict",
+      "description": "Consequential gate with degraded optional integration and stale/conflicting facts.",
+      "project": "project-gated",
+      "session": "session-gated",
+      "runs": [
+        {
+          "id": "run-gated",
+          "phase": "awaiting_acceptance",
+          "owner": "chair-gated",
+          "nextMilestone": "Resolve release-bound gate",
+          "health": "quarantined"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attention-safety-gate",
+          "label": "Approval",
+          "priority": "safety-integrity",
+          "title": "Approve exact accepted artifact",
+          "freshness": "live",
+          "ageMs": 500,
+          "duplicateCount": 1,
+          "consequential": true
+        },
+        {
+          "id": "attention-stale-authority",
+          "label": "Decision",
+          "priority": "expiring-authority",
+          "title": "Authority evidence requires refresh",
+          "freshness": "stale",
+          "ageMs": 70000,
+          "duplicateCount": 2
+        },
+        {
+          "id": "attention-conflict",
+          "label": "Blocked",
+          "priority": "critical-path",
+          "title": "Provider identity conflict",
+          "freshness": "conflict",
+          "ageMs": 5000,
+          "duplicateCount": 1
+        }
+      ],
+      "system": [
+        {
+          "id": "github",
+          "state": "unavailable",
+          "freshness": "unavailable",
+          "detail": "adapter outage; local fabric remains live"
+        }
+      ],
+      "expectedTopAttentionId": "attention-safety-gate",
+      "expectedAnswers": {
+        "project": "project-gated",
+        "run": "run-gated",
+        "phase": "awaiting_acceptance",
+        "owner": "chair-gated",
+        "nextMilestone": "Resolve release-bound gate",
+        "health": "quarantined"
+      }
+    }
+  ]
+}

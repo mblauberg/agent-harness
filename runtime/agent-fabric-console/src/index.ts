@@ -17,6 +17,7 @@ import type { FabricConsoleDataset } from "./protocol-adapter.js";
 
 export * from "./input.js";
 export * from "./controller.js";
+export * from "./evaluation.js";
 export * from "./model.js";
 export * from "./presenter.js";
 export * from "./protocol-adapter.js";

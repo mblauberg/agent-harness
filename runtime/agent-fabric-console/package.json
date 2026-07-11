@@ -7,18 +7,22 @@
     "node": ">=24.15.0 <25"
   },
   "files": [
-    "dist"
+    "dist",
+    "evals"
   ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./evals/usability-fixtures.v1.json": "./evals/usability-fixtures.v1.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:evaluation": "vitest run tests/evaluation.test.ts",
+    "test:load": "vitest run tests/load.test.ts",
     "check": "npm run typecheck && npm run build && npm run test",
     "audit": "npm audit --audit-level=high"
   },
