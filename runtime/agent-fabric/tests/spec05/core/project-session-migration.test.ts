@@ -74,11 +74,73 @@ describe("project-session migration 0004", () => {
     expect(database.prepare("SELECT lifecycle_state FROM runs WHERE run_id='run-legacy'").get()).toEqual({
       lifecycle_state: "recovery_required",
     });
+    expect(database.prepare("SELECT trust_record_digest FROM projects").get()).toEqual({ trust_record_digest: null });
     expect(database.prepare("SELECT status, resolved_by_operator_id, legacy_status FROM scoped_gates").get()).toEqual({
       status: "pending",
       resolved_by_operator_id: null,
       legacy_status: "approved",
     });
     expect(database.prepare("PRAGMA foreign_key_check").get()).toBeUndefined();
+  });
+
+  it("invalidates the operator snapshot for every table read by v2 projections", () => {
+    const root = mkdtempSync(join(tmpdir(), "afab-0004-snapshot-root-"));
+    directories.push(root);
+    const database = new Database(":memory:");
+    databases.push(database);
+    applyMigrations(database, migrations().slice(0, 3));
+    database.prepare(`
+      INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at)
+      VALUES ('run-snapshot', 'chair', ?, NULL, 1)
+    `).run(root);
+    database.exec(`
+      INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
+      VALUES ('authority-snapshot', 'run-snapshot', NULL, '{}', '${"a".repeat(64)}', 1);
+      INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run-snapshot', 'chair', NULL, 'authority-snapshot', NULL, 'ready');
+    `);
+    applyMigrations(database, migrations());
+
+    const snapshotTables = [
+      "projects",
+      "project_sessions",
+      "runs",
+      "tasks",
+      "leases",
+      "provider_actions",
+      "operator_client_attachments",
+      "agents",
+      "provider_state",
+      "agent_adapter_bindings",
+      "artifacts",
+      "events",
+      "observer_event_sequence",
+      "messages",
+      "message_contexts",
+      "attention_items",
+      "resource_scopes",
+      "resource_dimensions",
+      "integration_availability",
+      "task_objective_checks",
+      "workstreams",
+      "cross_family_review_evidence",
+      "intakes",
+    ] as const;
+    for (const table of snapshotTables) {
+      for (const operation of ["insert", "update", "delete"] as const) {
+        expect(database.prepare(`
+          SELECT name FROM sqlite_master
+          WHERE type='trigger' AND tbl_name=? AND name=?
+            AND sql LIKE '%UPDATE daemon_global_state%'
+        `).get(table, `global_revision_${table}_${operation}`), `${table} ${operation}`).toBeDefined();
+      }
+    }
+
+    const before = database.prepare("SELECT revision FROM daemon_global_state WHERE singleton=1").get() as { revision: number };
+    database.prepare("UPDATE projects SET updated_at=updated_at+1").run();
+    database.prepare("UPDATE agents SET lifecycle='suspended' WHERE run_id='run-snapshot' AND agent_id='chair'").run();
+    expect(database.prepare("SELECT revision FROM daemon_global_state WHERE singleton=1").get()).toEqual({
+      revision: before.revision + 2,
+    });
   });
 });

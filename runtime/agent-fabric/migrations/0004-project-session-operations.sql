@@ -3,6 +3,7 @@
 CREATE TABLE projects (
   project_id TEXT PRIMARY KEY,
   canonical_root TEXT NOT NULL UNIQUE,
+  trust_record_digest TEXT,
   revision INTEGER NOT NULL CHECK (revision >= 1),
   authority_generation INTEGER NOT NULL CHECK (authority_generation >= 1),
   created_at INTEGER NOT NULL,
@@ -925,10 +926,16 @@ END;
 CREATE TRIGGER global_revision_project_sessions_update AFTER UPDATE ON project_sessions BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
+CREATE TRIGGER global_revision_project_sessions_delete AFTER DELETE ON project_sessions BEGIN
+  UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
+END;
 CREATE TRIGGER global_revision_runs_insert AFTER INSERT ON runs BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER global_revision_runs_update AFTER UPDATE ON runs BEGIN
+  UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER global_revision_runs_delete AFTER DELETE ON runs BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER global_revision_tasks_insert AFTER INSERT ON tasks BEGIN
@@ -937,10 +944,16 @@ END;
 CREATE TRIGGER global_revision_tasks_update AFTER UPDATE ON tasks BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
+CREATE TRIGGER global_revision_tasks_delete AFTER DELETE ON tasks BEGIN
+  UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
+END;
 CREATE TRIGGER global_revision_leases_insert AFTER INSERT ON leases BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER global_revision_leases_update AFTER UPDATE ON leases BEGIN
+  UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER global_revision_leases_delete AFTER DELETE ON leases BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER global_revision_provider_actions_insert AFTER INSERT ON provider_actions BEGIN
@@ -949,13 +962,87 @@ END;
 CREATE TRIGGER global_revision_provider_actions_update AFTER UPDATE ON provider_actions BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
-CREATE TRIGGER global_revision_operator_attachments_insert AFTER INSERT ON operator_client_attachments BEGIN
+CREATE TRIGGER global_revision_provider_actions_delete AFTER DELETE ON provider_actions BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
-CREATE TRIGGER global_revision_operator_attachments_update AFTER UPDATE ON operator_client_attachments BEGIN
+CREATE TRIGGER global_revision_operator_client_attachments_insert AFTER INSERT ON operator_client_attachments BEGIN
+  UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER global_revision_operator_client_attachments_update AFTER UPDATE ON operator_client_attachments BEGIN
+  UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER global_revision_operator_client_attachments_delete AFTER DELETE ON operator_client_attachments BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER global_revision_result_deliveries_insert AFTER INSERT ON result_deliveries
 WHEN NEW.required=1 BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 CREATE TRIGGER global_revision_result_deliveries_update AFTER UPDATE ON result_deliveries
 WHEN NEW.required=1 BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_projects_insert AFTER INSERT ON projects BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_projects_update AFTER UPDATE ON projects BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_projects_delete AFTER DELETE ON projects BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_agents_insert AFTER INSERT ON agents BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_agents_update AFTER UPDATE ON agents BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_agents_delete AFTER DELETE ON agents BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_provider_state_insert AFTER INSERT ON provider_state BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_provider_state_update AFTER UPDATE ON provider_state BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_provider_state_delete AFTER DELETE ON provider_state BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_agent_adapter_bindings_insert AFTER INSERT ON agent_adapter_bindings BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_agent_adapter_bindings_update AFTER UPDATE ON agent_adapter_bindings BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_agent_adapter_bindings_delete AFTER DELETE ON agent_adapter_bindings BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_artifacts_insert AFTER INSERT ON artifacts BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_artifacts_update AFTER UPDATE ON artifacts BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_artifacts_delete AFTER DELETE ON artifacts BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_events_insert AFTER INSERT ON events BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_events_update AFTER UPDATE ON events BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_events_delete AFTER DELETE ON events BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_observer_event_sequence_insert AFTER INSERT ON observer_event_sequence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_observer_event_sequence_update AFTER UPDATE ON observer_event_sequence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_observer_event_sequence_delete AFTER DELETE ON observer_event_sequence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_messages_insert AFTER INSERT ON messages BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_messages_update AFTER UPDATE ON messages BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_messages_delete AFTER DELETE ON messages BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_message_contexts_insert AFTER INSERT ON message_contexts BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_message_contexts_update AFTER UPDATE ON message_contexts BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_message_contexts_delete AFTER DELETE ON message_contexts BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_attention_items_insert AFTER INSERT ON attention_items BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_attention_items_update AFTER UPDATE ON attention_items BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_attention_items_delete AFTER DELETE ON attention_items BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_resource_scopes_insert AFTER INSERT ON resource_scopes BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_resource_scopes_update AFTER UPDATE ON resource_scopes BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_resource_scopes_delete AFTER DELETE ON resource_scopes BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_resource_dimensions_insert AFTER INSERT ON resource_dimensions BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_resource_dimensions_update AFTER UPDATE ON resource_dimensions BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_resource_dimensions_delete AFTER DELETE ON resource_dimensions BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_integration_availability_insert AFTER INSERT ON integration_availability BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_integration_availability_update AFTER UPDATE ON integration_availability BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_integration_availability_delete AFTER DELETE ON integration_availability BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_task_objective_checks_insert AFTER INSERT ON task_objective_checks BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_task_objective_checks_update AFTER UPDATE ON task_objective_checks BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_task_objective_checks_delete AFTER DELETE ON task_objective_checks BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_workstreams_insert AFTER INSERT ON workstreams BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_workstreams_update AFTER UPDATE ON workstreams BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_workstreams_delete AFTER DELETE ON workstreams BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_cross_family_review_evidence_insert AFTER INSERT ON cross_family_review_evidence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_cross_family_review_evidence_update AFTER UPDATE ON cross_family_review_evidence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_cross_family_review_evidence_delete AFTER DELETE ON cross_family_review_evidence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER global_revision_intakes_insert AFTER INSERT ON intakes BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_intakes_update AFTER UPDATE ON intakes BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_intakes_delete AFTER DELETE ON intakes BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
