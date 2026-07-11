@@ -349,6 +349,15 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     });
   }
 
+  hasLiveChairSession(resumeReference: string, providerSessionGeneration: number): boolean {
+    const session = this.#chairSessions.get(resumeReference);
+    return (
+      session !== undefined &&
+      session.providerSessionGeneration === providerSessionGeneration &&
+      this.#connections.has(resumeReference)
+    );
+  }
+
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const connection = await this.#openConnection();
     try {

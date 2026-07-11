@@ -12,7 +12,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "9d5357fde3682a46674867c2e379756da0cb4d67b74b19131ff94d491d8217d3"
+      "sha256": "2ee7145e5aae5b3748a96fea3bdbb1ac3cde4cd5b3cc3403c4f75ef031c5d888"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",

@@ -11,6 +11,9 @@ type PendingRequest = {
 type Notification = { method: string; params: Record<string, unknown> };
 type ServerRequestHandler = (params: Record<string, unknown>) => Promise<unknown>;
 
+const MAXIMUM_PROVIDER_SERVER_REQUESTS = 16;
+const COMPLETED_SERVER_REQUEST_RETENTION = 256;
+
 function boundedError(stderr: string): string {
   return stderr.length === 0 ? "" : `: ${stderr.slice(-2048)}`;
 }
@@ -34,6 +37,9 @@ export class CodexJsonRpcConnection {
   readonly #pending = new Map<number, PendingRequest>();
   readonly #notifications: Notification[] = [];
   readonly #serverRequestHandlers = new Map<string, ServerRequestHandler>();
+  readonly #activeServerRequestIds = new Set<string>();
+  readonly #completedServerRequestIds = new Set<string>();
+  readonly #completedServerRequestOrder: string[] = [];
   readonly #waiters = new Set<{
     method: string;
     predicate(params: Record<string, unknown>): boolean;
@@ -164,7 +170,25 @@ export class CodexJsonRpcConnection {
       return;
     }
     if ((typeof value.id === "number" || typeof value.id === "string") && typeof value.method === "string") {
-      void this.#handleServerRequest(value.id, value.method, isRecord(value.params) ? value.params : {});
+      const key = this.#serverRequestKey(value.id);
+      if (key === undefined) {
+        this.#fail(new ProviderAdapterError("PROVIDER_PROTOCOL_INVALID", "Codex server request ID is invalid"));
+        return;
+      }
+      if (this.#activeServerRequestIds.has(key) || this.#completedServerRequestIds.has(key)) {
+        this.#fail(new ProviderAdapterError("PROVIDER_PROTOCOL_INVALID", "Codex reused a provider server-request ID"));
+        return;
+      }
+      if (this.#activeServerRequestIds.size >= MAXIMUM_PROVIDER_SERVER_REQUESTS) {
+        this.#rememberCompletedServerRequest(key);
+        this.#writeServerResponse({
+          id: value.id,
+          error: { code: -32000, message: "agent-fabric server request capacity exceeded" },
+        });
+        return;
+      }
+      this.#activeServerRequestIds.add(key);
+      void this.#handleServerRequest(key, value.id, value.method, isRecord(value.params) ? value.params : {});
       return;
     }
     if (typeof value.id === "number") {
@@ -197,37 +221,63 @@ export class CodexJsonRpcConnection {
   }
 
   async #handleServerRequest(
+    key: string,
     id: number | string,
     method: string,
     params: Record<string, unknown>,
   ): Promise<void> {
-    const handler = this.#serverRequestHandlers.get(method);
-    if (handler === undefined) {
-      this.#child.stdin.write(`${JSON.stringify({
-        id,
-        error: { code: -32601, message: `agent-fabric does not implement server request ${method}` },
-      })}\n`);
-      return;
-    }
     try {
-      const result = await handler(params);
-      if (!this.#closed) this.#child.stdin.write(`${JSON.stringify({ id, result })}\n`);
-    } catch {
-      if (!this.#closed) {
-        this.#child.stdin.write(`${JSON.stringify({
+      const handler = this.#serverRequestHandlers.get(method);
+      if (handler === undefined) {
+        this.#writeServerResponse({
           id,
-          error: { code: -32603, message: "agent-fabric server request failed" },
-        })}\n`);
+          error: { code: -32601, message: `agent-fabric does not implement server request ${method}` },
+        });
+        return;
       }
+      const result = await handler(params);
+      this.#writeServerResponse({ id, result });
+    } catch {
+      this.#writeServerResponse({
+        id,
+        error: { code: -32603, message: "agent-fabric server request failed" },
+      });
+    } finally {
+      this.#activeServerRequestIds.delete(key);
+      this.#rememberCompletedServerRequest(key);
     }
   }
 
+  #serverRequestKey(id: number | string): string | undefined {
+    if (typeof id === "number") {
+      return Number.isSafeInteger(id) ? `number:${String(id)}` : undefined;
+    }
+    return id.length > 0 && Buffer.byteLength(id, "utf8") <= 512 ? `string:${id}` : undefined;
+  }
+
+  #writeServerResponse(response: Record<string, unknown>): void {
+    if (!this.#closed) this.#child.stdin.write(`${JSON.stringify(response)}\n`);
+  }
+
+  #rememberCompletedServerRequest(key: string): void {
+    if (this.#completedServerRequestIds.has(key)) return;
+    this.#completedServerRequestIds.add(key);
+    this.#completedServerRequestOrder.push(key);
+    if (this.#completedServerRequestOrder.length <= COMPLETED_SERVER_REQUEST_RETENTION) return;
+    const expired = this.#completedServerRequestOrder.shift();
+    if (expired !== undefined) this.#completedServerRequestIds.delete(expired);
+  }
+
   #fail(error: Error): void {
+    if (this.#closed) return;
     this.#closed = true;
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
+    this.#activeServerRequestIds.clear();
     this.#rejectWaiters(error);
     this.#lines.close();
+    this.#child.stdin.end();
+    if (this.#child.exitCode === null && this.#child.signalCode === null) this.#child.kill("SIGTERM");
   }
 
   #rejectWaiters(error: Error): void {

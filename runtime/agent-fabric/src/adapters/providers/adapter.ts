@@ -26,6 +26,7 @@ export type ProviderBoundary = {
   steer?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   compact?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   launchChair?(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult>;
+  hasLiveChairSession?(resumeReference: string, providerSessionGeneration: number): boolean;
 };
 
 type SupportedOperation = "spawn" | "attach" | "send_turn" | "interrupt" | "release" | "steer" | "compact";
@@ -64,6 +65,7 @@ export function createProviderAdapter(options: {
     : chairLaunchChallengeDigest(chairLaunchHandoff.attestationChallenge);
   const liveChairLaunchActions = new Set<string>();
   const liveChairActionBySession = new Map<string, string>();
+  const liveChairSessionByAction = new Map<string, string>();
 
   function chairLaunchRequest(params: Record<string, unknown>): {
     actionId: string;
@@ -135,7 +137,11 @@ export function createProviderAdapter(options: {
         record.idempotencyProven &&
         liveChairLaunchActions.has(request.actionId)
       ) {
-        return parseChairLaunchProviderResult(record.result, attestationBinding());
+        const result = parseChairLaunchProviderResult(record.result, attestationBinding());
+        if (!isLiveChairResult(request.actionId, result)) {
+          throw chairBridgeLost(request.actionId);
+        }
+        return result;
       }
       if (record.status === "terminal" && record.idempotencyProven) {
         throw new ProviderAdapterError(
@@ -194,6 +200,7 @@ export function createProviderAdapter(options: {
       options.journal.markTerminal(request.actionId, result, true);
       liveChairLaunchActions.add(request.actionId);
       liveChairActionBySession.set(result.resumeReference, request.actionId);
+      liveChairSessionByAction.set(request.actionId, result.resumeReference);
       return result;
     } catch (error: unknown) {
       let current = options.journal.get(request.actionId);
@@ -272,7 +279,10 @@ export function createProviderAdapter(options: {
           if (typeof payload.resumeReference === "string") {
             const launchActionId = liveChairActionBySession.get(payload.resumeReference);
             liveChairActionBySession.delete(payload.resumeReference);
-            if (launchActionId !== undefined) liveChairLaunchActions.delete(launchActionId);
+            if (launchActionId !== undefined) {
+              liveChairLaunchActions.delete(launchActionId);
+              liveChairSessionByAction.delete(launchActionId);
+            }
           }
           break;
         case "steer":
@@ -304,15 +314,37 @@ export function createProviderAdapter(options: {
     if (typeof continuity.providerContractDigest !== "string" || typeof continuity.challengeDigest !== "string") {
       throw new ProviderAdapterError("JOURNAL_INVALID", "terminal chair launch journal binding is malformed");
     }
+    const result = parseChairLaunchProviderResult(record.result, {
+      providerAdapterId: capabilities.adapterId,
+      providerActionId: record.actionId,
+      providerContractDigest: continuity.providerContractDigest,
+      challengeDigest: continuity.challengeDigest,
+    });
+    if (!isLiveChairResult(record.actionId, result)) throw chairBridgeLost(record.actionId);
     return {
       ...record,
-      result: parseChairLaunchProviderResult(record.result, {
-        providerAdapterId: capabilities.adapterId,
-        providerActionId: record.actionId,
-        providerContractDigest: continuity.providerContractDigest,
-        challengeDigest: continuity.challengeDigest,
-      }),
+      result,
     };
+  }
+
+  function isLiveChairResult(actionId: string, result: ChairLaunchProviderResult): boolean {
+    return (
+      liveChairLaunchActions.has(actionId) &&
+      liveChairSessionByAction.get(actionId) === result.resumeReference &&
+      liveChairActionBySession.get(result.resumeReference) === actionId &&
+      options.boundary.hasLiveChairSession?.(
+        result.resumeReference,
+        result.providerSessionGeneration,
+      ) === true
+    );
+  }
+
+  function chairBridgeLost(actionId: string): ProviderAdapterError {
+    return new ProviderAdapterError(
+      "CHAIR_BRIDGE_LOST",
+      "terminal chair launch evidence is retained but its exact live provider bridge is unavailable",
+      { actionId },
+    );
   }
 
   return {

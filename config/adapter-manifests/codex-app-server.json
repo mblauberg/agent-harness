@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "9d5357fde3682a46674867c2e379756da0cb4d67b74b19131ff94d491d8217d3"
+      "sha256": "2ee7145e5aae5b3748a96fea3bdbb1ac3cde4cd5b3cc3403c4f75ef031c5d888"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
@@ -12,11 +12,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js",
-      "sha256": "e01f2c06835758585921f55b0a09f8071f96f6d63ad0edeecb80964c3389b79c"
+      "sha256": "e5a20e57660cf6827a9ece5dd67a023e0d79a74f137e4d4212d9016af5680275"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-json-rpc.js",
-      "sha256": "98873e3862bf234d53ec642fc369572af59143ed833f88982729aff56c4f8c67"
+      "sha256": "1fdf60a3308de690d6c3da7f94aae7dcb9eca59cca0dc7d51c008119290a8a78"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",

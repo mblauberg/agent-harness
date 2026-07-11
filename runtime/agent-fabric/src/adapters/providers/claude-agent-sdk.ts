@@ -23,6 +23,7 @@ import {
 import { SqliteAdapterActionJournal } from "./journal.js";
 import { journalPathFromArguments, serveAdapter } from "./server.js";
 import {
+  canonicalJson,
   optionalString,
   isRecord,
   parseChairLaunchProviderResult,
@@ -194,10 +195,18 @@ type ClaudeChairSession = {
   mcp?: ClaudeChairMcpBridge;
   providerSessionRef?: string;
   providerSessionGeneration: number;
-  attestationTurnRef?: string;
-  attestationInvocationRef?: string;
-  attestationChallengeResponse?: string;
+  nativeFabricInvocations: ClaudeNativeFabricInvocation[];
+  seenNativeFabricInvocationKeys: Set<string>;
+  seenNativeFabricInvocationOrder: string[];
+  attested?: boolean;
   busy?: boolean;
+};
+
+type ClaudeNativeFabricInvocation = {
+  toolName: string;
+  providerTurnRef: string;
+  providerInvocationRef: string;
+  input: Record<string, unknown>;
 };
 
 export type ClaudeChairMcpBridge = {
@@ -209,63 +218,113 @@ export type ClaudeChairMcpBridge = {
   mailboxTool: { handler(args: Record<string, never>, extra: unknown): Promise<unknown> };
 };
 
-function observeClaudeAttestationToolUse(
+function boundedClaudeNativeRef(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 512;
+}
+
+function observeClaudeFabricToolUses(
   session: ClaudeChairSession,
   message: SDKMessage,
-  attestationToolName: string,
+  mcp: ClaudeChairMcpBridge,
 ): void {
   if (
     message.type !== "assistant" ||
     !isRecord(message.message) ||
     !Array.isArray(message.message.content)
   ) return;
-  const toolUse = message.message.content.find((block) => (
-    isRecord(block) &&
-    block.type === "tool_use" &&
-    block.name === attestationToolName &&
-    typeof block.id === "string" &&
-    block.id.length > 0 &&
-    isRecord(block.input) &&
-    Object.keys(block.input).length === 1 &&
-    typeof block.input.challengeResponse === "string" &&
-    /^[0-9a-f]{64}$/u.test(block.input.challengeResponse)
-  ));
-  if (
-    !isRecord(toolUse) ||
-    typeof toolUse.id !== "string" ||
-    !isRecord(toolUse.input) ||
-    typeof toolUse.input.challengeResponse !== "string"
-  ) return;
   const turnRef = typeof message.request_id === "string" && message.request_id.length > 0
     ? message.request_id
     : message.uuid;
-  session.attestationTurnRef = turnRef;
-  session.attestationInvocationRef = toolUse.id;
-  session.attestationChallengeResponse = toolUse.input.challengeResponse;
+  if (
+    session.providerSessionRef === undefined ||
+    message.session_id !== session.providerSessionRef ||
+    !boundedClaudeNativeRef(turnRef)
+  ) return;
+  for (const block of message.message.content) {
+    if (
+      !isRecord(block) ||
+      block.type !== "tool_use" ||
+      (block.name !== mcp.attestationToolName && block.name !== mcp.mailboxToolName) ||
+      !boundedClaudeNativeRef(block.id) ||
+      !isRecord(block.input)
+    ) continue;
+    const invocationKey = `${turnRef}\0${block.id}`;
+    if (session.seenNativeFabricInvocationKeys.has(invocationKey)) {
+      throw new ProviderAdapterError(
+        "CHAIR_CONTINUITY_UNPROVEN",
+        "Claude replayed a native Fabric tool-use record",
+      );
+    }
+    const serializedInput = canonicalJson(block.input);
+    if (Buffer.byteLength(serializedInput, "utf8") > 4_096 || session.nativeFabricInvocations.length >= 32) {
+      throw new ProviderAdapterError(
+        "CHAIR_CONTINUITY_UNPROVEN",
+        "Claude emitted too many or oversized native Fabric tool records",
+      );
+    }
+    session.nativeFabricInvocations.push({
+      toolName: block.name,
+      providerTurnRef: turnRef,
+      providerInvocationRef: block.id,
+      input: block.input,
+    });
+    session.seenNativeFabricInvocationKeys.add(invocationKey);
+    session.seenNativeFabricInvocationOrder.push(invocationKey);
+    if (session.seenNativeFabricInvocationOrder.length > 256) {
+      const expired = session.seenNativeFabricInvocationOrder.shift();
+      if (expired !== undefined) session.seenNativeFabricInvocationKeys.delete(expired);
+    }
+  }
+}
+
+function consumeClaudeFabricInvocation(
+  session: ClaudeChairSession,
+  toolName: string,
+  input: Record<string, unknown>,
+): ClaudeNativeFabricInvocation {
+  const index = session.nativeFabricInvocations.findIndex((candidate) => candidate.toolName === toolName);
+  if (index === -1) {
+    throw new ProviderAdapterError(
+      "CHAIR_CONTINUITY_UNPROVEN",
+      "Claude MCP invocation lacks a matching native assistant tool-use record",
+    );
+  }
+  const [invocation] = session.nativeFabricInvocations.splice(index, 1);
+  if (invocation === undefined || canonicalJson(invocation.input) !== canonicalJson(input)) {
+    throw new ProviderAdapterError(
+      "CHAIR_CONTINUITY_UNPROVEN",
+      "Claude MCP invocation does not match its native assistant tool-use input",
+    );
+  }
+  return invocation;
 }
 
 export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeChairMcpBridge {
   const serverName = "agent_fabric_session";
+  const attestationToolName = `mcp__${serverName}__${session.bridge.challengeToolName}`;
+  const mailboxToolName = `mcp__${serverName}__fabric_get_mailbox_state`;
   const attestationTool = tool(
     session.bridge.challengeToolName,
     "Required one-use Agent Fabric provider-session continuity challenge.",
     { challengeResponse: z.string().regex(/^[0-9a-f]{64}$/u) },
     async ({ challengeResponse }) => {
-      if (
-        session.providerSessionRef === undefined ||
-        session.attestationTurnRef === undefined ||
-        session.attestationInvocationRef === undefined ||
-        session.attestationChallengeResponse !== challengeResponse
-      ) {
+      if (session.providerSessionRef === undefined) {
         throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude MCP invocation lacks native session, turn or tool-call evidence");
       }
+      const invocation = consumeClaudeFabricInvocation(
+        session,
+        attestationToolName,
+        { challengeResponse },
+      );
       await session.bridge.attest({
         providerSessionRef: session.providerSessionRef,
         providerSessionGeneration: session.providerSessionGeneration,
-        providerTurnRef: session.attestationTurnRef,
-        providerInvocationRef: session.attestationInvocationRef,
+        providerTurnRef: invocation.providerTurnRef,
+        providerInvocationRef: invocation.providerInvocationRef,
         challengeResponse,
       });
+      session.attested = true;
+      session.nativeFabricInvocations.length = 0;
       return {
         content: [{ type: "text" as const, text: JSON.stringify({
           attested: true,
@@ -279,12 +338,21 @@ export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeC
     "fabric_get_mailbox_state",
     "Read this chair's mailbox state through its retained Agent Fabric bridge.",
     {},
-    async () => ({
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify(await session.bridge.call("getMailboxState", {})),
-      }],
-    }),
+    async (args) => {
+      if (session.attested !== true) {
+        throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude Fabric tools are unavailable before launch attestation");
+      }
+      if (!isRecord(args) || Object.keys(args).length !== 0) {
+        throw new ProviderAdapterError("MCP_INPUT_INVALID", "Claude mailbox tool expects a closed empty object");
+      }
+      consumeClaudeFabricInvocation(session, mailboxToolName, args);
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(await session.bridge.call("getMailboxState", {})),
+        }],
+      };
+    },
     { alwaysLoad: true },
   );
   return {
@@ -295,8 +363,8 @@ export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeC
       alwaysLoad: true,
       tools: [attestationTool, mailboxTool],
     }),
-    attestationToolName: `mcp__${serverName}__${session.bridge.challengeToolName}`,
-    mailboxToolName: `mcp__${serverName}__fabric_get_mailbox_state`,
+    attestationToolName,
+    mailboxToolName,
     attestationTool,
     mailboxTool,
   };
@@ -358,6 +426,11 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
         };
   }
 
+  hasLiveChairSession(resumeReference: string, providerSessionGeneration: number): boolean {
+    const session = this.#chairSessions.get(resumeReference);
+    return session !== undefined && session.providerSessionGeneration === providerSessionGeneration;
+  }
+
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
     return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, prior, this.#executable) }));
@@ -373,7 +446,13 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
       attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
     });
-    const session: ClaudeChairSession = { bridge, providerSessionGeneration: 1 };
+    const session: ClaudeChairSession = {
+      bridge,
+      providerSessionGeneration: 1,
+      nativeFabricInvocations: [],
+      seenNativeFabricInvocationKeys: new Set(),
+      seenNativeFabricInvocationOrder: [],
+    };
     const mcp = this.#mcpBridgeFactory(session);
     session.mcp = mcp;
     try {
@@ -383,7 +462,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       }), (sessionId) => {
         session.providerSessionRef = sessionId;
         bridge.bindProviderSession(sessionId, session.providerSessionGeneration);
-      }, (message) => observeClaudeAttestationToolUse(session, message, mcp.attestationToolName));
+      }, (message) => observeClaudeFabricToolUses(session, message, mcp));
       const evidence = {
         resumeReference: completed.resumeReference,
         providerSessionGeneration: 1,
@@ -433,11 +512,13 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       throw new ProviderAdapterError("PROVIDER_SESSION_BUSY", "Claude chair session already has an active turn");
     }
     session.busy = true;
+    session.nativeFabricInvocations.length = 0;
     try {
       return await consumeQuery(this.#query({
         prompt: prompt(payload),
         options: claudeChairOptions(payload, this.#executable, resumeReference, mcp),
-      }), (sessionId) => session.bridge.bindProviderSession(sessionId, session.providerSessionGeneration));
+      }), (sessionId) => session.bridge.bindProviderSession(sessionId, session.providerSessionGeneration),
+      (message) => observeClaudeFabricToolUses(session, message, mcp));
     } catch (error: unknown) {
       if (error instanceof ProviderAdapterError && error.code === "PROVIDER_TURN_FAILED") throw error;
       this.#chairSessions.delete(resumeReference);

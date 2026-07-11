@@ -51,14 +51,25 @@ function modelPayload(method: string, params: Record<string, unknown>): Record<s
   return params.payload as Record<string, unknown>;
 }
 
-function providerSessionReference(params: Record<string, unknown>): string | undefined {
+function providerSessionReferences(params: Record<string, unknown>): string[] {
+  const references: string[] = [];
   for (const key of ["resumeReference", "providerSessionRef", "threadId"] as const) {
-    if (typeof params[key] === "string" && params[key].length > 0) return params[key];
+    if (typeof params[key] === "string" && params[key].length > 0) references.push(params[key]);
   }
   if (typeof params.payload === "object" && params.payload !== null && !Array.isArray(params.payload)) {
-    return providerSessionReference(params.payload as Record<string, unknown>);
+    references.push(...providerSessionReferences(params.payload as Record<string, unknown>));
   }
-  return undefined;
+  return references;
+}
+
+function providerSessionGenerations(params: Record<string, unknown>): unknown[] {
+  const generations = Object.hasOwn(params, "providerSessionGeneration")
+    ? [params.providerSessionGeneration]
+    : [];
+  if (typeof params.payload === "object" && params.payload !== null && !Array.isArray(params.payload)) {
+    generations.push(...providerSessionGenerations(params.payload as Record<string, unknown>));
+  }
+  return generations;
 }
 
 function chairTransportKey(adapterId: string, providerSessionRef: string): string {
@@ -106,7 +117,7 @@ export class AdapterSupervisor {
   readonly #definitions: Record<string, AdapterProcessDefinition>;
   readonly #transports = new Map<string, AdapterProcessTransport>();
   readonly #chairTransports = new Map<string, AdapterProcessTransport>();
-  readonly #knownChairSessions = new Set<string>();
+  readonly #knownChairSessions = new Map<string, number>();
   readonly #consumedChairHandoffHashes = new Set<string>();
   readonly #controlTimeoutMs: number;
   readonly #providerTurnTimeoutMs: number;
@@ -121,10 +132,35 @@ export class AdapterSupervisor {
     const definition = this.#definitions[adapterId];
     if (definition === undefined) throw new Error(`adapter is not configured: ${adapterId}`);
     enforceModelPolicy(adapterId, definition, method, params);
-    const sessionRef = providerSessionReference(params);
+    const sessionRefs = [...new Set(providerSessionReferences(params))];
+    if (sessionRefs.length > 1) {
+      throw new ProviderAdapterError(
+        "STALE_LEASE_GENERATION",
+        `${adapterId} chair request contains conflicting provider-session references`,
+      );
+    }
+    const sessionRef = sessionRefs[0];
     const chairKey = sessionRef === undefined ? undefined : chairTransportKey(adapterId, sessionRef);
+    const knownChairGeneration = chairKey === undefined ? undefined : this.#knownChairSessions.get(chairKey);
+    const requestedGenerations = providerSessionGenerations(params);
+    if (
+      knownChairGeneration !== undefined &&
+      (
+        requestedGenerations.length === 0 ||
+        requestedGenerations.some((generation) => (
+          typeof generation !== "number" ||
+          !Number.isSafeInteger(generation) ||
+          generation !== knownChairGeneration
+        ))
+      )
+    ) {
+      throw new ProviderAdapterError(
+        "STALE_LEASE_GENERATION",
+        `${adapterId} chair request does not match its retained provider-session generation`,
+      );
+    }
     const retainedChairTransport = chairKey === undefined ? undefined : this.#chairTransports.get(chairKey);
-    if (chairKey !== undefined && this.#knownChairSessions.has(chairKey) && retainedChairTransport === undefined) {
+    if (chairKey !== undefined && knownChairGeneration !== undefined && retainedChairTransport === undefined) {
       throw new ProviderAdapterError(
         "CHAIR_BRIDGE_LOST",
         `${adapterId} chair session cannot be resumed without its retained bridge`,
@@ -219,7 +255,7 @@ export class AdapterSupervisor {
         throw new ProviderAdapterError("CHAIR_BRIDGE_CONFLICT", `${adapterId} already owns the provider chair session`);
       }
       this.#chairTransports.set(key, transport);
-      this.#knownChairSessions.add(key);
+      this.#knownChairSessions.set(key, result.providerSessionGeneration);
       return result;
     } catch {
       await transport.close().catch(() => undefined);

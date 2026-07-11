@@ -110,29 +110,79 @@ describe("persistent adapter supervision", () => {
         code: "PRIVATE_HANDOFF_UNAVAILABLE",
       });
       await expect(supervisor.request("fake", "dispatch", {
+        actionId: "later-turn-missing-generation",
+        operation: "send_turn",
+        payload: { resumeReference: "fixture-chair-session", prompt: "must not dispatch" },
+      })).rejects.toMatchObject({ code: "STALE_LEASE_GENERATION" });
+      await expect(supervisor.request("fake", "dispatch", {
+        actionId: "later-turn-stale-generation",
+        operation: "send_turn",
+        payload: {
+          resumeReference: "fixture-chair-session",
+          providerSessionGeneration: 2,
+          prompt: "must not dispatch",
+        },
+      })).rejects.toMatchObject({ code: "STALE_LEASE_GENERATION" });
+      await expect(supervisor.request("fake", "dispatch", {
+        actionId: "later-turn-conflicting-generation",
+        operation: "send_turn",
+        providerSessionGeneration: 1,
+        payload: {
+          resumeReference: "fixture-chair-session",
+          providerSessionGeneration: 2,
+          prompt: "must not dispatch",
+        },
+      })).rejects.toMatchObject({ code: "STALE_LEASE_GENERATION" });
+      await expect(supervisor.request("fake", "dispatch", {
+        actionId: "later-turn-conflicting-reference",
+        operation: "send_turn",
+        resumeReference: "fixture-chair-session",
+        payload: {
+          resumeReference: "another-chair-session",
+          providerSessionGeneration: 1,
+          prompt: "must not dispatch",
+        },
+      })).rejects.toMatchObject({ code: "STALE_LEASE_GENERATION" });
+      await expect(supervisor.request("fake", "dispatch", {
         actionId: "later-turn-1",
         operation: "send_turn",
-        payload: { resumeReference: "fixture-chair-session", prompt: "continue" },
+        payload: {
+          resumeReference: "fixture-chair-session",
+          providerSessionGeneration: 1,
+          prompt: "continue",
+        },
       })).resolves.toMatchObject({ method: "dispatch" });
       await expect(supervisor.request("fake", "dispatch", {
         actionId: "recoverable-provider-error",
         operation: "send_turn",
-        payload: { resumeReference: "fixture-chair-session", prompt: "provider rejects this turn" },
+        payload: {
+          resumeReference: "fixture-chair-session",
+          providerSessionGeneration: 1,
+          prompt: "provider rejects this turn",
+        },
       })).rejects.toMatchObject({ name: "PROVIDER_TURN_FAILED" });
       await expect(supervisor.request("fake", "dispatch", {
         actionId: "later-turn-after-error",
         operation: "send_turn",
-        payload: { resumeReference: "fixture-chair-session", prompt: "bridge remains" },
+        payload: {
+          resumeReference: "fixture-chair-session",
+          providerSessionGeneration: 1,
+          prompt: "bridge remains",
+        },
       })).resolves.toMatchObject({ method: "dispatch" });
       await expect(supervisor.request("fake", "dispatch", {
         actionId: "release-chair-1",
         operation: "release",
-        payload: { resumeReference: "fixture-chair-session" },
+        payload: { resumeReference: "fixture-chair-session", providerSessionGeneration: 1 },
       })).resolves.toMatchObject({ method: "dispatch" });
       await expect(supervisor.request("fake", "dispatch", {
         actionId: "later-turn-after-release",
         operation: "send_turn",
-        payload: { resumeReference: "fixture-chair-session", prompt: "must not reconstruct" },
+        payload: {
+          resumeReference: "fixture-chair-session",
+          providerSessionGeneration: 1,
+          prompt: "must not reconstruct",
+        },
       })).rejects.toMatchObject({ code: "CHAIR_BRIDGE_LOST" });
       expect(await readFile(countPath, "utf8")).toBe("1");
     } finally {

@@ -133,6 +133,7 @@ function claudeBoundary(): ClaudeAgentSdkBoundary {
     sendTurn: vi.fn(async () => ({ resumeReference: "claude-session-1", result: "done" })),
     interrupt: vi.fn(async () => ({ interrupted: true })),
     release: vi.fn(async () => ({ released: true, deleted: false })),
+    hasLiveChairSession: vi.fn(() => true),
   };
 }
 
@@ -146,6 +147,7 @@ function codexBoundary(): CodexAppServerBoundary {
     interrupt: vi.fn(async () => ({ interrupted: true })),
     compact: vi.fn(async () => ({ compacted: true, resumeReference: "codex-thread-1" })),
     release: vi.fn(async () => ({ released: true, deleted: false })),
+    hasLiveChairSession: vi.fn(() => true),
   };
 }
 
@@ -341,6 +343,13 @@ describe("Claude Agent SDK fabric adapter", () => {
       provedChairLaunch("claude-chair-session-1", request.providerContractDigest, "claude-agent-sdk", request.actionId),
     );
     expect(launchChair).toHaveBeenCalledOnce();
+    await adapter.request("release", {
+      actionId: "claude-chair-release-1",
+      payload: { resumeReference: "claude-chair-session-1" },
+    });
+    await expect(adapter.request("lookup_action", { actionId: request.actionId })).rejects.toMatchObject({
+      code: "CHAIR_BRIDGE_LOST",
+    });
     actionJournal.close();
   });
 
@@ -391,6 +400,9 @@ describe("Claude Agent SDK fabric adapter", () => {
       throw new Error("must not relaunch");
     }));
     const replacement = createClaudeAgentSdkAdapter({ boundary: replacementBoundary, journal: reopenedJournal });
+    await expect(replacement.request("lookup_action", { actionId: request.actionId })).rejects.toMatchObject({
+      code: "CHAIR_BRIDGE_LOST",
+    });
     await expect(replacement.request("launch_chair", request)).rejects.toMatchObject({
       code: "CHAIR_BRIDGE_LOST",
     });
@@ -596,6 +608,9 @@ describe("installed Claude chair launch boundary", () => {
     let mcp: ReturnType<typeof createClaudeChairMcpBridge> | undefined;
     let queryCount = 0;
     const queryClose = vi.fn();
+    let directMailboxError: unknown;
+    let mismatchedMailboxError: unknown;
+    let replayedMailboxError: unknown;
     const queryFactory = vi.fn((input: unknown) => {
       queryCount += 1;
       const thisQuery = queryCount;
@@ -622,7 +637,40 @@ describe("installed Claude chair launch boundary", () => {
             };
             await mcp.attestationTool.handler({ challengeResponse: bridge.challengeResponse }, {});
           } else {
+            directMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
+            yield {
+              type: "assistant",
+              session_id: "claude-chair-session-1",
+              uuid: "claude-message-mailbox-mismatch",
+              request_id: "claude-turn-2",
+              parent_tool_use_id: null,
+              message: {
+                content: [{
+                  type: "tool_use",
+                  name: mcp.mailboxToolName,
+                  id: "claude-tool-mailbox-mismatch",
+                  input: { unexpected: true },
+                }],
+              },
+            };
+            mismatchedMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
+            yield {
+              type: "assistant",
+              session_id: "claude-chair-session-1",
+              uuid: "claude-message-mailbox-1",
+              request_id: "claude-turn-2",
+              parent_tool_use_id: null,
+              message: {
+                content: [{
+                  type: "tool_use",
+                  name: mcp.mailboxToolName,
+                  id: "claude-tool-mailbox-1",
+                  input: {},
+                }],
+              },
+            };
             await mcp.mailboxTool.handler({}, {});
+            replayedMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
           }
           yield {
             type: "result",
@@ -696,6 +744,9 @@ describe("installed Claude chair launch boundary", () => {
     expect(rpcCall).toHaveBeenCalledOnce();
     expect(rpcClose).not.toHaveBeenCalled();
     await boundary.sendTurn({ resumeReference: "claude-chair-session-1", prompt: "later work" });
+    expect(directMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
+    expect(mismatchedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
+    expect(replayedMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(rpcCall).toHaveBeenCalledTimes(2);
     expect(rpcClose).not.toHaveBeenCalled();
     expect(mcpBridgeFactory).toHaveBeenCalledOnce();
@@ -703,6 +754,13 @@ describe("installed Claude chair launch boundary", () => {
     await expect(adapter.request("lookup_action", { actionId: "claude-launch-1" })).resolves.toMatchObject({
       status: "terminal",
       idempotencyProven: true,
+    });
+    await expect(boundary.sendTurn({
+      resumeReference: "claude-chair-session-1",
+      prompt: "replay a provider-native tool record",
+    })).rejects.toMatchObject({ code: "CHAIR_BRIDGE_LOST" });
+    await expect(adapter.request("lookup_action", { actionId: "claude-launch-1" })).rejects.toMatchObject({
+      code: "CHAIR_BRIDGE_LOST",
     });
     await boundary.closeAll();
     expect(rpcClose).toHaveBeenCalledOnce();
@@ -716,11 +774,13 @@ describe("installed Claude chair launch boundary", () => {
     let bridge: Awaited<ReturnType<typeof createChairLaunchFabricBridge>> | undefined;
     let mcp: ReturnType<typeof createClaudeChairMcpBridge> | undefined;
     let directInvocationError: unknown;
+    let preAttestationMailboxError: unknown;
     const queryFactory = vi.fn((_input: unknown) => ({
       close: vi.fn(),
       async *[Symbol.asyncIterator]() {
         yield { type: "system", subtype: "init", session_id: "claude-chair-orphan-session" };
         if (bridge === undefined || mcp === undefined) throw new Error("test bridge missing");
+        preAttestationMailboxError = await mcp.mailboxTool.handler({}, {}).catch((error: unknown) => error);
         directInvocationError = await mcp.attestationTool.handler({
           challengeResponse: bridge.challengeResponse,
         }, {}).catch((error: unknown) => error);
@@ -775,6 +835,7 @@ describe("installed Claude chair launch boundary", () => {
     });
     expect(String(error)).not.toContain(capability);
     expect(String(error)).not.toContain(socketPath);
+    expect(preAttestationMailboxError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(directInvocationError).toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
     expect(rpcClose).toHaveBeenCalledOnce();
     await expect(adapter.request("lookup_action", {
