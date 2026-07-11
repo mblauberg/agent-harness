@@ -1,0 +1,591 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/agent-fabric-protocol/v1/protocol.schema.json",
+  "title": "Agent Fabric public protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/initializeRequest" },
+    { "$ref": "#/$defs/initializeResult" },
+    { "$ref": "#/$defs/rpcRequest" },
+    { "$ref": "#/$defs/rpcResponse" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "fabricOperation": {
+      "type": "string",
+      "enum": [
+        "fabric.v1.project-session.create",
+        "fabric.v1.project-session.read",
+        "fabric.v1.project-session.transition",
+        "fabric.v1.project-session.close",
+        "fabric.v1.project-session.membership.bind",
+        "fabric.v1.operator.attach",
+        "fabric.v1.operator.detach",
+        "fabric.v1.operator.heartbeat",
+        "fabric.v1.operator.command",
+        "fabric.v1.operator.input-attest",
+        "fabric.v1.intake.submit",
+        "fabric.v1.intake.revise",
+        "fabric.v1.scoped-gate.create",
+        "fabric.v1.scoped-gate.rebind",
+        "fabric.v1.scoped-gate.resolve",
+        "fabric.v1.scoped-gate.check",
+        "fabric.v1.resource.reserve",
+        "fabric.v1.resource.release",
+        "fabric.v1.resource.reconcile",
+        "fabric.v1.task.request",
+        "fabric.v1.task.complete-with-reply",
+        "fabric.v1.result-delivery.claim",
+        "fabric.v1.result-delivery.provider-accept",
+        "fabric.v1.result-delivery.consume",
+        "fabric.v1.result-delivery.retry",
+        "fabric.v1.result-delivery.reassign",
+        "fabric.v1.result-delivery.abandon",
+        "fabric.v1.chair.takeover",
+        "fabric.v1.operator-projection.snapshot",
+        "fabric.v1.operator-projection.events",
+        "fabric.v1.message-body.read",
+        "fabric.v1.project-session.drain",
+        "fabric.v1.project-session.stop",
+        "fabric.v1.daemon.drain",
+        "fabric.v1.daemon.stop"
+      ]
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "digest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "protocolLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumFrameBytes",
+        "maximumPendingCalls",
+        "maximumInFlightPerConnection",
+        "idleTimeoutMs",
+        "requestTimeoutMs"
+      ],
+      "properties": {
+        "maximumFrameBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "maximumPendingCalls": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "maximumInFlightPerConnection": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "idleTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 300000 },
+        "requestTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 30000 }
+      }
+    },
+    "initializeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "client", "principal", "requiredFeatures", "optionalFeatures"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "client": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        },
+        "principal": { "$ref": "#/$defs/principal" },
+        "requiredFeatures": { "$ref": "#/$defs/features" },
+        "optionalFeatures": { "$ref": "#/$defs/features" }
+      }
+    },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "principalGeneration"],
+      "properties": {
+        "kind": { "enum": ["operator", "agent"] },
+        "principalGeneration": { "type": "integer", "minimum": 1 },
+        "operatorId": { "$ref": "#/$defs/identifier" },
+        "projectId": { "$ref": "#/$defs/identifier" },
+        "agentId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "runId": { "$ref": "#/$defs/identifier" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "operator" } } },
+          "then": { "required": ["operatorId", "projectId"] },
+          "else": { "required": ["agentId", "projectSessionId", "runId"] }
+        }
+      ]
+    },
+    "features": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "project-sessions.v1",
+          "operator-control.v1",
+          "intakes.v1",
+          "scoped-gates.v1",
+          "resource-reservations.v1",
+          "request-results.v1",
+          "chair-takeover.v1",
+          "operator-projection.v1",
+          "message-body-read.v1",
+          "lifecycle-control.v1"
+        ]
+      }
+    },
+    "initializeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "daemonVersion", "daemonInstanceGeneration", "features", "limits"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "daemonVersion": { "type": "string", "minLength": 1 },
+        "daemonInstanceGeneration": { "type": "integer", "minimum": 1 },
+        "features": { "$ref": "#/$defs/features" },
+        "limits": { "$ref": "#/$defs/protocolLimits" }
+      }
+    },
+    "rpcRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operation", "input"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "operation": { "$ref": "#/$defs/fabricOperation" },
+        "input": { "$ref": "#/$defs/operationInput" }
+      }
+    },
+    "rpcResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operation", "ok"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "operation": { "$ref": "#/$defs/fabricOperation" },
+        "ok": { "type": "boolean" },
+        "result": true,
+        "error": { "$ref": "#/$defs/protocolError" }
+      },
+      "oneOf": [
+        { "properties": { "ok": { "const": true } }, "required": ["result"] },
+        { "properties": { "ok": { "const": false } }, "required": ["error"] }
+      ]
+    },
+    "protocolError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "retryable": { "type": "boolean" },
+        "details": true
+      }
+    },
+    "projectSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectSessionId",
+        "projectId",
+        "mode",
+        "state",
+        "revision",
+        "generation",
+        "authorityRef",
+        "budgetRef",
+        "launchPacketRef",
+        "membershipRevision",
+        "origin"
+      ],
+      "properties": {
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "projectId": { "$ref": "#/$defs/identifier" },
+        "mode": { "enum": ["coordinated", "independent"] },
+        "state": {
+          "enum": [
+            "draft",
+            "awaiting_launch",
+            "launching",
+            "active",
+            "quiescing",
+            "awaiting_acceptance",
+            "closed",
+            "launch_failed",
+            "launch_ambiguous",
+            "reconciling",
+            "visibility_degraded",
+            "recovery_required",
+            "quarantined",
+            "cancelled"
+          ]
+        },
+        "revision": { "type": "integer", "minimum": 0 },
+        "generation": { "type": "integer", "minimum": 1 },
+        "authorityRef": { "$ref": "#/$defs/sha256" },
+        "budgetRef": { "$ref": "#/$defs/identifier" },
+        "launchPacketRef": { "$ref": "#/$defs/artifactRef" },
+        "membershipRevision": { "type": "integer", "minimum": 0 },
+        "origin": { "$ref": "#/$defs/sessionOrigin" },
+        "terminalPath": { "$ref": "#/$defs/terminalPath" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "enum": ["closed", "cancelled"] } } },
+          "then": { "required": ["terminalPath"] },
+          "else": { "not": { "required": ["terminalPath"] } }
+        }
+      ]
+    },
+    "sessionOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["operator-launch", "legacy-migration"] },
+        "operatorId": { "$ref": "#/$defs/identifier" },
+        "migrationManifestRef": { "$ref": "#/$defs/artifactRef" }
+      }
+    },
+    "terminalPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["accepted", "cancelled", "failed"] },
+        "acceptanceRef": { "$ref": "#/$defs/sha256" },
+        "reason": { "type": "string", "minLength": 1 },
+        "failureRef": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "operatorCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilityId",
+        "operatorId",
+        "projectId",
+        "principalGeneration",
+        "issuedAt",
+        "expiresAt",
+        "status",
+        "kind",
+        "actions"
+      ],
+      "properties": {
+        "capabilityId": { "$ref": "#/$defs/identifier" },
+        "operatorId": { "$ref": "#/$defs/identifier" },
+        "projectId": { "$ref": "#/$defs/identifier" },
+        "principalGeneration": { "type": "integer", "minimum": 1 },
+        "issuedAt": { "$ref": "#/$defs/timestamp" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "status": { "const": "active" },
+        "kind": { "enum": ["project-launch", "session", "takeover"] },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "sessionGeneration": { "type": "integer", "minimum": 1 },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "read",
+              "decide",
+              "steer",
+              "pause",
+              "resume",
+              "cancel",
+              "drain",
+              "stop",
+              "launch",
+              "takeover",
+              "git",
+              "external-effect"
+            ]
+          }
+        },
+        "takeoverBinding": { "$ref": "#/$defs/takeoverBinding" }
+      }
+    },
+    "takeoverBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "handoffDigest",
+        "oldChairGeneration",
+        "expectedRunId",
+        "expectedRunRevision",
+        "expectedSessionRevision",
+        "targetRevision"
+      ],
+      "properties": {
+        "handoffDigest": { "$ref": "#/$defs/sha256" },
+        "oldChairGeneration": { "type": "integer", "minimum": 1 },
+        "expectedRunId": { "$ref": "#/$defs/identifier" },
+        "expectedRunRevision": { "type": "integer", "minimum": 0 },
+        "expectedSessionRevision": { "type": "integer", "minimum": 0 },
+        "targetRevision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "operatorInputAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attestationId",
+        "operatorId",
+        "projectId",
+        "projectSessionId",
+        "providerMessageId",
+        "humanUtterance",
+        "channel",
+        "gateBinding",
+        "recordedAt"
+      ],
+      "properties": {
+        "attestationId": { "$ref": "#/$defs/identifier" },
+        "operatorId": { "$ref": "#/$defs/identifier" },
+        "projectId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "providerMessageId": { "type": "string", "minLength": 1 },
+        "humanUtterance": { "type": "string", "minLength": 1 },
+        "channel": { "type": "object" },
+        "gateBinding": { "type": "object" },
+        "recordedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "intake": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intakeId", "projectSessionId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"],
+      "properties": {
+        "intakeId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["draft", "awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"] },
+        "dedupeKey": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "artifactRefs": { "type": "array", "items": { "$ref": "#/$defs/artifactRef" } },
+        "gateIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+      }
+    },
+    "scopedGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gateId",
+        "projectSessionId",
+        "coordinationRunId",
+        "scope",
+        "affectedTaskIds",
+        "dependencyRevision",
+        "blockedOperationIds",
+        "enforcementPoints",
+        "question",
+        "reason",
+        "options",
+        "consequences",
+        "evidenceRefs",
+        "revision",
+        "createdByRef",
+        "expectedApproverRef",
+        "status"
+      ],
+      "properties": {
+        "gateId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "coordinationRunId": { "$ref": "#/$defs/identifier" },
+        "scope": { "type": "object" },
+        "affectedTaskIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" } },
+        "dependencyRevision": { "type": "integer", "minimum": 0 },
+        "blockedOperationIds": { "type": "array", "items": { "$ref": "#/$defs/fabricOperation" } },
+        "enforcementPoints": { "type": "array", "uniqueItems": true, "items": { "enum": ["task-readiness", "operation", "scoped-barrier"] } },
+        "question": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "options": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "recommendation": { "type": "string" },
+        "consequences": { "type": "array", "items": { "type": "string" } },
+        "evidenceRefs": { "type": "array", "items": { "$ref": "#/$defs/artifactRef" } },
+        "revision": { "type": "integer", "minimum": 1 },
+        "createdByRef": { "type": "string", "minLength": 1 },
+        "expectedApproverRef": { "type": "string", "minLength": 1 },
+        "deadline": { "$ref": "#/$defs/timestamp" },
+        "default": { "type": "string" },
+        "status": { "enum": ["pending", "approved", "rejected", "deferred", "cancelled", "superseded"] },
+        "resolution": { "type": "object" },
+        "releaseBinding": { "type": "object" }
+      }
+    },
+    "resourceReservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commandId", "reservationId", "projectSessionId", "path", "amounts"],
+      "properties": {
+        "commandId": { "$ref": "#/$defs/identifier" },
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "array", "minItems": 2, "items": { "type": "object" } },
+        "amounts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "writerAdmission": { "type": "object" }
+      }
+    },
+    "taskRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commandId", "projectSessionId", "coordinationRunId", "task", "request"],
+      "properties": {
+        "commandId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "coordinationRunId": { "$ref": "#/$defs/identifier" },
+        "task": { "type": "object" },
+        "request": { "type": "object" }
+      }
+    },
+    "taskCompleteWithReply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandId",
+        "taskId",
+        "expectedTaskRevision",
+        "ownerLeaseId",
+        "ownerLeaseGeneration",
+        "requestMessageId",
+        "expectedRequestRevision",
+        "callbackId",
+        "callbackGeneration",
+        "reply",
+        "terminalResult"
+      ],
+      "properties": {
+        "commandId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" },
+        "expectedTaskRevision": { "type": "integer", "minimum": 1 },
+        "ownerLeaseId": { "$ref": "#/$defs/identifier" },
+        "ownerLeaseGeneration": { "type": "integer", "minimum": 1 },
+        "requestMessageId": { "$ref": "#/$defs/identifier" },
+        "expectedRequestRevision": { "type": "integer", "minimum": 1 },
+        "callbackId": { "$ref": "#/$defs/identifier" },
+        "callbackGeneration": { "type": "integer", "minimum": 1 },
+        "reply": { "type": "object" },
+        "terminalResult": { "type": "object" }
+      }
+    },
+    "resultDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resultDeliveryId",
+        "revision",
+        "projectSessionId",
+        "taskId",
+        "requestMessageId",
+        "requestRevision",
+        "replyMessageId",
+        "replyRevision",
+        "taskRevision",
+        "callbackId",
+        "callbackGeneration",
+        "assignmentGeneration",
+        "targetAgentId",
+        "targetProviderSessionRef",
+        "payloadDigest",
+        "responseDeadline",
+        "dependentBarrierId",
+        "required",
+        "state",
+        "claimGeneration"
+      ],
+      "properties": {
+        "resultDeliveryId": { "$ref": "#/$defs/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" },
+        "requestMessageId": { "$ref": "#/$defs/identifier" },
+        "requestRevision": { "type": "integer", "minimum": 1 },
+        "replyMessageId": { "$ref": "#/$defs/identifier" },
+        "replyRevision": { "type": "integer", "minimum": 1 },
+        "taskRevision": { "type": "integer", "minimum": 1 },
+        "callbackId": { "$ref": "#/$defs/identifier" },
+        "callbackGeneration": { "type": "integer", "minimum": 1 },
+        "assignmentGeneration": { "type": "integer", "minimum": 1 },
+        "targetAgentId": { "$ref": "#/$defs/identifier" },
+        "targetProviderSessionRef": { "$ref": "#/$defs/identifier" },
+        "payloadDigest": { "$ref": "#/$defs/sha256" },
+        "responseDeadline": { "$ref": "#/$defs/timestamp" },
+        "dependentBarrierId": { "$ref": "#/$defs/identifier" },
+        "required": { "type": "boolean" },
+        "state": { "enum": ["pending", "claimed", "provider-accepted", "consumed", "overdue", "abandoned"] },
+        "claimGeneration": { "type": "integer", "minimum": 0 },
+        "claimedByAgentId": { "$ref": "#/$defs/identifier" },
+        "claimDeadline": { "$ref": "#/$defs/timestamp" },
+        "providerAcceptedAt": { "$ref": "#/$defs/timestamp" },
+        "consumedAt": { "$ref": "#/$defs/timestamp" },
+        "overdueAt": { "$ref": "#/$defs/timestamp" },
+        "abandonedAt": { "$ref": "#/$defs/timestamp" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "projectionRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "projectSessionId"],
+      "properties": {
+        "projectId": { "$ref": "#/$defs/identifier" },
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "after": { "type": "integer", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "messageBodyRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectSessionId", "messageId", "expectedRevision"],
+      "properties": {
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "messageId": { "$ref": "#/$defs/identifier" },
+        "expectedRevision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "lifecycleCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedGeneration"],
+      "properties": {
+        "projectSessionId": { "$ref": "#/$defs/identifier" },
+        "expectedGeneration": { "type": "integer", "minimum": 1 },
+        "expectedGlobalStateRevision": { "type": "integer", "minimum": 0 },
+        "consequencePreviewRef": { "$ref": "#/$defs/artifactRef" },
+        "drainReceiptRef": { "$ref": "#/$defs/artifactRef" }
+      }
+    },
+    "operationInput": {
+      "oneOf": [
+        { "$ref": "#/$defs/projectSession" },
+        { "$ref": "#/$defs/operatorInputAttestation" },
+        { "$ref": "#/$defs/intake" },
+        { "$ref": "#/$defs/scopedGate" },
+        { "$ref": "#/$defs/resourceReservation" },
+        { "$ref": "#/$defs/taskRequest" },
+        { "$ref": "#/$defs/taskCompleteWithReply" },
+        { "$ref": "#/$defs/resultDelivery" },
+        { "$ref": "#/$defs/projectionRead" },
+        { "$ref": "#/$defs/messageBodyRead" },
+        { "$ref": "#/$defs/lifecycleCommand" }
+      ]
+    }
+  }
+}
