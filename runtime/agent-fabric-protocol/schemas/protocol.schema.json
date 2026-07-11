@@ -3375,7 +3375,7 @@
                       "minProperties": 0,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -6104,7 +6104,7 @@
                               "minProperties": 0,
                               "maxProperties": 128,
                               "propertyNames": {
-                                "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                                "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                               },
                               "additionalProperties": {
                                 "type": "integer",
@@ -6461,7 +6461,7 @@
                                 "minProperties": 0,
                                 "maxProperties": 128,
                                 "propertyNames": {
-                                  "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                                  "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                                 },
                                 "additionalProperties": {
                                   "type": "integer",
@@ -6607,7 +6607,7 @@
                       "minProperties": 1,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -6737,7 +6737,7 @@
                       "minProperties": 0,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -6749,7 +6749,7 @@
                       "minProperties": 0,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -7067,7 +7067,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -7124,7 +7124,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -7188,7 +7188,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -15854,7 +15854,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -15960,7 +15960,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -16023,7 +16023,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -29071,7 +29071,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -29516,7 +29516,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -29926,7 +29926,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -30336,7 +30336,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -30786,7 +30786,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -30826,7 +30826,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31016,7 +31016,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31056,7 +31056,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31246,7 +31246,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31286,7 +31286,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31476,7 +31476,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31516,7 +31516,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31706,7 +31706,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31746,7 +31746,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -42522,7 +42522,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -42534,7 +42534,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -42970,7 +42970,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -42982,7 +42982,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -43418,7 +43418,7 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -43430,7 +43430,7 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                   },
                   "additionalProperties": {
                     "oneOf": [

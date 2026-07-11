@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
+import { TimedNdjsonTransport } from "../../src/transport/ndjson-rpc.ts";
 import {
   callTool,
   MCP_ROOT_AUTHORITY,
@@ -50,6 +51,10 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       socketPath,
       capability: run.chairCapability,
     });
+    const chairCompatibility = await TimedNdjsonTransport.connect({
+      socketPath,
+      capability: run.chairCapability,
+    });
     let leaderProxy: McpProxy | undefined;
     let leaderDaemon: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
     cleanup.push(async () => {
@@ -58,6 +63,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
         leaderProxy?.close(),
         leaderDaemon?.close(),
         chairDaemon.close(),
+        chairCompatibility.close(),
         bootstrap.close(),
       ]);
       await daemon.stop();
@@ -83,20 +89,19 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       required: ["budgetId", "parentBudgetId", "state", "dimensions", "returned"],
     });
 
-    const created = await callTool(
-      chairProxy.client,
-      "fabric_team_create",
-      {
-        ...teamCreateInput({
-          teamId: "stage5-mcp-team",
-          memberAuthorities: [],
-          reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
-        }),
-        discussionGroups: [],
-      },
-    );
-    expect(created.isError).toBe(false);
-    const leader = requireRecord(created.structured.leader, "created leader");
+    // Atomic team creation still returns a leader bearer capability and is
+    // therefore registry-classified `none`; bootstrap it through the private
+    // compatibility client, then exercise every secret-free team operation
+    // through the generated MCP surface.
+    const created = requireRecord(await chairCompatibility.call("createTeam", {
+      ...teamCreateInput({
+        teamId: "stage5-mcp-team",
+        memberAuthorities: [],
+        reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
+      }),
+      discussionGroups: [],
+    }), "created team");
+    const leader = requireRecord(created.leader, "created leader");
     if (typeof leader.capability !== "string") throw new TypeError("leader capability is missing");
     leaderProxy = await spawnMcpProxy({
       socketPath,

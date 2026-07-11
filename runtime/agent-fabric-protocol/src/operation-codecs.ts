@@ -296,7 +296,7 @@ const positiveInteger = integer({ minimum: 1 });
 const stringList = arrayOf(identifier, { maximum: 256, unique: true });
 const textList = arrayOf(text, { maximum: 256 });
 const integerList = arrayOf(integer(), { maximum: 256, unique: true });
-const resourceUnitPattern = "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$";
+const resourceUnitPattern = "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$";
 const numberRecord = recordOf(integer(), { maximum: 128, keyPattern: resourceUnitPattern });
 const nonEmptyNumberRecord = recordOf(integer(), {
   minimum: 1,

@@ -127,7 +127,6 @@ export async function createFabricMcpServer(options: FabricMcpServerOptions): Pr
       const payload = errorPayload(error);
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
-        structuredContent: payload,
         isError: true,
       };
     }

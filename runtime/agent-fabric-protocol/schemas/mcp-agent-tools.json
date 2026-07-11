@@ -713,7 +713,7 @@
                 "minProperties": 0,
                 "maxProperties": 128,
                 "propertyNames": {
-                  "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                  "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
                 },
                 "additionalProperties": {
                   "type": "integer",
@@ -856,7 +856,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:3c3555d513274c066b41253029f8bde03f0ae0826458ef201a9a8cee2441191e",
+      "inputCodecDigest": "sha256:ae94afa330d399b3373a5d8dd06db3d7cf8efa7fb75b351716c5456f0ccdfde9",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -1067,7 +1067,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -1080,7 +1080,7 @@
         }
       },
       "inputCodecDigest": "sha256:8dbd1e053d966d8ec489b98a2ab4765dbba5a2b76858c1660449504f01b6da9b",
-      "outputCodecDigest": "sha256:08ae1465423fcbbd5973c89e8c0ecb0551e98550e564cb305a75538ded64d7d2"
+      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
     },
     {
       "operation": "fabric.v1.budget.release",
@@ -1201,7 +1201,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -1214,7 +1214,7 @@
         }
       },
       "inputCodecDigest": "sha256:4ce6a3dc5dcdee44055f0cf28c012dd81123bfaaddabc3f7f4b1fe2d77abfbb7",
-      "outputCodecDigest": "sha256:08ae1465423fcbbd5973c89e8c0ecb0551e98550e564cb305a75538ded64d7d2"
+      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
     },
     {
       "operation": "fabric.v1.budget.reserve",
@@ -1252,7 +1252,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -1361,7 +1361,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -1373,8 +1373,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:ecfc06689a32b497c43fbb0d4abb76e6471a5d50117f703bddb8e397ca72497a",
-      "outputCodecDigest": "sha256:08ae1465423fcbbd5973c89e8c0ecb0551e98550e564cb305a75538ded64d7d2"
+      "inputCodecDigest": "sha256:dfc6239be196e3aef17c723b9715219965c5f20145fe90ddf42679bd28482832",
+      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
     },
     {
       "operation": "fabric.v1.budget.usage.reconcile",
@@ -1399,7 +1399,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -1508,7 +1508,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -1520,8 +1520,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:d547ea0abf34cb70bfcc7c2e73d15467abeda3f52612427b2bfa52086d0472b7",
-      "outputCodecDigest": "sha256:08ae1465423fcbbd5973c89e8c0ecb0551e98550e564cb305a75538ded64d7d2"
+      "inputCodecDigest": "sha256:65fa0ad689266f07d3cf50aa84d38b4fc2e9327be5956649c37384950fd38b76",
+      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
     },
     {
       "operation": "fabric.v1.budget.usage.record",
@@ -1546,7 +1546,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "oneOf": [
@@ -1662,7 +1662,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -1674,8 +1674,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:e80207ea6b0f2822b16678ed4d6b9493f82520b6effb729f29cc49b1c404a98c",
-      "outputCodecDigest": "sha256:08ae1465423fcbbd5973c89e8c0ecb0551e98550e564cb305a75538ded64d7d2"
+      "inputCodecDigest": "sha256:c7c1f4d18df73b7e3d0a557cb394c7461c5dca46a83913726bdfd15041bbdb09",
+      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
     },
     {
       "operation": "fabric.v1.delivery.abandon",
@@ -5515,7 +5515,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "oneOf": [
@@ -5788,7 +5788,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -5800,8 +5800,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:8b3079b532008cae92e874352e09c29444f256cfb1378e9417da309d297574ba",
-      "outputCodecDigest": "sha256:943562a1338755b655124c973e2f9f2e0babebf57ab91d4b485902ed2da48cad"
+      "inputCodecDigest": "sha256:73f4b71dec3a01e5bd22c6e3d724fd507a7d3f56c5d79b0fdddf99ccc77b3c8e",
+      "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
     },
     {
       "operation": "fabric.v1.resource.release",
@@ -5834,7 +5834,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -6093,7 +6093,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -6105,8 +6105,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:778bd44b38414f356aeb83504fb6652311047459125b460ac8f9fc0d0c339024",
-      "outputCodecDigest": "sha256:943562a1338755b655124c973e2f9f2e0babebf57ab91d4b485902ed2da48cad"
+      "inputCodecDigest": "sha256:e9918ffba9ee727b20846d503668d58a5e938bcb026d5ea5338765c276f00fb5",
+      "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
     },
     {
       "operation": "fabric.v1.resource.reserve",
@@ -6264,7 +6264,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -6565,7 +6565,7 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
           },
           "generated_2": {
             "type": "string",
@@ -6577,8 +6577,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:712565fb0ec404668a7bc746486206592b409f5d15b88c6cb90f6c077a42cff4",
-      "outputCodecDigest": "sha256:943562a1338755b655124c973e2f9f2e0babebf57ab91d4b485902ed2da48cad"
+      "inputCodecDigest": "sha256:4ccb09426e98b9731c4675de0fee0d7331ff43a9ab613d446b7a01ece74293c5",
+      "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
     },
     {
       "operation": "fabric.v1.result-delivery.abandon",
@@ -11378,7 +11378,7 @@
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -11466,7 +11466,7 @@
         }
       },
       "inputCodecDigest": "sha256:fe5e7016f0ba4fd4e4cc48a858a5de205512fdec5a99e07b09903364ce93dcef",
-      "outputCodecDigest": "sha256:105e7afaa0d1afcd291c8f7ceecfe656b47d1f7ed97e3d5ada97a19e665374fc"
+      "outputCodecDigest": "sha256:0a50a3fa5e012f983b8e9f9d692c2eb5812c9d37373ba5375163f726e3a86790"
     },
     {
       "operation": "fabric.v1.subtree.freeze",
@@ -11604,7 +11604,7 @@
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -11692,7 +11692,7 @@
         }
       },
       "inputCodecDigest": "sha256:f230a66d282867e82217c8ca6c19b37f3d8304a86eaa18050a2203419ae4f800",
-      "outputCodecDigest": "sha256:105e7afaa0d1afcd291c8f7ceecfe656b47d1f7ed97e3d5ada97a19e665374fc"
+      "outputCodecDigest": "sha256:0a50a3fa5e012f983b8e9f9d692c2eb5812c9d37373ba5375163f726e3a86790"
     },
     {
       "operation": "fabric.v1.task.claim",
@@ -13905,7 +13905,7 @@
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
             },
             "additionalProperties": {
               "type": "integer",
@@ -13993,7 +13993,7 @@
         }
       },
       "inputCodecDigest": "sha256:28942f788bf36e90e63029f275b3287a764915b493c25753f5ee839919947cf4",
-      "outputCodecDigest": "sha256:105e7afaa0d1afcd291c8f7ceecfe656b47d1f7ed97e3d5ada97a19e665374fc"
+      "outputCodecDigest": "sha256:0a50a3fa5e012f983b8e9f9d692c2eb5812c9d37373ba5375163f726e3a86790"
     },
     {
       "operation": "fabric.v1.visibility-failure.record",

@@ -58,6 +58,10 @@ describe("registry-owned MCP projection", () => {
       isError: false,
       structured: { runId: fixture.run.runId, chairAgentId: "chair" },
     });
+    const missing = await callTool(fixture.chairProxy.client, "fabric_provider_action_read", {
+      actionId: "missing-action",
+    });
+    expect(missing).toMatchObject({ isError: true, structured: { code: "NOT_FOUND" } });
 
     const templates = await fixture.chairProxy.client.listResourceTemplates();
     expect(templates.resourceTemplates).toStrictEqual(expected.resources.map((descriptor) => ({
