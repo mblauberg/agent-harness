@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "runtime/agent-fabric/dist/adapters/compatibility.js",
-      "sha256": "e7c15a3b6975226e5a3ad050cf4f02e34c762c7f85500e59371835861f82d911"
+      "sha256": "98f9c64cbb807a175462f4b948e0fa5188d0531b7264ab1d15694285d1d8ea12"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/model-selection.js",
