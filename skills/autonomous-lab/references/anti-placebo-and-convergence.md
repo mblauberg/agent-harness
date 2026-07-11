@@ -1,6 +1,6 @@
 # Quality Discipline: Anti-Placebo Gates, the Build Ceiling, and Bounded Convergence
 
-*Layer 6 of the autonomous-lab skill. Realized by the **build-spike and finishing-audit archetypes you author per-run** (see `references/workflow-patterns.md` — the skill ships no workflow files) and the shipped `scripts/cross-family.sh`. Cross-refs: `references/cross-family-review.md` (the independent verdict), `references/decision-lifecycle.md` (escalation taxonomy).*
+*Layer 6 of the autonomous-lab skill. Realized by the **build-spike and finishing-audit archetypes you author per-run** (see `references/workflow-patterns.md` — the skill ships no workflow files) and Fabric-routed external review. Cross-refs: `references/cross-family-review.md` (the independent verdict), `references/decision-lifecycle.md` (escalation taxonomy).*
 
 This layer is what makes a long autonomous run's outputs *trustworthy* rather than merely *voluminous*. Without it, a run produces a clean-looking pile of green checks that don't actually check anything, builds things it had no license to build, and loops forever chasing an unreachable "done." With it, you get three interlocking guarantees: every verification is proven real, every artifact stays inside an explicit license-to-build, and the run terminates honestly with a documented residual instead of a fabricated all-clear.
 

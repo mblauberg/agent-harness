@@ -3,21 +3,21 @@
   "delivery_run_id": "SKILLS-20260711",
   "evidence_cutoff": "2026-07-11",
   "routing_regression": {
-    "evaluation_id": "skill-portfolio-routing-20260711",
+    "evaluation_id": "skill-portfolio-routing-20260711-fabric-v2-opus",
     "status": "pass",
     "families": ["anthropic", "openai"],
     "repetitions": 3,
-    "cases": 14,
+    "cases": 15,
     "attempts": 6,
-    "case_rows": 84,
+    "case_rows": 90,
     "primary_accuracy": 1.0,
     "primary_threshold": 1.0,
     "companion_fidelity": 1.0,
     "companion_threshold": 0.9,
-    "plan_digest": "sha256:e4f58c062df27f5d85e2797bef99f314000951eec1dbf39d2f926036c80bffee",
-    "dataset_digest": "sha256:20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13",
-    "catalogue_digest": "sha256:c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6",
-    "receipt_digest": "sha256:954c285b8855a4da0058ef3eecf8971a513757f41abf592e07fc50df6c215545",
+    "plan_digest": "sha256:05989dcd9bf869b54a64f670a3a465ccefd040b045c0125fd8459d68a1ab49c5",
+    "dataset_digest": "sha256:ccf946829c97f0972d144b1e1e07cc308833d7dc6cc20d20eed850e3d422b30d",
+    "catalogue_digest": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
+    "receipt_digest": "sha256:f0284aff373da2bcc4af9933746fe81bfbd9e1d81bd264137be6e029cdae2cff",
     "human_acceptance": "external"
   },
   "availability": {
@@ -26,6 +26,13 @@
     "openai_effective_model": "gpt-5.6-sol"
   },
   "retained_nonpasses": [
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-fabric-v2-fable-unavailable",
+      "status": "incomplete",
+      "reason": "three frozen Fable attempts returned HTTP 429 before generation; all 45 OpenAI rows passed but the mixed run was excluded and the full schedule reran on the predeclared Opus fallback",
+      "receipt_digest": "sha256:0c69de105fe359fa1640f0b8f5a36416b350acf91f21b60a071e1884cf7dbad4",
+      "artifact_root": ".agent-run/ADDY-HARNESS-20260711/evaluation/routing-fabric-v2"
+    },
     {
       "evaluation_id": "skill-portfolio-routing-20260711-fable-unavailable",
       "status": "incomplete",

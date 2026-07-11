@@ -107,13 +107,11 @@ them in:
    `cli-headless.md`, writing normalised results to files for the next phase; or run a separate
    cross-family verification pass over the production workflow's artifacts before acting. Only routes with
    `status=ok`, `cross_family=true`, and `read_only_guarantee=enforced` or `oauth_safe_mode` certify
-   (`cross_family_certified`); best_effort routes may scout but not certify (`cross_family_advisory`;
-   agy is best_effort).
-
-For agy, prefer bounded evidence packets over repo-roaming prompts: `scope`, `diff/artifacts`,
-`anchors`, and `questions`. Ask for visible fields (`hypothesis`, `risk`, `evidence_needed`,
-`likely_files`, `falsification_check`) so native or certified reviewers can verify each claim. This
-makes agy useful as a divergent scout without overstating read-only certification.
+   (`cross_family_certified`); best_effort routes may scout but not certify
+   (`cross_family_advisory`). Gemini-family bonus work uses Agent Fabric. Give
+   it bounded evidence packets—`scope`, `diff/artifacts`, `anchors`, and
+   `questions`—and verify every returned claim through native or certified
+   evidence.
 
 Keep the verifier's input artifact-only (no orchestrator reasoning) per `verification.md`. Apply
 the host data policy before any external-family dispatch — classify/redact and record the authorised

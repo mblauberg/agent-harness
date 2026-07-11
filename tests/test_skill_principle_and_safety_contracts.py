@@ -64,3 +64,28 @@ def test_typescript_parallelism_is_bounded_not_automatic():
     assert "`Promise.all` suits a small fixed set" in skill
     assert "bounded pool/queue for large collections" in skill
     assert "Do not map an unbounded input straight into Promise.all" in patterns
+
+
+def test_implementation_grounds_version_sensitive_interfaces_without_overriding_local_policy():
+    skill = squash(text("skills/implement/SKILL.md"))
+    grounding = squash(text("skills/implement/references/source-grounding.md"))
+    assert "version-sensitive external interface" in skill
+    assert "installed or locked version" in grounding
+    assert "primary source" in grounding
+    assert "unverified" in grounding
+    assert "repository convention" in grounding
+    assert "every ordinary code line" in grounding
+
+
+def test_migrations_preserve_mixed_version_safety_and_expire_compatibility_paths():
+    skill = squash(text("skills/implement/SKILL.md"))
+    migration = squash(text("skills/implement/references/migration-compatibility.md"))
+    for phrase in (
+        "mixed-version window",
+        "expand, migrate, contract",
+        "usage-zero evidence",
+        "expiry owner",
+        "containment",
+    ):
+        assert phrase in f"{skill} {migration}"
+    assert "Every migration needs a down migration" not in migration

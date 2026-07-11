@@ -149,7 +149,7 @@ def test_help_exits_cleanly():
         stderr=subprocess.PIPE,
     )
     assert result.returncode == 0
-    assert "CF_DISPATCH_AGY_TIMEOUT" in result.stdout
+    assert "Gemini/Agy execution belongs to Agent Fabric" in result.stdout
     assert "--doctor" in result.stdout
 
 
@@ -163,7 +163,7 @@ def test_doctor_exits_cleanly():
     assert result.returncode == 0
     assert "cf_dispatch doctor" in result.stdout
     assert "PATH=" in result.stdout
-    assert "CF_DISPATCH_ENABLE_AGY=" in result.stdout
+    assert "agy=" not in result.stdout
 
 
 def test_missing_option_value_is_clean_error():
@@ -180,7 +180,7 @@ def test_missing_option_value_is_clean_error():
 
 def test_missing_prompt_file_is_clean_error():
     result = subprocess.run(
-        [str(SCRIPT), "--tool", "agy", "--orchestrator-family", "codex", "--prompt-file", "/no/such/file"],
+        [str(SCRIPT), "--tool", "claude", "--orchestrator-family", "codex", "--prompt-file", "/no/such/file"],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -275,7 +275,7 @@ def test_claude_oauth_fallback_uses_verifier_system_prompt():
         assert out.read_text(encoding="utf-8").strip() == "OK"
 
 
-def test_disabled_adapter_fails_closed_with_schema():
+def test_removed_agy_direct_route_fails_closed_with_schema():
     with tempfile.TemporaryDirectory() as td:
         result = subprocess.run(
             [str(SCRIPT), "--tool", "agy", "--model", "gemini-test", "--orchestrator-family", "codex", "--prompt", "Reply exactly OK"],
@@ -287,9 +287,8 @@ def test_disabled_adapter_fails_closed_with_schema():
         record = json.loads(result.stdout)
         assert result.returncode != 0
         assert DISPATCH_SCHEMA <= set(record)
-        assert record["status"] == "unsafe_by_default"
+        assert record["status"] == "unknown_tool"
         assert record["read_only_guarantee"] == "none"
-        assert Path(record["output_path"]).exists()
 
 
 def test_default_failure_retains_only_the_declared_output_tempfile():
@@ -300,7 +299,7 @@ def test_default_failure_retains_only_the_declared_output_tempfile():
         env = os.environ.copy()
         env["TMPDIR"] = str(temp_root)
         result = subprocess.run(
-            [str(SCRIPT), "--tool", "agy", "--model", "gemini-test", "--orchestrator-family", "codex", "--prompt", "Review"],
+            [str(SCRIPT), "--tool", "kiro", "--orchestrator-family", "codex", "--prompt", "Review"],
             cwd=td,
             env=env,
             text=True,
@@ -313,57 +312,6 @@ def test_default_failure_retains_only_the_declared_output_tempfile():
         assert output.exists()
         assert [path.resolve() for path in temp_root.iterdir()] == [output.resolve()]
         output.unlink()
-
-
-def test_enabled_agy_passes_print_timeout():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        bin_dir = tmp / "bin"
-        bin_dir.mkdir()
-        args_file = tmp / "agy.args"
-        write_executable(
-            bin_dir / "agy",
-            f"""\
-            #!/usr/bin/env bash
-            printf '%s\\n' "$@" > {args_file}
-            echo OK
-            """,
-        )
-        out = tmp / "out.txt"
-        env = os.environ.copy()
-        env["PATH"] = f"{bin_dir}:{env['PATH']}"
-        env["CF_DISPATCH_ENABLE_AGY"] = "1"
-        env["CF_DISPATCH_AGY_TIMEOUT"] = "17s"
-        result = subprocess.run(
-            [
-                str(SCRIPT),
-                "--tool",
-                "agy",
-                "--model",
-                "gemini-test",
-                "--orchestrator-family",
-                "codex",
-                "--out",
-                str(out),
-                "--prompt",
-                "Reply exactly OK",
-            ],
-            cwd=td,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        record = json.loads(result.stdout)
-        assert result.returncode == 0, result.stderr
-        assert record["status"] == "ok"
-        assert record["read_only_guarantee"] == "best_effort"
-        assert out.read_text(encoding="utf-8").strip() == "OK"
-        args = args_file.read_text(encoding="utf-8").splitlines()
-        assert "--print" in args
-        assert args[args.index("--print") + 1] == "Reply exactly OK"
-        assert "--print-timeout" in args
-        assert "17s" in args
 
 
 def test_orchestrator_family_is_required():
@@ -722,7 +670,7 @@ def test_chain_all_failed_uses_dispatch_schema():
             [
                 str(SCRIPT),
                 "--chain",
-                "agy:gemini-test kiro",
+                "kiro copilot",
                 "--orchestrator-family",
                 "codex",
                 "--prompt",
@@ -793,8 +741,7 @@ if __name__ == "__main__":
     test_missing_prompt_file_is_clean_error()
     test_claude_oauth_fallback_after_bare_auth_failure()
     test_claude_oauth_fallback_uses_verifier_system_prompt()
-    test_disabled_adapter_fails_closed_with_schema()
-    test_enabled_agy_passes_print_timeout()
+    test_removed_agy_direct_route_fails_closed_with_schema()
     test_orchestrator_family_is_required()
     test_same_family_cli_is_forbidden_when_family_declared()
     test_invalid_orchestrator_family_fails_closed()

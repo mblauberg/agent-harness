@@ -24,10 +24,11 @@ disclosure, external-action and decision ceilings. Otherwise use
 
 1. Run `scripts/bootstrap-lab.sh <LAB_DIR>`, fill every CONFIG KNOB in
    `GOAL.md`, then rerun it to materialise/validate.
-2. Preflight operator/review routes with
-   `scripts/cross-family.sh --operator-family <family>`. Omission or unresolved
-   model lineage fails closed. Missing other-primary coverage reaches a human
-   gate; bonus-family failure is recorded and non-blocking.
+2. Preflight Agent Fabric with `scripts/agent-fabric status --json --project
+   "$PWD"` and `scripts/agent-fabric doctor --json`, then dispatch external
+   review tasks through `orchestrate`. Missing or unresolved other-primary
+   lineage reaches a human gate; bonus-family failure is recorded and
+   non-blocking. A direct CLI is an explicit degraded fallback, never primary.
 3. Operate one iteration at a time after reading `OPERATING_MANUAL.md`,
    `GOAL.md`, `STATE.md` and queue head. Keep one orchestrator lease.
 4. Interactive labs use Herdr and record owned panes. External-driver-only

@@ -60,15 +60,15 @@ def test_release_and_evaluate_complete_the_delivery_spine():
         assert frontmatter_name(skill) == name
 
 
-def test_autonomous_lab_external_reviewers_fail_closed_read_only():
-    script = (ROOT / "skills" / "autonomous-lab" / "scripts" / "cross-family.sh").read_text()
+def test_autonomous_lab_external_reviewers_are_fabric_first():
+    skill = (ROOT / "skills" / "autonomous-lab" / "SKILL.md").read_text()
+    orchestration = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()
     dispatcher = (ROOT / "skills" / "orchestrate" / "scripts" / "cf_dispatch.sh").read_text()
-    assert "CF_DISPATCH" in script
+    assert not (ROOT / "skills" / "autonomous-lab" / "scripts" / "cross-family.sh").exists()
+    assert "Agent Fabric" in skill
+    assert "Answer-bearing external work uses Fabric request/reply" in orchestration
     assert "codex exec -s read-only" in dispatcher
-    assert "--editable" not in script
-    assert "--dangerously-skip-permissions" not in script
-    assert "BOTH_PRIMARY" in script
-    assert "cancelled without delaying the gate" in script
+    assert "explicit degraded fallback" in dispatcher
 
 
 def test_root_harness_checker_is_available():
@@ -79,10 +79,8 @@ def test_root_harness_checker_is_available():
 
 def test_dispatchers_default_to_their_checkout_not_a_home_install():
     dispatcher = (ROOT / "skills" / "orchestrate" / "scripts" / "cf_dispatch.sh").read_text()
-    cross_family = (ROOT / "skills" / "autonomous-lab" / "scripts" / "cross-family.sh").read_text()
     assert 'AGENTS_ROOT="${AGENTS_HOME:-$HARNESS_ROOT}"' in dispatcher
-    assert 'MODEL_ROUTE="${AGENTS_HOME:-$HARNESS_ROOT}/scripts/model-route"' in cross_family
-    assert '${AGENTS_HOME:-$HOME/.agents}/scripts/model-route' not in dispatcher + cross_family
+    assert '${AGENTS_HOME:-$HOME/.agents}/scripts/model-route' not in dispatcher
 
 
 @pytest.mark.skipif(

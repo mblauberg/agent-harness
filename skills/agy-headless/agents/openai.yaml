@@ -1,6 +1,0 @@
-interface:
-  display_name: "agy Headless (Gemini)"
-  short_description: "Sandboxed Gemini-family scouting through the agy CLI"
-  default_prompt: "Use $agy-headless to preflight agy, run a bounded sandboxed Gemini-family scout pass, and return verified findings."
-policy:
-  allow_implicit_invocation: false

@@ -4,7 +4,7 @@ cases:
   - {id: q109, relation: positive, prompt: "Review this frontend source read-only for UX, visual hierarchy, responsive, and accessibility defects.", tags: [direct], expected: {primary_skill: frontend-review, companion_skills: []}}
   - {id: q110, relation: positive, prompt: "Critique these interface screenshots and distinguish tested, untested, and inferred states.", tags: [direct], expected: {primary_skill: frontend-review, companion_skills: []}}
   - {id: q111, relation: positive, prompt: "Audit the empty, loading, error, keyboard, and narrow-screen states without editing code.", tags: [direct], expected: {primary_skill: frontend-review, companion_skills: []}}
-  - {id: q112, relation: negative, prompt: "Redesign and implement the settings page with a new visual language.", tags: [adjacent], expected: {primary_skill: frontend-design, companion_skills: []}}
+  - {id: q112, relation: negative, prompt: "Redesign and implement the settings page with a new visual language.", tags: [adjacent], expected: {primary_skill: implement, companion_skills: [frontend-design]}}
   - {id: q113, relation: negative, prompt: "Measure and fix React hydration and re-render churn.", tags: [adjacent], expected: {primary_skill: react-performance, companion_skills: []}}
   - {id: q114, relation: negative, prompt: "Review this backend API patch; it has no interface surface.", tags: [adjacent], expected: {primary_skill: code-review, companion_skills: []}}
   - {id: q115, relation: boundary, prompt: "Review this UI pull request through its dependency cone and report UX regressions as well as code defects.", tags: [composition], expected: {primary_skill: code-review, companion_skills: [frontend-review]}}

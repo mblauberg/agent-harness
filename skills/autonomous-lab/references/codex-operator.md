@@ -96,9 +96,8 @@ Driver notes:
 ## Cross-family, family-relative
 
 The independence rule is "a family **≠ the operator's**", never a fixed vendor list. With Codex
-(OpenAI) operating: verifiers are **claude** (Anthropic) and **gemini** (Google) —
-`scripts/cross-family.sh --operator-family openai --models claude|gemini|both`. The claude route runs
-enforced read-only (`claude -p` with tools disabled, plan mode). A `codex exec` "verifier" from a
+(OpenAI) operating: the load-bearing verifier is **claude** (Anthropic) through
+Agent Fabric. Gemini (Google) is an optional Fabric bonus task. A `codex exec` "verifier" from a
 Codex operator is a same-family self-review: it **cannot certify** a hard gate — the wrapper
 fail-closes it. All capture/independence rules of `cross-family-review.md` (raw-verdict-to-disk,
 never-trust-self-report, build≠verdict-reporter) apply unchanged.

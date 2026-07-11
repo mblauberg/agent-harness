@@ -3,6 +3,10 @@
 
 Gathers design context for a project and writes two complementary files at the project root:
 
+`engineering-docs` owns whether these artifacts belong at the root, another
+canonical path, an index or an archive. Use this reference only after that owner
+and `scope` have resolved write authority and placement.
+
 - **PRODUCT.md** (strategic): root project file for register, target users, product purpose, brand personality, anti-references, strategic design principles. Answers "who/what/why".
 - **DESIGN.md** (visual): root project file for visual theme, color palette, typography, components, layout. Follows the [Google Stitch DESIGN.md format](https://stitch.withgoogle.com/docs/design-md/format/). Answers "how it looks".
 

@@ -1,26 +1,26 @@
 {
   "schema_version": 1,
   "contract": "skill-routing-regression",
-  "evaluation_id": "skill-portfolio-routing-20260711",
-  "generated_at": "2026-07-11T08:53:18.496723+00:00",
+  "evaluation_id": "skill-portfolio-routing-20260711-fabric-v2-opus",
+  "generated_at": "2026-07-11T09:45:04.941816+00:00",
   "plan": {
     "path": "routing-protocol.json",
-    "sha256": "sha256:e4f58c062df27f5d85e2797bef99f314000951eec1dbf39d2f926036c80bffee"
+    "sha256": "sha256:05989dcd9bf869b54a64f670a3a465ccefd040b045c0125fd8459d68a1ab49c5"
   },
   "dataset": {
     "path": "routing-holdout.yaml",
-    "sha256": "sha256:20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13",
-    "cases": 14
+    "sha256": "sha256:ccf946829c97f0972d144b1e1e07cc308833d7dc6cc20d20eed850e3d422b30d",
+    "cases": 15
   },
   "catalogue": {
-    "sha256": "sha256:c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6",
-    "characters": 7548
+    "sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
+    "characters": 7354
   },
   "schedule": {
     "families": ["anthropic", "openai"],
     "repetitions": 3,
     "attempts": 6,
-    "case_rows": 84
+    "case_rows": 90
   },
   "lineage": [
     {
@@ -38,15 +38,15 @@
   ],
   "metrics": {
     "primary_accuracy": {
-      "numerator": 84,
-      "denominator": 84,
+      "numerator": 90,
+      "denominator": 90,
       "value": 1.0,
       "threshold": 1.0,
       "passed": true
     },
     "companion_fidelity": {
-      "numerator": 84,
-      "denominator": 84,
+      "numerator": 90,
+      "denominator": 90,
       "value": 1.0,
       "threshold": 0.9,
       "passed": true
@@ -55,11 +55,11 @@
   },
   "raw_receipt": {
     "evaluation_id": "candidate-routing-preauthor-v1",
-    "run_owned_path": ".agent-run/SKILLS-FLAT-20260711/routing-bound/receipt.json",
-    "sha256": "sha256:5857c43ed23cd70b28e1207c122b584e3de64941344f18b2d7fcb6f0add00c89",
-    "packet_sha256": "sha256:c9c9f29ffea12e6bb3f6cb3bdb0625a7324ccd7cf0cbf4a8a028ce8332f5aa72",
+    "run_owned_path": ".agent-run/ADDY-HARNESS-20260711/evaluation/routing-fabric-v2-opus/receipt.json",
+    "sha256": "sha256:fa4a1c536ace37fcec2fcb9c3b6ce27d9638f353496ac11f9a351997bb50505e",
+    "packet_sha256": "sha256:cd6e98de0f6cc753ed65128e2ac2c6a76a2622aea888f5e424e39f166abdd1fb",
     "attempts": 6,
-    "case_rows": 84
+    "case_rows": 90
   },
   "human_acceptance": "external"
 }

@@ -7,33 +7,29 @@ description: "Use when bounded fan-out, multi-agent research, cross-family revie
 
 ## Overview
 
-Portable doctrine: decompose -> waves -> reduce -> gate -> finish. Claude Code
-or Codex chairs; workers provide context isolation and decorrelated coverage.
-Use `autonomous-lab` instead for a standing run-until-STOP job.
+Portable doctrine: decompose -> waves -> reduce -> gate -> finish. The chair
+owns synthesis; workers provide isolated, decorrelated coverage.
 
 ## Rules
 
 - Once triggered, **default to fan-out** across bounded, independently useful
   slices. If safe decomposition fails, use a read-only audit fan-out or one
   worker.
-- Preflight decomposability, sequential dependencies, tool density and shared
-  error sources. Keep sequential or coordination-heavy reasoning with one
-  owner; never use agent count as a quality target.
+- Preflight dependencies, tool density and shared error sources. Keep
+  coordination-heavy reasoning with one owner; agent count is not a target.
 - **No concurrent shared-state writes.** Partition source scopes; otherwise
   workers are read-only or patch-only with namespaced artifacts.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
   Pane injection is fire-and-forget steering. Without a tested callback, record
   `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded collection.
-- Choose and record each worker's task-relevant cwd. Never assume one global
-  repository.
+- Record each worker's task-relevant cwd; never assume one global repository.
 - **Workers write full output to files** when scratch authority exists and
   return only a short digest plus path.
 - **Cross-family follows the HARNESS risk ladder.** The other primary is
   load-bearing at substantial+; bonus families remain non-blocking.
 - **Objective checks outrank opinions. You own the final call.** Never
   majority-vote weak claims into truth.
-- **Discover current model/tool options at runtime.** Route through
-  `scripts/model-route` and record substitutions and failed/skipped lanes.
+- Discover current model/tool options at runtime; record substitutions and failed lanes.
 
 ## When This Pays
 
@@ -75,4 +71,4 @@ Load only the relevant file from [references/](references/):
 `cli-headless.md`, `debate-and-panels.md`, `memory-scratchpad.md`,
 `evaluation-and-observability.md`, `domain-adaptation.md`, and
 `system-design-patterns.md`. Helpers and static guards live in `scripts/` and
-`evals/`; `cf_dispatch.sh` is an adapter, not the doctrine.
+`evals/`; `cf_dispatch.sh` is degraded fallback/preflight, not primary execution.

@@ -185,7 +185,7 @@ adapters:
       wrapper_manifest_sha256: "02c9faa1a9bf3a3cf001ae40dedab6dcde7ec9d7e9cd14f59506e39fa9bc0b3b"
     contract:
       adapter_version: 1
-      protocol: agy-headless-cli
+      protocol: agy-cli
       protocol_version: "cli-1.1.1"
       schema_source: "runtime/agent-fabric/schemas/normalised-provider-output.v1.schema.json"
       schema_sha256: "7fffad0b2a9eceee814cd04bc80cd5141f47fcc5a0eb056919b33983c168868c"

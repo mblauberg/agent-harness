@@ -1,5 +1,5 @@
 schema_version: 1
-dataset_id: skill-portfolio-routing-holdout-20260711
+dataset_id: skill-portfolio-routing-holdout-20260711-v2
 split: canonical-holdout
 cases:
   - id: m01
@@ -120,3 +120,15 @@ cases:
       primary_skill: caveman
       required_companion_skills: []
       allowed_companion_skills: []
+  - id: m15
+    category: fabric-provider-routing
+    critical: true
+    prompt: >-
+      Use Agent Fabric rather than direct provider CLIs to send one bounded
+      read-only review packet to the other primary and an Agy/Gemini bonus
+      worker, retain their route and action receipts, then adjudicate the
+      evidence centrally.
+    expected:
+      primary_skill: orchestrate
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, evaluate]

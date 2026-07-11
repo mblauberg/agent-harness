@@ -328,8 +328,8 @@ arrays via `args`:
 
 Author these from the patterns rather than hand-writing orchestration each time.
 An empty (or absent) lab `workflows/` directory is EXPECTED — you populate it per
-run; it is never a defect. (`scripts/cross-family.sh` dispatches the
-`{{CROSS_FAMILY_VERIFIER}}` review the build/judge patterns call out to.)
+run; it is never a defect. (`orchestrate` dispatches the
+`{{CROSS_FAMILY_VERIFIER}}` review through Agent Fabric.)
 
 ## 11. Templates
 
@@ -471,7 +471,7 @@ artifact change cites its `adr/<id>.md`.
   residency + AFSL/AML-CTF/PPSR/Privacy-Act + minimal-cost; {{BUILD_CEILING}} =
   "scaffold + IaC + local/mocked, no real cloud or money"; {{DOMAIN_INVARIANTS}}
   = a set of money-math coherence checks used as the seed property suite + a
-  differential oracle; {{CROSS_FAMILY_VERIFIER}} = codex + gemini. NONE of that is
+  differential oracle; {{CROSS_FAMILY_VERIFIER}} = other primary plus a Fabric-routed Gemini bonus. NONE of that is
   load-bearing here — it only makes the abstract knobs concrete. Your domain fills
   them with entirely different values.
 -->

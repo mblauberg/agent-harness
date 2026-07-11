@@ -4,6 +4,8 @@
 # This script is a helper, not an authority. The caller still chooses an appropriate
 # different-family verifier, checks data policy, and records failures in the run manifest.
 # Pass --orchestrator-family when known so same-family verifier routes fail closed.
+# It is an explicit degraded fallback or adapter preflight; normal answer-bearing
+# external work uses Agent Fabric request/reply.
 set -uo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -17,7 +19,7 @@ Usage: cf_dispatch.sh --tool TOOL --orchestrator-family FAMILY --prompt TEXT [op
        cf_dispatch.sh --doctor
 
 Options:
-  --tool TOOL                  One of claude, codex, cursor, agy, kiro, copilot.
+  --tool TOOL                  One of claude, codex, cursor, kiro, copilot.
   --chain SPECS                Space-separated fallback chain.
   --orchestrator-family FAMILY Current orchestrator family; same-family routes fail closed.
   --alias ALIAS                Durable route alias: flagship, workhorse, scout (default: flagship).
@@ -30,8 +32,7 @@ Options:
   --doctor                     Print local dispatch diagnostics and exit.
   -h, --help                   Show this help.
 
-agy is disabled unless CF_DISPATCH_ENABLE_AGY=1. When enabled it is best-effort only.
-Set CF_DISPATCH_AGY_TIMEOUT (for example 30s or 15m) to pass --print-timeout to agy.
+Gemini/Agy execution belongs to Agent Fabric, not this direct-CLI helper.
 EOF
 }
 
@@ -83,15 +84,13 @@ show_doctor() {
   else
     printf 'git_root=NONE\n'
   fi
-  printf 'CF_DISPATCH_ENABLE_AGY=%s\n' "${CF_DISPATCH_ENABLE_AGY:-0}"
-  printf 'CF_DISPATCH_AGY_TIMEOUT=%s\n' "${CF_DISPATCH_AGY_TIMEOUT:-}"
   printf 'CF_DISPATCH_ENABLE_KIRO=%s\n' "${CF_DISPATCH_ENABLE_KIRO:-0}"
   printf 'CF_DISPATCH_ENABLE_COPILOT=%s\n' "${CF_DISPATCH_ENABLE_COPILOT:-0}"
-  for tool in claude codex cursor-agent agy kiro-cli copilot; do
+  for tool in claude codex cursor-agent kiro-cli copilot; do
     if cmd="$(command -v "$tool" 2>/dev/null)"; then
       printf '%s=%s\n' "$tool" "$cmd"
       case "$tool" in
-        claude|codex|agy) "$cmd" --version 2>/dev/null | sed "s/^/${tool}_version=/" | head -n 1;;
+        claude|codex) "$cmd" --version 2>/dev/null | sed "s/^/${tool}_version=/" | head -n 1;;
       esac
     else
       printf '%s=NOT_FOUND\n' "$tool"
@@ -153,7 +152,6 @@ resolve_model() {
   fi
   case "$tool" in
     cursor) echo "${CF_DISPATCH_CURSOR_MODEL:-}";;
-    agy) echo "${CF_DISPATCH_AGY_MODEL:-}";;
     kiro) echo "${CF_DISPATCH_KIRO_MODEL:-}";;
     copilot) echo "${CF_DISPATCH_COPILOT_MODEL:-}";;
     *) echo "";;
@@ -164,7 +162,6 @@ endpoint_provider() {
     claude) echo "anthropic";;
     codex) echo "openai";;
     cursor) echo "cursor";;
-    agy) echo "agy";;
     kiro) echo "aws";;
     copilot) echo "github";;
     *) echo "";;
@@ -371,26 +368,6 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
         else
           kiro-cli chat --no-interactive ${model:+--model "$model"} ${effort:+--effort "$effort"} \
             "$(cat "$PROMPT_TMP")" </dev/null >"$raw" 2>"$diag"; rc=$?
-        fi
-      fi ;;
-    agy)
-      guarantee="none"
-      if [ "${CF_DISPATCH_ENABLE_AGY:-0}" != "1" ]; then
-        status="unsafe_by_default"
-        echo "agy disabled: --sandbox is not a full read-only/no-tools guarantee" >"$diag"
-        rc=1
-      else
-        guarantee="best_effort"
-        local -a agy_cmd
-        if ! require_cmd agy "$diag"; then
-          status="tool_not_found"
-          rc=127
-        else
-          agy_cmd=(agy --sandbox)
-          [ -n "$model" ] && agy_cmd+=(--model "$model")
-          agy_cmd+=(--print "$(cat "$PROMPT_TMP")")
-          [ -n "${CF_DISPATCH_AGY_TIMEOUT:-}" ] && agy_cmd+=(--print-timeout "$CF_DISPATCH_AGY_TIMEOUT")
-          "${agy_cmd[@]}" </dev/null >"$raw" 2>"$diag"; rc=$?
         fi
       fi ;;
     copilot)

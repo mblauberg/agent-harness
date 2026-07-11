@@ -16,12 +16,11 @@ started is the session chair: it owns authority allocation, user communication,
 run state, gates and final synthesis. Equal-primary does not mean two concurrent
 bosses.
 
-For substantial work, chair uses native subagents and the other primary. An
-approved project/session envelope may let it select paired-primary mode unless
-human policy pins or prohibits pairing. Claude and Codex may rotate stages;
-each stage keeps one owner and the session one chair. Herdr provides visibility;
-durable communication lives in run artifacts,
-not pane transcripts. See
+For substantial work, the chair uses native subagents and the other primary.
+Approved authority may permit paired-primary mode. Claude and Codex may rotate
+stages; one chair and one stage owner remain. Agent Fabric owns answer-bearing
+provider execution and durable communication; direct CLIs are preflight or a
+recorded degraded fallback. Herdr only observes or wakes. See
 `skills/orchestrate/references/paired-primary.md` and `herdr-panes.md`.
 
 No overlapping concurrent source writers. Partition scopes or use patch-only

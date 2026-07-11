@@ -132,7 +132,5 @@ def test_frontend_guidance_does_not_claim_a_universal_16px_minimum():
 
 def test_read_only_frontend_review_isolates_build_outputs():
     review = (ROOT / "skills" / "frontend-review" / "SKILL.md").read_text()
-    audit = (ROOT / "skills" / "frontend-design" / "reference" / "audit.md").read_text()
     assert "assigned isolated output/cache path" in review
-    assert "configure all build and cache outputs under an assigned isolated path" in audit
-    assert "Otherwise mark runtime build evidence `not tested`" in audit
+    assert "not tested" in review

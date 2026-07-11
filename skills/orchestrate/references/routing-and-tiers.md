@@ -57,7 +57,7 @@ important.
 - **Adversarial red-team** → a strong *different* family. Alignment-tuned models tend to be weaker at
   *playing* an attacker; a strong code/agent family with an explicit defect taxonomy tends to be a
   sharper critic. Give it the artifact + a checklist of failure types.
-- **Long-context audit** → a long-context family (e.g. Gemini via agy), then bring the distilled
+- **Long-context audit** → a long-context family (e.g. Gemini through Agent Fabric), then bring the distilled
   result back to a flagship for the decision.
 - **Cheap bulk / scouting** → cheapest diverse family (kiro's open models), objective fields only.
 

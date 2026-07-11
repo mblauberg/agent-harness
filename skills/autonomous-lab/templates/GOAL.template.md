@@ -99,9 +99,9 @@ MODEL_MATRIX      = {{MODEL_MATRIX}}
 
 CROSS_FAMILY_VERIFIER = {{CROSS_FAMILY_VERIFIER}}
 # ^ which independent / DIFFERENT-MODEL-FAMILY reviewer(s) underwrite high-stakes
-#   verdicts, and their CLI invocations. Cross-family agreement is what raises
-#   confidence on one-way-doors. Default: a second family via its exec CLI; a
-#   one-vs-both selector for the finish gate; a REVIEW_TIMEOUT.
+#   verdicts and Fabric route/result receipts. Cross-family agreement can raise
+#   confidence on one-way doors; evidence still outranks votes. Default: the
+#   other primary plus risk-proportional bonus attempts; a REVIEW_TIMEOUT.
 
 EXPERT_AUTHORITIES = {{EXPERT_AUTHORITIES}}
 # ^ named domain sign-off authorities for the expert escalation class (fill per domain;
@@ -199,7 +199,7 @@ PREV: (none)
     LOCKED_CONSTRAINTS = AU data residency + AFSL/AML-CTF/PPSR/Privacy-Act + minimal-cost
     HARD_GATES         = money-movement / ledger-posting / KYC-AML / tenant-isolation / PPSR
     BUILD_CEILING      = scaffold + IaC + local/mocked, no real cloud or money
-    CROSS_FAMILY_VERIFIER = codex + gemini
+    CROSS_FAMILY_VERIFIER = other primary + optional Fabric-routed Gemini bonus
   NONE of that is load-bearing. It is shown only to make the abstract knobs
   concrete. Your domain fills them with entirely different values.
 -->

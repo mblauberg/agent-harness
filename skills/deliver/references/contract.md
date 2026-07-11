@@ -20,10 +20,15 @@ From the project root:
 ```
 
 Human decisions link matching passing `kind: human` evidence. Deterministic
-evidence records an exit code and receipt digest; judgement evidence records
-actual model lineage. Non-human evidence lists the source paths it consumed,
-all within authority. A digest-bound `--project-policy` may add a complete
-project profile or add requirements to a built-in profile, never remove them.
+evidence records an exit code and a receipt digest equal to its declared
+artifact digest; `--verify-hashes` then binds that artifact to its live bytes.
+Non-evaluation deterministic evidence must be a local JSON
+`deterministic-evidence-bundle`; its exact check IDs, gates, statuses, methods,
+source paths and exit codes must match the linked evidence rows.
+Judgement evidence records actual model lineage. Non-human evidence lists the
+source paths it consumed, all within authority. A digest-bound
+`--project-policy` may add a complete project profile or add requirements to a
+built-in profile, never remove them.
 
 Stochastic assurance uses a lifecycle binding with exactly `status`,
 `anchored_at`, `evidence_id`, `evaluation_artifact_id`, `evaluation_id`,

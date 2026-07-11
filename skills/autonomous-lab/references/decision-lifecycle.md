@@ -352,7 +352,7 @@ These are real failures observed in a long autonomous run. Each one will recur.
 >   movement, double-entry / ledger posting, KYC/AML logic, migrations on financial
 >   tables, RBAC / tenant isolation, PPSR registration, credit-decision-adjacent code.
 > - `{{EXPERT_AUTHORITIES}}` = a "lawyer" sign-off gate.
-> - Cross-family reviewers = two independent model families (`codex`, `gemini`).
+> - Cross-family reviewers = the other primary plus an optional Fabric-routed bonus family.
 > - `{{BUILD_CEILING}}` = scaffold + IaC + local/mocked only; no real cloud, no
 >   real money movement.
 > - The run ended cleanly **with** a 14-item escalation-gated residual list

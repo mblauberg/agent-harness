@@ -3,6 +3,11 @@
 
 Build a feature with impeccable UX and UI quality: shape the design, land the visual direction, build real production code, inspect and improve in-browser until it meets a high-end studio bar.
 
+Craft is a frontend method inside an active `implement` run. Require its
+approved scope, authority, acceptance criteria and verification plan before
+editing. If those are absent, return to `scope`; craft cannot accept, release or
+independently review the result it authored.
+
 Before writing code, you need: PRODUCT.md loaded, register identified and the matching reference loaded, and a confirmed design direction for this task (either from `shape` or supplied by the user). PRODUCT.md is project context, not a task-specific brief.
 
 Treat any approved visual direction (generated mock or stated reference) as a concrete contract for composition, hierarchy, density, atmosphere, signature motifs, and distinctive visual moves. Don't let mocks replace structure, copy, accessibility, or state design. But if the live result lacks the approved direction's major ingredients, the implementation is wrong.
@@ -107,11 +112,13 @@ If your tool returns a file path, read the PNG back into the conversation. A scr
 
 For long-form brand surfaces, inspect major sections individually. Thumbnails hide spacing, clipping, and cascade defects.
 
-After the first pass, write an honest critique against the brief, the approved mock's major ingredients (hero silhouette, motifs, imagery, nav/CTA, density), and impeccable's DON'Ts. Patch material defects and re-inspect. **Don't invent defects to demonstrate iteration.** A confident "first pass clean, shipping" beats a fake fix.
+After the first pass, write an honest self-check against the brief, the approved mock's major ingredients (hero silhouette, motifs, imagery, nav/CTA, density), and impeccable's DON'Ts. Patch material defects and re-inspect. **Don't invent defects to demonstrate iteration.** A truthful "self-check clean; ready for independent review" beats a fake fix.
 
 Actively check: responsive behavior (composes, not shrinks), every state (empty / error / loading / edge), craft details (spacing, alignment, hierarchy, contrast, motion timing, focus), performance basics. The exit bar: defensible in a high-end studio review.
 
 Detector or QA output is defect evidence only; never proof the work is finished.
+The enclosing `implement` run still requires deterministic checks and an
+independent `code-review`/`frontend-review` pass.
 
 ## Step 6: Present
 
