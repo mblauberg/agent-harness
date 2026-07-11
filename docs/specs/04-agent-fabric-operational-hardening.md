@@ -1,14 +1,15 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.7
+Version: 1.8
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.7 closes the review-discovered MCP bootstrap, secret-result and
-descriptor-ownership gaps. Version 1.6 closes the review-discovered bridge
+Version 1.8 closes the review-discovered retained-child-bridge and attestation
+descriptor gaps. Version 1.7 closes the review-discovered MCP bootstrap,
+secret-result and descriptor-ownership gaps. Version 1.6 closes the review-discovered bridge
 recovery, provider-native attestation evidence, resource projection and
 lifecycle-surface gaps. Version
 1.5 closed the implementation-discovered current-agent MCP parity and
@@ -723,9 +724,11 @@ Provider adapters project the same descriptors into their supported native
 tool mechanism. The Claude SDK bridge owns one in-process MCP server per live
 chair session. The Codex app-server bridge owns dynamic tools on the exact
 retained thread/connection. Both validate the provider-emitted invocation,
-closed arguments and exact closed daemon result; both retain only volatile credential and
-transport state. The attestation challenge is an additional private tool and
-is not a substitute for the coordination surface. Successful launch retains
+closed arguments and exact closed daemon result; both retain only volatile
+credential and transport state. The attestation challenge is an additional private tool and
+is not a substitute for the coordination surface. It remains a registry-owned
+`tool` operation, projected only by the launch-attestation feature/grant and
+excluded from standalone proxies. Successful launch retains
 the adapter process/connection so a later provider turn can call a normal
 Fabric tool. Release or supervisor shutdown closes it once. Unexpected loss
 before terminal launch is ambiguous; loss after activation journals provider-
@@ -783,14 +786,21 @@ Deterministic acceptance adds:
 
 ### 9.12 Bridge-loss recovery and lifecycle retirement
 
-Startup and live adapter supervision compare every active launched chair with
-the volatile retained-bridge registry. A missing/closed bridge atomically
-persists one immutable loss row under the daemon generation, freezes the old
+Startup and live adapter supervision compare every active retained chair and
+child bridge with the volatile retained-bridge registry. A missing/closed chair
+bridge atomically persists one immutable loss row under the daemon generation, freezes the old
 chair lease/delivery/grants, revokes the old capability and CASes the run and
 session to `recovery_required`. The recovery manifest hashes current task,
 mailbox, lease, checkpoint, membership, provider and revision facts. Repeated
 observation is idempotent; absence of a bridge is never inferred as provider
 death or a safe retry.
+
+A missing/closed non-chair child bridge instead persists one immutable child
+loss, revokes its exact capability, advances the bridge generation and projects
+`lost`/`none` without forcing the run or project session into
+`recovery_required`. Repeated detection is idempotent; the dead transport cannot
+authenticate or replay a provider call. Chair-only recovery custody below does
+not silently rebind a child.
 
 An operator-authorised recovery custody row binds the loss, manifest, selected
 path, expected generations/revisions, adapter contract and stable action ID.
@@ -815,4 +825,7 @@ daemon restart with an active launched chair, same-action lookup recovery,
 wrong loss/manifest/generation, stale resume reference, missing native callback,
 successor-without-live-bridge, explicit abandon and duplicate observation. It
 also asserts the direct lifecycle operations are absent from every grant/client
-and return retirement errors if sent manually.
+and return retirement errors if sent manually. Child-bridge coverage drops a
+post-activation transport and proves loss persistence, capability revocation,
+generation advance, honest projection and later-call rejection without
+chair-level run fencing.

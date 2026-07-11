@@ -1,15 +1,16 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.11
+Version: 0.12
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.11 closes the review-discovered MCP bootstrap, secret-result and
-descriptor-ownership gaps. Version 0.10 closes the review-discovered
+Version 0.12 closes the review-discovered retained-child-bridge and attestation
+descriptor gaps. Version 0.11 closes the review-discovered MCP bootstrap,
+secret-result and descriptor-ownership gaps. Version 0.10 closes the review-discovered
 chair-bridge recovery, provider-native attestation evidence, MCP resource parity
 and duplicate lifecycle-surface gaps.
 Version 0.9 closed the implementation-discovered current-agent MCP parity and
@@ -728,6 +729,8 @@ advertises that fact before dispatch; attach may then register a bridge-less
 mailbox/wake-up participant with `bridgeState: none`, but neither attach nor
 spawn fabricates a live Fabric tool surface. A supported retained bridge must
 complete a later provider-originated Fabric call before it is claimed active.
+Attach remains registry-classified `tool` regardless of the selected adapter's
+bridge capability; `bridgeState` reports the runtime outcome.
 
 Every model-visible result is the exact closed public result codec. Opaque
 provider output is replaced by typed contract evidence and/or a digest before
@@ -735,9 +738,11 @@ projection; `additionalProperties: true`, raw provider JSON and copied output
 schemas are forbidden.
 
 A launched chair receives this same current, principal-scoped MCP operation
-surface through the secret-consuming provider-session bridge, plus one private
-one-use attestation tool. Claude SDK MCP tools and Codex app-server dynamic
-tools may use provider-specific transport descriptions, but their Fabric names,
+surface through the secret-consuming provider-session bridge. Its one-use
+attestation operation is also registry-classified `tool`, but only the
+launch-attestation feature/grant projects it; standalone proxies cannot see it.
+“Private” means grant-scoped and one-use, not registry-exempt. Claude SDK MCP
+tools and Codex app-server dynamic tools may use provider-specific transport descriptions, but their Fabric names,
 schemas, authority results and receipts are generated from the same descriptors.
 The provider session must originate every tool call. The adapter wrapper may
 route and validate an attributed call but cannot invoke a Fabric operation on
@@ -2174,7 +2179,8 @@ Spawn/attach capability issuance uses the same hash-only, prepare-before-I/O,
 dispatch-once and lookup-only custody owner as chair launch. Their public
 results are secret-free. Bridge-capable adapters consume the target credential
 only through volatile private handoff and retain the exact generation-bound
-transport; bridge-incapable attach remains explicitly `none`. No wrapper,
+transport; bridge-incapable attach reports `bridgeState: none` while the attach
+operation remains registry-classified `tool`. No wrapper,
 calling model, MCP proxy persistence or protocol result relays a child token.
 
 The launched-chair surface shall support real coordination, not only
@@ -2214,8 +2220,10 @@ continuity.
   schema, duplicate operation name, secret-bearing result, bootstrap token,
   incomplete variant set or projection mismatch. Real-adapter/fake-provider
   spawn and attach tests prove secret-free results, exact bridge-state honesty,
-  later-turn calls over supported retained bridges and no fabricated surface
-  for unsupported interactive attachment.
+  later-turn calls over supported retained bridges, post-activation child loss
+  revocation/generation fencing and no fabricated surface for unsupported
+  interactive attachment. The launch-attestation descriptor is registry-owned,
+  grant-scoped to launch and absent from standalone proxies.
 
 ### 32.12 Chair-bridge recovery and one lifecycle mutation surface
 
@@ -2226,6 +2234,15 @@ and session to `recovery_required`, and captures a daemon-derived recovery
 manifest digest over current task, mailbox, lease, checkpoint, provider and
 membership revisions. This manifest is loss evidence, not a fabricated
 chair-authored handoff.
+
+The volatile registry supervises every retained chair and child bridge. Loss
+of a non-chair spawn/attach bridge persists one immutable child-bridge loss,
+revokes the exact target capability, advances `bridgeGeneration` and changes
+the agent's `bridgeState` from `active` to `lost` or `none`. It does not promote
+the child, fabricate provider death or force the whole run into
+`recovery_required`; chair loss retains the stronger run/session fencing below.
+Repeated observation is idempotent and a dead child bridge cannot authenticate
+or replay a later call.
 
 Recovery requires an explicit operator command with `takeover` authority bound
 to that exact loss record, recovery manifest, run/session/chair generations,
