@@ -19,6 +19,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 PROFILES_PATH = ROOT / "config" / "delivery-profiles.json"
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SAFE_CLASSES = {"canonical", "evidence", "handoff", "scratch", "external"}
 RISKS = ("routine", "substantial", "crucial", "terminal")
 NORMAL_STATES = (
@@ -49,6 +50,10 @@ AGENTIC_RISKS = {
 EVALUATION_BINDING_FIELDS = {
     "status", "anchored_at", "evidence_id", "evaluation_artifact_id",
     "evaluation_id", "evaluation_digest", "plan_digest",
+}
+FABRIC_RELATIONSHIP_FIELDS = {
+    "mode", "delivery_run_id", "project_session_id", "coordination_run_id",
+    "workstream_id", "lead_agent_id",
 }
 
 
@@ -83,6 +88,14 @@ def _digest(value: Any, field: str) -> None:
     fail(not isinstance(value, str) or not DIGEST.fullmatch(value), f"{field} must be a sha256 digest")
 
 
+def _identifier(value: Any, field: str) -> str:
+    fail(
+        not isinstance(value, str) or not IDENTIFIER.fullmatch(value),
+        f"{field} must be a bounded stable identifier",
+    )
+    return value
+
+
 def _safe_path(value: Any, field: str) -> str:
     fail(not isinstance(value, str) or not value, f"{field} must be a non-empty path")
     path = Path(value)
@@ -105,6 +118,38 @@ def _load_profiles(root: Path) -> dict[str, Any]:
         fail(not isinstance(profile, dict) or set(profile) != required, f"profile {name} contract is incomplete")
         fail(not set(profile["boundary_checks"]) <= set(profile["required_evidence"]["deterministic"]), f"profile {name} boundary checks are not deterministic gates")
     return data
+
+
+def _validate_fabric_relationships(run: dict[str, Any]) -> None:
+    if "fabric_relationships" not in run:  # Existing delivery-v1 receipts remain valid.
+        return
+    value = run["fabric_relationships"]
+    relationships = _mapping(value, "fabric_relationships")
+    fail(
+        set(relationships) != FABRIC_RELATIONSHIP_FIELDS,
+        "fabric_relationships fields are invalid",
+    )
+    mode = relationships.get("mode")
+    fail(mode not in {"coordinated", "independent"}, "fabric_relationships.mode is invalid")
+    delivery_run_id = _identifier(
+        relationships.get("delivery_run_id"), "fabric_relationships.delivery_run_id",
+    )
+    fail(delivery_run_id != run["run_id"], "fabric_relationships.delivery_run_id must match run_id")
+    relation_fields = (
+        "project_session_id", "coordination_run_id", "workstream_id", "lead_agent_id",
+    )
+    if mode == "independent":
+        fail(
+            any(relationships.get(field) != "not_applicable" for field in relation_fields),
+            "independent relationships must be explicit not_applicable values",
+        )
+        return
+    for field in relation_fields:
+        identifier = _identifier(relationships.get(field), f"fabric_relationships.{field}")
+        fail(
+            identifier == "not_applicable",
+            "coordinated relationships require concrete project-session, coordination-run, workstream and lead identifiers",
+        )
 
 
 def _retrospect_validator():
@@ -897,6 +942,7 @@ def validate(
     fail(root.resolve() != ROOT.resolve(), "global policy root cannot be replaced by a project registry")
     fail(run.get("schema_version") != 1 or run.get("contract") != "delivery-run", "delivery receipt must use contract delivery-run schema_version 1")
     fail(not run.get("run_id"), "run_id is required")
+    _validate_fabric_relationships(run)
     registry = _apply_project_policy(
         _load_profiles(ROOT), run, project_policy_path=project_policy_path,
         workspace_root=workspace_root or receipt_dir,

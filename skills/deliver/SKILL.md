@@ -23,9 +23,10 @@ may strengthen a profile, never weaken kernel gates silently.
 
 1. Create `.agent-run/<id>/RUN.json` from `templates/RUN.template.json` and
    bind intent, design and authority by digest. When the delivery belongs to a
-   coordinated project, record its explicit project session, coordination run
-   and workstream/lead relationships; use explicit not-applicable values for
-   an independent run rather than inventing parents.
+   coordinated project, bind the top-level `fabric_relationships` to its
+   project session, coordination run and workstream/lead IDs per
+   [the receipt contract](references/contract.md). Use the explicit independent
+   `not_applicable` form rather than inventing parents.
 2. Record each state transition. No state may jump an approval, evidence,
    review, acceptance or release gate.
 3. Execute through the relevant skills. Software routes execution through

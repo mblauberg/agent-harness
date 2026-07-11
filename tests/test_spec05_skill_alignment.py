@@ -93,3 +93,25 @@ def test_spec05_affected_skill_doctrine_is_adaptive_portable_and_bounded():
 
     release = (ROOT / "skills" / "release" / "SKILL.md").read_text().lower()
     assert "cannot release or deploy" in release
+
+
+def test_deliver_exposes_the_typed_portable_fabric_relationship_contract():
+    skill = (ROOT / "skills" / "deliver" / "SKILL.md").read_text()
+    contract = (ROOT / "skills" / "deliver" / "references" / "contract.md").read_text()
+    cases = yaml.safe_load(
+        (ROOT / "skills" / "deliver" / "evals" / "spec05_cases.yaml").read_text()
+    )["cases"]
+
+    assert "fabric_relationships" in skill
+    for fragment in (
+        "fabric_relationships", "delivery_run_id", "project_session_id",
+        "coordination_run_id", "workstream_id", "lead_agent_id",
+        "coordinated", "independent", "not_applicable",
+    ):
+        assert fragment in contract
+    assert "fabric_relationships" in next(
+        case["prompt"] for case in cases if case["relation"] == "positive"
+    )
+    assert "not_applicable" in next(
+        case["prompt"] for case in cases if case["relation"] == "portability"
+    )
