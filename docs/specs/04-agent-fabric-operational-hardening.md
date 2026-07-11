@@ -1,14 +1,16 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.2
-Date: 11 July 2026
+Version: 1.3
+Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.2 closes the implementation-discovered private operator bootstrap
-and generation-bound chair-launch boundary required by Spec 05.
+Version 1.3 closes the implementation-discovered atomic launch-custody,
+recovery, secret-handoff and global provider-action identity gaps. Version 1.2
+closed the private operator bootstrap and generation-bound chair-launch
+boundary required by Spec 05.
 
 ## 1. Decision and relationship to existing specs
 
@@ -325,6 +327,74 @@ transaction after a verified backup. Failure leaves schema 0003 usable; after
 successful cutover recovery remains forward repair or verified restore, not a
 destructive down migration.
 
+Migration `0005-launch-custody.sql` shall add the append-only launch-attempt
+owner after schema 0004. Its closed logical shape is:
+
+```sql
+CREATE TABLE project_session_launch_custody (
+  project_session_id TEXT NOT NULL,
+  attempt_generation INTEGER NOT NULL CHECK (attempt_generation >= 1),
+  run_id TEXT NOT NULL UNIQUE,
+  chair_agent_id TEXT NOT NULL,
+  provider_adapter_id TEXT NOT NULL,
+  provider_action_id TEXT NOT NULL,
+  operator_id TEXT NOT NULL,
+  command_id TEXT NOT NULL,
+  capability_token_hash TEXT NOT NULL UNIQUE,
+  resource_reservation_id TEXT NOT NULL UNIQUE,
+  launch_packet_path TEXT NOT NULL,
+  launch_packet_digest TEXT NOT NULL,
+  resource_plan_path TEXT NOT NULL,
+  resource_plan_digest TEXT NOT NULL,
+  expected_project_revision INTEGER NOT NULL
+    CHECK (expected_project_revision >= 1),
+  prepared_from_session_revision INTEGER NOT NULL
+    CHECK (prepared_from_session_revision >= 1),
+  session_generation INTEGER NOT NULL CHECK (session_generation >= 1),
+  trust_record_digest TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  resource_state_digest TEXT NOT NULL,
+  launch_binding_digest TEXT NOT NULL,
+  retry_of_adapter_id TEXT,
+  retry_of_action_id TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_session_id, attempt_generation),
+  UNIQUE (provider_adapter_id, provider_action_id),
+  UNIQUE (operator_id, command_id),
+  CHECK ((retry_of_adapter_id IS NULL) = (retry_of_action_id IS NULL)),
+  FOREIGN KEY (project_session_id, run_id)
+    REFERENCES runs(project_session_id, run_id),
+  FOREIGN KEY (run_id, chair_agent_id)
+    REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (provider_adapter_id, provider_action_id)
+    REFERENCES provider_actions(adapter_id, action_id),
+  FOREIGN KEY (operator_id, command_id)
+    REFERENCES operator_commands(operator_id, command_id),
+  FOREIGN KEY (capability_token_hash) REFERENCES capabilities(token_hash),
+  FOREIGN KEY (resource_reservation_id)
+    REFERENCES resource_reservations(reservation_id),
+  FOREIGN KEY (retry_of_adapter_id, retry_of_action_id)
+    REFERENCES project_session_launch_custody(
+      provider_adapter_id, provider_action_id
+    )
+);
+```
+
+The migration also adds positive `journal_revision` and nullable
+`outcome_digest` columns to `provider_actions`. Every state or outcome CAS
+increments the revision; a non-null digest hashes the canonical closed outcome.
+This is the source of `provider_action_ref_v1`, not an artifact projection.
+The migration creates the parent unique index before the custody table and a
+trigger that also requires the referenced provider action's `run_id` to equal
+the custody `run_id`. It preflights and enforces daemon-global
+`provider_actions(adapter_id, action_id)` uniqueness across runs; the core and
+every adapter journal key the same pair. Duplicate existing pairs fail
+preflight before mutation. Attempt generations are contiguous per session, and
+a retry must reference that session's immediately prior proved-failed attempt.
+Update and delete triggers make custody rows immutable; provider-action and
+lifecycle rows own outcome. The migration is transactional and forward-only
+under the existing backup and recovery rules.
+
 Existing schema-v3 runs shall receive one deterministic independent imported
 project session per run without combining authority. Its stable ID, generation
 and launch-packet digest derive from a synthetic migration manifest bound to the
@@ -359,6 +429,26 @@ transactionally:
 No pane, process absence or Console-local cache may infer coordination state.
 The Console may rebuild its complete projection from an authoritative snapshot
 plus monotonic event cursor after any restart.
+
+Generic provider-action recovery shall exclude every row joined to
+`project_session_launch_custody`, regardless of provider state. Launch recovery
+uses the immutable custody owner and applies this closed policy:
+
+- `prepared`: make no adapter call, revoke the chair capability hash and chair
+  lease, release the resource reservation, terminalise the run/action and CAS
+  the session to `launch_failed`;
+- `dispatched`, `accepted` or `ambiguous`: call only the adapter's pair-keyed
+  `lookup_action`; never dispatch, replay or reconstruct launch material; and
+- a strict `terminal-success` with an exact resume reference lets the internal
+  reconciler activate and settle resources once; strict `terminal-no-effect`
+  proof lets it fail and clean up; every absent, error, malformed, incomplete
+  or conflicting result remains `launch_ambiguous` with its run, lease, hash
+  and reservation.
+
+Recovery never derives plaintext from a hash or durable payload. It performs
+the prepared cleanup or lookup before admitting a retry or idle shutdown. A
+public transition or `operatorActionReconcile` request cannot invoke this
+path.
 
 ### 9.5 Notification worker
 
@@ -425,38 +515,154 @@ capability and reviewed launch-envelope expiry. A `project-launch` capability
 remains forbidden for session-targeted commands, and neither public creation
 nor projections return credentials.
 
-The public operator connection may create a draft session but may launch a
-chair only through preview/commit of `ProjectSessionLaunchIntent`. The daemon
-owns a launch-custody port behind the operator action service. On commit it:
+### 9.8 Closed launch inspection and private effect boundary
 
-1. revalidates the trusted project root, session generation/revision, launch
-   packet and resource-plan digests and registered adapter contract;
-2. in one SQLite transaction advances `awaiting_launch` to `launching`, creates
-   the run, one chair, hashed capability, chair lease, membership and
-   project/session/run resource hierarchy, and a prepared provider action with
-   the stable action ID;
-3. passes the plaintext chair credential directly to the registered local
-   adapter without returning or journalling it on the operator protocol; and
-4. lets the daemon-internal launch-custody reconciler CAS `launching` to
-   `active`, `launch_failed` or `launch_ambiguous` from the persisted provider
-   action outcome; no later operator credential or fabricated operator command
-   performs that transition.
+The public operator connection may create a draft session and prepare
+`draft -> awaiting_launch`; preparation requires the reviewed packet reference,
+atomically replaces the session packet path/digest and increments its revision.
+The transition request carries that packet reference only for this preparation.
+The public path shall reject every request to enter or leave `launching`, enter
+or leave `launch_ambiguous` or reconcile a launch provider action. Chair launch
+occurs only through preview/commit of the strict
+`ProjectSessionLaunchIntent`, `launch_packet_v1` and
+`launch_resource_plan_v1` contracts in Spec 01 section 32.9.
 
-The operator command journal commits the local preparation and stable provider
-action ID. Pending, ambiguous and terminal `OperatorActionStatus` values and
-the terminal receipt are projections of the provider-action journal; the
-daemon does not rewrite the original operator command's before/after audit as
-though the asynchronous effect were already terminal.
+Before preview, the daemon parses both artifacts with closed schemas, resolves
+all paths from the trusted project root and validates provider input through
+the exact registered adapter contract digest. Inspection normalises the chair
+authority and computes the project revision, session revision/generation,
+trust-record digest, adapter-contract digest, resource-state digest and one
+canonical launch-binding digest. It cross-checks packet, plan, intent, stored
+identity, topology, budget, resource hierarchy and provider action. Preview
+persists every binding. Commit repeats inspection and requires byte-identical
+canonical bindings; stale or changed state has zero effect. An initial preview
+requires the stored packet to equal the proposed reference. A retry preview
+instead binds both the prior failed-attempt packet and a newly reviewed
+proposed packet.
 
-Startup recovery never reconstructs or redispatches plaintext launch
-material. A still-prepared action has no external effect: recovery revokes its
-prepared chair capability hash and requires a fresh preview/attempt generation
-with a newly minted token. Launch custody persists `dispatched` before calling
-the adapter, so dispatched or uncertain actions are observe-only until adapter
-lookup proves their outcome. Global liveness counts the prepared/ambiguous run
-and action throughout reconciliation.
+One daemon-owned `LaunchCustodyService` has four operations:
 
-Deterministic gates cover private/public principal separation, trust-root
-recheck, secret non-disclosure, duplicate provision, launch crash injection at
-every transaction/effect boundary, coordinated-mode double-chair races and
-restart without blind provider respawn.
+1. `inspect(intent)` safely reads, parses, normalises and binds current state;
+2. `prepareInTransaction(...)` executes synchronously inside the operator
+   commit transaction and returns only a volatile post-commit dispatch handle;
+3. `dispatchPrepared(handle)` persists `dispatched` before adapter I/O and
+   invokes the dedicated secret-bearing adapter handoff; and
+4. `recover()` applies prepared cleanup or observe-only lookup under the rules
+   in section 9.4.
+
+The generic operator effect port and generic provider startup path never own a
+launch step. The operator command journal records preparation and the stable
+provider adapter/action pair. Pending, ambiguous and terminal
+`OperatorActionStatus` values and the receipt project the provider-action
+journal without rewriting the original command's before/after audit.
+
+The service generates the chair credential with a cryptographically secure
+random source and stores only its hash. Plaintext exists once in the volatile
+post-commit handle. A dedicated versioned adapter method consumes that handle
+at most once to configure the chair's local Fabric access. The secret is a
+separate argument from the persisted, strict public launch payload; it is never
+prompt/model input, provider payload/history, operator JSON, event, discovery
+material, log or error detail. Adapter implementations shall redact the secret
+before propagating any failure.
+
+Dispatch return and lookup both parse the closed
+`launch_adapter_outcome_v1` union from Spec 01. Only `terminal-success` with the
+exact action pair, usable resume reference, positive provider generation and
+complete per-reservation usage may activate. Only `terminal-no-effect` with a
+contract-validated proof may fail cleanly. Accepted-only, absent, error,
+malformed, incomplete or conflicting evidence becomes `ambiguous`. Launch
+status and receipts expose the typed `provider_action_ref_v1`; they never
+fabricate an effect artifact to represent journal state.
+
+### 9.9 Atomic custody, outcomes and retry
+
+For an initial attempt, `prepareInTransaction` CASes `awaiting_launch` to
+`launching`. For a retry, it CASes `launch_failed` to `launching`, replaces the
+session packet path/digest with the newly reviewed reference and increments the
+session revision. It then atomically creates or revalidates all of these rows:
+coordination run; narrowed authority and budget; exactly one chair; random
+capability hash; chair lease and mailbox; adapter binding;
+project/session/run resource scopes and dimensions; a launch reservation whose
+daemon-derived ID and `operation_id` bind the provider action; prepared
+provider action; immutable custody ownership; required project-session
+memberships; and the operator preparation. Every topology, revision,
+generation, trust, resource and idempotency predicate is rechecked inside the
+write transaction. Rollback retains the prior packet reference.
+
+The custody row never stores outcome or plaintext and is never updated. Its
+session attempt generation, run, chair, command, provider pair, capability
+hash, reservation and binding digests permanently identify the attempt.
+`provider_actions` owns progress and outcome. The daemon and every adapter
+journal enforce the same global `(adapter_id, action_id)` identity, including
+cross-run use.
+
+The internal custody reconciler alone CASes `launching` to `active`,
+`launch_failed` or `launch_ambiguous` from persisted provider evidence. A
+`terminal-no-effect` result revokes the capability hash and chair lease,
+releases the reservation and terminalises the run/action. An ambiguous result
+retains its run, lease, hash, reservation and action identity and permits
+lookup only. Neither restart nor duplicate commit dispatches it again.
+
+For `terminal-success`, the active-state CAS and reservation reconciliation are
+one transaction with persistence of the exact resume reference and provider
+generation. Exact usage consumes each reported amount and releases the
+remainder. An `unknown` dimension marks every affected ancestor unknown and
+closes the reservation without restoring unproved capacity. Usage above the
+reservation enters `recovery_required` rather than truncating evidence. A
+`terminal-no-effect` result releases every reserved unit; ambiguity settles
+nothing.
+
+`launch_ambiguous` prohibits a retry or second chair. After lookup proves
+failure, retry requires a fresh current-state preview, newly reviewed packet,
+new run ID, new provider adapter/action pair, next custody attempt generation
+and exact `retry_of` binding to the failed row. Its commit atomically replaces
+the session packet reference; no public transition performs that launch-owned
+CAS. An exact duplicate commit returns the existing public result without
+another transaction effect or adapter call; a changed replay conflicts. Failed
+and ambiguous custody rows remain immutable.
+
+### 9.10 Launch-custody verification additions
+
+Deterministic fake-adapter and crash-injection gates shall prove:
+
+- a fresh `decide`/transition command cannot enter or leave launch-owned state,
+  and leaves zero run, action, lease, reservation or custody rows;
+- a fault after every preparation statement rolls back every launch-owned row;
+- a crash after prepared commit and before dispatch makes zero adapter calls on
+  restart, revokes the capability hash and chair lease, releases the
+  reservation and records proved failure;
+- a crash after persisted `dispatched`, before or during adapter I/O, performs
+  pair-keyed lookup only on restart;
+- provider acceptance before core outcome persistence activates the same run
+  exactly once after lookup only when terminal success includes the exact
+  resume reference and provider generation;
+- accepted-only, missing-resume, absent, error, malformed and conflicting
+  lookup fixtures remain ambiguous, while a contract-valid no-effect proof
+  alone produces failed cleanup;
+- two concurrent coordinated commits produce at most one non-terminal run,
+  chair and provider action;
+- an exact duplicate commit dispatches once, while a changed replay conflicts;
+- packet, plan, project/session revision, trust record, adapter contract or
+  resource state change after preview rejects with zero effect;
+- unknown/extra artifact fields, symlink escape, authority widening and
+  forbidden provider controls reject before persistence;
+- cross-run reuse of one adapter/action pair fails before adapter I/O, including
+  migration preflight and adapter-journal coverage;
+- an ambiguous launch retains the run, lease, capability hash and reservation,
+  and cannot retry or create another chair;
+- terminal success consumes exact reported usage, releases its remainder and
+  propagates unknown dimensions without restoring unproved capacity; no-effect
+  failure releases the full reservation;
+- pending, ambiguous and terminal launch projections preserve the exact typed
+  provider-action reference without a synthetic effect artifact;
+- a secret canary is absent from protocol responses, previews, projections,
+  commands, provider payload/history, events, receipts, discovery material,
+  logs and adapter errors;
+- a proved-failure retry requires a new reviewed packet, run, action pair and
+  incremented custody attempt generation with the exact prior binding, and its
+  packet replacement rolls back with any failed commit; and
+- public `operatorActionReconcile` rejects launch, while internal custody
+  lookup alone may resolve it.
+
+These gates also cover private/public principal separation, trust-root recheck,
+duplicate local provisioning and daemon restart without blind chair respawn.
