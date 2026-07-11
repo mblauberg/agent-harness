@@ -1,13 +1,20 @@
 export const TERMINAL_SEQUENCES = Object.freeze({
+  alternateScreenOn: "\u001b[?1049h",
+  alternateScreenOff: "\u001b[?1049l",
+  cursorHide: "\u001b[?25l",
+  cursorShow: "\u001b[?25h",
   bracketedPasteOn: "\u001b[?2004h",
   bracketedPasteOff: "\u001b[?2004l",
   mouseOn: "\u001b[?1002h\u001b[?1006h",
   mouseOff: "\u001b[?1006l\u001b[?1002l",
-  restore: "\u001b[?1006l\u001b[?1002l\u001b[?2004l",
+  enter: "\u001b[?1049h\u001b[?25l\u001b[?2004h",
+  restore:
+    "\u001b[?1006l\u001b[?1002l\u001b[?2004l\u001b[?25h\u001b[?1049l",
 } as const);
 
-const RESTORED_SIGNALS = ["SIGINT", "SIGHUP", "SIGTERM"] as const;
-type RestoredSignal = (typeof RESTORED_SIGNALS)[number];
+const TERMINATION_SIGNALS = ["SIGINT", "SIGHUP", "SIGTERM"] as const;
+type TerminationSignal = (typeof TERMINATION_SIGNALS)[number];
+type TerminalLifecycleSignal = TerminationSignal | "SIGTSTP" | "SIGCONT";
 
 export type TerminalDimensions = Readonly<{
   columns: number;
@@ -33,8 +40,11 @@ export type TerminalOutput = {
 };
 
 export type TerminalLifecycleTarget = {
-  on(event: RestoredSignal | "exit", listener: () => void): unknown;
-  removeListener(event: RestoredSignal | "exit", listener: () => void): unknown;
+  on(event: TerminalLifecycleSignal | "exit", listener: () => void): unknown;
+  removeListener(
+    event: TerminalLifecycleSignal | "exit",
+    listener: () => void,
+  ): unknown;
 };
 
 export type TerminalSessionOptions = Readonly<{
@@ -42,23 +52,44 @@ export type TerminalSessionOptions = Readonly<{
   output: TerminalOutput;
   mouseCapture: boolean;
   signalTarget: TerminalLifecycleTarget;
-  onSignal: (signal: RestoredSignal) => void;
+  onSignal: (signal: TerminationSignal) => void;
+  onSuspend?: () => void;
+  onResume?: () => void;
   onResize?: (dimensions: TerminalDimensions) => void;
+  scheduleResize?: (callback: () => void) => unknown;
+  cancelResize?: (handle: unknown) => void;
 }>;
+
+function scheduleImmediate(callback: () => void): NodeJS.Immediate {
+  return setImmediate(callback);
+}
+
+function cancelImmediate(handle: unknown): void {
+  clearImmediate(handle as NodeJS.Immediate);
+}
 
 export class TerminalSession {
   readonly #input: TerminalInput;
   readonly #output: TerminalOutput;
   readonly #signalTarget: TerminalLifecycleTarget;
-  readonly #onSignal: (signal: RestoredSignal) => void;
+  readonly #onSignal: (signal: TerminationSignal) => void;
+  readonly #onSuspend: (() => void) | undefined;
+  readonly #onResume: (() => void) | undefined;
   readonly #onResize: ((dimensions: TerminalDimensions) => void) | undefined;
+  readonly #scheduleResize: (callback: () => void) => unknown;
+  readonly #cancelResize: (handle: unknown) => void;
   readonly #previousRaw: boolean;
   readonly #wasFlowing: boolean;
-  readonly #handlers = new Map<RestoredSignal, () => void>();
+  readonly #handlers = new Map<TerminalLifecycleSignal, () => void>();
   readonly #exitHandler: () => void;
   readonly #resizeHandler: () => void;
   #lastDimensions: string | null = null;
-  #mouseCapture = false;
+  #pendingResizeHandle: unknown | null = null;
+  #desiredMouseCapture = false;
+  #activeMouseCapture = false;
+  #editorActive = false;
+  #interactive = false;
+  #suspended = false;
   #closed = false;
 
   constructor(options: TerminalSessionOptions) {
@@ -66,17 +97,21 @@ export class TerminalSession {
     this.#output = options.output;
     this.#signalTarget = options.signalTarget;
     this.#onSignal = options.onSignal;
+    this.#onSuspend = options.onSuspend;
+    this.#onResume = options.onResume;
     this.#onResize = options.onResize;
+    this.#scheduleResize = options.scheduleResize ?? scheduleImmediate;
+    this.#cancelResize = options.cancelResize ?? cancelImmediate;
     this.#exitHandler = (): void => {
       try {
         this.close();
       } catch {
-        // An exit hook cannot delay process.exit; close already attempted every
-        // synchronous restoration step before reporting a failure.
+        // An exit hook cannot delay process.exit. Restoration already attempted
+        // every synchronous step before any aggregate failure was produced.
       }
     };
     this.#resizeHandler = (): void => {
-      this.#emitResize();
+      this.#queueResize();
     };
     if (
       options.input.isTTY !== true ||
@@ -87,14 +122,12 @@ export class TerminalSession {
     }
     this.#previousRaw = options.input.isRaw === true;
     this.#wasFlowing = options.input.readableFlowing === true;
+    this.#desiredMouseCapture = options.mouseCapture;
 
     try {
       this.#installLifecycleHandlers();
-      options.input.setRawMode(true);
-      options.input.resume();
-      options.output.write(TERMINAL_SEQUENCES.bracketedPasteOn);
-      this.setMouseCapture(options.mouseCapture);
-      this.#emitResize();
+      this.#enterInteractive();
+      this.#emitResize(true);
     } catch (error) {
       this.#restoreAfterSetupFailure();
       throw new Error("Console terminal setup failed", { cause: error });
@@ -102,7 +135,7 @@ export class TerminalSession {
   }
 
   get mouseCapture(): boolean {
-    return this.#mouseCapture;
+    return this.#desiredMouseCapture;
   }
 
   get dimensions(): TerminalDimensions {
@@ -124,28 +157,60 @@ export class TerminalSession {
     if (this.#closed) {
       throw new Error("Console terminal session is closed");
     }
-    if (enabled === this.#mouseCapture) {
-      return;
+    this.#desiredMouseCapture = enabled;
+    if (this.#interactive) {
+      this.#syncMouseCapture();
     }
-    this.#output.write(
-      enabled ? TERMINAL_SEQUENCES.mouseOn : TERMINAL_SEQUENCES.mouseOff,
-    );
-    this.#mouseCapture = enabled;
+  }
+
+  setEditorActive(enabled: boolean): void {
+    if (this.#closed) {
+      throw new Error("Console terminal session is closed");
+    }
+    if (enabled === this.#editorActive) return;
+    this.#editorActive = enabled;
+    if (this.#interactive) {
+      this.#output.write(
+        enabled ? TERMINAL_SEQUENCES.cursorShow : TERMINAL_SEQUENCES.cursorHide,
+      );
+    }
   }
 
   close(): void {
-    if (this.#closed) {
-      return;
-    }
+    if (this.#closed) return;
     this.#closed = true;
-    const failures: unknown[] = [];
+    this.#cancelPendingResize();
     this.#removeLifecycleHandlers();
+    const failures = this.#interactive ? this.#leaveInteractive() : [];
+    this.#desiredMouseCapture = false;
+    this.#activeMouseCapture = false;
+    this.#suspended = false;
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Console terminal restoration failed");
+    }
+  }
+
+  #enterInteractive(): void {
+    this.#input.setRawMode?.(true);
+    this.#input.resume();
+    this.#output.write(TERMINAL_SEQUENCES.enter);
+    this.#interactive = true;
+    this.#activeMouseCapture = false;
+    this.#syncMouseCapture();
+    if (this.#editorActive) {
+      this.#output.write(TERMINAL_SEQUENCES.cursorShow);
+    }
+  }
+
+  #leaveInteractive(): unknown[] {
+    const failures: unknown[] = [];
     try {
       this.#output.write(TERMINAL_SEQUENCES.restore);
-      this.#mouseCapture = false;
     } catch (error) {
       failures.push(error);
     }
+    this.#interactive = false;
+    this.#activeMouseCapture = false;
     try {
       this.#input.setRawMode?.(this.#previousRaw);
     } catch (error) {
@@ -160,26 +225,73 @@ export class TerminalSession {
     } catch (error) {
       failures.push(error);
     }
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "Console terminal restoration failed");
-    }
+    return failures;
   }
 
-  #emitResize(): void {
-    if (this.#closed || this.#onResize === undefined) {
+  #syncMouseCapture(): void {
+    if (this.#desiredMouseCapture === this.#activeMouseCapture) return;
+    this.#output.write(
+      this.#desiredMouseCapture
+        ? TERMINAL_SEQUENCES.mouseOn
+        : TERMINAL_SEQUENCES.mouseOff,
+    );
+    this.#activeMouseCapture = this.#desiredMouseCapture;
+  }
+
+  #suspend(): void {
+    if (this.#closed || this.#suspended) return;
+    this.#cancelPendingResize();
+    const failures = this.#leaveInteractive();
+    this.#suspended = true;
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        "Console terminal suspension restoration failed",
+      );
+    }
+    this.#onSuspend?.();
+  }
+
+  #resume(): void {
+    if (this.#closed || !this.#suspended) return;
+    this.#enterInteractive();
+    this.#suspended = false;
+    this.#emitResize(true);
+    this.#onResume?.();
+  }
+
+  #queueResize(): void {
+    if (
+      this.#closed ||
+      this.#suspended ||
+      this.#onResize === undefined ||
+      this.#pendingResizeHandle !== null
+    ) {
       return;
     }
+    this.#pendingResizeHandle = this.#scheduleResize(() => {
+      this.#pendingResizeHandle = null;
+      this.#emitResize(false);
+    });
+  }
+
+  #cancelPendingResize(): void {
+    if (this.#pendingResizeHandle === null) return;
+    this.#cancelResize(this.#pendingResizeHandle);
+    this.#pendingResizeHandle = null;
+  }
+
+  #emitResize(force: boolean): void {
+    if (this.#closed || this.#onResize === undefined) return;
     const dimensions = this.dimensions;
-    const key = `${dimensions.columns}x${dimensions.rows}`;
-    if (key === this.#lastDimensions) {
-      return;
-    }
+    const key = `${String(dimensions.columns)}x${String(dimensions.rows)}`;
+    if (!force && key === this.#lastDimensions) return;
     this.#lastDimensions = key;
     this.#onResize(dimensions);
   }
 
   #installLifecycleHandlers(): void {
-    for (const signal of RESTORED_SIGNALS) {
+    for (const signal of TERMINATION_SIGNALS) {
       const handler = (): void => {
         try {
           this.close();
@@ -190,6 +302,12 @@ export class TerminalSession {
       this.#handlers.set(signal, handler);
       this.#signalTarget.on(signal, handler);
     }
+    const suspend = (): void => this.#suspend();
+    const resume = (): void => this.#resume();
+    this.#handlers.set("SIGTSTP", suspend);
+    this.#handlers.set("SIGCONT", resume);
+    this.#signalTarget.on("SIGTSTP", suspend);
+    this.#signalTarget.on("SIGCONT", resume);
     this.#signalTarget.on("exit", this.#exitHandler);
     this.#output.on("resize", this.#resizeHandler);
   }
@@ -204,6 +322,7 @@ export class TerminalSession {
   }
 
   #restoreAfterSetupFailure(): void {
+    this.#cancelPendingResize();
     this.#removeLifecycleHandlers();
     try {
       this.#output.write(TERMINAL_SEQUENCES.restore);
@@ -220,7 +339,9 @@ export class TerminalSession {
     } else {
       this.#input.pause();
     }
-    this.#mouseCapture = false;
+    this.#activeMouseCapture = false;
+    this.#desiredMouseCapture = false;
+    this.#interactive = false;
     this.#closed = true;
   }
 }

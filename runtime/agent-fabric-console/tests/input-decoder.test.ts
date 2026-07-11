@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest";
 import * as Console from "../src/index.js";
 
 describe("bounded terminal input decoding", () => {
+  it("decodes paging and boundary navigation keys", () => {
+    const decoder = new Console.TerminalInputDecoder();
+    expect(
+      decoder.push(Buffer.from("\u001b[5~\u001b[6~\u001b[H\u001b[F")),
+    ).toStrictEqual([
+      { kind: "key", key: "page-up" },
+      { kind: "key", key: "page-down" },
+      { kind: "key", key: "home" },
+      { kind: "key", key: "end" },
+    ]);
+  });
+
   it("decodes keyboard and exact partial SGR 1006 mouse sequences", () => {
     const decoder = new Console.TerminalInputDecoder({
       maxPendingBytes: 48,

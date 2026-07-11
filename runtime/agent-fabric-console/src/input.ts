@@ -14,6 +14,10 @@ export type KeyInputEvent = Readonly<{
     | "down"
     | "left"
     | "right"
+    | "page-up"
+    | "page-down"
+    | "home"
+    | "end"
     | "tab"
     | "shift-tab"
     | "escape"
@@ -90,6 +94,12 @@ const KEY_SEQUENCES: Readonly<Record<string, KeyInputEvent["key"]>> =
     "\u001b[B": "down",
     "\u001b[C": "right",
     "\u001b[D": "left",
+    "\u001b[5~": "page-up",
+    "\u001b[6~": "page-down",
+    "\u001b[H": "home",
+    "\u001b[F": "end",
+    "\u001b[1~": "home",
+    "\u001b[4~": "end",
     "\u001b[Z": "shift-tab",
     "\u001bm": "alt-m",
     "\u001bM": "alt-m",

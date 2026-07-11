@@ -1,11 +1,26 @@
 import stringWidth from "string-width";
 import { splitGraphemes } from "unicode-segmenter/grapheme";
 import type { TerminalInputEvent } from "./input.js";
+import type { ConsoleControllerState } from "./controller.js";
+import type { FabricView, Revision } from "./model.js";
+import {
+  presentFabricConsole,
+  responsiveModeFor,
+  type FabricConsolePresentation,
+  type FabricConsoleUiState,
+  type FabricResponsiveMode,
+  type FabricViewport,
+  type PresentedAction,
+  type PresentedRow,
+} from "./presenter.js";
+import type { FabricConsoleDataset } from "./protocol-adapter.js";
 
 export * from "./input.js";
 export * from "./controller.js";
 export * from "./model.js";
+export * from "./presenter.js";
 export * from "./protocol-adapter.js";
+export * from "./runtime.js";
 export * from "./terminal.js";
 
 export const UNICODE_POLICY = Object.freeze({
@@ -988,4 +1003,761 @@ export function applyConsoleTerminalIntent(
   }
   terminal.setMouseCapture(intent.enabled);
   return { ...state, mouseCapture: terminal.mouseCapture };
+}
+
+export type FabricHitBinding = Readonly<{
+  view: FabricView;
+  itemId: string;
+  itemRevision: Revision;
+  projectionRevision: Revision;
+}>;
+
+export type FabricHitRegion = Readonly<{
+  id: string;
+  kind: "tab" | "row" | "action" | "detach" | "pager" | "splitter";
+  rect: Rect;
+  enabled: boolean;
+  geometryKey: string;
+  binding: FabricHitBinding | null;
+}>;
+
+export type FabricConsoleFrame = Readonly<{
+  columns: number;
+  rows: readonly string[];
+  mode: FabricResponsiveMode;
+  geometryKey: string;
+  hitRegions: readonly FabricHitRegion[];
+  presentation: FabricConsolePresentation;
+}>;
+
+function fabricDimensions(viewport: FabricViewport): Readonly<{
+  columns: number;
+  rows: number;
+}> {
+  const columns = viewport.columns;
+  const rows = viewport.rows;
+  if (
+    columns === undefined ||
+    rows === undefined ||
+    !Number.isFinite(columns) ||
+    !Number.isFinite(rows) ||
+    columns < 0 ||
+    rows < 0
+  ) {
+    return { columns: 0, rows: 0 };
+  }
+  const width = Math.trunc(columns);
+  const height = Math.trunc(rows);
+  if (
+    width > MAX_FRAME_CELLS ||
+    height > MAX_FRAME_CELLS ||
+    width * height > MAX_FRAME_CELLS
+  ) {
+    return { columns: 0, rows: 0 };
+  }
+  return { columns: width, rows: height };
+}
+
+function fabricGeometryKey(
+  columns: number,
+  rows: number,
+  dataset: FabricConsoleDataset,
+  controller: ConsoleControllerState,
+): string {
+  const revisions = dataset.pages[controller.activeView].rows
+    .map((row) => `${row.stableId}@${row.revision}`)
+    .join(",");
+  return `${String(columns)}x${String(rows)}:r${dataset.snapshotRevision ?? "none"}:${controller.activeView}:${revisions}`;
+}
+
+function setFabricRow(
+  rows: string[],
+  row: number,
+  columns: number,
+  value: string,
+): void {
+  if (row < 1 || row > rows.length) return;
+  rows[row - 1] = fitCells(chromeText(value), columns);
+}
+
+function presentedBinding(
+  dataset: FabricConsoleDataset,
+  row: PresentedRow,
+): FabricHitBinding | null {
+  return dataset.snapshotRevision === null
+    ? null
+    : {
+        view: row.view,
+        itemId: row.stableId,
+        itemRevision: row.revision,
+        projectionRevision: dataset.snapshotRevision,
+      };
+}
+
+function reviewBinding(
+  presentation: FabricConsolePresentation,
+): FabricHitBinding | null {
+  const review = presentation.review;
+  return review === null
+    ? null
+    : {
+        view: presentation.activeView,
+        itemId: review.itemId,
+        itemRevision: review.itemRevision,
+        projectionRevision: review.projectionRevision,
+      };
+}
+
+function renderFabricHeader(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+): void {
+  const header = presentation.header;
+  setFabricRow(
+    rows,
+    1,
+    columns,
+    composeFields(
+      columns,
+      [
+        `P:${header.project}`,
+        `S:${header.session}`,
+        `R:${header.run}`,
+        `r${header.revision ?? "?"}`,
+        header.freshness.toUpperCase(),
+      ],
+      [18, 16, 14, 21, 7],
+      [4, 4, 4, 2, 4],
+      [0, 1, 2, 3, 4],
+    ),
+  );
+  setFabricRow(
+    rows,
+    2,
+    columns,
+    composeFields(
+      columns,
+      [
+        `Phase:${header.phase}`,
+        `Owner:${header.owner}`,
+        `Health:${header.health}`,
+        `Attn:${String(header.attentionCount)}`,
+        `Runs:${String(header.runCount)}`,
+      ],
+      [20, 20, 16, 10, 10],
+      [6, 6, 7, 6, 6],
+      [0, 1, 2, 3, 4],
+    ),
+  );
+  setFabricRow(
+    rows,
+    3,
+    columns,
+    composeFields(
+      columns,
+      [`Next:${header.nextMilestone}`, `Capacity:${header.capacity}`],
+      [52, 27],
+      [6, 9],
+      [0, 1],
+    ),
+  );
+}
+
+function renderFabricTabs(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+  row = 4,
+): void {
+  const shortLabels: Readonly<Record<FabricView, string>> = {
+    attention: "Attn",
+    project: "Proj",
+    runs: "Runs",
+    work: "Work",
+    agents: "Agents",
+    evidence: "Evid",
+    activity: "Act",
+    system: "Sys",
+  };
+  let line = "";
+  let x = 1;
+  for (const view of presentation.views) {
+    const id = `view:${view.view}`;
+    const focused = presentation.focusId === id;
+    const label = `${focused ? ">" : ""}${view.key}:${shortLabels[view.view]}${view.active ? "*" : ""}`;
+    const width = cellWidth(label);
+    if (x + width - 1 > columns) break;
+    line += `${line.length === 0 ? "" : " "}${label}`;
+    const x1 = x + (x === 1 ? 0 : 1);
+    hitRegions.push({
+      id,
+      kind: "tab",
+      rect: { x1, y1: row, x2: x1 + width - 1, y2: row },
+      enabled: true,
+      geometryKey,
+      binding: null,
+    });
+    x = x1 + width;
+  }
+  setFabricRow(rows, row, columns, line);
+}
+
+function rowText(row: PresentedRow, focused: boolean): string {
+  return `${focused ? ">" : " "}${row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
+}
+
+function renderFabricMaster(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+  bounds: Rect,
+): void {
+  const offset = Math.max(
+    0,
+    Math.trunc(ui.scrollOffsetByView[presentation.activeView] ?? 0),
+  );
+  const visibleRows = presentation.masterRows.slice(
+    offset,
+    offset + (bounds.y2 - bounds.y1 + 1),
+  );
+  for (const [index, item] of visibleRows.entries()) {
+    const y = bounds.y1 + index;
+    const id = `row:${item.view}:${item.stableId}`;
+    const text = rowText(item, presentation.focusId === id);
+    if (bounds.x1 === 1 && bounds.x2 === columns) {
+      setFabricRow(rows, y, columns, text);
+    } else {
+      const existing = rows[y - 1] ?? " ".repeat(columns);
+      const leftWidth = bounds.x2 - bounds.x1 + 1;
+      const right = existing.slice(bounds.x2);
+      rows[y - 1] = `${fitCells(chromeText(text), leftWidth)}${right}`;
+    }
+    hitRegions.push({
+      id,
+      kind: "row",
+      rect: { x1: bounds.x1, y1: y, x2: bounds.x2, y2: y },
+      enabled: true,
+      geometryKey,
+      binding: presentedBinding(dataset, item),
+    });
+  }
+  if (presentation.masterRows.length === 0) {
+    const message = "No projected items in this view.";
+    if (bounds.x1 === 1 && bounds.x2 === columns) {
+      setFabricRow(rows, bounds.y1, columns, message);
+    } else {
+      const rightWidth = columns - bounds.x2;
+      rows[bounds.y1 - 1] = `${fitCells(message, bounds.x2)}${" ".repeat(rightWidth)}`;
+    }
+  }
+}
+
+function renderFabricDetail(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+  bounds: Rect,
+): void {
+  const lines = presentation.detail?.lines ?? [
+    { label: "Detail", value: "Select an item to inspect canonical facts." },
+  ];
+  for (const [index, detail] of lines
+    .slice(0, bounds.y2 - bounds.y1 + 1)
+    .entries()) {
+    const y = bounds.y1 + index;
+    const value = `${detail.label}: ${detail.value}`;
+    if (bounds.x1 === 1 && bounds.x2 === columns) {
+      setFabricRow(rows, y, columns, value);
+    } else {
+      const left = (rows[y - 1] ?? " ".repeat(columns)).slice(0, bounds.x1 - 1);
+      rows[y - 1] = `${left}${fitCells(chromeText(value), bounds.x2 - bounds.x1 + 1)}`;
+    }
+  }
+}
+
+function reviewLines(presentation: FabricConsolePresentation): readonly string[] {
+  const review = presentation.review;
+  if (review === null) return [];
+  const lines = [
+    `REVIEW ${review.stage.toUpperCase()} — ${review.consequenceClass}`,
+    `Item: ${review.itemId}`,
+    `Projection revision: ${review.projectionRevision} | Item revision: ${review.itemRevision} | Preview revision: ${review.previewRevision}`,
+    "Preview digest:",
+    review.previewDigest,
+    "Intent digest:",
+    review.intentDigest,
+    "Before-state digest:",
+    review.beforeStateDigest,
+    `Confirmation: ${review.confirmationMode}`,
+  ];
+  for (const gate of review.gates) {
+    lines.push(
+      `Gate ${gate.gateId} r${gate.gateRevision} | Scope ${gate.scope}`,
+      `Question: ${gate.question}`,
+      `Reason: ${gate.reason}`,
+      `Recommendation: ${gate.recommendation}`,
+      ...gate.consequences.map((value) => `Consequence: ${value}`),
+      ...gate.evidence.map((value) => `Evidence: ${value}`),
+    );
+  }
+  lines.push(...review.evidence.map((value) => `Preview evidence: ${value}`));
+  lines.push(
+    ...review.changes.map(
+      (change) => `CHANGED ${change.field}: ${change.before} -> ${change.after}`,
+    ),
+  );
+  return lines;
+}
+
+function renderFabricReview(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+  bounds: Rect,
+): void {
+  const lines = reviewLines(presentation);
+  for (const [index, line] of lines
+    .slice(0, bounds.y2 - bounds.y1 + 1)
+    .entries()) {
+    setFabricRow(rows, bounds.y1 + index, columns, line);
+  }
+}
+
+function actionBindingFor(
+  action: PresentedAction,
+  presentation: FabricConsolePresentation,
+  dataset: FabricConsoleDataset,
+): FabricHitBinding | null {
+  if (action.id === "review:cancel" || action.id === "review:close") {
+    return null;
+  }
+  const review = reviewBinding(presentation);
+  if (review !== null) return review;
+  const selected = presentation.masterRows.find((row) => row.selected);
+  return selected === undefined ? null : presentedBinding(dataset, selected);
+}
+
+function renderFabricActions(
+  rows: string[],
+  columns: number,
+  row: number,
+  presentation: FabricConsolePresentation,
+  dataset: FabricConsoleDataset,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+): void {
+  if (presentation.actions.length === 0) {
+    setFabricRow(
+      rows,
+      row,
+      columns,
+      presentation.connection === "LIVE"
+        ? "Actions: select an actionable item"
+        : `Actions disabled: ${presentation.connection}`,
+    );
+    return;
+  }
+  let line = "";
+  let x = 1;
+  for (const [index, action] of presentation.actions.entries()) {
+    const marker = presentation.focusId === action.id ? ">" : "";
+    const label = `${marker}[${String(index + 1)} ${action.label}]${action.enabled ? "" : "(disabled)"}`;
+    const gap = x === 1 ? "" : " ";
+    const width = cellWidth(label);
+    const x1 = x + cellWidth(gap);
+    if (x1 + width - 1 > columns) break;
+    line += `${gap}${label}`;
+    hitRegions.push({
+      id: action.id,
+      kind: "action",
+      rect: { x1, y1: row, x2: x1 + width - 1, y2: row },
+      enabled: action.enabled,
+      geometryKey,
+      binding: actionBindingFor(action, presentation, dataset),
+    });
+    x = x1 + width;
+  }
+  setFabricRow(rows, row, columns, line);
+}
+
+function renderFabricFooter(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+  dataset: FabricConsoleDataset,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+): void {
+  const statusRow = rows.length - 1;
+  const helpRow = rows.length;
+  setFabricRow(
+    rows,
+    statusRow,
+    columns,
+    presentation.notice ??
+      `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}`,
+  );
+  const help = "? help | [ ] views | PgUp/PgDn | q detach";
+  setFabricRow(rows, helpRow, columns, help);
+  const detachIndex = help.indexOf("q detach");
+  if (detachIndex >= 0 && detachIndex + 8 <= columns) {
+    hitRegions.push({
+      id: "detach",
+      kind: "detach",
+      rect: {
+        x1: detachIndex + 1,
+        y1: helpRow,
+        x2: detachIndex + 8,
+        y2: helpRow,
+      },
+      enabled: true,
+      geometryKey,
+      binding: null,
+    });
+  }
+}
+
+function renderFabricStrip(
+  rows: string[],
+  columns: number,
+  presentation: FabricConsolePresentation,
+  dataset: FabricConsoleDataset,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+): void {
+  const header = presentation.header;
+  setFabricRow(
+    rows,
+    1,
+    columns,
+    `P:${header.project} R:${header.run} ${presentation.connection}`,
+  );
+  const top = presentation.masterRows[0];
+  if (top !== undefined && rows.length >= 2) {
+    setFabricRow(rows, 2, columns, rowText(top, false));
+    hitRegions.push({
+      id: `row:${top.view}:${top.stableId}`,
+      kind: "row",
+      rect: { x1: 1, y1: 2, x2: columns, y2: 2 },
+      enabled: true,
+      geometryKey,
+      binding: presentedBinding(dataset, top),
+    });
+  }
+  if (rows.length >= 3) {
+    setFabricRow(
+      rows,
+      rows.length - 1,
+      columns,
+      `Health:${header.health} Attn:${String(header.attentionCount)} Next:${header.nextMilestone}`,
+    );
+    const help = "? help | q detach";
+    setFabricRow(rows, rows.length, columns, help);
+    if (columns >= 17) {
+      hitRegions.push({
+        id: "detach",
+        kind: "detach",
+        rect: { x1: 10, y1: rows.length, x2: 17, y2: rows.length },
+        enabled: true,
+        geometryKey,
+        binding: null,
+      });
+    }
+  }
+}
+
+export function renderFabricConsoleFrame(
+  dataset: FabricConsoleDataset,
+  controller: ConsoleControllerState,
+  ui: FabricConsoleUiState,
+  viewport: FabricViewport,
+): FabricConsoleFrame {
+  const dimensions = fabricDimensions(viewport);
+  const normalizedViewport = {
+    columns: dimensions.columns,
+    rows: dimensions.rows,
+  };
+  const presentation = presentFabricConsole(
+    dataset,
+    controller,
+    ui,
+    normalizedViewport,
+  );
+  const mode = responsiveModeFor(normalizedViewport);
+  const rows = Array.from({ length: dimensions.rows }, () =>
+    fitCells("", dimensions.columns),
+  );
+  const geometryKey = fabricGeometryKey(
+    dimensions.columns,
+    dimensions.rows,
+    dataset,
+    controller,
+  );
+  const hitRegions: FabricHitRegion[] = [];
+  if (mode === "inert") {
+    if (rows.length > 0) {
+      setFabricRow(
+        rows,
+        1,
+        dimensions.columns,
+        dimensions.columns >= 8 ? "q detach" : "",
+      );
+    }
+    return {
+      columns: dimensions.columns,
+      rows,
+      mode,
+      geometryKey,
+      hitRegions,
+      presentation,
+    };
+  }
+  if (mode === "strip") {
+    renderFabricStrip(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      geometryKey,
+      hitRegions,
+    );
+    return {
+      columns: dimensions.columns,
+      rows,
+      mode,
+      geometryKey,
+      hitRegions,
+      presentation,
+    };
+  }
+
+  renderFabricHeader(rows, dimensions.columns, presentation);
+  renderFabricTabs(
+    rows,
+    dimensions.columns,
+    presentation,
+    geometryKey,
+    hitRegions,
+  );
+  const actionRow = dimensions.rows - 2;
+  const body: Rect = {
+    x1: 1,
+    y1: 5,
+    x2: dimensions.columns,
+    y2: Math.max(5, actionRow - 1),
+  };
+  if (presentation.review !== null) {
+    renderFabricReview(rows, dimensions.columns, presentation, body);
+  } else if (mode === "wide") {
+    const masterWidth = Math.max(32, Math.floor(dimensions.columns * 0.45));
+    const master = { ...body, x2: masterWidth };
+    const detail = { ...body, x1: masterWidth + 2 };
+    renderFabricMaster(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      ui,
+      geometryKey,
+      hitRegions,
+      master,
+    );
+    for (let y = body.y1; y <= body.y2; y += 1) {
+      rows[y - 1] = writeFixedCells(
+        rows[y - 1] ?? " ".repeat(dimensions.columns),
+        masterWidth + 1,
+        1,
+        "|",
+      );
+    }
+    hitRegions.push({
+      id: "splitter:master-detail",
+      kind: "splitter",
+      rect: { x1: masterWidth + 1, y1: body.y1, x2: masterWidth + 1, y2: body.y2 },
+      enabled: true,
+      geometryKey,
+      binding: null,
+    });
+    renderFabricDetail(rows, dimensions.columns, presentation, detail);
+  } else if (mode === "reference") {
+    const splitRow = Math.min(body.y2 - 2, body.y1 + 7);
+    renderFabricMaster(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      ui,
+      geometryKey,
+      hitRegions,
+      { ...body, y2: splitRow - 1 },
+    );
+    setFabricRow(rows, splitRow, dimensions.columns, "==== DETAIL ====");
+    hitRegions.push({
+      id: "splitter:master-detail",
+      kind: "splitter",
+      rect: { x1: 1, y1: splitRow, x2: dimensions.columns, y2: splitRow },
+      enabled: true,
+      geometryKey,
+      binding: null,
+    });
+    renderFabricDetail(rows, dimensions.columns, presentation, {
+      ...body,
+      y1: splitRow + 1,
+    });
+  } else if (presentation.compactPane === "master") {
+    renderFabricMaster(
+      rows,
+      dimensions.columns,
+      presentation,
+      dataset,
+      ui,
+      geometryKey,
+      hitRegions,
+      body,
+    );
+  } else {
+    renderFabricDetail(rows, dimensions.columns, presentation, body);
+  }
+  renderFabricActions(
+    rows,
+    dimensions.columns,
+    actionRow,
+    presentation,
+    dataset,
+    geometryKey,
+    hitRegions,
+  );
+  renderFabricFooter(
+    rows,
+    dimensions.columns,
+    presentation,
+    dataset,
+    geometryKey,
+    hitRegions,
+  );
+  return {
+    columns: dimensions.columns,
+    rows,
+    mode,
+    geometryKey,
+    hitRegions,
+    presentation,
+  };
+}
+
+export type FabricPointerState = Readonly<{
+  pressed: Readonly<{
+    regionId: string;
+    geometryKey: string;
+  }> | null;
+}>;
+
+export type FabricPointerIntent = Readonly<{
+  kind: "activate-region" | "scroll";
+  regionId: string | null;
+  binding: FabricHitBinding | null;
+  direction?: -1 | 1;
+  provenance: "mouse";
+}>;
+
+export type FabricPointerReduction = Readonly<{
+  state: FabricPointerState;
+  intents: readonly FabricPointerIntent[];
+}>;
+
+function fabricRegionAt(
+  frame: FabricConsoleFrame,
+  x: number,
+  y: number,
+): FabricHitRegion | null {
+  return (
+    frame.hitRegions.find(
+      (region) =>
+        region.enabled &&
+        x >= region.rect.x1 &&
+        x <= region.rect.x2 &&
+        y >= region.rect.y1 &&
+        y <= region.rect.y2,
+    ) ?? null
+  );
+}
+
+function fabricBindingCurrent(
+  binding: FabricHitBinding | null,
+  dataset: FabricConsoleDataset,
+): boolean {
+  if (binding === null) return true;
+  if (dataset.snapshotRevision !== binding.projectionRevision) return false;
+  const row = dataset.pages[binding.view].rows.find(
+    (candidate) => candidate.stableId === binding.itemId,
+  );
+  return row?.revision === binding.itemRevision;
+}
+
+export function reduceFabricPointer(
+  state: FabricPointerState,
+  event: Extract<TerminalInputEvent, { kind: "mouse" }>,
+  frame: FabricConsoleFrame,
+  dataset: FabricConsoleDataset,
+): FabricPointerReduction {
+  if (event.button === "left" && event.modifiers.shift) {
+    return { state: { pressed: null }, intents: [] };
+  }
+  const region = fabricRegionAt(frame, event.x, event.y);
+  if (event.phase === "wheel") {
+    return {
+      state,
+      intents: [
+        {
+          kind: "scroll",
+          regionId: region?.id ?? null,
+          binding: region?.binding ?? null,
+          direction: event.button === "wheel-up" ? -1 : 1,
+          provenance: "mouse",
+        },
+      ],
+    };
+  }
+  if (event.button !== "left") return { state, intents: [] };
+  if (event.phase === "press") {
+    return {
+      state: {
+        pressed:
+          region === null
+            ? null
+            : { regionId: region.id, geometryKey: frame.geometryKey },
+      },
+      intents: [],
+    };
+  }
+  if (event.phase === "release") {
+    const activate =
+      region !== null &&
+      region.kind !== "splitter" &&
+      state.pressed?.regionId === region.id &&
+      state.pressed.geometryKey === frame.geometryKey &&
+      region.geometryKey === frame.geometryKey &&
+      fabricBindingCurrent(region.binding, dataset);
+    return {
+      state: { pressed: null },
+      intents: activate
+        ? [
+            {
+              kind: "activate-region",
+              regionId: region.id,
+              binding: region.binding,
+              provenance: "mouse",
+            },
+          ]
+        : [],
+    };
+  }
+  return { state, intents: [] };
 }

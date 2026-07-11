@@ -91,7 +91,7 @@ function preview(
     evidenceRefs: [],
     gateIds: [],
     confirmationMode,
-    expiresAt: "2026-07-11T13:00:00.000Z" as Timestamp,
+    expiresAt: "2099-07-11T13:00:00.000Z" as Timestamp,
   };
 }
 
