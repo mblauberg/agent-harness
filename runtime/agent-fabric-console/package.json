@@ -23,6 +23,7 @@
     "audit": "npm audit --audit-level=high"
   },
   "dependencies": {
+    "@local/agent-fabric-protocol": "file:../agent-fabric-protocol",
     "string-width": "8.2.2",
     "unicode-segmenter": "0.17.0"
   },
