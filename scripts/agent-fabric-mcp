@@ -1,0 +1,29 @@
+#!/bin/sh
+# Launch the agent-fabric stdio MCP proxy (spec 01-agent-fabric section 14).
+# Requires AGENT_FABRIC_SOCKET_PATH and exactly one capability source:
+# AGENT_FABRIC_SEAT plus AGENT_FABRIC_STATE_DIRECTORY (global project-aware
+# registration), AGENT_FABRIC_CAPABILITY_FILE, or AGENT_FABRIC_CAPABILITY.
+# Never registers itself with any client and never starts
+# provider sessions; it only proxies stdio to the local daemon socket.
+set -eu
+
+SCRIPT_PATH=$0
+while [ -L "$SCRIPT_PATH" ]; do
+  LINK=$(readlink "$SCRIPT_PATH")
+  case "$LINK" in
+    /*) SCRIPT_PATH=$LINK ;;
+    *) SCRIPT_PATH=$(dirname "$SCRIPT_PATH")/$LINK ;;
+  esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
+HARNESS_ROOT=$(dirname -- "$SCRIPT_DIR")
+AGENTS_ROOT=${AGENTS_HOME:-$HARNESS_ROOT}
+case "$AGENTS_ROOT" in /*) ;; *) echo "AGENTS_HOME must be absolute" >&2; exit 2 ;; esac
+FABRIC_ROOT="$AGENTS_ROOT/runtime/agent-fabric"
+
+if [ -f "$FABRIC_ROOT/dist/mcp/main.js" ]; then
+  exec node "$FABRIC_ROOT/dist/mcp/main.js" "$@"
+fi
+
+# Source-tree fallback for development checkouts without a build.
+exec node --import "$FABRIC_ROOT/node_modules/tsx/dist/loader.mjs" "$FABRIC_ROOT/src/mcp/main.ts" "$@"

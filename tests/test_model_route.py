@@ -8,9 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "model-route"
 
 
-def resolve(*args):
+def resolve(*args, adapter_gate="direct-cli"):
+    arguments = [str(SCRIPT), "resolve", *args]
+    if "--adapter-gate" not in args:
+        arguments.extend(("--adapter-gate", adapter_gate))
     result = subprocess.run(
-        [str(SCRIPT), "resolve", *args],
+        arguments,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -213,22 +216,27 @@ def test_empty_runtime_capability_snapshot_fails_closed(tmp_path):
 
 def test_model_id_effort_uses_last_token_and_explicit_unresolved_fails():
     result, route = resolve(
-        "--adapter", "cursor", "--model", "gpt-5.1-codex-max-low", "--alias", "flagship",
+        "--adapter", "cursor", "--model", "grok-4.5-max-low", "--alias", "flagship",
         "--role", "reviewer", "--lead-family", "anthropic", "--require-distinct",
+        "--adapter-gate", "direct-cli",
     )
     assert result.returncode == 0
+    assert route["status"] == "ok"
     assert route["effort"] == "low"
     result, route = resolve(
         "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
         "--role", "reviewer", "--effort", "high", "--lead-family", "openai", "--require-distinct",
+        "--adapter-gate", "direct-cli",
     )
     assert result.returncode == 1
     assert route["status"] == "adapter_effort_unresolved"
     result, route = resolve(
-        "--adapter", "cursor", "--model", "gpt-5.5-extra-high", "--alias", "flagship",
+        "--adapter", "cursor", "--model", "composer-2-extra-high", "--alias", "flagship",
         "--role", "reviewer", "--lead-family", "anthropic", "--require-distinct",
+        "--adapter-gate", "direct-cli",
     )
     assert result.returncode == 0
+    assert route["status"] == "ok"
     assert route["effort"] == "xhigh"
 
 
@@ -243,6 +251,8 @@ def test_distinct_requirement_fails_closed_for_same_family():
         "--lead-family",
         "openai",
         "--require-distinct",
+        "--adapter-gate",
+        "direct-cli",
     )
     assert result.returncode == 1
     assert route["status"] == "same_family_forbidden"
@@ -261,9 +271,172 @@ def test_broker_route_records_endpoint_separately_from_model_family():
         "--lead-family",
         "openai",
         "--require-distinct",
+        "--adapter-gate",
+        "direct-cli",
     )
     assert result.returncode == 0
+    assert route["status"] == "ok"
     assert route["endpoint_provider"] == "cursor"
     assert route["model_family"] == "xai"
     assert route["identity_source"] == "model-pattern"
     assert route["distinct_from_lead"] is True
+
+
+def test_cursor_composer_route_uses_cursor_model_family():
+    result, route = resolve(
+        "--adapter",
+        "cursor",
+        "--model",
+        "composer-2-high",
+        "--alias",
+        "flagship",
+        "--role",
+        "worker",
+        "--lead-family",
+        "openai",
+        "--require-distinct",
+        "--adapter-gate",
+        "direct-cli",
+    )
+    assert result.returncode == 0
+    assert route["status"] == "ok"
+    assert route["endpoint_provider"] == "cursor"
+    assert route["model_family"] == "cursor-composer"
+    assert route["effort"] == "high"
+    assert route["distinct_from_lead"] is True
+
+
+def test_agy_accepts_only_google_models_and_records_fabric_activation_metadata():
+    allowed, allowed_route = resolve(
+        "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship", "--role", "worker",
+        "--adapter-gate", "direct-cli",
+    )
+    forbidden, forbidden_route = resolve(
+        "--adapter", "agy", "--model", "grok-4", "--alias", "flagship", "--role", "worker"
+    )
+
+    assert allowed.returncode == 0
+    assert allowed_route["status"] == "ok"
+    assert allowed_route["model_family"] == "google"
+    assert allowed_route["adapter_enabled"] is False
+    assert allowed_route["adapter_unresolved_pins"]
+    assert forbidden.returncode == 1
+    assert forbidden_route["status"] == "adapter_family_forbidden"
+
+
+def test_cursor_accepts_only_composer_and_grok_models():
+    for model, family in (("composer-2-high", "cursor-composer"), ("grok-4.5-xhigh", "xai")):
+        allowed, allowed_route = resolve(
+            "--adapter", "cursor", "--model", model, "--alias", "flagship", "--role", "worker",
+            "--adapter-gate", "direct-cli",
+        )
+        assert allowed.returncode == 0
+        assert allowed_route["status"] == "ok"
+        assert allowed_route["model_family"] == family
+
+    wrong_family, wrong_family_route = resolve(
+        "--adapter", "cursor", "--model", "gemini-3.1-pro", "--alias", "flagship", "--role", "worker"
+    )
+    wrong_pattern, wrong_pattern_route = resolve(
+        "--adapter", "cursor", "--model", "grokish-high", "--alias", "flagship", "--role", "worker"
+    )
+    assert wrong_family.returncode == 1
+    assert wrong_family_route["status"] == "adapter_family_forbidden"
+    assert wrong_pattern.returncode == 1
+    assert wrong_pattern_route["status"] == "adapter_model_forbidden"
+
+
+def test_kiro_accepts_only_open_weight_models():
+    allowed_models = (
+        ("deepseek-3.2", "deepseek"),
+        ("glm-5", "zhipu"),
+        ("minimax-m2.5", "minimax"),
+        ("qwen3-coder-next", "alibaba"),
+    )
+    for model, family in allowed_models:
+        allowed, allowed_route = resolve(
+            "--adapter", "kiro", "--model", model, "--alias", "scout", "--role", "worker",
+            "--adapter-gate", "direct-cli",
+        )
+        assert allowed.returncode == 0
+        assert allowed_route["status"] == "ok"
+        assert allowed_route["model_family"] == family
+        assert allowed_route["compatibility_model_family"] == "open-weight"
+
+    forbidden, forbidden_route = resolve(
+        "--adapter", "kiro", "--model", "gemini-3.1-pro", "--alias", "scout", "--role", "worker"
+    )
+
+    assert forbidden.returncode == 1
+    assert forbidden_route["status"] == "adapter_family_forbidden"
+
+
+def test_pi_without_model_patterns_fails_closed_for_provider_families():
+    for model in ("gpt-5.6-sol", "claude-opus-4.5", "gemini-3.1-pro"):
+        result, route = resolve(
+            "--adapter", "pi", "--model", model, "--alias", "scout", "--role", "worker"
+        )
+        assert result.returncode == 1
+        assert route["status"] == "adapter_family_forbidden"
+
+
+def test_same_family_rejection_precedes_adapter_family_rejection():
+    result, route = resolve(
+        "--adapter", "cursor", "--model", "gpt-5.6-sol", "--alias", "flagship",
+        "--role", "reviewer", "--lead-family", "openai", "--require-distinct",
+    )
+
+    assert result.returncode == 1
+    assert route["status"] == "same_family_forbidden"
+
+
+def test_require_distinct_broker_fails_closed_on_fabric_activation_but_direct_cli_can_route():
+    arguments = (
+        "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
+        "--role", "reviewer", "--lead-family", "openai", "--require-distinct",
+    )
+
+    fabric, fabric_route = resolve(*arguments, adapter_gate="fabric")
+    direct, direct_route = resolve(*arguments, "--adapter-gate", "direct-cli")
+
+    assert fabric.returncode == 1
+    assert fabric_route["status"] == "adapter_disabled"
+    assert fabric_route["adapter_enabled"] is False
+    assert fabric_route["adapter_unresolved_pins"]
+    assert direct.returncode == 0
+    assert direct_route["status"] == "ok"
+    assert direct_route["adapter_gate"] == "direct-cli"
+
+
+def test_primary_adapters_honour_fabric_activation_gate():
+    for adapter in ("claude", "codex"):
+        fabric, fabric_route = resolve(
+            "--adapter", adapter, "--alias", "flagship", "--role", "lead",
+            adapter_gate="fabric",
+        )
+        direct, direct_route = resolve(
+            "--adapter", adapter, "--alias", "flagship", "--role", "lead",
+            "--adapter-gate", "direct-cli",
+        )
+
+        assert fabric.returncode == 1
+        assert fabric_route["status"] == "adapter_disabled"
+        assert fabric_route["adapter_enabled"] is False
+        assert fabric_route["adapter_unresolved_pins"]
+        assert direct.returncode == 0
+        assert direct_route["status"] == "ok"
+
+
+def test_fabric_gate_rejects_catalogue_adapter_without_compatibility_contract():
+    arguments = (
+        "--adapter", "copilot", "--model", "gemini-3.1-pro",
+        "--alias", "flagship", "--role", "worker",
+    )
+
+    fabric, fabric_route = resolve(*arguments, adapter_gate="fabric")
+    direct, direct_route = resolve(*arguments)
+
+    assert fabric.returncode == 2
+    assert fabric_route["status"] == "adapter_compatibility_unknown"
+    assert direct.returncode == 0
+    assert direct_route["status"] == "ok"

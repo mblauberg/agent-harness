@@ -17,10 +17,25 @@ without Herdr, record `HERDR-NOT-USED: <reason>`.
 ## Preflight
 
 ```sh
+test "${HERDR_ENV:-}" = 1
 herdr status server
 herdr integration status
 herdr agent list
 ```
+
+Operate the live session only from a Herdr-managed pane. If `HERDR_ENV` is not
+`1`, report that boundary instead of inspecting or controlling the user's
+focused session from outside Herdr.
+
+Treat the installed CLI as the syntax authority. Use `herdr --help` and the
+relevant non-mutating command-group help; never run bare `herdr` for discovery
+because it launches or attaches the TUI. Do not probe a potentially mutating
+subcommand by omitting arguments.
+
+Workspace, tab, pane and terminal IDs are opaque. Parse them from JSON after
+every create, split or move; never derive them from display order or examples.
+Use `--current` for the caller pane or an explicit returned ID. An omitted
+target may resolve to another client's focused pane.
 
 Require a compatible running server and a current integration for the selected
 agent. An installed CLI without an integration can still run, but its state is
@@ -44,21 +59,18 @@ and resolved model in the run receipt.
 
 ## Send work
 
-Use the bundled helper; it resolves the pane, sends literal text and presses
-Enter exactly once. Its result is `dispatched-unconfirmed`, not proof that the
-target process consumed the prompt:
+Use the bundled helper; it resolves the pane and calls Herdr's atomic
+`pane run` operation, which submits the text and Enter together. Its result is
+`dispatched-unconfirmed`, not proof that the target process consumed the prompt:
 
 ```sh
 printf '%s' '<bounded prompt>' | \
   "${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/herdr_prompt.sh" <name>
 ```
 
-Raw `herdr agent send` does not imply Enter. The helper never waits for the
-worker; collection remains a separate lead decision.
-
-The Herdr key token is lowercase `enter`; uppercase `ENTER` can be accepted by
-the CLI without submitting in the target terminal. Keep this behaviour locked
-by `tests/test_herdr_prompt.py`.
+The helper never waits for the worker; collection remains a separate lead
+decision. Prefer it or direct `herdr pane run`; do not coordinate separate
+text and key sends.
 
 Observed raw-send failure modes (2026-07-10, one session lost ~20 min to these —
 use the helper instead):
@@ -70,10 +82,9 @@ use the helper instead):
 - The pane buffer scrolls: output longer than the buffer is unrecoverable via
   `read` — ask the worker to re-emit only the missing span, or have it write
   findings to a file from the start.
-- Long prompts land as "[Pasted Content N chars]" and the helper's Enter can
-  fire before the paste settles, leaving the draft unsubmitted. After any
-  helper send, `read` the pane; if the draft is still in the composer, submit
-  with a REAL carriage return: `herdr agent send <pane> "$(printf '\r')"`.
+- Long split text/key submissions can race paste settlement and leave a draft
+  unsubmitted. `pane run` avoids that split operation; still read the pane after
+  dispatch because a successful transport call does not prove agent uptake.
 
 Prompts state source scope, artifact directory, allowed artifact classes, source
 write authority, output contract, evidence requirements and whether subagents
@@ -102,11 +113,18 @@ can be stale. If status conflicts with a live session, inspect
 `herdr pane process-info`, `herdr agent explain`, and a bounded pane tail before
 declaring failure.
 
+`idle` and `done` both mean the agent is no longer working: `done` is an unseen
+completion and `idle` is a seen/waiting completion. Accept either after checking
+the pane record and bounded output. A `blocked` agent needs input; `unknown`
+means integration/detection is not yet reliable.
+
 ## Finish
 
 Capture the worker's concise result and artifact paths, adjudicate them in the
 lead context, preserve a bounded status/failure receipt, then close or reuse the
-pane deliberately. Do not retain a full pane transcript when the named artifact
+pane deliberately. Never close a pane, tab, workspace or session you did not
+create unless the human explicitly requests it, and never stop the Herdr server
+from an active session as incidental cleanup. Do not retain a full pane transcript when the named artifact
 and receipt are sufficient. Clean pane-local temporary payload only when the
 run owns it; lifecycle and retention follow `session`'s context-hygiene
 contract. A pane being idle does not prove its work is correct; objective checks

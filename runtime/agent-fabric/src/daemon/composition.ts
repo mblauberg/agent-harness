@@ -1,0 +1,118 @@
+import type { FabricOpenOptions } from "../domain/types.js";
+import { isAbsolute, resolve } from "node:path";
+import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
+import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
+import { loadFabricConfig } from "../config/index.js";
+
+type AdapterMap = NonNullable<FabricOpenOptions["adapters"]>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function expandTrustedCommandPart(part: string, agentsHome: string, stateDirectory?: string): string {
+  for (const [token, root] of [["${AGENTS_HOME}", agentsHome], ["${FABRIC_STATE_DIRECTORY}", stateDirectory]] as const) {
+    if (!part.includes(token)) continue;
+    if (root === undefined) throw new TypeError(`${token} requires a trusted runtime path`);
+    if (part !== token && !part.startsWith(`${token}/`)) {
+      throw new TypeError(`${token} must begin a trusted adapter command path`);
+    }
+    return resolve(`${root}${part.slice(token.length)}`);
+  }
+  return part;
+}
+
+function replaceUniqueOption(command: string[], option: string, value: string): string[] {
+  const result: string[] = [];
+  for (let index = 0; index < command.length; index += 1) {
+    if (command[index] !== option) {
+      result.push(command[index] as string);
+      continue;
+    }
+    if (index + 1 >= command.length) throw new TypeError(`${option} requires a value`);
+    index += 1;
+  }
+  result.push(option, value);
+  return result;
+}
+
+export function parseDaemonAdapters(serialized: string | undefined): AdapterMap {
+  if (serialized === undefined) return {};
+  const value: unknown = JSON.parse(serialized);
+  if (!isRecord(value)) throw new TypeError("daemon adapter composition must be an object");
+  const adapters: AdapterMap = {};
+  for (const [adapterId, candidate] of Object.entries(value)) {
+    if (!isRecord(candidate) || !Array.isArray(candidate.command) || !candidate.command.every((part) => typeof part === "string") || candidate.command.length === 0 || !isRecord(candidate.environment) || !Object.values(candidate.environment).every((part) => typeof part === "string")) {
+      throw new TypeError(`daemon adapter composition is invalid for ${adapterId}`);
+    }
+    const modelPolicy = candidate.modelPolicy;
+    if (modelPolicy !== undefined && (!isRecord(modelPolicy) || !Array.isArray(modelPolicy.allowedFamilies) || !modelPolicy.allowedFamilies.every((item) => typeof item === "string") || !Array.isArray(modelPolicy.allowedModelPatterns) || !modelPolicy.allowedModelPatterns.every((item) => typeof item === "string") || typeof modelPolicy.requiresExplicitModel !== "boolean")) {
+      throw new TypeError(`daemon adapter model policy is invalid for ${adapterId}`);
+    }
+    adapters[adapterId] = {
+      command: candidate.command,
+      environment: candidate.environment as Record<string, string>,
+      ...(modelPolicy === undefined ? {} : { modelPolicy: modelPolicy as NonNullable<AdapterMap[string]["modelPolicy"]> }),
+    };
+  }
+  return adapters;
+}
+
+export async function composeDaemonConfiguration(options: {
+  globalConfigPath: string;
+  localConfigPath?: string;
+  projectConfigPath?: string;
+  runConfigPath?: string;
+  compatibilityPath: string;
+  compatibilitySchemaPath: string;
+  agentsHome: string;
+  stateDirectory?: string;
+}): Promise<{ adapters: AdapterMap; executionProfile: string; maximumConcurrentProviderTurns: number; workspaceRoots: string[] }> {
+  const config = await loadFabricConfig({
+    globalPath: options.globalConfigPath,
+    agentsHome: options.agentsHome,
+    ...(options.localConfigPath === undefined ? {} : { localPath: options.localConfigPath }),
+    ...(options.projectConfigPath === undefined ? {} : { projectPath: options.projectConfigPath }),
+    ...(options.runConfigPath === undefined ? {} : { runPath: options.runConfigPath }),
+  });
+  await verifyAdapterCompatibility({ compatibilityPath: options.compatibilityPath, schemaPath: options.compatibilitySchemaPath, adapterIds: config.adapterIds, requireEnabled: true });
+  const adapters = Object.fromEntries(await Promise.all(config.adapterIds.map(async (adapterId) => {
+    const command = config.adapterCommands[adapterId];
+    if (command === undefined || command.length === 0) throw new TypeError(`activated adapter ${adapterId} has no trusted command`);
+    const policy = await loadAdapterModelConstraints({
+      compatibilityPath: options.compatibilityPath,
+      schemaPath: options.compatibilitySchemaPath,
+      adapterId,
+      requireEnabled: true,
+    });
+    let resolvedCommand = command.map((part) => expandTrustedCommandPart(part, options.agentsHome, options.stateDirectory));
+    if (policy.wrapperEntrypoint === undefined) throw new TypeError(`${adapterId} compatibility entry has no pinned fabric wrapper`);
+    if (resolvedCommand.length < 2) throw new TypeError(`${adapterId} trusted command has no wrapper entrypoint`);
+    resolvedCommand[1] = policy.wrapperEntrypoint;
+    if (policy.providerExecutable !== undefined) {
+      if (!isAbsolute(policy.providerExecutable)) throw new TypeError(`${adapterId} provider executable must be absolute`);
+      resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-executable", policy.providerExecutable);
+    } else if (adapterId !== "claude-agent-sdk") {
+      throw new TypeError(`${adapterId} compatibility entry has no pinned provider executable`);
+    }
+    return [adapterId, {
+      command: resolvedCommand,
+      environment: {},
+      modelPolicy: {
+        allowedFamilies: policy.allowed,
+        allowedModelPatterns: policy.patterns,
+        requiresExplicitModel: policy.requiresExplicitModel,
+      },
+    }] as const;
+  })));
+  return {
+    adapters,
+    executionProfile: config.executionProfile ?? "headless",
+    maximumConcurrentProviderTurns: config.limits.maximumConcurrentProviderTurns,
+    workspaceRoots: config.workspaceRoots,
+  };
+}
+
+export async function composeDaemonAdapters(options: Parameters<typeof composeDaemonConfiguration>[0]): Promise<AdapterMap> {
+  return (await composeDaemonConfiguration(options)).adapters;
+}

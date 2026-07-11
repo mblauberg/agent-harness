@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "skills" / "orchestrate" / "scripts" / "herdr_prompt.sh"
 
 
-def test_prompt_helper_sends_text_and_enter_once(tmp_path):
+def test_prompt_helper_uses_atomic_pane_run(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "calls.log"
@@ -34,8 +34,7 @@ def test_prompt_helper_sends_text_and_enter_once(tmp_path):
     calls = log.read_text().splitlines()
     assert calls == [
         "agent get review-claude",
-        "agent send review-claude Inspect this diff",
-        "pane send-keys w9:p3 enter",
+        "pane run w9:p3 Inspect this diff",
     ]
 
 

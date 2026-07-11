@@ -1,0 +1,123 @@
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
+
+import { MCP_SEATS, projectKey, resolveSeatPaths } from "../cli/seat-store.js";
+
+const CAPABILITY_PATTERN = /^af[bc]_[A-Za-z0-9_-]{43}$/u;
+
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+async function readPrivateRegularFile(path: string): Promise<string> {
+  let before: Awaited<ReturnType<typeof lstat>>;
+  try {
+    before = await lstat(path);
+  } catch (error: unknown) {
+    throw error;
+  }
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw new Error("agent fabric MCP capability source must be a regular file");
+  }
+  if ((before.mode & 0o077) !== 0) {
+    throw new Error("agent fabric MCP capability file must be private (0600)");
+  }
+  if (typeof process.getuid === "function" && before.uid !== process.getuid()) {
+    throw new Error("agent fabric MCP capability file must be owned by the current user");
+  }
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error: unknown) {
+    if (errorCode(error) === "ELOOP") {
+      throw new Error("agent fabric MCP capability source must be a regular file");
+    }
+    throw error;
+  }
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error("agent fabric MCP capability file changed while opening");
+    }
+    if ((opened.mode & 0o077) !== 0) {
+      throw new Error("agent fabric MCP capability file must be private (0600)");
+    }
+    if (typeof process.getuid === "function" && opened.uid !== process.getuid()) {
+      throw new Error("agent fabric MCP capability file must be owned by the current user");
+    }
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+async function resolveProjectSeatFile(environment: NodeJS.ProcessEnv, cwd: string): Promise<string> {
+  const seat = environment.AGENT_FABRIC_SEAT;
+  const stateDirectory = environment.AGENT_FABRIC_STATE_DIRECTORY;
+  if (seat === undefined || !(MCP_SEATS as readonly string[]).includes(seat)) {
+    throw new Error("agent fabric MCP seat is invalid");
+  }
+  if (stateDirectory === undefined || !isAbsolute(stateDirectory)) {
+    throw new Error("agent fabric MCP state directory must be absolute");
+  }
+  let candidate = await realpath(resolve(cwd));
+  for (;;) {
+    try {
+      const paths = await resolveSeatPaths({ stateDirectory, project: candidate, seat: seat as (typeof MCP_SEATS)[number] });
+      const metadataPath = paths.metadataPath;
+      const metadataText = await readPrivateRegularFile(metadataPath);
+      const metadata: unknown = JSON.parse(metadataText);
+      const credentialPath = paths.credentialPath;
+      if (
+        typeof metadata !== "object" ||
+        metadata === null ||
+        !("schemaVersion" in metadata) ||
+        metadata.schemaVersion !== 1 ||
+        !("projectPath" in metadata) ||
+        metadata.projectPath !== candidate ||
+        !("projectKey" in metadata) ||
+        metadata.projectKey !== projectKey(candidate) ||
+        !("seat" in metadata) ||
+        metadata.seat !== seat ||
+        !("credentialPath" in metadata) ||
+        metadata.credentialPath !== credentialPath
+      ) {
+        throw new Error(`agent fabric MCP seat metadata is invalid for project ${candidate}`);
+      }
+      return credentialPath;
+    } catch (error: unknown) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) break;
+    candidate = parent;
+  }
+  throw new Error(`agent fabric MCP seat ${seat} is not provisioned for ${cwd} or an ancestor project`);
+}
+
+export async function resolveMcpCapability(
+  environment: NodeJS.ProcessEnv,
+  cwd = process.cwd(),
+): Promise<string> {
+  const inline = environment.AGENT_FABRIC_CAPABILITY;
+  let file = environment.AGENT_FABRIC_CAPABILITY_FILE;
+  const projectSeat = environment.AGENT_FABRIC_SEAT;
+  const sourceCount = Number(inline !== undefined) + Number(file !== undefined) + Number(projectSeat !== undefined);
+  if (sourceCount !== 1) {
+    throw new Error("agent-fabric-mcp requires exactly one capability source");
+  }
+  if (inline !== undefined) {
+    if (!CAPABILITY_PATTERN.test(inline)) throw new Error("agent fabric MCP capability is invalid");
+    return inline;
+  }
+  if (projectSeat !== undefined) file = await resolveProjectSeatFile(environment, cwd);
+  if (file === undefined || !isAbsolute(file)) {
+    throw new Error("agent fabric MCP capability file must be absolute");
+  }
+  const capability = (await readPrivateRegularFile(file)).trim();
+  if (!CAPABILITY_PATTERN.test(capability)) throw new Error("agent fabric MCP capability file is invalid");
+  return capability;
+}

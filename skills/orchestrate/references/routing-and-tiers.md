@@ -4,6 +4,12 @@
 > is the policy resolver. This file owns human-readable family/role and
 > degradation policy. `HARNESS.md` keeps only the invariant core.
 
+The resolver's default `--adapter-gate fabric` fails closed when the selected
+fabric adapter is disabled or has unresolved compatibility pins. A direct CLI
+executor that owns its own safety and activation gates must opt in explicitly
+with `--adapter-gate direct-cli`; this never bypasses family or model-pattern
+constraints.
+
 Route by **role, evidence surface, safety requirement, and capability tier**. Never route by a memorised
 model name. Discover current model IDs and tool modes at runtime (`cli-headless.md`) and record what was
 actually used for high-stakes work.

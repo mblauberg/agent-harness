@@ -404,6 +404,7 @@ run_gemini() {
   route_rc=0
   "$MODEL_ROUTE" resolve --adapter agy --model "$GEMINI_MODEL" --alias flagship \
     --role bonus-review --lead-family "$OPERATOR_FAMILY" --require-distinct \
+    --adapter-gate direct-cli \
     > "$route_file" 2>/dev/null || route_rc=$?
   if [ "$route_rc" -ne 0 ]; then
     write_header "$out_file" "gemini / Antigravity (unresolved)" "route resolution failed"

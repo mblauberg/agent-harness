@@ -1,0 +1,65 @@
+schemaVersion: 1
+
+allowedAdapters:
+  - claude-agent-sdk
+  - codex-app-server
+  - pi-rpc
+  - agy
+  - cursor-agent
+  - kiro-acp
+
+# Provider adapters are activated only by a separate trusted edit after their
+# compatibility entry is enabled and fully pinned. Empty keeps the daemon
+# coordination-only while preserving the provider allow-list above.
+activeAdapters: []
+
+allowedProfiles:
+  - headless
+  - observed
+  - interactive
+  - paired-visible
+  - paired-observed
+
+adapters:
+  claude-agent-sdk:
+    command:
+      - node
+      - "${AGENTS_HOME}/runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/claude-agent-sdk.sqlite3"
+  codex-app-server:
+    command:
+      - node
+      - "${AGENTS_HOME}/runtime/agent-fabric/dist/adapters/providers/codex-app-server.js"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/codex-app-server.sqlite3"
+  pi-rpc:
+    command:
+      - node
+      - "${AGENTS_HOME}/runtime/agent-fabric/dist/adapters/providers/optional/pi-rpc.js"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/pi-rpc.sqlite3"
+  agy:
+    command:
+      - node
+      - "${AGENTS_HOME}/runtime/agent-fabric/dist/adapters/providers/optional/agy.js"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/agy.sqlite3"
+  cursor-agent:
+    command:
+      - node
+      - "${AGENTS_HOME}/runtime/agent-fabric/dist/adapters/providers/optional/cursor-agent.js"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/cursor-agent.sqlite3"
+  kiro-acp:
+    command:
+      - node
+      - "${AGENTS_HOME}/runtime/agent-fabric/dist/adapters/providers/optional/kiro-acp.js"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/kiro-acp.sqlite3"
+
+workspaceRoots:
+  - "${AGENTS_HOME}"
+
+limits:
+  maximumConcurrentProviderTurns: 8

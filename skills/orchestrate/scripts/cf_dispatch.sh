@@ -259,7 +259,7 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
     local -a route_cmd
     route_cmd=("$AGENTS_ROOT/scripts/model-route" resolve
       --adapter "$tool" --alias "$MODEL_ALIAS" --role "$ROUTE_ROLE"
-      --lead-family "$ORCH_FAMILY" --require-distinct)
+      --lead-family "$ORCH_FAMILY" --require-distinct --adapter-gate direct-cli)
     if [ "$tool" = "codex" ]; then
       capabilities_file="$tmpdir/codex-capabilities.json"
       if ! "$AGENTS_ROOT/skills/orchestrate/scripts/codex_capabilities.py" \

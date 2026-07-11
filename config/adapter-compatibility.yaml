@@ -1,0 +1,273 @@
+schema_version: 1
+verification_date: "2026-07-10"
+adapter_contract_version: 1
+capability_fixture_version: 1
+activation_policy:
+  real_adapters_require_separate_gate: true
+  default_enabled: false
+
+adapters:
+  claude-agent-sdk:
+    enabled: false
+    delivery_stage: 3
+    implementation:
+      kind: npm-package
+      package: "@anthropic-ai/claude-agent-sdk"
+      installed_version: "0.3.206"
+      resolved_artifact: "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.206.tgz"
+      lock_integrity_sha512: "KljDh9Pg4YCYpoXS8dnWoVSsOHtU4yLCW268K2iOruSxFXE8/Tay6DPvmJzYuqjP5YLNYfj05ZGykwZSUn6GXA=="
+      entrypoint: "runtime/agent-fabric/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+      entrypoint_sha256: "4f38fab2cf0bd64ee4eafbeb6b1cb9e25dfbcfb6fe1cdd172334d3b5f876150f"
+    contract:
+      adapter_version: 1
+      protocol: claude-agent-sdk
+      protocol_version: "0.3.206"
+      schema_source: "runtime/agent-fabric/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts"
+      schema_sha256: "b20799a13cbb0838123947f377dbaf043814e1bd901a9f87a57c50aafcf14299"
+      capability_fixture_version: 1
+    runtime_range:
+      fabric_node: ">=24.15.0 <25"
+      upstream_node: ">=18.0.0"
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed:
+        - anthropic
+      allowed_model_patterns:
+        - "claude*"
+        - "fable*"
+        - "opus*"
+        - "sonnet*"
+        - "haiku*"
+      requires_explicit_model: true
+    official_source_url: "https://github.com/anthropics/claude-agent-sdk-typescript"
+    unresolved_pins:
+      - "The fabric-owned wrapper build is not hashed until a release artifact exists; activation remains disabled."
+
+  codex-app-server:
+    enabled: false
+    delivery_stage: 3
+    implementation:
+      kind: native-cli
+      command: codex
+      installed_version: "0.144.0"
+      source_build: "rust-v0.144.0"
+      executable: "/opt/homebrew/Caskroom/codex/0.144.0/codex-aarch64-apple-darwin"
+      executable_sha256: "978740e6bcbd9af2f850823b723fb74f16d8d1e44de05f7dd6737ae631f72017"
+    contract:
+      adapter_version: 1
+      protocol: codex-app-server
+      protocol_version: "cli-0.144.0"
+      schema_generator: "codex app-server generate-json-schema --experimental --out <directory>"
+      schema_bundle: codex_app_server_protocol.v2.schemas.json
+      schema_sha256: null
+      capability_fixture_version: 1
+    runtime_range:
+      supported_cli_versions:
+        - "0.144.0"
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed:
+        - openai
+      allowed_model_patterns:
+        - "gpt-*"
+        - "codex*"
+        - "o1*"
+        - "o3*"
+        - "o4*"
+      requires_explicit_model: true
+    official_source_url: "https://github.com/openai/codex"
+    unresolved_pins:
+      - "The fabric-owned wrapper build is not hashed until a release artifact exists; activation remains disabled."
+      - "The recorded Codex schema bundle is absent and the locally regenerated v2 bundle hash is unresolved; activation remains disabled."
+
+  herdr:
+    enabled: false
+    delivery_stage: 3
+    implementation:
+      kind: native-cli
+      command: herdr
+      installed_version: "0.7.3"
+      source_build: "v0.7.3"
+      executable: "/opt/homebrew/Cellar/herdr/0.7.3/bin/herdr"
+      executable_sha256: "b9dfac1390d86bd0a75e86182f4b9113a03c51bc927d700cf99eb063d81f21f7"
+    contract:
+      adapter_version: 1
+      protocol: herdr-local-api
+      protocol_version: 16
+      schema_version: 1
+      schema_generator: "herdr api schema --json"
+      schema_sha256: "7d1eede56d8009fe5b1b2f76e9cedf50b730124cec821fdc3b68ca07cd545f83"
+      capability_fixture_version: 1
+    runtime_range:
+      supported_cli_versions:
+        - "0.7.3"
+      supported_protocol_versions:
+        - 16
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed: []
+      route_role: visibility-and-wakeup-only
+    official_source_url: "https://github.com/ogulcancelik/herdr"
+    unresolved_pins:
+      - "Herdr is visibility-only and is not a provider NDJSON adapter; a separate fabric visibility bridge must be implemented and pinned before activation."
+
+  pi-rpc:
+    enabled: false
+    delivery_stage: 4
+    implementation:
+      kind: npm-cli
+      package: "@earendil-works/pi-coding-agent"
+      installed_version: "0.80.3"
+      executable: "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+      executable_sha256: "af302f231437eaf6f37691bce4b34234fcb626bcb5eb3910d4fc3f6519bf78ca"
+      rpc_entrypoint: "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"
+      rpc_entrypoint_sha256: "7c3b46714f2d357f8b0d5403164663b60c13e62ef14dfc360ee757bdc16e02a0"
+    contract:
+      adapter_version: 1
+      protocol: pi-jsonl-rpc
+      protocol_version: "package-0.80.3"
+      schema_source: "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-types.d.ts"
+      schema_sha256: "fa333f49bc1e53d77be78ed645bdc5169999a9f6945a50942d7a9d5ab0e248b2"
+      capability_fixture_version: 1
+    runtime_range:
+      fabric_node: ">=24.15.0 <25"
+      upstream_node: ">=22.19.0"
+      supported_cli_versions:
+        - "0.80.3"
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed:
+        - generic-open
+        - open-weight
+      allowed_model_patterns:
+        - "deepseek-*"
+        - "glm-*"
+        - "kimi-*"
+        - "llama-*"
+        - "minimax-*"
+        - "mistral-*"
+        - "mixtral-*"
+        - "qwen*"
+      requires_explicit_model: true
+      route_role: generic-or-open-model-worker
+    official_source_url: "https://github.com/earendil-works/pi"
+    unresolved_pins:
+      - "The fabric-owned Pi wrapper build is not hashed until a release artifact exists; activation remains disabled."
+
+  agy:
+    enabled: false
+    delivery_stage: 4
+    implementation:
+      kind: native-cli
+      command: agy
+      installed_version: "1.1.1"
+      source_build: null
+      executable: "${USER_HOME}/.local/bin/agy"
+      executable_sha256: "f3b54437e56d81bb5c47715ed9bfb9a924c584f37524e87790e562399e23d7e0"
+    contract:
+      adapter_version: 1
+      protocol: agy-headless-cli
+      protocol_version: "cli-1.1.1"
+      schema_source: null
+      schema_sha256: null
+      capability_fixture_version: 1
+    runtime_range:
+      supported_cli_versions:
+        - "1.1.1"
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed:
+        - google
+      allowed_model_patterns:
+        - "gemini*"
+      requires_explicit_model: true
+      route_role: gemini-or-antigravity-worker
+    official_source_url: "https://github.com/google-antigravity/antigravity-cli"
+    unresolved_pins:
+      - "Installed binary does not expose a source commit or build identifier through local version/help output."
+      - "No machine-readable headless output schema or schema generator is exposed by the installed CLI."
+      - "The fabric-owned Agy wrapper build and its normalised provider-output schema are not yet hashed as release artifacts."
+
+  cursor-agent:
+    enabled: false
+    delivery_stage: 4
+    implementation:
+      kind: bundled-cli
+      command: cursor-agent
+      installed_version: "2026.07.09-a3815c0"
+      source_build: "a3815c0"
+      executable: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.09-a3815c0/cursor-agent"
+      executable_sha256: "eed61c5224668c9236334c4c68936a16aecc37374b592f59e31eb50433817831"
+      bundle_entrypoint: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.09-a3815c0/index.js"
+      bundle_entrypoint_sha256: "0312ba6ca62f6b18890745625e8a42513bd0002cd713beac4fb99e25e6ff7a92"
+    contract:
+      adapter_version: 1
+      protocol: cursor-agent-stream-json-cli
+      protocol_version: "build-2026.07.09-a3815c0"
+      schema_source: null
+      schema_sha256: null
+      capability_fixture_version: 1
+    runtime_range:
+      supported_cli_versions:
+        - "2026.07.09-a3815c0"
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed:
+        - cursor-composer
+        - xai
+      allowed_model_patterns:
+        - "composer-*"
+        - "grok-*"
+      requires_explicit_model: true
+    official_source_url: "https://cursor.com/docs/cli/overview"
+    unresolved_pins:
+      - "The installed CLI exposes JSON and stream-json output but no local protocol schema or schema generator."
+      - "The fabric-owned Cursor wrapper build and its normalised provider-output schema are not yet hashed as release artifacts."
+
+  kiro-acp:
+    enabled: false
+    delivery_stage: 4
+    implementation:
+      kind: native-application-cli
+      command: kiro-cli
+      installed_version: "2.12.0"
+      source_build: "20260709.003513"
+      executable: "/Applications/Kiro CLI.app/Contents/MacOS/kiro-cli"
+      executable_sha256: "01501327bd97f1d54034aa586a0156b18a96537f9ae242fd38c928684310b740"
+      package_manifest: "/Applications/Kiro CLI.app/Contents/Resources/manifest.json"
+      package_manifest_sha256: "5214ef1a792aa61d68a25d9d5176572eee3127724234c7811baf381a16aa23f8"
+    contract:
+      adapter_version: 1
+      protocol: agent-client-protocol
+      protocol_version: null
+      agent_engine: v2
+      schema_source: null
+      schema_sha256: null
+      capability_fixture_version: 1
+    runtime_range:
+      supported_cli_versions:
+        - "2.12.0"
+      minimum_macos: "10.13"
+      platforms:
+        - darwin-arm64
+        - darwin-x86_64
+    model_family_constraints:
+      allowed:
+        - open-weight
+      allowed_model_patterns:
+        - "deepseek-*"
+        - "glm-*"
+        - "minimax-*"
+        - "qwen*"
+      requires_explicit_model: true
+      route_role: open-model-worker
+    official_source_url: "https://kiro.dev/docs/cli/acp/"
+    unresolved_pins:
+      - "The installed ACP help exposes agent engines v1, v2 and v3 but not the negotiated ACP protocol version or a local schema generator."
+      - "The fabric-owned Kiro entrypoint intentionally fails capabilities closed until the ACP wire contract is pinned; its release build is not yet hashed."

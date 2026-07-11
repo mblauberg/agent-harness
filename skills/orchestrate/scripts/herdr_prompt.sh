@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: herdr_prompt.sh TARGET [--prompt TEXT | --prompt-file PATH]
 
-Send one prompt to an interactive Herdr agent and submit it with Enter.
+Send one prompt to an interactive Herdr agent with Herdr's atomic pane runner.
 If no prompt option is supplied, read the prompt from stdin. This helper never
 waits for completion.
 EOF
@@ -53,6 +53,5 @@ except (KeyError, TypeError, json.JSONDecodeError):
 print(value)
 ')" || { echo "could not resolve pane for Herdr agent: $target" >&2; exit 1; }
 
-herdr agent send "$target" "$prompt" >/dev/null
-herdr pane send-keys "$pane_id" enter >/dev/null
+herdr pane run "$pane_id" "$prompt" >/dev/null
 printf 'dispatched-unconfirmed target=%s pane=%s bytes=%s\n' "$target" "$pane_id" "$prompt_bytes"

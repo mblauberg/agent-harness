@@ -17,6 +17,8 @@ should_trigger_explicit:
   - "ultracode: audit every API route from multiple angles | workflow keyword opt-in"
   - "run a workflow to fan out this migration across packages | explicit workflow request"
   - "work as a Claude Code and Codex pair throughout this task | paired-primary trigger"
+  - "use Herdr to open a side-by-side Claude review pane and show me its status | explicit Herdr control"
+  - "inspect the current Herdr pane and send the waiting agent this follow-up | explicit Herdr inspection and control"
 
 should_trigger_inferred:
   - "comprehensive source audit across hundreds of files with final synthesis | large read-heavy parallelisable audit"
@@ -32,6 +34,7 @@ should_not_trigger:
   - "the docs mention codex, agy, cursor, and kiro | passive tool-name mention"
   - "this is high stakes but answer this one factual question briefly | high-stakes alone without decomposition"
   - "web search one known URL only | single-source lookup"
+  - "what is Herdr | factual question without pane control or orchestration"
 
 ambiguous_confirm_first:
   - "be thorough | seriousness alone is not decomposition"

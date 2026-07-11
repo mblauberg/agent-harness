@@ -5,7 +5,8 @@ description: >
   workflows/ultracode, deep/web research, multi-angle audits, repo-wide sweeps, large migrations,
   independent second opinions, red-team/adversarial review, review-refine loops, cross-family
   verification, model-output synthesis, or high-stakes low-oracle work. Skip tiny edits, simple Q&A,
-  tightly coupled debugging, and unpartitionable shared-state writes.
+  tightly coupled debugging, and unpartitionable shared-state writes. Also use for explicit Herdr
+  pane, agent, workspace, tab or session inspection/control requests.
 ---
 
 # Multi-agent orchestration

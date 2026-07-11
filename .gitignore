@@ -10,3 +10,4 @@ skills/.backups/
 .claude/settings.local.json
 .env
 .env.*
+node_modules/

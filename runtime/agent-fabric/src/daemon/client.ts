@@ -1,0 +1,667 @@
+import { randomBytes } from "node:crypto";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
+import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { basename, dirname, normalize, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+
+import Database from "better-sqlite3";
+
+import type { AuthorityInput, MessageInput } from "../domain/types.js";
+import type { FabricOpenOptions } from "../domain/types.js";
+import type { BudgetResult, TeamResult } from "../core/contracts.js";
+import { FabricRemoteError, TimedNdjsonTransport } from "../transport/ndjson-rpc.js";
+import { isRecord } from "./protocol.js";
+import { composeDaemonConfiguration } from "./composition.js";
+
+export { FabricRemoteError } from "../transport/ndjson-rpc.js";
+
+function isMessageKind(value: unknown): value is MessageInput["kind"] {
+  return value === "request" || value === "response" || value === "event" || value === "steer" || value === "cancel" || value === "escalate" || value === "ack";
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isNumberRecord(value: unknown): value is Record<string, number> {
+  return isRecord(value) && Object.values(value).every((item) => typeof item === "number");
+}
+
+function isBudgetDimensions(value: unknown): value is BudgetResult["dimensions"] {
+  return (
+    isRecord(value) &&
+    Object.values(value).every(
+      (dimension) =>
+        isRecord(dimension) &&
+        typeof dimension.granted === "number" &&
+        typeof dimension.reserved === "number" &&
+        typeof dimension.consumed === "number" &&
+        typeof dimension.available === "number" &&
+        typeof dimension.usageUnknown === "boolean",
+    )
+  );
+}
+
+function teamResult(value: unknown): TeamResult {
+  if (
+    !isRecord(value) ||
+    typeof value.teamId !== "string" ||
+    (value.parentTeamId !== null && typeof value.parentTeamId !== "string") ||
+    typeof value.depth !== "number" ||
+    typeof value.leaderAgentId !== "string" ||
+    typeof value.rootTaskId !== "string" ||
+    !isStringArray(value.ownedTaskIds) ||
+    !isStringArray(value.memberAgentIds) ||
+    typeof value.budgetId !== "string" ||
+    (value.state !== "active" && value.state !== "frozen" && value.state !== "barrier-closed") ||
+    typeof value.generation !== "number" ||
+    (value.successorAgentId !== null && typeof value.successorAgentId !== "string") ||
+    !Array.isArray(value.discussionGroups) ||
+    !value.discussionGroups.every(
+      (group) => isRecord(group) && typeof group.groupId === "string" && isStringArray(group.memberAgentIds),
+    ) ||
+    !isNumberRecord(value.reservedBudget)
+  ) {
+    throw new Error("daemon returned an invalid team result");
+  }
+  return {
+    teamId: value.teamId,
+    parentTeamId: value.parentTeamId,
+    depth: value.depth,
+    leaderAgentId: value.leaderAgentId,
+    rootTaskId: value.rootTaskId,
+    ownedTaskIds: value.ownedTaskIds,
+    memberAgentIds: value.memberAgentIds,
+    budgetId: value.budgetId,
+    state: value.state,
+    generation: value.generation,
+    successorAgentId: value.successorAgentId,
+    discussionGroups: value.discussionGroups,
+    reservedBudget: value.reservedBudget,
+  };
+}
+
+function budgetResult(value: unknown): BudgetResult {
+  if (
+    !isRecord(value) ||
+    typeof value.budgetId !== "string" ||
+    (value.parentBudgetId !== null && typeof value.parentBudgetId !== "string") ||
+    (value.state !== "active" && value.state !== "usage-unknown" && value.state !== "released") ||
+    !isBudgetDimensions(value.dimensions) ||
+    !isNumberRecord(value.returned)
+  ) {
+    throw new Error("daemon returned an invalid budget result");
+  }
+  return {
+    budgetId: value.budgetId,
+    parentBudgetId: value.parentBudgetId,
+    state: value.state,
+    dimensions: value.dimensions,
+    returned: value.returned,
+  };
+}
+
+export type DaemonStartOptions = {
+  databasePath: string;
+  stateDirectory: string;
+  runtimeDirectory: string;
+  socketPath: string;
+  adapters?: NonNullable<FabricOpenOptions["adapters"]>;
+  executionProfile?: string;
+  maximumConcurrentProviderTurns?: number;
+  workspaceRoots?: string[];
+  configuration?: {
+    globalConfigPath: string;
+    localConfigPath?: string;
+    projectConfigPath?: string;
+    runConfigPath?: string;
+    compatibilityPath: string;
+    compatibilitySchemaPath: string;
+    agentsHome: string;
+  };
+};
+
+export type FabricDaemonHandle = {
+  bootstrapCapability: string;
+  address: { transport: "unix"; path: string };
+  pid: number;
+  stop(): Promise<void>;
+  waitForExit(): Promise<void>;
+};
+
+function canonicalDaemonPath(path: string): string {
+  let cursor = resolve(path);
+  const suffix: string[] = [];
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor);
+    if (parent === cursor) throw new TypeError(`workspace root has no resolvable ancestor: ${path}`);
+    suffix.unshift(basename(cursor));
+    cursor = parent;
+  }
+  return normalize(resolve(realpathSync(cursor), ...suffix));
+}
+
+function safeDatabasePath(path: string): string {
+  const requested = resolve(path);
+  if (existsSync(requested)) {
+    const link = lstatSync(requested);
+    if (link.isSymbolicLink()) throw new FabricRemoteError("DAEMON_DATABASE_PATH_UNSAFE", "daemon database path must not be a symbolic link");
+    const info = statSync(requested);
+    if (!info.isFile() || info.nlink !== 1) throw new FabricRemoteError("DAEMON_DATABASE_PATH_UNSAFE", "daemon database path must be a single-link regular file");
+  } else {
+    // A dangling final-component symlink is not reported by existsSync.
+    try {
+      if (lstatSync(requested).isSymbolicLink()) {
+        throw new FabricRemoteError("DAEMON_DATABASE_PATH_UNSAFE", "daemon database path must not be a symbolic link");
+      }
+    } catch (error: unknown) {
+      if (error instanceof FabricRemoteError) throw error;
+      if (!isRecord(error) || error.code !== "ENOENT") throw error;
+    }
+  }
+  return canonicalDaemonPath(requested);
+}
+
+function childEnvironment(options: DaemonStartOptions, bootstrapCapability: string, lockPaths: string[], capabilityKey: string): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    AGENT_FABRIC_DATABASE_PATH: options.databasePath,
+    AGENT_FABRIC_SOCKET_PATH: options.socketPath,
+    AGENT_FABRIC_STATE_DIRECTORY: options.stateDirectory,
+    AGENT_FABRIC_RUNTIME_DIRECTORY: options.runtimeDirectory,
+    AGENT_FABRIC_BOOTSTRAP_CAPABILITY: bootstrapCapability,
+    AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON: JSON.stringify(lockPaths),
+    AGENT_FABRIC_CAPABILITY_KEY: capabilityKey,
+    AGENT_FABRIC_EXECUTION_PROFILE: options.executionProfile ?? "headless",
+    AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: String(options.maximumConcurrentProviderTurns ?? 8),
+    AGENT_FABRIC_WORKSPACE_ROOTS_JSON: JSON.stringify(options.workspaceRoots ?? []),
+    AGENT_FABRIC_ADAPTERS_JSON: JSON.stringify(options.adapters ?? {}),
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    TMPDIR: process.env.TMPDIR ?? "/tmp",
+  };
+  for (const key of ["HOME", "CODEX_HOME", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE"] as const) {
+    const value = process.env[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  return environment;
+}
+
+async function loadOrCreateCapabilityKey(stateDirectory: string): Promise<string> {
+  const path = `${stateDirectory}/capability.key`;
+  try {
+    const key = (await readFile(path, "utf8")).trim();
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(key)) throw new Error("agent fabric capability key is invalid");
+    return key;
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code !== "ENOENT") throw error;
+    const key = randomBytes(32).toString("base64url");
+    const handle = await open(path, "wx", 0o600);
+    try {
+      await handle.writeFile(`${key}\n`);
+    } finally {
+      await handle.close();
+    }
+    return key;
+  }
+}
+
+export type DaemonLock = { database: Database.Database; path: string; token: string };
+
+export async function writeDaemonLockReceipt(path: string, owner: { pid: number; token: string; socketPath?: string }): Promise<void> {
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  const handle = await open(temporaryPath, "wx", 0o600);
+  try {
+    await handle.writeFile(`${JSON.stringify(owner)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temporaryPath, path);
+    await chmod(path, 0o600);
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
+async function acquireDaemonLock(path: string): Promise<DaemonLock> {
+  const token = randomBytes(24).toString("base64url");
+  const lockDatabasePath = `${path}.sqlite3`;
+  let database: Database.Database | undefined;
+  try {
+    database = new Database(lockDatabasePath, { timeout: 0 });
+    await chmod(lockDatabasePath, 0o600);
+    database.pragma("journal_mode = DELETE");
+    database.exec("CREATE TABLE IF NOT EXISTS daemon_lock_owner(singleton INTEGER PRIMARY KEY CHECK(singleton = 1), pid INTEGER NOT NULL, token TEXT NOT NULL)");
+    database.exec("BEGIN EXCLUSIVE");
+    database.prepare("INSERT OR REPLACE INTO daemon_lock_owner(singleton, pid, token) VALUES (1, ?, ?)").run(process.pid, token);
+    await writeDaemonLockReceipt(path, { pid: process.pid, token });
+    return { database, path, token };
+  } catch (error: unknown) {
+    if (database !== undefined) {
+      try { database.exec("ROLLBACK"); } catch { /* no active transaction */ }
+      database.close();
+    }
+    if (isRecord(error) && (error.code === "SQLITE_BUSY" || error.code === "SQLITE_LOCKED")) {
+      throw new FabricRemoteError("DAEMON_ALREADY_RUNNING", "agent fabric daemon already owns the coordination lock");
+    }
+    throw error;
+  }
+}
+
+export async function acquireDaemonLocks(paths: string[]): Promise<DaemonLock[]> {
+  const locks: DaemonLock[] = [];
+  try {
+    for (const path of [...new Set(paths)].sort()) locks.push(await acquireDaemonLock(path));
+    return locks;
+  } catch (error: unknown) {
+    await Promise.allSettled(locks.reverse().map(releaseDaemonLock));
+    throw error;
+  }
+}
+
+async function releaseDaemonLock(lock: DaemonLock): Promise<void> {
+  let record: unknown;
+  try {
+    record = JSON.parse(await readFile(lock.path, "utf8"));
+  } catch {
+    record = undefined;
+  }
+  if (isRecord(record) && record.token === lock.token) {
+    await rm(lock.path, { force: true });
+  }
+  try { lock.database.exec("COMMIT"); } catch { /* process teardown */ }
+  lock.database.close();
+}
+
+export async function releaseDaemonLocks(locks: DaemonLock[]): Promise<void> {
+  await Promise.all(locks.map(releaseDaemonLock));
+}
+
+export async function startFabricDaemon(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
+  await Promise.all([
+    mkdir(options.stateDirectory, { recursive: true, mode: 0o700 }),
+    mkdir(options.runtimeDirectory, { recursive: true, mode: 0o700 }),
+  ]);
+  await Promise.all([chmod(options.stateDirectory, 0o700), chmod(options.runtimeDirectory, 0o700)]);
+  const databasePath = safeDatabasePath(options.databasePath);
+  const lockPaths = [
+    `${options.socketPath}.lock`,
+    `${databasePath}.daemon.lock`,
+  ];
+  const capabilityKey = await loadOrCreateCapabilityKey(options.stateDirectory);
+  let adapters = options.adapters ?? {};
+  let executionProfile = options.executionProfile ?? "headless";
+  let maximumConcurrentProviderTurns = options.maximumConcurrentProviderTurns ?? 8;
+  let workspaceRoots = options.workspaceRoots ?? [process.cwd()];
+  if (options.configuration !== undefined) {
+    if (options.adapters !== undefined) {
+      throw new TypeError("daemon accepts explicit adapters or trusted configuration, not both");
+    }
+    const composition = await composeDaemonConfiguration({ ...options.configuration, stateDirectory: options.stateDirectory });
+    adapters = composition.adapters;
+    executionProfile = composition.executionProfile;
+    maximumConcurrentProviderTurns = composition.maximumConcurrentProviderTurns;
+    workspaceRoots = composition.workspaceRoots;
+  }
+  workspaceRoots = [...new Set(workspaceRoots.map(canonicalDaemonPath))].sort();
+  const bootstrapCapability = `afb_${randomBytes(32).toString("base64url")}`;
+  const sourceMode = import.meta.url.endsWith(".ts");
+  const processUrl = new URL(sourceMode ? "./process.ts" : "./process.js", import.meta.url);
+  const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const args = sourceMode
+    ? ["--import", "tsx", fileURLToPath(processUrl)]
+    : [fileURLToPath(processUrl)];
+  const child = spawn(process.execPath, args, {
+    cwd: packageRoot,
+    env: childEnvironment(
+      { ...options, databasePath, adapters, executionProfile, maximumConcurrentProviderTurns, workspaceRoots },
+      bootstrapCapability,
+      lockPaths,
+      capabilityKey,
+    ),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (child.pid === undefined || child.stdout === null || child.stderr === null) {
+    child.kill("SIGKILL");
+    throw new Error("failed to start agent fabric daemon process");
+  }
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr = `${stderr}${chunk}`.slice(-8192);
+  });
+  const exitPromise = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+  });
+  try {
+    await waitUntilReady(child, () => stderr);
+  } catch (error: unknown) {
+    child.kill("SIGKILL");
+    await exitPromise;
+    throw error;
+  }
+  const pid = child.pid;
+  let stopPromise: Promise<void> | undefined;
+  const stopChild = async (): Promise<void> => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      await exitPromise;
+      return;
+    }
+    child.kill("SIGTERM");
+    const graceful = await new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 2_000);
+      void exitPromise.then(() => {
+        clearTimeout(timeout);
+        resolve(true);
+      });
+    });
+    if (!graceful && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+    await exitPromise;
+  };
+  return {
+    bootstrapCapability,
+    address: { transport: "unix", path: options.socketPath },
+    pid,
+    stop(): Promise<void> {
+      stopPromise ??= stopChild();
+      return stopPromise;
+    },
+    waitForExit(): Promise<void> {
+      return exitPromise;
+    },
+  };
+}
+
+async function waitUntilReady(child: ChildProcess, stderr: () => string): Promise<void> {
+  if (child.stdout === null) {
+    throw new Error("daemon stdout is unavailable");
+  }
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("agent fabric daemon startup timed out")), 10_000);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      clearTimeout(timeout);
+      reject(new Error(`agent fabric daemon exited before ready (${String(code)}, ${String(signal)}): ${stderr()}`));
+    };
+    child.once("exit", onExit);
+    lines.once("line", (line) => {
+      clearTimeout(timeout);
+      child.off("exit", onExit);
+      try {
+        const value: unknown = JSON.parse(line);
+        if (isRecord(value) && value.ready === false && isRecord(value.error) && typeof value.error.code === "string" && typeof value.error.message === "string") {
+          reject(new FabricRemoteError(value.error.code, value.error.message));
+          return;
+        }
+        if (!isRecord(value) || value.ready !== true) {
+          reject(new Error("agent fabric daemon returned an invalid ready message"));
+          return;
+        }
+        resolve();
+      } catch (error: unknown) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  });
+  lines.close();
+}
+
+export class FabricDaemonClient {
+  readonly #transport: TimedNdjsonTransport;
+
+  private constructor(transport: TimedNdjsonTransport) {
+    this.#transport = transport;
+  }
+
+  static async connect(socketPath: string, capability: string): Promise<FabricDaemonClient> {
+    return new FabricDaemonClient(await TimedNdjsonTransport.connect({ socketPath, capability }));
+  }
+
+  async #call(method: string, params: Record<string, unknown>): Promise<unknown> {
+    return this.#transport.call(method, params);
+  }
+
+  async close(): Promise<void> {
+    await this.#transport.close();
+  }
+
+  async createRun(input: {
+    runId: string;
+    workspaceRoot?: string;
+    projectRunDirectory?: string;
+    chair: { agentId: string; authority: AuthorityInput };
+  }): Promise<{ runId: string; chairAuthorityId: string; chairCapability: string }> {
+    const result = await this.#call("createRun", input);
+    if (!isRecord(result) || typeof result.runId !== "string" || typeof result.chairAuthorityId !== "string" || typeof result.chairCapability !== "string") {
+      throw new Error("daemon returned an invalid run result");
+    }
+    return { runId: result.runId, chairAuthorityId: result.chairAuthorityId, chairCapability: result.chairCapability };
+  }
+
+  async delegateAuthority(input: {
+    parentAuthorityId: string;
+    authority: AuthorityInput;
+    commandId?: string;
+  }): Promise<{ authorityId: string }> {
+    const result = await this.#call("delegateAuthority", input);
+    if (!isRecord(result) || typeof result.authorityId !== "string") {
+      throw new Error("daemon returned an invalid authority result");
+    }
+    return { authorityId: result.authorityId };
+  }
+
+  async registerAgent(input: { agentId: string; authorityId: string; providerSessionRef?: string; adapterId?: string }): Promise<{ capability: string }> {
+    const result = await this.#call("registerAgent", input);
+    if (!isRecord(result) || typeof result.capability !== "string") {
+      throw new Error("daemon returned an invalid registration result");
+    }
+    return { capability: result.capability };
+  }
+
+  async dispatchProviderAction(input: {
+    adapterId: string;
+    actionId: string;
+    operation: "send_turn" | "wakeup" | "release" | "steer";
+    payload: Record<string, unknown>;
+    commandId: string;
+  }): Promise<{ actionId: string; status: string; history: string[]; executionCount: number; effectCount: number; result?: unknown }> {
+    const result = await this.#call(input.operation === "steer" ? "steerAgent" : "dispatchProviderAction", input);
+    if (!isRecord(result) || typeof result.actionId !== "string" || typeof result.status !== "string" || !Array.isArray(result.history) || !result.history.every((value) => typeof value === "string") || typeof result.executionCount !== "number" || typeof result.effectCount !== "number") {
+      throw new Error("daemon returned an invalid provider action result");
+    }
+    return { actionId: result.actionId, status: result.status, history: result.history, executionCount: result.executionCount, effectCount: result.effectCount, ...(result.result === undefined ? {} : { result: result.result }) };
+  }
+
+  async createDiscussionGroup(input: {
+    groupId: string;
+    memberAgentIds: string[];
+    teamId?: string;
+    commandId: string;
+  }): Promise<{ groupId: string; memberAgentIds: string[] }> {
+    const result = await this.#call("createDiscussionGroup", input);
+    if (!isRecord(result) || typeof result.groupId !== "string" || !Array.isArray(result.memberAgentIds) || !result.memberAgentIds.every((item) => typeof item === "string")) {
+      throw new Error("daemon returned an invalid discussion group");
+    }
+    return { groupId: result.groupId, memberAgentIds: result.memberAgentIds };
+  }
+
+  async freezeSubtree(input: {
+    teamId: string;
+    expectedGeneration: number;
+    reason: string;
+    commandId: string;
+  }): Promise<TeamResult> {
+    return teamResult(await this.#call("freezeSubtree", input));
+  }
+
+  async adoptSubtree(input: {
+    teamId: string;
+    successorAgentId: string;
+    expectedGeneration: number;
+    handoffEvidence: string;
+    commandId: string;
+  }): Promise<TeamResult> {
+    return teamResult(await this.#call("adoptSubtree", input));
+  }
+
+  async closeSubtreeBarrier(input: {
+    teamId: string;
+    expectedGeneration: number;
+    commandId: string;
+  }): Promise<{ teamId: string; generation: number; closed: true }> {
+    const result = await this.#call("closeSubtreeBarrier", input);
+    if (!isRecord(result) || typeof result.teamId !== "string" || typeof result.generation !== "number" || result.closed !== true) {
+      throw new Error("daemon returned an invalid subtree barrier result");
+    }
+    return { teamId: result.teamId, generation: result.generation, closed: true };
+  }
+
+  async reserveBudget(input: {
+    teamId: string;
+    expectedTeamGeneration: number;
+    parentBudgetId: string;
+    budgetId: string;
+    dimensions: Record<string, number>;
+    commandId: string;
+  }): Promise<BudgetResult> {
+    return budgetResult(await this.#call("reserveBudget", input));
+  }
+
+  async recordBudgetUsage(input: {
+    budgetId: string;
+    usage: Record<string, number | null>;
+    commandId: string;
+  }): Promise<BudgetResult> {
+    return budgetResult(await this.#call("recordBudgetUsage", input));
+  }
+
+  async reconcileBudgetUsage(input: {
+    budgetId: string;
+    consumed: Record<string, number>;
+    commandId: string;
+  }): Promise<BudgetResult> {
+    return budgetResult(await this.#call("reconcileBudgetUsage", input));
+  }
+
+  async releaseBudget(input: { budgetId: string; commandId: string }): Promise<BudgetResult> {
+    return budgetResult(await this.#call("releaseBudget", input));
+  }
+
+  async getBudget(input: { budgetId: string }): Promise<BudgetResult> {
+    return budgetResult(await this.#call("getBudget", input));
+  }
+
+  async acknowledgeTaskHandoff(input: {
+    taskId: string;
+    taskRevision: number;
+    ownerLeaseGeneration: number;
+    commandId: string;
+  }): Promise<{ acknowledged: true }> {
+    const result = await this.#call("acknowledgeTaskHandoff", input);
+    if (!isRecord(result) || result.acknowledged !== true) {
+      throw new Error("daemon returned an invalid task handoff acknowledgement");
+    }
+    return { acknowledged: true };
+  }
+
+  async sendMessage(input: MessageInput): Promise<{ messageId: string }> {
+    const result = await this.#call("sendMessage", input);
+    if (!isRecord(result) || typeof result.messageId !== "string") {
+      throw new Error("daemon returned an invalid message result");
+    }
+    return { messageId: result.messageId };
+  }
+
+  async receiveMessages(input: { limit: number; visibilityTimeoutMs: number }): Promise<Array<{
+    deliveryId: string;
+    messageId: string;
+    sequence: number;
+    body: string;
+    attempt: number;
+    senderId: string;
+    kind: MessageInput["kind"];
+    requiresAck: boolean;
+  }>> {
+    const result = await this.#call("receiveMessages", input);
+    if (!Array.isArray(result)) {
+      throw new Error("daemon returned invalid deliveries");
+    }
+    const deliveries: Array<{
+      deliveryId: string;
+      messageId: string;
+      sequence: number;
+      body: string;
+      attempt: number;
+      senderId: string;
+      kind: MessageInput["kind"];
+      requiresAck: boolean;
+    }> = [];
+    for (const value of result) {
+      if (!isRecord(value) || typeof value.deliveryId !== "string" || typeof value.messageId !== "string" || typeof value.sequence !== "number" || typeof value.body !== "string" || typeof value.attempt !== "number" || typeof value.senderId !== "string" || !isMessageKind(value.kind) || typeof value.requiresAck !== "boolean") {
+        throw new Error("daemon returned an invalid delivery");
+      }
+      deliveries.push({
+        deliveryId: value.deliveryId,
+        messageId: value.messageId,
+        sequence: value.sequence,
+        body: value.body,
+        attempt: value.attempt,
+        senderId: value.senderId,
+        kind: value.kind,
+        requiresAck: value.requiresAck,
+      });
+    }
+    return deliveries;
+  }
+
+  async acknowledgeDelivery(input: { deliveryId: string }): Promise<void> {
+    await this.#call("acknowledgeDelivery", input);
+  }
+
+  async abandonDelivery(input: { deliveryId: string; reason: string; commandId: string }): Promise<{
+    deliveryId: string;
+    status: "abandoned";
+    reason: string;
+  }> {
+    const result = await this.#call("abandonDelivery", input);
+    if (!isRecord(result) || typeof result.deliveryId !== "string" || result.status !== "abandoned" || typeof result.reason !== "string") {
+      throw new Error("daemon returned an invalid delivery abandonment result");
+    }
+    return { deliveryId: result.deliveryId, status: result.status, reason: result.reason };
+  }
+
+  async getMailboxState(): Promise<{ contiguousWatermark: number; acknowledgedAboveWatermark: number[] }> {
+    const result = await this.#call("getMailboxState", {});
+    if (!isRecord(result) || typeof result.contiguousWatermark !== "number" || !Array.isArray(result.acknowledgedAboveWatermark) || !result.acknowledgedAboveWatermark.every((value) => typeof value === "number")) {
+      throw new Error("daemon returned an invalid mailbox state");
+    }
+    return { contiguousWatermark: result.contiguousWatermark, acknowledgedAboveWatermark: result.acknowledgedAboveWatermark };
+  }
+
+  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string }): Promise<{
+    leaseId: string; holderAgentId: string; generation: number; status: "active" | "quarantined"; scope: string[];
+  }> {
+    return this.#leaseResult(await this.#call("acquireWriteLease", input));
+  }
+
+  async getWriteLease(input: { leaseId: string }): Promise<{
+    leaseId: string; holderAgentId: string; generation: number; status: "active" | "quarantined"; scope: string[];
+  }> {
+    return this.#leaseResult(await this.#call("getWriteLease", input));
+  }
+
+  #leaseResult(result: unknown): { leaseId: string; holderAgentId: string; generation: number; status: "active" | "quarantined"; scope: string[] } {
+    if (!isRecord(result) || typeof result.leaseId !== "string" || typeof result.holderAgentId !== "string" || typeof result.generation !== "number" || (result.status !== "active" && result.status !== "quarantined") || !Array.isArray(result.scope) || !result.scope.every((value) => typeof value === "string")) {
+      throw new Error("daemon returned an invalid write lease result");
+    }
+    return { leaseId: result.leaseId, holderAgentId: result.holderAgentId, generation: result.generation, status: result.status, scope: result.scope };
+  }
+}
+
+export async function connectFabricDaemon(options: { socketPath: string; capability: string }): Promise<FabricDaemonClient> {
+  return FabricDaemonClient.connect(options.socketPath, options.capability);
+}
