@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
+import { connectFabricDaemon } from "../../../src/index.ts";
 import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
+import { MCP_ROOT_AUTHORITY } from "../../support/mcp-testkit.ts";
 
 const handles: FabricDaemonHandle[] = [];
 const roots: string[] = [];
@@ -138,9 +140,15 @@ describe("production daemon bootstrap wiring", () => {
     });
     expect(JSON.parse(firstLine)).toEqual({ ready: true });
     child.kill("SIGTERM");
-    await new Promise<void>((resolvePromise, reject) => {
-      child.once("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`daemon proof child exit ${String(code)}`)));
+    const exitCode = await new Promise<number | null>((resolvePromise) => {
+      child.once("exit", (code) => resolvePromise(code));
     });
+    // This low-level fixture proves the process accepts a production election
+    // proof, but deliberately has no published discovery owner to terminalise.
+    // Teardown must therefore fail closed after readiness instead of claiming a
+    // clean production stop.
+    expect(exitCode).toBe(1);
+    expect(childStderr).toContain("daemon shutdown failed during mark-terminal");
   });
 
   it("handshakes first and coalesces repeated starts through one flock election without lock databases", async () => {
@@ -220,6 +228,42 @@ describe("production daemon bootstrap wiring", () => {
     await expect(readdir(options.runtimeDirectory)).resolves.not.toContain(
       "fabric-v1.discovery.json",
     );
+  });
+
+  it("keeps serving after SIGTERM while authoritative run work remains active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "f-signal-busy-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "s", "f.sqlite3"),
+      stateDirectory: join(root, "s"),
+      runtimeDirectory: join(root, "r"),
+      socketPath: join(root, "r", "f.sock"),
+      workspaceRoots: [root],
+    };
+    const daemon = await startFabricDaemon(options);
+    handles.push(daemon);
+    const bootstrap = await connectFabricDaemon({
+      socketPath: options.socketPath,
+      capability: daemon.bootstrapCapability,
+    });
+    await bootstrap.createRun({
+      runId: "run_signal_busy_01",
+      projectRunDirectory: join(root, "project-run"),
+      chair: { agentId: "chair_signal_busy_01", authority: MCP_ROOT_AUTHORITY },
+    });
+    await bootstrap.close();
+
+    process.kill(daemon.pid, "SIGTERM");
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 250));
+    expect(() => process.kill(daemon.pid, 0)).not.toThrow();
+    const owner = JSON.parse(await readFile(
+      join(options.runtimeDirectory, "fabric-v1.discovery-owner.json"),
+      "utf8",
+    )) as { state: string };
+    expect(owner.state).toBe("active");
+
+    process.kill(daemon.pid, "SIGKILL");
+    await daemon.waitForExit();
   });
 
   it("recovers a crashed daemon after its released launcher exits", async () => {

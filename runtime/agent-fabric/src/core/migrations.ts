@@ -6,6 +6,7 @@ import type Database from "better-sqlite3";
 import { preflightAdditiveInvariants } from "../persistence/invariants.js";
 import { preflightLaunchCustody } from "../persistence/launch-custody-preflight.js";
 import { preflightProjectSessionOperations } from "../persistence/project-session-preflight.js";
+import { preflightProviderBridgeCustody } from "../persistence/provider-bridge-custody-preflight.js";
 
 export type Migration = {
   version: number;
@@ -42,6 +43,7 @@ const defaultMigrationFiles = [
   "0004-project-session-operations.sql",
   "0005-launch-custody.sql",
   "0006-operator-lifecycle.sql",
+  "0007-provider-bridge-custody.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {
@@ -64,6 +66,8 @@ function loadDefaultMigrations(): Migration[] {
           ? { preflight: preflightProjectSessionOperations }
           : index === 4
             ? { preflight: preflightLaunchCustody }
+            : index === 6
+              ? { preflight: preflightProviderBridgeCustody }
             : {}),
     };
   });

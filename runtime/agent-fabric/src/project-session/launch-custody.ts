@@ -1,5 +1,6 @@
 import type { ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { createHash, randomBytes } from "node:crypto";
 import {
   parseLaunchAdapterOutcomeV1,
   parseLaunchPacketV1,
@@ -185,6 +186,8 @@ export type LaunchDispatchHandle = Readonly<{
   publicPayload: Record<string, unknown>;
   capability: string;
   socketPath: string;
+  attestationChallenge: string;
+  attestationChallengeDigest: Digest;
 }>;
 
 type LaunchOutcomeBase = Readonly<{
@@ -245,6 +248,7 @@ type LaunchCustodyServiceOptions = Readonly<{
   clock?: () => number;
   fault?: (label: string) => void;
   randomCapability: () => string;
+  randomAttestationChallenge?: () => string;
   fabricSocketPath: string;
   adapterContracts: {
     inspect(adapterId: string): Promise<LaunchAdapterContract>;
@@ -255,6 +259,7 @@ type LaunchCustodyServiceOptions = Readonly<{
       providerAdapterId: string;
       providerActionId: string;
       providerContractDigest: Digest;
+      attestationChallengeDigest: Digest;
     }>): Promise<unknown>;
   };
 }>;
@@ -601,6 +606,7 @@ export class LaunchCustodyService {
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
   readonly #randomCapability: () => string;
+  readonly #randomAttestationChallenge: () => string;
   readonly #fabricSocketPath: string;
   readonly #adapterContracts: LaunchCustodyServiceOptions["adapterContracts"];
   readonly #adapterEffects: LaunchCustodyServiceOptions["adapterEffects"];
@@ -611,6 +617,7 @@ export class LaunchCustodyService {
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
     this.#randomCapability = options.randomCapability;
+    this.#randomAttestationChallenge = options.randomAttestationChallenge ?? (() => randomBytes(32).toString("hex"));
     this.#fabricSocketPath = options.fabricSocketPath;
     this.#adapterContracts = options.adapterContracts;
     this.#adapterEffects = options.adapterEffects;
@@ -782,6 +789,13 @@ export class LaunchCustodyService {
     const capability = this.#randomCapability();
     if (typeof capability !== "string" || capability.length < 16) throw new Error("random launch capability is too short");
     const capabilityHash = sha256(capability);
+    const attestationChallenge = this.#randomAttestationChallenge();
+    if (!/^[0-9a-f]{64}$/u.test(attestationChallenge)) {
+      throw new Error("random launch attestation challenge must contain exactly 32 bytes");
+    }
+    const attestationChallengeDigest = `sha256:${createHash("sha256")
+      .update(Buffer.from(attestationChallenge, "hex"))
+      .digest("hex")}` as Digest;
     const expiresAt = Date.parse(packet.chairAuthority.expiresAt);
 
     const changed = this.#database.prepare(`
@@ -904,12 +918,13 @@ export class LaunchCustodyService {
         project_session_id, custody_attempt_generation, coordination_run_id,
         chair_agent_id, chair_lease_id, operator_id, operator_command_id,
         provider_adapter_id, provider_action_id, capability_hash, capability_expires_at,
+        attestation_challenge_digest,
         reservation_id, launch_packet_path, launch_packet_digest, authority_ref,
         budget_ref, resource_plan_path, resource_plan_digest, expected_project_revision,
         expected_session_revision, expected_session_generation, trust_record_digest,
         provider_contract_digest, resource_state_digest, launch_binding_digest,
         retry_of_provider_adapter_id, retry_of_provider_action_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       intent.projectSessionId,
       attempt,
@@ -922,6 +937,7 @@ export class LaunchCustodyService {
       intent.providerActionId,
       capabilityHash,
       expiresAt,
+      attestationChallengeDigest,
       reservationId,
       intent.launchPacketRef.path,
       intent.launchPacketRef.digest,
@@ -949,6 +965,8 @@ export class LaunchCustodyService {
       publicPayload: packet.provider.input,
       capability,
       socketPath: this.#fabricSocketPath,
+      attestationChallenge,
+      attestationChallengeDigest,
     };
   }
 
@@ -1016,7 +1034,17 @@ export class LaunchCustodyService {
     providerActionId: string;
     providerContractDigest: Digest;
   }>): Promise<unknown> {
-    return await this.#adapterEffects.lookup(input);
+    const custody = row(this.#database.prepare(`
+      SELECT attestation_challenge_digest FROM project_session_launch_custody
+       WHERE provider_adapter_id=? AND provider_action_id=? AND provider_contract_digest=?
+    `).get(input.providerAdapterId, input.providerActionId, input.providerContractDigest), "launch custody");
+    return await this.#adapterEffects.lookup({
+      ...input,
+      attestationChallengeDigest: exactDigest(
+        custody.attestation_challenge_digest,
+        "custody attestation challenge digest",
+      ),
+    });
   }
 
   async readCurrentState(intent: LaunchCustodyIntent): Promise<ProjectSessionLaunchCurrentState> {
@@ -1173,6 +1201,10 @@ export class LaunchCustodyService {
       const providerAdapterId = text(custody, "provider_adapter_id");
       const providerActionId = text(custody, "provider_action_id");
       const providerContractDigest = exactDigest(custody.provider_contract_digest, "custody provider contract digest");
+      const attestationChallengeDigest = exactDigest(
+        custody.attestation_challenge_digest,
+        "custody attestation challenge digest",
+      );
       let contract: LaunchAdapterContract;
       try {
         contract = await this.#adapterContracts.inspect(providerAdapterId);
@@ -1191,7 +1223,12 @@ export class LaunchCustodyService {
       }
       let raw: unknown;
       try {
-        raw = await this.#adapterEffects.lookup({ providerAdapterId, providerActionId, providerContractDigest });
+        raw = await this.#adapterEffects.lookup({
+          providerAdapterId,
+          providerActionId,
+          providerContractDigest,
+          attestationChallengeDigest,
+        });
       } catch (error: unknown) {
         raw = this.#ambiguousOutcome(
           custody,

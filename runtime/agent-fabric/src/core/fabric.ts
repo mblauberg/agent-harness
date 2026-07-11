@@ -36,6 +36,7 @@ import {
 } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
 import { AdapterSupervisor } from "../adapters/supervisor.js";
+import { parseChairLaunchProviderResult } from "../adapters/providers/types.js";
 import { assessAdapterModelPolicy } from "../adapters/model-selection.js";
 import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
@@ -72,6 +73,7 @@ import { operatorOperationsForActions } from "../daemon/protocol-credentials.js"
 import type { PublicProtocolContext } from "../daemon/public-protocol.js";
 import {
   attemptDrainedStop as attemptRuntimeDrainedStop,
+  attemptIdleStop as attemptRuntimeIdleStop,
   markDaemonRuntimeRunning as markRuntimeEpochRunning,
   recoverDaemonRuntimeEpoch as recoverRuntimeEpoch,
   type IdleElectionPort,
@@ -80,6 +82,12 @@ import {
 } from "../daemon/global-liveness.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
+import {
+  LaunchCustodyService,
+  parseLaunchAdapterContract,
+  type LaunchAdapterContract,
+  type LaunchDispatchHandle,
+} from "../project-session/launch-custody.js";
 import { IntakeStore } from "../project-session/intake-store.js";
 import {
   ProjectFabricCoreError,
@@ -89,6 +97,11 @@ import { ScopedGateStore } from "../gates/store.js";
 import { HierarchicalAdmissionStore } from "../resources/store.js";
 import { AtomicDeliveryStore } from "../results/store.js";
 import { NotificationOutbox } from "../attention/outbox.js";
+import { MacOsNativeDesktopAdapter } from "../attention/native-desktop.js";
+import {
+  NativeNotificationWorker,
+  type NotificationWorkerPassResult,
+} from "../attention/notification-worker.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
@@ -126,6 +139,7 @@ export type FabricOperatorActionPorts = {
 export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   operatorActionPorts?: FabricOperatorActionPorts;
   daemonStopPort?: ProductionDaemonStopPort;
+  fabricSocketPath?: string;
 };
 
 type Row = Record<string, unknown>;
@@ -823,12 +837,14 @@ export class Fabric {
   readonly #operatorProjections: OperatorProjectionStore;
   readonly #gitRepositoryReads: GitRepositoryReadService;
   readonly #operatorActions: OperatorActionStore;
+  readonly #launchCustody: LaunchCustodyService | undefined;
   readonly #projectSessions: ProjectSessionStore;
   readonly #intakes: IntakeStore;
   readonly #gates: ScopedGateStore;
   readonly #resources: HierarchicalAdmissionStore;
   readonly #results: AtomicDeliveryStore;
   readonly #notifications: NotificationOutbox;
+  readonly #notificationWorker: NativeNotificationWorker;
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -844,6 +860,15 @@ export class Fabric {
     upgradeStoredAuthorities(this.#database, this.#workspaceRoots);
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
+    this.#adapters = options.adapters ?? {};
+    this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
+    this.#providerSessions = new ProviderSessionCoordinator({
+      database: this.#database,
+      clock: this.#clock,
+      maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
+    });
+    this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
+    this.#executionProfile = options.executionProfile ?? "headless";
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
     this.#operatorProjections = new OperatorProjectionStore({
       database: this.#database,
@@ -856,15 +881,6 @@ export class Fabric {
       privateStateRoot: dirname(realpathSync(options.databasePath)),
       clock: this.#clock,
     });
-    this.#adapters = options.adapters ?? {};
-    this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
-    this.#providerSessions = new ProviderSessionCoordinator({
-      database: this.#database,
-      clock: this.#clock,
-      maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
-    });
-    this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
-    this.#executionProfile = options.executionProfile ?? "headless";
     const productionOperatorPorts = createProductionOperatorActionPorts({
       database: this.#database,
       clock: this.#clock,
@@ -875,11 +891,27 @@ export class Fabric {
       },
       ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
     });
+    this.#launchCustody = options.fabricSocketPath === undefined
+      ? undefined
+      : new LaunchCustodyService({
+          database: this.#database,
+          clock: this.#clock,
+          randomCapability: () => `afc_${randomBytes(32).toString("base64url")}`,
+          fabricSocketPath: options.fabricSocketPath,
+          adapterContracts: {
+            inspect: async (adapterId) => await this.#inspectLaunchAdapterContract(adapterId),
+          },
+          adapterEffects: {
+            dispatch: async (handle) => await this.#dispatchLaunchAdapter(handle),
+            lookup: async (input) => await this.#lookupLaunchAdapter(input),
+          },
+        });
     this.#operatorActions = new OperatorActionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
       statePort: options.operatorActionPorts?.statePort ?? productionOperatorPorts.statePort,
       effectPort: options.operatorActionPorts?.effectPort ?? productionOperatorPorts.effectPort,
+      ...(this.#launchCustody === undefined ? {} : { launchCustody: this.#launchCustody }),
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
@@ -913,6 +945,13 @@ export class Fabric {
     });
     this.#resources = new HierarchicalAdmissionStore({ database: this.#database, clock: this.#clock });
     this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
+    this.#notificationWorker = new NativeNotificationWorker({
+      outbox: this.#notifications,
+      adapter: new MacOsNativeDesktopAdapter(),
+      workerInstanceId: `native-notification-${randomBytes(16).toString("hex")}`,
+      integrationId: "native-desktop",
+      clock: this.#clock,
+    });
   }
 
   recoverDaemonRuntimeEpoch(input: {
@@ -930,6 +969,23 @@ export class Fabric {
       instanceGeneration,
       now: this.#clock(),
     });
+  }
+
+  async attemptIdleStop(input: {
+    actionId: string;
+    daemonInstanceGeneration: number;
+    election: IdleElectionPort;
+    closeSocket(): Promise<void>;
+  }): Promise<IdleStopResult> {
+    return await attemptRuntimeIdleStop({
+      ...input,
+      database: this.#database,
+      clock: this.#clock,
+    });
+  }
+
+  async runNativeNotificationPass(): Promise<NotificationWorkerPassResult> {
+    return await this.#notificationWorker.runOnce();
   }
 
   async attemptDrainedStop(input: {
@@ -1113,6 +1169,145 @@ export class Fabric {
     return await this.#adapterSupervisor.request(adapterId, method, params);
   }
 
+  #assertGenericProviderAction(runId: string, actionId: string): void {
+    if (this.#database.prepare(`
+      SELECT 1
+        FROM provider_actions p
+        JOIN project_session_launch_custody c
+          ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+       WHERE p.run_id=? AND p.action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "launch provider actions mutate only through launch custody");
+    }
+  }
+
+  async #inspectLaunchAdapterContract(adapterId: string): Promise<LaunchAdapterContract> {
+    const capabilities = await this.#requestAdapter(adapterId, "capabilities", {});
+    assertAdapterOperation(capabilities, "launch_chair");
+    if (!isRow(capabilities) || !Object.hasOwn(capabilities, "chairLaunch")) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "adapter does not advertise a chair launch contract");
+    }
+    return parseLaunchAdapterContract(capabilities.chairLaunch);
+  }
+
+  #launchResourceUsage(providerAdapterId: string, providerActionId: string): Record<string, "unknown"> {
+    const reservation = rowOrNotFound(this.#database.prepare(`
+      SELECT r.amounts_json
+        FROM project_session_launch_custody c
+        JOIN resource_reservations r ON r.reservation_id=c.reservation_id
+       WHERE c.provider_adapter_id=? AND c.provider_action_id=?
+    `).get(providerAdapterId, providerActionId), "launch resource reservation");
+    const amounts: unknown = JSON.parse(stringField(reservation, "amounts_json"));
+    if (!isRow(amounts) || Object.values(amounts).some((value) => !Number.isSafeInteger(value) || Number(value) < 0)) {
+      throw new Error("launch reservation amounts are invalid");
+    }
+    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [unit, "unknown"]));
+  }
+
+  #terminalLaunchOutcome(
+    handle: Pick<LaunchDispatchHandle, "providerAdapterId" | "providerActionId" | "providerContractDigest" | "attestationChallengeDigest">,
+    raw: unknown,
+    observationKind: "dispatch-return" | "lookup",
+  ): unknown {
+    const result = parseChairLaunchProviderResult(raw, {
+      providerAdapterId: handle.providerAdapterId,
+      providerActionId: handle.providerActionId,
+      providerContractDigest: handle.providerContractDigest,
+      challengeDigest: handle.attestationChallengeDigest,
+    });
+    const effectEvidence = {
+      schemaVersion: 1,
+      providerAdapterId: handle.providerAdapterId,
+      providerActionId: handle.providerActionId,
+      providerContractDigest: handle.providerContractDigest,
+      resumeReference: result.resumeReference,
+      providerSessionGeneration: result.providerSessionGeneration,
+      fabricContinuity: result.fabricContinuity,
+    };
+    return {
+      schemaVersion: 1,
+      providerAdapterId: handle.providerAdapterId,
+      providerActionId: handle.providerActionId,
+      providerContractDigest: handle.providerContractDigest,
+      observationKind,
+      observedAt: new Date(this.#clock()).toISOString(),
+      outcome: {
+        kind: "terminal-success",
+        providerSessionRef: result.resumeReference,
+        providerSessionGeneration: result.providerSessionGeneration,
+        effectDigest: sha256Digest(canonicalJson(effectEvidence)),
+        resourceUsage: this.#launchResourceUsage(handle.providerAdapterId, handle.providerActionId),
+      },
+    };
+  }
+
+  #ambiguousLaunchOutcome(
+    input: Pick<LaunchDispatchHandle, "providerAdapterId" | "providerActionId" | "providerContractDigest">,
+    reasonCode: "absent" | "transport-error" | "adapter-error" | "malformed" | "incomplete" | "conflict" | "missing-resume-reference",
+    evidence: unknown,
+  ): unknown {
+    return {
+      schemaVersion: 1,
+      providerAdapterId: input.providerAdapterId,
+      providerActionId: input.providerActionId,
+      providerContractDigest: input.providerContractDigest,
+      observationKind: "lookup",
+      observedAt: new Date(this.#clock()).toISOString(),
+      outcome: {
+        kind: "ambiguous",
+        reasonCode,
+        evidenceDigest: evidence === null ? null : sha256Digest(canonicalJson(evidence)),
+      },
+    };
+  }
+
+  async #dispatchLaunchAdapter(handle: LaunchDispatchHandle): Promise<unknown> {
+    const result = await this.#adapterSupervisor.launchChair(
+      handle.providerAdapterId,
+      {
+        schemaVersion: 1,
+        actionId: handle.providerActionId,
+        providerContractDigest: handle.providerContractDigest,
+        payload: handle.publicPayload,
+      },
+      {
+        capability: handle.capability,
+        socketPath: handle.socketPath,
+        attestationChallenge: handle.attestationChallenge,
+      },
+    );
+    return this.#terminalLaunchOutcome(handle, result, "dispatch-return");
+  }
+
+  async #lookupLaunchAdapter(input: Pick<
+    LaunchDispatchHandle,
+    "providerAdapterId" | "providerActionId" | "providerContractDigest" | "attestationChallengeDigest"
+  >): Promise<unknown> {
+    let record: unknown;
+    try {
+      record = await this.#requestAdapter(input.providerAdapterId, "lookup_action", {
+        actionId: input.providerActionId,
+      });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === "ACTION_NOT_FOUND") {
+        return this.#ambiguousLaunchOutcome(input, "absent", null);
+      }
+      throw error;
+    }
+    if (!isRow(record)) return this.#ambiguousLaunchOutcome(input, "malformed", record);
+    if (record.status === "terminal") {
+      try {
+        return this.#terminalLaunchOutcome(input, record.result, "lookup");
+      } catch {
+        return this.#ambiguousLaunchOutcome(input, "malformed", record);
+      }
+    }
+    if (record.status === "ambiguous" || record.status === "accepted" || record.status === "dispatched" || record.status === "prepared") {
+      return this.#ambiguousLaunchOutcome(input, "incomplete", record);
+    }
+    return this.#ambiguousLaunchOutcome(input, "conflict", record);
+  }
+
   async recoverStartupState(): Promise<{
     actionsReconciled: number;
     actionsQuarantined: number;
@@ -1122,6 +1317,7 @@ export class Fabric {
   }> {
     this.#results.recover();
     this.#notifications.recover();
+    await this.#launchCustody?.recover();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")
@@ -1140,9 +1336,17 @@ export class Fabric {
     let actionsQuarantined = 0;
     const pendingActions = this.#database.prepare(`
       SELECT p.run_id, p.action_id, p.adapter_id, p.status, p.updated_at, r.chair_agent_id
-        FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
+       FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
        WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
          AND json_type(p.payload_json, '$.operatorCommandId') IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM project_session_launch_custody c
+            WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM provider_agent_custody c
+            WHERE c.adapter_id=p.adapter_id AND c.action_id=p.action_id
+         )
        ORDER BY p.updated_at, p.action_id
     `).all();
     for (const value of pendingActions) {
@@ -3491,6 +3695,7 @@ export class Fabric {
     },
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
+    this.#assertGenericProviderAction(runId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const target = this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
@@ -3675,6 +3880,7 @@ export class Fabric {
     input: { actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
+    this.#assertGenericProviderAction(runId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const stored = rowOrNotFound(

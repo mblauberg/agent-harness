@@ -397,7 +397,6 @@ export async function markPrivateDiscoveryTerminal(input: {
     exitCode: input.exitCode,
     signal: input.signal,
   };
-  await atomicPrivateJson(input.paths.ownerPath, terminal);
   const receiptValue = await readPrivateJson(input.paths.receiptPath);
   if (receiptValue !== undefined) {
     const receipt = parseLegacyReceipt(receiptValue, input.expected.socketPath);
@@ -410,4 +409,8 @@ export async function markPrivateDiscoveryTerminal(input: {
     await rm(input.paths.receiptPath);
     await syncDirectory(input.paths.runtimeDirectory);
   }
+  // A terminal owner must never coexist with a live bootstrap credential.
+  // If the process crashes between these writes, active-without-receipt is
+  // deliberately ambiguous and fails closed on the next bootstrap.
+  await atomicPrivateJson(input.paths.ownerPath, terminal);
 }

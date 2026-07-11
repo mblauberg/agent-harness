@@ -226,17 +226,20 @@ class ProductionOperatorActions {
   readonly #clock: () => number;
   readonly #adapter: ProductionOperatorAdapterPort;
   readonly #daemonStop: ProductionDaemonStopPort | undefined;
+  readonly #fault: (label: string) => void;
 
   constructor(options: {
     database: Database.Database;
     clock: () => number;
     adapter: ProductionOperatorAdapterPort;
     daemonStop?: ProductionDaemonStopPort;
+    fault?: (label: string) => void;
   }) {
     this.#database = options.database;
     this.#clock = options.clock;
     this.#adapter = options.adapter;
     this.#daemonStop = options.daemonStop;
+    this.#fault = options.fault ?? (() => undefined);
   }
 
   readonly statePort: OperatorActionStatePort = {
@@ -532,6 +535,7 @@ class ProductionOperatorActions {
     }
     try {
       const outcome = await this.#dispatchOwned(effective);
+      this.#fault("operator-effect:after-owned-dispatch");
       this.#storeCustodyOutcome(scope, effective.commandId, outcome);
       return outcome;
     } catch (error: unknown) {
@@ -586,22 +590,21 @@ class ProductionOperatorActions {
     if (request.intent.kind !== "control") unsupported();
     const target = this.#resolveControlTarget(request.intent);
     if (request.intent.action === "resume") {
-      return this.#resume(request.commandId, target);
+      return this.#resume(request, target);
     }
     if (request.intent.action === "pause") {
       const activeTurns = this.#activeTurns(target);
       if (activeTurns.length > 0) {
         return await this.#dispatchExternalControl(request, activeTurns, "interrupt");
       }
-      this.#freeze(target, `operator-pause:${request.commandId}`);
-      return { status: "committed", afterState: { lifecycleState: "paused" } };
+      return this.#freeze(target, `operator-pause:${request.commandId}`, request);
     }
     if (request.intent.action === "cancel") {
       const activeTurns = this.#activeTurns(target);
       if (activeTurns.length > 0) {
         return await this.#dispatchExternalControl(request, activeTurns, "interrupt");
       }
-      return this.#cancel(target, request.intent.reason, request.commandId);
+      return this.#cancel(target, request);
     }
     if (request.intent.action === "steer") {
       const activeTurns = this.#activeTurns(target);
@@ -640,6 +643,23 @@ class ProductionOperatorActions {
         afterState: { lifecycleState: "quiescing", obligationsSettled: true },
         effectRef: receipt,
       };
+    }
+    if (request.intent.kind === "project-session-stop") {
+      const session = row(this.#database.prepare(`
+        SELECT state, terminal_path_json FROM project_sessions WHERE project_session_id=?
+      `).get(request.intent.projectSessionId), "project session stop observation");
+      const expectedTerminal = canonicalJson({
+        kind: "cancelled",
+        reason: `operator stop ${request.commandId}`,
+      });
+      if (text(session, "state") === "cancelled" && session.terminal_path_json === expectedTerminal) {
+        return { status: "committed", afterState: { lifecycleState: "cancelled" } };
+      }
+      if (text(session, "state") === "quiescing") {
+        return { status: "rejected", code: "state-changed", evidenceRefs: [] };
+      }
+      const effectCustody = row(this.#effectCustody(this.#effectScope(request), request.commandId), "operator effect custody");
+      return { status: "ambiguous", effectRef: this.#custodyEffectRef(effectCustody) };
     }
     if (request.intent.kind === "daemon-drain") {
       return this.#finishDaemonDrain(
@@ -734,13 +754,12 @@ class ProductionOperatorActions {
     }
     const target = this.#resolveControlTarget(request.intent);
     if (request.intent.action === "pause") {
-      this.#freeze(target, `operator-pause:${request.commandId}`);
-      return { status: "committed", afterState: { lifecycleState: "paused" } };
+      return this.#freeze(target, `operator-pause:${request.commandId}`, request);
     }
     if (request.intent.action === "steer") {
       return { status: "committed", afterState: { lifecycleState: "active", steered: true } };
     }
-    if (request.intent.action === "cancel") return this.#cancel(target, request.intent.reason, request.commandId);
+    if (request.intent.action === "cancel") return this.#cancel(target, request);
     unsupported();
   }
 
@@ -784,11 +803,20 @@ class ProductionOperatorActions {
            WHERE task.run_id=? ORDER BY task.task_id
         `).all(target.rootTaskId, target.coordinationRunId, target.coordinationRunId) as Row[];
       }
-      const owners = [...new Set(taskRows.flatMap((item) => {
+      const scopedAgentIds = new Set(taskRows.flatMap((item) => {
         const owner = nullableText(item, "owner_agent_id");
         return owner === null ? [] : [owner];
-      }))].sort();
-      agentRows = owners.map((agentId) => row(this.#database.prepare(`
+      }));
+      if (taskRows.length > 0) {
+        const taskIds = taskRows.map((item) => text(item, "task_id"));
+        const participants = this.#database.prepare(`
+          SELECT DISTINCT agent_id FROM task_participants
+           WHERE run_id=? AND task_id IN (${taskIds.map(() => "?").join(",")})
+           ORDER BY agent_id
+        `).all(target.coordinationRunId, ...taskIds).filter(isRow);
+        for (const participant of participants) scopedAgentIds.add(text(participant, "agent_id"));
+      }
+      agentRows = [...scopedAgentIds].sort().map((agentId) => row(this.#database.prepare(`
         SELECT ? AS run_id, agent_id, lifecycle FROM agents WHERE run_id=? AND agent_id=?
       `).get(target.coordinationRunId, target.coordinationRunId, agentId), "operator control agent"));
     } else if (target.kind === "run") {
@@ -1119,11 +1147,10 @@ class ProductionOperatorActions {
     }
     if (request.intent.kind === "control" && request.intent.action === "pause") {
       const target = this.#resolveControlTarget(request.intent);
-      this.#freeze(target, `operator-pause:${request.commandId}`);
-      return { status: "committed", afterState: { lifecycleState: "paused" } };
+      return this.#freeze(target, `operator-pause:${request.commandId}`, request);
     }
     if (request.intent.kind === "control" && request.intent.action === "cancel") {
-      return this.#cancel(this.#resolveControlTarget(request.intent), request.intent.reason, request.commandId);
+      return this.#cancel(this.#resolveControlTarget(request.intent), request);
     }
     return { status: "committed", afterState: { lifecycleState: "active", steered: true } };
   }
@@ -1317,7 +1344,12 @@ class ProductionOperatorActions {
     `).run(this.#clock(), action.runId, action.actionId);
   }
 
-  #freeze(target: ResolvedControlTarget, reason: string): void {
+  #freeze(
+    target: ResolvedControlTarget,
+    reason: string,
+    request: OperatorEffectRequest,
+  ): OperatorEffectOutcome {
+    const outcome: OperatorEffectOutcome = { status: "committed", afterState: { lifecycleState: "paused" } };
     this.#database.transaction(() => {
       const commandId = reason.slice("operator-pause:".length);
       for (const task of target.tasks) {
@@ -1353,28 +1385,32 @@ class ProductionOperatorActions {
           this.#clock(),
         );
       }
-      if (target.scopeKind !== "run" && target.scopeKind !== "session") return;
-      for (const agent of target.agents) {
-        const existing = this.#database.prepare(`
-          SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-        `).get(agent.runId, agent.agentId);
-        if (isRow(existing) && existing.reason !== reason) {
-          throw new ProjectFabricCoreError("CONFLICT", "agent delivery is frozen by another lifecycle owner");
-        }
-        if (!isRow(existing)) {
+      if (target.scopeKind === "run" || target.scopeKind === "session") {
+        for (const agent of target.agents) {
+          const existing = this.#database.prepare(`
+            SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+          `).get(agent.runId, agent.agentId);
+          if (isRow(existing) && existing.reason !== reason) {
+            throw new ProjectFabricCoreError("CONFLICT", "agent delivery is frozen by another lifecycle owner");
+          }
+          if (!isRow(existing)) {
+            this.#database.prepare(`
+              INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
+              VALUES (?, ?, ?, ?)
+            `).run(agent.runId, agent.agentId, reason, this.#clock());
+          }
           this.#database.prepare(`
-            INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
-            VALUES (?, ?, ?, ?)
-          `).run(agent.runId, agent.agentId, reason, this.#clock());
+            UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=? AND lifecycle='ready'
+          `).run(agent.runId, agent.agentId);
         }
-        this.#database.prepare(`
-          UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=? AND lifecycle='ready'
-        `).run(agent.runId, agent.agentId);
       }
+      this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, outcome);
     })();
+    return outcome;
   }
 
-  #resume(commandId: string, target: ResolvedControlTarget): OperatorEffectOutcome {
+  #resume(request: OperatorEffectRequest, target: ResolvedControlTarget): OperatorEffectOutcome {
+    const outcome: OperatorEffectOutcome = { status: "committed", afterState: { lifecycleState: "active" } };
     this.#database.transaction(() => {
       for (const task of target.tasks) {
         const changed = this.#database.prepare(`
@@ -1386,26 +1422,31 @@ class ProductionOperatorActions {
           throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "resume requires an exact paused task fence");
         }
       }
-      if (target.scopeKind !== "run" && target.scopeKind !== "session") return;
-      for (const agent of target.agents) {
-        const freeze = row(this.#database.prepare(`
-          SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-        `).get(agent.runId, agent.agentId), "operator pause fence");
-        if (!text(freeze, "reason").startsWith("operator-pause:")) {
-          throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "resume cannot release another lifecycle owner");
+      if (target.scopeKind === "run" || target.scopeKind === "session") {
+        for (const agent of target.agents) {
+          const freeze = row(this.#database.prepare(`
+            SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+          `).get(agent.runId, agent.agentId), "operator pause fence");
+          if (!text(freeze, "reason").startsWith("operator-pause:")) {
+            throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "resume cannot release another lifecycle owner");
+          }
+          this.#database.prepare("DELETE FROM delivery_freezes WHERE run_id=? AND agent_id=?")
+            .run(agent.runId, agent.agentId);
+          this.#database.prepare("UPDATE agents SET lifecycle='ready' WHERE run_id=? AND agent_id=? AND lifecycle='suspended'")
+            .run(agent.runId, agent.agentId);
         }
-        this.#database.prepare("DELETE FROM delivery_freezes WHERE run_id=? AND agent_id=?")
-          .run(agent.runId, agent.agentId);
-        this.#database.prepare("UPDATE agents SET lifecycle='ready' WHERE run_id=? AND agent_id=? AND lifecycle='suspended'")
-          .run(agent.runId, agent.agentId);
       }
-      void commandId;
+      this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, outcome);
     })();
-    return { status: "committed", afterState: { lifecycleState: "active" } };
+    return outcome;
   }
 
-  #cancel(target: ResolvedControlTarget, reason: string, commandId: string): OperatorEffectOutcome {
+  #cancel(target: ResolvedControlTarget, request: OperatorEffectRequest): OperatorEffectOutcome {
+    if (request.intent.kind !== "control" || request.intent.action !== "cancel") unsupported();
+    const reason = request.intent.reason;
+    const commandId = request.commandId;
     let cancelledTasks = 0;
+    let outcome: OperatorEffectOutcome;
     this.#database.transaction(() => {
       for (const task of target.tasks) {
         const changed = this.#database.prepare(`
@@ -1433,8 +1474,10 @@ class ProductionOperatorActions {
            WHERE coordination_run_id=? AND task_id=? AND state='paused'
         `).run(this.#clock(), task.runId, task.taskId);
       }
+      outcome = { status: "committed", afterState: { lifecycleState: "cancelled", cancelledTasks } };
+      this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, outcome);
     })();
-    return { status: "committed", afterState: { lifecycleState: "cancelled", cancelledTasks } };
+    return outcome!;
   }
 
   #settleCancelledTask(
@@ -1773,6 +1816,10 @@ class ProductionOperatorActions {
         intent.expectedSessionGeneration,
       );
       if (changed.changes !== 1) throw new ProjectFabricCoreError("STALE_REVISION", "project stop raced another transition");
+      this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, {
+        status: "committed",
+        afterState: { lifecycleState: "cancelled" },
+      });
     })();
     return { status: "committed", afterState: { lifecycleState: "cancelled" } };
   }
@@ -2099,12 +2146,14 @@ export function createProductionOperatorActionPorts(options: {
   clock?: () => number;
   adapter: ProductionOperatorAdapterPort;
   daemonStop?: ProductionDaemonStopPort;
+  fault?: (label: string) => void;
 }): ProductionOperatorActionPorts {
   const owner = new ProductionOperatorActions({
     database: options.database,
     clock: options.clock ?? Date.now,
     adapter: options.adapter,
     ...(options.daemonStop === undefined ? {} : { daemonStop: options.daemonStop }),
+    ...(options.fault === undefined ? {} : { fault: options.fault }),
   });
   return { statePort: owner.statePort, effectPort: owner.effectPort };
 }

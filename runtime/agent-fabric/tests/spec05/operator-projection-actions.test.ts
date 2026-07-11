@@ -1163,6 +1163,8 @@ describe("operator action store", () => {
         publicPayload: {},
         capability: "volatile-chair-capability",
         socketPath: "/private/fabric.sock",
+        attestationChallenge: "ab".repeat(32),
+        attestationChallengeDigest: authorityRef,
       }),
       dispatchPrepared: async () => {
         launchTerminal = true;

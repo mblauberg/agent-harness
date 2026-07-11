@@ -1,7 +1,9 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -14,12 +16,18 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { openFabric } from "../../../src/index.ts";
 import { OperatorActionStore } from "../../../src/operator/action-store.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
+import {
+  preflightProviderBridgeCustody,
+  ProviderBridgeCustodyPreflightError,
+} from "../../../src/persistence/provider-bridge-custody-preflight.ts";
 import {
   LaunchCustodyService,
   computeLaunchResourceStateDigest,
   normaliseLaunchChairAuthority,
+  parseLaunchAdapterContract,
   type LaunchCustodyIntent,
 } from "../../../src/project-session/launch-custody.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
@@ -28,6 +36,11 @@ const databases: Database.Database[] = [];
 const directories: string[] = [];
 const now = Date.parse("2027-01-01T00:00:00Z");
 const digest = (value: string): Sha256Digest => parseSha256Digest(`sha256:${sha256(value)}`, "test.digest");
+const attestationChallenge = "ab".repeat(32);
+const attestationChallengeDigest = parseSha256Digest(
+  `sha256:${createHash("sha256").update(Buffer.from(attestationChallenge, "hex")).digest("hex")}`,
+  "test.attestationChallengeDigest",
+);
 const trustDigest = digest("trusted-project-record");
 const contract = {
   schemaVersion: 1,
@@ -37,6 +50,7 @@ const contract = {
   environment: {
     capability: "AGENT_FABRIC_CAPABILITY",
     socketPath: "AGENT_FABRIC_SOCKET_PATH",
+    attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE",
   },
   inputSchemaId: "chair-launch-input.v1",
   publicPayloadSchema: {
@@ -53,8 +67,18 @@ const contract = {
       properties: { effectCount: { const: 0 } },
     },
   },
+  attestation: {
+    method: "provider-session-random-challenge-v1",
+    bridgeContract: "agent-fabric-session-bridge-v1",
+    origin: "provider-session-tool-call",
+    oneUse: true,
+    bridgeLifetime: "provider-session",
+    digestAlgorithm: "sha256",
+    nativeAttribution: "claude-sdk-assistant-request-tool-use-v1",
+  },
 } as const;
 const contractDigest = digest(canonicalJson(contract));
+const recoveryAdapter = fileURLToPath(new URL("../../support/launch-custody-recovery-adapter.ts", import.meta.url));
 
 function databaseContains(database: Database.Database, needle: string): boolean {
   const tables = database.prepare(`
@@ -79,15 +103,18 @@ function createFixture(options: Readonly<{
   dispatch?: (handle: Parameters<LaunchCustodyService["dispatchPrepared"]>[0]) => Promise<unknown>;
   lookup?: (input: Parameters<LaunchCustodyService["lookup"]>[0]) => Promise<unknown>;
   fault?: (label: string) => void;
+  persistent?: boolean;
 }> = {}): {
   database: Database.Database;
+  databasePath: string;
   root: string;
   service: LaunchCustodyService;
   intent: LaunchCustodyIntent;
 } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "afab-launch-custody-")));
   directories.push(root);
-  const database = new Database(":memory:");
+  const databasePath = options.persistent === true ? join(root, "fabric.sqlite3") : ":memory:";
+  const database = new Database(databasePath);
   databases.push(database);
   applyMigrations(database);
 
@@ -184,6 +211,7 @@ function createFixture(options: Readonly<{
     clock: () => now,
     ...(options.fault === undefined ? {} : { fault: options.fault }),
     randomCapability: () => `chair-secret-canary-${String(++capabilityGeneration).padStart(2, "0")}`,
+    randomAttestationChallenge: () => attestationChallenge,
     fabricSocketPath: "/private/agent-fabric.sock",
     adapterContracts: {
       inspect: async (adapterId) => {
@@ -213,7 +241,13 @@ function createFixture(options: Readonly<{
     providerContractDigest: contractDigest,
     resourceStateDigest: computeLaunchResourceStateDigest(database, "project_01", "session_launch_01"),
   });
-  return { database, root, service, intent };
+  return { database, databasePath, root, service, intent };
+}
+
+function closeTrackedDatabase(database: Database.Database): void {
+  const index = databases.indexOf(database);
+  if (index >= 0) databases.splice(index, 1);
+  database.close();
 }
 
 async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promise<{
@@ -250,6 +284,33 @@ afterEach(() => {
 });
 
 describe("launch custody", () => {
+  it.each(["dispatched", "accepted", "ambiguous"] as const)(
+    "rejects a pre-challenge migration while legacy launch custody is %s",
+    async (status) => {
+      const fixture = createFixture();
+      await prepareFixture(fixture);
+      expect(() => preflightProviderBridgeCustody(fixture.database)).not.toThrow();
+      fixture.database.prepare("UPDATE provider_actions SET status=?").run(status);
+      expect(() => preflightProviderBridgeCustody(fixture.database)).toThrowError(
+        expect.objectContaining<Partial<ProviderBridgeCustodyPreflightError>>({
+          code: "PROVIDER_BRIDGE_CUSTODY_MIGRATION_PREFLIGHT_FAILED",
+        }),
+      );
+    },
+  );
+
+  it("binds the exact provider-session attestation contract into launch custody", () => {
+    expect(parseLaunchAdapterContract(contract)).toEqual(contract);
+    expect(() => parseLaunchAdapterContract({
+      ...contract,
+      attestation: { ...contract.attestation, method: "wrapper-mailbox-probe-v1" },
+    })).toThrow(/attestation/u);
+    expect(() => parseLaunchAdapterContract({
+      ...contract,
+      attestation: { ...contract.attestation, wrapperMayAttest: true },
+    })).toThrow(/unknown field/u);
+  });
+
   it("inspects closed artifacts and atomically prepares one hash-only chair launch", async () => {
     const fixture = createFixture();
     const { handle } = await prepareFixture(fixture);
@@ -259,6 +320,8 @@ describe("launch custody", () => {
       providerActionId: "provider_launch_01",
       capability: "chair-secret-canary-01",
       socketPath: "/private/agent-fabric.sock",
+      attestationChallenge,
+      attestationChallengeDigest,
     });
     expect(fixture.database.prepare(`
       SELECT state, revision FROM project_sessions WHERE project_session_id='session_launch_01'
@@ -272,7 +335,8 @@ describe("launch custody", () => {
     `).get()).toEqual({ status: "prepared", execution_count: 0, effect_count: 0 });
     expect(fixture.database.prepare(`
       SELECT COUNT(*) AS count FROM project_session_launch_custody
-    `).get()).toEqual({ count: 1 });
+       WHERE attestation_challenge_digest=?
+    `).get(attestationChallengeDigest)).toEqual({ count: 1 });
     expect(fixture.database.prepare(`
       SELECT COUNT(*) AS count FROM capabilities WHERE token_hash=?
     `).get(sha256("chair-secret-canary-01"))).toEqual({ count: 1 });
@@ -290,6 +354,7 @@ describe("launch custody", () => {
       outcomeDigest: null,
     });
     expect(databaseContains(fixture.database, "chair-secret-canary-01")).toBe(false);
+    expect(databaseContains(fixture.database, attestationChallenge)).toBe(false);
   });
 
   it("routes operator preview and commit through custody instead of the generic effect port", async () => {
@@ -628,6 +693,69 @@ describe("launch custody", () => {
        WHERE reservation_id=(SELECT reservation_id FROM project_session_launch_custody)
     `).get()).toEqual({ state: "reserved" });
     await expect(fixture.service.dispatchPrepared(handle)).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+  });
+
+  it("routes startup recovery through launch custody without generic redispatch", async () => {
+    const prepared = createFixture({ persistent: true });
+    await prepareFixture(prepared);
+    closeTrackedDatabase(prepared.database);
+
+    const preparedRuntime = await openFabric({
+      databasePath: prepared.databasePath,
+      workspaceRoots: [prepared.root],
+      fabricSocketPath: join(prepared.root, "fabric.sock"),
+    });
+    await expect(preparedRuntime.reconcileProviderAction("run_launch_01", "chair_launch_01", {
+      actionId: "provider_launch_01",
+      commandId: "generic_launch_reconcile_forbidden_01",
+    })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    await preparedRuntime.recoverStartupState();
+    await preparedRuntime.close();
+    const preparedState = new Database(prepared.databasePath, { readonly: true });
+    expect(preparedState.prepare(`
+      SELECT s.state, p.status, p.execution_count
+        FROM project_sessions s
+        JOIN project_session_launch_custody c ON c.project_session_id=s.project_session_id
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+    `).get()).toEqual({ state: "launch_failed", status: "terminal", execution_count: 0 });
+    preparedState.close();
+
+    const dispatched = createFixture({ persistent: true });
+    await prepareFixture(dispatched);
+    dispatched.database.prepare(`
+      UPDATE provider_actions
+         SET status='dispatched', history_json='["prepared","dispatched"]', execution_count=1
+    `).run();
+    closeTrackedDatabase(dispatched.database);
+    const callsPath = join(dispatched.root, "adapter-calls.jsonl");
+    const dispatchedRuntime = await openFabric({
+      databasePath: dispatched.databasePath,
+      workspaceRoots: [dispatched.root],
+      fabricSocketPath: join(dispatched.root, "fabric.sock"),
+      adapters: {
+        "claude-agent-sdk": {
+          command: [process.execPath, "--import", "tsx", recoveryAdapter],
+          environment: {
+            LAUNCH_RECOVERY_CALLS_PATH: callsPath,
+            LAUNCH_RECOVERY_CONTRACT_JSON: canonicalJson(contract),
+          },
+        },
+      },
+    });
+    await dispatchedRuntime.recoverStartupState();
+    await dispatchedRuntime.close();
+    const calls = readFileSync(callsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string });
+    expect(calls.map(({ method }) => method)).toEqual(["capabilities", "lookup_action"]);
+    const dispatchedState = new Database(dispatched.databasePath, { readonly: true });
+    expect(dispatchedState.prepare(`
+      SELECT s.state, p.status, p.execution_count
+        FROM project_sessions s
+        JOIN project_session_launch_custody c ON c.project_session_id=s.project_session_id
+        JOIN provider_actions p
+          ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
+    `).get()).toEqual({ state: "launch_ambiguous", status: "ambiguous", execution_count: 1 });
+    dispatchedState.close();
   });
 
   it("retries only the exact proved failure with a fresh packet, run and provider action", async () => {

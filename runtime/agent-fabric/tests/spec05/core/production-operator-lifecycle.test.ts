@@ -168,6 +168,62 @@ describe("production operator lifecycle ports", () => {
       .toEqual([{ task_id: "task_01", state: "released" }]);
   });
 
+  it("atomically journals local pause, resume, and cancel before a post-mutation crash", async () => {
+    const { database } = fixture();
+    const crashing = createProductionOperatorActionPorts({
+      database,
+      clock: () => now,
+      adapter: {
+        capabilities: async () => { throw new Error("local control must not inspect an adapter"); },
+        dispatch: async () => { throw new Error("local control must not dispatch an adapter"); },
+        lookup: async () => { throw new Error("local control must not look up an adapter"); },
+      },
+      fault: (label) => {
+        if (label === "operator-effect:after-owned-dispatch") throw new Error("crash after local mutation");
+      },
+    });
+    const recovered = createProductionOperatorActionPorts({
+      database,
+      clock: () => now,
+      adapter: {
+        capabilities: async () => { throw new Error("recovery must not inspect an adapter"); },
+        dispatch: async () => { throw new Error("recovery must not dispatch an adapter"); },
+        lookup: async () => { throw new Error("recovery must not look up an adapter"); },
+      },
+    });
+    const target = {
+      kind: "task" as const,
+      projectSessionId: "session_01" as never,
+      coordinationRunId: "run_01" as never,
+      taskId: "task_01" as never,
+      expectedRevision: 3,
+    };
+
+    const pause = { kind: "control" as const, action: "pause" as const, target };
+    const pauseRequest = scopedEffectRequest("pause_local_crash_01", pause, stateDigest(await crashing.statePort.read(pause)));
+    await expect(crashing.effectPort.dispatch(pauseRequest)).rejects.toThrow("crash after local mutation");
+    expect(database.prepare("SELECT state FROM operator_effect_custody WHERE command_id='pause_local_crash_01'").get())
+      .toEqual({ state: "terminal" });
+    await expect(recovered.effectPort.observe({ ...pauseRequest, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({ status: "committed", afterState: { lifecycleState: "paused" } });
+
+    const resume = { kind: "control" as const, action: "resume" as const, target };
+    const resumeRequest = scopedEffectRequest("resume_local_crash_01", resume, stateDigest(await crashing.statePort.read(resume)));
+    await expect(crashing.effectPort.dispatch(resumeRequest)).rejects.toThrow("crash after local mutation");
+    expect(database.prepare("SELECT state FROM operator_effect_custody WHERE command_id='resume_local_crash_01'").get())
+      .toEqual({ state: "terminal" });
+    await expect(recovered.effectPort.observe({ ...resumeRequest, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({ status: "committed", afterState: { lifecycleState: "active" } });
+
+    const cancel = { kind: "control" as const, action: "cancel" as const, target, reason: "superseded" };
+    const cancelRequest = scopedEffectRequest("cancel_local_crash_01", cancel, stateDigest(await crashing.statePort.read(cancel)));
+    await expect(crashing.effectPort.dispatch(cancelRequest)).rejects.toThrow("crash after local mutation");
+    expect(database.prepare("SELECT state FROM operator_effect_custody WHERE command_id='cancel_local_crash_01'").get())
+      .toEqual({ state: "terminal" });
+    await expect(recovered.effectPort.observe({ ...cancelRequest, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({ status: "committed", afterState: { lifecycleState: "cancelled" } });
+  });
+
   it("looks up an ambiguous pause action without replaying provider I/O", async () => {
     let dispatches = 0;
     let lookups = 0;
@@ -311,6 +367,82 @@ describe("production operator lifecycle ports", () => {
       .toEqual({ status: "active" });
     expect(database.prepare("SELECT lifecycle FROM agents WHERE run_id='run_01' AND agent_id='chair_01'").get())
       .toEqual({ lifecycle: "ready" });
+  });
+
+  it("interrupts an exact task participant turn even when the task owner is idle", async () => {
+    const dispatchedAgents: string[] = [];
+    const { database, ports } = fixture({
+      capabilities: async () => ({ actionJournal: true, operations: ["interrupt", "lookup_action"] }),
+      dispatch: async (_adapterId, input) => {
+        dispatchedAgents.push(String(input.payload.agentId));
+        return {
+          actionId: input.actionId,
+          operation: "interrupt",
+          payloadHash: sha256(canonicalJson(input.payload)),
+          status: "terminal",
+          history: ["prepared", "dispatched", "accepted", "terminal"],
+          executionCount: 1,
+          effectCount: 1,
+          result: {
+            interrupted: true,
+            resumeReference: "provider_worker_01",
+            turnId: "participant_turn_01",
+          },
+        };
+      },
+      lookup: async () => { throw new Error("terminal interrupt must not be looked up"); },
+    });
+    database.exec(`
+      INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_01', 'worker_01', 'authority_01', 'provider_worker_01', 'ready');
+      INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision)
+      VALUES ('run_01', 'worker_01', 3, 'worker_context_01');
+      INSERT INTO agent_adapter_bindings(run_id, agent_id, adapter_id, bound_at)
+      VALUES ('run_01', 'worker_01', 'fake', ${now});
+      INSERT INTO task_participants(run_id, task_id, agent_id)
+      VALUES ('run_01', 'task_01', 'worker_01');
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, result_json, updated_at
+      ) VALUES (
+        'run_01', 'participant_turn_source', 'fake', 'send_turn', 'worker_01', 3, 1,
+        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
+        '["prepared","dispatched","accepted"]', 1, 1, 0,
+        '{"turnId":"participant_turn_01"}', ${now}
+      );
+      INSERT INTO provider_session_turn_leases(
+        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        action_id, status, created_at, updated_at
+      ) VALUES ('run_01', 'worker_01', 3, 1, 'participant_turn_source', 'active', ${now}, ${now});
+    `);
+    const intent = {
+      kind: "control" as const,
+      action: "pause" as const,
+      target: {
+        kind: "task" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        taskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+    };
+    const before = await ports.statePort.read(intent);
+    expect(before).toMatchObject({
+      binding: { turns: [{ agentId: "worker_01", sourceActionId: "participant_turn_source" }] },
+    });
+
+    await expect(ports.effectPort.dispatch(scopedEffectRequest(
+      "pause_participant_turn_01",
+      intent,
+      stateDigest(before),
+    ))).resolves.toMatchObject({ status: "committed", afterState: { lifecycleState: "paused" } });
+    expect(dispatchedAgents).toEqual(["worker_01"]);
+    expect(database.prepare("SELECT status FROM provider_session_turn_leases WHERE action_id='participant_turn_source'").get())
+      .toEqual({ status: "released" });
+    expect(database.prepare("SELECT state FROM operator_control_fences WHERE task_id='task_01'").get())
+      .toEqual({ state: "paused" });
   });
 
   it("rejects a multi-agent pause before persisting any action when one adapter lacks custody", async () => {
@@ -1174,16 +1306,30 @@ describe("production operator lifecycle ports", () => {
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(database.prepare("SELECT state FROM project_sessions WHERE project_session_id='session_01'").get())
       .toEqual({ state: "quiescing" });
-    await expect(ports.effectPort.dispatch({
+    const stopRequest = {
       commandId: "project_stop_01",
       intent: stop,
       intentDigest: digest as never,
       beforeStateDigest: digest as never,
       attemptGeneration: 1,
-    })).resolves.toMatchObject({
-      status: "committed",
-      afterState: { lifecycleState: "cancelled" },
+    };
+    const crashingStop = createProductionOperatorActionPorts({
+      database,
+      clock: () => now,
+      adapter: {
+        capabilities: async () => { throw new Error("project stop must not inspect an adapter"); },
+        dispatch: async () => { throw new Error("project stop must not dispatch an adapter"); },
+        lookup: async () => { throw new Error("project stop must not look up an adapter"); },
+      },
+      fault: (label) => {
+        if (label === "operator-effect:after-owned-dispatch") throw new Error("crash after project stop");
+      },
     });
+    await expect(crashingStop.effectPort.dispatch(stopRequest)).rejects.toThrow("crash after project stop");
+    expect(database.prepare("SELECT state FROM operator_effect_custody WHERE command_id='project_stop_01'").get())
+      .toEqual({ state: "terminal" });
+    await expect(ports.effectPort.observe({ ...stopRequest, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({ status: "committed", afterState: { lifecycleState: "cancelled" } });
     expect(database.prepare("SELECT state, revision FROM project_sessions WHERE project_session_id='session_01'").get())
       .toEqual({ state: "cancelled", revision: 4 });
     expect(database.prepare("SELECT status FROM run_chair_leases WHERE lease_id='chair:run_01:1'").get())

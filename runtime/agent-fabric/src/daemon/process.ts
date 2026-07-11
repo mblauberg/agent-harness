@@ -26,9 +26,10 @@ import {
 } from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
 import { BootstrapElection } from "./bootstrap-election.js";
-import type { QuiesceToken } from "./global-liveness.js";
+import { GuardedIdleStopController, type QuiesceToken } from "./global-liveness.js";
+import { IdleShutdownScheduler } from "./idle-shutdown-scheduler.js";
+import { finalizeDaemonShutdown } from "./shutdown-finalizer.js";
 import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "./client.js";
-import { BootstrapElection } from "./bootstrap-election.js";
 import {
   markPrivateDiscoveryTerminal,
   privateDiscoveryPaths,
@@ -190,8 +191,11 @@ type PendingDaemonStop = Readonly<{
   token: QuiesceToken;
 }>;
 const pendingDaemonStops = new Map<string, PendingDaemonStop>();
+let scheduleIdleStop: () => void = () => undefined;
+let closeBackgroundWorkers: () => void = () => undefined;
 const fabric = await openFabric({
   databasePath,
+  fabricSocketPath: socketPath,
   capabilityKey,
   executionProfile,
   maximumConcurrentProviderTurns,
@@ -409,6 +413,15 @@ const servePublicConnection = (socket: Socket): void => {
       }
     },
     afterResponse: ({ context, operation, input, result }) => {
+      if (
+        operation === FABRIC_OPERATIONS.operatorDetach &&
+        context.principal.kind === "operator" &&
+        isRecord(result) &&
+        result.detached === true
+      ) {
+        scheduleIdleStop();
+        return;
+      }
       if (operation !== FABRIC_OPERATIONS.operatorActionCommit || context.principal.kind !== "operator") return;
       const value: unknown = input;
       const principal = context.principal;
@@ -516,6 +529,59 @@ const markProductionTerminal = async (
 };
 
 const stopElection = new BootstrapElection({ runtimeDirectory });
+const closeServingSocket = async (): Promise<void> => await new Promise<void>((resolve) => {
+  server.close(() => resolve());
+  for (const active of sockets) active.end();
+});
+
+const finishProcess = async (input: {
+  signal: NodeJS.Signals | null;
+  state: "stopped" | "crashed";
+  exitCode: number;
+}): Promise<never> => {
+  closeBackgroundWorkers();
+  return await finalizeDaemonShutdown({
+    requestedState: input.state,
+    requestedExitCode: input.exitCode,
+    closeFabric: async () => await fabric.close(),
+    removeSocket: async () => { rmSync(socketPath, { force: true }); },
+    releaseLocks: async () => await releaseDaemonLocks(daemonLocks),
+    markTerminal: async ({ state, exitCode }) => {
+      await markProductionTerminal(input.signal, state, exitCode);
+    },
+    reportFailure: (failure) => {
+      process.stderr.write(`${failure.message}\n`);
+    },
+    exit: (exitCode) => process.exit(exitCode),
+  });
+};
+
+const idleScheduler = new IdleShutdownScheduler({
+  graceMs: 250,
+  sweepMs: 30_000,
+  attempt: async ({ actionId }) => await fabric.attemptIdleStop({
+    actionId: `${actionId}:${String(daemonInstanceGeneration)}`,
+    daemonInstanceGeneration,
+    election: stopElection,
+    closeSocket: closeServingSocket,
+  }),
+  onStopped: async () => {
+    shuttingDown = true;
+    await finishProcess({ signal: null, state: "stopped", exitCode: 0 });
+  },
+});
+idleScheduler.start();
+const notificationTimer = setInterval(() => {
+  void fabric.runNativeNotificationPass().catch(() => undefined);
+}, 1_000);
+notificationTimer.unref();
+void fabric.runNativeNotificationPass().catch(() => undefined);
+scheduleIdleStop = () => idleScheduler.schedule("operator-detach");
+closeBackgroundWorkers = () => {
+  idleScheduler.close();
+  clearInterval(notificationTimer);
+};
+
 completeQueuedDaemonStop = (custodyId: string): void => {
   const pending = pendingDaemonStops.get(custodyId);
   if (pending === undefined || shuttingDown) return;
@@ -528,13 +594,8 @@ completeQueuedDaemonStop = (custodyId: string): void => {
       token: pending.token,
       election: stopElection,
       closeSocket: async () => {
-        await new Promise<void>((resolve) => {
-          server.close(() => {
-            socketClosed = true;
-            resolve();
-          });
-          for (const active of sockets) active.end();
-        });
+        await closeServingSocket();
+        socketClosed = true;
       },
     }).then(async (result) => {
       if (result.state !== "stopped") {
@@ -553,14 +614,7 @@ completeQueuedDaemonStop = (custodyId: string): void => {
         result,
       });
       shuttingDown = true;
-      try {
-        await fabric.close();
-      } finally {
-        rmSync(socketPath, { force: true });
-        await releaseDaemonLocks(daemonLocks);
-        await markProductionTerminal(null).catch(() => undefined);
-        process.exit(0);
-      }
+      await finishProcess({ signal: null, state: "stopped", exitCode: 0 });
     }).catch(async (error: unknown) => {
       let failure = error;
       try {
@@ -576,30 +630,33 @@ completeQueuedDaemonStop = (custodyId: string): void => {
       process.stderr.write(`operator daemon stop failed: ${failure instanceof Error ? failure.message : String(failure)}\n`);
       if (!socketClosed) return;
       shuttingDown = true;
-      await fabric.close();
-      rmSync(socketPath, { force: true });
-      await releaseDaemonLocks(daemonLocks);
-      await markProductionTerminal(null, "crashed", 1).catch(() => undefined);
-      process.exit(1);
+      await finishProcess({ signal: null, state: "crashed", exitCode: 1 });
     });
   });
 };
+
+const signalStop = new GuardedIdleStopController(async (signal) => {
+  const result = await fabric.attemptIdleStop({
+    actionId: `signal-idle-stop:${signal}:${String(daemonInstanceGeneration)}`,
+    daemonInstanceGeneration,
+    election: stopElection,
+    closeSocket: closeServingSocket,
+  });
+  if (result.state === "stopped") {
+    shuttingDown = true;
+    await finishProcess({ signal, state: "stopped", exitCode: 0 });
+  }
+  return result;
+});
 const shutdown = (signal: "SIGINT" | "SIGTERM"): void => {
   if (shuttingDown) return;
-  shuttingDown = true;
-  server.close(() => {
-    void (async () => {
-      try {
-        await fabric.close();
-      } finally {
-        rmSync(socketPath, { force: true });
-        await releaseDaemonLocks(daemonLocks);
-        await markProductionTerminal(signal).catch(() => undefined);
-        process.exit(0);
-      }
-    })();
+  void signalStop.request(signal).then((result) => {
+    if (result.state === "busy") {
+      process.stderr.write(`daemon remains active after ${signal}: ${result.reason}\n`);
+    }
+  }).catch((error: unknown) => {
+    process.stderr.write(`guarded daemon stop failed: ${error instanceof Error ? error.message : String(error)}\n`);
   });
-  for (const socket of sockets) socket.destroy();
 };
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

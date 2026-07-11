@@ -6304,6 +6304,9 @@
                 "minimum": 1
               }
             }
+          },
+          "taskId": {
+            "$ref": "#/$defs/generated_1"
           }
         },
         "$defs": {
@@ -6577,7 +6580,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:4ccb09426e98b9731c4675de0fee0d7331ff43a9ab613d446b7a01ece74293c5",
+      "inputCodecDigest": "sha256:eb0a00ebf1d6b1ed5d620731f39d7ebef5eb0b7f3b590e263dffae9c6bb575d4",
       "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
     },
     {
@@ -14106,6 +14109,14 @@
             "minimum": 0
           },
           "commandId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "taskId": {
+            "$ref": "#/$defs/generated_1"
+          }
+        },
+        "$defs": {
+          "generated_1": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -14164,7 +14175,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:640ea79609e2c695aa87e86ae8f65d8f69e6b0818bbcb7e4294933b2d4879bee",
+      "inputCodecDigest": "sha256:c86e4f4755a8fdb22759a99f4f3cc66ff99d2337160d15a842e8b12a71d97bbf",
       "outputCodecDigest": "sha256:f1ad7176c705f00313cd3b756d0e526f51f5d107aa678761314b9872cb7abbd7"
     },
     {
