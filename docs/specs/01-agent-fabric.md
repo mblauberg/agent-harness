@@ -1,14 +1,15 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.15
+Version: 0.16
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.15 closes the implementation-discovered evidence-registration,
+Version 0.16 closes the implementation-discovered notification-projection
+wire-compatibility gap. Version 0.15 closes the implementation-discovered evidence-registration,
 accepted-scope and bounded artifact-content read gaps required for truthful
 Console review. Version 0.14 closes the review-discovered destroyed-conflict
 recovery dead end.
@@ -3281,3 +3282,89 @@ Acceptance additionally requires:
   Every rejected or unavailable
   read performs no mutation and creates no liveness, membership,
   acknowledgement or custody state.
+
+### 32.15 Negotiated native-notification projection shape
+
+Spec 05 requires native delivery state on Attention without making a Console
+and daemon built from different compatible revisions reject each other's
+otherwise valid projection frames. Negotiated result-shape feature
+`native-notification-projection.v1` therefore extends the existing
+`fabric.v1.operator-projection.snapshot` and
+`fabric.v1.operator-projection.page` Attention variant plus
+`fabric.v1.operator-projection.view-page` Attention result. It grants no
+operation and cannot widen operator authority.
+
+Without that negotiated feature, all three operations retain their pre-extension
+closed shapes and omit `nativeNotification`. With the feature, every Attention
+item in a snapshot and every Attention view-row summary requires exactly one
+closed `nativeNotification` value. Other views never carry it. The value binds
+the exact Attention item revision to target `native-desktop`, delivery journal
+state and revision/generation, integration availability and observation time;
+its Console label is only `available`, `unavailable` or `stale`.
+
+The server derives the result shape from the authenticated connection's
+negotiated feature set and must omit the extension for a client that did not
+request it. A new client accepts the legacy shape only when the feature was not
+negotiated, then renders an explicit client-side `unavailable` fallback; it
+must not imply a delivery journal observation. When the feature was negotiated,
+a missing or malformed extension fails closed as a protocol result error. An
+extension received without negotiation likewise fails closed in the new
+client. The Console first attempts the richer optional feature. Because a
+pre-extension daemon rejects an unknown optional feature before negotiation,
+the local connector may make exactly one fresh-connection retry after the first
+locally valid initialise request receives `PROTOCOL_INVALID`. The retry keeps
+every required feature and narrows optional features to an immutable
+`strict-v1` compatibility profile captured from the last daemon whose parser
+rejected unknown names while still emitting the true pre-extension result
+shape; it does not guess one rejected name or progressively downgrade. The
+retry uses a fresh nonce and performs no attach or other mutation before
+initialise succeeds. If it fails, the original incompatibility remains visible.
+An intermediate daemon that emits `nativeNotification` without negotiating the
+feature is intentionally incompatible and fails closed; the client never
+accepts its extra field as legacy. Thus new-client/compatible-old-daemon and
+old-client/new-daemon pairs keep the legacy wire contract, while new peers
+obtain the richer shape.
+
+For future additive features, the amended daemon accepts bounded, unique,
+well-formed feature names in initialise requests. An unknown required name
+produces `required-features-unavailable`; an unknown optional name is ignored.
+Names use the closed lowercase dotted-version grammar, are at most 64 bytes and
+each feature array contains at most 64 entries. Initialise results still carry
+only features known to and negotiated by both peers. This forward-tolerance
+does not grant an unknown operation or relax result validation.
+
+Every insert, update or delete that can change the projected native delivery
+summary advances `daemon_global_state.revision` in the same SQLite transaction.
+This includes `notification_deliveries`; `integration_availability` remains
+covered by its existing revision triggers. The next snapshot/page therefore
+cannot reuse a revision or state digest after a pending, claimed, sent, failed,
+deduplicated or ambiguous transition.
+
+Added requirements are:
+
+- **FR-046:** Native notification delivery fields shall appear only under the
+  exact negotiated result-shape feature and shall be required there, while the
+  unextended projection shapes remain wire-compatible and closed.
+- **NFR-028:** Every database transition visible in a notification delivery
+  summary shall atomically invalidate the daemon projection revision.
+- **NFR-029:** Protocol initialise shall ignore bounded well-formed unknown
+  optional features, report unknown required features as unavailable and never
+  derive an operation grant from an unknown name.
+
+Acceptance additionally requires:
+
+- **AC-038:** compatibility tests exercise old client/new daemon, new
+  client/old daemon, negotiated success, negotiated-missing-field,
+  unnegotiated-extra-field and malformed-summary frames for both snapshot and
+  Attention projection-page and view-page. A genuine pre-feature daemon fixture
+  pinned at `af548f8` proves the single fresh-connection fallback, pinned
+  optional-feature profile, preserved required features, fresh nonce, absence
+  of any pre-initialise mutation and honest unavailable UI. A separate
+  `466e5c7` fixture proves the unnegotiated required-field intermediate fails
+  closed. Future-name fixtures prove
+  unknown optional names are ignored and unknown required names fail as
+  unavailable. Migration tests prove insert/update/delete delivery
+  changes advance global revision exactly as defined, force resnapshot for a
+  stale page, and cause a polling Console to observe pending-to-terminal state
+  without an unrelated Fabric event. No notification state change
+  acknowledges, approves, focuses or otherwise mutates its Attention item.

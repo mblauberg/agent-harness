@@ -1,13 +1,14 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.11
+Version: 1.12
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.11 owns the evidence-registry migration, accepted-scope persistence,
+Version 1.12 owns negotiated native-notification projection compatibility and
+revision invalidation. Version 1.11 owns the evidence-registry migration, accepted-scope persistence,
 root/digest compatibility and bounded no-follow artifact-content read required
 by Spec 01 v0.15. Version 1.10 closes the review-discovered destroyed-conflict
 recovery dead end.
@@ -2003,3 +2004,74 @@ Deterministic verification additionally covers:
   drift or database writer starvation; and
 - the Spec 05 production Console evidence workflow over every source kind, with
   raw terminal output free of controls and credential canaries.
+
+### 9.15 Notification result-shape negotiation and revision invalidation
+
+Spec 01 section 32.15 owns the public result semantics. This section owns the
+daemon/client negotiation boundary and persistence enforcement. Feature
+`native-notification-projection.v1` is a result-shape capability with no
+operation grant: it may be advertised only when the daemon can condition all
+three affected projection operations on the authenticated connection's
+negotiated features and the client can enforce the same condition after
+decoding.
+
+The generated wire codecs represent `nativeNotification` as an optional schema
+property solely because the affected operations each have two negotiated
+closed shapes. The connection-aware boundaries restore strictness: server
+dispatch passes an explicit include/omit mode into snapshot, projection-page
+and view-page construction; the client rejects absence in include mode and
+presence in omit mode before the value reaches the Console. Internal callers
+use omit mode unless they request the extension explicitly. Console protocol
+binding records whether the feature was negotiated. A Console-local
+discriminated presentation value separates a
+real `daemon-journal` summary from `legacy-fallback`; the fallback is never
+inserted into the wire `NativeNotificationDeliverySummary`. In valid legacy
+mode its presenter, evaluation and export say `notification status unavailable
+(feature not negotiated)` and do not fabricate a journal state, delivery
+revision, claim generation, integration observation or observation time.
+
+The local Console connector owns one bounded legacy retry because a daemon
+predating this amendment rejects the new optional feature while parsing the
+first initialise request. It opens a fresh connection with a fresh client nonce
+and retains all required features while narrowing optional features to a
+checked-in immutable `strict-v1` profile and built-daemon fixture captured from
+commit `af548f8`, the last strict-name parser with the genuine pre-notification
+result shape. This one retry removes every later optional extension together;
+it never guesses from error text, loops per feature or silently drops a required
+feature. It occurs only after the locally validated first request receives
+`PROTOCOL_INVALID`, before any attach or other operation. A second failure is
+final. The intermediate `466e5c7` daemon already emitted the required field
+without negotiation, so a separate fixture must prove that it fails the
+unnegotiated-extra check after retry; it is not a compatibility target. These
+are vintage built daemon fixtures, not current parsers with mocked offers. The
+amended request parser separately admits no more than 64 unique well-formed
+feature names of at most 64 bytes, ignores unknown optional names during
+negotiation and reports unknown required names as unavailable. Unknown names
+can never enter the offered result feature set or operation-grant calculation.
+
+Migration 0010 adds `AFTER INSERT`, `AFTER UPDATE` and `AFTER DELETE` triggers
+on `notification_deliveries` that increment `daemon_global_state.revision` in
+the mutating transaction. They follow the existing projection-trigger policy,
+compose with the evidence-registry work in the same ordered migration and do
+not create events, Attention mutations or delivery retries. Existing
+`integration_availability` triggers remain mandatory and are verified rather
+than duplicated. Migration preflight/postflight rejects missing trigger
+coverage before the new result-shape feature is advertised.
+
+Deterministic verification additionally covers:
+
+- negotiated and unnegotiated server responses for snapshot, projection-page
+  Attention and view-page,
+  including closed unknown/missing/malformed field negatives;
+- independently versioned client/server fixtures proving legacy peers receive
+  byte-shape-compatible results and new peers require the extension, including
+  one real pre-feature initialise rejection followed by a fresh-nonce retry
+  with the exact `af548f8` optional profile and unchanged required features,
+  plus fail-closed rejection of the `466e5c7` unnegotiated-extra shape;
+- forward-compatible bounded unknown-feature parsing, client-side legacy
+  fallback honesty and zero fabricated journal/freshness claims;
+- delivery insert/update/delete plus availability changes advancing revision,
+  invalidating a stale page/read transaction and refreshing Console polling;
+  and
+- migration restart/checksum behavior and absence of any notification-caused
+  Attention acknowledgement, approval, focus or other authority effect.
