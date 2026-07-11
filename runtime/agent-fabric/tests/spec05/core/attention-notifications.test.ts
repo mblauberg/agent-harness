@@ -81,6 +81,7 @@ describe("durable attention and native-notification outbox", () => {
       targetIntegration: "native-desktop",
     });
     expect(revisedDelivery.notificationId).not.toBe(delivery.notificationId);
+    expect(outbox.get(delivery.notificationId)).toMatchObject({ state: "deduplicated" });
     expect(database.prepare("SELECT count(*) AS count FROM attention_items").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT count(*) AS count FROM notification_deliveries").get()).toEqual({ count: 2 });
   });

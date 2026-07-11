@@ -72,12 +72,30 @@ export type ClaimedNotificationDelivery = NotificationDeliveryRecord & Readonly<
   effectIdentityHash: string;
 }>;
 
+export type PendingNotificationWork = Readonly<{
+  delivery: NotificationDeliveryRecord & Readonly<{ state: "pending" }>;
+  attention: AttentionItemRecord;
+}>;
+
 type AttentionUpsertRequest = Readonly<{
   dedupeKey: string;
   kind: string;
   severity: string;
   payload: unknown;
 }>;
+
+const NOTIFICATION_ACTIVE_SESSION_STATES = [
+  "awaiting_launch",
+  "launching",
+  "active",
+  "quiescing",
+  "awaiting_acceptance",
+  "launch_ambiguous",
+  "reconciling",
+  "visibility_degraded",
+  "recovery_required",
+  "quarantined",
+] as const;
 
 type NotificationEnqueueRequest = Readonly<{
   itemId: string;
@@ -161,6 +179,12 @@ export class NotificationOutbox {
            WHERE item_id=?
         `).run(kind, severity, payloadJson, this.#clock(), text(existing, "item_id"));
         this.#fault("attention:upsert:after-item");
+        this.#database.prepare(`
+          UPDATE notification_deliveries
+             SET state='deduplicated', updated_at=?
+           WHERE item_id=? AND item_revision<? AND state='pending'
+        `).run(this.#clock(), text(existing, "item_id"), integer(existing, "revision") + 1);
+        this.#fault("attention:upsert:after-supersede");
         return this.getAttention(text(existing, "item_id"));
       }
       const itemId = `attention_${sha256(`${context.projectSessionId}\0${dedupeKey}`).slice(0, 24)}`;
@@ -537,6 +561,39 @@ export class NotificationOutbox {
       return { ambiguousClaims: expired.length };
     });
     return execute();
+  }
+
+  pendingPage(
+    context: NotificationWorkerContext,
+    request: Readonly<{ limit: number }>,
+  ): readonly PendingNotificationWork[] {
+    this.#assertWorkerContext(context);
+    if (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 100) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "notification page limit must be between 1 and 100");
+    }
+    const rows = this.#database.prepare(`
+      SELECT d.notification_id
+        FROM notification_deliveries d
+        JOIN attention_items i ON i.item_id=d.item_id
+        JOIN project_sessions s ON s.project_session_id=i.project_session_id
+       WHERE d.target_integration=?
+         AND d.state='pending'
+         AND i.state='open'
+         AND i.revision=d.item_revision
+         AND s.state IN (${NOTIFICATION_ACTIVE_SESSION_STATES.map(() => "?").join(",")})
+       ORDER BY d.updated_at, d.notification_id
+       LIMIT ?
+    `).all(context.integrationId, ...NOTIFICATION_ACTIVE_SESSION_STATES, request.limit).filter(isRow);
+    return rows.map((value): PendingNotificationWork => {
+      const delivery = this.get(text(value, "notification_id"));
+      if (delivery.state !== "pending") {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "pending notification page changed while reading");
+      }
+      return {
+        delivery: { ...delivery, state: "pending" },
+        attention: this.getAttention(delivery.itemId),
+      };
+    });
   }
 
   getAttention(itemId: string): AttentionItemRecord {
