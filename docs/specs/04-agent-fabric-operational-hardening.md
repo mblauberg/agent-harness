@@ -301,6 +301,10 @@ corresponding launching/active/quiescing/acceptance, ambiguity, recovery and
 quarantine states; draft and terminal closed/cancelled/failed history does not.
 Provider actions contribute only while `prepared`, `dispatched`, `accepted`,
 `ambiguous` or `quarantined`. Historical terminal rows never block shutdown.
+Typed Git custody contributes while its four-owner mapping is `prepared`,
+`dispatching`, `conflict`, `ambiguous` or `quarantined`; an operation draft
+alone never contributes. Machine or human terminalisation removes only the
+mapped custody/reservation contribution.
 
 Operator attachment is a persisted generation-fenced lease with heartbeat and
 bounded crash expiry. Stop uses a daemon-instance compare-and-set transition
@@ -845,9 +849,11 @@ integration so it cannot collide with another already approved additive
 migration. The migration shall not create a second operator command journal or
 a parallel effect state machine.
 
-The migration adds `runs.authority_revision`, initialised to one, plus immutable
+The migration adds `runs.authority_revision` and `runs.git_allowlist_epoch`,
+each initialised to one, plus nullable `runs.git_allowlist_digest` and immutable
 `run_authority_revisions(project_session_id, coordination_run_id,
-authority_revision, authority_ref, activated_at_run_revision, created_at)`.
+authority_revision, authority_ref, git_allowlist_epoch, git_allowlist_digest,
+activated_at_run_revision, created_at)`.
 `runs` is the current revision owner. Authority rotation compare-and-sets the
 current tuple, appends the next contiguous history row, increments both
 authority and run revisions and revokes every active Git grant under the old
@@ -857,6 +863,10 @@ The history primary key is `(project_session_id, coordination_run_id,
 authority_revision)`, its full authority tuple is unique, and it has a
 composite foreign key to `runs`. Insert/update triggers require the current
 `runs` authority tuple to have exactly one matching immutable history row.
+Adding, replacing or removing `git_allowlist_v1` appends authority history and
+advances the run's authority revision/ref and allow-list epoch/digest in the
+same transaction. No other run/session/dependency revision change advances the
+allow-list epoch.
 
 The daemon also persists two trusted registries before accepting a grant:
 
@@ -892,6 +902,8 @@ CREATE TABLE operator_git_grants (
   issuing_dependency_revision INTEGER NOT NULL CHECK (issuing_dependency_revision >= 1),
   authority_ref TEXT NOT NULL,
   authority_revision INTEGER NOT NULL CHECK (authority_revision >= 1),
+  git_allowlist_epoch INTEGER NOT NULL CHECK (git_allowlist_epoch >= 1),
+  git_allowlist_digest TEXT NOT NULL,
   repository_root TEXT NOT NULL,
   worktree_path TEXT NOT NULL,
   execution_profile_id TEXT NOT NULL,
@@ -909,10 +921,11 @@ CREATE TABLE operator_git_grants (
   FOREIGN KEY (project_session_id, coordination_run_id)
     REFERENCES runs(project_session_id, run_id),
   FOREIGN KEY (project_session_id, coordination_run_id,
-               authority_revision, authority_ref)
+               authority_revision, authority_ref,
+               git_allowlist_epoch, git_allowlist_digest)
     REFERENCES run_authority_revisions(
       project_session_id, coordination_run_id, authority_revision,
-      authority_ref),
+      authority_ref, git_allowlist_epoch, git_allowlist_digest),
   FOREIGN KEY (execution_profile_id, execution_profile_revision)
     REFERENCES git_execution_profiles(profile_id, revision),
   CHECK (length(authority_ref)=71 AND substr(authority_ref,1,7)='sha256:'),
@@ -931,10 +944,10 @@ remote child to `git_remote_registrations`. Empty child sets mean unavailable
 for that category; no query treats absence as wildcard.
 
 `grant_digest` hashes the immutable grant identity, captured issuing session/
-run/dependency and authority revisions, repository/worktree, execution profile,
-normalised child constraints, source authority and expiry; later revocation
-fields are excluded. Launch custody may insert a grant only from the exact
-approved launch-envelope digest. Later creation/revision/revocation uses a
+run/dependency provenance, authority and allow-list tuple, repository/worktree,
+execution profile, normalised child constraints, source authority and expiry;
+later revocation fields are excluded. Launch custody may insert a grant only
+from the exact approved launch-envelope digest. Later creation/revision/revocation uses a
 separate previewed `git-authorise` operator command, verifies its capability and
 independently attested human provenance, and proves every child row is a
 positive subset of the current run `git_allowlist_v1`. `git` cannot call this
@@ -945,10 +958,82 @@ A revision's binding and constraints are immutable; replacement appends the
 next contiguous revision and revokes the prior active revision atomically. Only
 one compare-and-set `active -> revoked` lifecycle change is allowed. At most
 one revision of a grant is active. Point-of-use indexes cover expiry,
-revocation, session generation, issuing session/run/dependency revisions,
-authority revision/ref, execution profile and remote registration generation.
-A grant record never contains a bearer capability, remote credential, URL with
-credentials, Git argument vector or executable.
+revocation/state, session generation, authority revision/ref, allow-list
+epoch/digest, execution profile and remote registration generation. Separate
+audit indexes expose issuing session/run/dependency provenance; current-value
+queries never compare those issuance fields with the live orchestration
+revisions. A grant record never contains a bearer capability, remote
+credential, URL with credentials, Git argument vector or executable.
+
+Gate-only identity is owned before gate creation by one bounded table:
+
+```sql
+CREATE TABLE git_operation_drafts (
+  draft_id TEXT PRIMARY KEY,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  draft_request_id TEXT NOT NULL,
+  request_digest TEXT NOT NULL,
+  operator_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  project_session_id TEXT NOT NULL,
+  observed_session_revision INTEGER NOT NULL,
+  session_generation INTEGER NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  observed_run_revision INTEGER NOT NULL,
+  observed_dependency_revision INTEGER NOT NULL,
+  authority_ref TEXT NOT NULL,
+  authority_revision INTEGER NOT NULL,
+  git_allowlist_epoch INTEGER NOT NULL,
+  git_allowlist_digest TEXT,
+  draft_kind TEXT NOT NULL
+    CHECK (draft_kind IN ('mutation','custody-resolution')),
+  operation_id TEXT NOT NULL UNIQUE,
+  operation_kind TEXT NOT NULL,
+  payload_digest TEXT NOT NULL,
+  binding_json TEXT NOT NULL,
+  draft_digest TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN
+    ('open','gate-bound','consumed','stale','expired','cancelled')),
+  expires_at INTEGER NOT NULL,
+  consumed_command_id TEXT,
+  terminal_reason TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (operator_id, project_id, project_session_id, draft_request_id),
+  UNIQUE (draft_id, operation_id),
+  FOREIGN KEY (project_session_id, coordination_run_id)
+    REFERENCES runs(project_session_id, run_id),
+  FOREIGN KEY (operation_id) REFERENCES operation_admissions(operation_id),
+  CHECK ((state='consumed')=(consumed_command_id IS NOT NULL)),
+  CHECK ((state IN ('stale','expired','cancelled'))=
+         (terminal_reason IS NOT NULL))
+);
+```
+
+The canonical closed `binding_json` is decoded by the same mutation or custody-
+resolution codec as Spec 01, never as open JSON. Identity/binding/authority/
+observation/expiry fields are immutable; only one-step revisioned lifecycle
+fields advance. `draft_digest` hashes every immutable field including
+`operation_id`; lifecycle/consumption fields are excluded. Draft creation and
+its `prepared` operation admission commit together. Exact request replay
+returns the same row; changed request content
+under the dedupe key conflicts. Drafts have a bounded expiry and no repository
+reservation, generic effect custody, grant use or liveness contribution.
+The existing operator command journal owns draft `create`/`cancel` Preview/
+Commit; the draft table is not another command or effect journal.
+
+One active gate association is permitted per draft operation. Gate binding
+compare-and-sets `open -> gate-bound`. Confirmed final Commit alone may consume
+`gate-bound -> consumed` and admission `prepared -> authorised` in the same
+transaction that creates mutation custody/reservation or records custody
+resolution. Final Preview performs no lifecycle write. A binding mismatch
+reported by Preview changes nothing; draft reconciliation or a confirmed Commit
+compare-and-sets the draft to `stale` without creating effect rows. Expiry or
+explicit cancellation uses its matching terminal state. Each terminal path
+cancels the prepared admission and supersedes every associated gate
+transactionally. No terminal draft can be reopened, rebound or copied into a
+new operation ID. Gate rejection/cancellation/supersession cancels its draft;
+gate deferral leaves the bounded draft `gate-bound` until another terminal path.
 
 The common-directory reservation is also a persisted logical owner, not an
 in-memory mutex:
@@ -965,7 +1050,8 @@ CREATE TABLE git_mutation_reservations (
   lock_plan_digest TEXT NOT NULL,
   state TEXT NOT NULL
     CHECK (state IN
-      ('reserved','dispatching','conflict','ambiguous','released')),
+      ('reserved','dispatching','conflict','ambiguous','quarantined',
+       'released','retired')),
   owner_instance_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -976,17 +1062,21 @@ CREATE TABLE git_mutation_reservations (
 );
 CREATE UNIQUE INDEX one_active_git_mutation_per_common_dir
   ON git_mutation_reservations(git_common_dir)
-  WHERE state IN ('reserved','dispatching','conflict','ambiguous');
+  WHERE state IN
+    ('reserved','dispatching','conflict','ambiguous','quarantined');
 ```
 
 Canonical/no-follow common-directory identity, digest and lock plan are
 immutable. State and owner advance only through custody-coupled compare-and-set
-transitions. A terminal applied/no-effect/rejected outcome releases the row in
-the same transaction; conflict and ambiguity retain it. A separately
-authorised typed continue or abort atomically transfers a predecessor conflict
+transitions. A terminal machine-proved applied/no-effect/rejected outcome
+releases the row in the same transaction; conflict, ambiguity and quarantine
+retain it. A separately authorised typed continue or abort atomically
+transfers a predecessor conflict
 reservation to the successor custody/generation before dispatch. Reclaim
 requires proof that the recorded daemon instance is dead and may remove only
 that instance's private reservation artifact, never a Git lock or project file.
+Only the gate-bound human-resolution transaction below may retire an unprovable
+reservation without machine outcome proof.
 
 The one-to-one binding for the existing custody owner is logically:
 
@@ -1005,8 +1095,12 @@ CREATE TABLE operator_git_effect_bindings (
     CHECK (prepared_dependency_revision >= 1),
   authority_ref TEXT NOT NULL,
   authority_revision INTEGER NOT NULL CHECK (authority_revision >= 1),
+  git_allowlist_epoch INTEGER NOT NULL CHECK (git_allowlist_epoch >= 1),
+  git_allowlist_digest TEXT,
   grant_id TEXT,
   grant_revision INTEGER,
+  draft_id TEXT,
+  draft_revision INTEGER CHECK (draft_revision IS NULL OR draft_revision >= 1),
   gate_id TEXT,
   gate_revision INTEGER,
   repository_root TEXT NOT NULL,
@@ -1027,13 +1121,31 @@ CREATE TABLE operator_git_effect_bindings (
   decision_digest TEXT NOT NULL,
   before_git_state_json TEXT NOT NULL,
   expected_terminal_state_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN
+    ('prepared','dispatching','conflict','conflict-transferred','ambiguous',
+     'quarantined','applied','no-effect','rejected','failed',
+     'human-resolved')),
+  state_revision INTEGER NOT NULL CHECK (state_revision >= 1),
+  terminal_basis TEXT CHECK (terminal_basis IS NULL OR terminal_basis IN
+    ('machine-proof','conflict-transfer','human-adjudication')),
   predecessor_custody_id TEXT,
-  conflict_generation INTEGER,
+  predecessor_conflict_generation INTEGER CHECK (
+    predecessor_conflict_generation IS NULL OR
+    predecessor_conflict_generation >= 1),
+  owned_conflict_generation INTEGER CHECK (
+    owned_conflict_generation IS NULL OR owned_conflict_generation >= 1),
   mutation_reservation_generation INTEGER NOT NULL
     CHECK (mutation_reservation_generation >= 1),
   lock_plan_digest TEXT NOT NULL,
   lookup_generation INTEGER NOT NULL CHECK (lookup_generation >= 0),
   lookup_evidence_digest TEXT,
+  resolution_eligible INTEGER NOT NULL CHECK (resolution_eligible IN (0,1)),
+  resolution_eligible_lookup_generation INTEGER,
+  resolution_eligible_evidence_digest TEXT,
+  resolution_eligibility_reason TEXT CHECK (
+    resolution_eligibility_reason IS NULL OR resolution_eligibility_reason IN
+      ('inspector-unavailable','remote-proof-permanently-unavailable',
+       'mixed-local-remote-evidence','evidence-integrity-failure')),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (project_session_id, coordination_run_id)
@@ -1045,6 +1157,8 @@ CREATE TABLE operator_git_effect_bindings (
       authority_ref),
   FOREIGN KEY (grant_id, grant_revision)
     REFERENCES operator_git_grants(grant_id, revision),
+  FOREIGN KEY (draft_id, operation_id)
+    REFERENCES git_operation_drafts(draft_id, operation_id),
   FOREIGN KEY (gate_id, operation_id)
     REFERENCES scoped_gate_operations(gate_id, operation_id),
   FOREIGN KEY (operation_id) REFERENCES operation_admissions(operation_id),
@@ -1057,48 +1171,198 @@ CREATE TABLE operator_git_effect_bindings (
   FOREIGN KEY (custody_id, mutation_reservation_generation)
     REFERENCES git_mutation_reservations(custody_id, generation),
   CHECK ((grant_id IS NULL)=(grant_revision IS NULL)),
+  CHECK ((draft_id IS NULL)=(draft_revision IS NULL)),
   CHECK ((gate_id IS NULL)=(gate_revision IS NULL)),
+  CHECK ((draft_id IS NULL)=(gate_id IS NULL)),
   CHECK ((grant_id IS NULL)<>(gate_id IS NULL)),
   CHECK ((remote_registration_id IS NULL)=
          (remote_registration_revision IS NULL)),
   CHECK ((remote_registration_id IS NULL)=(remote_generation IS NULL)),
   CHECK ((remote_registration_id IS NULL)=(remote_target_digest IS NULL)),
-  CHECK ((predecessor_custody_id IS NULL)=(conflict_generation IS NULL))
+  CHECK ((predecessor_custody_id IS NULL)=
+         (predecessor_conflict_generation IS NULL)),
+  CHECK ((resolution_eligible=0)=
+         (resolution_eligible_lookup_generation IS NULL)),
+  CHECK ((resolution_eligible=0)=
+         (resolution_eligible_evidence_digest IS NULL)),
+  CHECK ((resolution_eligible=0)=
+         (resolution_eligibility_reason IS NULL))
 );
 ```
+
+The binding's `prepared_session_revision`, `prepared_run_revision` and
+`prepared_dependency_revision` are the final action's compare-and-set snapshot,
+not grant-lifetime fields. They may differ from the grant's issuing provenance;
+the grant remains valid if its live fences still match.
+
+The migration transactionally widens the canonical
+`operator_effect_custody.state` check with `conflict` and `quarantined`, and
+widens `operation_admissions.state` with `conflict`, `ambiguous` and
+`quarantined`. These are refinements of the existing owners, not parallel
+journals. Generic-owner triggers reject those new states unless the exact Git
+binding/admission/reservation join exists. Git lifecycle triggers permit only
+the following row combinations
+and update every named row in one transaction:
+
+| Event | Git binding | Generic custody | Target admission | Reservation | Liveness |
+| --- | --- | --- | --- | --- | --- |
+| unconsumed gate draft | absent | absent | `prepared` | absent | no |
+| final Commit prepared | `prepared` | `prepared` | `authorised` | `reserved` | yes |
+| dispatch begins | `dispatching` | `dispatching` | `executing` | `dispatching` | yes |
+| exact bounded conflict | `conflict` | `conflict` | `conflict` | `conflict` | yes |
+| outcome unknown | `ambiguous` | `ambiguous` | `ambiguous` | `ambiguous` | yes |
+| machine proof permanently unavailable | `quarantined` | `quarantined` | `quarantined` | `quarantined` | yes |
+| machine-proved applied | `applied` | `terminal` | `terminal` | `released` | no |
+| machine-proved no effect | `no-effect` | `no-effect` | `terminal` | `released` | no |
+| post-prepare proved reject/failure | `rejected`/`failed` | same | `cancelled` | `released` | no |
+| conflict handed to typed successor | `conflict-transferred` | `terminal` | `terminal` | `released`; successor is `reserved` | successor only |
+| human custody adjudication | `human-resolved` | `terminal` | `terminal` | `released` or `retired` | no |
+
+An `applied`/`no-effect` terminal basis is `machine-proof`; a transferred
+conflict is `conflict-transfer`; `human-resolved` is
+`human-adjudication`. Triggers reject a terminal basis inconsistent with the
+row combination, a conflict without one positive
+`owned_conflict_generation`, an eligible-resolution marker outside
+`ambiguous`/`quarantined`, or a marker whose generation/evidence does not equal
+the latest lookup. There is exactly one current conflict owner and one active
+reservation for a Git common directory.
+
+Confirmed Commit of `merge-continue`, `merge-abort`, `rebase-continue` or
+`rebase-abort` revalidates the current conflict owner and generation. In one
+transaction it terminalises that predecessor as `conflict-transferred`,
+releases its reservation and creates the successor as
+`prepared`/`authorised`/`reserved` over the exact conflict before-state. If the
+successor never dispatches, or dispatch proves the identical conflict remains
+with no other effect, recovery uses the sealed no-process typed local reader to
+move the successor to `conflict` and make it the new owner instead of releasing
+the repository. If exact unchanged-conflict proof is unavailable it becomes
+ambiguous/quarantined. Exact resolution releases
+the reservation; another exact conflict records a higher owned generation;
+ambiguity/quarantine follows the table. An old owner/generation, concurrent
+successor or partial transfer fails atomically.
+
+Draft rows never contribute liveness. Prepared through quarantined Git custody
+does; conflict blocks project-session acceptance without forcing an unrelated
+session state, ambiguity contributes `recovery_required`, and quarantine uses
+the existing `quarantined` session/run state. Terminal rows do not contribute.
+Restart joins all four owners and fails closed on any impossible combination;
+it never repairs one row by guessing from another. Human resolution removes
+the custody blocker only through the transaction defined below and does not
+silently advance the session lifecycle.
+
+Human adjudication has one immutable owner:
+
+```sql
+CREATE TABLE git_custody_resolutions (
+  resolution_id TEXT PRIMARY KEY,
+  draft_id TEXT NOT NULL UNIQUE REFERENCES git_operation_drafts(draft_id),
+  resolution_operation_id TEXT NOT NULL UNIQUE
+    REFERENCES operation_admissions(operation_id),
+  target_custody_id TEXT NOT NULL UNIQUE
+    REFERENCES operator_git_effect_bindings(custody_id),
+  target_operation_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  expected_lookup_generation INTEGER NOT NULL,
+  lookup_evidence_digest TEXT NOT NULL,
+  eligibility_reason TEXT NOT NULL CHECK (eligibility_reason IN
+    ('inspector-unavailable','remote-proof-permanently-unavailable',
+     'mixed-local-remote-evidence','evidence-integrity-failure')),
+  adjudication TEXT NOT NULL CHECK (adjudication IN
+    ('applied','no-effect','quarantine-accepted')),
+  reason TEXT NOT NULL,
+  gate_id TEXT NOT NULL,
+  gate_revision INTEGER NOT NULL,
+  resolved_by_operator_id TEXT NOT NULL,
+  operator_input_record_digest TEXT NOT NULL,
+  reservation_disposition TEXT NOT NULL CHECK (reservation_disposition IN
+    ('released','retired')),
+  resolution_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (project_session_id, coordination_run_id)
+    REFERENCES runs(project_session_id, run_id),
+  FOREIGN KEY (target_operation_id)
+    REFERENCES operation_admissions(operation_id),
+  FOREIGN KEY (gate_id, resolution_operation_id)
+    REFERENCES scoped_gate_operations(gate_id, operation_id),
+  CHECK ((adjudication='quarantine-accepted')=
+         (reservation_disposition='retired'))
+);
+```
+
+The insert trigger joins the target binding and its generic custody, target
+admission and active reservation; requires one identical project/session/run,
+target operation ID, `ambiguous`/`quarantined` state and exact current eligible
+lookup generation/evidence; and validates the consumed
+`custody-resolution` draft, exact approved human-required gate and independently
+attested operator-input record. The reason is bounded and non-empty. The
+resolution digest covers all immutable fields and the original machine evidence,
+excluding only itself.
+
+Confirmed Commit inserts the resolution, advances the target binding to
+`human-resolved` with `human-adjudication` basis, target generic custody and
+target admission to `terminal`, and target reservation to `released` for
+`applied`/`no-effect` or `retired` for `quarantine-accepted`. It also consumes
+the draft, advances the resolution admission through `authorised` to
+`terminal`, copies the eligibility reason into the immutable resolution and
+clears the target's eligibility marker/three eligibility fields. It then
+commits the operator command/receipt. All statements are one transaction; a
+crash exposes all or none. No update changes the target's lookup evidence,
+machine outcome or expected terminal state. The receipt and projections always
+prefix the selected result with `human-adjudicated-`.
+
+Resolution performs zero Git/remote/process/filesystem calls. Exact replay is
+read-only and returns the immutable row. A second resolution, stale lookup,
+changed evidence, ineligible state, reused/mismatched gate, policy resolver,
+ordinary `git`/`decide` capability or direct SQL partial write fails with no
+reservation or liveness change. `quarantine-accepted` satisfies only the
+existing explicit abandonment with reason closure predicate; it never proves
+the effect outcome or closes/promotes the session by itself.
 
 The implementation shall install the exhaustive Spec 01 operation-variant
 enumeration and stricter same-project/session/run/profile/remote triggers; they
 are not optional implementation detail. Binding, before-state, result-recipe
-and expected-terminal columns are immutable after insert. Only the generic
-custody state, bounded outcome, lookup generation/evidence and timestamps may
-advance through compare-and-set transitions. The custody ID is daemon-derived
-from operator, project, session and command identity. Exact replay returns the
+and expected-terminal columns are immutable after insert. Only the closed Git/
+generic/admission/reservation lifecycle fields, owned conflict generation,
+bounded outcome, lookup/eligibility fields and timestamps may advance through
+the mapped compare-and-set transitions. The custody ID is daemon-derived from
+operator, project, session and command identity. Exact replay returns the
 same record; changed intent, decision or binding conflicts.
 
-Both authorisation variants insert one exact `operation_admissions` row in the
-same transaction as generic custody and the Git binding. Its operation ID is
-derived from operator, project session, stable Preview ID and effect-binding
-digest; `operation_kind` is the closed operation variant and `payload_digest`
-equals `effect_binding_digest`. A later Preview of identical Git state receives
-a different operation ID. The gate variant requires an already persisted
-`scoped_gate_operations(gate_id, operation_id)` row and the composite foreign
-key above. A preparation trigger rechecks the gate's exact session/run,
-revision, `approved` status, human-required flag and resolver, dependency
-revision, operation enforcement point and blocked-operation membership. The
-preauthorised variant has no gate association but still has an operation
-admission.
+The preauthorised final Commit inserts one exact `authorised`
+`operation_admissions` row with generic custody and the Git binding. Its
+operation ID derives from operator, project session, stable Preview ID and
+effect-binding digest. A later Preview of identical Git state receives a
+different ID. A gate-only mutation or custody resolution instead uses the
+immutable operation ID/payload digest already inserted as a `prepared`
+admission with `git_operation_drafts`; final Commit compare-and-sets draft
+`gate-bound -> consumed` and admission `prepared -> authorised` while creating
+the mutation custody rows or human-resolution row. `operation_kind` is the
+closed mutation variant or `git-custody-resolve`; `payload_digest` equals the
+immutable draft binding digest.
+
+The gate path requires the persisted exact
+`scoped_gate_operations(gate_id, operation_id)` row and operation-draft
+identity. A preparation trigger rechecks draft state/revision/digest/expiry,
+its observed session/run/dependency revisions and session generation, the
+gate's exact session/run/revision, `approved` status, human-required flag and
+resolver, dependency revision, operation enforcement point and blocked-
+operation membership. The preauthorised variant has no draft or gate
+association but still owns one admission. No draft association is inferred
+from operation kind or payload similarity.
 
 The migration shall drop and replace the legacy `operation_gate_block` trigger
 after preflight. The replacement joins on `NEW.operation_id`, never
 `NEW.operation_kind`, and rejects any admission/gate/binding mismatch before
 custody becomes prepared. Direct SQL and public-protocol paths use the same
-triggers. Missing grant/gate, admission or Git binding rolls back the operator
-command and all three rows.
+triggers. Missing grant/draft/gate, admission, binding or required resolution
+row rolls back the operator command and every owned row.
 
-Preparation first performs all capability, positive allow-list, grant/gate,
-issuing and current generation/revision, repository, worktree,
-writer-admission, execution-profile, remote-target and typed Git-state checks
+Preparation first performs all capability, the applicable positive allow-list/
+grant or draft/gate checks, issuance-provenance integrity, current action CAS,
+repository, worktree, writer-admission, execution-profile, remote-target and
+typed Git-state checks
 inside the custody transaction. It persists canonical before state, the exact
 bounded result recipe and the states that would prove applied, conflict or no
 effect. It also creates one generation-bearing `git_mutation_reservations` row
@@ -1119,7 +1383,7 @@ lock-and-dispatch protocol:
 3. in one SQLite transaction recheck global/session/run/dependency/authority,
    grant/gate/admission, profile/remote and reservation generations, require the
    observation to equal custody, then CAS generic custody `prepared ->
-   dispatching` and operation admission `prepared -> executing`;
+   dispatching` and operation admission `authorised -> executing`;
 4. begin the first mutation immediately while retaining the native locks or an
    exact native compare-and-set over every affected state; and
 5. release native locks only after terminal/conflict/ambiguous custody and the
@@ -1197,19 +1461,30 @@ Startup and live reconciliation use this closed policy:
 - `prepared`: perform zero Git process or remote calls; after proving dispatch
   never began, remove only a proved-owned daemon-private reservation artifact,
   release its persisted reservation and record `no-effect` once; never remove
-  a Git lock or project file;
+  a Git lock or project file. A prepared typed conflict successor instead
+  uses the sealed no-process typed local reader to prove the inherited conflict
+  unchanged and atomically becomes the current `conflict` owner/reservation
+  without executing its requested action; unavailable/mismatched proof retains
+  an ambiguity/quarantine blocker rather than releasing it;
 - `dispatching` or `ambiguous`: call only the fixed read-only Git effect
   inspector for the exact custody ID and increment `lookup_generation`; never
   execute, abort, continue, retry or reconstruct the mutation;
+- `quarantined`: perform no automatic repeated lookup. An explicit bounded
+  reconciliation request may call only that same inspector and either append a
+  higher lookup generation with machine proof or retain quarantine; it never
+  mutates Git;
 - exact bounded conflict proof: retain the predecessor conflict record and
   reservation for a separately previewed typed continue/abort decision; lookup
   itself never changes the conflict;
 - exact applied proof: record terminal success and the after-state digest once;
 - exact no-effect proof: record terminal no-effect once;
 - incomplete, unavailable, conflicting or mixed local/remote evidence: retain
-  `ambiguous` or enter `quarantined` with its evidence digest; and
+  `ambiguous` or enter `quarantined` with its evidence digest. Only a closed
+  permanent-unprovability reason may set the exact generation-bound
+  `resolution_eligible` marker; and
 - terminal, no-effect, rejected or failed-with-proof: return the stored outcome
-  on replay with zero Git I/O.
+  on replay with zero Git I/O. `human-resolved` returns its separately labelled
+  immutable adjudication and never re-runs lookup.
 
 Lookup of fetch, pull or push opens only the custody's exact remote registration
 ID/revision/generation/target digest and exact refs. A same-name registration
@@ -1228,45 +1503,61 @@ Migration preflight shall reject malformed/non-canonical paths, unknown effect,
 variant, recipe or state values, invalid digests, missing run authority history,
 missing execution-profile or target-bound remote records, non-contiguous grant
 revisions, two active grant revisions, missing normalised constraint children,
-widened/gate-only constraints, stale issuing session/run/dependency revisions,
+widened/gate-only constraints, malformed or impossible issuance provenance,
 cross-project/session/run references and an existing generic Git custody row
-without a complete typed binding. It also rejects missing or mismatched
-operation admissions, non-exact gate-operation associations, duplicate active
-common-directory reservations and unowned/native Git locks that prevent a safe
-initial observation. It shall not infer a grant, target, profile, admission or
-human gate for historical data.
+without a complete typed binding. A valid historical issuing revision lower
+than the current orchestration revision is not stale. Preflight also rejects an
+impossible draft/admission/gate state, a non-exact gate-operation association,
+any mismatch in the four-owner Git state table, duplicate active common-
+directory reservations, a partial/duplicate human resolution and unowned/
+native Git locks that prevent a safe initial observation. It shall not infer a
+grant, draft, target, profile, admission, resolution or human gate for
+historical data.
 
-Authority-history, profile, remote, normalised grant-child, reservation,
-binding, operation-admission and exact `(gate_id, operation_id)` foreign keys,
-indexes and triggers install in one transaction. Preflight explicitly locates
+Authority/allow-list history, profile, remote, normalised grant-child, draft,
+reservation, binding, custody-resolution, operation-admission and exact
+`(gate_id, operation_id)` foreign keys, indexes and triggers install in one
+transaction. The migration rebuilds the generic custody/admission state checks
+without changing existing valid rows. Preflight explicitly locates
 the legacy operation-kind-based `operation_gate_block` trigger; migration drops
 and replaces it with the operation-ID join or rolls back. Binding/reservation
-immutability, state-transition, digest, positive-containment, exact-revision,
-same-run and global-revision triggers become live before the schema version
-advances. Recovery is forward repair or verified restore under section 7.
+immutability, mapped state-transition, digest, positive-containment, live-
+authority, same-run and global-revision triggers become live before the schema
+version advances. Recovery is forward repair or verified restore under
+section 7.
 
 Acceptance additionally requires deterministic oracles for:
 
 - migration preflight/rollback, every composite foreign key, immutable
-  bindings/reservations, contiguous grant revisions, one-active-revision,
-  exclusive grant/gate choice, one active reservation per common directory and
-  indexed current-grant/recovery queries;
+  draft/binding/resolution content, contiguous grant revisions, one-active-
+  revision, exclusive grant/gate choice, every four-owner state combination,
+  one active reservation per common directory and indexed current-grant/
+  draft/recovery queries;
 - grant issue/revise/revoke requiring `git-authorise`, a Preview-bound
   direct-human decision and positive subset of every `git_allowlist_v1`
   dimension; missing/stale parents, wildcard/negative-only rows, widened
   variants/refs/paths/remotes/profile, gate-only variants, reused human
   provenance and an ordinary `git` caller all fail before insert/update;
-- absent, expired, revoked, stale, wrong-project/session/run/dependency/
-  authority/profile/remote generation, wrong repository/worktree and
-  constraint-mismatched grants causing zero Git process I/O, including a grant
-  for a sibling operation variant or same remote name with another target;
-- session/run/dependency revision and authority rotation between Preview,
-  prepare, lock, final recheck and first mutation invalidating the old grant
-  without silent refresh;
-- both preauthorised and gate paths inserting the exact operation admission,
-  plus direct-SQL negatives for a gate whose operation ID, revision, resolver,
-  run, dependency revision, enforcement point or blocked effect differs; the
-  removed operation-kind trigger must not accept a same-kind operation ID;
+- absent, expired, revoked/non-active, tampered/nonexistent issuance provenance,
+  wrong project/session/generation, authority/allow-list/profile/remote fence,
+  repository/worktree or constraint-mismatched grants causing zero Git process
+  I/O, including a sibling operation variant or same remote name with another
+  target;
+- ordinary session/run/dependency and repository HEAD/ref/index/content
+  revision advancement after issuance leaving the grant valid, while a stale
+  action Preview fails its own CAS and a fresh Preview reuses that grant.
+  Authority/allow-list rotation, session-generation, canonical repository/
+  worktree identity, profile or remote-target change at Preview, prepare, lock,
+  final recheck or first mutation invalidates it without rewriting issuance
+  provenance;
+- exact draft replay returning one prepared admission/operation ID and no
+  custody/reservation/liveness; changed payload, duplicate ID, early effect row,
+  expiry/cancel/stale reopen and gate association by operation kind all fail;
+- final gate Preview making no write, while confirmed Commit alone atomically
+  consumes the exact draft, authorises its admission and creates custody/
+  reservation. Direct-SQL negatives vary draft/gate operation ID, revision,
+  digest, resolver, run, dependency revision, enforcement point and blocked
+  effect; the removed operation-kind trigger accepts no same-kind substitute;
 - one real temporary-repository operation for every Spec 01 operation variant,
   including upstream set/unset and typed merge/rebase continue/abort, with
   fixed profile/backend, bounded I/O and a receipt matching a fresh typed read;
@@ -1279,23 +1570,32 @@ Acceptance additionally requires deterministic oracles for:
   parent/tree/identity/timestamp/message, source-to-new mapping, conflict
   manifest and hard-bound checks; a Git binary/version/digest change invalidates
   the old Preview, and an unpinned backend is unavailable;
-- exact start-conflict proof followed by separately gated typed continue and
-  abort, with predecessor custody/generation and reservation transfer checks;
-  automatic recovery and reuse of the start gate/admission both fail;
+- exact start-conflict proof followed by separately drafted/gated typed
+  continue and abort, with predecessor custody/generation, atomic terminal/
+  successor transfer and one-reservation checks. Crash before successor
+  dispatch makes the successor the conflict owner without Git I/O; old-owner,
+  concurrent-successor, automatic recovery and start gate/admission reuse fail;
 - fault injection before binding/reservation insert, after generic custody,
   after prepare commit, after private lock, after each native lock, before the
   SQLite CAS and immediately before the first mutation/CAS for index, ref,
   merge/rebase worktree, worktree registry, config/upstream and remote families;
   every injected competing change fails with zero authority-visible mutation;
 - restart of `prepared` making no Git/remote call and cleaning only its owned
-  private artifact, restart of `dispatching`/`ambiguous` making exactly one
-  bounded lookup and no mutation, retained conflict making no automatic action,
-  and exact terminal replay making no call;
+  private artifact (or retaining an inherited conflict), restart of
+  `dispatching`/`ambiguous` making exactly one bounded lookup and no mutation,
+  quarantine making no automatic lookup, retained conflict making no automatic
+  action, and exact machine/human terminal replay making no call;
 - commit/branch/worktree/upstream local proof, target-bound fetch/pull/push
   remote proof, same-name target retarget invalidation, merge/rebase conflict,
   partial pull and unavailable remote observation remaining honest;
 - unresolved Git custody blocking project-session closure and surviving daemon
-  and Console restart without a duplicate effect; and
+  and Console restart without a duplicate effect, followed by
+  `git-custody-resolve` negatives for ineligible/conflict custody, stale lookup/
+  evidence, wrong gate/capability/human provenance and changed replay. Faults
+  before/after every resolution statement leave all rows unchanged or one
+  immutable human-labelled result, make zero Git/remote/process call, preserve
+  machine evidence, release/retire one reservation and remove only its closure
+  blocker; and
 - capability, remote-credential, command, output and receipt canaries proving
   that no secret, arbitrary argument or unbounded process output reaches
   persistence, projection, logs or Console rendering.

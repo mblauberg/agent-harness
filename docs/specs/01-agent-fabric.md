@@ -1432,6 +1432,9 @@ coordination_run:
   chair_agent_id: exactly-one
   chair_generation: fenced-generation
   authority_ref: narrowing-envelope-hash
+  authority_revision: compare-and-set-integer
+  git_allowlist_epoch: monotonic-authority-fence
+  git_allowlist_digest: null-or-exact-sha256
   budget_ref: run-resource-budget
   state: revisioned-run-state
   revision: compare-and-set-integer
@@ -1452,8 +1455,10 @@ obligations, gates and scoped barriers to the project session. `quiescing`
 freezes new membership. A transition to `awaiting_acceptance` rechecks in the
 same transaction that every run, workstream and task is terminal or explicitly
 abandoned with reason; every required message and artifact obligation is
-reconciled; no active lease or provider action remains; and every applicable
-scoped barrier is closed. `closed` additionally needs the exact acceptance or
+reconciled; no active lease or provider action remains; every typed Git
+custody/reservation is machine-terminal or has the exact human-resolution
+record in section 32.13; and every applicable scoped barrier is closed.
+`closed` additionally needs the exact acceptance or
 cancel/failure terminal path.
 
 Each coordination run has exactly one generation-fenced chair. Coordinated
@@ -1478,8 +1483,8 @@ agent or chair. An operator capability is revocable and binds:
 
 - one operator, project, optional project session and principal generation;
 - an explicit subset of `read`, `decide`, `steer`, `pause`, `resume`,
-  `cancel`, `drain`, `stop`, `launch`, `takeover`, `git`, `git-authorise` and
-  `external-effect` operations;
+  `cancel`, `drain`, `stop`, `launch`, `takeover`, `git`, `git-authorise`,
+  `git-custody-resolve` and `external-effect` operations;
 - issue and expiry times no later than the project session;
 - the current project/session generation; and
 - for takeover, the handoff digest, old chair generation, expected run and
@@ -1490,7 +1495,8 @@ session ID exists. Every other session mutation requires the exact session ID
 and generation. Possession of `decide` does not imply `launch`, `takeover` or
 `external-effect`. `git` admits an already-authorised typed mutation;
 `git-authorise` may issue or revoke a narrower Git grant but cannot execute one.
-Neither implies the other.
+`git-custody-resolve` may adjudicate only an eligible unprovable Git custody and
+cannot execute Git or issue a grant. None implies another.
 
 Every operator mutation carries the capability, stable command ID, expected
 revision, actor and provenance. The daemon derives project and actor identity
@@ -2315,6 +2321,8 @@ git_action_authorisation:
   expected_dependency_revision: compare-and-set-integer
   authority_ref: exact-active-run-authority-sha256
   expected_authority_revision: compare-and-set-integer
+  expected_git_allowlist_epoch: compare-and-set-integer
+  git_allowlist_digest: null-or-exact-sha256
   repository_root: exact-canonical-trusted-root
   worktree_path: exact-canonical-admitted-worktree
   repository_state_digest: exact-sha256
@@ -2337,11 +2345,13 @@ observation. `effect_binding_digest` is the canonical SHA-256 of the complete
 Git effect, repository and remote bindings, execution profile, closed operation
 variant, canonical before state and complete expected result recipe, excluding
 only the operator credential, command ID, `operation_id` and the `decision`
-variant. `operation_id` is derived from authenticated operator, project session,
-stable Preview ID and `effect_binding_digest`. It is stable for exact Preview
-replay but distinct for a later Preview of the same Git state. A changed action,
-path, ref, remote, mode, expected object or revision therefore requires a new
-preview and authorisation decision.
+variant. The preauthorised variant derives `operation_id` from authenticated
+operator, project session, stable Preview ID and `effect_binding_digest`. A
+gate variant obtains both immutable values from the pre-effect draft below;
+it never derives gate identity from the later final Preview. Exact replay is
+stable, while a later preauthorised Preview or new gate draft has a distinct
+operation ID. A changed action, path, ref, remote, mode, expected object or
+authority-bound state therefore requires a new Preview and decision.
 
 `coordination_run.authority_revision` is the canonical revision owner for the
 run's current authority tuple. It starts at one. Each historical
@@ -2352,6 +2362,12 @@ under the prior tuple. The common `expected_dependency_revision` is the same
 run-owned dependency revision used by scoped gates. No implementation may
 invent an authority revision from an operator command, grant row or artifact
 timestamp.
+
+`git_allowlist_epoch` is the monotonic revision of `git_allowlist_v1` inside
+that same run-authority history; `git_allowlist_digest` is null only while the
+allow-list is absent. Adding, replacing or removing the allow-list is an
+authority rotation that advances the authority tuple and allow-list epoch in
+one transaction. It is not an independent mutable policy owner.
 
 The preauthorised variant is:
 
@@ -2376,8 +2392,8 @@ never be treated as wildcard authority.
 
 `git-authorise` is itself a closed Preview/Commit operator intent. It selects
 `issue`, `revise` or `revoke`; binds the exact project/session/generation and
-session/run/dependency/authority revisions; names the current allow-list digest;
-and carries either the complete proposed canonical grant or the exact current
+session/run/dependency/authority revisions; names the current allow-list epoch
+and digest; and carries either the complete proposed canonical grant or the exact current
 grant ID/revision/digest. Revise binds both. The daemon derives the canonical
 child constraints and proposed digest, shows the complete old/new authority
 diff, and binds the independently attested direct-human decision to that
@@ -2400,6 +2416,8 @@ git_action_grant:
   issuing_dependency_revision: exact-revision
   authority_ref: exact-active-run-authority-sha256
   authority_revision: exact-revision
+  git_allowlist_epoch: exact-issuance-epoch
+  git_allowlist_digest: exact-sha256
   repository_root: exact-canonical-root
   worktree_path: exact-canonical-worktree
   execution_profile_id: exact-trusted-profile
@@ -2416,8 +2434,9 @@ git_action_grant:
   revoked_at: null-or-timestamp
 ```
 
-The daemon hashes the immutable identity, authority, repository, constraint and
-expiry fields of the closed canonical grant to `grant_digest`; `revoked_at` is
+The daemon hashes the immutable identity, issuing session/run/dependency
+provenance, authority and allow-list tuple, repository, constraint and expiry
+fields of the closed canonical grant to `grant_digest`; `revoked_at` is
 excluded because it is a later lifecycle fact. Empty
 constraint sets mean that category is unavailable to an action requiring it,
 not unconstrained. `operation_variants` uses the exhaustive action-and-mode
@@ -2428,14 +2447,25 @@ every canonical repository-relative path. The exact worktree shall retain an
 active writer admission for the same project session and run when the effect
 can write files.
 
-Point-of-use equality is required for `issuing_session_revision`,
-`issuing_run_revision`, `issuing_dependency_revision`, session generation,
-authority revision/ref, execution-profile revision/digest and every remote
-registration revision/generation/target digest. Any change, grant expiry or
-revocation, repository/worktree change or constraint mismatch fails before Git
-lock acquisition or process I/O. Reissuing after a legitimate revision change
-requires a new human-authorised grant revision; a fresh action Preview cannot
-silently refresh an old grant.
+`issuing_session_revision`, `issuing_run_revision` and
+`issuing_dependency_revision` are immutable, hash-bound issuance provenance,
+not point-of-use equality fences. They prove where the reusable grant came
+from. Ordinary later session, run or dependency revision advances, including
+revision changes caused by Git custody/audit activity, neither alter nor
+invalidate it. Each action still carries current expected revisions and a stale
+Preview fails its own compare-and-set; a new Preview may reuse the same grant.
+Ordinary HEAD/ref/index/worktree-content changes likewise stale only the action
+Preview, not the grant, while canonical repository and admitted-worktree
+identity remain unchanged.
+
+Point-of-use grant equality is required for session generation, current
+authority revision/ref, current `git_allowlist_epoch`/digest, execution-profile
+revision/digest and every remote registration revision/generation/target
+digest. Grant expiry, revocation/non-active state, authority or allow-list
+rotation, session-generation change, profile/remote-target change,
+repository/worktree identity change or constraint mismatch fails before Git
+lock acquisition or process I/O. No action Preview may rewrite issuance
+provenance or silently refresh any live authority fence.
 
 The daemon owns a secret-free remote registry independently of `.git/config`:
 
@@ -2497,28 +2527,101 @@ force-with-lease push, destructive branch deletion and forced worktree removal
 always use the gate variant. A grant for one sibling operation, such as
 `branch-create`, can never authorise `branch-rename` or either delete mode.
 
+A gate-only operation first creates one typed pre-effect reservation.
+`GitOperationDraftIntent` is a closed `OperatorActionIntent` with `create` and
+`cancel` discriminators routed only through the existing
+`fabric.v1.operator-action.preview`/`commit` owner. Its Preview is read-only;
+confirmed Commit creates or cancels the no-authority draft and prepared
+admission. Cancel binds the exact draft ID/revision/digest and accepts only
+`open`/`gate-bound`. It is not the final Git action Preview/Commit.
+
+```yaml
+git_operation_draft:
+  draft_id: daemon-generated-stable-id
+  revision: compare-and-set-integer
+  kind: mutation-or-custody-resolution
+  project_id: exact-authenticated-project
+  project_session_id: exact-session
+  observed_session_revision: draft-cas-fence
+  session_generation: fenced-generation
+  coordination_run_id: exact-run
+  observed_run_revision: draft-cas-fence
+  observed_dependency_revision: draft-cas-fence
+  authority_ref: exact-current-sha256
+  authority_revision: exact-current-revision
+  git_allowlist_epoch: exact-current-epoch
+  git_allowlist_digest: null-or-exact-sha256
+  operation_id: daemon-derived-immutable-id
+  operation_kind: exact-gate-only-variant
+  payload_digest: exact-binding-sha256
+  binding:
+    kind: mutation
+    effect_binding_digest: exact-sha256
+    repository_state_digest: exact-sha256
+    result_recipe_digest: exact-sha256
+  state: open-or-gate-bound-or-consumed-or-stale-or-expired-or-cancelled
+  expires_at: bounded-timestamp
+```
+
+The closed `binding` discriminator is `mutation` with the complete repository,
+worktree, execution-profile, target, before-state and result-recipe binding, or
+`custody-resolution` with the complete resolution binding defined below.
+Draft creation requires the corresponding `git` or
+`git-custody-resolve` capability and validates current authority, syntax and
+typed state through read-only inspection. The daemon derives `operation_id`
+from authenticated operator/project/session identity, the random stable
+`draft_id` and `payload_digest`, then atomically persists the immutable draft
+and one `prepared` `operation_admissions` row whose kind and payload digest
+match. It creates no generic effect custody, Git mutation reservation, grant
+consumption or mutation authority; makes no mutating Git/remote call; and does
+not block session closure or daemon idle stop.
+
+Gate creation may bind only that exact prepared operation ID and draft payload.
+The later final Preview names the draft and approved gate, repeats every current
+session/run/dependency revision, session generation, authority and typed
+repository/custody observation, and requires the recomputed binding digest to
+equal the immutable draft; Preview remains read-only. Only a
+separately confirmed Commit may atomically consume the draft once, authorise the
+admission and write the action's typed rows. A mutation Commit creates effect
+custody/reservation; a custody-resolution Commit writes only the adjudication
+and target lifecycle changes below. Preview reports a changed binding without
+writing; draft reconciliation or a confirmed Commit terminalises the draft as
+`stale`, cancels its admission and supersedes the associated gate without
+creating custody. It cannot be rebound or refreshed under an earlier human
+decision. Expiry, explicit cancellation or rejection/cancellation/supersession
+of its gate is likewise terminal/no-authority, cancels the unconsumed admission
+and supersedes any remaining association without Git I/O; gate deferral leaves
+the bounded draft `gate-bound`. Exact draft-request
+replay returns the same identity and operation ID; a new request receives a new
+operation ID even for identical repository state.
+
 The gate variant is:
 
 ```yaml
 decision:
   kind: gate
+  draft_id: exact-pre-effect-draft
+  expected_draft_revision: compare-and-set-integer
+  draft_digest: exact-sha256
   gate_id: exact-id
   expected_gate_revision: compare-and-set-integer
   expected_gate_status: approved
   blocked_operation_id: exact-operation-id
 ```
 
-The gate shall belong to the same project session and coordination run, have an
-`operation` enforcement point, bind `blocked_operation_id` exactly to
-`operation_id`, bind the current dependency revision and have an authenticated
-human resolver. Both decision variants create one `operation_admissions` row
-for `operation_id`; its `operation_kind` is the exact Git operation variant and
-its payload digest is `effect_binding_digest`. The gate variant additionally
-requires the persisted exact `(gate_id, operation_id)` association. An
-operation kind is classification data and can never substitute for the unique
-operation ID. Policy approval, a gate for another action, a stale/superseded
-gate or a general consequential-action capability is insufficient. Commit
-rechecks the gate, association, admission row and every common binding after
+The gate shall belong to the draft's project session and coordination run, have
+an `operation` enforcement point, bind `blocked_operation_id` exactly to the
+draft's `operation_id`, bind the current dependency revision and have an
+authenticated human resolver. The preauthorised confirmed Commit creates one
+`authorised` admission. The gate draft already owns one `prepared`
+admission; final Commit compare-and-sets it to `authorised`. In both cases
+`operation_kind` is the exact operation variant and `payload_digest` is the
+immutable binding digest. The gate variant additionally requires the persisted
+exact `(gate_id, operation_id)` association. An operation kind is
+classification data and can never substitute for the unique operation ID.
+Policy approval, a gate for another action/draft, a stale/superseded gate or a
+general consequential-action capability is insufficient. Commit rechecks the
+draft, gate, association, admission and every current common binding after
 Preview and immediately before effect preparation. The gate never supplies
 release or deployment authority; those retain the exact release binding in
 section 32.3.
@@ -2593,8 +2696,70 @@ semantics:
   port changes only the branch's remote and merge keys through a locked atomic
   config update. It cannot set an arbitrary Git config key or remote URL.
 
-Every variant owns one closed `git_result_recipe_v1`. It includes the execution
-profile and algorithm IDs; canonical before state; exact expected success and,
+`git-custody-resolve` is a separate zero-Git-effect `OperatorActionIntent`, not
+an `OperatorGitIntent` or mutation variant:
+
+```yaml
+git_custody_resolve:
+  project_id: exact-authenticated-project
+  project_session_id: exact-session
+  expected_session_revision: compare-and-set-integer
+  expected_session_generation: fenced-generation
+  coordination_run_id: exact-run
+  expected_run_revision: compare-and-set-integer
+  expected_dependency_revision: compare-and-set-integer
+  authority_ref: exact-current-sha256
+  expected_authority_revision: compare-and-set-integer
+  draft_id: exact-custody-resolution-draft
+  expected_draft_revision: compare-and-set-integer
+  draft_digest: exact-sha256
+  operation_id: exact-draft-operation-id
+  custody_id: exact-unresolved-git-custody
+  expected_custody_state: ambiguous-or-quarantined
+  expected_lookup_generation: compare-and-set-integer
+  lookup_evidence_digest: exact-sha256
+  resolution_eligibility_reason: exact-daemon-reason-code
+  adjudication: applied-or-no-effect-or-quarantine-accepted
+  reason: bounded-non-empty-human-reason
+  gate_id: exact-human-approved-operation-gate
+  expected_gate_revision: compare-and-set-integer
+  expected_gate_status: approved
+```
+
+The target must already carry a daemon-persisted `resolution_eligible` marker
+for that lookup generation and evidence digest after the bounded inspector has
+declared machine proof permanently unavailable. Ordinary pending lookup and
+typed conflict are ineligible. Draft creation uses the
+`custody-resolution` binding. Its payload digest covers the exact current
+project/session/run authority, target custody/state, lookup generation/evidence,
+eligibility reason, adjudication and human reason, but excludes the later
+daemon-assigned draft/operation identity, gate identity and credential. It
+follows the exact operation-draft/
+gate flow. Final Preview is read-only. Confirmed Commit requires the distinct
+`git-custody-resolve` capability and an independently attested direct-human
+approval of the exact adjudication/reason; `git`, `git-authorise`, `decide`,
+policy or a gate for another operation is insufficient.
+
+Commit performs no Git process, filesystem, ref, index, worktree, configuration
+or remote mutation. In one transaction it preserves the machine evidence,
+appends one immutable human-adjudication record, terminalises the target custody
+and admission, releases its reservation for `applied`/`no-effect` or retires it
+for `quarantine-accepted`, and terminalises the resolution command/admission.
+The receipt says `human-adjudicated-applied`,
+`human-adjudicated-no-effect` or `human-adjudicated-quarantine-accepted`; it
+never rewrites or presents the machine outcome as proved. Exact replay returns
+that record. A changed custody state, lookup generation, evidence digest,
+reason, adjudication, gate or operation ID conflicts with zero state change.
+
+A human-adjudicated result removes only that custody's liveness/reservation
+blocker. It does not restore repository state, authorise another Git action,
+advance a project session automatically or imply acceptance. For project-
+session closure, `quarantine-accepted` is the explicit abandonment with reason
+record; other closure predicates and an explicit lifecycle transition still
+apply.
+
+Every mutation variant owns one closed `git_result_recipe_v1`. It includes the
+execution profile and algorithm IDs; canonical before state; exact expected success and,
 where admitted, conflict states; no-effect proof fields; at most 64 atomic ref/
 config updates; at most 128 input/output commit mappings; at most 4,096 conflict
 paths/index stages; and bounded index/worktree/config digests. Every produced
@@ -2639,11 +2804,21 @@ Added requirements are:
   gate variant.
 - **FR-040:** A Git grant shall be issued or revoked only through launch custody
   materialising an approved positive run allow-list or a distinct
-  `git-authorise` capability, and shall capture the exact issuing session, run,
-  dependency and run-authority revisions without wildcard containment.
+  `git-authorise` capability. It shall hash the exact issuing session/run/
+  dependency revisions as provenance and fence use by the current session
+  generation, run-authority tuple and allow-list epoch/digest; unrelated later
+  orchestration revisions shall not invalidate it.
 - **FR-041:** Remote Git and upstream-tracking actions shall bind a daemon-owned
   secret-free remote registration identity, target digest and generation; a
   reused display name or project Git configuration shall confer no authority.
+- **FR-042:** Every gate-only Git mutation or custody resolution shall allocate
+  one immutable operation ID and binding digest in a typed no-authority draft
+  before gate creation; only confirmed final Commit may consume that draft and
+  create or resolve effect custody.
+- **FR-043:** Permanently unprovable ambiguous/quarantined Git custody shall
+  remain blocking until machine proof or one exact, independently attested,
+  gate-bound `git-custody-resolve` adjudication; human adjudication shall remain
+  distinguishable from machine proof in every receipt and projection.
 - **NFR-022:** Typed Git execution shall use one fixed bounded port with no
   arbitrary shell, command, option, hook, editor, pager, executable or
   environment injection surface.
@@ -2658,16 +2833,20 @@ Added requirements are:
   backend and complete bounded output recipe into the authority digest; hostile
   Git configuration, attributes and helpers shall be disabled or rejected
   before Preview.
+- **NFR-026:** Typed Git binding, generic custody, operation admission and
+  common-directory reservation states shall transition through one enforced
+  atomic mapping; restart shall fail closed on an impossible combination.
 
 Acceptance additionally requires:
 
 - **AC-031:** a matrix over missing, expired, revoked, wrong-project,
-  wrong-session/generation, wrong issuing session/run/dependency revision,
-  stale run-authority or grant revision, wrong repository/worktree/execution
-  profile, sibling operation variant, remote target/generation, ref and path
-  proves zero Git process I/O. Matching routine grants succeed only inside
-  their exact positive constraints; pull merge/rebase, push and every gate-only
-  mode reject broad authority and a gate for another operation ID.
+  wrong-session/generation, tampered or nonexistent issuing provenance, stale
+  run-authority/allow-list or grant revision, wrong repository/worktree/
+  execution profile, sibling operation variant, remote target/generation, ref
+  and path proves zero Git process I/O. A valid grant remains usable through
+  unrelated session/run/dependency revision advances after a fresh action
+  Preview; pull merge/rebase, push and every gate-only mode reject broad
+  authority and a gate for another operation ID.
 - **AC-032:** real temporary-repository tests cover every closed Git effect and
   mode, including current-branch/no-autostash rebase, merged-only versus force
   deletion, the three worktree-create modes, clean versus force removal,
@@ -2679,9 +2858,11 @@ Acceptance additionally requires:
 - **AC-033:** grant issuance rejects absence of `git-authorise`, an absent or
   negative parent allow-list, every widened operation/profile/remote/ref/path/
   bound and a concurrent session/run/dependency/authority rotation. Direct SQL
-  and public protocol tests prove both decision variants create one exact
-  operation admission, while only the gate variant has the same-session/run
-  `(gate_id, operation_id)` association and human-approved dependency revision.
+  and public protocol tests prove preauthorised final Commit creates one exact
+  authorised admission, while gate-draft creation makes one no-authority
+  prepared admission and only final Commit may consume it under the same-
+  session/run `(gate_id, operation_id)` association and human-approved current
+  dependency revision.
 - **AC-034:** hostile hook, filter, process, merge/diff driver, include, alias,
   editor, pager, signer, credential/remote helper and SSH command canaries never
   execute. Preview is byte-identical across wall time and mutable Git config for
@@ -2689,3 +2870,15 @@ Acceptance additionally requires:
   commit mapping or conflict state. Retargeting `origin` under the same name
   invalidates the old grant, and upstream tracking can change only through the
   target-bound typed variants.
+- **AC-035:** exact gate-draft replay returns one operation ID; changed payload,
+  operation-kind substitution, early custody/reservation creation, gate binding
+  by kind, final Preview writes and expired/cancelled/stale draft reuse all fail.
+  Confirmed Commit atomically consumes one exact approved draft or changes
+  nothing, and crash at every draft/gate/Commit boundary grants no mutation.
+- **AC-036:** every conflict, ambiguity, quarantine, typed successor and
+  terminal outcome matches the four-owner persistence table across restart.
+  `git-custody-resolve` rejects stale generation/evidence, ineligible/conflict
+  custody, wrong gate/capability/provenance and replay with changed reason or
+  adjudication; exact Commit makes zero Git call, atomically releases/retires
+  the reservation, preserves machine evidence, records the human-labelled
+  result and removes only the exact closure blocker.
