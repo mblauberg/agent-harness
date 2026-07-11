@@ -51,7 +51,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: intent.projectId,
       projectSessionId: intent.projectSessionId,
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process,
       effectJournal: journal,
     });
@@ -79,7 +79,7 @@ describe("sealed Herdr CLI boundary", () => {
           "--cwd", project,
           "--no-focus",
           "--",
-          "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+          "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
           "--project", project,
           "--herdr",
         ],
@@ -139,7 +139,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: intent.identity.projectId,
       projectSessionId: intent.identity.projectSessionId,
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process,
       effectJournal: journal,
       clock: () => Date.parse("2027-01-01T00:00:00Z"),
@@ -206,7 +206,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: identity.projectId,
       projectSessionId: identity.projectSessionId,
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process,
       effectJournal: journal,
     });
@@ -293,7 +293,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: "project-01",
       projectSessionId: "session-01",
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process: {
         run: async (request) => {
           calls.push(request);
@@ -362,7 +362,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: "project-01",
       projectSessionId: "session-01",
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process: {
         run: async (request) => {
           calls.push(request);
@@ -475,8 +475,8 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: identity.projectId,
       projectSessionId: identity.projectSessionId,
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
-      observerExecutable: "/Users/user/.agents/runtime/agent-fabric/dist/cli/main.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
+      observerExecutable: "/opt/agent-fabric/runtime/agent-fabric/dist/cli/main.js",
       observerSocketPath: join(root, "fabric.sock"),
       observerCapabilityFile: join(root, "observer.cap"),
       observerCursorDirectory: join(root, "cursors"),
@@ -509,7 +509,7 @@ describe("sealed Herdr CLI boundary", () => {
       "--cwd", project,
       "--no-focus",
       "--",
-      "/Users/user/.agents/runtime/agent-fabric/dist/cli/main.js",
+      "/opt/agent-fabric/runtime/agent-fabric/dist/cli/main.js",
       "observe",
       "--socket", join(root, "fabric.sock"),
       "--capability-file", join(root, "observer.cap"),
@@ -538,7 +538,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: "project-01",
       projectSessionId: "session-01",
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process: { run: async () => output },
       effectJournal: journal,
     });
@@ -568,7 +568,7 @@ describe("sealed Herdr CLI boundary", () => {
       projectId: "project-01",
       projectSessionId: "session-01",
       canonicalProjectRoot: project,
-      consoleExecutable: "/Users/user/.agents/runtime/agent-fabric-console/dist/cli.js",
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
       process: { run: async () => { calls += 1; return response({}); } },
       effectJournal: new HerdrEffectEvidenceJournal({ stateDirectory: state }),
     });

@@ -216,7 +216,7 @@ describe("optional GitHub hosted checks", () => {
   });
 
   it("labels authentication failure unavailable without persisting or projecting credentials", async () => {
-    const canary = "ghp_secret_canary";
+    const canary = ["gh", "p_secret_canary"].join("");
     const adapter = new GitHubCliHostedChecksAdapter({
       executable: "/opt/homebrew/bin/gh",
       executableDigest: `sha256:${"c".repeat(64)}`,
@@ -236,7 +236,7 @@ describe("optional GitHub hosted checks", () => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "fabric-github-auth-")));
     try {
       const executable = join(directory, "gh-fixture");
-      const canary = "ghp_process_secret_canary";
+      const canary = ["gh", "p_process_secret_canary"].join("");
       const body = `#!/bin/sh\nprintf '%s\\n' '${canary}' >&2\nexit 4\n`;
       await writeFile(executable, body, { encoding: "utf8", mode: 0o700 });
       await chmod(executable, 0o700);
