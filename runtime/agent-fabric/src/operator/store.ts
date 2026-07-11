@@ -1,4 +1,5 @@
 import {
+  OPERATOR_ACTIONS,
   assertOperatorCapabilityAuthority,
   type JsonValue,
   type OperatorAction,
@@ -38,6 +39,15 @@ export type OperatorCommandTarget = {
   sessionGeneration?: number;
   requiredAction: OperatorAction;
   commandPayload: JsonValue;
+};
+
+export type AuthenticatedOperatorCredential = {
+  context: AuthenticatedOperatorContext;
+  capabilityId: string;
+  kind: "project-launch" | "session" | "takeover";
+  projectSessionId?: string;
+  sessionGeneration?: number;
+  actions: OperatorAction[];
 };
 
 type CapabilityRow = Row & {
@@ -179,6 +189,89 @@ export class OperatorStore {
       UPDATE operator_capabilities SET revoked_at=? WHERE capability_id=? AND revoked_at IS NULL
     `).run(this.#clock(), capabilityId);
     if (changed.changes !== 1) throw new ProjectFabricCoreError("NOT_FOUND", "capability was not active");
+  }
+
+  authenticateCredential(token: string): AuthenticatedOperatorCredential {
+    if (token.length === 0) throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "capability token is empty");
+    const capability = this.database.prepare(`
+      SELECT * FROM operator_capabilities WHERE token_hash=?
+    `).get(sha256(token));
+    if (!isRow(capability)) throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "capability credential is invalid");
+    if (capability.revoked_at !== null) throw new ProjectFabricCoreError("CAPABILITY_REVOKED", "capability is revoked");
+    if (integer(capability, "expires_at") <= this.#clock()) {
+      throw new ProjectFabricCoreError("CAPABILITY_EXPIRED", "capability is expired");
+    }
+    const projectId = text(capability, "project_id");
+    const operatorId = text(capability, "operator_id");
+    const principal = row(this.database.prepare(`
+      SELECT project_id, project_authority_generation, principal_generation, state
+        FROM operator_principals WHERE operator_id=?
+    `).get(operatorId), "operator principal");
+    if (text(principal, "state") !== "active") {
+      throw new ProjectFabricCoreError("CAPABILITY_REVOKED", "operator principal is revoked");
+    }
+    if (text(principal, "project_id") !== projectId) {
+      throw new ProjectFabricCoreError("WRONG_PROJECT", "operator principal changed project");
+    }
+    const projectGeneration = integer(row(this.database.prepare(`
+      SELECT authority_generation FROM projects WHERE project_id=?
+    `).get(projectId), "project"), "authority_generation");
+    if (
+      integer(capability, "project_authority_generation") !== projectGeneration ||
+      integer(principal, "project_authority_generation") !== projectGeneration
+    ) {
+      throw new ProjectFabricCoreError("STALE_GENERATION", "project authority generation is stale");
+    }
+    const principalGeneration = integer(principal, "principal_generation");
+    if (integer(capability, "principal_generation") !== principalGeneration) {
+      throw new ProjectFabricCoreError("STALE_PRINCIPAL_GENERATION", "operator principal generation is stale");
+    }
+    const kind = text(capability, "kind");
+    if (kind !== "project-launch" && kind !== "session" && kind !== "takeover") {
+      throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "operator capability kind is invalid");
+    }
+    const projectSessionId = nullableText(capability, "project_session_id");
+    const sessionGeneration = capability.session_generation === null
+      ? null
+      : integer(capability, "session_generation");
+    if (kind === "project-launch") {
+      if (projectSessionId !== null || sessionGeneration !== null) {
+        throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "project capability has a session binding");
+      }
+    } else {
+      if (projectSessionId === null || sessionGeneration === null) {
+        throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "session capability has no session binding");
+      }
+      const currentSessionGeneration = integer(row(this.database.prepare(`
+        SELECT generation FROM project_sessions WHERE project_session_id=? AND project_id=?
+      `).get(projectSessionId, projectId), "project session"), "generation");
+      if (sessionGeneration !== currentSessionGeneration) {
+        throw new ProjectFabricCoreError("STALE_GENERATION", "project-session generation is stale");
+      }
+    }
+    const parsedActions: unknown = JSON.parse(text(capability, "operations_json"));
+    if (
+      !Array.isArray(parsedActions) ||
+      parsedActions.length === 0 ||
+      !parsedActions.every((action): action is OperatorAction => (
+        typeof action === "string" && OPERATOR_ACTIONS.includes(action as OperatorAction)
+      ))
+    ) {
+      throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "operator capability actions are invalid");
+    }
+    return {
+      context: {
+        operatorId: operatorId as never,
+        projectId: projectId as never,
+        projectAuthorityGeneration: projectGeneration,
+        principalGeneration,
+      },
+      capabilityId: text(capability, "capability_id"),
+      kind,
+      ...(projectSessionId === null ? {} : { projectSessionId }),
+      ...(sessionGeneration === null ? {} : { sessionGeneration }),
+      actions: [...parsedActions],
+    };
   }
 
   attach(

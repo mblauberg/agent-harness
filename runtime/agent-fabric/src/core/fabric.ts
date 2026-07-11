@@ -35,6 +35,8 @@ import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
 import { renderSafePreview } from "../visibility/safe-preview.js";
+import { OperatorStore } from "../operator/store.js";
+import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
@@ -755,6 +757,7 @@ export class Fabric {
   readonly #executionProfile: string;
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
+  readonly #operatorStore: OperatorStore;
 
   constructor(options: FabricOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -770,6 +773,7 @@ export class Fabric {
     upgradeStoredAuthorities(this.#database, this.#workspaceRoots);
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
+    this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
     this.#providerSessions = new ProviderSessionCoordinator({
@@ -1160,8 +1164,21 @@ export class Fabric {
         JOIN runs r ON r.run_id=c.run_id
        WHERE c.token_hash=?
     `).get(sha256(token));
-    if (!isRow(authenticated) || authenticated.revoked_at !== null || numberField(authenticated, "expires_at") <= this.#clock()) {
-      throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired, revoked or unknown");
+    if (!isRow(authenticated)) {
+      const operator = this.#operatorStore.authenticateCredential(token);
+      return {
+        principal: {
+          kind: "operator",
+          operatorId: operator.context.operatorId,
+          projectId: operator.context.projectId,
+          projectAuthorityGeneration: operator.context.projectAuthorityGeneration,
+          principalGeneration: operator.context.principalGeneration,
+        },
+        grantedOperations: operatorOperationsForActions(operator.actions),
+      };
+    }
+    if (authenticated.revoked_at !== null || numberField(authenticated, "expires_at") <= this.#clock()) {
+      throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired or revoked");
     }
     const authority = parseAuthority(stringField(authenticated, "authority_json"));
     const denied = new Set(authority.deniedActions);

@@ -115,6 +115,25 @@ afterEach(() => {
 });
 
 describe("operator capability and command boundary", () => {
+  it("resolves a bearer token to its current principal and abstract actions without returning the token", () => {
+    const fixture = setup();
+    expect(fixture.store.authenticateCredential("session-secret")).toEqual({
+      context: fixture.context,
+      capabilityId: "cap_session",
+      kind: "session",
+      projectSessionId: "session_01",
+      sessionGeneration: 1,
+      actions: ["read", "decide"],
+    });
+    expect(() => fixture.store.authenticateCredential("wrong-secret")).toThrowError(
+      expect.objectContaining({ code: "AUTHENTICATION_FAILED" }),
+    );
+    fixture.store.revokeCapability("cap_session");
+    expect(() => fixture.store.authenticateCredential("session-secret")).toThrowError(
+      expect.objectContaining({ code: "CAPABILITY_REVOKED" }),
+    );
+  });
+
   it("rejects an absent capability with zero state or audit mutation", () => {
     const fixture = setup();
     const missing = {
