@@ -77,6 +77,29 @@ describe("agent-fabric-herdr CLI", () => {
         "pane run w5:p7 Pause after the current check.",
         "pane send-keys w5:p7 enter",
       ]);
+      stdout = "";
+      stderr = "";
+
+      const messageResult = await runHerdrCli([
+        "steer", "--config", config, "--pane", "w5:p7", "--fire-and-forget",
+        "--message-ref", "message-01", "--prompt", "Pause after this command.",
+      ], { stdin: new PassThrough(), stdout: output, stderr: error });
+
+      expect(messageResult).toBe(0);
+      expect(JSON.parse(stdout)).toMatchObject({
+        status: "dispatched-unconfirmed",
+        referenceValidation: "unverified",
+        messageRef: "message-01",
+        canSatisfyExpectedResult: false,
+        canCloseBarrier: false,
+      });
+      stdout = "";
+      stderr = "";
+      await expect(runHerdrCli([
+        "steer", "--config", config, "--pane", "w5:p7", "--fire-and-forget",
+        "--task-ref", "task-01", "--message-ref", "message-01", "--prompt", "Pause.",
+      ], { stdin: new PassThrough(), stdout: output, stderr: error })).resolves.toBe(2);
+      expect(stderr).toContain("exactly one");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

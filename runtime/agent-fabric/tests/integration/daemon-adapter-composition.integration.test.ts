@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,47 @@ import { DAEMON_ROOT_AUTHORITY } from "../support/daemon-testkit.ts";
 const fakeAdapter = fileURLToPath(new URL("../support/daemon-fake-adapter.ts", import.meta.url));
 
 describe("daemon adapter composition", () => {
+  it("validates enabled GitHub hosted checks in the authoritative daemon process", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-daemon-github-"));
+    const stateDirectory = join(directory, "state");
+    const runtimeDirectory = join(directory, "runtime");
+    const socketPath = join(runtimeDirectory, "fabric.sock");
+    const projectRoot = join(directory, "project");
+    const executable = join(directory, "gh-fixture");
+    const body = "#!/bin/sh\nexit 0\n";
+    await mkdir(projectRoot);
+    await writeFile(executable, body, { encoding: "utf8", mode: 0o700 });
+    await chmod(executable, 0o700);
+    let unexpected: Awaited<ReturnType<typeof startFabricDaemon>> | undefined;
+    let rejected = false;
+    try {
+      try {
+        unexpected = await startFabricDaemon({
+          databasePath: join(stateDirectory, "fabric.sqlite3"),
+          stateDirectory,
+          runtimeDirectory,
+          socketPath,
+          workspaceRoots: [projectRoot],
+          githubHostedChecks: {
+            enabled: true,
+            executable,
+            executableDigest: `sha256:${"0".repeat(64)}`,
+            hostname: "github.com",
+            repository: "example/project",
+            canonicalRepositoryRoot: projectRoot,
+          },
+        });
+      } catch {
+        rejected = true;
+      }
+      expect(rejected).toBe(true);
+      expect(createHash("sha256").update(body).digest("hex")).not.toBe("0".repeat(64));
+    } finally {
+      if (unexpected !== undefined) await unexpected.stop();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("passes an explicitly activated adapter into the authoritative daemon and journals a real fake-process action", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-daemon-adapter-"));
     const stateDirectory = join(directory, "state");

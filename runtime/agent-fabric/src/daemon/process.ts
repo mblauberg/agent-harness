@@ -39,6 +39,10 @@ import { routeDaemonConnection } from "./connection-router.js";
 import { servePublicProtocolConnection } from "./public-protocol.js";
 import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../transport/bounded-ndjson.js";
 import { trustedWorkspaceIdentity } from "../cli/workspace-trust.js";
+import {
+  createOptionalGitHubHostedChecksAdapter,
+  type OptionalGitHubHostedChecksConfiguration,
+} from "../operator/github-hosted-checks.js";
 
 class DaemonProtocolError extends Error {
   readonly code: string;
@@ -88,6 +92,9 @@ const workspaceRootsValue: unknown = JSON.parse(process.env.AGENT_FABRIC_WORKSPA
 const workspaceRoots = Array.isArray(workspaceRootsValue) && workspaceRootsValue.every((value) => typeof value === "string")
   ? workspaceRootsValue
   : undefined;
+const githubHostedChecksValue: unknown = JSON.parse(
+  process.env.AGENT_FABRIC_GITHUB_HOSTED_CHECKS_JSON ?? '{"enabled":false}',
+);
 // Temporary compatibility fallback until every launcher supplies the persisted
 // runtime epoch. New bootstrap callers pass the authoritative generation.
 const daemonInstanceGenerationValue = process.env.AGENT_FABRIC_DAEMON_INSTANCE_GENERATION ?? "1";
@@ -178,6 +185,9 @@ if (bootstrapMode === "test-forced-process-locks") {
 rmSync(socketPath, { force: true });
 
 const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON);
+const gitHostedChecks = await createOptionalGitHubHostedChecksAdapter(
+  githubHostedChecksValue as OptionalGitHubHostedChecksConfiguration,
+);
 const initializeResult = daemonInitializeResult(Object.keys(daemonAdapters));
 type PendingDaemonStop = Readonly<{
   custodyId: string;
@@ -201,6 +211,7 @@ const fabric = await openFabric({
   maximumConcurrentProviderTurns,
   workspaceRoots,
   adapters: daemonAdapters,
+  ...(gitHostedChecks === undefined ? {} : { gitHostedChecks }),
   daemonStopPort: {
     request: async (request) => {
       const existing = pendingDaemonStops.get(request.custodyId);

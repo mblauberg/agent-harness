@@ -39,6 +39,7 @@ import {
 } from "./private-discovery.js";
 import { FABRIC_PROTOCOL_VERSION, isRecord, type DaemonInitializeResult } from "./protocol.js";
 import { composeDaemonConfiguration } from "./composition.js";
+import type { OptionalGitHubHostedChecksConfiguration } from "../operator/github-hosted-checks.js";
 
 export { FabricRemoteError } from "../transport/ndjson-rpc.js";
 
@@ -278,6 +279,7 @@ export type DaemonStartOptions = {
   executionProfile?: string;
   maximumConcurrentProviderTurns?: number;
   workspaceRoots?: string[];
+  githubHostedChecks?: OptionalGitHubHostedChecksConfiguration;
   configuration?: {
     globalConfigPath: string;
     localConfigPath?: string;
@@ -365,6 +367,7 @@ function childEnvironment(
     AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: String(options.maximumConcurrentProviderTurns ?? 8),
     AGENT_FABRIC_WORKSPACE_ROOTS_JSON: JSON.stringify(options.workspaceRoots ?? []),
     AGENT_FABRIC_ADAPTERS_JSON: JSON.stringify(options.adapters ?? {}),
+    AGENT_FABRIC_GITHUB_HOSTED_CHECKS_JSON: JSON.stringify(options.githubHostedChecks ?? { enabled: false }),
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     TMPDIR: process.env.TMPDIR ?? "/tmp",
   };

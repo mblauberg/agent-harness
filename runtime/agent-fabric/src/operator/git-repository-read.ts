@@ -85,6 +85,7 @@ type CoreObservation = {
 
 type FullObservation = {
   core: CoreObservation;
+  projectionFenceDigest: Sha256Digest;
   diffBytes: Buffer;
   diffBaseDigest: Sha256Digest;
   diffTargetDigest: Sha256Digest;
@@ -143,24 +144,21 @@ export class GitRepositoryReadService {
       throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "private Git artifacts must be stored outside the repository");
     }
     let observation = await this.#observe(target.repositoryRoot, target.worktreePath, request);
-    let finalCore = await this.#observeCore(target.repositoryRoot, target.worktreePath);
-    if (observation.core.repositoryStateDigest !== finalCore.repositoryStateDigest) {
+    let finalFence = await this.#observeProjectionFence(target.repositoryRoot, target.worktreePath);
+    if (observation.projectionFenceDigest !== finalFence.digest) {
       observation = await this.#observe(target.repositoryRoot, target.worktreePath, request);
-      finalCore = await this.#observeCore(target.repositoryRoot, target.worktreePath);
-      if (observation.core.repositoryStateDigest !== finalCore.repositoryStateDigest) {
+      finalFence = await this.#observeProjectionFence(target.repositoryRoot, target.worktreePath);
+      if (observation.projectionFenceDigest !== finalFence.digest) {
         throw new ProjectFabricCoreError(
           "PROJECTION_RESNAPSHOT_REQUIRED",
-          `repository changed during observation; latest state is ${finalCore.repositoryStateDigest}`,
-          { repositoryStateDigest: finalCore.repositoryStateDigest },
+          `repository changed during observation; latest state is ${finalFence.core.repositoryStateDigest}`,
+          { repositoryStateDigest: finalFence.core.repositoryStateDigest },
         );
       }
     }
     const postReadSnapshotRevision = this.#globalRevision();
     if (postReadSnapshotRevision !== request.snapshotRevision) return resnapshot(postReadSnapshotRevision);
 
-    const artifactRef = await this.#writePrivateDiff(observation.diffBytes);
-    const finalSnapshotRevision = this.#globalRevision();
-    if (finalSnapshotRevision !== request.snapshotRevision) return resnapshot(finalSnapshotRevision);
     const observedAt = parseTimestamp(new Date(this.#clock()).toISOString(), "gitRepository.observedAt");
     const hostedChecks = await this.#readHostedChecks({
       canonicalRepositoryRoot: target.repositoryRoot,
@@ -171,6 +169,29 @@ export class GitRepositoryReadService {
       snapshotRevision: request.snapshotRevision,
       observedAt,
     });
+    const postHostedSnapshotRevision = this.#globalRevision();
+    if (postHostedSnapshotRevision !== request.snapshotRevision) return resnapshot(postHostedSnapshotRevision);
+    const postHostedFence = await this.#observeProjectionFence(target.repositoryRoot, target.worktreePath);
+    if (postHostedFence.digest !== observation.projectionFenceDigest) {
+      throw new ProjectFabricCoreError(
+        "PROJECTION_RESNAPSHOT_REQUIRED",
+        `repository changed during hosted-check observation; latest state is ${postHostedFence.core.repositoryStateDigest}`,
+        { repositoryStateDigest: postHostedFence.core.repositoryStateDigest },
+      );
+    }
+    const artifactRef = await this.#writePrivateDiff(observation.diffBytes);
+    const finalSnapshotRevision = this.#globalRevision();
+    if (finalSnapshotRevision !== request.snapshotRevision) return resnapshot(finalSnapshotRevision);
+    const returnFence = await this.#observeProjectionFence(target.repositoryRoot, target.worktreePath);
+    if (returnFence.digest !== observation.projectionFenceDigest) {
+      throw new ProjectFabricCoreError(
+        "PROJECTION_RESNAPSHOT_REQUIRED",
+        `repository changed before projection return; latest state is ${returnFence.core.repositoryStateDigest}`,
+        { repositoryStateDigest: returnFence.core.repositoryStateDigest },
+      );
+    }
+    const returnSnapshotRevision = this.#globalRevision();
+    if (returnSnapshotRevision !== request.snapshotRevision) return resnapshot(returnSnapshotRevision);
     const repository: GitRepositoryProjection = {
       freshness: "live",
       source: "git",
@@ -335,12 +356,30 @@ export class GitRepositoryReadService {
     const diff = await readDiff(worktreePath, request.diff, core, objectIds);
     return {
       core,
+      projectionFenceDigest: projectionFenceDigest(
+        core,
+        branchObservation.fenceDigest,
+        worktreeObservation.fenceDigest,
+      ),
       diffBytes: diff.bytes,
       diffBaseDigest: diff.baseDigest,
       diffTargetDigest: diff.targetDigest,
       log: parsedLog,
       branches: { items: branchObservation.items, truncated: branchObservation.truncated },
       worktrees: { items: worktreeObservation.items, truncated: worktreeObservation.truncated },
+    };
+  }
+
+  async #observeProjectionFence(
+    repositoryRoot: string,
+    worktreePath: string,
+  ): Promise<{ core: CoreObservation; digest: Sha256Digest }> {
+    const core = await this.#observeCore(repositoryRoot, worktreePath);
+    const branches = await readBranches(worktreePath);
+    const worktrees = await readWorktrees(repositoryRoot, worktreePath);
+    return {
+      core,
+      digest: projectionFenceDigest(core, branches.fenceDigest, worktrees.fenceDigest),
     };
   }
 
@@ -651,7 +690,12 @@ async function readBranches(worktreePath: string) {
     };
   });
   all.sort((left, right) => compareText(left.refName, right.refName));
-  return { items: all.slice(0, MAX_BRANCHES), truncated: all.length > MAX_BRANCHES, objectIds };
+  return {
+    items: all.slice(0, MAX_BRANCHES),
+    truncated: all.length > MAX_BRANCHES,
+    objectIds,
+    fenceDigest: sha256Digest(canonicalJson(all)),
+  };
 }
 
 async function readWorktrees(repositoryRoot: string, currentPath: string) {
@@ -691,7 +735,25 @@ async function readWorktrees(repositoryRoot: string, currentPath: string) {
     });
   }
   all.sort((left, right) => compareText(left.canonicalPath, right.canonicalPath));
-  return { items: all.slice(0, MAX_WORKTREES), truncated: all.length > MAX_WORKTREES, objectIds };
+  return {
+    items: all.slice(0, MAX_WORKTREES),
+    truncated: all.length > MAX_WORKTREES,
+    objectIds,
+    fenceDigest: sha256Digest(canonicalJson(all)),
+  };
+}
+
+function projectionFenceDigest(
+  core: CoreObservation,
+  branchesDigest: Sha256Digest,
+  worktreesDigest: Sha256Digest,
+): Sha256Digest {
+  return sha256Digest(canonicalJson({
+    repositoryStateDigest: core.repositoryStateDigest,
+    operationState: core.operationState,
+    branchesDigest,
+    worktreesDigest,
+  }));
 }
 
 async function worktreePaths(repositoryRoot: string): Promise<string[]> {

@@ -62,7 +62,11 @@ import {
   type LocalOperatorSessionCapabilityResult,
 } from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
-import { GitRepositoryReadService } from "../operator/git-repository-read.js";
+import {
+  GitRepositoryReadService,
+  type GitHostedChecksPort,
+} from "../operator/git-repository-read.js";
+import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 import {
   OperatorActionStore,
   type OperatorActionEffectPort,
@@ -149,6 +153,7 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   operatorActionPorts?: FabricOperatorActionPorts;
   daemonStopPort?: ProductionDaemonStopPort;
   fabricSocketPath?: string;
+  gitHostedChecks?: GitHostedChecksPort;
 };
 
 type Row = Record<string, unknown>;
@@ -889,6 +894,7 @@ export class Fabric {
       operatorStore: this.#operatorStore,
       privateStateRoot: dirname(realpathSync(options.databasePath)),
       clock: this.#clock,
+      ...(options.gitHostedChecks === undefined ? {} : { hostedChecks: options.gitHostedChecks }),
     });
     const productionOperatorPorts = createProductionOperatorActionPorts({
       database: this.#database,
@@ -1231,6 +1237,12 @@ export class Fabric {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
     }
     if (this.#database.prepare(`
+      SELECT 1 FROM provider_actions
+       WHERE run_id=? AND action_id=? AND adapter_id=?
+    `).get(runId, actionId, HERDR_CONTROL_ADAPTER_ID) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "Herdr actions mutate only through Herdr integration custody");
+    }
+    if (this.#database.prepare(`
       SELECT 1
         FROM provider_actions p
         JOIN chair_bridge_recovery_custody c
@@ -1530,6 +1542,7 @@ export class Fabric {
       SELECT p.run_id, p.action_id, p.adapter_id, p.status, p.updated_at, r.chair_agent_id
        FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
        WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
+         AND p.adapter_id<>?
          AND json_type(p.payload_json, '$.operatorCommandId') IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM project_session_launch_custody c
@@ -1544,7 +1557,7 @@ export class Fabric {
             WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
          )
        ORDER BY p.updated_at, p.action_id
-    `).all();
+    `).all(HERDR_CONTROL_ADAPTER_ID);
     for (const value of pendingActions) {
       const action = rowOrNotFound(value, "startup provider action");
       const runId = stringField(action, "run_id");

@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import type {
   AgentId,
   CoordinationRunId,
+  MessageId,
   ProjectId,
   ProjectSessionId,
   ProviderActionId,
@@ -13,6 +14,7 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import { HerdrFabricPorts } from "../../src/integrations/herdr-fabric-ports.ts";
+import { openFabric } from "../../src/index.ts";
 import { createStage1Fixture } from "../support/stage1-fixture.ts";
 
 describe("daemon-owned Herdr Fabric ports", () => {
@@ -22,6 +24,7 @@ describe("daemon-owned Herdr Fabric ports", () => {
       taskId: "herdr-steer-task",
       authorityId: fixture.authorities.bob,
       eligibleAgentIds: ["bob"],
+      participantAgentIds: ["chair"],
       objective: "receive one-way steering",
       baseRevision: "base-01",
       commandId: "herdr:task:create",
@@ -30,6 +33,38 @@ describe("daemon-owned Herdr Fabric ports", () => {
       taskId: ready.taskId,
       expectedRevision: ready.revision,
       commandId: "herdr:task:claim",
+    });
+    const otherReady = await fixture.chair.createTask({
+      taskId: "herdr-other-task",
+      authorityId: fixture.authorities.bob,
+      eligibleAgentIds: ["bob"],
+      participantAgentIds: ["chair"],
+      objective: "prove exact message task binding",
+      baseRevision: "base-01",
+      commandId: "herdr:other-task:create",
+    });
+    const otherActive = await fixture.bob.claimTask({
+      taskId: otherReady.taskId,
+      expectedRevision: otherReady.revision,
+      commandId: "herdr:other-task:claim",
+    });
+    const steerMessage = await fixture.chair.sendMessage({
+      audience: { kind: "task", taskId: active.taskId },
+      kind: "steer",
+      body: "Pause after the current check.",
+      requiresAck: false,
+      dedupeKey: "herdr:message:steer",
+      taskRevision: active.revision,
+      context: { kind: "task", taskId: active.taskId },
+    });
+    const answerBearingMessage = await fixture.chair.sendMessage({
+      audience: { kind: "task", taskId: active.taskId },
+      kind: "request",
+      body: "Return an answer.",
+      requiresAck: true,
+      dedupeKey: "herdr:message:request",
+      taskRevision: active.revision,
+      context: { kind: "task", taskId: active.taskId },
     });
     await fixture.fabric.close();
     const database = new Database(fixture.databasePath);
@@ -62,6 +97,34 @@ describe("daemon-owned Herdr Fabric ports", () => {
         expectsResult: false,
         dependentBarrierId: null,
         referenceDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      });
+      const messageReference = {
+        ...reference,
+        kind: "message" as const,
+        messageId: steerMessage.messageId as MessageId,
+      };
+      await expect(ports.validateSteerReference(messageReference)).resolves.toMatchObject({
+        status: "valid",
+        targetAgentId: "bob",
+        purpose: "steer",
+        requiresAck: false,
+        expectsResult: false,
+        dependentBarrierId: null,
+      });
+      await expect(ports.validateSteerReference({
+        ...messageReference,
+        messageId: answerBearingMessage.messageId as MessageId,
+      })).resolves.toMatchObject({
+        status: "rejected",
+        code: "scope-mismatch",
+      });
+      await expect(ports.validateSteerReference({
+        ...messageReference,
+        taskId: otherActive.taskId as TaskId,
+        expectedRevision: otherActive.revision,
+      })).resolves.toMatchObject({
+        status: "rejected",
+        code: "scope-mismatch",
       });
       const actionId = "herdr-steer-action-01" as ProviderActionId;
       const intent = {
@@ -144,6 +207,85 @@ describe("daemon-owned Herdr Fabric ports", () => {
       })).rejects.toThrow("credential-like");
     } finally {
       database.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Herdr-owned actions out of generic provider recovery", async () => {
+    const fixture = await createStage1Fixture();
+    const ready = await fixture.chair.createTask({
+      taskId: "herdr-restart-task",
+      authorityId: fixture.authorities.bob,
+      eligibleAgentIds: ["bob"],
+      objective: "survive daemon restart",
+      baseRevision: "base-01",
+      commandId: "herdr:restart:create",
+    });
+    const active = await fixture.bob.claimTask({
+      taskId: ready.taskId,
+      expectedRevision: ready.revision,
+      commandId: "herdr:restart:claim",
+    });
+    await fixture.fabric.close();
+    const database = new Database(fixture.databasePath);
+    try {
+      database.pragma("foreign_keys = ON");
+      const identity = database.prepare(`
+        SELECT p.project_id, s.project_session_id
+          FROM projects p JOIN project_sessions s ON s.project_id=p.project_id
+         WHERE s.project_session_id=(SELECT project_session_id FROM runs WHERE run_id='run-stage1')
+      `).get() as { project_id: string; project_session_id: string };
+      const ports = new HerdrFabricPorts({ database, clock: () => fixture.clock.now().getTime() });
+      const reference = {
+        kind: "task" as const,
+        projectId: identity.project_id as ProjectId,
+        projectSessionId: identity.project_session_id as ProjectSessionId,
+        coordinationRunId: "run-stage1" as CoordinationRunId,
+        taskId: active.taskId as TaskId,
+        expectedRevision: active.revision,
+      };
+      const validation = await ports.validateSteerReference(reference);
+      if (validation.status !== "valid") throw new Error("expected valid Herdr task reference");
+      const intent = {
+        kind: "steer.inject-fire-and-forget" as const,
+        targetAgentId: "bob" as AgentId,
+        paneRef: "w5:p7" as never,
+        reference,
+        validatedReferenceDigest: validation.referenceDigest,
+        prompt: "Continue without returning an answer.",
+      };
+      await ports.prepareDirectSteerAction("herdr-restart-prepared" as ProviderActionId, intent);
+      await ports.prepareDirectSteerAction("herdr-restart-dispatched" as ProviderActionId, intent);
+      await ports.markDispatched("herdr-restart-dispatched" as ProviderActionId, 1);
+    } finally {
+      database.close();
+    }
+
+    const restarted = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.directory],
+      clock: fixture.clock.now,
+    });
+    try {
+      await expect(restarted.recoverStartupState()).resolves.toMatchObject({ actionsQuarantined: 0 });
+      await expect(restarted.reconcileProviderAction("run-stage1", "chair", {
+        actionId: "herdr-restart-dispatched",
+        commandId: "generic-herdr-reconcile-forbidden",
+      })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    } finally {
+      await restarted.close();
+    }
+    const reopened = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(reopened.prepare(`
+        SELECT action_id, status FROM provider_actions
+         WHERE adapter_id='herdr-control-v1' ORDER BY action_id
+      `).all()).toEqual([
+        { action_id: "herdr-restart-dispatched", status: "dispatched" },
+        { action_id: "herdr-restart-prepared", status: "prepared" },
+      ]);
+    } finally {
+      reopened.close();
       await rm(fixture.directory, { recursive: true, force: true });
     }
   });

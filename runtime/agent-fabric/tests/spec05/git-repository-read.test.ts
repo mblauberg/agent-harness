@@ -18,7 +18,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric, type Fabric } from "../../src/index.ts";
 import type { PublicProtocolContext } from "../../src/daemon/public-protocol.ts";
-import { GitRepositoryReadService } from "../../src/operator/git-repository-read.ts";
+import {
+  GitRepositoryReadService,
+  type GitHostedChecksPort,
+} from "../../src/operator/git-repository-read.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../support/stage1-fixture.ts";
 
@@ -47,6 +50,7 @@ async function setupFixture(options: {
   worktree?: "admitted" | "unadmitted";
   untrackedCount?: number;
   largeDiff?: boolean;
+  hostedChecks?: GitHostedChecksPort;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), "fabric-git-read-"));
   cleanups.push(directory);
@@ -164,7 +168,12 @@ async function setupFixture(options: {
     database.close();
   }
 
-  const fabric = await openFabric({ databasePath, workspaceRoots: [repositoryRoot], clock: () => now });
+  const fabric = await openFabric({
+    databasePath,
+    workspaceRoots: [repositoryRoot],
+    clock: () => now,
+    ...(options.hostedChecks === undefined ? {} : { gitHostedChecks: options.hostedChecks }),
+  });
   const verified = fabric.verifyProtocolCredential("git-read-secret");
   if (verified.principal.kind !== "operator") throw new Error("expected operator principal");
   const requestBase = {
@@ -203,35 +212,31 @@ afterEach(async () => {
 
 describe("operator repository read", () => {
   it("projects enabled hosted checks without coupling them to local Git availability", async () => {
-    const fixture = await setupFixture();
-    await fixture.fabric.close();
-    const database = new Database(join(fixture.stateRoot, "fabric.sqlite3"));
+    const fixture = await setupFixture({
+      hostedChecks: {
+        read: async (binding) => ({
+          freshness: "live",
+          source: "github",
+          revision: 41,
+          observedAt: "2027-01-01T00:00:00Z" as never,
+          value: {
+            repository: "example/project",
+            headObjectDigest: binding.headObjectDigest,
+            state: "passing",
+            total: 2,
+            passing: 2,
+            failing: 0,
+            pending: 0,
+          },
+        }),
+      },
+    });
     try {
-      const service = new GitRepositoryReadService({
-        database,
-        operatorStore: new OperatorStore({ database, clock: () => now }),
-        privateStateRoot: await realpath(fixture.stateRoot),
-        clock: () => now,
-        hostedChecks: {
-          read: async (binding) => ({
-            freshness: "live",
-            source: "github",
-            revision: 41,
-            observedAt: "2027-01-01T00:00:00Z" as never,
-            value: {
-              repository: "example/project",
-              headObjectDigest: binding.headObjectDigest,
-              state: "passing",
-              total: 2,
-              passing: 2,
-              failing: 0,
-              pending: 0,
-            },
-          }),
-        },
-      });
-
-      const result = await service.read(fixture.request);
+      const result = await fixture.fabric.dispatchPublicProtocol(
+        fixture.context,
+        FABRIC_OPERATIONS.operatorRepositoryRead,
+        fixture.request,
+      );
 
       expect(result).toMatchObject({
         status: "current",
@@ -249,6 +254,128 @@ describe("operator repository read", () => {
             },
           },
         },
+      });
+    } finally {
+      await fixture.fabric.close();
+    }
+  });
+
+  it("fails closed when the repository changes during hosted-check lookup", async () => {
+    const fixture = await setupFixture();
+    await fixture.fabric.close();
+    const database = new Database(join(fixture.stateRoot, "fabric.sqlite3"));
+    try {
+      const service = new GitRepositoryReadService({
+        database,
+        operatorStore: new OperatorStore({ database, clock: () => now }),
+        privateStateRoot: await realpath(fixture.stateRoot),
+        clock: () => now,
+        hostedChecks: {
+          read: async (binding) => {
+            await writeFile(join(fixture.repositoryRoot, "tracked.txt"), "changed during hosted lookup\n", "utf8");
+            return {
+              freshness: "live",
+              source: "github",
+              revision: 42,
+              observedAt: "2027-01-01T00:00:00Z" as never,
+              value: {
+                repository: "example/project",
+                headObjectDigest: binding.headObjectDigest,
+                state: "passing",
+                total: 1,
+                passing: 1,
+                failing: 0,
+                pending: 0,
+              },
+            };
+          },
+        },
+      });
+
+      await expect(service.read(fixture.request)).rejects.toMatchObject({
+        code: "PROJECTION_RESNAPSHOT_REQUIRED",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns resnapshot-required when Fabric state changes during hosted-check lookup", async () => {
+    const fixture = await setupFixture();
+    await fixture.fabric.close();
+    const database = new Database(join(fixture.stateRoot, "fabric.sqlite3"));
+    try {
+      const service = new GitRepositoryReadService({
+        database,
+        operatorStore: new OperatorStore({ database, clock: () => now }),
+        privateStateRoot: await realpath(fixture.stateRoot),
+        clock: () => now,
+        hostedChecks: {
+          read: async (binding) => {
+            database.prepare("UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1").run();
+            return {
+              freshness: "live",
+              source: "github",
+              revision: 43,
+              observedAt: "2027-01-01T00:00:00Z" as never,
+              value: {
+                repository: "example/project",
+                headObjectDigest: binding.headObjectDigest,
+                state: "passing",
+                total: 1,
+                passing: 1,
+                failing: 0,
+                pending: 0,
+              },
+            };
+          },
+        },
+      });
+
+      await expect(service.read(fixture.request)).resolves.toEqual({
+        status: "resnapshot-required",
+        reason: "snapshot-mismatch",
+        currentSnapshotRevision: fixture.request.snapshotRevision + 1,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fails closed when local branch projection changes during hosted-check lookup", async () => {
+    const fixture = await setupFixture();
+    await fixture.fabric.close();
+    const database = new Database(join(fixture.stateRoot, "fabric.sqlite3"));
+    try {
+      const service = new GitRepositoryReadService({
+        database,
+        operatorStore: new OperatorStore({ database, clock: () => now }),
+        privateStateRoot: await realpath(fixture.stateRoot),
+        clock: () => now,
+        hostedChecks: {
+          read: async (binding) => {
+            await git(fixture.repositoryRoot, "branch", "created-during-hosted-lookup");
+            return {
+              freshness: "live",
+              source: "github",
+              revision: 44,
+              observedAt: "2027-01-01T00:00:00Z" as never,
+              value: {
+                repository: "example/project",
+                headObjectDigest: binding.headObjectDigest,
+                state: "passing",
+                total: 1,
+                passing: 1,
+                failing: 0,
+                pending: 0,
+              },
+            };
+          },
+        },
+      });
+
+      await expect(service.read(fixture.request)).rejects.toMatchObject({
+        code: "PROJECTION_RESNAPSHOT_REQUIRED",
       });
     } finally {
       database.close();

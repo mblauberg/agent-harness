@@ -21,7 +21,7 @@ export type HerdrCliIo = Readonly<{
 }>;
 
 const USAGE = "usage: agent-fabric-herdr doctor --config PATH\n" +
-  "       agent-fabric-herdr steer --config PATH --pane ID --fire-and-forget --task-ref ID [--prompt TEXT]\n";
+  "       agent-fabric-herdr steer --config PATH --pane ID --fire-and-forget (--task-ref ID | --message-ref ID) [--prompt TEXT]\n";
 const CREDENTIAL_PATTERN = /\b(?:afb|afc|afop)_[A-Za-z0-9_-]{8,}|\bghp_[A-Za-z0-9_]{8,}|\bgithub_pat_[A-Za-z0-9_]{8,}/u;
 
 type HerdrCliConfig = Omit<ProductionHerdrIntegrationOptions, "fabricJournal" | "fabricDirectSteer" | "clock"> & {
@@ -51,9 +51,13 @@ export async function runHerdrCli(arguments_: readonly string[], io: HerdrCliIo)
   }
   if (
     command === "steer" &&
-    (parsed.taskRef === undefined || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(parsed.taskRef) || CREDENTIAL_PATTERN.test(parsed.taskRef))
+    (
+      (parsed.taskRef === undefined) === (parsed.messageRef === undefined) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(parsed.taskRef ?? parsed.messageRef ?? "") ||
+      CREDENTIAL_PATTERN.test(parsed.taskRef ?? parsed.messageRef ?? "")
+    )
   ) {
-    io.stderr.write("degraded Herdr steering requires a bounded --task-ref; the reference remains unverified\n");
+    io.stderr.write("degraded Herdr steering requires exactly one bounded --task-ref or --message-ref; the reference remains unverified\n");
     return 2;
   }
   if (command === "steer" && (parsed.pane === undefined || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(parsed.pane))) {
@@ -81,7 +85,10 @@ export async function runHerdrCli(arguments_: readonly string[], io: HerdrCliIo)
     }
     const prompt = parsed.prompt ?? await readBoundedStdin(io.stdin, 4_096);
     const result = await integration.boundary.dispatchUnverifiedFireAndForget(parsed.pane as string, prompt);
-    io.stdout.write(`${JSON.stringify({ ...result, taskRef: parsed.taskRef })}\n`);
+    io.stdout.write(`${JSON.stringify({
+      ...result,
+      ...(parsed.taskRef === undefined ? { messageRef: parsed.messageRef } : { taskRef: parsed.taskRef }),
+    })}\n`);
     return 0;
   } catch {
     io.stderr.write("Herdr configuration or bounded operation failed safely\n");
@@ -94,6 +101,7 @@ type ParsedArguments = {
   fireAndForget: boolean;
   pane?: string;
   taskRef?: string;
+  messageRef?: string;
   prompt?: string;
 };
 
@@ -102,6 +110,7 @@ function parseArguments(arguments_: readonly string[]): ParsedArguments {
   let fireAndForget = false;
   let pane: string | undefined;
   let taskRef: string | undefined;
+  let messageRef: string | undefined;
   let prompt: string | undefined;
   const seen = new Set<string>();
   for (let index = 0; index < arguments_.length; index += 1) {
@@ -112,7 +121,7 @@ function parseArguments(arguments_: readonly string[]): ParsedArguments {
       fireAndForget = true;
       continue;
     }
-    if (name !== "--config" && name !== "--pane" && name !== "--task-ref" && name !== "--prompt") {
+    if (name !== "--config" && name !== "--pane" && name !== "--task-ref" && name !== "--message-ref" && name !== "--prompt") {
       throw new TypeError("unknown argument");
     }
     if (seen.has(name)) throw new TypeError(`duplicate ${name}`);
@@ -123,6 +132,7 @@ function parseArguments(arguments_: readonly string[]): ParsedArguments {
     if (name === "--config") config = value;
     else if (name === "--pane") pane = value;
     else if (name === "--task-ref") taskRef = value;
+    else if (name === "--message-ref") messageRef = value;
     else prompt = value;
   }
   if (config === undefined || !isAbsolute(config) || config.includes("\0")) {
@@ -133,6 +143,7 @@ function parseArguments(arguments_: readonly string[]): ParsedArguments {
     fireAndForget,
     ...(pane === undefined ? {} : { pane }),
     ...(taskRef === undefined ? {} : { taskRef }),
+    ...(messageRef === undefined ? {} : { messageRef }),
     ...(prompt === undefined ? {} : { prompt }),
   };
 }

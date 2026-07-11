@@ -113,7 +113,8 @@ export type HerdrRecoverySummary = Readonly<{
   prepared: number;
 }>;
 
-const ADAPTER_ID = "herdr-control-v1";
+export const HERDR_CONTROL_ADAPTER_ID = "herdr-control-v1";
+const ADAPTER_ID = HERDR_CONTROL_ADAPTER_ID;
 const SECRET_PATTERN = /\b(?:afb|afc|afop)_[A-Za-z0-9_-]{8,}|\bghp_[A-Za-z0-9_]{8,}|\bgithub_pat_[A-Za-z0-9_]{8,}/u;
 const HERDR_APPLIED_OPERATIONS = new Set<HerdrAppliedOperation>([
   "console.ensure-pane",
@@ -367,7 +368,44 @@ export class HerdrFabricPorts {
       return rejection("scope-mismatch", "Fabric task owner is unavailable");
     }
     if (parsed.kind === "message") {
-      return rejection("scope-mismatch", "message references lack an exact task binding in the current schema");
+      const message = this.#database.prepare(`
+        SELECT m.kind, m.requires_ack, m.task_revision, m.expires_at,
+               d.state AS delivery_state, context.context_json
+          FROM messages m
+          JOIN deliveries d ON d.message_id=m.message_id
+          JOIN message_contexts context ON context.message_id=m.message_id
+         WHERE m.run_id=? AND m.message_id=? AND d.run_id=m.run_id AND d.recipient_id=?
+      `).get(parsed.coordinationRunId, parsed.messageId, ownerAgentId);
+      if (!isRow(message)) return rejection("unknown-reference", "Fabric message does not target the active task owner");
+      if (message.task_revision !== revision) {
+        return rejection("stale-reference", "Fabric message task revision changed");
+      }
+      if (
+        text(message, "context_json") !== canonicalJson({ kind: "task", taskId: parsed.taskId }) ||
+        text(message, "kind") !== "steer" || integer(message, "requires_ack") !== 0 ||
+        !["ready", "claimed"].includes(text(message, "delivery_state")) ||
+        (message.expires_at !== null && integer(message, "expires_at") <= this.#clock()) ||
+        isRow(this.#database.prepare(`
+          SELECT 1 FROM task_requests WHERE request_message_id=?
+          UNION ALL
+          SELECT 1 FROM task_results WHERE reply_message_id=?
+          LIMIT 1
+        `).get(parsed.messageId, parsed.messageId))
+      ) {
+        return rejection("scope-mismatch", "Fabric message is answer-bearing, resolved or outside one-way steering");
+      }
+      const base = {
+        targetAgentId: parseIdentifier<"AgentId">(ownerAgentId, "herdrSteer.targetAgentId"),
+        purpose: "steer" as const,
+        requiresAck: false,
+        expectsResult: false,
+        dependentBarrierId: null,
+      };
+      return {
+        status: "valid",
+        referenceDigest: digestJson({ reference: parsed, ...base }),
+        ...base,
+      };
     }
     const request = this.#database.prepare(`
       SELECT dependent_barrier_id FROM task_requests
