@@ -2,24 +2,42 @@
   "schema_version": 1,
   "delivery_run_id": "SKILLS-20260711",
   "evidence_cutoff": "2026-07-11",
-  "final_gate": {
-    "evaluation_id": "skill-portfolio-routing-20260711-v6",
+  "routing_regression": {
+    "evaluation_id": "skill-portfolio-routing-20260711",
     "status": "pass",
     "families": ["anthropic", "openai"],
     "repetitions": 3,
-    "cases": 12,
+    "cases": 14,
     "attempts": 6,
-    "case_rows": 72,
+    "case_rows": 84,
     "primary_accuracy": 1.0,
     "primary_threshold": 1.0,
     "companion_fidelity": 1.0,
     "companion_threshold": 0.9,
-    "plan_digest": "sha256:5f6ab44ad7aee8b67fc4ab0b6e011081d772f9ca47fa6acf8b135be0e1bddb55",
-    "receipt_digest": "sha256:9879b06f02866bbded4c6917c317e013056bae2aa8812fc67652816019fd4555",
-    "dataset_digest": "sha256:0653255c89c8eedc98d7a97bb774a3606e046746cebad3af552fdb5686772593",
+    "plan_digest": "sha256:e4f58c062df27f5d85e2797bef99f314000951eec1dbf39d2f926036c80bffee",
+    "dataset_digest": "sha256:20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13",
+    "catalogue_digest": "sha256:c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6",
+    "receipt_digest": "sha256:954c285b8855a4da0058ef3eecf8971a513757f41abf592e07fc50df6c215545",
     "human_acceptance": "external"
   },
+  "availability": {
+    "anthropic_initial_route": "fable unavailable before generation with HTTP 429",
+    "anthropic_effective_model": "claude-opus-4-8",
+    "openai_effective_model": "gpt-5.6-sol"
+  },
   "retained_nonpasses": [
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-fable-unavailable",
+      "status": "incomplete",
+      "reason": "three requested Fable attempts returned HTTP 429 before generation; successful OpenAI rows were retained but the mixed run was excluded from semantic gating",
+      "receipt_digest": "sha256:4c475850f95887541b09ea9a6587d7126b26961c545c6c90b7941bf58cf387ec",
+      "artifact_root": ".agent-run/SKILLS-FLAT-20260711/routing",
+      "attempts": [
+        {"family": "anthropic", "trial": 1, "status": "tool-error", "requested_model": "fable", "actual_model": "unknown", "exit_code": 1},
+        {"family": "anthropic", "trial": 2, "status": "tool-error", "requested_model": "fable", "actual_model": "unknown", "exit_code": 1},
+        {"family": "anthropic", "trial": 3, "status": "tool-error", "requested_model": "fable", "actual_model": "unknown", "exit_code": 1}
+      ]
+    },
     {
       "evaluation_id": "skill-portfolio-routing-20260711-v2",
       "status": "incomplete",
@@ -38,7 +56,7 @@
       "evaluation_id": "skill-portfolio-routing-20260711-v4",
       "status": "fail",
       "primary_accuracy": 1.0,
-      "exact_route_accuracy": 0.9861111111111112,
+      "companion_fidelity": 0.9861111111111112,
       "reason": "undeclared but legitimate work-map companion",
       "receipt_digest": "sha256:696091cd34f9b20d8eebba075a608209991904371df016611fd3f0312732a36f"
     },
@@ -46,9 +64,18 @@
       "evaluation_id": "skill-portfolio-routing-20260711-v5",
       "status": "fail",
       "primary_accuracy": 1.0,
-      "exact_route_accuracy": 0.9861111111111112,
+      "companion_fidelity": 0.9861111111111112,
       "reason": "undeclared but legitimate engineering-writing companion",
       "receipt_digest": "sha256:7b09dc603770038a1aed87605285350b577bba1c33f14f7ffa9c805cf8434647"
+    },
+    {
+      "evaluation_id": "skill-portfolio-routing-20260711-unfrozen-attempt",
+      "status": "cancelled",
+      "model_calls_started": 6,
+      "completed_outputs": 5,
+      "reason": "operator cancelled after detecting that the replacement protocol had not been frozen before generation; outputs were excluded from semantic evidence",
+      "artifact_root": ".agent-run/SKILLS-FLAT-20260711/routing-current",
+      "lineage": ["claude-opus-4-8", "gpt-5.6-sol"]
     }
   ]
 }

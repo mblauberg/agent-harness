@@ -53,7 +53,7 @@ def terminalise_reference_evaluation(run, status="failed"):
         "kind": "deterministic",
         "gate": f"evaluation-{status}",
         "status": "pass",
-        "method": "schema-v2 terminal receipt validation",
+        "method": "canonical terminal receipt validation",
         "artifact_id": binding["evaluation_artifact_id"],
         "source_paths": ["input"],
         "result": {
@@ -538,7 +538,7 @@ def test_awaiting_acceptance_requires_outcome_trajectory_and_bound_stochastic_ev
     module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
 
     candidate["assurance"]["evaluations"][0]["repetitions"] = 3
-    with pytest.raises(module.Invalid, match="schema-v2 receipt binding fields"):
+    with pytest.raises(module.Invalid, match="canonical receipt binding fields"):
         module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
 
     candidate = fixture("software")

@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: frontend-review
 cases:
   - {id: q109, relation: positive, prompt: "Review this frontend source read-only for UX, visual hierarchy, responsive, and accessibility defects.", tags: [direct], expected: {primary_skill: frontend-review, companion_skills: []}}

@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: retrospect
 cases:
   - {id: q208, relation: positive, prompt: "Run an evidence-backed retrospective on this completed delivery and propose regression gates.", tags: [direct], expected: {primary_skill: retrospect, companion_skills: []}}

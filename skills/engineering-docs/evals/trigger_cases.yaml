@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: engineering-docs
 cases:
   - {id: q073, relation: positive, prompt: "Set up the documentation layout, indexes, and archive conventions for this new repository.", tags: [direct], expected: {primary_skill: engineering-docs, companion_skills: []}}

@@ -4,43 +4,42 @@ Evidence cut-off: 11 July 2026
 Delivery run: `SKILLS-20260711`
 
 This appendix is the durable, redacted evidence index for the 2026 portfolio
-refactor. It separates development evidence, infrastructure failures, failed
-gates and the final fresh regression. Raw prompts, provider events, stderr,
-usage and failure rows remain under `.agent-run/SKILLS-20260711/evaluation/`;
-they are local run evidence and are not a public transcript archive.
+refactor. Raw prompts, provider events, stderr and usage remain run-owned local
+evidence rather than a public transcript archive.
 
 ## Routing results
 
-| Run | Role | Schedule | Result | Disposition |
-|---|---|---:|---|---|
-| Portable catalogue holdout | development holdout | 40 cases x 2 families x 3 trials | 235/240 exact routes (97.9%); all five misses were the same requirements-document boundary | Retained unchanged; followed by a fresh six-case writing regression at 36/36. |
-| Selected Codex host overlay | developmental probe, not full host catalogue | 12 cases x 2 families x 3 trials | four completed invocations: 48/48 primary, 43/48 exact; two Codex invocations hit a usage limit | Not a gate. Infrastructure rows are not semantic errors. |
-| v2 | frozen schema-v2 gate | 12 x 2 x 2 | deterministic preflight failed because its interpreter lacked `pytest`; zero model calls | `incomplete`; all planned cells retained as skipped. |
-| v3 | frozen schema-v2 gate | 12 x 2 x 2 | plan was below the agent-product minimum of three repetitions; zero model calls | `incomplete`; prompted a delivery-validator check and a fresh plan. |
-| v4 | first three-repetition holdout | 12 x 2 x 3 | 72/72 primary; 71/72 exact | `fail`; one valid `work-map` companion was undeclared for `autonomous-lab`. |
-| v5 | fresh post-failure holdout | 12 x 2 x 3 | 72/72 primary; 71/72 exact | `fail`; one valid `engineering-writing` companion was undeclared for an implementation/documentation prompt. |
-| v6 | fresh post-metric-repair holdout | 12 x 2 x 3 | 72/72 primary and 72/72 bounded companion dispositions | Machine `pass`; primary accuracy threshold 1.00, companion-fidelity threshold 0.90. Human acceptance remains external. |
+| Dataset | Schedule | Result | Disposition |
+|---|---:|---|---|
+| [Canonical portfolio holdout](routing-holdout.yaml) | 14 cases x 2 families x 3 trials | 84/84 exact primary-plus-bounded-companion routes | Pass; human acceptance remains external. |
 
-The v4/v5 failures showed that primary selection and companion composition are
-different signals. v6 froze them as separate metrics before execution: a
-critical case fails on the wrong primary, while legitimate companion variation
-is retained and scored against its own threshold. This is not a post-hoc rescore
-of v4 or v5; both failed receipts remain bound in the delivery run.
+The holdout includes lifecycle, authority, presentation and specialist
+confusion boundaries, including material skill revision versus read-only audit,
+implementation ownership and the governing Caveman adaptive default. Its
+SHA-256 is
+`20966b1a295e20531402a815bee901476df2fefc599139b7aea66fc31c4fff13`.
 
-The three reproducible routing datasets are:
+The [frozen protocol](routing-protocol.json) set primary accuracy to 1.00 and
+companion fidelity to 0.90 before generation. The current catalogue digest is
+`c00f4760e45821d2b2403211e04141a67cd292123fcaa768255e6c7c58cc5cf6`.
 
-- [routing-holdout.yaml](routing-holdout.yaml), SHA-256
-  `beda748951b073155661c3a80f2f622ca11a6f78d9a64129cf2233746ef15b7c`;
-- [routing-regression-holdout.yaml](routing-regression-holdout.yaml), SHA-256
-  `1a45801f7d0d9867ebd352c8ef98077d81086c9e2a3ac57c45033be39e16e7bf`;
-- [routing-metric-holdout.yaml](routing-metric-holdout.yaml), SHA-256
-  `0653255c89c8eedc98d7a97bb774a3606e046746cebad3af552fdb5686772593`.
+The initial Anthropic route returned HTTP 429 before generation. The live model
+router selected `claude-opus-4-8`; the full holdout was rerun fresh alongside
+`gpt-5.6-sol`. Infrastructure failure was not counted as semantic evidence.
 
-v4-v6 used three clean-context trials on each primary family. Requested and
-actual generator lineage was retained as `gpt-5.6-sol` through Codex CLI and
-`claude-fable-5` through Claude Code. Each receipt binds the catalogue,
-dataset, rubric, runtime, plan, provider route/output artifacts, case rows,
-ground-truth judgements, accounting and hashes.
+## Retained non-passes
+
+| Attempt | Result | Reason | Receipt SHA-256 |
+|---|---|---|---|
+| initial Fable route | incomplete; three tool errors | HTTP 429 before generation; OpenAI rows excluded from the semantic gate | `4c475850f95887541b09ea9a6587d7126b26961c545c6c90b7941bf58cf387ec` |
+| v2 | incomplete; zero model calls | preflight interpreter lacked `pytest` | `6fb081ea45d08bdf8d20f0b340d30882699030955c8787a706eb7029cc81964e` |
+| v3 | incomplete; zero model calls | plan had fewer than three repetitions | `0e534a369cec5a8e90aadf9ccba0bfc849152b3553f321e7f942b7db5aab3908` |
+| v4 | fail; 72/72 primary, 71/72 companions | undeclared but legitimate `work-map` companion | `696091cd34f9b20d8eebba075a608209991904371df016611fd3f0312732a36f` |
+| v5 | fail; 72/72 primary, 71/72 companions | undeclared but legitimate `engineering-writing` companion | `7b09dc603770038a1aed87605285350b577bba1c33f14f7ffa9c805cf8434647` |
+| unfrozen replacement attempt | cancelled; five outputs completed | protocol-free outputs excluded; raw artifacts retained locally | no receipt produced |
+
+These are historical evidence, not alternative live schemas or routing
+datasets. The supported public route is the single canonical holdout above.
 
 ## Caveman quality evidence
 
@@ -73,11 +72,8 @@ blind judge scored 256 items after deterministic checks.
 | Caveman arm receipt | `bc098ae63f98a2b433ee068beecd2821a9ad85b68861c9b3471517a27218714f` |
 | Caveman blind-judge receipt | `e9f86375bebf4c1537ff214a62a3ceba494ede5c3f68e932129e8449e189fbec` |
 | Caveman altitude-regression receipt | `4f9b9d4202a9cb8e2250fca1a7008adbdee578d774b1e3620eac256762d776e9` |
-| v2 incomplete receipt | `6fb081ea45d08bdf8d20f0b340d30882699030955c8787a706eb7029cc81964e` |
-| v3 incomplete receipt | `0e534a369cec5a8e90aadf9ccba0bfc849152b3553f321e7f942b7db5aab3908` |
-| v4 failed receipt | `696091cd34f9b20d8eebba075a608209991904371df016611fd3f0312732a36f` |
-| v5 failed receipt | `7b09dc603770038a1aed87605285350b577bba1c33f14f7ffa9c805cf8434647` |
-| v6 passing receipt | `9879b06f02866bbded4c6917c317e013056bae2aa8812fc67652816019fd4555` |
+| canonical routing protocol | `e4f58c062df27f5d85e2797bef99f314000951eec1dbf39d2f926036c80bffee` |
+| canonical routing result | `954c285b8855a4da0058ef3eecf8971a513757f41abf592e07fc50df6c215545` |
 
 ## Interpretation limits
 
@@ -87,5 +83,5 @@ blind judge scored 256 items after deterministic checks.
   plugin overlays. The selected host probe contains 16 hand-selected entries.
 - Model aliases, discovery behaviour, caching and pricing can change. Re-run
   after a material model, host or catalogue change.
-- A schema-v2 machine pass establishes only the frozen evaluation gate. The
+- A routing regression establishes only the frozen synthetic cases. The
   enclosing delivery receipt and human retain acceptance and release authority.

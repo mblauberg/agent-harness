@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: tdd
 cases:
   - {id: q262, relation: positive, prompt: "Write the first public-interface test for this new behaviour and witness the right-reason failure.", tags: [direct], expected: {primary_skill: tdd, companion_skills: [implement]}}

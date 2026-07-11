@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: react-performance
 cases:
   - {id: q181, relation: positive, prompt: "Profile and improve this React page's re-render churn against a production-build baseline.", tags: [direct], expected: {primary_skill: react-performance, companion_skills: []}}

@@ -683,7 +683,7 @@ def _validate_measures_assurance(
         item = _mapping(raw, f"assurance.evaluations[{index}]")
         fail(
             set(item) != EVALUATION_BINDING_FIELDS,
-            f"evaluation {index} must contain only the schema-v2 receipt binding fields",
+            f"evaluation {index} must contain only the canonical receipt binding fields",
         )
         binding_status = item.get("status")
         fail(
@@ -769,7 +769,7 @@ def _validate_measures_assurance(
         fail(not isinstance(errors, list), f"evaluation {index} validator returned an invalid result")
         fail(
             bool(errors),
-            f"evaluation {index} failed its schema-v2 machine gate: "
+            f"evaluation {index} failed its machine gate: "
             + "; ".join(str(error) for error in errors[:5]),
         )
         expected_receipt_status = {

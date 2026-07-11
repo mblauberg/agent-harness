@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: natural-writing
 cases:
   - {id: q145, relation: positive, prompt: "Humanise this general email without changing names, dates, facts, or intent.", tags: [direct], expected: {primary_skill: natural-writing, companion_skills: []}}

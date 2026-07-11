@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: work-map
 cases:
   - {id: q298, relation: positive, prompt: "Create the persistent effort map for this multi-session migration with legs, blockers, and next work.", tags: [direct], expected: {primary_skill: work-map, companion_skills: []}}

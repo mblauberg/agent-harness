@@ -408,7 +408,7 @@ def _validate_plan(
         for field in ("unit", "aggregation"):
             _text(metric.get(field), f"plan.metrics[{index}].{field}", errors)
         if metric.get("aggregation") != "mean":
-            errors.append(f"plan.metrics[{index}].aggregation must be mean in schema v2")
+            errors.append(f"plan.metrics[{index}].aggregation must be mean")
         direction = metric.get("direction")
         if direction not in {"gte", "lte", "eq"}:
             errors.append(f"plan.metrics[{index}].direction is invalid")
@@ -1223,124 +1223,6 @@ def _validate_results(
     return metrics_pass, observed_counts, metric_evidence
 
 
-def inspect_legacy_v1(receipt: Any) -> list[str]:
-    """Inspect legacy shape only. A clean result is never a schema-v2 gate."""
-    errors: list[str] = []
-    if not isinstance(receipt, dict):
-        return ["legacy receipt root must be an object"]
-    if receipt.get("schema_version") != 1:
-        errors.append("legacy inspection requires schema_version 1")
-    for field in ("evaluation_id", "decision"):
-        _text(receipt.get(field), f"legacy.{field}", errors)
-    _time(receipt.get("updated_at"), "legacy.updated_at", errors)
-    dataset = _object(receipt.get("dataset"), "legacy.dataset", errors)
-    for field in ("id", "version", "provenance", "holdout_boundary", "data_policy"):
-        _text(dataset.get(field), f"legacy.dataset.{field}", errors)
-    runtime = _object(receipt.get("runtime"), "legacy.runtime", errors)
-    models = _strict_string_list(runtime.get("models"), "legacy.runtime.models", errors, nonempty=True)
-    if len(models) != len(set(models)):
-        errors.append("legacy.runtime.models must be unique")
-    configuration = _object(runtime.get("configuration"), "legacy.runtime.configuration", errors)
-    if not configuration:
-        errors.append("legacy.runtime.configuration must not be empty")
-    _text(runtime.get("sample_policy"), "legacy.runtime.sample_policy", errors)
-    seed_policy = runtime.get("seed_policy")
-    if seed_policy not in {"fixed", "not-applicable"}:
-        errors.append("legacy.runtime.seed_policy must be fixed or not-applicable")
-    seeds = _list(runtime.get("seeds"), "legacy.runtime.seeds", errors)
-    if seed_policy == "fixed" and (
-        not seeds or any(isinstance(seed, bool) or not isinstance(seed, (int, str)) or seed == "" for seed in seeds)
-    ):
-        errors.append("legacy fixed seed policy requires scalar seeds")
-    definitions: dict[str, tuple[str, float]] = {}
-    for index, raw in enumerate(_list(receipt.get("metrics"), "legacy.metrics", errors)):
-        metric = _object(raw, f"legacy.metrics[{index}]", errors)
-        name = metric.get("name")
-        direction = metric.get("direction")
-        threshold = metric.get("threshold")
-        if not isinstance(name, str) or not name or direction not in {"gte", "lte", "eq"} or not _finite(threshold):
-            errors.append(f"legacy.metrics[{index}] requires name, direction and finite threshold")
-        elif name in definitions:
-            errors.append(f"duplicate legacy metric: {name}")
-        else:
-            definitions[name] = (direction, float(threshold))
-    if not definitions:
-        errors.append("legacy.metrics must not be empty")
-    safety_applicability = receipt.get("safety_applicability")
-    safety_cases = _list(receipt.get("safety_cases"), "legacy.safety_cases", errors)
-    if safety_applicability not in {"required", "not-applicable"}:
-        errors.append("legacy.safety_applicability is invalid")
-    if safety_applicability == "required" and not safety_cases:
-        errors.append("legacy required safety evaluation needs cases")
-    safety_failed = False
-    safety_ids: set[str] = set()
-    for index, raw in enumerate(safety_cases):
-        case = _object(raw, f"legacy.safety_cases[{index}]", errors)
-        case_id = case.get("id")
-        if not isinstance(case_id, str) or not case_id or case_id in safety_ids:
-            errors.append(f"legacy.safety_cases[{index}] requires a unique id")
-        else:
-            safety_ids.add(case_id)
-        evidence = _strict_string_list(case.get("evidence"), f"legacy.safety_cases[{index}].evidence", errors, nonempty=True)
-        if case.get("status") not in {"pass", "fail"}:
-            errors.append(f"legacy.safety_cases[{index}].status is invalid")
-        if case.get("status") != "pass" or not evidence:
-            safety_failed = True
-    baseline = _object(receipt.get("baseline"), "legacy.baseline", errors)
-    _text(baseline.get("id"), "legacy.baseline.id", errors)
-    budget = baseline.get("regression_budget")
-    if not _finite(budget) or float(budget) < 0:
-        errors.append("legacy.baseline.regression_budget must be finite and non-negative")
-    baseline_values: dict[str, float] = {}
-    for index, raw in enumerate(_list(baseline.get("metrics"), "legacy.baseline.metrics", errors)):
-        metric = _object(raw, f"legacy.baseline.metrics[{index}]", errors)
-        if not isinstance(metric.get("name"), str) or not _finite(metric.get("value")):
-            errors.append(f"legacy.baseline.metrics[{index}] requires name and finite value")
-        elif metric["name"] in baseline_values:
-            errors.append(f"duplicate legacy baseline metric: {metric['name']}")
-        else:
-            baseline_values[metric["name"]] = float(metric["value"])
-    evaluator = _object(receipt.get("evaluator"), "legacy.evaluator", errors)
-    _text(evaluator.get("rubric_version"), "legacy.evaluator.rubric_version", errors)
-    if evaluator.get("independent") is not True:
-        errors.append("legacy.evaluator.independent must be true")
-    _text(evaluator.get("disagreement_protocol"), "legacy.evaluator.disagreement_protocol", errors)
-    results = _object(receipt.get("results"), "legacy.results", errors)
-    observed: dict[str, float] = {}
-    for index, raw in enumerate(_list(results.get("metrics"), "legacy.results.metrics", errors)):
-        metric = _object(raw, f"legacy.results.metrics[{index}]", errors)
-        if not isinstance(metric.get("name"), str) or not _finite(metric.get("value")):
-            errors.append(f"legacy.results.metrics[{index}] requires name and finite value")
-        elif metric["name"] in observed:
-            errors.append(f"duplicate legacy result metric: {metric['name']}")
-        else:
-            observed[metric["name"]] = float(metric["value"])
-    failed: list[str] = []
-    for name, (direction, threshold) in definitions.items():
-        if name not in observed:
-            errors.append(f"legacy results missing metric: {name}")
-            continue
-        value = observed[name]
-        if not _direction_pass(direction, value, threshold):
-            failed.append(name)
-        if name not in baseline_values:
-            errors.append(f"legacy baseline missing metric: {name}")
-        elif _finite(budget) and not _comparison_pass(direction, value, baseline_values[name], float(budget)):
-            failed.append(f"{name} baseline regression")
-    if receipt.get("status") not in {"pass", "fail"}:
-        errors.append("legacy status must be pass or fail")
-    conclusion = _object(receipt.get("conclusion"), "legacy.conclusion", errors)
-    if conclusion.get("status") != receipt.get("status"):
-        errors.append("legacy conclusion status must match receipt status")
-    _strict_string_list(conclusion.get("limitations"), "legacy.conclusion.limitations", errors)
-    _strict_string_list(conclusion.get("evidence"), "legacy.conclusion.evidence", errors, nonempty=True)
-    if receipt.get("status") == "pass" and failed:
-        errors.append("legacy passing conclusion violates thresholds or baseline")
-    if receipt.get("status") == "pass" and safety_failed:
-        errors.append("legacy passing conclusion has failed safety cases")
-    return errors
-
-
 def _verify_frozen_plan(
     plan: dict[str, Any],
     artifacts: dict[str, dict[str, Any]],
@@ -1385,8 +1267,6 @@ def validate(
     errors: list[str] = []
     if not isinstance(receipt, dict):
         return ["receipt root must be an object"]
-    if receipt.get("schema_version") == 1:
-        return ["legacy schema_version 1 is non-gating; rerun from a frozen evaluation-run schema v2 plan"]
     if receipt.get("contract") != CONTRACT or receipt.get("schema_version") != SCHEMA_VERSION:
         return [f"receipt must use contract {CONTRACT} schema_version {SCHEMA_VERSION}"]
     unknown_top = set(receipt) - TOP_LEVEL_FIELDS
@@ -1580,21 +1460,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-evaluation-id", help="evaluation ID anchored by the enclosing delivery receipt")
     parser.add_argument("--expected-plan-digest", help="pre-execution plan digest anchored by delivery")
     parser.add_argument("--expected-delivery-run-id", help="enclosing canonical delivery run ID")
-    parser.add_argument("--legacy-v1", action="store_true", help="inspect schema v1 without treating it as a gate")
     args = parser.parse_args(argv)
     try:
         data = _load_json(args.receipt)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"invalid evaluation receipt: {exc}", file=sys.stderr)
         return 2
-    if data.get("schema_version") == 1 and args.legacy_v1:
-        legacy_errors = inspect_legacy_v1(data)
-        if legacy_errors:
-            for error in legacy_errors:
-                print(f"FAIL: {error}", file=sys.stderr)
-            return 1
-        print("LEGACY: schema v1 is structurally inspectable but non-gating; rerun from a frozen schema-v2 plan", file=sys.stderr)
-        return 3
     errors = validate(
         data,
         receipt_dir=args.receipt_dir or args.receipt.parent,

@@ -14,7 +14,9 @@ is a harness invariant, not an agent-platform preference.
 ## Change a skill
 
 1. Confirm the capability belongs globally and is not better kept in a project.
-2. Use `skill-audit` for an existing skill or `skill-authoring` for a new one.
+2. Use `skill-audit` for read-only assessment and `skill-authoring` for a new or
+   materially revised skill. `implement` owns an end-to-end delivery and its
+   verification.
 3. Write a consistent kebab-case capability name. Related writing skills use
    parallel names: `engineering-writing`, `academic-writing`, `legal-writing`.
 4. This harness's portable frontmatter profile contains only `name` and
@@ -27,7 +29,7 @@ is a harness invariant, not an agent-platform preference.
    cannot compensate for an omitted skill.
 6. Keep `SKILL.md` roughly 500 words or less. Move depth into narrowly named
    references loaded only when needed; put deterministic behaviour in scripts.
-7. Add schema-v2 positive, negative and boundary fixtures with exact primary
+7. Add canonical positive, negative and boundary fixtures with exact primary
    and companion routes plus contract tests for machine-enforceable invariants.
 8. For material changes, freeze held-out cases and compare candidate,
    without-skill and previous-package arms on current primary families. Retain

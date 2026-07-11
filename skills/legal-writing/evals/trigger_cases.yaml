@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: legal-writing
 cases:
   - {id: q136, relation: positive, prompt: "Draft an Australian affidavit from the provided evidence and preserve every source anchor.", tags: [direct], expected: {primary_skill: legal-writing, companion_skills: []}}

@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: orchestrate
 cases:
   - {id: q154, relation: positive, prompt: "Fan out this repository-wide audit across bounded agents and synthesise verified findings.", tags: [direct], expected: {primary_skill: orchestrate, companion_skills: []}}

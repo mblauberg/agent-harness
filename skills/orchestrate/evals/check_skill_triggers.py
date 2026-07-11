@@ -174,7 +174,7 @@ def main(argv=None):
             fails.append(f"script does not parse: {script}: {result.stderr.strip()}")
 
     # Prompt/description token overlap is not routing ground truth. Balanced
-    # schema-v2 fixtures and repeated blind model trials own selection evidence;
+    # Canonical routing fixtures and repeated blind model trials own selection evidence;
     # this checker retains only deterministic doctrine/reference contracts.
 
     ntext = norm(text)

@@ -51,12 +51,14 @@ The approved intent and acceptance contract are in
 - 2026-07-11 Codex: implemented a 34-skill portfolio with new `caveman`,
   `refactor` and `frontend-review`; hardened catalogue, fixtures, lifecycle,
   review, release, evaluation, frontend, browser and specialist contracts.
-- 2026-07-11 Codex: retained two incomplete and two failed schema-v2 routing
-  receipts, then passed fresh v6 at 72/72 primary and 72/72 companion rows over
-  three trials on each primary family. Final `scripts/check-harness` passed with
-  418 tests; portable Agent Fabric typecheck/build and all 363 tests also passed.
+- 2026-07-11 Codex: flattened evaluation, release and routing fixtures to one
+  current schema; the canonical 13-case holdout passed 78/78 exact routes over
+  three trials on each primary family after a recorded Fable-to-Opus fallback.
 - 2026-07-11 Codex: linked the four missing Codex skills, verified Claude's
   shared local skill root, and removed the disabled legacy Caveman plugin and
   marketplace. Native full-source review is clean after bounded repairs; the
   other-primary and bonus review records are retained. Human acceptance remains
   pending.
+- 2026-07-11 Codex: made portable `skill-authoring` the create-or-revise owner
+  and disabled Codex's overlapping bundled `skill-creator`; the installer now
+  preserves and verifies that host override idempotently.

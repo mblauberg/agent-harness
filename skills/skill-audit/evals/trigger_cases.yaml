@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: skill-audit
 cases:
   - {id: q235, relation: positive, prompt: "Audit this existing Agent Skill for missed triggers, false triggers, overlap, and token cost.", tags: [direct], expected: {primary_skill: skill-audit, companion_skills: []}}

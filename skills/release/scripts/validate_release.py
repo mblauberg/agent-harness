@@ -69,31 +69,6 @@ def parse_timestamp(value: Any) -> datetime | None:
     return datetime.fromisoformat(str(value)[:-1] + "+00:00")
 
 
-def passing_checks(values: Any, field: str) -> list[str]:
-    errors: list[str] = []
-    checks = items(values)
-    if not checks:
-        return [f"{field} must not be empty"]
-    for index, raw in enumerate(checks):
-        check = mapping(raw)
-        exit_code = check.get("exit_code")
-        if not check.get("command") or not isinstance(exit_code, int) or isinstance(exit_code, bool) or exit_code != 0:
-            errors.append(f"{field}[{index}] must record command and exit_code 0")
-    return errors
-
-
-def recorded_checks(values: Any, field: str) -> list[str]:
-    errors: list[str] = []
-    checks = items(values)
-    if not checks:
-        return [f"{field} must not be empty"]
-    for index, raw in enumerate(checks):
-        check = mapping(raw)
-        if not check.get("command") or not isinstance(check.get("exit_code"), int) or isinstance(check.get("exit_code"), bool):
-            errors.append(f"{field}[{index}] must record command and integer exit_code")
-    return errors
-
-
 def command_tokens(value: Any) -> list[str] | None:
     if isinstance(value, list) and value and all(isinstance(item, str) and item for item in value):
         return value
@@ -104,18 +79,6 @@ def command_tokens(value: Any) -> list[str] | None:
     except ValueError:
         return None
     return tokens or None
-
-
-def authorised_commands(values: Any, field: str, prefixes: list[Any]) -> list[str]:
-    errors: list[str] = []
-    allowed = [command_tokens(prefix) for prefix in prefixes]
-    for index, raw in enumerate(items(values)):
-        tokens = command_tokens(mapping(raw).get("command"))
-        if tokens is None:
-            errors.append(f"{field}[{index}] must be argv or shell-free text")
-        elif not any(prefix and tokens[:len(prefix)] == prefix for prefix in allowed):
-            errors.append(f"{field}[{index}] is outside release authority")
-    return errors
 
 
 def receipt_reference_path(
@@ -143,256 +106,6 @@ def receipt_reference_path(
     return candidate_real
 
 
-def validate_v1(
-    receipt: dict[str, Any], gate: str, base_dir: Path | None = None,
-    workspace_root: Path | None = None,
-    *, structural_only: bool = False,
-) -> list[str]:
-    errors: list[str] = []
-    if receipt.get("schema_version") != 1:
-        errors.append("schema_version must be 1")
-    for field in ("release_id", "target", "owner"):
-        if not receipt.get(field):
-            errors.append(f"{field} is required")
-    if not timestamp(receipt.get("updated_at")):
-        errors.append("updated_at must be a UTC timestamp")
-
-    artifact = mapping(receipt.get("artifact"))
-    for field in ("id", "source_revision", "change_receipt"):
-        if not artifact.get(field):
-            errors.append(f"artifact.{field} is required")
-    if artifact.get("change_receipt") and not structural_only:
-        verification_root = base_dir or workspace_root
-        if verification_root is None:
-            errors.append(
-                "schema-v1 ready/complete gate requires base_dir or workspace_root "
-                "for canonical accepted-artifact verification"
-            )
-            verification_root = None
-        if verification_root is None:
-            change_path = None
-        else:
-            change_path = receipt_reference_path(
-                artifact["change_receipt"], base_dir=base_dir,
-                workspace_root=workspace_root,
-                field="artifact.change_receipt", errors=errors,
-            )
-    else:
-        change_path = None
-    if change_path is not None:
-        try:
-            change = json.loads(change_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            errors.append("artifact.change_receipt must reference a readable accepted change receipt")
-        else:
-            if isinstance(change, dict) and change.get("schema_version") == 1 and change.get("contract") == "delivery-run":
-                try:
-                    live_root = (workspace_root or base_dir)
-                    project_policy = mapping(change.get("project_policy"))
-                    project_policy_path = (live_root / project_policy["path"]) if live_root and project_policy.get("path") else None
-                    DELIVERY_VALIDATOR.validate(
-                        change, ROOT, receipt_dir=change_path.parent,
-                        workspace_root=live_root, project_policy_path=project_policy_path,
-                        verify_hashes=True,
-                    )
-                except DELIVERY_VALIDATOR.Invalid:
-                    errors.append("artifact.change_receipt must be a valid neutral delivery receipt")
-                if gate == "ready" and change.get("status") != "awaiting_release":
-                    errors.append("artifact.change_receipt must be awaiting_release at the ready gate")
-                if gate == "complete" and (
-                    change.get("status") not in {"observing", "closed"}
-                    or mapping(mapping(change.get("human_gates")).get("release")).get("status") != "approved"
-                ):
-                    errors.append("terminal release requires canonical observing state and approved release gate")
-                observation_status = mapping(change.get("observation")).get("status")
-                if gate == "complete" and (
-                    (change.get("status") == "observing" and observation_status not in {"active", "pass"})
-                    or (change.get("status") == "closed" and observation_status != "pass")
-                ):
-                    errors.append("terminal release requires active or passing canonical observation")
-                delivered = next((item for item in items(change.get("artifacts")) if mapping(item).get("id") == artifact.get("id")), None)
-                if not delivered or mapping(delivered).get("digest") != artifact.get("source_revision"):
-                    errors.append("artifact.source_revision must match the accepted delivery artifact digest")
-            else:
-                errors.append("artifact.change_receipt must use the canonical delivery-run contract")
-    authority = mapping(receipt.get("release_authority"))
-    if not authority.get("approved_by") or not timestamp(authority.get("expires_at")):
-        errors.append("release_authority requires approved_by and UTC expires_at")
-    expiry = parse_timestamp(authority.get("expires_at"))
-    updated = parse_timestamp(receipt.get("updated_at"))
-    if expiry and updated and expiry <= updated:
-        errors.append("release_authority must cover the release checkpoint")
-    if receipt.get("target") not in items(authority.get("targets")):
-        errors.append("release_authority does not include target")
-    if artifact.get("id") not in items(authority.get("artifact_ids")):
-        errors.append("release_authority does not include artifact")
-    prefixes = authority.get("allowed_command_prefixes")
-    if not isinstance(prefixes, list) or not prefixes or any(command_tokens(item) is None for item in prefixes):
-        errors.append("release_authority.allowed_command_prefixes must not be empty")
-        prefixes = []
-    if not isinstance(authority.get("secrets_access"), str) or authority.get("secrets_access") not in {
-        "none", "use-without-disclosure"
-    }:
-        errors.append("release_authority.secrets_access is invalid")
-    for field in ("external_communication", "irreversible_migration"):
-        if not isinstance(authority.get(field), bool):
-            errors.append(f"release_authority.{field} must be boolean")
-    errors.extend(passing_checks(receipt.get("readiness_checks"), "readiness_checks"))
-    errors.extend(authorised_commands(receipt.get("readiness_checks"), "readiness_checks", prefixes))
-
-    rollout = mapping(receipt.get("rollout"))
-    if not rollout.get("plan") or not rollout.get("blast_radius_cap"):
-        errors.append("rollout must record plan and blast_radius_cap")
-    if not items(rollout.get("stop_conditions")):
-        errors.append("rollout.stop_conditions must not be empty")
-
-    rollback = mapping(receipt.get("rollback"))
-    for field in ("plan", "owner", "time_bound"):
-        if not rollback.get(field):
-            errors.append(f"rollback.{field} is required")
-    # Schema v1 predates typed environment tiers. Treat every legacy target as
-    # production-risk rather than guessing from a provider-specific target ID.
-    if rollback.get("tested") is not True:
-        errors.append("legacy v1 promotion requires tested rollback because environment tier is untyped")
-    migration = mapping(receipt.get("migration"))
-    migration_type = migration.get("type")
-    if not isinstance(migration_type, str) or migration_type not in {
-        "none", "reversible", "stateful", "destructive"
-    }:
-        errors.append("migration.type is invalid")
-    backward_compatible = migration.get("backward_compatible")
-    if not isinstance(backward_compatible, bool):
-        errors.append("migration.backward_compatible must be boolean")
-    migration_required = migration_type != "none" or backward_compatible is not True
-    if migration.get("required") is not migration_required:
-        errors.append("migration.required must agree with migration.type")
-    if migration_required:
-        for field in ("plan", "order", "compatibility_window", "recovery_point"):
-            if not migration.get(field):
-                errors.append(f"required migration needs {field}")
-    if migration_type == "destructive" or backward_compatible is not True:
-        if authority.get("irreversible_migration") is not True or not migration.get("approved_by"):
-            errors.append("destructive/non-compatible migration requires explicit irreversible authority")
-
-    observability = mapping(receipt.get("observability"))
-    for field in ("window", "signals", "owner", "rollback_or_containment", "sampling_and_privacy", "close_condition"):
-        if not observability.get(field):
-            errors.append(f"observability.{field} is required")
-    thresholds = [mapping(item) for item in items(observability.get("success_thresholds"))]
-    if not observability.get("baseline") or not thresholds:
-        errors.append("observability baseline and success_thresholds are required")
-    threshold_ids: set[str] = set()
-    for index, threshold in enumerate(thresholds):
-        threshold_id = threshold.get("id")
-        limit = threshold.get("limit")
-        if not isinstance(threshold_id, str) or not threshold_id or threshold_id in threshold_ids:
-            errors.append(f"observability.success_thresholds[{index}] requires a unique id")
-        else:
-            threshold_ids.add(threshold_id)
-        direction = threshold.get("direction")
-        if (
-            not isinstance(direction, str)
-            or direction not in {"lte", "gte"}
-            or not isinstance(limit, (int, float))
-            or isinstance(limit, bool)
-            or not math.isfinite(float(limit))
-        ):
-            errors.append(f"observability.success_thresholds[{index}] requires direction and numeric limit")
-    signals = items(observability.get("signals"))
-    if (
-        any(not isinstance(signal, str) or not signal for signal in signals)
-        or set(signals) != threshold_ids
-    ):
-        errors.append("observability.signals must match success threshold ids")
-
-    if gate == "ready":
-        if receipt.get("status") != "awaiting-promotion":
-            errors.append("status must be awaiting-promotion at the ready gate")
-        return errors
-
-    promotion = mapping(receipt.get("human_promotion"))
-    if promotion.get("status") != "approved" or not promotion.get("approved_by"):
-        errors.append("human_promotion must be approved by a named human")
-    if not timestamp(promotion.get("approved_at")):
-        errors.append("human_promotion.approved_at must be a UTC timestamp")
-    execution = mapping(receipt.get("execution"))
-    terminal_status = receipt.get("status")
-    if terminal_status == "complete":
-        errors.extend(passing_checks(execution.get("commands"), "execution.commands"))
-    else:
-        errors.extend(recorded_checks(execution.get("commands"), "execution.commands"))
-    errors.extend(authorised_commands(execution.get("commands"), "execution.commands", prefixes))
-    if not timestamp(execution.get("started_at")) or not timestamp(execution.get("finished_at")):
-        errors.append("execution start and finish timestamps are required")
-    approved_at = parse_timestamp(promotion.get("approved_at"))
-    started_at = parse_timestamp(execution.get("started_at"))
-    finished_at = parse_timestamp(execution.get("finished_at"))
-    if approved_at and started_at and approved_at > started_at:
-        errors.append("release execution cannot start before promotion approval")
-    if started_at and finished_at and started_at > finished_at:
-        errors.append("release execution cannot finish before it starts")
-    if expiry and finished_at and expiry < finished_at:
-        errors.append("release authority must remain valid through execution completion")
-    if terminal_status == "complete":
-        errors.extend(passing_checks(observability.get("checks"), "observability.checks"))
-    else:
-        errors.extend(recorded_checks(observability.get("checks"), "observability.checks"))
-    errors.extend(authorised_commands(observability.get("checks"), "observability.checks", prefixes))
-    if terminal_status == "complete":
-        window_match = WINDOW_DURATION.fullmatch(str(observability.get("window", "")))
-        window_started = parse_timestamp(observability.get("window_started_at"))
-        window_ended = parse_timestamp(observability.get("window_ended_at"))
-        if not window_match or not window_started or not window_ended or window_ended <= window_started:
-            errors.append("observability requires a typed increasing terminal window")
-        else:
-            amount = int(window_match.group(1))
-            seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[window_match.group(2)]
-            if (window_ended - window_started).total_seconds() < seconds:
-                errors.append("observability window is shorter than declared")
-            if finished_at and window_started < finished_at:
-                errors.append("observability window cannot start before release execution finishes")
-            if updated and updated < window_ended:
-                errors.append("terminal receipt must be updated after the observation window")
-        measured = {mapping(item).get("threshold_id"): mapping(item) for item in items(observability.get("checks"))}
-        for threshold in thresholds:
-            threshold_id = threshold.get("id")
-            check = measured.get(threshold_id)
-            value = check.get("measured_value") if check else None
-            if not check or not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or not items(check.get("evidence")):
-                errors.append(f"observability threshold {threshold_id} needs a measured value and evidence")
-                continue
-            observed_at = parse_timestamp(check.get("observed_at"))
-            if not observed_at or (window_started and observed_at < window_started) or (window_ended and observed_at > window_ended):
-                errors.append(f"observability threshold {threshold_id} needs a measurement inside the window")
-            passed = value <= threshold["limit"] if threshold.get("direction") == "lte" else value >= threshold["limit"]
-            if not passed:
-                errors.append(f"observability threshold {threshold_id} was not met")
-    if terminal_status == "rolled-back":
-        rollback_execution = mapping(receipt.get("rollback_execution"))
-        errors.extend(passing_checks(rollback_execution.get("commands"), "rollback_execution.commands"))
-        errors.extend(authorised_commands(rollback_execution.get("commands"), "rollback_execution.commands", prefixes))
-        errors.extend(passing_checks(rollback_execution.get("restoration_checks"), "rollback_execution.restoration_checks"))
-        errors.extend(authorised_commands(rollback_execution.get("restoration_checks"), "rollback_execution.restoration_checks", prefixes))
-        rollback_started = parse_timestamp(rollback_execution.get("started_at"))
-        rollback_finished = parse_timestamp(rollback_execution.get("finished_at"))
-        if not rollback_started or not rollback_finished:
-            errors.append("rollback_execution start and finish timestamps are required")
-        elif rollback_started > rollback_finished:
-            errors.append("rollback execution cannot finish before it starts")
-        if expiry and rollback_finished and expiry < rollback_finished:
-            errors.append("release authority must remain valid through rollback completion")
-        if finished_at and rollback_started and rollback_started < finished_at:
-            errors.append("rollback execution cannot start before release execution finishes")
-    outcome = mapping(receipt.get("outcome"))
-    if receipt.get("status") not in {"complete", "rolled-back", "failed"}:
-        errors.append("terminal status must be complete, rolled-back, or failed")
-    if outcome.get("status") != receipt.get("status") or not items(outcome.get("evidence")):
-        errors.append("outcome must match terminal status and contain evidence")
-    if receipt.get("status") != "complete" and not outcome.get("follow_up_owner"):
-        errors.append("non-success terminal outcome requires follow_up_owner")
-    return errors
-
-
 ACTION_TARGET_KINDS = {
     "deploy": {"environment"},
     "publish": {"audience"},
@@ -413,7 +126,7 @@ def accepted_artifact_errors(
     artifact: dict[str, Any], gate: str, base_dir: Path | None,
     workspace_root: Path | None, *, structural_only: bool,
 ) -> list[str]:
-    """Validate that a v2 artifact is pinned to the canonical accepted delivery."""
+    """Validate that an artifact is pinned to the canonical accepted delivery."""
     errors: list[str] = []
     for field in ("id", "digest", "acceptance_receipt"):
         if not artifact.get(field):
@@ -426,7 +139,7 @@ def accepted_artifact_errors(
     verification_root = base_dir or workspace_root
     if verification_root is None:
         errors.append(
-            "schema-v2 ready/complete gate requires base_dir or workspace_root "
+            "release ready/complete gate requires base_dir or workspace_root "
             "for canonical accepted-artifact verification"
         )
         return errors
@@ -594,7 +307,7 @@ def operation_errors(
     return errors
 
 
-def validate_v2(
+def validate(
     receipt: dict[str, Any], gate: str, base_dir: Path | None = None,
     workspace_root: Path | None = None,
     *, structural_only: bool = False,
@@ -605,6 +318,8 @@ def validate_v2(
     live accepted-delivery binding and therefore cannot certify promotion.
     """
     errors: list[str] = []
+    if receipt.get("schema_version") != 2:
+        errors.append("schema_version must be 2")
     for field in ("release_id", "owner"):
         if not receipt.get(field):
             errors.append(f"{field} is required")
@@ -918,25 +633,6 @@ def validate_v2(
     if terminal_status != "complete" and not outcome.get("follow_up_owner"):
         errors.append("non-success terminal outcome requires follow_up_owner")
     return errors
-
-
-def validate(
-    receipt: dict[str, Any], gate: str, base_dir: Path | None = None,
-    workspace_root: Path | None = None,
-    *, structural_only: bool = False,
-) -> list[str]:
-    schema_version = receipt.get("schema_version")
-    if schema_version == 1:
-        return validate_v1(
-            receipt, gate, base_dir, workspace_root,
-            structural_only=structural_only,
-        )
-    if schema_version == 2:
-        return validate_v2(
-            receipt, gate, base_dir, workspace_root,
-            structural_only=structural_only,
-        )
-    return ["schema_version must be 1 or 2"]
 
 
 def main(argv: list[str] | None = None) -> int:

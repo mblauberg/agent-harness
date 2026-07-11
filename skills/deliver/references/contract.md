@@ -38,7 +38,7 @@ row.
 
 The referenced local JSON artifact must be declared as evidence. With
 `--verify-hashes`, the delivery validator checks its live digest and invokes
-the `evaluation-run` schema-v2 validator with the anchored evaluation ID,
+the canonical `evaluation-run` validator with the anchored evaluation ID,
 frozen plan digest and enclosing delivery run ID. It also verifies every
 artifact inside that evaluation receipt and checks profile minima against the
 bound plan for complete candidates. Terminal nonpasses may fall below those

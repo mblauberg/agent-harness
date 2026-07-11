@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: autonomous-lab
 cases:
   - {id: q019, relation: positive, prompt: "Spin up an agent lab for this open-ended migration and keep going until I write STOP.", tags: [direct], expected: {primary_skill: autonomous-lab, companion_skills: []}}

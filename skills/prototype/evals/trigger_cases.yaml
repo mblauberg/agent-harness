@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: prototype
 cases:
   - {id: q172, relation: positive, prompt: "Build a 45-minute throwaway spike to test whether this library can stream ten thousand rows.", tags: [direct], expected: {primary_skill: prototype, companion_skills: []}}

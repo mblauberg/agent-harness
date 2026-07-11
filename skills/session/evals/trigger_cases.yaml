@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 1
 target_skill: session
 cases:
   - {id: q226, relation: positive, prompt: "Resume this substantial task from the live project state and current handoff.", tags: [direct], expected: {primary_skill: session, companion_skills: []}}

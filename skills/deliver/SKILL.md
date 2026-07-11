@@ -30,7 +30,7 @@ may strengthen a profile, never weaken kernel gates silently.
    `diagnose`; substantial parallel work may use `orchestrate`.
 4. Produce profile-required deterministic evidence before judgement evidence.
    Every gate links to a typed artifact or receipt. At acceptance, a stochastic
-   gate must bind and hash-verify a passing `evaluation-run` schema-v2 receipt;
+   gate must bind and hash-verify a passing canonical `evaluation-run` receipt;
    copied scores or sampling metadata are not evidence. Retain failed or
    incomplete evaluation receipts as non-gating history.
 5. Review independently with lenses selected from the dependency cone.

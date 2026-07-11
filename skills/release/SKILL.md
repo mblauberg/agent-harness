@@ -15,10 +15,9 @@ Require the accepted delivery receipt, artifact digest, typed action (`deploy`,
 and project instructions.
 Implementation acceptance is not promotion authority.
 
-Start new work from the schema-v2
-[RELEASE.template.json](templates/RELEASE.template.json). The validator keeps
-schema v1 readable; do not create new v1 receipts. Because v1 lacks typed tiers,
-every legacy target requires tested rollback.
+Start new work from the canonical
+[RELEASE.template.json](templates/RELEASE.template.json). The validator accepts
+only that rich, typed receipt and fails closed on every other shape.
 
 ## Readiness
 

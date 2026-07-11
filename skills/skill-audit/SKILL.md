@@ -10,7 +10,7 @@ skill is read-only: return an evidence-backed report, never edit the skills.
 
 ## Privacy boundary
 
-Default to static analysis and versioned routing fixtures. Do not scan provider
+Default to static analysis and frozen routing fixtures. Do not scan provider
 transcripts, private memory or project content merely because those stores
 exist. Historical session analysis requires explicit human authority naming the
 roots or receipts, time window, target skills, disclosure destination and
@@ -40,7 +40,7 @@ Use `scripts/validate_telemetry.py` before relying on a telemetry artifact.
 3. If authorised telemetry exists, verify its scope and privacy receipt, then
    calculate trigger, completion, correction and cost signals. Never infer
    invocation from a skill being loaded into context.
-4. Use balanced, versioned routing evals for undertrigger and overtrigger
+4. Use balanced, frozen routing evals for undertrigger and overtrigger
    claims. A raw keyword match is only a candidate, not ground truth.
 5. Report all dimensions from `references/method.md`; mark missing evidence
    `N/A` and keep static facts separate from behavioural estimates.
