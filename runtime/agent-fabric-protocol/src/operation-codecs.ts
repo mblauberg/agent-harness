@@ -49,6 +49,7 @@ import {
   parseScopedGateResolveRequest,
 } from "./gates.js";
 import { parseProjectSession } from "./project-session.js";
+import { PROJECT_SESSION_LAUNCH_INTENT_CODEC, PROVIDER_ACTION_REF_V1_CODEC } from "./launch.js";
 import {
   parseResultDelivery,
   parseTaskCompleteWithReply,
@@ -274,9 +275,9 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.projectionViewPage]: object(["status", "view"], ["rows", "nextCursor", "hasMore", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision", "snapshotCursor"]),
   [FABRIC_OPERATIONS.projectionDetailRead]: object(["status"], ["detailRef", "detail", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision"]),
   [FABRIC_OPERATIONS.operatorActionPreview]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
-  [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef"]),
-  [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "receipt", "code", "evidenceRefs"]),
-  [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "receipt", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef", "providerActionRef"]),
+  [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "providerActionRef", "receipt", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "providerActionRef", "receipt", "code", "evidenceRefs"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["available", "messageId", "revision"], ["body", "terminalNeutralised", "capabilityValuesRedacted", "artifactRefs", "reason"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["status"],
@@ -487,6 +488,31 @@ const projectSessionCodec = parserBacked(
   parseProjectSession,
   parseProjectSession(projectSessionWireCodec.example),
 );
+const projectSessionTransitionInputCodec = objectCodec({
+  command: operatorMutationCodec,
+  projectSessionId: identifier,
+  expectedGeneration: positiveInteger,
+  transition: unionOf([
+    objectCodec({
+      to: literal("awaiting_launch"),
+      reason: text,
+      launchPacketRef: artifactRefCodec,
+    }),
+    objectCodec({
+      to: enumeration([
+        "draft",
+        "active",
+        "quiescing",
+        "reconciling",
+        "visibility_degraded",
+        "recovery_required",
+        "quarantined",
+      ]),
+      reason: text,
+    }),
+    objectCodec({ to: literal("awaiting_acceptance"), closureEvidence: artifactRefCodec }),
+  ]),
+});
 
 const runProjectionCodec = objectCodec({
   runId: identifier,
@@ -1098,19 +1124,7 @@ const operatorActionIntentCodec = unionOf([
     instruction: text,
     evidenceRefs: artifactRefsCodec,
   }),
-  objectCodec({
-    kind: literal("project-session-launch"),
-    projectId: identifier,
-    projectSessionId: identifier,
-    expectedSessionRevision: positiveInteger,
-    expectedSessionGeneration: positiveInteger,
-    launchPacketRef: artifactRefCodec,
-    authorityRef: sha256,
-    budgetRef: identifier,
-    resourcePlanRef: artifactRefCodec,
-    providerAdapterId: identifier,
-    providerActionId: identifier,
-  }),
+  PROJECT_SESSION_LAUNCH_INTENT_CODEC,
   objectCodec({
     kind: literal("project-session-drain"),
     projectSessionId: identifier,
@@ -1202,7 +1216,7 @@ const operatorActionCommitCodec = parserBacked(
   },
   operatorActionCommitBaseCodec.example,
 );
-const operatorActionReceiptCodec = objectCodec({
+const operatorActionReceiptFields = {
   commandId: identifier,
   previewId: identifier,
   previewRevision: positiveInteger,
@@ -1211,7 +1225,13 @@ const operatorActionReceiptCodec = objectCodec({
   afterStateDigest: sha256,
   evidenceRefs: artifactRefsCodec,
   committedAt: timestamp,
-}, { effectRef: artifactRefCodec });
+};
+const operatorActionReceiptCodec = unionOf([
+  objectCodec(operatorActionReceiptFields, { effectRef: artifactRefCodec }),
+  objectCodec({ ...operatorActionReceiptFields, providerActionRef: PROVIDER_ACTION_REF_V1_CODEC }, {
+    effectRef: artifactRefCodec,
+  }),
+]);
 const operatorActionStatusInputCodec = objectCodec({
   credential: credentialCodec,
   projectId: identifier,
@@ -1249,12 +1269,27 @@ const operatorActionStatusCodec = unionOf([
     attemptGeneration: positiveInteger,
   }),
   objectCodec({
+    status: literal("pending"),
+    commandId: identifier,
+    intentDigest: sha256,
+    phase: enumeration(["prepared", "dispatched", "accepted", "observing"]),
+    attemptGeneration: positiveInteger,
+    providerActionRef: PROVIDER_ACTION_REF_V1_CODEC,
+  }),
+  objectCodec({
     status: literal("ambiguous"),
     commandId: identifier,
     intentDigest: sha256,
     attemptGeneration: positiveInteger,
     effectRef: artifactRefCodec,
   }),
+  objectCodec({
+    status: literal("ambiguous"),
+    commandId: identifier,
+    intentDigest: sha256,
+    attemptGeneration: positiveInteger,
+    providerActionRef: PROVIDER_ACTION_REF_V1_CODEC,
+  }, { effectRef: artifactRefCodec }),
   objectCodec({ status: literal("committed"), commandId: identifier, receipt: operatorActionReceiptCodec }),
   objectCodec({
     status: literal("rejected"),
@@ -2234,6 +2269,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.projectionViewPage) return operatorViewPageInputCodec;
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadInputCodec;
+  if (operation === FABRIC_OPERATIONS.projectSessionTransition) return projectSessionTransitionInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionCommitCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus) return operatorActionStatusInputCodec;

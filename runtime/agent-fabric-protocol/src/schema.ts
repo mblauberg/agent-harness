@@ -7,6 +7,14 @@ import {
   secret,
 } from "./codec.js";
 import { OPERATION_CODECS } from "./operation-codecs.js";
+import {
+  LAUNCH_ADAPTER_OUTCOME_V1_CODEC,
+  LAUNCH_PACKET_V1_CODEC,
+  LAUNCH_RESOURCE_PLAN_V1_CODEC,
+  PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC,
+  PROJECT_SESSION_LAUNCH_INTENT_CODEC,
+  PROVIDER_ACTION_REF_V1_CODEC,
+} from "./launch.js";
 import { OPERATION_REGISTRY } from "./operations.js";
 import { parseJsonValue, type JsonValue } from "./primitives.js";
 import { PROTOCOL_ERROR_CODES, PROTOCOL_LIMITS, type ProtocolOperation } from "./rpc-contract.js";
@@ -22,6 +30,19 @@ const boundedJsonDefinitions = {
   boundedJsonValue: BOUNDED_JSON_VALUE_SCHEMA,
   jsonValueNode: JSON_VALUE_NODE_SCHEMA,
 } as const;
+
+function standaloneLaunchSchema(schema: JsonSchema): JsonSchema {
+  return { ...schema, "$defs": boundedJsonDefinitions };
+}
+
+export const LAUNCH_CONTRACT_SCHEMAS = Object.freeze({
+  projectSessionLaunchIntent: standaloneLaunchSchema(PROJECT_SESSION_LAUNCH_INTENT_CODEC.schema),
+  launchPacketV1: standaloneLaunchSchema(LAUNCH_PACKET_V1_CODEC.schema),
+  launchResourcePlanV1: standaloneLaunchSchema(LAUNCH_RESOURCE_PLAN_V1_CODEC.schema),
+  projectSessionLaunchCurrentState: standaloneLaunchSchema(PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC.schema),
+  launchAdapterOutcomeV1: standaloneLaunchSchema(LAUNCH_ADAPTER_OUTCOME_V1_CODEC.schema),
+  providerActionRefV1: standaloneLaunchSchema(PROVIDER_ACTION_REF_V1_CODEC.schema),
+});
 
 const principalSchemas = {
   operator: {
@@ -273,6 +294,12 @@ export const PROTOCOL_SCHEMA = {
   ],
   "$defs": {
     ...boundedJsonDefinitions,
+    projectSessionLaunchIntent: PROJECT_SESSION_LAUNCH_INTENT_CODEC.schema,
+    launchPacketV1: LAUNCH_PACKET_V1_CODEC.schema,
+    launchResourcePlanV1: LAUNCH_RESOURCE_PLAN_V1_CODEC.schema,
+    projectSessionLaunchCurrentState: PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC.schema,
+    launchAdapterOutcomeV1: LAUNCH_ADAPTER_OUTCOME_V1_CODEC.schema,
+    providerActionRefV1: PROVIDER_ACTION_REF_V1_CODEC.schema,
     fabricOperation: { type: "string", enum: operations },
     activeFabricOperation: { type: "string", enum: activeOperations },
     operatorPrincipal: principalSchemas.operator,

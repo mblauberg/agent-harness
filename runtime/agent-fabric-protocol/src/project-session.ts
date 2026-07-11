@@ -99,7 +99,21 @@ export type ProjectSessionTransitionRequest = {
   expectedGeneration: number;
   transition:
     | {
-        to: Exclude<ProjectSessionState, "closed" | "cancelled" | "awaiting_acceptance">;
+        to: "awaiting_launch";
+        reason: string;
+        launchPacketRef: ArtifactRef;
+      }
+    | {
+        to: Exclude<
+          ProjectSessionState,
+          | "closed"
+          | "cancelled"
+          | "awaiting_acceptance"
+          | "awaiting_launch"
+          | "launching"
+          | "launch_failed"
+          | "launch_ambiguous"
+        >;
         reason: string;
       }
     | { to: "awaiting_acceptance"; closureEvidence: ArtifactRef };

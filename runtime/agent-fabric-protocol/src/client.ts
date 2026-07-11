@@ -208,8 +208,8 @@ type OperatorConsoleReadSurface = {
 };
 
 export type OperatorConsoleClient = OperatorConsoleReadSurface & (
-  | { readOnly: true; actions?: undefined }
-  | { readOnly: false; actions: OperatorActionClient }
+  | { readOnly: true; launchAvailable: false; actions?: undefined }
+  | { readOnly: false; launchAvailable: boolean; actions: OperatorActionClient }
 );
 
 export interface InputAttestationClient {
@@ -365,8 +365,13 @@ function operatorConsole(transport: ProtocolRpcTransport): OperatorConsoleClient
     FABRIC_OPERATIONS.operatorActionReconcile,
   ] as const;
   return hasFeature(transport, "operator-actions.v1") && hasOperations(transport, actionOperations)
-    ? { ...reads, readOnly: false, actions: operatorActions(transport) }
-    : { ...reads, readOnly: true };
+    ? {
+        ...reads,
+        readOnly: false,
+        launchAvailable: hasFeature(transport, "launch-custody.v1"),
+        actions: operatorActions(transport),
+      }
+    : { ...reads, readOnly: true, launchAvailable: false };
 }
 
 export function createOperatorClient(transport: ProtocolRpcTransport): NegotiatedOperatorClient {

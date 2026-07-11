@@ -60,6 +60,1250 @@
         }
       ]
     },
+    "projectSessionLaunchIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "projectId",
+        "projectSessionId",
+        "expectedProjectRevision",
+        "expectedSessionRevision",
+        "expectedSessionGeneration",
+        "trustRecordDigest",
+        "launchPacketRef",
+        "authorityRef",
+        "budgetRef",
+        "resourcePlanRef",
+        "providerAdapterId",
+        "providerActionId",
+        "providerContractDigest",
+        "resourceStateDigest"
+      ],
+      "properties": {
+        "kind": {
+          "const": "project-session-launch"
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "projectSessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "expectedProjectRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedSessionRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedSessionGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "trustRecordDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "launchPacketRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "digest"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        },
+        "authorityRef": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "budgetRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "resourcePlanRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "digest"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        },
+        "providerAdapterId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "providerActionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "providerContractDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "resourceStateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "retryOf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "providerAdapterId",
+            "providerActionId"
+          ],
+          "properties": {
+            "providerAdapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerActionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            }
+          }
+        }
+      }
+    },
+    "launchPacketV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "projectId",
+        "projectSessionId",
+        "runId",
+        "chairAgentId",
+        "projectRunDirectory",
+        "topologyMode",
+        "budgetRef",
+        "resourcePlanRef",
+        "chairAuthority",
+        "provider"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "projectSessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "chairAgentId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "projectRunDirectory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+        },
+        "topologyMode": {
+          "type": "string",
+          "enum": [
+            "coordinated",
+            "independent"
+          ]
+        },
+        "budgetRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "resourcePlanRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "digest"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        },
+        "chairAuthority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workspaceRoots",
+            "sourcePaths",
+            "artifactPaths",
+            "actions",
+            "disclosure",
+            "expiresAt",
+            "budget"
+          ],
+          "properties": {
+            "workspaceRoots": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+              },
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true
+            },
+            "sourcePaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+              },
+              "minItems": 0,
+              "maxItems": 256,
+              "uniqueItems": true
+            },
+            "artifactPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+              },
+              "minItems": 0,
+              "maxItems": 256,
+              "uniqueItems": true
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "fabric.v1.authority.delegate",
+                  "fabric.v1.agent.register",
+                  "fabric.v1.agent.spawn",
+                  "fabric.v1.agent.attach",
+                  "fabric.v1.message.send",
+                  "fabric.v1.discussion-group.create",
+                  "fabric.v1.message.receive",
+                  "fabric.v1.delivery.acknowledge",
+                  "fabric.v1.delivery.abandon",
+                  "fabric.v1.mailbox.read",
+                  "fabric.v1.task.create",
+                  "fabric.v1.task.claim",
+                  "fabric.v1.task.readiness.refresh",
+                  "fabric.v1.task.objective-check.record",
+                  "fabric.v1.task.handoff.acknowledge",
+                  "fabric.v1.task.read",
+                  "fabric.v1.task.update",
+                  "fabric.v1.task.owner-recovery-proof.record",
+                  "fabric.v1.task.owner.recover",
+                  "fabric.v1.lease.revocation-proof.record",
+                  "fabric.v1.capability.revoke",
+                  "fabric.v1.capability.rotate",
+                  "fabric.v1.write-lease.acquire",
+                  "fabric.v1.write-lease.recover",
+                  "fabric.v1.write-lease.renew",
+                  "fabric.v1.write-lease.read",
+                  "fabric.v1.write-lease.release",
+                  "fabric.v1.lifecycle.request",
+                  "fabric.v1.lifecycle.read",
+                  "fabric.v1.provider-state.report",
+                  "fabric.v1.provider-action.dispatch",
+                  "fabric.v1.provider-action.reconcile",
+                  "fabric.v1.provider-action.read",
+                  "fabric.v1.operator-intervention.record",
+                  "fabric.v1.visibility-failure.record",
+                  "fabric.v1.team.create",
+                  "fabric.v1.team.read",
+                  "fabric.v1.subtree.freeze",
+                  "fabric.v1.subtree.adopt",
+                  "fabric.v1.subtree-barrier.close",
+                  "fabric.v1.budget.reserve",
+                  "fabric.v1.budget.usage.record",
+                  "fabric.v1.budget.usage.reconcile",
+                  "fabric.v1.budget.release",
+                  "fabric.v1.budget.read",
+                  "fabric.v1.artifact.publish",
+                  "fabric.v1.barrier.close",
+                  "fabric.v1.run-status.read",
+                  "fabric.v1.events.observe",
+                  "fabric.v1.task.list",
+                  "fabric.v1.agent.list",
+                  "fabric.v1.receipt.list",
+                  "fabric.v1.receipt.export",
+                  "fabric.v1.project-session.membership.bind",
+                  "fabric.v1.intake.revise",
+                  "fabric.v1.scoped-gate.create",
+                  "fabric.v1.scoped-gate.check",
+                  "fabric.v1.resource.reserve",
+                  "fabric.v1.resource.release",
+                  "fabric.v1.resource.reconcile",
+                  "fabric.v1.task.request",
+                  "fabric.v1.task.complete-with-reply",
+                  "fabric.v1.result-delivery.claim",
+                  "fabric.v1.result-delivery.consume",
+                  "fabric.v1.result-delivery.retry",
+                  "fabric.v1.result-delivery.reassign",
+                  "fabric.v1.result-delivery.abandon"
+                ]
+              },
+              "minItems": 0,
+              "maxItems": 256,
+              "uniqueItems": true
+            },
+            "disclosure": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "level"
+                  ],
+                  "properties": {
+                    "level": {
+                      "const": "allowed"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "level",
+                    "scopes"
+                  ],
+                  "properties": {
+                    "level": {
+                      "const": "scoped"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "local",
+                          "approved-provider",
+                          "external"
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 3,
+                      "uniqueItems": true
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "level"
+                  ],
+                  "properties": {
+                    "level": {
+                      "const": "forbidden"
+                    }
+                  }
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "local",
+                      "approved-provider",
+                      "external"
+                    ]
+                  },
+                  "minItems": 0,
+                  "maxItems": 3,
+                  "uniqueItems": true
+                }
+              ]
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "budget": {
+              "type": "object",
+              "minProperties": 0,
+              "maxProperties": 128,
+              "propertyNames": {
+                "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "deniedPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+              },
+              "minItems": 0,
+              "maxItems": 256,
+              "uniqueItems": true
+            },
+            "deniedActions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "fabric.v1.authority.delegate",
+                  "fabric.v1.agent.register",
+                  "fabric.v1.agent.spawn",
+                  "fabric.v1.agent.attach",
+                  "fabric.v1.message.send",
+                  "fabric.v1.discussion-group.create",
+                  "fabric.v1.message.receive",
+                  "fabric.v1.delivery.acknowledge",
+                  "fabric.v1.delivery.abandon",
+                  "fabric.v1.mailbox.read",
+                  "fabric.v1.task.create",
+                  "fabric.v1.task.claim",
+                  "fabric.v1.task.readiness.refresh",
+                  "fabric.v1.task.objective-check.record",
+                  "fabric.v1.task.handoff.acknowledge",
+                  "fabric.v1.task.read",
+                  "fabric.v1.task.update",
+                  "fabric.v1.task.owner-recovery-proof.record",
+                  "fabric.v1.task.owner.recover",
+                  "fabric.v1.lease.revocation-proof.record",
+                  "fabric.v1.capability.revoke",
+                  "fabric.v1.capability.rotate",
+                  "fabric.v1.write-lease.acquire",
+                  "fabric.v1.write-lease.recover",
+                  "fabric.v1.write-lease.renew",
+                  "fabric.v1.write-lease.read",
+                  "fabric.v1.write-lease.release",
+                  "fabric.v1.lifecycle.request",
+                  "fabric.v1.lifecycle.read",
+                  "fabric.v1.provider-state.report",
+                  "fabric.v1.provider-action.dispatch",
+                  "fabric.v1.provider-action.reconcile",
+                  "fabric.v1.provider-action.read",
+                  "fabric.v1.operator-intervention.record",
+                  "fabric.v1.visibility-failure.record",
+                  "fabric.v1.team.create",
+                  "fabric.v1.team.read",
+                  "fabric.v1.subtree.freeze",
+                  "fabric.v1.subtree.adopt",
+                  "fabric.v1.subtree-barrier.close",
+                  "fabric.v1.budget.reserve",
+                  "fabric.v1.budget.usage.record",
+                  "fabric.v1.budget.usage.reconcile",
+                  "fabric.v1.budget.release",
+                  "fabric.v1.budget.read",
+                  "fabric.v1.artifact.publish",
+                  "fabric.v1.barrier.close",
+                  "fabric.v1.run-status.read",
+                  "fabric.v1.events.observe",
+                  "fabric.v1.task.list",
+                  "fabric.v1.agent.list",
+                  "fabric.v1.receipt.list",
+                  "fabric.v1.receipt.export",
+                  "fabric.v1.project-session.membership.bind",
+                  "fabric.v1.intake.revise",
+                  "fabric.v1.scoped-gate.create",
+                  "fabric.v1.scoped-gate.check",
+                  "fabric.v1.resource.reserve",
+                  "fabric.v1.resource.release",
+                  "fabric.v1.resource.reconcile",
+                  "fabric.v1.task.request",
+                  "fabric.v1.task.complete-with-reply",
+                  "fabric.v1.result-delivery.claim",
+                  "fabric.v1.result-delivery.consume",
+                  "fabric.v1.result-delivery.retry",
+                  "fabric.v1.result-delivery.reassign",
+                  "fabric.v1.result-delivery.abandon"
+                ]
+              },
+              "minItems": 0,
+              "maxItems": 256,
+              "uniqueItems": true
+            }
+          }
+        },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "adapterId",
+            "actionId",
+            "contractDigest",
+            "inputSchemaId",
+            "input"
+          ],
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "actionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "contractDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "inputSchemaId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "input": {
+              "type": "object",
+              "minProperties": 0,
+              "maxProperties": 256,
+              "additionalProperties": {
+                "$ref": "#/$defs/boundedJsonValue"
+              }
+            }
+          }
+        }
+      }
+    },
+    "launchResourcePlanV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "projectId",
+        "projectSessionId",
+        "runId",
+        "budgetRef",
+        "scopes",
+        "launchReservation"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "projectSessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "budgetRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "scopes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "projectSession",
+            "coordinationRun"
+          ],
+          "properties": {
+            "project": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "scopeId",
+                "limits"
+              ],
+              "properties": {
+                "scopeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "limits": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "maxProperties": 128,
+                  "propertyNames": {
+                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                  },
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "projectSession": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "scopeId",
+                "limits"
+              ],
+              "properties": {
+                "scopeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "limits": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "maxProperties": 128,
+                  "propertyNames": {
+                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                  },
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "coordinationRun": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "scopeId",
+                "limits"
+              ],
+              "properties": {
+                "scopeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "limits": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "maxProperties": 128,
+                  "propertyNames": {
+                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                  },
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "launchReservation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "amounts"
+          ],
+          "properties": {
+            "amounts": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 128,
+              "propertyNames": {
+                "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "projectSessionLaunchCurrentState": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "projectId",
+            "projectRevision",
+            "projectSessionId",
+            "sessionRevision",
+            "sessionGeneration",
+            "currentLaunchPacketRef",
+            "trustRecordDigest",
+            "providerAdapterId",
+            "providerContractDigest",
+            "resourceStateDigest",
+            "sessionState",
+            "provedFailedAttempt"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "projectId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "projectRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "projectSessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "sessionRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sessionGeneration": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "currentLaunchPacketRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "digest"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                }
+              }
+            },
+            "trustRecordDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "providerAdapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerContractDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "resourceStateDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "sessionState": {
+              "const": "awaiting_launch"
+            },
+            "provedFailedAttempt": {
+              "const": null
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "projectId",
+            "projectRevision",
+            "projectSessionId",
+            "sessionRevision",
+            "sessionGeneration",
+            "currentLaunchPacketRef",
+            "trustRecordDigest",
+            "providerAdapterId",
+            "providerContractDigest",
+            "resourceStateDigest",
+            "sessionState",
+            "provedFailedAttempt"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "projectId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "projectRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "projectSessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "sessionRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sessionGeneration": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "currentLaunchPacketRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "digest"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                }
+              }
+            },
+            "trustRecordDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "providerAdapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerContractDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "resourceStateDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "sessionState": {
+              "const": "launch_failed"
+            },
+            "provedFailedAttempt": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "providerAdapterId",
+                "providerActionId"
+              ],
+              "properties": {
+                "providerAdapterId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "providerActionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "launchAdapterOutcomeV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "providerAdapterId",
+        "providerActionId",
+        "providerContractDigest",
+        "observationKind",
+        "observedAt",
+        "outcome"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "providerAdapterId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "providerActionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "providerContractDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "observationKind": {
+          "type": "string",
+          "enum": [
+            "dispatch-return",
+            "lookup"
+          ]
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "providerSessionRef",
+                "providerSessionGeneration",
+                "effectDigest",
+                "resourceUsage"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "terminal-success"
+                },
+                "providerSessionRef": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "providerSessionGeneration": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "effectDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "resourceUsage": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "maxProperties": 128,
+                  "propertyNames": {
+                    "pattern": "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                  },
+                  "additionalProperties": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "const": "unknown"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "failureCode",
+                "noEffectProof"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "terminal-no-effect"
+                },
+                "failureCode": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "noEffectProof": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaId",
+                    "proof",
+                    "digest"
+                  ],
+                  "properties": {
+                    "schemaId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "proof": {
+                      "$ref": "#/$defs/boundedJsonValue"
+                    },
+                    "digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "reasonCode",
+                "evidenceDigest"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "ambiguous"
+                },
+                "reasonCode": {
+                  "type": "string",
+                  "enum": [
+                    "absent",
+                    "transport-error",
+                    "adapter-error",
+                    "malformed",
+                    "incomplete",
+                    "conflict",
+                    "missing-resume-reference"
+                  ]
+                },
+                "evidenceDigest": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "providerActionRefV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "projectSessionId",
+            "coordinationRunId",
+            "providerAdapterId",
+            "providerActionId",
+            "providerContractDigest",
+            "custodyAttemptGeneration",
+            "journalRevision",
+            "journalState",
+            "outcomeKind",
+            "outcomeDigest"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "projectSessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "coordinationRunId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerAdapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerActionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerContractDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "custodyAttemptGeneration": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "journalRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "journalState": {
+              "type": "string",
+              "enum": [
+                "prepared",
+                "dispatched",
+                "accepted"
+              ]
+            },
+            "outcomeKind": {
+              "const": null
+            },
+            "outcomeDigest": {
+              "const": null
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "projectSessionId",
+            "coordinationRunId",
+            "providerAdapterId",
+            "providerActionId",
+            "providerContractDigest",
+            "custodyAttemptGeneration",
+            "journalRevision",
+            "journalState",
+            "outcomeKind",
+            "outcomeDigest"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "projectSessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "coordinationRunId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerAdapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerActionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerContractDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "custodyAttemptGeneration": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "journalRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "journalState": {
+              "const": "terminal"
+            },
+            "outcomeKind": {
+              "type": "string",
+              "enum": [
+                "terminal-success",
+                "terminal-no-effect"
+              ]
+            },
+            "outcomeDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "projectSessionId",
+            "coordinationRunId",
+            "providerAdapterId",
+            "providerActionId",
+            "providerContractDigest",
+            "custodyAttemptGeneration",
+            "journalRevision",
+            "journalState",
+            "outcomeKind",
+            "outcomeDigest"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "projectSessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "coordinationRunId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerAdapterId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerActionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "providerContractDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "custodyAttemptGeneration": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "journalRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "journalState": {
+              "const": "ambiguous"
+            },
+            "outcomeKind": {
+              "const": "ambiguous"
+            },
+            "outcomeDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        }
+      ]
+    },
     "fabricOperation": {
       "type": "string",
       "enum": [
@@ -933,7 +2177,7 @@
         },
         "requiredFeatures": {
           "type": "array",
-          "maxItems": 16,
+          "maxItems": 17,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -950,6 +2194,7 @@
               "operator-projection.v1",
               "operator-projection.v2",
               "operator-actions.v1",
+              "launch-custody.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
               "lifecycle-control.v1"
@@ -958,7 +2203,7 @@
         },
         "optionalFeatures": {
           "type": "array",
-          "maxItems": 16,
+          "maxItems": 17,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -975,6 +2220,7 @@
               "operator-projection.v1",
               "operator-projection.v2",
               "operator-actions.v1",
+              "launch-custody.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
               "lifecycle-control.v1"
@@ -1117,7 +2363,7 @@
         },
         "features": {
           "type": "array",
-          "maxItems": 16,
+          "maxItems": 17,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -1134,6 +2380,7 @@
               "operator-projection.v1",
               "operator-projection.v2",
               "operator-actions.v1",
+              "launch-custody.v1",
               "message-body-read.v1",
               "operator-repository-read.v1",
               "lifecycle-control.v1"
@@ -1377,7 +2624,7 @@
             },
             "requiredFeatures": {
               "type": "array",
-              "maxItems": 16,
+              "maxItems": 17,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -1394,6 +2641,7 @@
                   "operator-projection.v1",
                   "operator-projection.v2",
                   "operator-actions.v1",
+                  "launch-custody.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
                   "lifecycle-control.v1"
@@ -1402,7 +2650,7 @@
             },
             "optionalFeatures": {
               "type": "array",
-              "maxItems": 16,
+              "maxItems": 17,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -1419,6 +2667,7 @@
                   "operator-projection.v1",
                   "operator-projection.v2",
                   "operator-actions.v1",
+                  "launch-custody.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
                   "lifecycle-control.v1"
@@ -1583,7 +2832,7 @@
             },
             "features": {
               "type": "array",
-              "maxItems": 16,
+              "maxItems": 17,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -1600,6 +2849,7 @@
                   "operator-projection.v1",
                   "operator-projection.v2",
                   "operator-actions.v1",
+                  "launch-custody.v1",
                   "message-body-read.v1",
                   "operator-repository-read.v1",
                   "lifecycle-control.v1"
@@ -6820,6 +8070,47 @@
                       "additionalProperties": false,
                       "required": [
                         "to",
+                        "reason",
+                        "launchPacketRef"
+                      ],
+                      "properties": {
+                        "to": {
+                          "const": "awaiting_launch"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "launchPacketRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "path",
+                            "digest"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                            },
+                            "digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "to",
                         "reason"
                       ],
                       "properties": {
@@ -6827,12 +8118,8 @@
                           "type": "string",
                           "enum": [
                             "draft",
-                            "awaiting_launch",
-                            "launching",
                             "active",
                             "quiescing",
-                            "launch_failed",
-                            "launch_ambiguous",
                             "reconciling",
                             "visibility_degraded",
                             "recovery_required",
@@ -17442,14 +18729,18 @@
                         "kind",
                         "projectId",
                         "projectSessionId",
+                        "expectedProjectRevision",
                         "expectedSessionRevision",
                         "expectedSessionGeneration",
+                        "trustRecordDigest",
                         "launchPacketRef",
                         "authorityRef",
                         "budgetRef",
                         "resourcePlanRef",
                         "providerAdapterId",
-                        "providerActionId"
+                        "providerActionId",
+                        "providerContractDigest",
+                        "resourceStateDigest"
                       ],
                       "properties": {
                         "kind": {
@@ -17457,19 +18748,15 @@
                         },
                         "projectId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
                         "projectSessionId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedProjectRevision": {
+                          "type": "integer",
+                          "minimum": 1
                         },
                         "expectedSessionRevision": {
                           "type": "integer",
@@ -17478,6 +18765,10 @@
                         "expectedSessionGeneration": {
                           "type": "integer",
                           "minimum": 1
+                        },
+                        "trustRecordDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
                         },
                         "launchPacketRef": {
                           "type": "object",
@@ -17505,10 +18796,6 @@
                         },
                         "budgetRef": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
                         "resourcePlanRef": {
@@ -17533,19 +18820,37 @@
                         },
                         "providerAdapterId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
                         "providerActionId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "resourceStateDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "retryOf": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "providerAdapterId",
+                            "providerActionId"
+                          ],
+                          "properties": {
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            }
+                          }
                         }
                       }
                     },
@@ -66419,14 +67724,18 @@
                         "kind",
                         "projectId",
                         "projectSessionId",
+                        "expectedProjectRevision",
                         "expectedSessionRevision",
                         "expectedSessionGeneration",
+                        "trustRecordDigest",
                         "launchPacketRef",
                         "authorityRef",
                         "budgetRef",
                         "resourcePlanRef",
                         "providerAdapterId",
-                        "providerActionId"
+                        "providerActionId",
+                        "providerContractDigest",
+                        "resourceStateDigest"
                       ],
                       "properties": {
                         "kind": {
@@ -66434,19 +67743,15 @@
                         },
                         "projectId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
                         "projectSessionId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "expectedProjectRevision": {
+                          "type": "integer",
+                          "minimum": 1
                         },
                         "expectedSessionRevision": {
                           "type": "integer",
@@ -66455,6 +67760,10 @@
                         "expectedSessionGeneration": {
                           "type": "integer",
                           "minimum": 1
+                        },
+                        "trustRecordDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
                         },
                         "launchPacketRef": {
                           "type": "object",
@@ -66482,10 +67791,6 @@
                         },
                         "budgetRef": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
                         "resourcePlanRef": {
@@ -66510,19 +67815,37 @@
                         },
                         "providerAdapterId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
                         "providerActionId": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "providerContractDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "resourceStateDigest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "retryOf": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "providerAdapterId",
+                            "providerActionId"
+                          ],
+                          "properties": {
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            }
+                          }
                         }
                       }
                     },
@@ -68465,101 +69788,395 @@
               "const": true
             },
             "result": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "commandId",
-                "previewId",
-                "previewRevision",
-                "intentDigest",
-                "beforeStateDigest",
-                "afterStateDigest",
-                "evidenceRefs",
-                "committedAt"
-              ],
-              "properties": {
-                "commandId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "previewId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "previewRevision": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "intentDigest": {
-                  "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
-                },
-                "beforeStateDigest": {
-                  "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
-                },
-                "afterStateDigest": {
-                  "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
-                },
-                "evidenceRefs": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "path",
-                      "digest"
-                    ],
-                    "properties": {
-                      "path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                      },
-                      "digest": {
-                        "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
-                      }
-                    }
-                  },
-                  "minItems": 0,
-                  "maxItems": 128
-                },
-                "committedAt": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "effectRef": {
+              "oneOf": [
+                {
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "path",
-                    "digest"
+                    "commandId",
+                    "previewId",
+                    "previewRevision",
+                    "intentDigest",
+                    "beforeStateDigest",
+                    "afterStateDigest",
+                    "evidenceRefs",
+                    "committedAt"
                   ],
                   "properties": {
-                    "path": {
+                    "commandId": {
                       "type": "string",
                       "minLength": 1,
-                      "maxLength": 4096,
-                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
-                    "digest": {
+                    "previewId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "previewRevision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "intentDigest": {
                       "type": "string",
                       "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "beforeStateDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "afterStateDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "evidenceRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "committedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "effectRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "commandId",
+                    "previewId",
+                    "previewRevision",
+                    "intentDigest",
+                    "beforeStateDigest",
+                    "afterStateDigest",
+                    "evidenceRefs",
+                    "committedAt",
+                    "providerActionRef"
+                  ],
+                  "properties": {
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "previewId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "previewRevision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "beforeStateDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "afterStateDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "evidenceRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "committedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "providerActionRef": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "dispatched",
+                                "accepted"
+                              ]
+                            },
+                            "outcomeKind": {
+                              "const": null
+                            },
+                            "outcomeDigest": {
+                              "const": null
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "terminal"
+                            },
+                            "outcomeKind": {
+                              "type": "string",
+                              "enum": [
+                                "terminal-success",
+                                "terminal-no-effect"
+                              ]
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeKind": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "effectRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
                     }
                   }
                 }
-              }
+              ]
             }
           }
         },
@@ -68766,6 +70383,240 @@
                     "status",
                     "commandId",
                     "intentDigest",
+                    "phase",
+                    "attemptGeneration",
+                    "providerActionRef"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "pending"
+                    },
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "prepared",
+                        "dispatched",
+                        "accepted",
+                        "observing"
+                      ]
+                    },
+                    "attemptGeneration": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "providerActionRef": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "dispatched",
+                                "accepted"
+                              ]
+                            },
+                            "outcomeKind": {
+                              "const": null
+                            },
+                            "outcomeDigest": {
+                              "const": null
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "terminal"
+                            },
+                            "outcomeKind": {
+                              "type": "string",
+                              "enum": [
+                                "terminal-success",
+                                "terminal-no-effect"
+                              ]
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeKind": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "commandId",
+                    "intentDigest",
                     "attemptGeneration",
                     "effectRef"
                   ],
@@ -68817,6 +70668,250 @@
                   "required": [
                     "status",
                     "commandId",
+                    "intentDigest",
+                    "attemptGeneration",
+                    "providerActionRef"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ambiguous"
+                    },
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "attemptGeneration": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "providerActionRef": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "dispatched",
+                                "accepted"
+                              ]
+                            },
+                            "outcomeKind": {
+                              "const": null
+                            },
+                            "outcomeDigest": {
+                              "const": null
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "terminal"
+                            },
+                            "outcomeKind": {
+                              "type": "string",
+                              "enum": [
+                                "terminal-success",
+                                "terminal-no-effect"
+                              ]
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeKind": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "effectRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "commandId",
                     "receipt"
                   ],
                   "properties": {
@@ -68832,101 +70927,395 @@
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
                     "receipt": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "commandId",
-                        "previewId",
-                        "previewRevision",
-                        "intentDigest",
-                        "beforeStateDigest",
-                        "afterStateDigest",
-                        "evidenceRefs",
-                        "committedAt"
-                      ],
-                      "properties": {
-                        "commandId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "previewId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "previewRevision": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "intentDigest": {
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "beforeStateDigest": {
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "afterStateDigest": {
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "evidenceRefs": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "path",
-                              "digest"
-                            ],
-                            "properties": {
-                              "path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 4096,
-                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                              },
-                              "digest": {
-                                "type": "string",
-                                "pattern": "^sha256:[a-f0-9]{64}$"
-                              }
-                            }
-                          },
-                          "minItems": 0,
-                          "maxItems": 128
-                        },
-                        "committedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "effectRef": {
+                      "oneOf": [
+                        {
                           "type": "object",
                           "additionalProperties": false,
                           "required": [
-                            "path",
-                            "digest"
+                            "commandId",
+                            "previewId",
+                            "previewRevision",
+                            "intentDigest",
+                            "beforeStateDigest",
+                            "afterStateDigest",
+                            "evidenceRefs",
+                            "committedAt"
                           ],
                           "properties": {
-                            "path": {
+                            "commandId": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 4096,
-                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                             },
-                            "digest": {
+                            "previewId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "previewRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "intentDigest": {
                               "type": "string",
                               "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "beforeStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "afterStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "path",
+                                  "digest"
+                                ],
+                                "properties": {
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                  }
+                                }
+                              },
+                              "minItems": 0,
+                              "maxItems": 128
+                            },
+                            "committedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "effectRef": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "path",
+                                "digest"
+                              ],
+                              "properties": {
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                },
+                                "digest": {
+                                  "type": "string",
+                                  "pattern": "^sha256:[a-f0-9]{64}$"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "commandId",
+                            "previewId",
+                            "previewRevision",
+                            "intentDigest",
+                            "beforeStateDigest",
+                            "afterStateDigest",
+                            "evidenceRefs",
+                            "committedAt",
+                            "providerActionRef"
+                          ],
+                          "properties": {
+                            "commandId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "previewId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "previewRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "intentDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "beforeStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "afterStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "path",
+                                  "digest"
+                                ],
+                                "properties": {
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                  }
+                                }
+                              },
+                              "minItems": 0,
+                              "maxItems": 128
+                            },
+                            "committedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "providerActionRef": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "schemaVersion",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "providerAdapterId",
+                                    "providerActionId",
+                                    "providerContractDigest",
+                                    "custodyAttemptGeneration",
+                                    "journalRevision",
+                                    "journalState",
+                                    "outcomeKind",
+                                    "outcomeDigest"
+                                  ],
+                                  "properties": {
+                                    "schemaVersion": {
+                                      "const": 1
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "coordinationRunId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerAdapterId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerActionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerContractDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    },
+                                    "custodyAttemptGeneration": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalRevision": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalState": {
+                                      "type": "string",
+                                      "enum": [
+                                        "prepared",
+                                        "dispatched",
+                                        "accepted"
+                                      ]
+                                    },
+                                    "outcomeKind": {
+                                      "const": null
+                                    },
+                                    "outcomeDigest": {
+                                      "const": null
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "schemaVersion",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "providerAdapterId",
+                                    "providerActionId",
+                                    "providerContractDigest",
+                                    "custodyAttemptGeneration",
+                                    "journalRevision",
+                                    "journalState",
+                                    "outcomeKind",
+                                    "outcomeDigest"
+                                  ],
+                                  "properties": {
+                                    "schemaVersion": {
+                                      "const": 1
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "coordinationRunId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerAdapterId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerActionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerContractDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    },
+                                    "custodyAttemptGeneration": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalRevision": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalState": {
+                                      "const": "terminal"
+                                    },
+                                    "outcomeKind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "terminal-success",
+                                        "terminal-no-effect"
+                                      ]
+                                    },
+                                    "outcomeDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "schemaVersion",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "providerAdapterId",
+                                    "providerActionId",
+                                    "providerContractDigest",
+                                    "custodyAttemptGeneration",
+                                    "journalRevision",
+                                    "journalState",
+                                    "outcomeKind",
+                                    "outcomeDigest"
+                                  ],
+                                  "properties": {
+                                    "schemaVersion": {
+                                      "const": 1
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "coordinationRunId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerAdapterId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerActionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerContractDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    },
+                                    "custodyAttemptGeneration": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalRevision": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalState": {
+                                      "const": "ambiguous"
+                                    },
+                                    "outcomeKind": {
+                                      "const": "ambiguous"
+                                    },
+                                    "outcomeDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "effectRef": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "path",
+                                "digest"
+                              ],
+                              "properties": {
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                },
+                                "digest": {
+                                  "type": "string",
+                                  "pattern": "^sha256:[a-f0-9]{64}$"
+                                }
+                              }
                             }
                           }
                         }
-                      }
+                      ]
                     }
                   }
                 },
@@ -69205,6 +71594,240 @@
                     "status",
                     "commandId",
                     "intentDigest",
+                    "phase",
+                    "attemptGeneration",
+                    "providerActionRef"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "pending"
+                    },
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "prepared",
+                        "dispatched",
+                        "accepted",
+                        "observing"
+                      ]
+                    },
+                    "attemptGeneration": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "providerActionRef": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "dispatched",
+                                "accepted"
+                              ]
+                            },
+                            "outcomeKind": {
+                              "const": null
+                            },
+                            "outcomeDigest": {
+                              "const": null
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "terminal"
+                            },
+                            "outcomeKind": {
+                              "type": "string",
+                              "enum": [
+                                "terminal-success",
+                                "terminal-no-effect"
+                              ]
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeKind": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "commandId",
+                    "intentDigest",
                     "attemptGeneration",
                     "effectRef"
                   ],
@@ -69256,6 +71879,250 @@
                   "required": [
                     "status",
                     "commandId",
+                    "intentDigest",
+                    "attemptGeneration",
+                    "providerActionRef"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ambiguous"
+                    },
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "attemptGeneration": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "providerActionRef": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "dispatched",
+                                "accepted"
+                              ]
+                            },
+                            "outcomeKind": {
+                              "const": null
+                            },
+                            "outcomeDigest": {
+                              "const": null
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "terminal"
+                            },
+                            "outcomeKind": {
+                              "type": "string",
+                              "enum": [
+                                "terminal-success",
+                                "terminal-no-effect"
+                              ]
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "projectSessionId",
+                            "coordinationRunId",
+                            "providerAdapterId",
+                            "providerActionId",
+                            "providerContractDigest",
+                            "custodyAttemptGeneration",
+                            "journalRevision",
+                            "journalState",
+                            "outcomeKind",
+                            "outcomeDigest"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "coordinationRunId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerAdapterId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerActionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "providerContractDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "custodyAttemptGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "journalState": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeKind": {
+                              "const": "ambiguous"
+                            },
+                            "outcomeDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "effectRef": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "digest"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "commandId",
                     "receipt"
                   ],
                   "properties": {
@@ -69271,101 +72138,395 @@
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
                     "receipt": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "commandId",
-                        "previewId",
-                        "previewRevision",
-                        "intentDigest",
-                        "beforeStateDigest",
-                        "afterStateDigest",
-                        "evidenceRefs",
-                        "committedAt"
-                      ],
-                      "properties": {
-                        "commandId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "previewId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "previewRevision": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "intentDigest": {
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "beforeStateDigest": {
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "afterStateDigest": {
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "evidenceRefs": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "path",
-                              "digest"
-                            ],
-                            "properties": {
-                              "path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 4096,
-                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                              },
-                              "digest": {
-                                "type": "string",
-                                "pattern": "^sha256:[a-f0-9]{64}$"
-                              }
-                            }
-                          },
-                          "minItems": 0,
-                          "maxItems": 128
-                        },
-                        "committedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "effectRef": {
+                      "oneOf": [
+                        {
                           "type": "object",
                           "additionalProperties": false,
                           "required": [
-                            "path",
-                            "digest"
+                            "commandId",
+                            "previewId",
+                            "previewRevision",
+                            "intentDigest",
+                            "beforeStateDigest",
+                            "afterStateDigest",
+                            "evidenceRefs",
+                            "committedAt"
                           ],
                           "properties": {
-                            "path": {
+                            "commandId": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 4096,
-                              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                             },
-                            "digest": {
+                            "previewId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "previewRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "intentDigest": {
                               "type": "string",
                               "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "beforeStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "afterStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "path",
+                                  "digest"
+                                ],
+                                "properties": {
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                  }
+                                }
+                              },
+                              "minItems": 0,
+                              "maxItems": 128
+                            },
+                            "committedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "effectRef": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "path",
+                                "digest"
+                              ],
+                              "properties": {
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                },
+                                "digest": {
+                                  "type": "string",
+                                  "pattern": "^sha256:[a-f0-9]{64}$"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "commandId",
+                            "previewId",
+                            "previewRevision",
+                            "intentDigest",
+                            "beforeStateDigest",
+                            "afterStateDigest",
+                            "evidenceRefs",
+                            "committedAt",
+                            "providerActionRef"
+                          ],
+                          "properties": {
+                            "commandId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "previewId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "previewRevision": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "intentDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "beforeStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "afterStateDigest": {
+                              "type": "string",
+                              "pattern": "^sha256:[a-f0-9]{64}$"
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "path",
+                                  "digest"
+                                ],
+                                "properties": {
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f0-9]{64}$"
+                                  }
+                                }
+                              },
+                              "minItems": 0,
+                              "maxItems": 128
+                            },
+                            "committedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "providerActionRef": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "schemaVersion",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "providerAdapterId",
+                                    "providerActionId",
+                                    "providerContractDigest",
+                                    "custodyAttemptGeneration",
+                                    "journalRevision",
+                                    "journalState",
+                                    "outcomeKind",
+                                    "outcomeDigest"
+                                  ],
+                                  "properties": {
+                                    "schemaVersion": {
+                                      "const": 1
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "coordinationRunId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerAdapterId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerActionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerContractDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    },
+                                    "custodyAttemptGeneration": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalRevision": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalState": {
+                                      "type": "string",
+                                      "enum": [
+                                        "prepared",
+                                        "dispatched",
+                                        "accepted"
+                                      ]
+                                    },
+                                    "outcomeKind": {
+                                      "const": null
+                                    },
+                                    "outcomeDigest": {
+                                      "const": null
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "schemaVersion",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "providerAdapterId",
+                                    "providerActionId",
+                                    "providerContractDigest",
+                                    "custodyAttemptGeneration",
+                                    "journalRevision",
+                                    "journalState",
+                                    "outcomeKind",
+                                    "outcomeDigest"
+                                  ],
+                                  "properties": {
+                                    "schemaVersion": {
+                                      "const": 1
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "coordinationRunId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerAdapterId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerActionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerContractDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    },
+                                    "custodyAttemptGeneration": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalRevision": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalState": {
+                                      "const": "terminal"
+                                    },
+                                    "outcomeKind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "terminal-success",
+                                        "terminal-no-effect"
+                                      ]
+                                    },
+                                    "outcomeDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "schemaVersion",
+                                    "projectSessionId",
+                                    "coordinationRunId",
+                                    "providerAdapterId",
+                                    "providerActionId",
+                                    "providerContractDigest",
+                                    "custodyAttemptGeneration",
+                                    "journalRevision",
+                                    "journalState",
+                                    "outcomeKind",
+                                    "outcomeDigest"
+                                  ],
+                                  "properties": {
+                                    "schemaVersion": {
+                                      "const": 1
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "coordinationRunId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerAdapterId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerActionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "providerContractDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    },
+                                    "custodyAttemptGeneration": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalRevision": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "journalState": {
+                                      "const": "ambiguous"
+                                    },
+                                    "outcomeKind": {
+                                      "const": "ambiguous"
+                                    },
+                                    "outcomeDigest": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[a-f0-9]{64}$"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "effectRef": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "path",
+                                "digest"
+                              ],
+                              "properties": {
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                },
+                                "digest": {
+                                  "type": "string",
+                                  "pattern": "^sha256:[a-f0-9]{64}$"
+                                }
+                              }
                             }
                           }
                         }
-                      }
+                      ]
                     }
                   }
                 },

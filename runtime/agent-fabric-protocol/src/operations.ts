@@ -15,6 +15,7 @@ export type OperationFeature =
   | "operator-projection.v1"
   | "operator-projection.v2"
   | "operator-actions.v1"
+  | "launch-custody.v1"
   | "message-body-read.v1"
   | "operator-repository-read.v1"
   | "lifecycle-control.v1";

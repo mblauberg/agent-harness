@@ -283,14 +283,18 @@ const launchIntent = {
   kind: "project-session-launch",
   projectId: "project_01",
   projectSessionId: "ps_01",
+  expectedProjectRevision: 3,
   expectedSessionRevision: 4,
   expectedSessionGeneration: 2,
+  trustRecordDigest: digestA,
   launchPacketRef: artifact,
   authorityRef: digestA,
   budgetRef: "budget_01",
   resourcePlanRef: { path: "launch/resources.json", digest: digestA },
   providerAdapterId: "claude-agent-sdk",
   providerActionId: "provider_action_launch_01",
+  providerContractDigest: digestA,
+  resourceStateDigest: digestA,
 } as const;
 
 describe("closed two-phase action intents", () => {

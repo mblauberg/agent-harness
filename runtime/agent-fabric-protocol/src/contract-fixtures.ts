@@ -1,5 +1,13 @@
 import { OPERATION_REGISTRY, FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
 import { OPERATION_CODECS } from "./operation-codecs.js";
+import {
+  parseLaunchAdapterOutcomeV1,
+  parseLaunchPacketV1,
+  parseLaunchResourcePlanV1,
+  parseProjectSessionLaunchCurrentState,
+  parseProjectSessionLaunchIntent,
+  parseProviderActionRefV1,
+} from "./launch.js";
 import { parseJsonValue, type JsonValue } from "./primitives.js";
 import type { ProtocolOperation } from "./rpc-contract.js";
 
@@ -16,6 +24,137 @@ const operatorCommand = {
   provenance: { kind: "console-direct-input", clientId: "client_01", inputEventId: "input_01" },
   evidenceRefs: [artifact],
 };
+
+const launchPacketRef = { path: "launch/packet.json", digest: digestA };
+const launchResourcePlanRef = { path: "launch/resources.json", digest: digestB };
+const projectSessionLaunchIntent = parseProjectSessionLaunchIntent({
+  kind: "project-session-launch",
+  projectId: "project_01",
+  projectSessionId: "ps_01",
+  expectedProjectRevision: 3,
+  expectedSessionRevision: 4,
+  expectedSessionGeneration: 2,
+  trustRecordDigest: digestA,
+  launchPacketRef,
+  authorityRef: digestA,
+  budgetRef: "budget_01",
+  resourcePlanRef: launchResourcePlanRef,
+  providerAdapterId: "claude-agent-sdk",
+  providerActionId: "provider_action_launch_01",
+  providerContractDigest: digestB,
+  resourceStateDigest: digestA,
+});
+const launchPacketV1 = parseLaunchPacketV1({
+  schemaVersion: 1,
+  projectId: "project_01",
+  projectSessionId: "ps_01",
+  runId: "run_launch_01",
+  chairAgentId: "agent_chair_01",
+  projectRunDirectory: ".agent-run/AFAB-005",
+  topologyMode: "coordinated",
+  budgetRef: "budget_01",
+  resourcePlanRef: launchResourcePlanRef,
+  chairAuthority: {
+    workspaceRoots: ["project"],
+    sourcePaths: ["runtime/agent-fabric"],
+    artifactPaths: [".agent-run/AFAB-005"],
+    actions: [FABRIC_OPERATIONS.createTask],
+    disclosure: { level: "forbidden" },
+    expiresAt: "2026-07-12T12:00:00Z",
+    budget: { concurrent_turns: 2 },
+  },
+  provider: {
+    adapterId: "claude-agent-sdk",
+    actionId: "provider_action_launch_01",
+    contractDigest: digestB,
+    inputSchemaId: "claude-launch-input.v1",
+    input: { model: "claude-opus-4-1", promptRef: "launch/prompt.txt" },
+  },
+});
+const launchResourcePlanV1 = parseLaunchResourcePlanV1({
+  schemaVersion: 1,
+  projectId: "project_01",
+  projectSessionId: "ps_01",
+  runId: "run_launch_01",
+  budgetRef: "budget_01",
+  scopes: {
+    project: { scopeId: "scope_project_01", limits: { concurrent_turns: 4 } },
+    projectSession: { scopeId: "scope_session_01", limits: { concurrent_turns: 3 } },
+    coordinationRun: { scopeId: "scope_run_01", limits: { concurrent_turns: 2 } },
+  },
+  launchReservation: { amounts: { concurrent_turns: 1 } },
+});
+const projectSessionLaunchCurrentState = parseProjectSessionLaunchCurrentState({
+  schemaVersion: 1,
+  projectId: "project_01",
+  projectRevision: 3,
+  projectSessionId: "ps_01",
+  sessionRevision: 4,
+  sessionGeneration: 2,
+  sessionState: "awaiting_launch",
+  currentLaunchPacketRef: launchPacketRef,
+  trustRecordDigest: digestA,
+  providerAdapterId: "claude-agent-sdk",
+  providerContractDigest: digestB,
+  resourceStateDigest: digestA,
+  provedFailedAttempt: null,
+});
+const terminalSuccessOutcome = parseLaunchAdapterOutcomeV1({
+  schemaVersion: 1,
+  providerAdapterId: "claude-agent-sdk",
+  providerActionId: "provider_action_launch_01",
+  providerContractDigest: digestB,
+  observationKind: "lookup",
+  observedAt: timestamp,
+  outcome: {
+    kind: "terminal-success",
+    providerSessionRef: "provider_session_01",
+    providerSessionGeneration: 1,
+    effectDigest: digestA,
+    resourceUsage: { concurrent_turns: 1 },
+  },
+});
+const terminalNoEffectOutcome = parseLaunchAdapterOutcomeV1({
+  ...terminalSuccessOutcome,
+  observationKind: "dispatch-return",
+  outcome: {
+    kind: "terminal-no-effect",
+    failureCode: "provider-rejected",
+    noEffectProof: {
+      schemaId: "provider-no-effect.v1",
+      proof: { providerActionId: "provider_action_launch_01", effectCount: 0 },
+      digest: digestA,
+    },
+  },
+});
+const ambiguousOutcome = parseLaunchAdapterOutcomeV1({
+  ...terminalSuccessOutcome,
+  outcome: { kind: "ambiguous", reasonCode: "missing-resume-reference", evidenceDigest: null },
+});
+const providerActionRefV1 = parseProviderActionRefV1({
+  schemaVersion: 1,
+  projectSessionId: "ps_01",
+  coordinationRunId: "run_launch_01",
+  providerAdapterId: "claude-agent-sdk",
+  providerActionId: "provider_action_launch_01",
+  providerContractDigest: digestB,
+  custodyAttemptGeneration: 1,
+  journalRevision: 3,
+  journalState: "terminal",
+  outcomeKind: "terminal-success",
+  outcomeDigest: digestA,
+});
+
+export const LAUNCH_CONTRACT_FIXTURES = Object.freeze({
+  projectSessionLaunchIntent,
+  launchPacketV1,
+  launchResourcePlanV1,
+  projectSessionLaunchCurrentState,
+  terminalSuccessOutcome,
+  terminalNoEffectOutcome,
+  ambiguousOutcome,
+  providerActionRefV1,
+});
 
 const session = {
   projectSessionId: "ps_01",

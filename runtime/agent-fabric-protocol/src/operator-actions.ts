@@ -1,4 +1,5 @@
 import type { ReleaseBinding, ScopedGate } from "./gates.js";
+import type { ProviderActionRefV1 } from "./launch.js";
 import type { OperatorAction, OperatorCapabilityCredential, OperatorMutationContext } from "./operator.js";
 import type {
   ArtifactRef,
@@ -84,14 +85,22 @@ export type ProjectSessionLaunchIntent = {
   kind: "project-session-launch";
   projectId: ProjectId;
   projectSessionId: ProjectSessionId;
+  expectedProjectRevision: number;
   expectedSessionRevision: number;
   expectedSessionGeneration: number;
+  trustRecordDigest: Sha256Digest;
   launchPacketRef: ArtifactRef;
   authorityRef: Sha256Digest;
   budgetRef: string;
   resourcePlanRef: ArtifactRef;
   providerAdapterId: string;
   providerActionId: ProviderActionId;
+  providerContractDigest: Sha256Digest;
+  resourceStateDigest: Sha256Digest;
+  retryOf?: {
+    providerAdapterId: string;
+    providerActionId: ProviderActionId;
+  };
 };
 
 export type GitRepositoryBinding = {
@@ -370,17 +379,21 @@ export type OperatorActionCommitRequest = {
   confirmation: OperatorActionConfirmation;
 };
 
-export type OperatorActionReceipt = {
+type OperatorActionReceiptBase = {
   commandId: string;
   previewId: string;
   previewRevision: number;
   intentDigest: Sha256Digest;
   beforeStateDigest: Sha256Digest;
   afterStateDigest: Sha256Digest;
-  effectRef?: ArtifactRef;
   evidenceRefs: readonly ArtifactRef[];
   committedAt: Timestamp;
 };
+
+export type OperatorActionReceipt = OperatorActionReceiptBase & (
+  | { effectRef?: ArtifactRef; providerActionRef?: never }
+  | { effectRef?: ArtifactRef; providerActionRef: ProviderActionRefV1 }
+);
 
 export type OperatorActionStatusRequest = {
   credential: OperatorCapabilityCredential;
@@ -408,14 +421,17 @@ export type OperatorActionStatus =
       intentDigest: Sha256Digest;
       phase: "prepared" | "dispatched" | "accepted" | "observing";
       attemptGeneration: number;
+      providerActionRef?: ProviderActionRefV1;
     }
-  | {
+  | ({
       status: "ambiguous";
       commandId: string;
       intentDigest: Sha256Digest;
       attemptGeneration: number;
-      effectRef: ArtifactRef;
-    }
+    } & (
+      | { effectRef: ArtifactRef; providerActionRef?: never }
+      | { effectRef?: ArtifactRef; providerActionRef: ProviderActionRefV1 }
+    ))
   | { status: "committed"; commandId: string; receipt: OperatorActionReceipt }
   | {
       status: "rejected";
