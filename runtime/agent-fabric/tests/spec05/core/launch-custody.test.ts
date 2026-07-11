@@ -275,6 +275,52 @@ function closeTrackedDatabase(database: Database.Database): void {
   database.close();
 }
 
+function probeRecoveryCapabilityIdentityGuards(database: Database.Database): {
+  identityUpdateBlocked: boolean;
+  deleteBlocked: boolean;
+  mutableMetadataAllowed: boolean;
+} {
+  const recovery = database.prepare(`
+    SELECT new_capability_hash FROM chair_bridge_recovery_custody WHERE path='rebind'
+  `).get() as { new_capability_hash: string };
+  let identityUpdateBlocked = false;
+  database.exec("SAVEPOINT probe_recovery_identity_update");
+  try {
+    database.prepare(`
+      UPDATE capabilities SET principal_generation=principal_generation+1 WHERE token_hash=?
+    `).run(recovery.new_capability_hash);
+  } catch (error: unknown) {
+    identityUpdateBlocked = error instanceof Error && /INVARIANT_chair_bridge_loss_freezes_grants/u.test(error.message);
+  } finally {
+    database.exec("ROLLBACK TO probe_recovery_identity_update");
+    database.exec("RELEASE probe_recovery_identity_update");
+  }
+  let deleteBlocked = false;
+  database.exec("SAVEPOINT probe_recovery_identity_delete");
+  try {
+    database.prepare(`DELETE FROM capabilities WHERE token_hash=?`).run(recovery.new_capability_hash);
+  } catch (error: unknown) {
+    deleteBlocked = error instanceof Error && /INVARIANT_chair_bridge_loss_freezes_grants/u.test(error.message);
+  } finally {
+    database.exec("ROLLBACK TO probe_recovery_identity_delete");
+    database.exec("RELEASE probe_recovery_identity_delete");
+  }
+  let mutableMetadataAllowed = true;
+  database.exec("SAVEPOINT probe_recovery_mutable_metadata");
+  try {
+    database.prepare(`
+      UPDATE capabilities SET expires_at=expires_at+1, revoked_at=COALESCE(revoked_at, ?)
+       WHERE token_hash=?
+    `).run(now, recovery.new_capability_hash);
+  } catch {
+    mutableMetadataAllowed = false;
+  } finally {
+    database.exec("ROLLBACK TO probe_recovery_mutable_metadata");
+    database.exec("RELEASE probe_recovery_mutable_metadata");
+  }
+  return { identityUpdateBlocked, deleteBlocked, mutableMetadataAllowed };
+}
+
 async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promise<{
   inspection: Awaited<ReturnType<LaunchCustodyService["inspect"]>>;
   handle: ReturnType<LaunchCustodyService["prepareInTransaction"]>;
@@ -899,6 +945,7 @@ describe("launch custody", () => {
 
   it("rebinds a lost chair with fresh secret custody, native evidence and duplicate-safe settlement", async () => {
     let recoveryEffects = 0;
+    let dispatchedCapabilityGuards: ReturnType<typeof probeRecoveryCapabilityIdentityGuards> | undefined;
     const outcome = {
       schemaVersion: 1,
       providerAdapterId: "claude-agent-sdk",
@@ -922,6 +969,7 @@ describe("launch custody", () => {
         expect(fixture.database.prepare(`
           SELECT state FROM chair_bridge_recovery_custody WHERE recovery_id=?
         `).get(recovery.recoveryId)).toEqual({ state: "dispatched" });
+        dispatchedCapabilityGuards = probeRecoveryCapabilityIdentityGuards(fixture.database);
         return {
           schemaVersion: 1,
           recoveryId: recovery.recoveryId,
@@ -1081,6 +1129,11 @@ describe("launch custody", () => {
     const committed = await fixture.service.dispatchPreparedChairRecovery(recovery);
     await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toEqual(committed);
     expect(recoveryEffects).toBe(1);
+    expect(dispatchedCapabilityGuards).toEqual({
+      identityUpdateBlocked: true,
+      deleteBlocked: true,
+      mutableMetadataAllowed: true,
+    });
     expect(fixture.database.prepare(`
       SELECT chair_agent_id, provider_action_id, provider_session_generation,
              principal_generation, bridge_generation, state
@@ -1440,6 +1493,11 @@ describe("launch custody", () => {
       inspection, operatorId: "operator_01", operatorCommandId: "ambiguous_recovery_command",
     }))();
     await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({ status: "ambiguous" });
+    expect(probeRecoveryCapabilityIdentityGuards(fixture.database)).toEqual({
+      identityUpdateBlocked: true,
+      deleteBlocked: true,
+      mutableMetadataAllowed: true,
+    });
     await fixture.service.recover();
     expect(recoveryEffects).toBe(1);
     expect(lookups).toBe(1);

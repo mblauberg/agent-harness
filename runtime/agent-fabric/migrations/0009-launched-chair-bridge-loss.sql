@@ -220,7 +220,7 @@ WHEN (
      WHERE bridge.coordination_run_id=NEW.run_id AND bridge.state='lost'
   ) OR EXISTS (
     SELECT 1 FROM chair_bridge_recovery_custody recovery
-     WHERE recovery.path='rebind' AND recovery.state='prepared'
+     WHERE recovery.path='rebind'
        AND recovery.new_capability_hash=NEW.token_hash
   )
 ) AND NOT EXISTS (
@@ -241,8 +241,16 @@ WHEN (
   OLD.agent_id<>NEW.agent_id OR OLD.principal_generation<>NEW.principal_generation
 ) AND EXISTS (
   SELECT 1 FROM chair_bridge_recovery_custody recovery
-   WHERE recovery.path='rebind' AND recovery.state='prepared'
+   WHERE recovery.path='rebind'
      AND recovery.new_capability_hash IN (OLD.token_hash, NEW.token_hash)
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_chair_bridge_loss_freezes_grants'); END;
+
+CREATE TRIGGER chair_bridge_recovery_capability_delete_forbidden
+BEFORE DELETE ON capabilities
+WHEN EXISTS (
+  SELECT 1 FROM chair_bridge_recovery_custody recovery
+   WHERE recovery.path='rebind' AND recovery.new_capability_hash=OLD.token_hash
 )
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_chair_bridge_loss_freezes_grants'); END;
 
