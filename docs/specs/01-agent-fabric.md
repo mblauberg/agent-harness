@@ -1,16 +1,17 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.5
+Version: 0.6
 Date: 11 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.5 closes the implementation-discovered local operator-provisioning
-and reviewed chair-launch gap. It does not change Spec 05 product scope or
-authorise provider login, push, release or unattended daemon operation.
+Version 0.6 closes the implementation-discovered typed Git-read and Activity
+message-body binding gaps. Version 0.5 closed local operator provisioning and
+reviewed chair launch. Neither amendment changes Spec 05 product scope or
+authorises provider login, push, release or unattended daemon operation.
 
 ## 1. Decision requested
 
@@ -1716,6 +1717,71 @@ Acceptance additionally requires:
   project session, at most one run/action effect for the stable identity, no
   second coordinated chair and no secret in protocol responses, projections,
   logs or receipts.
+
+### 32.10 Typed repository reads and Activity message binding
+
+The public operator protocol adds `operator-repository-read.v1` with
+`fabric.v1.operator-repository.read`. The request authenticates an operator,
+binds the exact project and optional project session, carries the current
+operator snapshot revision, and selects either the trusted project root or an
+exact canonical worktree admitted to that session. It accepts only typed diff
+selectors (`working-tree`, `staged`, or two exact object digests) plus bounded
+log cursor and limit. It accepts no command, shell, argument vector, arbitrary
+Git subcommand, environment override or caller-selected repository outside the
+trusted project.
+
+The daemon derives and rechecks the repository/worktree boundary, invokes only
+its fixed Git-read port, and returns one `GitRepositoryProjection` containing:
+
+- canonical repository and worktree paths;
+- head ref, detached state and exact object digest;
+- head, index, worktree and remote state digests compatible with
+  `GitRepositoryBinding` mutation fences;
+- bounded staged, unstaged, untracked and conflicted paths with an explicit
+  truncation marker;
+- typed merge, rebase, cherry-pick, bisect or clean operation state;
+- optional remote/branch upstream with ahead/behind counts;
+- an immutable diff artifact reference and its exact base/target digests;
+- a bounded cursor-paged log of object digest, parent digests, subject and
+  author timestamp;
+- bounded typed branch and worktree records with explicit truncation; and
+- a separately fresh `ProjectionFact` for optional hosted checks.
+
+Local Git and hosted GitHub facts have independent source, revision, freshness
+and observation time. GitHub absence, outage or staleness cannot make the
+local Git result unavailable or stale. A changed operator snapshot returns
+`resnapshot-required`; a repository change between observation and response
+returns a new repository state digest and never fabricates snapshot stability.
+The v2 Project row carries only bounded status/count/upstream fields and the
+repository state digest; Project detail and repository-read results carry the
+full typed projection. Pagination and truncation are explicit and bounded.
+
+The protocol also adds:
+
+```yaml
+message_body_ref:
+  project_session_id: exact-session
+  message_id: exact-message
+  expected_revision: positive-integer
+```
+
+`ActivityViewItem`, the v2 Activity summary and Activity detail carry
+`messageBodyRef`. An Activity item of kind `message` requires the exact ref;
+every other kind forbids it. Row, detail and `MessageBodyReadRequest` preserve
+the same session, message and revision. The body read remains separately
+authorised and revision-fenced; its result must still prove terminal-control
+neutralisation and capability-value redaction. No event ID is guessed or
+reinterpreted as a message ID.
+
+Acceptance additionally requires:
+
+- **AC-023:** status, diff, log, branches, worktrees, upstream and checks survive
+  Project row-to-detail/repository-read projection with exact state digests,
+  explicit pagination/truncation and independent Git/GitHub degradation; no
+  typed or runtime surface accepts arbitrary Git execution; and
+- **AC-024:** message Activity rows require and preserve the exact message-body
+  reference, non-message rows reject one, stale revisions fail closed, and the
+  Console can read the full neutralised/redacted body without deriving IDs.
 
 Acceptance adds:
 
