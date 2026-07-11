@@ -363,6 +363,50 @@ describe("production Console mutation planner", () => {
       command: { expectedRevision: 8 },
     });
   });
+
+  it("plans every action retained by the production availability boundary", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+    const current = dataset();
+    const run = current.pages.runs.rows[0];
+    if (run === undefined) throw new Error("run fixture is unavailable");
+    const supported = [
+      "pause",
+      "resume",
+      "cancel",
+      "steer",
+      "project-session-drain",
+    ] as const;
+    const available: FabricConsoleDataset = {
+      ...current,
+      pages: {
+        ...current.pages,
+        runs: {
+          ...current.pages.runs,
+          rows: [{
+            ...run,
+            actionAvailability: {
+              state: "available",
+              actions: supported,
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
+    };
+
+    for (const action of supported) {
+      await expect(planner.plan({
+        activation: activation(action, `input_${action}`),
+        dataset: available,
+        state: state(),
+        draft: "exact operator payload",
+      })).resolves.toMatchObject({ availableAction: action });
+    }
+  });
 });
 
 describe("production Console package-root bootstrap", () => {
@@ -435,6 +479,113 @@ describe("production Console package-root bootstrap", () => {
         confirmation: expect.any(Function),
       }),
     });
+  });
+
+  it("removes server-enabled actions that the production planner cannot bind exactly", async () => {
+    const close = async () => {};
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => ({
+          client: {
+            kind: "operator",
+            features: ["operator-projection.v1", "operator-projection.v2", "scoped-gate-read.v1"],
+            projection: {
+              snapshot: async () => dataset().snapshot,
+              events: async () => { throw new Error("unused"); },
+            },
+            console: {
+              readOnly: false,
+              launchAvailable: false,
+              actions: {
+                preview: async () => { throw new Error("unused"); },
+                commit: async () => { throw new Error("unused"); },
+                status: async () => { throw new Error("unused"); },
+                reconcile: async () => { throw new Error("unused"); },
+              },
+              gates: { read: async () => { throw new Error("unused"); } },
+              projection: {
+                viewPage: async () => ({
+                  status: "page",
+                  view: "runs",
+                  rows: [{
+                    itemId: "run_console_production",
+                    itemRevision: 4,
+                    fact: {
+                      freshness: "live",
+                      source: "fabric",
+                      revision: 4,
+                      observedAt,
+                      value: {
+                        summary: {
+                          kind: "run",
+                          phase: "active",
+                          health: "healthy",
+                          nextMilestone: "verification",
+                        },
+                        detailRef: {
+                          kind: "run",
+                          coordinationRunId: "run_console_production",
+                          expectedRevision: 4,
+                        },
+                        actionAvailability: {
+                          state: "available",
+                          actions: [
+                            "pause", "resume", "cancel", "steer",
+                            "project-session-drain", "project-session-stop",
+                            "daemon-drain", "daemon-stop", "git", "promotion",
+                          ],
+                          requiresPreview: true,
+                        },
+                      },
+                    },
+                  }],
+                  nextCursor: 1,
+                  hasMore: false,
+                  snapshotRevision: 11,
+                  readTransactionId: "filtered_actions",
+                }),
+                readDetail: async () => { throw new Error("unused"); },
+              },
+            },
+            operations: {},
+            close,
+          },
+          credential,
+          projectId,
+          projectSessionId,
+          operatorId: "operator_console_production",
+          clientId: "console_client_production",
+          detach: async () => {},
+          close,
+        }),
+      }),
+    });
+
+    const connected = await bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    });
+    if (connected.status !== "connected" || !connected.binding.ok) {
+      throw new Error("production binding is unavailable");
+    }
+    const page = await connected.binding.port.viewPage({
+      credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: 11,
+      cursor: 0,
+      limit: 10,
+    });
+    if (page.status !== "page" || page.rows[0]?.fact.freshness !== "live") {
+      throw new Error("filtered page is unavailable");
+    }
+    expect(page.rows[0].fact.value.actionAvailability).toStrictEqual({
+      state: "available",
+      actions: ["pause", "resume", "cancel", "steer", "project-session-drain"],
+      requiresPreview: true,
+    });
+    await connected.close();
   });
 
   it.each([

@@ -90,6 +90,16 @@ export type LocalOperatorProvisioningResult = LocalCapabilityMetadata & (
   | { issued: false }
 );
 
+export type LocalOperatorConsoleCapabilityInput = Omit<
+  LocalOperatorProvisioningInput,
+  "principalGeneration"
+>;
+
+export type LocalOperatorConsoleCapabilityResult = LocalCapabilityMetadata & {
+  issued: true;
+  credential: { capabilityId: string; token: string };
+};
+
 export type LocalOperatorSessionCapabilityInput = {
   projectId: string;
   canonicalRoot: string;
@@ -101,6 +111,7 @@ export type LocalOperatorSessionCapabilityInput = {
   actions: readonly SessionCapabilityAction[];
   expiresAt: string;
   launchEnvelopeExpiresAt: string;
+  fresh?: true;
 };
 
 type LocalSessionCapabilityMetadata = {
@@ -121,6 +132,12 @@ export type LocalOperatorSessionCapabilityResult = LocalSessionCapabilityMetadat
   | { issued: true; credential: { capabilityId: string; token: string } }
   | { issued: false }
 );
+
+export type LocalOperatorConsoleSessionCapabilityResult =
+  LocalSessionCapabilityMetadata & {
+    issued: true;
+    credential: { capabilityId: string; token: string };
+  };
 
 export type LocalOperatorPrincipalRotationInput = {
   projectId: string;
@@ -351,6 +368,179 @@ export class OperatorStore {
     return provision.immediate();
   }
 
+  openLocalOperatorConsoleCapability(
+    input: LocalOperatorConsoleCapabilityInput,
+  ): LocalOperatorConsoleCapabilityResult {
+    exactCanonicalRoot(input.canonicalRoot);
+    exactDigest(input.trustRecordDigest, "trustRecordDigest");
+    exactDigest(input.authenticatedSubjectHash, "authenticatedSubjectHash");
+    exactGeneration(input.projectAuthorityGeneration, "projectAuthorityGeneration");
+    const requestedExpiry = futureTimestamp(input.expiresAt, this.#clock(), "expiresAt");
+    const actions = projectLaunchActions(input.actions);
+    const projectId = deterministicIdentifier("project:local", {
+      canonicalRoot: input.canonicalRoot,
+    });
+    const operatorId = deterministicIdentifier("operator:local", {
+      authenticatedSubjectHash: input.authenticatedSubjectHash,
+      projectId,
+    });
+
+    const issue = this.database.transaction((): LocalOperatorConsoleCapabilityResult => {
+      const now = this.#clock();
+      const existingProject = this.database.prepare(
+        "SELECT * FROM projects WHERE project_id=? OR canonical_root=?",
+      ).get(projectId, input.canonicalRoot);
+      if (!isRow(existingProject)) {
+        if (input.projectAuthorityGeneration !== 1) {
+          throw new ProjectFabricCoreError(
+            "STALE_GENERATION",
+            "new project authority generation must be one",
+          );
+        }
+        this.database.prepare(`
+          INSERT INTO projects(
+            project_id, canonical_root, trust_record_digest, revision,
+            authority_generation, created_at, updated_at
+          ) VALUES (?, ?, ?, 1, 1, ?, ?)
+        `).run(projectId, input.canonicalRoot, input.trustRecordDigest, now, now);
+      } else if (
+        text(existingProject, "project_id") !== projectId ||
+        text(existingProject, "canonical_root") !== input.canonicalRoot ||
+        nullableText(existingProject, "trust_record_digest") !== input.trustRecordDigest ||
+        integer(existingProject, "authority_generation") !== input.projectAuthorityGeneration
+      ) {
+        throw new ProjectFabricCoreError(
+          "CONFLICT",
+          "trusted project binding conflicts with stored identity",
+        );
+      }
+
+      const existingPrincipal = this.database.prepare(`
+        SELECT * FROM operator_principals WHERE operator_id=?
+      `).get(operatorId);
+      let principalGeneration: number;
+      if (!isRow(existingPrincipal)) {
+        const otherPrincipal = this.database.prepare(`
+          SELECT operator_id FROM operator_principals WHERE project_id=? LIMIT 1
+        `).get(projectId);
+        if (isRow(otherPrincipal)) {
+          throw new ProjectFabricCoreError(
+            "CONFLICT",
+            "project already has a different local operator identity",
+          );
+        }
+        principalGeneration = 1;
+        this.database.prepare(`
+          INSERT INTO operator_principals(
+            operator_id, project_id, project_session_id, authenticated_subject_hash,
+            project_authority_generation, principal_generation, state, created_at, updated_at
+          ) VALUES (?, ?, NULL, ?, ?, 1, 'active', ?, ?)
+        `).run(
+          operatorId,
+          projectId,
+          input.authenticatedSubjectHash,
+          input.projectAuthorityGeneration,
+          now,
+          now,
+        );
+      } else {
+        if (
+          text(existingPrincipal, "project_id") !== projectId ||
+          text(existingPrincipal, "authenticated_subject_hash") !== input.authenticatedSubjectHash ||
+          integer(existingPrincipal, "project_authority_generation") !== input.projectAuthorityGeneration ||
+          text(existingPrincipal, "state") !== "active"
+        ) {
+          throw new ProjectFabricCoreError(
+            "CONFLICT",
+            "local operator binding conflicts with stored identity",
+          );
+        }
+        principalGeneration = integer(existingPrincipal, "principal_generation");
+      }
+
+      const epochRow = this.database.prepare(`
+        SELECT MAX(expires_at) AS expires_at
+          FROM operator_capabilities
+         WHERE operator_id=? AND project_id=? AND principal_generation=?
+           AND kind='project-launch' AND revoked_at IS NULL
+      `).get(operatorId, projectId, principalGeneration);
+      if (!isRow(epochRow)) throw new Error("local operator capability epoch is unavailable");
+      const storedEpoch = epochRow.expires_at;
+      let epochExpiry = storedEpoch === null ? null : Number(storedEpoch);
+      if (
+        epochExpiry !== null &&
+        (!Number.isSafeInteger(epochExpiry) || epochExpiry < 1)
+      ) {
+        throw new Error("local operator capability epoch is invalid");
+      }
+      if (epochExpiry !== null && epochExpiry <= now) {
+        const rotated = this.database.prepare(`
+          UPDATE operator_principals
+             SET principal_generation=principal_generation+1, updated_at=?
+           WHERE operator_id=? AND project_id=? AND principal_generation=? AND state='active'
+        `).run(now, operatorId, projectId, principalGeneration);
+        if (rotated.changes !== 1) {
+          throw new ProjectFabricCoreError(
+            "STALE_PRINCIPAL_GENERATION",
+            "operator principal generation changed",
+          );
+        }
+        this.database.prepare(`
+          UPDATE operator_capabilities SET revoked_at=?
+           WHERE operator_id=? AND project_id=?
+             AND principal_generation<=? AND revoked_at IS NULL
+        `).run(now, operatorId, projectId, principalGeneration);
+        principalGeneration += 1;
+        epochExpiry = null;
+      }
+
+      const expiresAtMillis = Math.min(
+        requestedExpiry.millis,
+        epochExpiry ?? requestedExpiry.millis,
+      );
+      if (expiresAtMillis <= now) {
+        throw new ProjectFabricCoreError(
+          "CAPABILITY_EXPIRED",
+          "local operator capability epoch expired",
+        );
+      }
+      const expiresAt = new Date(expiresAtMillis).toISOString();
+      const capabilityId = deterministicIdentifier("capability:project-console", {
+        operatorId,
+        principalGeneration,
+        nonce: randomBytes(32).toString("base64url"),
+      });
+      const token = `afop_${randomBytes(32).toString("base64url")}`;
+      const issuedAt = new Date(now).toISOString();
+      this.issueCapability(parseOperatorCapabilityGrant({
+        capabilityId,
+        operatorId,
+        projectId,
+        projectAuthorityGeneration: input.projectAuthorityGeneration,
+        principalGeneration,
+        issuedAt,
+        expiresAt,
+        status: "active",
+        kind: "project-launch",
+        actions,
+      }), token);
+      return {
+        projectId,
+        operatorId,
+        capabilityId,
+        projectAuthorityGeneration: input.projectAuthorityGeneration,
+        principalGeneration,
+        kind: "project-launch",
+        actions,
+        issuedAt,
+        expiresAt,
+        issued: true,
+        credential: { capabilityId, token },
+      };
+    });
+    return issue.immediate();
+  }
+
   issueLocalOperatorSessionCapability(
     input: LocalOperatorSessionCapabilityInput,
   ): LocalOperatorSessionCapabilityResult {
@@ -433,16 +623,22 @@ export class OperatorStore {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "session capability cannot outlive the project capability");
       }
 
-      const capabilityId = deterministicIdentifier("capability:session", {
-        actions,
-        expiresAt: expiresAt.canonical,
-        launchEnvelopeExpiresAt: envelopeExpiry.canonical,
-        operatorId: authenticated.context.operatorId,
-        principalGeneration,
-        projectAuthorityGeneration,
-        projectSessionId: input.projectSessionId,
-        sessionGeneration: input.sessionGeneration,
-      });
+      const capabilityId = deterministicIdentifier(
+        input.fresh === true ? "capability:session-console" : "capability:session",
+        {
+          actions,
+          expiresAt: expiresAt.canonical,
+          launchEnvelopeExpiresAt: envelopeExpiry.canonical,
+          operatorId: authenticated.context.operatorId,
+          principalGeneration,
+          projectAuthorityGeneration,
+          projectSessionId: input.projectSessionId,
+          sessionGeneration: input.sessionGeneration,
+          ...(input.fresh === true
+            ? { nonce: randomBytes(32).toString("base64url") }
+            : {}),
+        },
+      );
       const existingCapability = this.database.prepare(`
         SELECT * FROM operator_capabilities WHERE capability_id=?
       `).get(capabilityId);
@@ -512,6 +708,19 @@ export class OperatorStore {
       };
     });
     return issue.immediate();
+  }
+
+  openLocalOperatorConsoleSessionCapability(
+    input: Omit<LocalOperatorSessionCapabilityInput, "fresh">,
+  ): LocalOperatorConsoleSessionCapabilityResult {
+    const result = this.issueLocalOperatorSessionCapability({ ...input, fresh: true });
+    if (!result.issued) {
+      throw new ProjectFabricCoreError(
+        "CONFLICT",
+        "fresh local Console session capability was not issued",
+      );
+    }
+    return result;
   }
 
   rotatePrincipal(input: LocalOperatorPrincipalRotationInput): LocalOperatorPrincipalRotationResult {

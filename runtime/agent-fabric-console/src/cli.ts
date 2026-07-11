@@ -3,15 +3,24 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { startFabricConsoleApplication } from "./application.js";
-import { TerminalInputDecoder } from "./input.js";
+import {
+  startFabricConsoleApplication,
+  type ConsoleBootstrapPort,
+} from "./application.js";
+import { TerminalInputDecoder, type TerminalInputEvent } from "./input.js";
 import {
   reduceFabricPointer,
   renderFabricConsoleFrame,
   type FabricConsoleFrame,
 } from "./index.js";
 import { createProductionConsoleBootstrap } from "./production-composition.js";
-import { TerminalSession } from "./terminal.js";
+import {
+  TerminalSession,
+  type TerminalInput,
+  type TerminalLifecycleTarget,
+  type TerminalOutput,
+  type TerminalSessionOptions,
+} from "./terminal.js";
 
 export const CONSOLE_CLI_USAGE =
   "usage: agent-fabric-console [--project ABSOLUTE_ROOT] [--herdr]\n" +
@@ -38,87 +47,222 @@ function validateArguments(arguments_: readonly string[]): void {
   }
 }
 
-export async function runConsoleCli(arguments_: readonly string[]): Promise<void> {
+type ConsoleCliInput = TerminalInput & Readonly<{
+  on(event: "data", listener: (chunk: Buffer) => void): unknown;
+  off(event: "data", listener: (chunk: Buffer) => void): unknown;
+}>;
+
+type ConsoleCliOutput = TerminalOutput & Readonly<{
+  columns?: number;
+  rows?: number;
+}>;
+
+export type ConsoleCliDependencies = Readonly<{
+  input?: ConsoleCliInput;
+  output?: ConsoleCliOutput;
+  signalTarget?: TerminalLifecycleTarget;
+  bootstrap?: ConsoleBootstrapPort;
+  startApplication?: typeof startFabricConsoleApplication;
+  createTerminal?: (options: TerminalSessionOptions) => TerminalSession;
+}>;
+
+export type ConsoleRefreshLoop = Readonly<{
+  stop(): Promise<void>;
+}>;
+
+export function startConsoleRefreshLoop(options: Readonly<{
+  refresh(): Promise<unknown>;
+  isClosed(): boolean;
+  onClosed(): void;
+  intervalMs?: number;
+  schedule?: (callback: () => void, intervalMs: number) => unknown;
+  clear?: (handle: unknown) => void;
+}>): ConsoleRefreshLoop {
+  const intervalMs = options.intervalMs ?? 500;
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 50 || intervalMs >= 2_000) {
+    throw new TypeError("Console refresh interval must be from 50 to 1999 milliseconds");
+  }
+  const schedule = options.schedule ?? ((callback, milliseconds) => {
+    const timer = setInterval(callback, milliseconds);
+    timer.unref();
+    return timer;
+  });
+  const clear = options.clear ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
+  let stopped = false;
+  let closedNotified = false;
+  let inFlight: Promise<void> | undefined;
+  let handle: unknown;
+  const stopTimer = (): void => {
+    if (stopped) return;
+    stopped = true;
+    clear(handle);
+  };
+  const notifyClosed = (): void => {
+    if (closedNotified) return;
+    closedNotified = true;
+    options.onClosed();
+  };
+  const tick = (): void => {
+    if (stopped) return;
+    if (options.isClosed()) {
+      stopTimer();
+      notifyClosed();
+      return;
+    }
+    if (inFlight !== undefined) return;
+    inFlight = (async () => {
+      try {
+        await options.refresh();
+      } catch {
+        // The adapter retains the last good projection and the next bounded
+        // tick retries. Transport failure never permits a mutation.
+      } finally {
+        inFlight = undefined;
+        if (options.isClosed()) {
+          stopTimer();
+          notifyClosed();
+        }
+      }
+    })();
+  };
+  handle = schedule(tick, intervalMs);
+  return {
+    async stop(): Promise<void> {
+      stopTimer();
+      await inFlight;
+    },
+  };
+}
+
+function assertInteractiveTerminal(
+  input: ConsoleCliInput,
+  output: ConsoleCliOutput,
+): void {
+  if (
+    input.isTTY !== true ||
+    output.isTTY !== true ||
+    typeof input.setRawMode !== "function"
+  ) {
+    throw new Error("Console terminal setup requires a TTY input and output");
+  }
+}
+
+export async function runConsoleCli(
+  arguments_: readonly string[],
+  dependencies: ConsoleCliDependencies = {},
+): Promise<void> {
   validateArguments(arguments_);
+  const input = dependencies.input ?? process.stdin;
+  const output = dependencies.output ?? process.stdout;
   if (arguments_.includes("--help") || arguments_.includes("-h")) {
-    process.stdout.write(CONSOLE_CLI_USAGE);
+    output.write(CONSOLE_CLI_USAGE);
     return;
   }
+  assertInteractiveTerminal(input, output);
   const projectRoot = resolve(option(arguments_, "--project") ?? process.cwd());
   let terminalReady = false;
   let application:
     | Awaited<ReturnType<typeof startFabricConsoleApplication>>
     | undefined;
   let terminal: TerminalSession | undefined;
+  let refreshLoop: ConsoleRefreshLoop | undefined;
+  let decoderTimeout: NodeJS.Timeout | undefined;
+  let onData: ((chunk: Buffer) => void) | undefined;
   const draw = (frame: FabricConsoleFrame): void => {
     if (!terminalReady) return;
-    process.stdout.write(`\u001b[H${frame.rows.join("\n")}`);
+    output.write(`\u001b[H${frame.rows.join("\n")}`);
   };
-  application = await startFabricConsoleApplication({
-    bootstrap: createProductionConsoleBootstrap(),
-    projectRoot,
-    surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
-    viewport: {
-      columns: process.stdout.columns,
-      rows: process.stdout.rows,
-    },
-    draw,
-    eventId: (() => {
-      let sequence = 0;
-      return () => `cli-input-${String(++sequence)}`;
-    })(),
-    confirmationId: () => `console-confirmation-${randomUUID()}`,
-    render: renderFabricConsoleFrame,
-    reducePointer: reduceFabricPointer,
-    setMouseCapture: (enabled) => terminal?.setMouseCapture(enabled),
-    setEditorActive: (enabled) => terminal?.setEditorActive(enabled),
-  });
   let finish: (() => void) | undefined;
-  const finished = new Promise<void>((resolveFinished) => {
+  let fail: ((error: unknown) => void) | undefined;
+  const finished = new Promise<void>((resolveFinished, rejectFinished) => {
     finish = resolveFinished;
+    fail = rejectFinished;
   });
-  terminal = new TerminalSession({
-    input: process.stdin,
-    output: process.stdout,
-    mouseCapture: false,
-    signalTarget: process,
-    onResize: (viewport) => {
-      application?.resize(viewport);
-    },
-    onSignal: () => {
-      void application?.close("signal").finally(() => finish?.());
-    },
-    onSuspend: () => {
-      process.kill(process.pid, "SIGSTOP");
-    },
-    onResume: () => {
-      application?.repaint();
-    },
-  });
-  terminalReady = true;
-  application.repaint();
-  const decoder = new TerminalInputDecoder();
-  const onData = (chunk: Buffer): void => {
-    for (const event of decoder.push(chunk)) {
-      void application?.handleInput(event).then(() => {
-        if (application?.closed === true) finish?.();
-      });
-    }
-  };
-  process.stdin.on("data", onData);
-  const timeout = setInterval(() => {
-    for (const event of decoder.flushTimedOut()) {
-      void application?.handleInput(event).then(() => {
-        if (application?.closed === true) finish?.();
-      });
-    }
-  }, 10);
+  let primaryFailure: unknown;
+  let failed = false;
   try {
+    const startApplication = dependencies.startApplication ?? startFabricConsoleApplication;
+    application = await startApplication({
+      bootstrap: dependencies.bootstrap ?? createProductionConsoleBootstrap(),
+      projectRoot,
+      surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
+      viewport: {
+        ...(output.columns === undefined ? {} : { columns: output.columns }),
+        ...(output.rows === undefined ? {} : { rows: output.rows }),
+      },
+      draw,
+      eventId: (() => {
+        let sequence = 0;
+        return () => `cli-input-${String(++sequence)}`;
+      })(),
+      confirmationId: () => `console-confirmation-${randomUUID()}`,
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+      setMouseCapture: (enabled) => terminal?.setMouseCapture(enabled),
+      setEditorActive: (enabled) => terminal?.setEditorActive(enabled),
+    });
+    const createTerminal = dependencies.createTerminal ?? ((options) => new TerminalSession(options));
+    terminal = createTerminal({
+      input,
+      output,
+      mouseCapture: false,
+      signalTarget: dependencies.signalTarget ?? process,
+      onResize: (viewport) => application?.resize(viewport),
+      onSignal: () => {
+        void application?.close("signal").then(() => finish?.(), (error) => fail?.(error));
+      },
+      onSuspend: () => process.kill(process.pid, "SIGSTOP"),
+      onResume: () => { application?.repaint(); },
+    });
+    terminalReady = true;
+    application.repaint();
+    refreshLoop = startConsoleRefreshLoop({
+      refresh: async () => await application?.refresh(),
+      isClosed: () => application?.closed === true,
+      onClosed: () => finish?.(),
+    });
+    const decoder = new TerminalInputDecoder();
+    const handleEvent = (event: TerminalInputEvent): void => {
+      void application?.handleInput(event).then(() => {
+        if (application?.closed === true) finish?.();
+      }, (error) => fail?.(error));
+    };
+    onData = (chunk: Buffer): void => {
+      for (const event of decoder.push(chunk)) handleEvent(event);
+    };
+    input.on("data", onData);
+    decoderTimeout = setInterval(() => {
+      for (const event of decoder.flushTimedOut()) handleEvent(event);
+    }, 10);
     await finished;
+  } catch (error: unknown) {
+    failed = true;
+    primaryFailure = error;
   } finally {
-    clearInterval(timeout);
-    process.stdin.off("data", onData);
-    terminal.close();
+    if (decoderTimeout !== undefined) clearInterval(decoderTimeout);
+    if (onData !== undefined) input.off("data", onData);
+    const cleanupFailures: unknown[] = [];
+    await refreshLoop?.stop().catch((error: unknown) => cleanupFailures.push(error));
+    try {
+      terminal?.close();
+    } catch (error: unknown) {
+      cleanupFailures.push(error);
+    }
+    if (application !== undefined && !application.closed) {
+      await application.close("safety").catch((error: unknown) => cleanupFailures.push(error));
+    }
+    if (failed) {
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          [primaryFailure, ...cleanupFailures],
+          "Console failed and cleanup was incomplete",
+        );
+      }
+      throw primaryFailure;
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(cleanupFailures, "Console cleanup failed");
+    }
   }
 }
 

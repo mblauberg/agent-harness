@@ -13,6 +13,9 @@ import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
 import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
 import type {
+  LocalOperatorConsoleCapabilityInput,
+  LocalOperatorConsoleCapabilityResult,
+  LocalOperatorConsoleSessionCapabilityResult,
   LocalOperatorPrincipalRotationInput,
   LocalOperatorPrincipalRotationResult,
   LocalOperatorProvisioningInput,
@@ -694,6 +697,34 @@ function socketEntryExists(socketPath: string): boolean {
   }
 }
 
+function processIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code === "ESRCH") return false;
+    return true;
+  }
+}
+
+async function reconcileUnreachablePrivateDaemon(
+  paths: PrivateDiscoveryPaths,
+  socketPath: string,
+): Promise<boolean> {
+  const discovery = await readPrivateDiscovery(paths, socketPath);
+  if (discovery.status !== "active" || processIsRunning(discovery.owner.pid)) {
+    return false;
+  }
+  await markPrivateDiscoveryTerminal({
+    paths,
+    expected: discovery.owner,
+    state: "crashed",
+    exitCode: null,
+    signal: null,
+  });
+  return true;
+}
+
 async function privateDaemonHandshake(
   paths: PrivateDiscoveryPaths,
   election: BootstrapElection,
@@ -956,6 +987,17 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
       requiredFeatures: ["rpc"],
       election,
       handshake: async () => await privateDaemonHandshake(paths, election, normalized.socketPath, provisional),
+      reconcile: async (unavailable) => {
+        if (!await reconcileUnreachablePrivateDaemon(paths, normalized.socketPath)) {
+          return unavailable;
+        }
+        return await privateDaemonHandshake(
+          paths,
+          election,
+          normalized.socketPath,
+          provisional,
+        );
+      },
       spawn: async (bootstrap) => {
         spawned = await spawnProductionDaemon({
           options: normalized,
@@ -1114,12 +1156,36 @@ export class FabricDaemonClient {
     return localOperatorProvisioningResult(await this.#call("provisionLocalOperator", input));
   }
 
+  async openLocalOperatorConsoleCapability(
+    input: Omit<LocalOperatorConsoleCapabilityInput, "authenticatedSubjectHash">,
+  ): Promise<LocalOperatorConsoleCapabilityResult> {
+    const result = localOperatorProvisioningResult(
+      await this.#call("openLocalOperatorConsoleCapability", input),
+    );
+    if (!result.issued) {
+      throw new Error("daemon did not issue a fresh local Console capability");
+    }
+    return result;
+  }
+
   async issueLocalOperatorSessionCapability(
     input: Omit<LocalOperatorSessionCapabilityInput, "authenticatedSubjectHash">,
   ): Promise<LocalOperatorSessionCapabilityResult> {
     return localOperatorSessionCapabilityResult(
       await this.#call("issueLocalOperatorSessionCapability", input),
     );
+  }
+
+  async openLocalOperatorConsoleSessionCapability(
+    input: Omit<LocalOperatorSessionCapabilityInput, "authenticatedSubjectHash" | "fresh">,
+  ): Promise<LocalOperatorConsoleSessionCapabilityResult> {
+    const result = localOperatorSessionCapabilityResult(
+      await this.#call("openLocalOperatorConsoleSessionCapability", input),
+    );
+    if (!result.issued) {
+      throw new Error("daemon did not issue a fresh local Console session capability");
+    }
+    return result;
   }
 
   async rotateLocalOperatorPrincipal(

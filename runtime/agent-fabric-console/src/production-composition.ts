@@ -10,6 +10,7 @@ import type {
   OperatorId,
   OperatorMutationContext,
   OperatorRevisionTarget,
+  OperatorViewPageResult,
   ProjectId,
   ProjectSession,
   ProjectSessionId,
@@ -24,6 +25,7 @@ import type { ConsoleControllerState } from "./controller.js";
 import { revisionToProtocol, type ConsoleRow } from "./model.js";
 import {
   bindConsoleProtocolClient,
+  type ConsoleProtocolBinding,
   type FabricConsoleDataset,
 } from "./protocol-adapter.js";
 import type { FabricRuntimeActivation } from "./runtime.js";
@@ -42,6 +44,59 @@ const supportedActions = [
   "project-session-drain",
 ] as const satisfies readonly OperatorAvailableAction[];
 type ProductionConsoleAction = typeof supportedActions[number];
+const supportedActionSet = new Set<OperatorAvailableAction>(supportedActions);
+
+function restrictActionAvailability<Availability extends {
+  state: "read-only" | "available";
+}>(availability: Availability): Availability {
+  if (availability.state === "read-only") return availability;
+  const available = availability as Availability & {
+    state: "available";
+    actions: readonly OperatorAvailableAction[];
+    requiresPreview: true;
+  };
+  const actions = available.actions.filter((action) => supportedActionSet.has(action));
+  return (actions.length === 0
+    ? { state: "read-only", reason: "feature-unavailable" }
+    : { ...available, actions }) as Availability;
+}
+
+function restrictProductionActions(
+  binding: ConsoleProtocolBinding,
+): ConsoleProtocolBinding {
+  if (!binding.ok) return binding;
+  return {
+    ...binding,
+    port: {
+      ...binding.port,
+      async viewPage(request) {
+        const result = await binding.port.viewPage(request);
+        if (result.status !== "page") return result;
+        return {
+          ...result,
+          rows: result.rows.map((row) => {
+            if (
+              row.fact.freshness === "unavailable" ||
+              row.fact.freshness === "conflict"
+            ) return row;
+            return {
+              ...row,
+              fact: {
+                ...row.fact,
+                value: {
+                  ...row.fact.value,
+                  actionAvailability: restrictActionAvailability(
+                    row.fact.value.actionAvailability,
+                  ),
+                },
+              },
+            };
+          }),
+        } as OperatorViewPageResult;
+      },
+    },
+  };
+}
 
 function commandId(
   clientId: OperatorClientId,
@@ -284,7 +339,9 @@ export function createProductionConsoleBootstrap(
         );
         return {
           status: "connected",
-          binding: bindConsoleProtocolClient(session.client),
+          binding: restrictProductionActions(
+            bindConsoleProtocolClient(session.client),
+          ),
           credential: session.credential,
           projectId: session.projectId,
           ...(session.projectSessionId === undefined

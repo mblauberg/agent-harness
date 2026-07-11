@@ -18,12 +18,19 @@ import {
   issueLocalOperatorSessionCapabilityInput,
   isDaemonRequest,
   isRecord,
+  openLocalOperatorConsoleCapabilityInput,
   provisionLocalOperatorInput,
   rotateLocalOperatorPrincipalInput,
   type DaemonRequest,
 } from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
 import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "./client.js";
+import { BootstrapElection } from "./bootstrap-election.js";
+import {
+  markPrivateDiscoveryTerminal,
+  privateDiscoveryPaths,
+  readPrivateDiscovery,
+} from "./private-discovery.js";
 import { routeDaemonConnection } from "./connection-router.js";
 import { servePublicProtocolConnection } from "./public-protocol.js";
 import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../transport/bounded-ndjson.js";
@@ -247,8 +254,16 @@ const serveLegacyConnection = (socket: Socket): void => {
           return fabric.provisionLocalOperator(await withTrustedLocalSubject(
             provisionLocalOperatorInput(request.params),
           ));
+        case "openLocalOperatorConsoleCapability":
+          return fabric.openLocalOperatorConsoleCapability(await withTrustedLocalSubject(
+            openLocalOperatorConsoleCapabilityInput(request.params),
+          ));
         case "issueLocalOperatorSessionCapability":
           return fabric.issueLocalOperatorSessionCapability(await withTrustedLocalSubject(
+            issueLocalOperatorSessionCapabilityInput(request.params),
+          ));
+        case "openLocalOperatorConsoleSessionCapability":
+          return fabric.openLocalOperatorConsoleSessionCapability(await withTrustedLocalSubject(
             issueLocalOperatorSessionCapabilityInput(request.params),
           ));
         case "rotateLocalOperatorPrincipal":
@@ -408,18 +423,60 @@ fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 process.stdout.write(`${JSON.stringify({ ready: true })}\n`);
 
 let shuttingDown = false;
-const shutdown = (): void => {
+const markProductionTerminal = async (
+  signal: "SIGINT" | "SIGTERM",
+): Promise<void> => {
+  if (bootstrapMode !== "production-election") return;
+  const paths = privateDiscoveryPaths(runtimeDirectory);
+  const expected = {
+    actionId: bootstrapActionId as string,
+    electionGeneration: bootstrapElectionGeneration,
+    daemonInstanceGeneration,
+    socketPath,
+    pid: process.pid,
+    bootstrapCapabilityHash: createHash("sha256").update(bootstrapCapability).digest("hex"),
+  };
+  const election = new BootstrapElection({ runtimeDirectory });
+  const result = await election.withExclusiveLock(
+    `terminal-${String(bootstrapActionId)}`,
+    async () => await markPrivateDiscoveryTerminal({
+      paths,
+      expected,
+      state: "stopped",
+      exitCode: null,
+      signal,
+    }),
+  );
+  if (result.role === "observer") {
+    const discovery = await readPrivateDiscovery(paths, socketPath);
+    if (
+      discovery.status !== "terminal" ||
+      discovery.owner.actionId !== expected.actionId ||
+      discovery.owner.electionGeneration !== expected.electionGeneration ||
+      discovery.owner.daemonInstanceGeneration !== expected.daemonInstanceGeneration
+    ) {
+      throw new Error("daemon could not confirm its terminal discovery generation");
+    }
+  }
+};
+
+const shutdown = (signal: "SIGINT" | "SIGTERM"): void => {
   if (shuttingDown) return;
   shuttingDown = true;
   server.close(() => {
-    void fabric.close().finally(async () => {
-      rmSync(socketPath, { force: true });
-      await releaseDaemonLocks(daemonLocks);
-      process.exit(0);
-    });
+    void (async () => {
+      try {
+        await fabric.close();
+      } finally {
+        rmSync(socketPath, { force: true });
+        await releaseDaemonLocks(daemonLocks);
+        await markProductionTerminal(signal).catch(() => undefined);
+        process.exit(0);
+      }
+    })();
   });
   for (const socket of sockets) socket.destroy();
 };
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

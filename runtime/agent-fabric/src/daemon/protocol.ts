@@ -51,6 +51,11 @@ export type ProvisionLocalOperatorInput = {
   expiresAt: string;
 };
 
+export type OpenLocalOperatorConsoleCapabilityInput = Omit<
+  ProvisionLocalOperatorInput,
+  "principalGeneration"
+>;
+
 export type IssueLocalOperatorSessionCapabilityInput = {
   projectId: string;
   canonicalRoot: string;
@@ -807,6 +812,25 @@ export function provisionLocalOperatorInput(
     trustRecordDigest: requiredString(params, "trustRecordDigest"),
     projectAuthorityGeneration: requiredPositiveInteger(params, "projectAuthorityGeneration"),
     principalGeneration: requiredPositiveInteger(params, "principalGeneration"),
+    actions: uniqueActions(params.actions, ["read", "launch"] as const, "actions"),
+    expiresAt: requiredString(params, "expiresAt"),
+  };
+}
+
+export function openLocalOperatorConsoleCapabilityInput(
+  params: Record<string, unknown>,
+): OpenLocalOperatorConsoleCapabilityInput {
+  exactFields(params, [
+    "canonicalRoot",
+    "trustRecordDigest",
+    "projectAuthorityGeneration",
+    "actions",
+    "expiresAt",
+  ], "local Console operator capability");
+  return {
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    trustRecordDigest: requiredString(params, "trustRecordDigest"),
+    projectAuthorityGeneration: requiredPositiveInteger(params, "projectAuthorityGeneration"),
     actions: uniqueActions(params.actions, ["read", "launch"] as const, "actions"),
     expiresAt: requiredString(params, "expiresAt"),
   };

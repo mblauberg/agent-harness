@@ -70,6 +70,9 @@ export type AttachOrStartOptions<Client> = {
   requiredFeatures: readonly string[];
   election: BootstrapElection;
   handshake(): Promise<DaemonHandshakeResult<Client>>;
+  reconcile?(result: Extract<DaemonHandshakeResult<Client>, {
+    status: "unavailable";
+  }>): Promise<DaemonHandshakeResult<Client>>;
   spawn(input: { actionId: string; electionGeneration: number; socketPath: string }): Promise<BootstrapSpawnHandle>;
 };
 
@@ -194,7 +197,14 @@ export async function attachOrStartDaemon<Client>(options: AttachOrStartOptions<
   const initial = await options.handshake();
   if (initial.status === "compatible") return compatibleDaemon(initial, options, null, false);
   const elected = await options.election.withExclusiveLock(options.actionId, async (held) => {
-    const recheck = await options.handshake();
+    let recheck = await options.handshake();
+    if (
+      recheck.status === "unavailable" &&
+      recheck.reconciliationRequired === true &&
+      options.reconcile !== undefined
+    ) {
+      recheck = await options.reconcile(recheck);
+    }
     if (recheck.status === "compatible") {
       return { kind: "attached" as const, attached: compatibleDaemon(recheck, options, null, false) };
     }

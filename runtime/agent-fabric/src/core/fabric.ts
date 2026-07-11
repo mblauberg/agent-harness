@@ -44,6 +44,9 @@ import { renderSafePreview } from "../visibility/safe-preview.js";
 import {
   OperatorStore,
   type AuthenticatedOperatorCredential,
+  type LocalOperatorConsoleCapabilityInput,
+  type LocalOperatorConsoleCapabilityResult,
+  type LocalOperatorConsoleSessionCapabilityResult,
   type LocalOperatorPrincipalRotationInput,
   type LocalOperatorPrincipalRotationResult,
   type LocalOperatorProvisioningInput,
@@ -924,10 +927,22 @@ export class Fabric {
     return this.#operatorStore.provisionLocalOperator(input);
   }
 
+  openLocalOperatorConsoleCapability(
+    input: LocalOperatorConsoleCapabilityInput,
+  ): LocalOperatorConsoleCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleCapability(input);
+  }
+
   issueLocalOperatorSessionCapability(
     input: LocalOperatorSessionCapabilityInput,
   ): LocalOperatorSessionCapabilityResult {
     return this.#operatorStore.issueLocalOperatorSessionCapability(input);
+  }
+
+  openLocalOperatorConsoleSessionCapability(
+    input: Omit<LocalOperatorSessionCapabilityInput, "fresh">,
+  ): LocalOperatorConsoleSessionCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleSessionCapability(input);
   }
 
   rotateLocalOperatorPrincipal(

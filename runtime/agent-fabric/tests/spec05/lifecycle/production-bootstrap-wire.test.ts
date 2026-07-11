@@ -13,6 +13,75 @@ import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/
 const handles: FabricDaemonHandle[] = [];
 const roots: string[] = [];
 
+type StartOptions = Parameters<typeof startFabricDaemon>[0];
+
+async function launchAndReleaseFromSeparateProcess(
+  options: StartOptions,
+): Promise<number> {
+  const clientPath = fileURLToPath(new URL("../../../src/daemon/client.ts", import.meta.url));
+  const script = `
+    import { startFabricDaemon } from ${JSON.stringify(clientPath)};
+    const handle = await startFabricDaemon(JSON.parse(process.argv[1]));
+    process.stdout.write(JSON.stringify({ pid: handle.pid }) + "\\n");
+    handle.release();
+  `;
+  const launcher = spawn(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", script, JSON.stringify(options)],
+    {
+      cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (launcher.stdout === null || launcher.stderr === null) {
+    throw new Error("released daemon launcher pipes are unavailable");
+  }
+  let stderr = "";
+  launcher.stderr.setEncoding("utf8");
+  launcher.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  const line = await new Promise<string>((resolvePromise, reject) => {
+    launcher.stdout?.once("data", (chunk: Buffer) => resolvePromise(chunk.toString("utf8")));
+    launcher.once("exit", (code) => {
+      if (code !== 0) reject(new Error(`released daemon launcher failed ${String(code)}: ${stderr}`));
+    });
+  });
+  await new Promise<void>((resolvePromise, reject) => {
+    if (launcher.exitCode !== null) {
+      launcher.exitCode === 0
+        ? resolvePromise()
+        : reject(new Error(`released daemon launcher failed ${String(launcher.exitCode)}: ${stderr}`));
+      return;
+    }
+    launcher.once("exit", (code) => code === 0
+      ? resolvePromise()
+      : reject(new Error(`released daemon launcher failed ${String(code)}: ${stderr}`)));
+  });
+  const result: unknown = JSON.parse(line);
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("pid" in result) ||
+    typeof result.pid !== "number"
+  ) throw new Error("released daemon launcher result is invalid");
+  return result.pid;
+}
+
+async function waitForOwnerState(
+  runtimeDirectory: string,
+  state: "stopped" | "crashed",
+): Promise<Record<string, unknown>> {
+  const path = join(runtimeDirectory, "fabric-v1.discovery-owner.json");
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      const value = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      if (value.state === state) return value;
+    } catch { /* not durable yet */ }
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for discovery ${state}`);
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
 afterEach(async () => {
   await Promise.allSettled(handles.splice(0).reverse().map(async (handle) => handle.stop()));
   await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
@@ -131,6 +200,53 @@ describe("production daemon bootstrap wiring", () => {
     attached.release();
     await expect(attached.waitForExit()).resolves.toBeUndefined();
     process.kill(owner.pid, 0);
+  });
+
+  it("terminalises discovery after its released launcher exits and the daemon stops gracefully", async () => {
+    const root = await mkdtemp(join(tmpdir(), "f-rs-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "s", "f.sqlite3"),
+      stateDirectory: join(root, "s"),
+      runtimeDirectory: join(root, "r"),
+      socketPath: join(root, "r", "f.sock"),
+      workspaceRoots: [root],
+    };
+
+    const pid = await launchAndReleaseFromSeparateProcess(options);
+    process.kill(pid, "SIGTERM");
+    await expect(waitForOwnerState(options.runtimeDirectory, "stopped"))
+      .resolves.toMatchObject({ pid, state: "stopped" });
+    await expect(readdir(options.runtimeDirectory)).resolves.not.toContain(
+      "fabric-v1.discovery.json",
+    );
+  });
+
+  it("recovers a crashed daemon after its released launcher exits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "f-rc-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "s", "f.sqlite3"),
+      stateDirectory: join(root, "s"),
+      runtimeDirectory: join(root, "r"),
+      socketPath: join(root, "r", "f.sock"),
+      workspaceRoots: [root],
+    };
+
+    const crashedPid = await launchAndReleaseFromSeparateProcess(options);
+    process.kill(crashedPid, "SIGKILL");
+    for (;;) {
+      try {
+        process.kill(crashedPid, 0);
+        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 20));
+      } catch {
+        break;
+      }
+    }
+    const restarted = await startFabricDaemon(options);
+    handles.push(restarted);
+    expect(restarted.pid).not.toBe(crashedPid);
+    expect(restarted.ownsProcess).toBe(true);
   });
 
   it("coalesces twelve production contenders onto exactly one child and one private discovery owner", async () => {

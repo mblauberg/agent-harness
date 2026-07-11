@@ -1,12 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import type { FileHandle } from "node:fs/promises";
-import { chmod, lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 
-import { flock } from "fs-ext";
 import {
   NdjsonRpcTransport,
   createOperatorClient,
@@ -34,9 +31,6 @@ import {
 import { resolveFabricPaths, type FabricPaths } from "../cli/paths.js";
 import { trustedWorkspaceIdentity } from "../cli/workspace-trust.js";
 
-const PRIVATE_DIRECTORY_MODE = 0o700;
-const PRIVATE_FILE_MODE = 0o600;
-const MAX_CREDENTIAL_FILE_BYTES = 128 * 1024;
 const PROJECT_ACTIONS = ["launch", "read"] as const;
 const SESSION_ACTIONS = [
   "read",
@@ -45,9 +39,8 @@ const SESSION_ACTIONS = [
   "resume",
   "cancel",
   "drain",
-  "stop",
 ] as const satisfies readonly NonTakeoverOperatorAction[];
-const TERMINAL_SESSION_STATES = new Set(["closed", "cancelled", "launch_failed"]);
+const NON_ATTACHABLE_SESSION_STATES = new Set(["closed", "cancelled", "launch_failed"]);
 const REQUIRED_FEATURES = [
   "operator-control.v1",
   "operator-projection.v1",
@@ -119,201 +112,6 @@ export type LocalOperatorConsoleSession = Readonly<{
   close(): Promise<void>;
 }>;
 
-type ProjectProvisionRequest = Readonly<{
-  canonicalRoot: string;
-  trustRecordDigest: string;
-  projectAuthorityGeneration: 1;
-  principalGeneration: 1;
-  actions: typeof PROJECT_ACTIONS;
-  expiresAt: string;
-}>;
-
-type CachedCredential = Readonly<{
-  capabilityId: string;
-  token: string;
-}>;
-
-type ProjectCredentialRecord = Readonly<{
-  request: ProjectProvisionRequest;
-  projectId: string;
-  operatorId: string;
-  capabilityId: string;
-  expiresAt: string;
-  credential: CachedCredential;
-}>;
-
-type SessionCredentialRecord = Readonly<{
-  projectSessionId: string;
-  sessionGeneration: number;
-  actions: readonly NonTakeoverOperatorAction[];
-  expiresAt: string;
-  launchEnvelopeExpiresAt: string;
-  capabilityId: string;
-  credential: CachedCredential;
-}>;
-
-type CredentialBundle = Readonly<{
-  schemaVersion: 1;
-  canonicalRoot: string;
-  trustRecordDigest: string;
-  project: ProjectCredentialRecord;
-  sessions: Readonly<Record<string, SessionCredentialRecord>>;
-}>;
-
-type StorePaths = Readonly<{
-  directory: string;
-  lockPath: string;
-  credentialPath: string;
-}>;
-
-function isErrno(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function exactKeys(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-): boolean {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length &&
-    actual.every((key, index) => key === expected[index]);
-}
-
-function nonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
-function credential(value: unknown): CachedCredential | null {
-  if (
-    !isRecord(value) ||
-    !exactKeys(value, ["capabilityId", "token"]) ||
-    !nonEmptyString(value.capabilityId) ||
-    !nonEmptyString(value.token)
-  ) return null;
-  return { capabilityId: value.capabilityId, token: value.token };
-}
-
-function parseProjectRecord(value: unknown): ProjectCredentialRecord | null {
-  if (
-    !isRecord(value) ||
-    !exactKeys(value, [
-      "request", "projectId", "operatorId", "capabilityId", "expiresAt", "credential",
-    ]) ||
-    !isRecord(value.request) ||
-    !exactKeys(value.request, [
-      "canonicalRoot", "trustRecordDigest", "projectAuthorityGeneration",
-      "principalGeneration", "actions", "expiresAt",
-    ]) ||
-    !nonEmptyString(value.request.canonicalRoot) ||
-    !nonEmptyString(value.request.trustRecordDigest) ||
-    value.request.projectAuthorityGeneration !== 1 ||
-    value.request.principalGeneration !== 1 ||
-    !Array.isArray(value.request.actions) ||
-    value.request.actions.length !== 2 ||
-    value.request.actions[0] !== "launch" ||
-    value.request.actions[1] !== "read" ||
-    !nonEmptyString(value.request.expiresAt) ||
-    !nonEmptyString(value.projectId) ||
-    !nonEmptyString(value.operatorId) ||
-    !nonEmptyString(value.capabilityId) ||
-    !nonEmptyString(value.expiresAt)
-  ) return null;
-  const parsedCredential = credential(value.credential);
-  if (
-    parsedCredential === null ||
-    parsedCredential.capabilityId !== value.capabilityId ||
-    value.expiresAt !== value.request.expiresAt
-  ) return null;
-  return {
-    request: {
-      canonicalRoot: value.request.canonicalRoot,
-      trustRecordDigest: value.request.trustRecordDigest,
-      projectAuthorityGeneration: 1,
-      principalGeneration: 1,
-      actions: PROJECT_ACTIONS,
-      expiresAt: value.request.expiresAt,
-    },
-    projectId: value.projectId,
-    operatorId: value.operatorId,
-    capabilityId: value.capabilityId,
-    expiresAt: value.expiresAt,
-    credential: parsedCredential,
-  };
-}
-
-function parseSessionRecord(value: unknown): SessionCredentialRecord | null {
-  if (
-    !isRecord(value) ||
-    !exactKeys(value, [
-      "projectSessionId", "sessionGeneration", "actions", "expiresAt",
-      "launchEnvelopeExpiresAt", "capabilityId", "credential",
-    ]) ||
-    !nonEmptyString(value.projectSessionId) ||
-    typeof value.sessionGeneration !== "number" ||
-    !Number.isSafeInteger(value.sessionGeneration) ||
-    value.sessionGeneration < 1 ||
-    !Array.isArray(value.actions) ||
-    value.actions.length !== SESSION_ACTIONS.length ||
-    value.actions.some((action, index) => action !== SESSION_ACTIONS[index]) ||
-    !nonEmptyString(value.expiresAt) ||
-    !nonEmptyString(value.launchEnvelopeExpiresAt) ||
-    !nonEmptyString(value.capabilityId)
-  ) return null;
-  const parsedCredential = credential(value.credential);
-  if (
-    parsedCredential === null ||
-    parsedCredential.capabilityId !== value.capabilityId
-  ) return null;
-  return {
-    projectSessionId: value.projectSessionId,
-    sessionGeneration: value.sessionGeneration,
-    actions: SESSION_ACTIONS,
-    expiresAt: value.expiresAt,
-    launchEnvelopeExpiresAt: value.launchEnvelopeExpiresAt,
-    capabilityId: value.capabilityId,
-    credential: parsedCredential,
-  };
-}
-
-function parseBundle(value: unknown): CredentialBundle {
-  if (
-    !isRecord(value) ||
-    !exactKeys(value, [
-      "schemaVersion", "canonicalRoot", "trustRecordDigest", "project", "sessions",
-    ]) ||
-    value.schemaVersion !== 1 ||
-    !nonEmptyString(value.canonicalRoot) ||
-    !nonEmptyString(value.trustRecordDigest) ||
-    !isRecord(value.sessions)
-  ) {
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  }
-  const project = parseProjectRecord(value.project);
-  if (project === null) {
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  }
-  const sessions: Record<string, SessionCredentialRecord> = {};
-  for (const [key, candidate] of Object.entries(value.sessions)) {
-    const session = parseSessionRecord(candidate);
-    if (session === null || key !== sessionKey(session.projectSessionId, session.sessionGeneration)) {
-      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-    }
-    sessions[key] = session;
-  }
-  return {
-    schemaVersion: 1,
-    canonicalRoot: value.canonicalRoot,
-    trustRecordDigest: value.trustRecordDigest,
-    project,
-    sessions,
-  };
-}
-
 function positiveDuration(
   value: number | undefined,
   fallback: number,
@@ -326,139 +124,12 @@ function positiveDuration(
   return selected;
 }
 
-function storePaths(stateDirectory: string, canonicalRoot: string): StorePaths {
+function legacyCredentialDirectory(
+  stateDirectory: string,
+  canonicalRoot: string,
+): string {
   const projectKey = createHash("sha256").update(canonicalRoot).digest("hex").slice(0, 32);
-  const directory = join(stateDirectory, "console-operators", projectKey);
-  return {
-    directory,
-    lockPath: join(directory, "credential.lock"),
-    credentialPath: join(directory, "credential.json"),
-  };
-}
-
-async function ensurePrivateDirectory(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  const info = await lstat(path);
-  if (
-    !info.isDirectory() ||
-    info.isSymbolicLink() ||
-    (info.mode & 0o777) !== PRIVATE_DIRECTORY_MODE ||
-    (typeof process.getuid === "function" && info.uid !== process.getuid())
-  ) {
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  }
-}
-
-async function validatePrivateHandle(handle: FileHandle): Promise<void> {
-  const info = await handle.stat();
-  if (
-    !info.isFile() ||
-    info.nlink !== 1 ||
-    (info.mode & 0o777) !== PRIVATE_FILE_MODE ||
-    (typeof process.getuid === "function" && info.uid !== process.getuid())
-  ) {
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  }
-}
-
-async function flockPromise(fileDescriptor: number, mode: "ex" | "un"): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    flock(fileDescriptor, mode, (error) => {
-      if (error === null) resolvePromise();
-      else reject(error);
-    });
-  });
-}
-
-async function withCredentialLock<T>(paths: StorePaths, operation: () => Promise<T>): Promise<T> {
-  await ensurePrivateDirectory(paths.directory);
-  let handle: FileHandle | undefined;
-  try {
-    handle = await open(
-      paths.lockPath,
-      constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW,
-      PRIVATE_FILE_MODE,
-    );
-    await validatePrivateHandle(handle);
-    await flockPromise(handle.fd, "ex");
-    try {
-      await validatePrivateHandle(handle);
-      return await operation();
-    } finally {
-      await flockPromise(handle.fd, "un");
-    }
-  } catch (error: unknown) {
-    if (error instanceof LocalOperatorConsoleUnavailableError) throw error;
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-async function readBundle(path: string): Promise<CredentialBundle | null> {
-  let handle: FileHandle | undefined;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    await validatePrivateHandle(handle);
-    const info = await handle.stat();
-    if (info.size > MAX_CREDENTIAL_FILE_BYTES) {
-      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-    }
-    return parseBundle(JSON.parse(await handle.readFile("utf8")));
-  } catch (error: unknown) {
-    if (isErrno(error, "ENOENT")) return null;
-    if (error instanceof LocalOperatorConsoleUnavailableError) throw error;
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-async function writeBundle(paths: StorePaths, bundle: CredentialBundle): Promise<void> {
-  const serialized = `${JSON.stringify(bundle)}\n`;
-  if (Buffer.byteLength(serialized, "utf8") > MAX_CREDENTIAL_FILE_BYTES) {
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  }
-  const temporary = `${paths.credentialPath}.tmp-${process.pid}-${randomUUID()}`;
-  let handle: FileHandle | undefined;
-  try {
-    handle = await open(
-      temporary,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      PRIVATE_FILE_MODE,
-    );
-    await validatePrivateHandle(handle);
-    await handle.writeFile(serialized, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    try {
-      const existing = await lstat(paths.credentialPath);
-      if (!existing.isFile() || existing.isSymbolicLink() || (existing.mode & 0o777) !== PRIVATE_FILE_MODE) {
-        throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-      }
-    } catch (error: unknown) {
-      if (!isErrno(error, "ENOENT")) throw error;
-    }
-    await rename(temporary, paths.credentialPath);
-    await chmod(paths.credentialPath, PRIVATE_FILE_MODE);
-    const directory = await open(paths.directory, constants.O_RDONLY);
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error: unknown) {
-    if (error instanceof LocalOperatorConsoleUnavailableError) throw error;
-    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
-}
-
-function sessionKey(projectSessionId: string, generation: number): string {
-  return `${projectSessionId}:${String(generation)}`;
+  return join(stateDirectory, "console-operators", projectKey);
 }
 
 function isoTimestamp(milliseconds: number): Timestamp {
@@ -474,133 +145,47 @@ function assertFuture(expiresAt: string, now: number): void {
 
 async function projectCredential(
   privateClient: FabricDaemonClient,
-  paths: StorePaths,
+  stateDirectory: string,
   identity: Awaited<ReturnType<typeof trustedWorkspaceIdentity>>,
   now: number,
   credentialLifetimeMs: number,
-): Promise<ProjectCredentialRecord> {
-  return await withCredentialLock(paths, async () => {
-    const existing = await readBundle(paths.credentialPath);
-    const request: ProjectProvisionRequest = existing?.project.request ?? {
-      canonicalRoot: identity.canonicalRoot,
-      trustRecordDigest: identity.trustRecordDigest,
-      projectAuthorityGeneration: 1,
-      principalGeneration: 1,
-      actions: PROJECT_ACTIONS,
-      expiresAt: isoTimestamp(now + credentialLifetimeMs),
-    };
-    if (
-      request.canonicalRoot !== identity.canonicalRoot ||
-      request.trustRecordDigest !== identity.trustRecordDigest ||
-      existing !== null && (
-        existing.canonicalRoot !== identity.canonicalRoot ||
-        existing.trustRecordDigest !== identity.trustRecordDigest
-      )
-    ) {
-      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-    }
-    assertFuture(request.expiresAt, now);
-    const provisioned = await privateClient.provisionLocalOperator(request);
-    let record: ProjectCredentialRecord;
-    if (provisioned.issued) {
-      record = {
-        request,
-        projectId: provisioned.projectId,
-        operatorId: provisioned.operatorId,
-        capabilityId: provisioned.capabilityId,
-        expiresAt: provisioned.expiresAt,
-        credential: provisioned.credential,
-      };
-    } else {
-      const cached = existing?.project;
-      if (
-        cached === undefined ||
-        cached.projectId !== provisioned.projectId ||
-        cached.operatorId !== provisioned.operatorId ||
-        cached.capabilityId !== provisioned.capabilityId ||
-        cached.expiresAt !== provisioned.expiresAt
-      ) {
-        throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-      }
-      record = cached;
-    }
-    const bundle: CredentialBundle = {
-      schemaVersion: 1,
-      canonicalRoot: identity.canonicalRoot,
-      trustRecordDigest: identity.trustRecordDigest,
-      project: record,
-      sessions: existing?.sessions ?? {},
-    };
-    await writeBundle(paths, bundle);
-    return record;
+): ReturnType<FabricDaemonClient["openLocalOperatorConsoleCapability"]> {
+  await rm(legacyCredentialDirectory(stateDirectory, identity.canonicalRoot), {
+    recursive: true,
+    force: true,
+  });
+  return await privateClient.openLocalOperatorConsoleCapability({
+    canonicalRoot: identity.canonicalRoot,
+    trustRecordDigest: identity.trustRecordDigest,
+    projectAuthorityGeneration: 1,
+    actions: PROJECT_ACTIONS,
+    expiresAt: isoTimestamp(now + credentialLifetimeMs),
   });
 }
 
 async function sessionCredential(
   privateClient: FabricDaemonClient,
-  paths: StorePaths,
   identity: Awaited<ReturnType<typeof trustedWorkspaceIdentity>>,
-  project: ProjectCredentialRecord,
+  project: Awaited<ReturnType<FabricDaemonClient["openLocalOperatorConsoleCapability"]>>,
   selected: ProjectSessionDiscovery,
   now: number,
   credentialLifetimeMs: number,
-): Promise<SessionCredentialRecord> {
-  return await withCredentialLock(paths, async () => {
-    const bundle = await readBundle(paths.credentialPath);
-    if (
-      bundle === null ||
-      bundle.canonicalRoot !== identity.canonicalRoot ||
-      bundle.trustRecordDigest !== identity.trustRecordDigest ||
-      bundle.project.capabilityId !== project.capabilityId
-    ) {
-      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-    }
-    const key = sessionKey(selected.projectSessionId, selected.generation);
-    const existing = bundle.sessions[key];
-    const maximumExpiry = Math.min(
-      Date.parse(project.expiresAt),
-      now + credentialLifetimeMs,
-    );
-    const expiresAt = existing?.expiresAt ?? isoTimestamp(maximumExpiry);
-    const launchEnvelopeExpiresAt = existing?.launchEnvelopeExpiresAt ?? expiresAt;
-    assertFuture(expiresAt, now);
-    const issued = await privateClient.issueLocalOperatorSessionCapability({
-      projectId: project.projectId,
-      canonicalRoot: identity.canonicalRoot,
-      trustRecordDigest: identity.trustRecordDigest,
-      projectCapability: project.credential,
-      projectSessionId: selected.projectSessionId,
-      sessionGeneration: selected.generation,
-      actions: SESSION_ACTIONS,
-      expiresAt,
-      launchEnvelopeExpiresAt,
-    });
-    let record: SessionCredentialRecord;
-    if (issued.issued) {
-      record = {
-        projectSessionId: issued.projectSessionId,
-        sessionGeneration: issued.sessionGeneration,
-        actions: issued.actions,
-        expiresAt: issued.expiresAt,
-        launchEnvelopeExpiresAt,
-        capabilityId: issued.capabilityId,
-        credential: issued.credential,
-      };
-    } else {
-      if (
-        existing === undefined ||
-        existing.capabilityId !== issued.capabilityId ||
-        existing.expiresAt !== issued.expiresAt
-      ) {
-        throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-      }
-      record = existing;
-    }
-    await writeBundle(paths, {
-      ...bundle,
-      sessions: { ...bundle.sessions, [key]: record },
-    });
-    return record;
+): ReturnType<FabricDaemonClient["openLocalOperatorConsoleSessionCapability"]> {
+  const expiresAt = isoTimestamp(Math.min(
+    Date.parse(project.expiresAt),
+    now + credentialLifetimeMs,
+  ));
+  assertFuture(expiresAt, now);
+  return await privateClient.openLocalOperatorConsoleSessionCapability({
+    projectId: project.projectId,
+    canonicalRoot: identity.canonicalRoot,
+    trustRecordDigest: identity.trustRecordDigest,
+    projectCapability: project.credential,
+    projectSessionId: selected.projectSessionId,
+    sessionGeneration: selected.generation,
+    actions: SESSION_ACTIONS,
+    expiresAt,
+    launchEnvelopeExpiresAt: expiresAt,
   });
 }
 
@@ -655,7 +240,43 @@ async function operatorClient(
 function selectedSession(
   items: readonly ProjectSessionDiscovery[],
 ): ProjectSessionDiscovery | undefined {
-  return items.find((session) => !TERMINAL_SESSION_STATES.has(session.state));
+  return items.find((session) => !NON_ATTACHABLE_SESSION_STATES.has(session.state));
+}
+
+async function discoverSelectedSession(input: {
+  client: NegotiatedOperatorClient;
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  canonicalRoot: string;
+}): Promise<ProjectSessionDiscovery | undefined> {
+  const projection = input.client.projection;
+  if (projection === undefined) {
+    throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+  }
+  let after = 0;
+  for (;;) {
+    const discovery = await projection.discover({
+      credential: input.credential,
+      projectId: input.projectId,
+      after,
+      limit: 100,
+    });
+    if (
+      discovery.project.freshness !== "live" ||
+      discovery.project.value.projectId !== input.projectId ||
+      discovery.project.value.canonicalRoot !== input.canonicalRoot ||
+      discovery.sessions.freshness !== "live"
+    ) {
+      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+    }
+    const selected = selectedSession(discovery.sessions.value.items);
+    if (selected !== undefined || !discovery.sessions.value.hasMore) return selected;
+    const next = discovery.sessions.value.nextCursor;
+    if (!Number.isSafeInteger(next) || next <= after) {
+      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+    }
+    after = next;
+  }
 }
 
 function mutationContext(input: {
@@ -821,10 +442,9 @@ export async function openLocalOperatorConsoleSession(
       daemon.address.path,
       daemon.bootstrapCapability,
     );
-    const custodyPaths = storePaths(paths.stateDirectory, identity.canonicalRoot);
     const project = await projectCredential(
       privateClient,
-      custodyPaths,
+      paths.stateDirectory,
       identity,
       now(),
       credentialLifetimeMs,
@@ -834,28 +454,17 @@ export async function openLocalOperatorConsoleSession(
       project.credential as OperatorCapabilityCredential,
       options.surface,
     );
-    const discovery = await publicClient.projection?.discover({
+    const selected = await discoverSelectedSession({
+      client: publicClient,
       credential: project.credential as OperatorCapabilityCredential,
       projectId: project.projectId as ProjectId,
-      after: 0,
-      limit: 100,
+      canonicalRoot: identity.canonicalRoot,
     });
-    if (
-      discovery === undefined ||
-      discovery.project.freshness !== "live" ||
-      discovery.project.value.projectId !== project.projectId ||
-      discovery.project.value.canonicalRoot !== identity.canonicalRoot ||
-      discovery.sessions.freshness !== "live"
-    ) {
-      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-    }
-    const selected = selectedSession(discovery.sessions.value.items);
     let activeCredential = project.credential as OperatorCapabilityCredential;
     let activeCredentialExpiresAt = project.expiresAt;
     if (selected !== undefined) {
       const issued = await sessionCredential(
         privateClient,
-        custodyPaths,
         identity,
         project,
         selected,

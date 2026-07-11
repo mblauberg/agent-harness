@@ -140,8 +140,8 @@ function parseOwner(value: unknown, socketPath: string): PrivateDiscoveryOwner {
   if (owner.state === "active" && (owner.exitCode !== null || owner.signal !== null)) {
     throw new PrivateDiscoveryError("DAEMON_DISCOVERY_INVALID", "active daemon discovery contains terminal process state");
   }
-  if (owner.state !== "active" && owner.exitCode === null && owner.signal === null) {
-    throw new PrivateDiscoveryError("DAEMON_DISCOVERY_INVALID", "terminal daemon discovery has no process outcome");
+  if (owner.state === "stopped" && owner.exitCode === null && owner.signal === null) {
+    throw new PrivateDiscoveryError("DAEMON_DISCOVERY_INVALID", "stopped daemon discovery has no process outcome");
   }
   return {
     schemaVersion: 1,

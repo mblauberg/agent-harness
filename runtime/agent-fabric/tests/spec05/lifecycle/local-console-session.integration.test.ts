@@ -1,17 +1,19 @@
-import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
-import { lstat, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   FABRIC_OPERATIONS,
   type OperatorMutationContext,
 } from "@local/agent-fabric-protocol";
 
-import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/index.ts";
+import {
+  FabricDaemonClient,
+  startFabricDaemon,
+  type FabricDaemonHandle,
+} from "../../../src/index.ts";
 import { openLocalOperatorConsoleSession } from "../../../src/operator/local-console-session.ts";
 import { runWorkspaceTrust } from "../../../src/cli/workspace-trust.ts";
 
@@ -55,60 +57,36 @@ async function fixture() {
   return { paths, projectA, projectB, daemon };
 }
 
-async function holdFileLock(path: string): Promise<() => Promise<void>> {
-  const script = `
-    const fs = require("node:fs");
-    const { flock } = require("fs-ext");
-    const path = process.argv[1];
-    const fd = fs.openSync(path, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);
-    flock(fd, "ex", (error) => {
-      if (error) throw error;
-      process.stdout.write("locked\\n");
-      process.stdin.resume();
-      process.stdin.once("end", () => flock(fd, "un", () => {
-        fs.closeSync(fd);
-        process.exit(0);
-      }));
-    });
-  `;
-  const child = spawn(process.execPath, ["-e", script, path], {
-    cwd: new URL("../../..", import.meta.url),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  if (child.stdin === null || child.stdout === null || child.stderr === null) {
-    throw new Error("lock child pipes are unavailable");
-  }
-  let stderr = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-  await new Promise<void>((resolvePromise, reject) => {
-    child.stdout?.once("data", (chunk: Buffer) => {
-      if (chunk.toString("utf8").startsWith("locked")) resolvePromise();
-      else reject(new Error("lock child returned an invalid readiness marker"));
-    });
-    child.once("exit", (code) => reject(new Error(`lock child exited ${String(code)}: ${stderr}`)));
-  });
-  return async () => {
-    child.stdin?.end();
-    await new Promise<void>((resolvePromise, reject) => {
-      child.once("exit", (code) => code === 0
-        ? resolvePromise()
-        : reject(new Error(`lock child exited ${String(code)}: ${stderr}`)));
-    });
+async function regularFiles(root: string): Promise<string[]> {
+  const files: string[] = [];
+  const visit = async (path: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(path, { withFileTypes: true });
+    } catch (error: unknown) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) await visit(child);
+      else if (entry.isFile()) files.push(child);
+    }
   };
+  await visit(root);
+  return files;
 }
 
-async function waitForPath(path: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    try {
-      await lstat(path);
-      return;
-    } catch (error: unknown) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+async function expectSecretsAbsent(
+  rootsToScan: readonly string[],
+  secrets: readonly string[],
+): Promise<void> {
+  const files = (await Promise.all(rootsToScan.map(regularFiles))).flat();
+  for (const path of files) {
+    const bytes = await readFile(path);
+    for (const secret of secrets) {
+      expect(bytes.includes(Buffer.from(secret))).toBe(false);
     }
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
-    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 10));
   }
 }
 
@@ -157,6 +135,11 @@ describe("public local operator Console session", () => {
     ]);
     await first.close();
 
+    await expectSecretsAbsent(
+      [paths.stateDirectory, paths.runtimeDirectory],
+      [first.credential.token, second.credential.token, otherProject.credential.token],
+    );
+
     const bootstrap = await import("better-sqlite3").then(({ default: Database }) =>
       new Database(paths.databasePath, { readonly: true, fileMustExist: true }),
     );
@@ -169,7 +152,7 @@ describe("public local operator Console session", () => {
     }
   });
 
-  it("selects an existing session, reuses its bounded credential and never creates a session implicitly", async () => {
+  it("selects an existing session, issues a fresh bounded credential and never creates a session implicitly", async () => {
     const { paths, projectA, projectB } = await fixture();
     const project = await openLocalOperatorConsoleSession({
       projectRoot: projectA,
@@ -232,10 +215,139 @@ describe("public local operator Console session", () => {
 
     expect(first.projectSessionId).toBe("session_console_existing_01");
     expect(replay.projectSessionId).toBe(first.projectSessionId);
-    expect(first.credential.capabilityId).toBe(replay.credential.capabilityId);
+    expect(first.credential.capabilityId).not.toBe(replay.credential.capabilityId);
     expect(first.client.console?.readOnly).toBe(false);
     expect(first.client.operations[FABRIC_OPERATIONS.operatorActionPreview]).toBeTypeOf("function");
     await Promise.all([first.close(), replay.close()]);
+    await expectSecretsAbsent(
+      [paths.stateDirectory, paths.runtimeDirectory],
+      [first.credential.token, replay.credential.token],
+    );
+  });
+
+  it("rotates an expired principal generation, revokes prior capabilities and reopens concurrently", async () => {
+    const { paths, projectA, projectB } = await fixture();
+    const expired = await openLocalOperatorConsoleSession({
+      projectRoot: projectA,
+      surface: "standalone",
+      paths,
+      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+      clientId: "console_expiring_01",
+      credentialLifetimeMs: 250,
+      attachmentLeaseMs: 100,
+      heartbeatIntervalMs: 25,
+    });
+    const expiredCapabilityId = expired.credential.capabilityId;
+    const expiredToken = expired.credential.token;
+    await expired.close();
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 300));
+
+    const [first, second] = await Promise.all([
+      openLocalOperatorConsoleSession({
+        projectRoot: projectA,
+        surface: "standalone",
+        paths,
+        daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+        clientId: "console_rotated_01",
+      }),
+      openLocalOperatorConsoleSession({
+        projectRoot: projectA,
+        surface: "herdr",
+        paths,
+        daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+        clientId: "console_rotated_02",
+      }),
+    ]);
+    try {
+      expect(first.projectId).toBe(expired.projectId);
+      expect(second.projectId).toBe(expired.projectId);
+      expect(first.credential.capabilityId).not.toBe(second.credential.capabilityId);
+      const database = await import("better-sqlite3").then(({ default: Database }) =>
+        new Database(paths.databasePath, { readonly: true, fileMustExist: true }),
+      );
+      try {
+        expect(database.prepare(`
+          SELECT principal_generation FROM operator_principals WHERE operator_id=?
+        `).get(first.operatorId)).toEqual({ principal_generation: 2 });
+        expect(database.prepare(`
+          SELECT revoked_at IS NOT NULL AS revoked FROM operator_capabilities WHERE capability_id=?
+        `).get(expiredCapabilityId)).toEqual({ revoked: 1 });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+    }
+    await expectSecretsAbsent(
+      [paths.stateDirectory, paths.runtimeDirectory],
+      [expiredToken, first.credential.token, second.credential.token],
+    );
+  });
+
+  it("paginates past one hundred non-attachable sessions to select an older attachable session", async () => {
+    const { paths, projectA, projectB } = await fixture();
+    const project = await openLocalOperatorConsoleSession({
+      projectRoot: projectA,
+      surface: "standalone",
+      paths,
+      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+      clientId: "console_pagination_seed",
+    });
+    await project.close();
+    const database = await import("better-sqlite3").then(({ default: Database }) =>
+      new Database(paths.databasePath, { fileMustExist: true }),
+    );
+    try {
+      const insert = database.prepare(`
+        INSERT INTO project_sessions(
+          project_session_id, project_id, mode, state, revision, generation,
+          authority_ref, budget_ref, launch_packet_path, launch_packet_digest,
+          membership_revision, origin_kind, origin_operator_id,
+          migration_manifest_ref, terminal_path_json, created_at, updated_at
+        ) VALUES (?, ?, 'coordinated', ?, 1, 1, ?, ?, ?, ?, 1,
+                  'operator-launch', ?, NULL, NULL, ?, ?)
+      `);
+      database.transaction(() => {
+        insert.run(
+          "session_pagination_active",
+          project.projectId,
+          "draft",
+          `sha256:${"a".repeat(64)}`,
+          "budget_pagination_active",
+          "launch/active.json",
+          `sha256:${"b".repeat(64)}`,
+          project.operatorId,
+          1,
+          1,
+        );
+        for (let index = 0; index < 101; index += 1) {
+          insert.run(
+            `session_pagination_terminal_${String(index).padStart(3, "0")}`,
+            project.projectId,
+            "launch_failed",
+            `sha256:${"a".repeat(64)}`,
+            `budget_pagination_${String(index)}`,
+            `launch/${String(index)}.json`,
+            `sha256:${"b".repeat(64)}`,
+            project.operatorId,
+            index + 2,
+            index + 2,
+          );
+        }
+      })();
+    } finally {
+      database.close();
+    }
+
+    const selected = await openLocalOperatorConsoleSession({
+      projectRoot: projectA,
+      surface: "standalone",
+      paths,
+      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+      clientId: "console_pagination_selected",
+    });
+    expect(selected.projectSessionId).toBe("session_pagination_active");
+    await selected.close();
   });
 
   it("fails closed for untrusted roots and never creates default authority", async () => {
@@ -277,13 +389,18 @@ describe("public local operator Console session", () => {
     await runWorkspaceTrust(["trust", projectA], paths);
     await runWorkspaceTrust(["trust", projectB], paths);
 
-    const projectKey = createHash("sha256")
-      .update(await realpath(projectA))
-      .digest("hex")
-      .slice(0, 32);
-    const custodyDirectory = join(stateDirectory, "console-operators", projectKey);
-    await mkdir(custodyDirectory, { recursive: true, mode: 0o700 });
-    const releaseLock = await holdFileLock(join(custodyDirectory, "credential.lock"));
+    let releaseProvision!: () => void;
+    let provisionEntered!: () => void;
+    const entered = new Promise<void>((resolvePromise) => { provisionEntered = resolvePromise; });
+    const blocked = new Promise<void>((resolvePromise) => { releaseProvision = resolvePromise; });
+    const provision = vi.spyOn(
+      FabricDaemonClient.prototype,
+      "openLocalOperatorConsoleCapability",
+    ).mockImplementationOnce(async () => {
+      provisionEntered();
+      await blocked;
+      throw new Error("injected late authority failure");
+    });
     const first = openLocalOperatorConsoleSession({
       projectRoot: projectA,
       surface: "standalone",
@@ -292,7 +409,7 @@ describe("public local operator Console session", () => {
       clientId: "console_late_failure_01",
     });
     void first.catch(() => undefined);
-    await waitForPath(paths.socketPath);
+    await entered;
 
     const survivor = await openLocalOperatorConsoleSession({
       projectRoot: projectB,
@@ -302,12 +419,7 @@ describe("public local operator Console session", () => {
       clientId: "console_survivor_01",
     });
     try {
-      await writeFile(
-        join(custodyDirectory, "credential.json"),
-        "{\"invalid\":true}\n",
-        { mode: 0o600 },
-      );
-      await releaseLock();
+      releaseProvision();
 
       await expect(first).rejects.toMatchObject({
         code: "CONSOLE_AUTHORITY_UNAVAILABLE",
@@ -320,6 +432,7 @@ describe("public local operator Console session", () => {
         project: { freshness: "live", value: { projectId: survivor.projectId } },
       });
     } finally {
+      provision.mockRestore();
       await survivor.close().catch(() => undefined);
       try { process.kill(survivor.daemonPid, "SIGTERM"); } catch { /* already stopped */ }
     }

@@ -12,6 +12,7 @@
   },
   "files": [
     "dist",
+    "migrations",
     "schemas"
   ],
   "exports": {
