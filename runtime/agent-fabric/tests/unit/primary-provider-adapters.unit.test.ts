@@ -9,6 +9,7 @@ import { parse } from "yaml";
 import {
   claudeReadOnlyOptions,
   createClaudeAgentSdkAdapter,
+  InstalledClaudeAgentSdkBoundary,
   type ClaudeAgentSdkBoundary,
 } from "../../src/adapters/providers/claude-agent-sdk.ts";
 import {
@@ -16,9 +17,12 @@ import {
   codexCompletedTurnResult,
   codexThreadConfiguration,
   createCodexAppServerAdapter,
+  InstalledCodexAppServerBoundary,
   type CodexAppServerBoundary,
 } from "../../src/adapters/providers/codex-app-server.ts";
 import { SqliteAdapterActionJournal } from "../../src/adapters/providers/journal.ts";
+import { probeChairLaunchFabricContinuity } from "../../src/adapters/providers/chair-launch-continuity.ts";
+import * as providerTypes from "../../src/adapters/providers/types.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -28,8 +32,107 @@ async function journal(): Promise<SqliteAdapterActionJournal> {
   return new SqliteAdapterActionJournal(join(directory, "actions.sqlite3"));
 }
 
+function provedChairLaunch(resumeReference: string, providerContractDigest: string) {
+  return {
+    resumeReference,
+    providerSessionGeneration: 1,
+    fabricContinuity: {
+      schemaVersion: 1,
+      kind: "authenticated-fabric-continuity",
+      providerContractDigest,
+      providerSessionRef: resumeReference,
+      providerSessionGeneration: 1,
+      authenticated: true,
+    },
+  } as const;
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
+describe("private chair launch environment", () => {
+  it("takes the complete handoff once and removes both values from the adapter process environment", () => {
+    const takeChairLaunchHandoff: unknown = Reflect.get(providerTypes, "takeChairLaunchHandoff");
+    expect(takeChairLaunchHandoff).toBeTypeOf("function");
+    const environment: NodeJS.ProcessEnv = {
+      AGENT_FABRIC_CAPABILITY: "environment-capability-canary",
+      AGENT_FABRIC_SOCKET_PATH: "/private/environment-fabric.sock",
+      KEEP: "retained",
+    };
+
+    expect(Reflect.apply(
+      takeChairLaunchHandoff as (...arguments_: unknown[]) => unknown,
+      undefined,
+      [environment],
+    )).toEqual({
+      capability: "environment-capability-canary",
+      socketPath: "/private/environment-fabric.sock",
+    });
+    expect(environment).toEqual({ KEEP: "retained" });
+    expect(Reflect.apply(
+      takeChairLaunchHandoff as (...arguments_: unknown[]) => unknown,
+      undefined,
+      [environment],
+    )).toBeUndefined();
+  });
+
+  it("rejects and removes a handoff whose socket path is not absolute", () => {
+    const takeChairLaunchHandoff: unknown = Reflect.get(providerTypes, "takeChairLaunchHandoff");
+    const environment: NodeJS.ProcessEnv = {
+      AGENT_FABRIC_CAPABILITY: "relative-socket-capability-canary",
+      AGENT_FABRIC_SOCKET_PATH: "relative/fabric.sock",
+    };
+
+    expect(() => Reflect.apply(
+      takeChairLaunchHandoff as (...arguments_: unknown[]) => unknown,
+      undefined,
+      [environment],
+    )).toThrowError("chair launch private environment must contain a capability and absolute socket path");
+    expect(environment).toEqual({});
+  });
+
+  it("closes a bounded authenticated mailbox probe and returns only contract-bound evidence", async () => {
+    const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+    const close = vi.fn(async () => undefined);
+    const connect = vi.fn(async () => ({ call, close }));
+    const input = {
+      capability: "mailbox-probe-capability-canary",
+      socketPath: "/private/mailbox-probe.sock",
+      resumeReference: "provider-chair-session",
+      providerSessionGeneration: 1,
+      providerContractDigest: `sha256:${"6".repeat(64)}`,
+    };
+
+    const result = await probeChairLaunchFabricContinuity(input, { connect });
+
+    expect(connect).toHaveBeenCalledWith({
+      capability: input.capability,
+      socketPath: input.socketPath,
+    });
+    expect(call).toHaveBeenCalledWith("getMailboxState", {});
+    expect(close).toHaveBeenCalledOnce();
+    expect(result).toEqual(provedChairLaunch(input.resumeReference, input.providerContractDigest));
+    expect(JSON.stringify(result)).not.toContain(input.capability);
+    expect(JSON.stringify(result)).not.toContain(input.socketPath);
+  });
+
+  it("closes the authenticated mailbox probe when its response is invalid", async () => {
+    const close = vi.fn(async () => undefined);
+    const connect = vi.fn(async () => ({
+      call: vi.fn(async () => ({ unexpected: true })),
+      close,
+    }));
+
+    await expect(probeChairLaunchFabricContinuity({
+      capability: "invalid-probe-capability-canary",
+      socketPath: "/private/invalid-probe.sock",
+      resumeReference: "provider-chair-invalid-probe",
+      providerSessionGeneration: 1,
+      providerContractDigest: `sha256:${"7".repeat(64)}`,
+    }, { connect })).rejects.toMatchObject({ code: "CHAIR_CONTINUITY_UNPROVEN" });
+    expect(close).toHaveBeenCalledOnce();
+  });
 });
 
 function claudeBoundary(): ClaudeAgentSdkBoundary {
@@ -159,6 +262,406 @@ describe("Claude Agent SDK fabric adapter", () => {
     });
     actionJournal.close();
   });
+
+  it("accepts one advertised private-environment chair launch without journalling its credential", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const launchChair = vi.fn(async (input: { providerContractDigest: string }) => (
+      provedChairLaunch("claude-chair-session-1", input.providerContractDigest)
+    ));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const capability = "chair-capability-secret-canary";
+    const socketPath = "/private/agent-fabric.sock";
+    const adapterOptions = {
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: { capability, socketPath },
+    };
+    const adapter = createClaudeAgentSdkAdapter(adapterOptions);
+    const request = {
+      schemaVersion: 1,
+      actionId: "claude-chair-launch-1",
+      providerContractDigest: `sha256:${"a".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "continue the reviewed project session",
+      },
+    };
+
+    await expect(adapter.request("capabilities", {})).resolves.toMatchObject({
+      operations: expect.arrayContaining(["launch_chair"]),
+      chairLaunch: {
+        schemaVersion: 1,
+        method: "launch_chair",
+        inputSchemaId: "claude-agent-sdk.chair-launch.v1",
+        oneUse: true,
+        secretTransport: "private-environment",
+        environment: {
+          capability: "AGENT_FABRIC_CAPABILITY",
+          socketPath: "AGENT_FABRIC_SOCKET_PATH",
+        },
+        noEffectProofSchemas: {},
+      },
+    });
+    const advertised = await adapter.request("capabilities", {});
+    const chairLaunch = Reflect.get(advertised as object, "chairLaunch");
+    const parseChairLaunchCapability: unknown = Reflect.get(providerTypes, "parseChairLaunchCapability");
+    expect(parseChairLaunchCapability).toBeTypeOf("function");
+    expect(Reflect.apply(
+      parseChairLaunchCapability as (...arguments_: unknown[]) => unknown,
+      undefined,
+      [chairLaunch],
+    )).toEqual(chairLaunch);
+    expect(() => Reflect.apply(
+      parseChairLaunchCapability as (...arguments_: unknown[]) => unknown,
+      undefined,
+      [{ ...chairLaunch, providerContractDigest: request.providerContractDigest }],
+    )).toThrowError("chair launch capability does not match its closed schema");
+    await expect(adapter.request("launch_chair", request)).resolves.toEqual(
+      provedChairLaunch("claude-chair-session-1", request.providerContractDigest),
+    );
+    expect(launchChair).toHaveBeenCalledWith({
+      actionId: "claude-chair-launch-1",
+      providerContractDigest: request.providerContractDigest,
+      payload: request.payload,
+      environment: {
+        AGENT_FABRIC_CAPABILITY: capability,
+        AGENT_FABRIC_SOCKET_PATH: socketPath,
+      },
+    });
+    const persisted = await adapter.request("lookup_action", { actionId: request.actionId });
+    expect(JSON.stringify(persisted)).not.toContain(capability);
+    expect(JSON.stringify(persisted)).not.toContain(socketPath);
+    await expect(adapter.request("launch_chair", request)).resolves.toEqual(
+      provedChairLaunch("claude-chair-session-1", request.providerContractDigest),
+    );
+    expect(launchChair).toHaveBeenCalledOnce();
+    actionJournal.close();
+  });
+
+  it("rejects a changed chair-launch replay against the persisted public contract digest", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const launchChair = vi.fn(async (input: { providerContractDigest: string }) => (
+      provedChairLaunch("claude-chair-session-2", input.providerContractDigest)
+    ));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const adapterOptions = {
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability: "changed-replay-capability-canary",
+        socketPath: "/private/changed-replay.sock",
+      },
+    };
+    const adapter = createClaudeAgentSdkAdapter(adapterOptions);
+    const request = {
+      schemaVersion: 1,
+      actionId: "claude-chair-launch-2",
+      providerContractDigest: `sha256:${"e".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "original reviewed work",
+      },
+    };
+
+    await adapter.request("launch_chair", request);
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      payload: { ...request.payload, prompt: "changed work" },
+    })).rejects.toMatchObject({ code: "ACTION_CONFLICT" });
+    expect(launchChair).toHaveBeenCalledOnce();
+    actionJournal.close();
+  });
+
+  it("rejects a private capability reused as a journalled chair-launch identifier", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const launchChair = vi.fn(async () => ({ resumeReference: "must-not-launch" }));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const capability = "identifier-capability-secret-canary";
+    const adapterOptions = {
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability,
+        socketPath: "/private/identifier.sock",
+      },
+    };
+    const adapter = createClaudeAgentSdkAdapter(adapterOptions);
+
+    await expect(adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: `launch-${capability}`,
+      providerContractDigest: `sha256:${"f".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "reviewed work",
+      },
+    })).rejects.toMatchObject({ code: "PRIVATE_HANDOFF_DISCLOSED" });
+    expect(launchChair).not.toHaveBeenCalled();
+    actionJournal.close();
+  });
+
+  it("rejects an open provider launch result before core outcome binding", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const launchChair = vi.fn(async (input: { providerContractDigest: string }) => ({
+      ...provedChairLaunch("claude-chair-session-open", input.providerContractDigest),
+      unexpected: "must-not-cross-the-launch-boundary",
+    }));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const adapter = createClaudeAgentSdkAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability: "open-result-capability-canary",
+        socketPath: "/private/open-result.sock",
+      },
+    });
+
+    await expect(adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: "claude-chair-open-result",
+      providerContractDigest: `sha256:${"0".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "reviewed work",
+      },
+    })).rejects.toMatchObject({
+      code: "CHAIR_LAUNCH_FAILED",
+      message: "chair launch provider handoff failed",
+    });
+    const persisted = await adapter.request("lookup_action", {
+      actionId: "claude-chair-open-result",
+    });
+    expect(persisted).toMatchObject({ status: "ambiguous" });
+    expect(persisted).not.toHaveProperty("result");
+    actionJournal.close();
+  });
+
+  it("rejects Fabric continuity evidence bound to another provider contract", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const launchChair = vi.fn(async () => provedChairLaunch(
+      "claude-chair-wrong-contract",
+      `sha256:${"3".repeat(64)}`,
+    ));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const adapter = createClaudeAgentSdkAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability: "wrong-contract-capability-canary",
+        socketPath: "/private/wrong-contract.sock",
+      },
+    });
+
+    await expect(adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: "claude-chair-wrong-contract",
+      providerContractDigest: `sha256:${"4".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "reviewed work",
+      },
+    })).rejects.toMatchObject({ code: "CHAIR_LAUNCH_FAILED" });
+    await expect(adapter.request("lookup_action", {
+      actionId: "claude-chair-wrong-contract",
+    })).resolves.toMatchObject({ status: "ambiguous", idempotencyProven: false });
+    actionJournal.close();
+  });
+
+  it("redacts private handoff material from provider launch failures", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const capability = "failure-capability-secret-canary";
+    const socketPath = "/private/failure-socket-canary.sock";
+    Reflect.set(boundary, "launchChair", vi.fn(async () => {
+      throw new Error(`provider leaked ${capability} at ${socketPath}`);
+    }));
+    const adapter = createClaudeAgentSdkAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: { capability, socketPath },
+    });
+
+    const error = await adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: "claude-chair-redacted-failure",
+      providerContractDigest: `sha256:${"1".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "reviewed work",
+      },
+    }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({
+      code: "CHAIR_LAUNCH_FAILED",
+      message: "chair launch provider handoff failed",
+      details: { actionId: "claude-chair-redacted-failure" },
+    });
+    expect(JSON.stringify(error)).not.toContain(capability);
+    expect(JSON.stringify(error)).not.toContain(socketPath);
+    expect(String(error)).not.toContain(capability);
+    expect(String(error)).not.toContain(socketPath);
+    const persisted = await adapter.request("lookup_action", {
+      actionId: "claude-chair-redacted-failure",
+    });
+    expect(JSON.stringify(persisted)).not.toContain(capability);
+    expect(JSON.stringify(persisted)).not.toContain(socketPath);
+    actionJournal.close();
+  });
+});
+
+describe("installed Claude chair launch boundary", () => {
+  it("passes private Fabric access only through the Claude process environment", async () => {
+    const actionJournal = await journal();
+    const close = vi.fn();
+    const queryFactory = vi.fn((_input: unknown) => ({
+      close,
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "result",
+          subtype: "success",
+          session_id: "claude-chair-session-1",
+          result: "chair ready",
+          usage: {},
+          total_cost_usd: 0,
+        };
+      },
+    }));
+    const providerContractDigest = `sha256:${"c".repeat(64)}`;
+    const continuityProbe = vi.fn(async () => (
+      provedChairLaunch("claude-chair-session-1", providerContractDigest)
+    ));
+    const boundary = Reflect.construct(InstalledClaudeAgentSdkBoundary, [{
+      executable: "/trusted/claude",
+      query: queryFactory,
+      continuityProbe,
+    }]);
+    const capability = "claude-private-capability-canary";
+    const socketPath = "/private/claude-fabric.sock";
+    const adapter = createClaudeAgentSdkAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: { capability, socketPath },
+    });
+
+    await expect(adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: "claude-launch-1",
+      providerContractDigest,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "continue reviewed work",
+      },
+    })).resolves.toEqual(provedChairLaunch("claude-chair-session-1", providerContractDigest));
+
+    const queryInput = queryFactory.mock.calls[0]?.[0] as {
+      prompt: string;
+      options: Record<string, unknown> & { env?: Record<string, string> };
+    };
+    expect(queryInput.prompt).toBe("continue reviewed work");
+    expect(queryInput.options.env).toMatchObject({
+      AGENT_FABRIC_CAPABILITY: capability,
+      AGENT_FABRIC_SOCKET_PATH: socketPath,
+    });
+    const { env: _privateEnvironment, ...publicOptions } = queryInput.options;
+    expect(JSON.stringify({ prompt: queryInput.prompt, options: publicOptions })).not.toContain(capability);
+    expect(JSON.stringify({ prompt: queryInput.prompt, options: publicOptions })).not.toContain(socketPath);
+    expect(close).toHaveBeenCalledOnce();
+    expect(continuityProbe).toHaveBeenCalledWith({
+      capability,
+      socketPath,
+      resumeReference: "claude-chair-session-1",
+      providerSessionGeneration: 1,
+      providerContractDigest,
+    });
+    await expect(adapter.request("lookup_action", { actionId: "claude-launch-1" })).resolves.toMatchObject({
+      status: "terminal",
+      idempotencyProven: true,
+    });
+    actionJournal.close();
+  });
+
+  it("preserves safe resume evidence when the authenticated continuity probe fails", async () => {
+    const actionJournal = await journal();
+    const capability = "claude-probe-failure-capability-canary";
+    const socketPath = "/private/claude-probe-failure.sock";
+    const queryFactory = vi.fn((_input: unknown) => ({
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "result",
+          subtype: "success",
+          session_id: "claude-chair-orphan-session",
+          result: "bootstrap complete",
+          usage: {},
+          total_cost_usd: 0,
+        };
+      },
+    }));
+    const continuityProbe = vi.fn(async () => {
+      throw new Error(`probe rejected ${capability} ${socketPath}`);
+    });
+    const boundary = Reflect.construct(InstalledClaudeAgentSdkBoundary, [{
+      query: queryFactory,
+      continuityProbe,
+    }]);
+    const adapter = createClaudeAgentSdkAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: { capability, socketPath },
+    });
+    const providerContractDigest = `sha256:${"5".repeat(64)}`;
+
+    const error = await adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: "claude-launch-probe-failure",
+      providerContractDigest,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        prompt: "begin reviewed coordination",
+      },
+    }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({
+      code: "CHAIR_LAUNCH_FAILED",
+      message: "chair launch provider handoff failed",
+    });
+    expect(String(error)).not.toContain(capability);
+    expect(String(error)).not.toContain(socketPath);
+    await expect(adapter.request("lookup_action", {
+      actionId: "claude-launch-probe-failure",
+    })).resolves.toMatchObject({
+      status: "ambiguous",
+      history: ["prepared", "dispatched", "accepted", "ambiguous"],
+      effectCount: 1,
+      idempotencyProven: false,
+      result: {
+        kind: "continuity-unproven",
+        providerContractDigest,
+        resumeReference: "claude-chair-orphan-session",
+        providerSessionGeneration: 1,
+      },
+    });
+    actionJournal.close();
+  });
 });
 
 describe("Codex app-server response validation", () => {
@@ -178,6 +681,223 @@ describe("Codex app-server response validation", () => {
       .toThrow("provider error");
     expect(() => codexCompletedTurnResult({ status: "completed", items: [] }))
       .toThrow("no agent message");
+  });
+});
+
+describe("installed Codex chair launch boundary", () => {
+  it("starts and completes the initial Codex chair turn with private Fabric environment", async () => {
+    const actionJournal = await journal();
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const connection = {
+      initialize: vi.fn(async () => undefined),
+      request: vi.fn(async (method: string, params: Record<string, unknown>) => {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "codex-chair-thread-1" } };
+        if (method === "turn/start") return { turn: { id: "codex-chair-turn-1", status: "inProgress" } };
+        return {
+          thread: {
+            id: "codex-chair-thread-1",
+            turns: [{
+              id: "codex-chair-turn-1",
+              status: "completed",
+              items: [{ type: "agentMessage", text: "chair bootstrap complete" }],
+            }],
+          },
+        };
+      }),
+      close: vi.fn(async () => undefined),
+      waitForNotification: vi.fn(async () => ({
+        threadId: "codex-chair-thread-1",
+        turn: { id: "codex-chair-turn-1", status: "completed" },
+      })),
+    };
+    const connectionFactory = vi.fn(() => connection);
+    const providerContractDigest = `sha256:${"d".repeat(64)}`;
+    const continuityProbe = vi.fn(async () => (
+      provedChairLaunch("codex-chair-thread-1", providerContractDigest)
+    ));
+    const boundary = Reflect.construct(InstalledCodexAppServerBoundary, [connectionFactory, continuityProbe]);
+    const capability = "codex-private-capability-canary";
+    const socketPath = "/private/codex-fabric.sock";
+    const adapter = createCodexAppServerAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: { capability, socketPath },
+    });
+
+    await expect(adapter.request("launch_chair", {
+      schemaVersion: 1,
+      actionId: "codex-launch-1",
+      providerContractDigest,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "openai",
+        model: "gpt-test",
+        prompt: "begin chair coordination",
+        ephemeral: false,
+      },
+    })).resolves.toEqual(provedChairLaunch("codex-chair-thread-1", providerContractDigest));
+
+    expect(connectionFactory).toHaveBeenCalledWith({
+      AGENT_FABRIC_CAPABILITY: capability,
+      AGENT_FABRIC_SOCKET_PATH: socketPath,
+    });
+    expect(requests).toEqual([
+      {
+        method: "thread/start",
+        params: {
+          cwd: "/workspace/project",
+          model: "gpt-test",
+          ephemeral: false,
+          sandbox: "read-only",
+          approvalPolicy: "never",
+        },
+      },
+      {
+        method: "turn/start",
+        params: {
+          threadId: "codex-chair-thread-1",
+          input: [{ type: "text", text: "begin chair coordination" }],
+          model: "gpt-test",
+        },
+      },
+      {
+        method: "thread/read",
+        params: { threadId: "codex-chair-thread-1", includeTurns: true },
+      },
+    ]);
+    expect(JSON.stringify(requests)).not.toContain(capability);
+    expect(JSON.stringify(requests)).not.toContain(socketPath);
+    expect(connectionFactory).toHaveBeenCalledOnce();
+    expect(connection.close).not.toHaveBeenCalled();
+    expect(continuityProbe).toHaveBeenCalledWith({
+      capability,
+      socketPath,
+      resumeReference: "codex-chair-thread-1",
+      providerSessionGeneration: 1,
+      providerContractDigest,
+    });
+    await expect(adapter.request("lookup_action", { actionId: "codex-launch-1" })).resolves.toMatchObject({
+      status: "terminal",
+      idempotencyProven: true,
+    });
+    await boundary.closeAll();
+    expect(connection.close).toHaveBeenCalledOnce();
+
+    const failingProbe = vi.fn(async () => {
+      throw new Error("continuity unavailable");
+    });
+    const failingBoundary = Reflect.construct(InstalledCodexAppServerBoundary, [connectionFactory, failingProbe]);
+    const failingLaunch: unknown = Reflect.get(failingBoundary, "launchChair");
+    await expect(Reflect.apply(
+      failingLaunch as (...arguments_: unknown[]) => unknown,
+      failingBoundary,
+      [{
+        actionId: "codex-launch-probe-failure",
+        providerContractDigest,
+        payload: {
+          cwd: "/workspace/project",
+          modelFamily: "openai",
+          model: "gpt-test",
+          prompt: "begin chair coordination",
+          ephemeral: false,
+        },
+        environment: {
+          AGENT_FABRIC_CAPABILITY: capability,
+          AGENT_FABRIC_SOCKET_PATH: socketPath,
+        },
+      }],
+    )).rejects.toMatchObject({
+      code: "CHAIR_CONTINUITY_UNPROVEN",
+      details: {
+        kind: "continuity-unproven",
+        providerContractDigest,
+        resumeReference: "codex-chair-thread-1",
+        providerSessionGeneration: 1,
+      },
+    });
+    expect(connection.close).toHaveBeenCalledTimes(2);
+    actionJournal.close();
+  });
+});
+
+describe("Codex chair launch contract", () => {
+  it("advertises and enforces a closed public payload before launch I/O", async () => {
+    const actionJournal = await journal();
+    const boundary = codexBoundary();
+    const launchChair = vi.fn(async (input: { providerContractDigest: string }) => (
+      provedChairLaunch("codex-chair-contract-thread", input.providerContractDigest)
+    ));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const adapter = createCodexAppServerAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability: "codex-contract-capability-canary",
+        socketPath: "/private/codex-contract.sock",
+      },
+    });
+    const request = {
+      schemaVersion: 1,
+      providerContractDigest: `sha256:${"2".repeat(64)}`,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "openai",
+        model: "gpt-test",
+        prompt: "begin reviewed coordination",
+      },
+    };
+
+    await expect(adapter.request("capabilities", {})).resolves.toMatchObject({
+      chairLaunch: {
+        inputSchemaId: "codex-app-server.chair-launch.v1",
+        noEffectProofSchemas: {},
+        publicPayloadSchema: {
+          additionalProperties: false,
+          required: ["cwd", "modelFamily", "model", "prompt"],
+          properties: {
+            cwd: { pattern: "^/" },
+            modelFamily: { const: "openai" },
+            ephemeral: { const: false },
+          },
+        },
+      },
+    });
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      actionId: "codex-chair-missing-prompt",
+      payload: { cwd: "/workspace/project", modelFamily: "openai", model: "gpt-test" },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      actionId: "codex-chair-public-environment",
+      payload: { ...request.payload, environment: { inherit: true } },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      actionId: "codex-chair-provider-override",
+      payload: { ...request.payload, modelProvider: "unreviewed-provider" },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      actionId: "codex-chair-ephemeral",
+      payload: { ...request.payload, ephemeral: true },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      actionId: "codex-chair-wrong-family",
+      payload: { ...request.payload, modelFamily: "anthropic" },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(launchChair).not.toHaveBeenCalled();
+    await expect(adapter.request("launch_chair", {
+      ...request,
+      actionId: "codex-chair-valid-contract",
+    })).resolves.toEqual(provedChairLaunch(
+      "codex-chair-contract-thread",
+      request.providerContractDigest,
+    ));
+    expect(launchChair).toHaveBeenCalledOnce();
+    actionJournal.close();
   });
 });
 

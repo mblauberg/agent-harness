@@ -2,15 +2,25 @@ import { pathToFileURL } from "node:url";
 import { isAbsolute } from "node:path";
 
 import { createProviderAdapter, type ProviderBoundary } from "./adapter.js";
+import {
+  chairLaunchContinuityUnproven,
+  probeChairLaunchFabricContinuity,
+  type ChairLaunchContinuityProbe,
+} from "./chair-launch-continuity.js";
 import { CodexJsonRpcConnection } from "./codex-json-rpc.js";
 import { SqliteAdapterActionJournal } from "./journal.js";
 import { journalPathFromArguments, serveAdapter } from "./server.js";
 import {
   isRecord,
   optionalString,
+  parseChairLaunchProviderResult,
   ProviderAdapterError,
   requiredString,
+  takeChairLaunchHandoff,
   type AdapterRequestHandler,
+  type ChairLaunchBoundaryInput,
+  type ChairLaunchHandoff,
+  type ChairLaunchProviderResult,
   type ProviderAdapterCapabilities,
 } from "./types.js";
 
@@ -40,6 +50,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     "lookup_action",
     "cancel_action",
     "release",
+    "launch_chair",
   ],
   actionJournal: true,
   persistentSession: true,
@@ -49,7 +60,60 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
   recoveryOperations: ["resume_reference", "lookup_action"],
   compactInPlace: true,
   idempotencyEvidence: "per-action-fail-closed",
+  chairLaunch: {
+    schemaVersion: 1,
+    method: "launch_chair",
+    inputSchemaId: "codex-app-server.chair-launch.v1",
+    oneUse: true,
+    secretTransport: "private-environment",
+    environment: {
+      capability: "AGENT_FABRIC_CAPABILITY",
+      socketPath: "AGENT_FABRIC_SOCKET_PATH",
+    },
+    publicPayloadSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["cwd", "modelFamily", "model", "prompt"],
+      properties: {
+        cwd: { type: "string", minLength: 1, pattern: "^/" },
+        modelFamily: { type: "string", const: "openai" },
+        model: { type: "string", minLength: 1 },
+        prompt: { type: "string", minLength: 1 },
+        developerInstructions: { type: "string", minLength: 1 },
+        baseInstructions: { type: "string", minLength: 1 },
+        serviceTier: { type: "string", minLength: 1 },
+        ephemeral: { type: "boolean", const: false },
+      },
+    },
+    noEffectProofSchemas: {},
+  },
 };
+
+function validateCodexChairLaunchPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const stringFields = ["developerInstructions", "baseInstructions", "serviceTier"] as const;
+  const allowed = new Set(["cwd", "modelFamily", "model", "prompt", "ephemeral", ...stringFields]);
+  if (Object.keys(payload).some((key) => !allowed.has(key))) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "Codex chair launch payload has unexpected fields");
+  }
+  const cwd = requiredString(payload.cwd, "cwd");
+  if (!isAbsolute(cwd)) throw new ProviderAdapterError("INVALID_PARAMS", "cwd must be absolute");
+  const modelFamily = requiredString(payload.modelFamily, "modelFamily");
+  if (modelFamily !== "openai") {
+    throw new ProviderAdapterError("INVALID_PARAMS", "Codex chair launch modelFamily must be openai");
+  }
+  const validated: Record<string, unknown> = {
+    cwd,
+    modelFamily,
+    model: requiredString(payload.model, "model"),
+    prompt: requiredString(payload.prompt, "prompt"),
+  };
+  for (const field of stringFields) copyString(payload, field, validated);
+  if (payload.ephemeral === false) validated.ephemeral = false;
+  else if (payload.ephemeral !== undefined) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "chair launch cannot create an ephemeral Codex thread");
+  }
+  return validated;
+}
 
 function threadId(payload: Record<string, unknown>): string {
   return requiredString(payload.resumeReference ?? payload.threadId, "resumeReference");
@@ -107,17 +171,27 @@ export function codexThreadConfiguration(payload: Record<string, unknown>): Reco
   return configuration;
 }
 
-type ConnectionFactory = () => CodexJsonRpcConnection;
+type CodexConnection = Pick<
+  CodexJsonRpcConnection,
+  "initialize" | "request" | "waitForNotification" | "close"
+>;
+
+type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection;
 
 export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   readonly #connectionFactory: ConnectionFactory;
-  readonly #connections = new Map<string, CodexJsonRpcConnection>();
+  readonly #continuityProbe: ChairLaunchContinuityProbe;
+  readonly #connections = new Map<string, CodexConnection>();
 
-  constructor(connectionFactory: ConnectionFactory) {
+  constructor(
+    connectionFactory: ConnectionFactory,
+    continuityProbe: ChairLaunchContinuityProbe = probeChairLaunchFabricContinuity,
+  ) {
     this.#connectionFactory = connectionFactory;
+    this.#continuityProbe = continuityProbe;
   }
 
-  async #withConnection<T>(operation: (connection: CodexJsonRpcConnection) => Promise<T>): Promise<T> {
+  async #withConnection<T>(operation: (connection: CodexConnection) => Promise<T>): Promise<T> {
     const connection = this.#connectionFactory();
     try {
       await connection.initialize();
@@ -127,13 +201,13 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     }
   }
 
-  async #openConnection(): Promise<CodexJsonRpcConnection> {
-    const connection = this.#connectionFactory();
+  async #openConnection(environment?: Record<string, string>): Promise<CodexConnection> {
+    const connection = this.#connectionFactory(environment);
     await connection.initialize();
     return connection;
   }
 
-  async #sessionConnection(resumeReference: string): Promise<CodexJsonRpcConnection> {
+  async #sessionConnection(resumeReference: string): Promise<CodexConnection> {
     const existing = this.#connections.get(resumeReference);
     if (existing !== undefined) return existing;
     const connection = await this.#openConnection();
@@ -145,6 +219,40 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       await connection.close();
       throw error;
     }
+  }
+
+  async #completeTurn(
+    connection: CodexConnection,
+    resumeReference: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const response = await connection.request("turn/start", {
+      threadId: resumeReference,
+      input: textInput(payload),
+      ...(typeof payload.model === "string" ? { model: payload.model } : {}),
+      ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
+    });
+    const turn = turnFromResponse(response);
+    const completed = await connection.waitForNotification(
+      "turn/completed",
+      (params) => params.threadId === resumeReference && isRecord(params.turn) && params.turn.id === turn.id,
+    );
+    const completedTurn = isRecord(completed.turn) ? completed.turn : turn;
+    if (completedTurn.status !== "completed") codexCompletedTurnResult(completedTurn);
+    const readResponse = await connection.request("thread/read", { threadId: resumeReference, includeTurns: true });
+    const hydratedThread = threadFromResponse(readResponse, "thread/read");
+    const hydratedTurn = Array.isArray(hydratedThread.turns)
+      ? hydratedThread.turns.find((candidate) => isRecord(candidate) && candidate.id === turn.id)
+      : undefined;
+    if (!isRecord(hydratedTurn)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex thread/read returned no completed turn");
+    }
+    return {
+      resumeReference,
+      turnId: turn.id,
+      status: hydratedTurn.status,
+      result: codexCompletedTurnResult(hydratedTurn),
+    };
   }
 
   async closeAll(): Promise<void> {
@@ -178,6 +286,36 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     }
   }
 
+  async launchChair(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult> {
+    const connection = await this.#openConnection(input.environment);
+    try {
+      const response = await connection.request("thread/start", codexThreadConfiguration(input.payload));
+      const thread = threadFromResponse(response, "thread/start");
+      const resumeReference = String(thread.id);
+      await this.#completeTurn(connection, resumeReference, input.payload);
+      const evidence = {
+        resumeReference,
+        providerSessionGeneration: 1,
+        providerContractDigest: input.providerContractDigest,
+      };
+      let result: ChairLaunchProviderResult;
+      try {
+        result = parseChairLaunchProviderResult(await this.#continuityProbe({
+          capability: input.environment.AGENT_FABRIC_CAPABILITY,
+          socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+          ...evidence,
+        }), input.providerContractDigest);
+      } catch {
+        throw chairLaunchContinuityUnproven(evidence);
+      }
+      this.#connections.set(resumeReference, connection);
+      return result;
+    } catch (error: unknown) {
+      await connection.close();
+      throw error;
+    }
+  }
+
   async attach(input: { resumeReference: string; payload: Record<string, unknown> }): Promise<Record<string, unknown>> {
     const connection = await this.#openConnection();
     try {
@@ -197,35 +335,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   async sendTurn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = threadId(payload);
     const connection = await this.#sessionConnection(resumeReference);
-    return await (async () => {
-      const response = await connection.request("turn/start", {
-        threadId: resumeReference,
-        input: textInput(payload),
-        ...(typeof payload.model === "string" ? { model: payload.model } : {}),
-        ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
-      });
-      const turn = turnFromResponse(response);
-      const completed = await connection.waitForNotification(
-        "turn/completed",
-        (params) => params.threadId === resumeReference && isRecord(params.turn) && params.turn.id === turn.id,
-      );
-      const completedTurn = isRecord(completed.turn) ? completed.turn : turn;
-      if (completedTurn.status !== "completed") codexCompletedTurnResult(completedTurn);
-      const readResponse = await connection.request("thread/read", { threadId: resumeReference, includeTurns: true });
-      const hydratedThread = threadFromResponse(readResponse, "thread/read");
-      const hydratedTurn = Array.isArray(hydratedThread.turns)
-        ? hydratedThread.turns.find((candidate) => isRecord(candidate) && candidate.id === turn.id)
-        : undefined;
-      if (!isRecord(hydratedTurn)) {
-        throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex thread/read returned no completed turn");
-      }
-      return {
-        resumeReference,
-        turnId: turn.id,
-        status: hydratedTurn.status,
-        result: codexCompletedTurnResult(hydratedTurn),
-      };
-    })();
+    return await this.#completeTurn(connection, resumeReference, payload);
   }
 
   async steer(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -282,23 +392,34 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
 export function createCodexAppServerAdapter(options: {
   boundary: CodexAppServerBoundary;
   journal: SqliteAdapterActionJournal;
+  chairLaunchHandoff?: ChairLaunchHandoff;
 }): AdapterRequestHandler {
-  return createProviderAdapter({ capabilities: CAPABILITIES, ...options });
+  return createProviderAdapter({
+    capabilities: CAPABILITIES,
+    boundary: options.boundary,
+    journal: options.journal,
+    chairLaunch: {
+      ...(options.chairLaunchHandoff === undefined ? {} : { handoff: options.chairLaunchHandoff }),
+      validatePayload: validateCodexChairLaunchPayload,
+    },
+  });
 }
 
 export async function runCodexAppServerAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("codex-app-server", arguments_));
+  const chairLaunchHandoff = takeChairLaunchHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
   if (providerExecutable === undefined) throw new Error("codex-app-server adapter requires --provider-executable");
   const boundary = new InstalledCodexAppServerBoundary(
-    () => new CodexJsonRpcConnection(codexAppServerCommand(providerExecutable)),
+    (environment) => new CodexJsonRpcConnection(codexAppServerCommand(providerExecutable), environment),
   );
   try {
     await serveAdapter(
       createCodexAppServerAdapter({
         boundary,
         journal,
+        ...(chairLaunchHandoff === undefined ? {} : { chairLaunchHandoff }),
       }),
       { input: process.stdin, output: process.stdout },
     );

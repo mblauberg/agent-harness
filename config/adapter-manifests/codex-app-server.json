@@ -4,19 +4,23 @@
   "files": [
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "8306e956cc6494562a5426b6018a0989cf159a0d6a65ee17cb829bf6f6c6ef86"
+      "sha256": "d41f97f812e06c89ef2af65cb080cabcd33787f5df06297820f0b29a57291c65"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
+      "sha256": "97ac3a10dd3097128bf4652cf762784f4d3a9da55f406a97a3bedfbe779fdb78"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js",
-      "sha256": "99ce2a69be689bd81439c16381111626e944a49f46210fed09fc39e78a5a48df"
+      "sha256": "a76a33f9f22b45c4dc3749fdcfef58a7a45bb088d5daab519b7e47d19c34f525"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-json-rpc.js",
-      "sha256": "df38ae1df3d74faecb6a8cae1e07363f5fd08eda81c42b88fb116f5faa9471b3"
+      "sha256": "999abf62338ea63370dc94eaf189161b47b47f26bbc56b9d5f2ef333f8a1c6ab"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
-      "sha256": "fe942144b97c7248b68d00ddc48b9a5bdb159ec3ecb0c4dcf0b5b9db283ce4b2"
+      "sha256": "a0b1d113ee8e4b0931446cc3ee4c17bf03f35a6d47e01b588c95ae9d68fb3a46"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/server.js",
@@ -24,11 +28,23 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
-      "sha256": "c8d2768f18013aa7559a525e11b227d5b6a2f1bc50d954923d99a8ebe8c7abac"
+      "sha256": "45408bdbdfd0c11cc0610b3426dbac2837a227bf3cd91aa5c67d861cc23d863f"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/daemon/protocol.js",
+      "sha256": "ef6c9201c7091fb2f54948b5725efb1874172a2cba6f08ff11e973e7b23a5fc4"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/domain/unit-keys.js",
+      "sha256": "786ee96647be4b96e373cac674ffb64794dceb5cf94ebce1ebca6882a086c290"
     },
     {
       "path": "runtime/agent-fabric/dist/transport/bounded-ndjson.js",
       "sha256": "f4de18ca4b1fe4f705afa4a2bcccc84a9ee2f2ab8b5632611b83ed2c033a7950"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/transport/ndjson-rpc.js",
+      "sha256": "842d97823498d72837f4857eeba72e8492abeb55caff502249b92782476fe741"
     }
   ]
 }

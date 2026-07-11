@@ -1,10 +1,16 @@
 import {
   actionPayload,
   isRecord,
+  parseChairLaunchCapability,
+  parseChairLaunchContinuityUnprovenEvidence,
+  parseChairLaunchProviderResult,
   ProviderAdapterError,
   requiredString,
   type AdapterActionRecord,
   type AdapterRequestHandler,
+  type ChairLaunchBoundaryInput,
+  type ChairLaunchHandoff,
+  type ChairLaunchProviderResult,
   type ProviderAdapterCapabilities,
 } from "./types.js";
 import type { SqliteAdapterActionJournal } from "./journal.js";
@@ -18,6 +24,7 @@ export type ProviderBoundary = {
   release(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   steer?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   compact?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+  launchChair?(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult>;
 };
 
 type SupportedOperation = "spawn" | "attach" | "send_turn" | "interrupt" | "release" | "steer" | "compact";
@@ -41,8 +48,147 @@ export function createProviderAdapter(options: {
   capabilities: ProviderAdapterCapabilities;
   boundary: ProviderBoundary;
   journal: SqliteAdapterActionJournal;
+  chairLaunch?: {
+    handoff?: ChairLaunchHandoff;
+    validatePayload(payload: Record<string, unknown>): Record<string, unknown>;
+  };
 }): AdapterRequestHandler {
-  const supported = new Set(options.capabilities.operations);
+  const capabilities: ProviderAdapterCapabilities = options.capabilities.chairLaunch === undefined
+    ? options.capabilities
+    : { ...options.capabilities, chairLaunch: parseChairLaunchCapability(options.capabilities.chairLaunch) };
+  const supported = new Set(capabilities.operations);
+  let chairLaunchHandoff = options.chairLaunch?.handoff;
+
+  function chairLaunchRequest(params: Record<string, unknown>): {
+    actionId: string;
+    providerContractDigest: string;
+    payload: Record<string, unknown>;
+  } {
+    if (
+      Object.keys(params).length !== 4 ||
+      !Object.hasOwn(params, "schemaVersion") ||
+      !Object.hasOwn(params, "actionId") ||
+      !Object.hasOwn(params, "providerContractDigest") ||
+      !Object.hasOwn(params, "payload")
+    ) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "chair launch request does not match its closed schema");
+    }
+    if (params.schemaVersion !== 1) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "chair launch schemaVersion must be 1");
+    }
+    const providerContractDigest = requiredString(params.providerContractDigest, "providerContractDigest");
+    if (!/^sha256:[0-9a-f]{64}$/u.test(providerContractDigest)) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "providerContractDigest must be a sha256 digest");
+    }
+    if (!isRecord(params.payload)) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "chair launch payload must be an object");
+    }
+    if (options.chairLaunch === undefined) capabilityUnavailable("launch_chair");
+    return {
+      actionId: requiredString(params.actionId, "actionId"),
+      providerContractDigest,
+      payload: options.chairLaunch.validatePayload(params.payload),
+    };
+  }
+
+  function containsPrivateValue(value: unknown, privateValues: readonly string[]): boolean {
+    if (typeof value === "string") return privateValues.some((candidate) => value.includes(candidate));
+    if (Array.isArray(value)) return value.some((entry) => containsPrivateValue(entry, privateValues));
+    return isRecord(value) && Object.values(value).some((entry) => containsPrivateValue(entry, privateValues));
+  }
+
+  async function launchChair(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!supported.has("launch_chair") || options.boundary.launchChair === undefined) {
+      capabilityUnavailable("launch_chair");
+    }
+    const request = chairLaunchRequest(params);
+    const journalPayload = {
+      schemaVersion: 1,
+      providerContractDigest: request.providerContractDigest,
+      payload: request.payload,
+    };
+    function replayOrConsumed(record: AdapterActionRecord): ChairLaunchProviderResult {
+      if (record.status === "terminal" && record.idempotencyProven) {
+        return parseChairLaunchProviderResult(record.result, request.providerContractDigest);
+      }
+      throw new ProviderAdapterError(
+        "CHAIR_LAUNCH_ALREADY_CONSUMED",
+        "chair launch private handoff was already consumed",
+        { actionId: request.actionId },
+      );
+    }
+    if (chairLaunchHandoff === undefined) {
+      let existing: AdapterActionRecord;
+      try {
+        existing = options.journal.get(request.actionId);
+      } catch (error: unknown) {
+        if (error instanceof ProviderAdapterError && error.code === "ACTION_NOT_FOUND") {
+          throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair launch private handoff is unavailable");
+        }
+        throw error;
+      }
+      options.journal.prepare(request.actionId, "launch_chair", journalPayload);
+      return replayOrConsumed(existing);
+    }
+    const handoff = chairLaunchHandoff;
+    const privateValues = [handoff.capability, handoff.socketPath];
+    if (containsPrivateValue({ actionId: request.actionId, payload: request.payload }, privateValues)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "chair launch payload contains private handoff material");
+    }
+    const prepared = options.journal.prepare(request.actionId, "launch_chair", journalPayload);
+    if (!prepared.created) {
+      chairLaunchHandoff = undefined;
+      return replayOrConsumed(prepared.record);
+    }
+    options.journal.markDispatched(request.actionId);
+    chairLaunchHandoff = undefined;
+    try {
+      const result = parseChairLaunchProviderResult(await options.boundary.launchChair({
+        ...request,
+        environment: {
+          AGENT_FABRIC_CAPABILITY: handoff.capability,
+          AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+        },
+      }), request.providerContractDigest);
+      if (containsPrivateValue(result, privateValues)) {
+        throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "chair launch result contains private handoff material");
+      }
+      options.journal.markAccepted(request.actionId);
+      options.journal.markTerminal(request.actionId, result, true);
+      return result;
+    } catch (error: unknown) {
+      let current = options.journal.get(request.actionId);
+      if (
+        current.status === "dispatched" &&
+        error instanceof ProviderAdapterError &&
+        error.code === "CHAIR_CONTINUITY_UNPROVEN"
+      ) {
+        try {
+          const evidence = parseChairLaunchContinuityUnprovenEvidence(
+            error.details,
+            request.providerContractDigest,
+          );
+          if (containsPrivateValue(evidence, privateValues)) {
+            throw new ProviderAdapterError(
+              "PROVIDER_RESPONSE_INVALID",
+              "chair launch continuity evidence contains private handoff material",
+            );
+          }
+          options.journal.markAccepted(request.actionId);
+          options.journal.markAmbiguous(request.actionId, evidence);
+          current = options.journal.get(request.actionId);
+        } catch {
+          current = options.journal.get(request.actionId);
+        }
+      }
+      if (current.status === "dispatched") options.journal.markAmbiguous(request.actionId);
+      throw new ProviderAdapterError(
+        "CHAIR_LAUNCH_FAILED",
+        "chair launch provider handoff failed",
+        { actionId: request.actionId },
+      );
+    }
+  }
 
   async function effect(operation: SupportedOperation, actionId: string, payload: Record<string, unknown>): Promise<{
     record: AdapterActionRecord;
@@ -106,7 +252,8 @@ export function createProviderAdapter(options: {
 
   return {
     async request(method: string, params: Record<string, unknown>): Promise<unknown> {
-      if (method === "capabilities") return options.capabilities;
+      if (method === "capabilities") return capabilities;
+      if (method === "launch_chair") return await launchChair(params);
       if (method === "status") {
         return await options.boundary.status({
           ...(typeof params.providerSessionRef === "string"

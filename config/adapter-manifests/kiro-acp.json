@@ -12,11 +12,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "8306e956cc6494562a5426b6018a0989cf159a0d6a65ee17cb829bf6f6c6ef86"
+      "sha256": "d41f97f812e06c89ef2af65cb080cabcd33787f5df06297820f0b29a57291c65"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
-      "sha256": "fe942144b97c7248b68d00ddc48b9a5bdb159ec3ecb0c4dcf0b5b9db283ce4b2"
+      "sha256": "a0b1d113ee8e4b0931446cc3ee4c17bf03f35a6d47e01b588c95ae9d68fb3a46"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/kiro-acp-client.js",
@@ -36,7 +36,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
-      "sha256": "c8d2768f18013aa7559a525e11b227d5b6a2f1bc50d954923d99a8ebe8c7abac"
+      "sha256": "45408bdbdfd0c11cc0610b3426dbac2837a227bf3cd91aa5c67d861cc23d863f"
     },
     {
       "path": "runtime/agent-fabric/dist/errors.js",

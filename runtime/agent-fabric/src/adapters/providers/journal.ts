@@ -166,8 +166,8 @@ export class SqliteAdapterActionJournal {
     return this.#transition(actionId, "terminal", { result, idempotencyProven });
   }
 
-  markAmbiguous(actionId: string): AdapterActionRecord {
-    return this.#transition(actionId, "ambiguous", {});
+  markAmbiguous(actionId: string, result?: unknown): AdapterActionRecord {
+    return this.#transition(actionId, "ambiguous", result === undefined ? {} : { result });
   }
 
   cancel(actionId: string): AdapterActionRecord {

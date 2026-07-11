@@ -14,7 +14,7 @@ function boundedError(stderr: string): string {
   return stderr.length === 0 ? "" : `: ${stderr.slice(-2048)}`;
 }
 
-function providerEnvironment(): NodeJS.ProcessEnv {
+function providerEnvironment(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     TMPDIR: process.env.TMPDIR ?? "/tmp",
@@ -23,6 +23,7 @@ function providerEnvironment(): NodeJS.ProcessEnv {
     const value = process.env[key];
     if (value !== undefined) environment[key] = value;
   }
+  Object.assign(environment, overrides);
   return environment;
 }
 
@@ -41,11 +42,11 @@ export class CodexJsonRpcConnection {
   #stderr = "";
   #closed = false;
 
-  constructor(command: string[]) {
+  constructor(command: string[], environment: Record<string, string> = {}) {
     const executable = command[0];
     if (executable === undefined) throw new ProviderAdapterError("PROVIDER_COMMAND_INVALID", "Codex command is empty");
     this.#child = spawn(executable, command.slice(1), {
-      env: providerEnvironment(),
+      env: providerEnvironment(environment),
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.#lines = createInterface({ input: this.#child.stdout, crlfDelay: Infinity });
