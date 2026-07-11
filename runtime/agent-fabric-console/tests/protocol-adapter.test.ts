@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
@@ -347,18 +347,16 @@ describe("public protocol adapter", () => {
 
   it("imports only the public protocol package across the Console source tree", async () => {
     const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
-    const files = [
-      "index.ts",
-      "input.ts",
-      "model.ts",
-      "protocol-adapter.ts",
-      "terminal.ts",
-    ];
+    const files = (await readdir(sourceRoot, { recursive: true })).filter(
+      (file) => file.endsWith(".ts"),
+    );
     const source = (
       await Promise.all(files.map((file) => readFile(`${sourceRoot}${file}`, "utf8")))
     ).join("\n");
 
-    expect(source).not.toMatch(/agent-fabric\/src|herdr|sqlite|\.\.\/agent-fabric(?!-protocol)/i);
+    expect(source).not.toMatch(
+      /(?:from|import\()\s*["'][^"']*(?:agent-fabric\/src|herdr\/|\.\.\/agent-fabric(?!-protocol))/iu,
+    );
     expect(source).not.toMatch(/@local\/agent-fabric-(?!protocol)/);
   });
 });

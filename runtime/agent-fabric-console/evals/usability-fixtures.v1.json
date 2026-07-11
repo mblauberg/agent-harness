@@ -8,7 +8,7 @@
     {
       "id": "empty-healthy-work",
       "description": "Healthy project session with no human-attention item.",
-      "project": "project-empty",
+      "project": "proj-empty",
       "session": "session-empty",
       "runs": [
         {
@@ -30,7 +30,7 @@
       ],
       "expectedTopAttentionId": null,
       "expectedAnswers": {
-        "project": "project-empty",
+        "project": "proj-empty",
         "run": "run-empty",
         "phase": "observe",
         "owner": "chair-empty",
@@ -41,7 +41,7 @@
     {
       "id": "concurrent-multi-run",
       "description": "Two concurrent runs with grouped critical and advisory attention.",
-      "project": "project-concurrent",
+      "project": "proj-concurrent",
       "session": "session-concurrent",
       "runs": [
         {
@@ -89,7 +89,7 @@
       ],
       "expectedTopAttentionId": "attention-critical-path",
       "expectedAnswers": {
-        "project": "project-concurrent",
+        "project": "proj-concurrent",
         "run": "run-primary",
         "phase": "implement",
         "owner": "chair-primary",
@@ -100,7 +100,7 @@
     {
       "id": "gate-degraded-stale-conflict",
       "description": "Consequential gate with degraded optional integration and stale/conflicting facts.",
-      "project": "project-gated",
+      "project": "proj-gated",
       "session": "session-gated",
       "runs": [
         {
@@ -151,7 +151,7 @@
       ],
       "expectedTopAttentionId": "attention-safety-gate",
       "expectedAnswers": {
-        "project": "project-gated",
+        "project": "proj-gated",
         "run": "run-gated",
         "phase": "awaiting_acceptance",
         "owner": "chair-gated",

@@ -423,6 +423,73 @@ describe("structured presenter and responsive Fabric renderer", () => {
     ]);
   });
 
+  it("presents exact accepted artifact, action and target for promotion", () => {
+    const base = review("committed");
+    const promotion: ActionReview = {
+      ...base,
+      preview: {
+        ...base.preview,
+        consequenceClass: "promotion",
+        intent: {
+          kind: "promotion",
+          projectSessionId: sessionId,
+          coordinationRunId: "AFAB-004" as never,
+          gateId: "gate-release" as never,
+          expectedGateRevision: 9,
+          expectedGateStatus: "approved",
+          releaseBinding: {
+            acceptedDeliveryReceiptRef: {
+              path: "receipts/accepted.json" as never,
+              digest: digestA,
+            },
+            artifactDigest: digestB,
+            promotionAction: "publish",
+            target: "registry:stable",
+          },
+        },
+      },
+      status: {
+        status: "committed",
+        commandId: "promotion-command",
+        receipt: {
+          commandId: "promotion-command",
+          previewId: "preview-1",
+          previewRevision: 3,
+          intentDigest: digestB,
+          beforeStateDigest: digestA,
+          afterStateDigest: digestB,
+          effectRef: {
+            path: "effects/promotion.json" as never,
+            digest: digestA,
+          },
+          evidenceRefs: [],
+          committedAt: timestamp,
+        },
+      },
+    };
+    const presentation = presentFabricConsole(
+      richDataset(),
+      controllerState(promotion),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.review?.intent).toEqual(
+      expect.arrayContaining([
+        { label: "Accepted receipt", value: `receipts/accepted.json@${digestA}` },
+        { label: "Artifact digest", value: digestB },
+        { label: "Promotion action", value: "publish" },
+        { label: "Promotion target", value: "registry:stable" },
+      ]),
+    );
+    expect(presentation.review?.receipt).toStrictEqual({
+      commandId: "promotion-command",
+      afterStateDigest: digestB,
+      effect: `effects/promotion.json@${digestA}`,
+      committedAt: timestamp,
+    });
+  });
+
   it("keeps optional GitHub failure explicit without degrading local projection", () => {
     const dataset = richDataset(11, "unavailable");
     const state = { ...controllerState(), activeView: "system" as const };

@@ -403,6 +403,22 @@ export class ConsoleController {
     return armed;
   }
 
+  cancelReview(): void {
+    const stage = this.#state.review?.stage;
+    if (stage === "pending" || stage === "ambiguous") {
+      throw new Error("a dispatched action cannot be cancelled from the Console");
+    }
+    this.#state = { ...this.#state, review: null };
+  }
+
+  closeReview(): void {
+    const stage = this.#state.review?.stage;
+    if (stage === "review" || stage === "confirm") {
+      throw new Error("an uncommitted Review must be explicitly cancelled");
+    }
+    this.#state = { ...this.#state, review: null };
+  }
+
   confirmAction(
     input: ConsoleConfirmationInput,
     command: OperatorMutationContext,

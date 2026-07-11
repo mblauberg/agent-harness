@@ -96,7 +96,8 @@ export type ConsoleConnection =
       reason:
         | "transport-failure"
         | "projection-invalid"
-        | "resnapshot-exhausted";
+        | "resnapshot-exhausted"
+        | "bootstrap-unavailable";
     }>
   | Readonly<{
       state: "unsupported";
@@ -124,6 +125,60 @@ export type ConsoleProtocolAdapterOptions = Readonly<{
   maxPagesPerView?: number;
   maxResnapshotAttempts?: number;
 }>;
+
+export type BootstrapUnavailableReason =
+  | "feature-unavailable"
+  | "configuration-missing"
+  | "start-failed"
+  | "authority-unavailable";
+
+export function createBootstrapUnavailableDataset(
+  reason: BootstrapUnavailableReason,
+  nowMs = Date.now(),
+): FabricConsoleDataset {
+  const pages = createEmptyViewPages();
+  const revision = revisionFromProtocol(0);
+  return {
+    connection: { state: "unavailable", reason: "bootstrap-unavailable" },
+    snapshot: null,
+    snapshotRevision: null,
+    cursor: 0,
+    pages: {
+      ...pages,
+      system: {
+        view: "system",
+        rows: [
+          {
+            view: "system",
+            stableId: "bootstrap",
+            revision,
+            urgency: "safety-integrity",
+            freshness: {
+              state: "unavailable",
+              source: "fabric",
+              revision,
+              observedAt: new Date(nowMs).toISOString() as never,
+              ageMs: 0,
+              reason,
+            },
+            summary: null,
+            detailRef: null,
+            actionAvailability: {
+              state: "read-only",
+              reason: "fact-unavailable",
+            },
+          },
+        ],
+        nextCursor: 0,
+        hasMore: false,
+        snapshotRevision: null,
+        readTransactionId: null,
+      },
+    },
+    loadedAtMs: nowMs,
+    canMutate: false,
+  };
+}
 
 class ResnapshotRequiredError extends Error {
   constructor() {

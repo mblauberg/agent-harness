@@ -550,6 +550,8 @@ function observe(
   );
   const durationMs = performance.now() - started;
   const frameText = frame.rows.join("\n");
+  const visibleAnswer = (value: string): string =>
+    frameText.includes(value) ? value : "not-visible";
   const githubUnavailable = fixture.system.some(
     (item) => item.id === "github" && item.freshness === "unavailable",
   );
@@ -559,12 +561,12 @@ function observe(
     durationMs,
     topAttentionId: presentation.masterRows[0]?.stableId ?? null,
     answers: {
-      project: presentation.header.project,
-      run: presentation.header.run,
-      phase: presentation.header.phase,
-      owner: presentation.header.owner,
-      nextMilestone: presentation.header.nextMilestone,
-      health: presentation.header.health,
+      project: visibleAnswer(presentation.header.project),
+      run: visibleAnswer(presentation.header.run),
+      phase: visibleAnswer(presentation.header.phase),
+      owner: visibleAnswer(presentation.header.owner),
+      nextMilestone: visibleAnswer(presentation.header.nextMilestone),
+      health: visibleAnswer(presentation.header.health),
     },
     visibleFreshness:
       presentation.masterRows.length === 0 ||

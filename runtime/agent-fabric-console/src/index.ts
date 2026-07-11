@@ -16,8 +16,10 @@ import {
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 
 export * from "./input.js";
+export * from "./application.js";
 export * from "./controller.js";
 export * from "./evaluation.js";
+export * from "./message.js";
 export * from "./model.js";
 export * from "./presenter.js";
 export * from "./protocol-adapter.js";
@@ -1146,7 +1148,7 @@ function renderFabricHeader(
         `Attn:${String(header.attentionCount)}`,
         `Runs:${String(header.runCount)}`,
       ],
-      [20, 20, 16, 10, 10],
+      [25, 19, 18, 7, 7],
       [6, 6, 7, 6, 6],
       [0, 1, 2, 3, 4],
     ),
@@ -1297,6 +1299,7 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
     "Before-state digest:",
     review.beforeStateDigest,
     `Confirmation: ${review.confirmationMode}`,
+    ...review.intent.map((item) => `Intent ${item.label}: ${item.value}`),
   ];
   for (const gate of review.gates) {
     lines.push(
@@ -1314,6 +1317,15 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
       (change) => `CHANGED ${change.field}: ${change.before} -> ${change.after}`,
     ),
   );
+  if (review.receipt !== null) {
+    lines.push(
+      `Receipt command: ${review.receipt.commandId}`,
+      "After-state digest:",
+      review.receipt.afterStateDigest,
+      `Effect: ${review.receipt.effect ?? "none"}`,
+      `Committed: ${review.receipt.committedAt}`,
+    );
+  }
   return lines;
 }
 

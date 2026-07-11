@@ -1,5 +1,6 @@
 import type {
   OperatorAvailableAction,
+  OperatorActionIntent,
   ProjectionFact,
 } from "@local/agent-fabric-protocol";
 
@@ -166,9 +167,16 @@ export type PresentedReview = Readonly<{
   beforeStateDigest: string;
   consequenceClass: string;
   confirmationMode: "explicit" | "echo";
+  intent: readonly Readonly<{ label: string; value: string }>[];
   evidence: readonly string[];
   gates: readonly PresentedReviewGate[];
   changes: ActionReview["changes"];
+  receipt: Readonly<{
+    commandId: string;
+    afterStateDigest: string;
+    effect: string | null;
+    committedAt: string;
+  }> | null;
 }>;
 
 export type FabricConsolePresentation = Readonly<{
@@ -431,6 +439,83 @@ function presentReviewGate(gate: ReviewGate): PresentedReviewGate {
   };
 }
 
+function presentIntent(
+  intent: OperatorActionIntent,
+): readonly Readonly<{ label: string; value: string }>[] {
+  if (intent.kind === "control") {
+    const target = intent.target;
+    return [
+      { label: "Kind", value: `control:${intent.action}` },
+      { label: "Target", value: target.kind },
+      {
+        label: "Identity",
+        value:
+          target.kind === "task"
+            ? target.taskId
+            : target.kind === "subtree"
+              ? target.rootTaskId
+              : target.kind === "run"
+                ? target.coordinationRunId
+                : target.projectSessionId,
+      },
+      { label: "Expected revision", value: String(target.expectedRevision) },
+    ];
+  }
+  if (intent.kind === "git") {
+    return [
+      { label: "Kind", value: `git:${intent.operation.effect}` },
+      { label: "Repository", value: intent.repository.repositoryRoot },
+      { label: "Worktree", value: intent.repository.worktreePath },
+      { label: "Remote", value: intent.repository.remoteName },
+      { label: "Expected HEAD", value: intent.repository.expectedHeadDigest },
+      { label: "Expected index", value: intent.repository.expectedIndexDigest },
+      { label: "Expected worktree", value: intent.repository.expectedWorktreeDigest },
+      { label: "Expected remote", value: intent.repository.expectedRemoteDigest },
+      { label: "Operation", value: JSON.stringify(intent.operation) },
+    ];
+  }
+  if (intent.kind === "registered-external-effect") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Integration", value: intent.integrationId },
+      { label: "Operation", value: intent.operationId },
+      { label: "Target", value: intent.targetId },
+      { label: "Expected target revision", value: String(intent.expectedTargetRevision) },
+      { label: "Contract digest", value: intent.contractDigest },
+      {
+        label: "Request artifact",
+        value: `${intent.requestArtifactRef.path}@${intent.requestArtifactRef.digest}`,
+      },
+    ];
+  }
+  if (intent.kind === "promotion") {
+    const release = intent.releaseBinding;
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Gate", value: `${intent.gateId}@r${String(intent.expectedGateRevision)}` },
+      { label: "Gate status", value: intent.expectedGateStatus },
+      {
+        label: "Accepted receipt",
+        value: `${release.acceptedDeliveryReceiptRef.path}@${release.acceptedDeliveryReceiptRef.digest}`,
+      },
+      { label: "Artifact digest", value: release.artifactDigest },
+      { label: "Promotion action", value: release.promotionAction },
+      { label: "Promotion target", value: release.target },
+    ];
+  }
+  return [
+    { label: "Kind", value: intent.kind },
+    {
+      label: "Expected revision",
+      value:
+        intent.kind === "project-session-drain" ||
+        intent.kind === "project-session-stop"
+          ? String(intent.expectedSessionRevision)
+          : String(intent.expectedGlobalStateRevision),
+    },
+  ];
+}
+
 function presentReview(review: ActionReview): PresentedReview {
   return {
     stage: review.stage,
@@ -443,11 +528,24 @@ function presentReview(review: ActionReview): PresentedReview {
     beforeStateDigest: review.preview.beforeStateDigest,
     consequenceClass: review.preview.consequenceClass,
     confirmationMode: review.preview.confirmationMode,
+    intent: presentIntent(review.preview.intent),
     evidence: review.preview.evidenceRefs.map(
       (reference) => `${reference.path}@${reference.digest}`,
     ),
     gates: review.gates.map(presentReviewGate),
     changes: review.changes,
+    receipt:
+      review.status?.status === "committed"
+        ? {
+            commandId: review.status.receipt.commandId,
+            afterStateDigest: review.status.receipt.afterStateDigest,
+            effect:
+              review.status.receipt.effectRef === undefined
+                ? null
+                : `${review.status.receipt.effectRef.path}@${review.status.receipt.effectRef.digest}`,
+            committedAt: review.status.receipt.committedAt,
+          }
+        : null,
   };
 }
 
