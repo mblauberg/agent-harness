@@ -40,6 +40,29 @@ describe("public protocol credential routing", () => {
           FABRIC_OPERATIONS.observeEvents,
         ]));
         expect(verified.grantedOperations).not.toContain(FABRIC_OPERATIONS.projectSessionCreate);
+        const principal = verified.principal;
+        if (principal.kind !== "agent") throw new Error("expected agent principal");
+        const context: PublicProtocolContext = {
+          principal,
+          allowedOperations: new Set(verified.grantedOperations),
+          features: ["fabric-core.v1"],
+          connectionNonce: "connection_agent_01",
+          credentialHash: createHash("sha256").update(run.chairCapability).digest("hex"),
+          daemonInstanceGeneration: 1,
+        };
+        await expect(fabric.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.getRunStatus,
+          { runId: "run_protocol_credential" },
+        )).resolves.toMatchObject({
+          runId: "run_protocol_credential",
+          chairAgentId: "chair",
+        });
+        await expect(fabric.dispatchPublicProtocol(
+          { ...context, allowedOperations: new Set() },
+          FABRIC_OPERATIONS.getRunStatus,
+          { runId: "run_protocol_credential" },
+        )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
       } finally {
         await fabric.close();
       }

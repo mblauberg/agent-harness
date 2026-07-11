@@ -22,6 +22,7 @@ import { MESSAGE_POLICY } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import {
   FABRIC_OPERATIONS,
+  OPERATION_REGISTRY,
   expandAuthorityActions,
   isAgentAuthorityOperation,
   isReadFabricOperation,
@@ -43,6 +44,7 @@ import { renderSafePreview } from "../visibility/safe-preview.js";
 import { OperatorStore, type AuthenticatedOperatorCredential } from "../operator/store.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
 import type { PublicProtocolContext } from "../daemon/public-protocol.js";
+import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { IntakeStore } from "../project-session/intake-store.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
@@ -1220,6 +1222,25 @@ export class Fabric {
     operation: ProtocolOperation,
     input: OperationInputMap[ProtocolOperation],
   ): Promise<unknown> {
+    if (!context.allowedOperations.has(operation)) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", `connection does not permit ${operation}`);
+    }
+    if (context.principal.kind === "agent") {
+      const definition = OPERATION_REGISTRY[operation];
+      if (definition.kind !== "baseline" || !definition.principals.includes("agent")) {
+        throw new FabricError("CAPABILITY_FORBIDDEN", "operation is not available to agent principals");
+      }
+      return dispatchAgentProtocol(
+        new FabricClient(
+          this,
+          context.principal.runId,
+          context.principal.agentId,
+          context.credentialHash,
+        ),
+        operation as never,
+        input as never,
+      );
+    }
     const operatorCredential = (): AuthenticatedOperatorCredential => {
       if (context.principal.kind !== "operator") {
         throw new FabricError("CAPABILITY_FORBIDDEN", "operation requires an operator principal");
