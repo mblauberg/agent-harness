@@ -4,7 +4,11 @@ import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolv
 
 import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
-import type { VerifiedProtocolCredential } from "@local/agent-fabric-protocol";
+import type {
+  OperationInputMap,
+  ProtocolOperation,
+  VerifiedProtocolCredential,
+} from "@local/agent-fabric-protocol";
 
 import type {
   AuthorityInput,
@@ -17,6 +21,7 @@ import type {
 import { MESSAGE_POLICY } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import {
+  FABRIC_OPERATIONS,
   expandAuthorityActions,
   isAgentAuthorityOperation,
   isReadFabricOperation,
@@ -35,8 +40,12 @@ import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
 import { renderSafePreview } from "../visibility/safe-preview.js";
-import { OperatorStore } from "../operator/store.js";
+import { OperatorStore, type AuthenticatedOperatorCredential } from "../operator/store.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
+import type { PublicProtocolContext } from "../daemon/public-protocol.js";
+import { ProjectSessionStore } from "../project-session/store.js";
+import { IntakeStore } from "../project-session/intake-store.js";
+import { ProjectFabricCoreError } from "../project-session/contracts.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
@@ -758,6 +767,8 @@ export class Fabric {
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #operatorStore: OperatorStore;
+  readonly #projectSessions: ProjectSessionStore;
+  readonly #intakes: IntakeStore;
 
   constructor(options: FabricOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -774,6 +785,16 @@ export class Fabric {
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
+    this.#projectSessions = new ProjectSessionStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    this.#intakes = new IntakeStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
     this.#providerSessions = new ProviderSessionCoordinator({
@@ -1192,6 +1213,119 @@ export class Fabric {
       },
       grantedOperations: authority.actions.filter((operation) => !denied.has(operation)),
     };
+  }
+
+  async dispatchPublicProtocol(
+    context: PublicProtocolContext,
+    operation: ProtocolOperation,
+    input: OperationInputMap[ProtocolOperation],
+  ): Promise<unknown> {
+    const operatorCredential = (): AuthenticatedOperatorCredential => {
+      if (context.principal.kind !== "operator") {
+        throw new FabricError("CAPABILITY_FORBIDDEN", "operation requires an operator principal");
+      }
+      const credential = this.#operatorStore.authenticateCredentialHash(context.credentialHash);
+      if (
+        credential.context.operatorId !== context.principal.operatorId ||
+        credential.context.projectId !== context.principal.projectId ||
+        credential.context.projectAuthorityGeneration !== context.principal.projectAuthorityGeneration ||
+        credential.context.principalGeneration !== context.principal.principalGeneration
+      ) {
+        throw new FabricError("AUTHENTICATION_FAILED", "operator connection principal changed");
+      }
+      return credential;
+    };
+    const operatorCommand = (
+      credential: AuthenticatedOperatorCredential,
+      command: { credential: { capabilityId: string; token: string } },
+    ): void => {
+      if (
+        command.credential.capabilityId !== credential.capabilityId ||
+        sha256(command.credential.token) !== context.credentialHash
+      ) {
+        throw new FabricError("AUTHENTICATION_FAILED", "operator command credential differs from its connection");
+      }
+    };
+
+    switch (operation) {
+      case FABRIC_OPERATIONS.projectSessionCreate: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionCreate];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        if (request.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "session is outside the operator project");
+        return this.#projectSessions.createProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.projectSessionGet: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionGet];
+        const credential = operatorCredential();
+        if (request.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "session is outside the operator project");
+        return this.#projectSessions.getProjectSession(request);
+      }
+      case FABRIC_OPERATIONS.projectSessionTransition: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionTransition];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.transitionProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.projectSessionClose: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionClose];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.closeProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.membershipBind: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
+        if (request.origin !== "operator") throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding uses the chair dispatcher");
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.bindMembership(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorAttach: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorAttach];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorStore.attach(credential.context, request, context.daemonInstanceGeneration);
+      }
+      case FABRIC_OPERATIONS.operatorDetach: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorDetach];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorStore.detach(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorHeartbeat: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorHeartbeat];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorStore.heartbeat(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.intakeDraftCreate: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeDraftCreate];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#intakes.createDraft(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.intakeRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRead];
+        const credential = operatorCredential();
+        if (
+          request.credential.capabilityId !== credential.capabilityId ||
+          sha256(request.credential.token) !== context.credentialHash
+        ) throw new FabricError("AUTHENTICATION_FAILED", "intake read credential differs from its connection");
+        const intake = this.#intakes.get(request.intakeId);
+        if (intake.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "intake is outside the operator project");
+        return intake;
+      }
+      case FABRIC_OPERATIONS.chairTakeover: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.chairTakeover];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.takeoverChair(credential.context, request);
+      }
+      default:
+        throw Object.assign(new Error(`public protocol operation is not wired: ${operation}`), {
+          code: "PROTOCOL_UNSUPPORTED",
+        });
+    }
   }
 
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {

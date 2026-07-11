@@ -193,9 +193,16 @@ export class OperatorStore {
 
   authenticateCredential(token: string): AuthenticatedOperatorCredential {
     if (token.length === 0) throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "capability token is empty");
+    return this.authenticateCredentialHash(sha256(token));
+  }
+
+  authenticateCredentialHash(tokenHash: string): AuthenticatedOperatorCredential {
+    if (!/^[0-9a-f]{64}$/u.test(tokenHash)) {
+      throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "capability token hash is invalid");
+    }
     const capability = this.database.prepare(`
       SELECT * FROM operator_capabilities WHERE token_hash=?
-    `).get(sha256(token));
+    `).get(tokenHash);
     if (!isRow(capability)) throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "capability credential is invalid");
     if (capability.revoked_at !== null) throw new ProjectFabricCoreError("CAPABILITY_REVOKED", "capability is revoked");
     if (integer(capability, "expires_at") <= this.#clock()) {

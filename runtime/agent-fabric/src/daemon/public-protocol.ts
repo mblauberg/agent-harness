@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Duplex } from "node:stream";
 
 import {
@@ -32,6 +32,8 @@ export type PublicProtocolContext = {
   allowedOperations: ReadonlySet<FabricOperation>;
   features: readonly ProtocolFeature[];
   connectionNonce: string;
+  credentialHash: string;
+  daemonInstanceGeneration: number;
 };
 
 export type PublicProtocolServerOptions = {
@@ -167,6 +169,8 @@ export function servePublicProtocolConnection(
           allowedOperations: new Set(initialized.allowedOperations),
           features: initialized.features,
           connectionNonce: initialized.connectionNonce,
+          credentialHash: createHash("sha256").update(input.authentication.credential).digest("hex"),
+          daemonInstanceGeneration: initialized.daemonInstanceGeneration,
         };
         reader.tightenLimits({
           maximumFrameBytes: limits.maximumFrameBytes,

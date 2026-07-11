@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
 import { operatorOperationsForActions } from "../../../src/daemon/protocol-credentials.ts";
+import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
@@ -83,6 +85,7 @@ describe("public protocol credential routing", () => {
       });
       await initial.close();
 
+      let projectSessionId = "";
       const database = new Database(databasePath);
       try {
         database.pragma("foreign_keys = ON");
@@ -95,6 +98,7 @@ describe("public protocol credential routing", () => {
           project_session_id: string;
           generation: number;
         };
+        projectSessionId = identity.project_session_id;
         const store = new OperatorStore({ database, clock: () => Date.parse("2027-01-01T00:00:00Z") });
         store.registerPrincipal({
           operatorId: "operator_protocol",
@@ -138,6 +142,26 @@ describe("public protocol credential routing", () => {
           FABRIC_OPERATIONS.scopedGateResolve,
         ]));
         expect(verified.grantedOperations).not.toContain(FABRIC_OPERATIONS.projectSessionCreate);
+        const principal = verified.principal;
+        if (principal.kind !== "operator") throw new Error("expected operator principal");
+        const context: PublicProtocolContext = {
+          principal,
+          allowedOperations: new Set(verified.grantedOperations),
+          features: ["project-sessions.v1"],
+          connectionNonce: "connection_01",
+          credentialHash: createHash("sha256").update("operator-protocol-secret").digest("hex"),
+          daemonInstanceGeneration: 7,
+        };
+        const session = await reopened.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.projectSessionGet,
+          {
+            projectId: principal.projectId,
+            projectSessionId: projectSessionId as never,
+            expectedGeneration: 1,
+          },
+        );
+        expect(session).toMatchObject({ projectId: principal.projectId, state: "recovery_required" });
       } finally {
         await reopened.close();
       }
