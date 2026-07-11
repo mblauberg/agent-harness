@@ -1,8 +1,8 @@
 # Shared agent fabric
 
-Status: Implementation complete; final human acceptance pending
-Version: 0.3
-Date: 10 July 2026
+Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
+Version: 0.4
+Date: 11 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
@@ -1343,3 +1343,300 @@ These choices refine existing requirements without widening scope:
   receipt declares detection unavailable. Such a session cannot claim complete
   direct-input provenance and requires explicit owner reconciliation before a
   barrier closes.
+
+## 32. Project-session and operator protocol amendment
+
+This amendment is approved by Spec 05 v1.0 and the direct implementation
+instruction of 11 July 2026. It extends the shared protocol; Spec 05 continues
+to own Console product behaviour and Spec 04 owns persistence, bootstrap and
+daemon-liveness mechanics. Existing run, agent, task, lease and mailbox
+contracts remain valid.
+
+### 32.1 Project-session ownership and topology
+
+The daemon shall persist a project session before creating its first
+coordination run. A project session records:
+
+```yaml
+project_session:
+  project_session_id: stable-id
+  project_id: stable-id-bound-to-one-canonical-root
+  mode: coordinated-or-independent
+  state: draft-or-awaiting_launch-or-launching-or-active-or-quiescing-or-awaiting_acceptance-or-closed-or-exceptional
+  revision: compare-and-set-integer
+  generation: authority-and-takeover-fence
+  authority_ref: immutable-envelope-hash
+  budget_ref: root-project-session-budget
+  launch_packet_ref: path-and-sha256
+  membership_revision: compare-and-set-integer
+  origin:
+    kind: operator-launch-or-legacy-migration
+    operator_id: required-only-for-operator-launch
+    migration_manifest_ref: required-only-for-legacy-migration
+
+coordination_run:
+  run_id: stable-id
+  project_session_id: owning-session
+  chair_agent_id: exactly-one
+  chair_generation: fenced-generation
+  authority_ref: narrowing-envelope-hash
+  budget_ref: run-resource-budget
+  state: revisioned-run-state
+  revision: compare-and-set-integer
+
+workstream:
+  workstream_id: stable-id
+  project_session_id: owning-session
+  coordination_run_id: accountable-run
+  fabric_task_id: owning-task
+  lead_agent_id: bounded-lead-not-chair
+  delivery_run_id: canonical-delivery-run-reference
+  revision: compare-and-set-integer
+```
+
+Membership rows explicitly bind coordination runs, delivery
+runs/workstreams, tasks, leases, provider actions, required messages, artifact
+obligations, gates and scoped barriers to the project session. `quiescing`
+freezes new membership. A transition to `awaiting_acceptance` rechecks in the
+same transaction that every run, workstream and task is terminal or explicitly
+abandoned with reason; every required message and artifact obligation is
+reconciled; no active lease or provider action remains; and every applicable
+scoped barrier is closed. `closed` additionally needs the exact acceptance or
+cancel/failure terminal path.
+
+Each coordination run has exactly one generation-fenced chair. Coordinated
+mode has exactly one non-terminal coordination run and may contain many
+delivery workstreams under it, but their leads are not additional chairs. A
+concurrent attempt to create a second non-terminal run fails. Independent mode
+may contain several coordination runs, each with its own chair and authority.
+A project session never implies cross-run authority.
+
+Exceptional project-session states are `launch_failed`, `launch_ambiguous`,
+`reconciling`, `visibility_degraded`, `recovery_required`, `quarantined` and
+`cancelled`. `closed` and `cancelled` are terminal. `launch_failed` becomes
+terminal only through an explicit cancel/failure transition. Ambiguous,
+recovery and quarantine states remain non-terminal. Session generation changes
+only on authority rotation or takeover and fences prior operator and
+chair-facing grants.
+
+### 32.2 Human operator principal and commands
+
+The Console authenticates as a distinct `operator` principal, never as an
+agent or chair. An operator capability is revocable and binds:
+
+- one operator, project, optional project session and principal generation;
+- an explicit subset of `read`, `decide`, `steer`, `pause`, `resume`,
+  `cancel`, `drain`, `stop`, `launch`, `takeover`, `git` and
+  `external-effect` operations;
+- issue and expiry times no later than the project session;
+- the current project/session generation; and
+- for takeover, the handoff digest, old chair generation, expected run and
+  session revisions and compare-and-set target revision.
+
+A project-bound `launch` capability may create a reviewed session before a
+session ID exists. Every other session mutation requires the exact session ID
+and generation. Possession of `decide` does not imply `launch`, `takeover` or
+`external-effect`.
+
+Every operator mutation carries the capability, stable command ID, expected
+revision, actor and provenance. The daemon derives project and actor identity
+from the authenticated connection, authorises the exact operation before the
+mutation and journals before/after state plus linked evidence. Retrying the
+same command and payload returns the committed result. Reusing a command ID
+with changed payload, project or expected revision fails as a conflict. Absent,
+expired, revoked, wrong-project, wrong-generation and action-insufficient
+capabilities fail closed.
+
+Direct conversational input may resolve a gate only through an independently
+attested operator-input record containing the provider message ID, exact human
+utterance, input-channel provenance, expected gate revision and bound artifact
+digests. Echoes, pane or CLI injection, agent-authored text and unavailable
+direct-input provenance cannot approve. Consequential decisions also require a
+persisted preview and a separate explicit confirmation command.
+
+### 32.3 Revisioned intake and scoped gates
+
+Task intake is a Fabric entity with stable `intake_id`, monotonically
+increasing revision and states `draft`, `awaiting-chair`, `discussing`,
+`awaiting-human`, `accepted`, `deferred` or `cancelled`. Submission commits the
+intake revision, gate references and artifact digests inside its correlated
+chair request before any wake-up. A duplicate dedupe key has one effect.
+Replies, plan revisions and artifact digests update the same intake after
+daemon, Console or provider restart or provider compaction.
+
+A scoped gate records:
+
+```yaml
+scoped_gate:
+  gate_id: stable-id
+  project_session_id: stable-id
+  coordination_run_id: stable-id
+  scope_kind: task-or-subtree-or-run-or-release
+  affected_task_ids: []
+  dependency_revision: compare-and-set-integer
+  blocked_operation_ids: []
+  enforcement_points: [task-readiness, operation, scoped-barrier]
+  question: human-readable
+  reason: human-readable
+  options: []
+  recommendation: human-readable-or-empty
+  consequences: []
+  evidence_refs: []
+  revision: compare-and-set-integer
+  created_by_ref: authenticated-operator-or-explicit-policy
+  expected_approver_ref: authenticated-operator-or-explicit-policy
+  resolved_by_operator_id: optional-until-human-resolution
+  deadline: optional
+  default: optional-non-approving-action
+  status: pending-or-approved-or-rejected-or-deferred-or-cancelled-or-superseded
+  release_binding: optional-accepted-delivery-receipt-artifact-digest-action-and-target
+```
+
+Gate creation, dependency changes and resolution are transactional. The daemon
+rechecks applicable unresolved gates before task claim, start and resume;
+before each named consequential operation; and before the matching scoped
+barrier closes. Dependent descendants block only where the persisted scope and
+dependency revision require it. Unrelated siblings remain runnable. A timeout
+may alert or defer but never approves.
+
+`dependency_revision` is the owning coordination run's dependency-graph
+revision. Every dependency-edge or affected-set mutation increments it and, in
+the same transaction, recomputes descendants and rebinds every applicable open
+gate. Newly added descendants become blocked immediately; removed descendants
+become unblocked only after the rebinding commits. A graph mutation that cannot
+produce a complete rebind fails and retains the prior graph and gate revision.
+
+Policy may create, defer, cancel or notify about a gate. Spec, one-way-door,
+release, external-effect, irreversible-action and final-acceptance gates require
+an authenticated human as both expected approver and resolver; policy can
+never approve them. Release-scoped gates additionally bind the exact accepted
+delivery receipt, artifact digest, promotion action and target, directly or by
+a schema-validated release receipt. Broad session or `external-effect`
+authority cannot satisfy that binding.
+
+Existing identifier-only task gates migrate to `task`-scoped gates with
+`task-readiness` and `scoped-barrier` enforcement. Migration shall not infer a
+run or release scope. After migration there is one gate owner and no parallel
+legacy gate truth. Approver-less gate creation and resolution fail closed.
+
+### 32.4 Hierarchical resource admission
+
+Budgets extend from project to project session, coordination run, team and
+agent. Every dimension uses the existing unit-key rules and reports `used`,
+`reserved`, `remaining` and `unknown`. Admission reserves every affected
+ancestor atomically before dispatch, so concurrent runs cannot overbook a
+project or session. Terminal completion releases unused reservation; ambiguous
+effects retain their stable reservation until reconciliation. Unknown hard
+usage freezes new reservations when remaining capacity cannot be proven, while
+already-authorised bounded work may reach a terminal state. Child limits only
+narrow their parent.
+
+Active writer admission additionally records canonical source prefixes,
+repository root, repository-owned worktree path and writer generation. The
+daemon rejects intersecting active prefixes before launch. A worktree does not
+replace authority, sandbox or predecessor-revocation evidence.
+
+### 32.5 Atomic request, result and callback delivery
+
+Answer-bearing paired work shall create a task and correlated request message
+before Herdr wake-up. The request binds task and request revisions,
+conversation and message IDs, target agent/provider session, expected
+artifacts, acknowledgement requirement, dedupe key, response deadline and a
+stable callback ID.
+
+The peer's correlated reply, terminal task result and pending result-delivery
+obligation commit in one SQLite transaction or one transactionally equivalent
+outbox transition. None may be externally visible without the others. Result
+delivery is distinct from mailbox acknowledgement and has states `pending`,
+`claimed`, `provider-accepted`, `consumed`, `overdue` and `abandoned`. Its
+claim generation, callback ID, request/reply/task revisions and payload digest
+make claim, injection and consumption idempotent across daemon, Console,
+requester restart and compaction.
+
+A deadline moves a still-required result to `overdue`, alerts the requester and
+keeps its dependent barrier open. Same-action retry, reassignment or
+abandonment is an explicit revisioned transition; the fabric never blindly
+redispatches. A late reply remains evidence and cannot complete reassigned or
+abandoned work. Pane state and scrollback never satisfy result delivery.
+
+`fabric_task_request` commits the task, request, recipient deliveries, response
+deadline, callback and dependent-barrier link before wake-up.
+`fabric_task_complete_with_reply` verifies the task owner, lease generation,
+task/request revisions and callback generation, then atomically commits the
+reply, terminal result, artifact references and pending callback. Typed claim,
+provider-accept, consume, same-action retry, reassign and abandon operations
+complete the result-delivery state machine.
+
+### 32.6 Chair takeover
+
+Chair loss freezes the old chair generation, delivery and new authority grants.
+Takeover succeeds only when the old generation is revoked or otherwise fenced,
+a persisted handoff digest exists, and a takeover-capable operator command
+matches the project session, run, expected chair generation and revisions.
+The reassignment and new chair lease commit atomically. Peer presence, pane
+presence or lease expiry alone cannot promote a chair.
+
+### 32.7 Public protocol surface
+
+The shared typed client shall expose project-session, membership, intake,
+operator-command, scoped-gate, resource-reservation, request-result and
+takeover operations. Agent MCP operations remain principal-scoped; the Console
+uses a separate operator client and shall not import daemon internals. New
+operations are absent from a client whose negotiated protocol capability does
+not include them.
+
+### 32.8 Added requirements and acceptance scenarios
+
+- **FR-020:** Project-session creation, membership and lifecycle transitions
+  shall be revisioned and atomic with their closure predicates.
+- **FR-021:** Operator principals and commands shall enforce exact project,
+  action, generation, expiry and revision boundaries with idempotent audit.
+- **FR-022:** Scoped gates shall block only their persisted task/subtree/run or
+  release scope at every declared enforcement point.
+- **FR-023:** Intake discussion shall bind the intake revision, gates and
+  artifact digests into its correlated request and survive duplicate
+  submission, restart and compaction with one stable intake identity.
+- **FR-024:** Project/session/run/team/agent budgets shall reserve and reconcile
+  every configured dimension without overbooking.
+- **FR-025:** Correlated reply, terminal task result and result-delivery outbox
+  shall be atomic and replay-safe.
+- **FR-026:** Chair takeover shall require generation fencing, a bound handoff
+  and an exact takeover capability.
+- **FR-027:** Result-delivery claim, deadline, retry, reassignment,
+  abandonment and consumption shall persist independently of mailbox delivery.
+- **NFR-011:** Console and other operator clients shall use only the negotiated
+  public protocol and shall never mutate SQLite directly.
+- **NFR-012:** Duplicate and crash-replayed session, intake, gate, request,
+  completion and delivery commands shall have one durable effect.
+- **NFR-013:** Operator audit shall record authenticated actor, provenance,
+  command ID, revisions, before/after state and evidence without capability
+  values.
+- **NFR-014:** Project-session protocol shall remain usable without Console,
+  Herdr or GitHub.
+
+Acceptance adds:
+
+- **AC-014:** project lifecycle, membership, coordinated/independent topology
+  and one-chair invariants survive races and restart;
+- **AC-015:** the full operator-capability negative matrix and exact takeover
+  bindings fail closed, including independent `drain` and `stop` authority;
+- **AC-016:** each scoped-gate enforcement point blocks only its affected
+  dependency set; added and removed descendants rebind atomically and policy
+  auto-approval of a human-only gate fails;
+- **AC-017:** concurrent resource admission cannot overbook any ancestor and
+  unknown usage remains honest after restart;
+- **AC-018:** duplicate discussion, restart and compaction retain one revisioned
+  intake and one correlated request bound to the exact intake revision, gates
+  and artifact digests;
+- **AC-019:** crash injection exposes either all or none of task/request and
+  reply/result/callback composite effects; and
+- **AC-020:** safe-boundary delivery, busy/idle requester behaviour, overdue,
+  retry, reassignment, abandonment and late reply preserve the dependent
+  barrier and never use pane state as delivery evidence.
+
+Migration-created sessions use `origin.kind: legacy-migration`, one stable
+independent session per legacy run, and a digest-bound migration manifest.
+Their launch packet, authority and root budget are derived without widening
+from the existing run/root authority and budget records. The migration never
+fabricates a human operator or approval; anything not provably closed enters
+`recovery_required` for explicit reconciliation.

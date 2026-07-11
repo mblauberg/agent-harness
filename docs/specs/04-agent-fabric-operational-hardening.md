@@ -1,7 +1,7 @@
 # Agent fabric operational hardening
 
-Status: Implementation complete; final human acceptance pending
-Version: 1.0
+Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
+Version: 1.1
 Date: 11 July 2026
 Risk: Crucial
 Chair: Codex
@@ -219,3 +219,174 @@ support a later human-approved change.
 - Canonical delivery receipt validates at `awaiting_acceptance`.
 - Human final acceptance remains pending; Git push and release remain separate
   gates.
+
+## 9. Project Console daemon and persistence amendment
+
+This amendment is approved by Spec 05 v1.0 and the direct implementation
+instruction of 11 July 2026. Spec 01 owns the new protocol entities and atomic
+coordination invariants. This spec owns their additive persistence, lock-safe
+on-demand daemon bootstrap, global liveness and stop predicates, notification
+outbox and crash recovery.
+
+### 9.1 Lock-safe on-demand bootstrap
+
+The first operator or Fabric client read or command shall call one shared
+bootstrap client. It shall:
+
+1. attempt a bounded protocol initialisation against the trusted Unix socket;
+2. if no compatible incumbent answers because the socket is absent, stale,
+   unreachable, timed out or negotiates an incompatible feature version,
+   contend for a generation-bearing lease under the private runtime directory
+   and the canonical exclusive daemon-election lock;
+3. after acquiring the lease, check the socket again before spawning;
+4. spawn the configured daemon with a stable bootstrap action ID;
+5. wait for a successful version/capability handshake and authoritative daemon
+   instance generation; and
+6. release the bootstrap lease only after success or a recorded terminal
+   failure.
+
+The pre-daemon bootstrap lease and append-only attempt journal live only under
+the private runtime directory; they never mutate Fabric SQLite or create a
+second transaction owner. Socket absence or PID inspection alone never grants
+election. A contender may reclaim only after lease expiry and release of the
+exclusive lock. The winner rechecks the socket while holding the lock and
+retains the lease until the daemon owns the canonical socket and database,
+finishes migration/recovery and publishes an atomic ready receipt. A live but
+incompatible incumbent that still owns the canonical locks produces a typed
+compatibility failure, never a second daemon or socket replacement. Losers poll
+the exact election generation or its bounded terminal result. Runtime
+directories remain `0700`, socket and lease material private, and no
+project-session record may be created before initialisation succeeds.
+
+Election and shutdown use the same lock order: acquire the daemon-election lock
+first, then begin the SQLite liveness/recovery transaction. The daemon imports
+the winning bootstrap receipt into its audit journal only after it is the sole
+database owner. Shutdown holds the election lock through its final liveness
+recheck and socket close, so attach/start cannot race quiesce into a duplicate
+owner.
+
+### 9.2 Global liveness and idle stop
+
+While holding the daemon-election lock, the daemon shall stop only after one
+SQLite transaction proves there is no liveness-contributing project session or
+coordination run, active current-generation task/agent lease, unresolved
+provider action or unexpired current-generation operator client. Required
+result delivery remains a project-session closure blocker. Pending best-effort
+notification delivery alone does not keep the daemon alive. An attached Console
+intentionally keeps it alive. Closing the final Console permits, but does not
+force, idle shutdown.
+
+Liveness-contributing project-session states are `awaiting_launch`,
+`launching`, `active`, `quiescing`, `awaiting_acceptance`, `launch_ambiguous`,
+`reconciling`, `visibility_degraded`, `recovery_required` and `quarantined`.
+Detached `draft`, `closed`, `cancelled` and explicitly terminalised
+`launch_failed` sessions do not keep the process alive. Run liveness uses the
+corresponding launching/active/quiescing/acceptance, ambiguity, recovery and
+quarantine states; draft and terminal closed/cancelled/failed history does not.
+Provider actions contribute only while `prepared`, `dispatched`, `accepted`,
+`ambiguous` or `quarantined`. Historical terminal rows never block shutdown.
+
+Operator attachment is a persisted generation-fenced lease with heartbeat and
+bounded crash expiry. Stop uses a daemon-instance compare-and-set transition
+from `running` to `quiescing`, records the observed global-state revision and
+rechecks the idle predicate before closing the socket. A concurrent attach,
+project launch or recovered active member cancels the quiesce or advances the
+revision so the stop fails closed. Project close and client detach are
+idempotent and cannot stop another project's work.
+
+### 9.3 Additive migration and invariants
+
+Migration `0004-project-session-operations.sql` shall add, without rewriting historical
+tables:
+
+- project sessions and explicit membership;
+- coordination-run project/session links, lifecycle revision and chair
+  generation, plus persisted delivery workstreams;
+- operator principals, capabilities, client attachments, input attestations
+  and idempotent commands;
+- revisioned intakes, scoped gates and gate-to-task/operation/barrier links;
+- hierarchical resource scopes and reservations;
+- request-result delivery and transactional outbox state;
+- attention items and notification delivery journal;
+- daemon runtime epochs and imported bootstrap audit receipts; and
+- schema-versioned operator projection cursors.
+
+The migration shall preflight legacy rows, install same-project/run foreign-key
+and enumeration/generation triggers, and add indexes for active membership,
+gate enforcement, intake revision, callback deadline/claim, resource
+admission, notification dedupe and global-idle queries. It runs in one
+transaction after a verified backup. Failure leaves schema 0003 usable; after
+successful cutover recovery remains forward repair or verified restore, not a
+destructive down migration.
+
+Existing schema-v3 runs shall receive one deterministic independent imported
+project session per run without combining authority. Its stable ID, generation
+and launch-packet digest derive from a synthetic migration manifest bound to the
+legacy run ID, canonical root, authority and budget rows. The project-session
+origin is `legacy-migration`, never a human operator or approval. Its authority
+and root budget can only equal or narrow the legacy records. A run with a
+proven closed final barrier may import as closed; every other legacy run imports
+as `recovery_required` until explicitly reconciled. Uncanonical roots, identity
+collisions or inconsistent legacy state fail preflight before mutation.
+
+### 9.4 Restart and ambiguous-effect recovery
+
+Under the daemon-election lock and before opening SQLite, startup reconciles an
+expired runtime bootstrap lease and records its terminal attempt receipt. It
+does not treat that lease as database state. An unclean marker then triggers
+bounded integrity and foreign-key checks before mutation. Startup then,
+transactionally:
+
+- restores project-session and operator projection revisions;
+- expires only operator attachments whose deadline and daemon-generation
+  predicates are proven;
+- requeues unacknowledged mailbox deliveries under their existing rules;
+- returns only an expired `claimed` result-delivery lease to `pending` with a
+  higher claim generation;
+- preserves `provider-accepted`, `overdue`, `abandoned` and `consumed` result
+  deliveries without regression, reinjection or reassignment;
+- marks expired response deadlines `overdue` without redispatch;
+- resumes notification attempts from their durable dedupe keys; and
+- quarantines ambiguous provider, Git, Herdr or notification effects until
+  lookup/reconciliation proves their outcome.
+
+No pane, process absence or Console-local cache may infer coordination state.
+The Console may rebuild its complete projection from an authoritative snapshot
+plus monotonic event cursor after any restart.
+
+### 9.5 Notification worker
+
+The daemon-owned notification worker consumes durable attention items while
+project work remains active. Notification attempts are best-effort and
+non-authoritative. Each has a stable dedupe key, target integration, exact item
+revision and state `pending`, `claimed`, `sent`, `failed`, `deduplicated` or
+`ambiguous`; integration availability is separately `available`, `unavailable`
+or `stale`. Retries append attempts and never approve, acknowledge or consume
+the attention item. A crash after claim but before terminal journalling records
+ambiguity and never blindly retries. An exact focus action is emitted only for
+an integration whose discovered contract advertises a tested link/action
+capability.
+
+### 9.6 Verification additions
+
+Acceptance requires deterministic tests for:
+
+- simultaneous first reads producing one daemon and one socket owner;
+- stale/unreachable sockets, bounded initialisation timeout and incompatible
+  handshakes without duplicate spawn or socket replacement;
+- crash at every bootstrap phase and safe stale-lease reconciliation;
+- two projects launching/closing while clients attach/detach without premature
+  shutdown;
+- restart through every project-session and result-delivery state;
+- migration preflight, rollback, trigger and query-plan enforcement;
+- global-idle false positives for every liveness predicate;
+- detached draft sessions and terminal historical rows not blocking idle stop;
+- election racing quiesce/stop through the canonical lock order;
+- Console crash/restart without task cancellation or duplicate commands;
+- notification dedupe, restart, unavailable/stale labelling and
+  non-authoritative action handling; and
+- deterministic projection snapshot plus cursor replay.
+
+Load evidence shall cover concurrent session membership, scoped-gate reads,
+budget admission, result callbacks and operator projection alongside the
+existing 32-agent/1,000-operation coordination mix.
