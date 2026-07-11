@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexJsonRpcConnection } from "../../src/adapters/providers/codex-json-rpc.ts";
 
 const FAKE_SERVER = String.raw`
 const readline = require("node:readline");
 const lines = readline.createInterface({ input: process.stdin });
+let nextServerRequestId = 100;
 lines.on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
@@ -15,6 +16,14 @@ lines.on("line", (line) => {
     process.stdout.write(JSON.stringify({ method: "thread/compacted", params: { threadId: "thread-1", sequence: 2 } }) + "\n");
   } else if (message.method === "exit") {
     process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + "\n", () => process.exit(7));
+  } else if (message.method === "invoke-client-tool") {
+    const id = nextServerRequestId++;
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + "\n");
+    process.stdout.write(JSON.stringify({ id, method: "item/tool/call", params: {
+      arguments: {}, callId: "call-1", threadId: "thread-1", tool: "attest", turnId: "turn-1"
+    } }) + "\n");
+  } else if (message.id >= 100 && (message.result || message.error)) {
+    process.stdout.write(JSON.stringify({ method: "client-tool/result", params: { response: message } }) + "\n");
   }
 });
 `;
@@ -45,5 +54,31 @@ describe("Codex JSON-RPC notification consumption", () => {
     await connection.request("exit", {});
     await expect(waiting).rejects.toMatchObject({ code: "PROVIDER_EXITED" });
     await connection.close();
+  });
+
+  it("attributes a server-requested dynamic tool call and returns its response", async () => {
+    const connection = new CodexJsonRpcConnection([process.execPath, "-e", FAKE_SERVER]);
+    try {
+      await connection.initialize();
+      const handler = vi.fn(async (params: Record<string, unknown>) => ({
+        contentItems: [{ type: "inputText", text: String(params.callId) }],
+        success: true,
+      }));
+      connection.setServerRequestHandler("item/tool/call", handler);
+      await connection.request("invoke-client-tool", {});
+
+      await expect(connection.waitForNotification("client-tool/result", () => true, 100))
+        .resolves.toMatchObject({
+          response: {
+            id: 100,
+            result: { contentItems: [{ type: "inputText", text: "call-1" }], success: true },
+          },
+        });
+      expect(handler).toHaveBeenCalledWith({
+        arguments: {}, callId: "call-1", threadId: "thread-1", tool: "attest", turnId: "turn-1",
+      });
+    } finally {
+      await connection.close();
+    }
   });
 });

@@ -9,6 +9,7 @@ type PendingRequest = {
 };
 
 type Notification = { method: string; params: Record<string, unknown> };
+type ServerRequestHandler = (params: Record<string, unknown>) => Promise<unknown>;
 
 function boundedError(stderr: string): string {
   return stderr.length === 0 ? "" : `: ${stderr.slice(-2048)}`;
@@ -32,6 +33,7 @@ export class CodexJsonRpcConnection {
   readonly #lines: Interface;
   readonly #pending = new Map<number, PendingRequest>();
   readonly #notifications: Notification[] = [];
+  readonly #serverRequestHandlers = new Map<string, ServerRequestHandler>();
   readonly #waiters = new Set<{
     method: string;
     predicate(params: Record<string, unknown>): boolean;
@@ -99,6 +101,11 @@ export class CodexJsonRpcConnection {
     this.#child.stdin.write(`${JSON.stringify({ method, params })}\n`);
   }
 
+  setServerRequestHandler(method: string, handler: ServerRequestHandler): void {
+    if (this.#closed) throw new ProviderAdapterError("PROVIDER_CLOSED", "Codex app-server connection is closed");
+    this.#serverRequestHandlers.set(method, handler);
+  }
+
   waitForNotification(
     method: string,
     predicate: (params: Record<string, unknown>) => boolean,
@@ -157,10 +164,7 @@ export class CodexJsonRpcConnection {
       return;
     }
     if ((typeof value.id === "number" || typeof value.id === "string") && typeof value.method === "string") {
-      this.#child.stdin.write(`${JSON.stringify({
-        id: value.id,
-        error: { code: -32601, message: `agent-fabric does not implement server request ${value.method}` },
-      })}\n`);
+      void this.#handleServerRequest(value.id, value.method, isRecord(value.params) ? value.params : {});
       return;
     }
     if (typeof value.id === "number") {
@@ -188,6 +192,32 @@ export class CodexJsonRpcConnection {
       } else {
         this.#notifications.push(notification);
         if (this.#notifications.length > 256) this.#notifications.shift();
+      }
+    }
+  }
+
+  async #handleServerRequest(
+    id: number | string,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<void> {
+    const handler = this.#serverRequestHandlers.get(method);
+    if (handler === undefined) {
+      this.#child.stdin.write(`${JSON.stringify({
+        id,
+        error: { code: -32601, message: `agent-fabric does not implement server request ${method}` },
+      })}\n`);
+      return;
+    }
+    try {
+      const result = await handler(params);
+      if (!this.#closed) this.#child.stdin.write(`${JSON.stringify({ id, result })}\n`);
+    } catch {
+      if (!this.#closed) {
+        this.#child.stdin.write(`${JSON.stringify({
+          id,
+          error: { code: -32603, message: "agent-fabric server request failed" },
+        })}\n`);
       }
     }
   }

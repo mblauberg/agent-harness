@@ -12,11 +12,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "d41f97f812e06c89ef2af65cb080cabcd33787f5df06297820f0b29a57291c65"
+      "sha256": "9d5357fde3682a46674867c2e379756da0cb4d67b74b19131ff94d491d8217d3"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
-      "sha256": "a0b1d113ee8e4b0931446cc3ee4c17bf03f35a6d47e01b588c95ae9d68fb3a46"
+      "sha256": "cb4123db5454e3a0cf6c9db014e926703e86b068a55e21727b6f0bdf37578df4"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/command-boundaries.js",
@@ -40,7 +40,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
-      "sha256": "45408bdbdfd0c11cc0610b3426dbac2837a227bf3cd91aa5c67d861cc23d863f"
+      "sha256": "bcc7c6f039d01b0e2ef2654a73a57321a8f09fb5e13e8051180d50319b7b7a6d"
     },
     {
       "path": "runtime/agent-fabric/dist/errors.js",

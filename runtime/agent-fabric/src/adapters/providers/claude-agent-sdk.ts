@@ -2,23 +2,29 @@ import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  createSdkMcpServer,
   getSessionInfo,
   query,
+  tool,
   type Options,
   type Query,
+  type SDKMessage,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 
 import { createProviderAdapter, type ProviderBoundary } from "./adapter.js";
 import {
   chairLaunchContinuityUnproven,
-  probeChairLaunchFabricContinuity,
-  type ChairLaunchContinuityProbe,
+  createChairLaunchFabricBridge,
+  type ChairLaunchFabricBridge,
+  type ChairLaunchFabricBridgeInput,
 } from "./chair-launch-continuity.js";
 import { SqliteAdapterActionJournal } from "./journal.js";
 import { journalPathFromArguments, serveAdapter } from "./server.js";
 import {
   optionalString,
+  isRecord,
   parseChairLaunchProviderResult,
   ProviderAdapterError,
   requiredString,
@@ -64,6 +70,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     environment: {
       capability: "AGENT_FABRIC_CAPABILITY",
       socketPath: "AGENT_FABRIC_SOCKET_PATH",
+      attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE",
     },
     publicPayloadSchema: {
       type: "object",
@@ -78,6 +85,15 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
       },
     },
     noEffectProofSchemas: {},
+    attestation: {
+      method: "provider-session-random-challenge-v1",
+      bridgeContract: "agent-fabric-session-bridge-v1",
+      origin: "provider-session-tool-call",
+      oneUse: true,
+      bridgeLifetime: "provider-session",
+      digestAlgorithm: "sha256",
+      nativeAttribution: "claude-sdk-assistant-request-tool-use-v1",
+    },
   },
 };
 
@@ -139,12 +155,18 @@ function prompt(payload: Record<string, unknown>): string {
   return requiredString(payload.prompt ?? payload.instruction ?? payload.initialPrompt, "prompt");
 }
 
-async function consumeQuery(active: Query): Promise<{ resumeReference: string; result: string; usage: unknown; costUsd: number }> {
+async function consumeQuery(
+  active: Query,
+  onSession?: (sessionId: string) => void,
+  onMessage?: (message: SDKMessage) => void,
+): Promise<{ resumeReference: string; result: string; usage: unknown; costUsd: number }> {
   let sessionId: string | undefined;
   let terminal: SDKResultMessage | undefined;
   try {
     for await (const message of active) {
       sessionId = message.session_id;
+      if (typeof message.session_id === "string") onSession?.(message.session_id);
+      onMessage?.(message);
       if (message.type === "result") terminal = message;
     }
   } finally {
@@ -167,24 +189,158 @@ async function consumeQuery(active: Query): Promise<{ resumeReference: string; r
   };
 }
 
+type ClaudeChairSession = {
+  bridge: ChairLaunchFabricBridge;
+  mcp?: ClaudeChairMcpBridge;
+  providerSessionRef?: string;
+  providerSessionGeneration: number;
+  attestationTurnRef?: string;
+  attestationInvocationRef?: string;
+  attestationChallengeResponse?: string;
+  busy?: boolean;
+};
+
+export type ClaudeChairMcpBridge = {
+  serverName: string;
+  server: ReturnType<typeof createSdkMcpServer>;
+  attestationToolName: string;
+  mailboxToolName: string;
+  attestationTool: { handler(args: { challengeResponse: string }, extra: unknown): Promise<unknown> };
+  mailboxTool: { handler(args: Record<string, never>, extra: unknown): Promise<unknown> };
+};
+
+function observeClaudeAttestationToolUse(
+  session: ClaudeChairSession,
+  message: SDKMessage,
+  attestationToolName: string,
+): void {
+  if (
+    message.type !== "assistant" ||
+    !isRecord(message.message) ||
+    !Array.isArray(message.message.content)
+  ) return;
+  const toolUse = message.message.content.find((block) => (
+    isRecord(block) &&
+    block.type === "tool_use" &&
+    block.name === attestationToolName &&
+    typeof block.id === "string" &&
+    block.id.length > 0 &&
+    isRecord(block.input) &&
+    Object.keys(block.input).length === 1 &&
+    typeof block.input.challengeResponse === "string" &&
+    /^[0-9a-f]{64}$/u.test(block.input.challengeResponse)
+  ));
+  if (
+    !isRecord(toolUse) ||
+    typeof toolUse.id !== "string" ||
+    !isRecord(toolUse.input) ||
+    typeof toolUse.input.challengeResponse !== "string"
+  ) return;
+  const turnRef = typeof message.request_id === "string" && message.request_id.length > 0
+    ? message.request_id
+    : message.uuid;
+  session.attestationTurnRef = turnRef;
+  session.attestationInvocationRef = toolUse.id;
+  session.attestationChallengeResponse = toolUse.input.challengeResponse;
+}
+
+export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeChairMcpBridge {
+  const serverName = "agent_fabric_session";
+  const attestationTool = tool(
+    session.bridge.challengeToolName,
+    "Required one-use Agent Fabric provider-session continuity challenge.",
+    { challengeResponse: z.string().regex(/^[0-9a-f]{64}$/u) },
+    async ({ challengeResponse }) => {
+      if (
+        session.providerSessionRef === undefined ||
+        session.attestationTurnRef === undefined ||
+        session.attestationInvocationRef === undefined ||
+        session.attestationChallengeResponse !== challengeResponse
+      ) {
+        throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Claude MCP invocation lacks native session, turn or tool-call evidence");
+      }
+      await session.bridge.attest({
+        providerSessionRef: session.providerSessionRef,
+        providerSessionGeneration: session.providerSessionGeneration,
+        providerTurnRef: session.attestationTurnRef,
+        providerInvocationRef: session.attestationInvocationRef,
+        challengeResponse,
+      });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          attested: true,
+          challengeDigest: session.bridge.challengeDigest,
+        }) }],
+      };
+    },
+    { alwaysLoad: true },
+  );
+  const mailboxTool = tool(
+    "fabric_get_mailbox_state",
+    "Read this chair's mailbox state through its retained Agent Fabric bridge.",
+    {},
+    async () => ({
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify(await session.bridge.call("getMailboxState", {})),
+      }],
+    }),
+    { alwaysLoad: true },
+  );
+  return {
+    serverName,
+    server: createSdkMcpServer({
+      name: serverName,
+      version: "1.0.0",
+      alwaysLoad: true,
+      tools: [attestationTool, mailboxTool],
+    }),
+    attestationToolName: `mcp__${serverName}__${session.bridge.challengeToolName}`,
+    mailboxToolName: `mcp__${serverName}__fabric_get_mailbox_state`,
+    attestationTool,
+    mailboxTool,
+  };
+}
+
+function claudeChairOptions(
+  payload: Record<string, unknown>,
+  executable: string | undefined,
+  resume: string | undefined,
+  mcp: ClaudeChairMcpBridge,
+): Options {
+  return {
+    ...claudeReadOnlyOptions(payload, resume, executable),
+    mcpServers: { [mcp.serverName]: mcp.server },
+    allowedTools: [mcp.attestationToolName, mcp.mailboxToolName],
+  };
+}
+
+type BridgeFactory = (input: ChairLaunchFabricBridgeInput) => Promise<ChairLaunchFabricBridge>;
+type ClaudeMcpBridgeFactory = (session: ClaudeChairSession) => ClaudeChairMcpBridge;
+
 export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   readonly #executable: string | undefined;
   readonly #query: typeof query;
-  readonly #continuityProbe: ChairLaunchContinuityProbe;
+  readonly #bridgeFactory: BridgeFactory;
+  readonly #mcpBridgeFactory: ClaudeMcpBridgeFactory;
+  readonly #chairSessions = new Map<string, ClaudeChairSession>();
 
   constructor(options?: string | {
     executable?: string;
     query?: typeof query;
-    continuityProbe?: ChairLaunchContinuityProbe;
+    bridgeFactory?: BridgeFactory;
+    mcpBridgeFactory?: ClaudeMcpBridgeFactory;
   }) {
     if (typeof options === "string" || options === undefined) {
       this.#executable = options;
       this.#query = query;
-      this.#continuityProbe = probeChairLaunchFabricContinuity;
+      this.#bridgeFactory = createChairLaunchFabricBridge;
+      this.#mcpBridgeFactory = createClaudeChairMcpBridge;
     } else {
       this.#executable = options.executable;
       this.#query = options.query ?? query;
-      this.#continuityProbe = options.continuityProbe ?? probeChairLaunchFabricContinuity;
+      this.#bridgeFactory = options.bridgeFactory ?? createChairLaunchFabricBridge;
+      this.#mcpBridgeFactory = options.mcpBridgeFactory ?? createClaudeChairMcpBridge;
     }
   }
 
@@ -208,23 +364,46 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   }
 
   async launchChair(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult> {
-    const completed = await consumeQuery(this.#query({
-      prompt: prompt(input.payload),
-      options: claudeReadOnlyOptions(input.payload, undefined, this.#executable, input.environment),
-    }));
-    const evidence = {
-      resumeReference: completed.resumeReference,
-      providerSessionGeneration: 1,
+    const bridge = await this.#bridgeFactory({
+      providerAdapterId: input.providerAdapterId,
+      providerActionId: input.actionId,
       providerContractDigest: input.providerContractDigest,
-    };
+      challengeDigest: input.challengeDigest,
+      capability: input.environment.AGENT_FABRIC_CAPABILITY,
+      socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+      attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+    });
+    const session: ClaudeChairSession = { bridge, providerSessionGeneration: 1 };
+    const mcp = this.#mcpBridgeFactory(session);
+    session.mcp = mcp;
     try {
-      return parseChairLaunchProviderResult(await this.#continuityProbe({
-        capability: input.environment.AGENT_FABRIC_CAPABILITY,
-        socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
-        ...evidence,
-      }), input.providerContractDigest);
-    } catch {
-      throw chairLaunchContinuityUnproven(evidence);
+      const completed = await consumeQuery(this.#query({
+        prompt: `Before continuing, invoke ${mcp.attestationToolName} exactly once with {"challengeResponse":"${bridge.challengeResponse}"}. ${prompt(input.payload)}`,
+        options: claudeChairOptions(input.payload, this.#executable, undefined, mcp),
+      }), (sessionId) => {
+        session.providerSessionRef = sessionId;
+        bridge.bindProviderSession(sessionId, session.providerSessionGeneration);
+      }, (message) => observeClaudeAttestationToolUse(session, message, mcp.attestationToolName));
+      const evidence = {
+        resumeReference: completed.resumeReference,
+        providerSessionGeneration: 1,
+        providerContractDigest: input.providerContractDigest,
+      };
+      try {
+        const result = parseChairLaunchProviderResult(await bridge.result(), {
+          providerAdapterId: input.providerAdapterId,
+          providerActionId: input.actionId,
+          providerContractDigest: input.providerContractDigest,
+          challengeDigest: input.challengeDigest,
+        });
+        this.#chairSessions.set(completed.resumeReference, session);
+        return result;
+      } catch {
+        throw chairLaunchContinuityUnproven(evidence);
+      }
+    } catch (error: unknown) {
+      await bridge.close();
+      throw error;
     }
   }
 
@@ -242,7 +421,33 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async sendTurn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = requiredString(payload.resumeReference, "resumeReference");
-    return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, resumeReference, this.#executable) }));
+    const session = this.#chairSessions.get(resumeReference);
+    if (session === undefined) {
+      return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, resumeReference, this.#executable) }));
+    }
+    const mcp = session.mcp;
+    if (mcp === undefined) {
+      throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "Claude chair MCP bridge is unavailable");
+    }
+    if (session.busy === true) {
+      throw new ProviderAdapterError("PROVIDER_SESSION_BUSY", "Claude chair session already has an active turn");
+    }
+    session.busy = true;
+    try {
+      return await consumeQuery(this.#query({
+        prompt: prompt(payload),
+        options: claudeChairOptions(payload, this.#executable, resumeReference, mcp),
+      }), (sessionId) => session.bridge.bindProviderSession(sessionId, session.providerSessionGeneration));
+    } catch (error: unknown) {
+      if (error instanceof ProviderAdapterError && error.code === "PROVIDER_TURN_FAILED") throw error;
+      this.#chairSessions.delete(resumeReference);
+      await session.bridge.close();
+      throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "Claude chair provider context was lost", undefined, {
+        cause: error,
+      });
+    } finally {
+      session.busy = false;
+    }
   }
 
   async interrupt(): Promise<Record<string, unknown>> {
@@ -255,7 +460,18 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async release(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = optionalString(payload.resumeReference, "resumeReference");
+    if (resumeReference !== undefined) {
+      const session = this.#chairSessions.get(resumeReference);
+      this.#chairSessions.delete(resumeReference);
+      await session?.bridge.close();
+    }
     return { released: true, deleted: false, ...(resumeReference === undefined ? {} : { resumeReference }) };
+  }
+
+  async closeAll(): Promise<void> {
+    const sessions = [...this.#chairSessions.values()];
+    this.#chairSessions.clear();
+    await Promise.allSettled(sessions.map(async (session) => await session.bridge.close()));
   }
 }
 
@@ -280,16 +496,18 @@ export async function runClaudeAgentSdkAdapter(arguments_: string[] = process.ar
   const chairLaunchHandoff = takeChairLaunchHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
+  const boundary = new InstalledClaudeAgentSdkBoundary(providerExecutable);
   try {
     await serveAdapter(
       createClaudeAgentSdkAdapter({
-        boundary: new InstalledClaudeAgentSdkBoundary(providerExecutable),
+        boundary,
         journal,
         ...(chairLaunchHandoff === undefined ? {} : { chairLaunchHandoff }),
       }),
       { input: process.stdin, output: process.stdout },
     );
   } finally {
+    await boundary.closeAll();
     journal.close();
   }
 }

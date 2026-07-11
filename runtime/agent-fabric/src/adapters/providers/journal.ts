@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
@@ -95,8 +95,10 @@ function recordFromRow(row: ActionRow): AdapterActionRecord {
 
 export class SqliteAdapterActionJournal {
   readonly #database: Database.Database;
+  readonly #path: string;
 
   constructor(path: string) {
+    this.#path = path;
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.#database = new Database(path);
     chmodSync(path, 0o600);
@@ -116,6 +118,7 @@ export class SqliteAdapterActionJournal {
         updated_at TEXT NOT NULL
       ) STRICT;
     `);
+    this.#hardenFiles();
   }
 
   close(): void {
@@ -127,7 +130,7 @@ export class SqliteAdapterActionJournal {
     created: boolean;
   } {
     const payloadHash = sha256(canonicalJson(payload));
-    return this.#database.transaction(() => {
+    const result = this.#database.transaction(() => {
       const existing = this.#read(actionId);
       if (existing !== undefined) {
         if (existing.operation !== operation || existing.payloadHash !== payloadHash) {
@@ -144,6 +147,8 @@ export class SqliteAdapterActionJournal {
         .run(actionId, operation, payloadHash, new Date().toISOString());
       return { record: this.get(actionId), created: true };
     })();
+    this.#hardenFiles();
+    return result;
   }
 
   get(actionId: string): AdapterActionRecord {
@@ -196,7 +201,7 @@ export class SqliteAdapterActionJournal {
     status: AdapterActionStatus,
     options: { executionDelta?: number; effectDelta?: number; result?: unknown; idempotencyProven?: boolean },
   ): AdapterActionRecord {
-    return this.#database.transaction(() => {
+    const result = this.#database.transaction(() => {
       const existing = this.get(actionId);
       const history = [...existing.history, status];
       this.#database
@@ -218,5 +223,13 @@ export class SqliteAdapterActionJournal {
         );
       return this.get(actionId);
     })();
+    this.#hardenFiles();
+    return result;
+  }
+
+  #hardenFiles(): void {
+    for (const path of [this.#path, `${this.#path}-wal`, `${this.#path}-shm`]) {
+      if (existsSync(path)) chmodSync(path, 0o600);
+    }
   }
 }

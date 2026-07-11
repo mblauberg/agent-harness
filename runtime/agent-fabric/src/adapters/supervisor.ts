@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 
-import { AdapterProcessTransport } from "./process.js";
+import { AdapterProcessTransport, AdapterTransportError } from "./process.js";
 import { assessAdapterModelPolicy } from "./model-selection.js";
 import { FabricError } from "../errors.js";
 import {
+  chairLaunchChallengeDigest,
   parseChairLaunchProviderResult,
   ProviderAdapterError,
   type ChairLaunchHandoff,
@@ -50,6 +51,38 @@ function modelPayload(method: string, params: Record<string, unknown>): Record<s
   return params.payload as Record<string, unknown>;
 }
 
+function providerSessionReference(params: Record<string, unknown>): string | undefined {
+  for (const key of ["resumeReference", "providerSessionRef", "threadId"] as const) {
+    if (typeof params[key] === "string" && params[key].length > 0) return params[key];
+  }
+  if (typeof params.payload === "object" && params.payload !== null && !Array.isArray(params.payload)) {
+    return providerSessionReference(params.payload as Record<string, unknown>);
+  }
+  return undefined;
+}
+
+function chairTransportKey(adapterId: string, providerSessionRef: string): string {
+  return `${adapterId}\0${providerSessionRef}`;
+}
+
+function isReleaseRequest(method: string, params: Record<string, unknown>): boolean {
+  return method === "release" || (method === "dispatch" && params.operation === "release");
+}
+
+function isRetainedChairLoss(error: unknown, transport: AdapterProcessTransport): boolean {
+  return (
+    transport.closed ||
+    error instanceof AdapterTransportError ||
+    (error instanceof Error && [
+      "CHAIR_BRIDGE_LOST",
+      "PROVIDER_CLOSED",
+      "PROVIDER_EXITED",
+      "PROVIDER_SPAWN_FAILED",
+      "PROVIDER_STDIN_FAILED",
+    ].includes(error.name))
+  );
+}
+
 function enforceModelPolicy(adapterId: string, definition: AdapterProcessDefinition, method: string, params: Record<string, unknown>): void {
   const policy = definition.modelPolicy;
   const payload = modelPayload(method, params);
@@ -72,6 +105,8 @@ function enforceModelPolicy(adapterId: string, definition: AdapterProcessDefinit
 export class AdapterSupervisor {
   readonly #definitions: Record<string, AdapterProcessDefinition>;
   readonly #transports = new Map<string, AdapterProcessTransport>();
+  readonly #chairTransports = new Map<string, AdapterProcessTransport>();
+  readonly #knownChairSessions = new Set<string>();
   readonly #consumedChairHandoffHashes = new Set<string>();
   readonly #controlTimeoutMs: number;
   readonly #providerTurnTimeoutMs: number;
@@ -86,18 +121,44 @@ export class AdapterSupervisor {
     const definition = this.#definitions[adapterId];
     if (definition === undefined) throw new Error(`adapter is not configured: ${adapterId}`);
     enforceModelPolicy(adapterId, definition, method, params);
-    let transport = this.#transports.get(adapterId);
+    const sessionRef = providerSessionReference(params);
+    const chairKey = sessionRef === undefined ? undefined : chairTransportKey(adapterId, sessionRef);
+    const retainedChairTransport = chairKey === undefined ? undefined : this.#chairTransports.get(chairKey);
+    if (chairKey !== undefined && this.#knownChairSessions.has(chairKey) && retainedChairTransport === undefined) {
+      throw new ProviderAdapterError(
+        "CHAIR_BRIDGE_LOST",
+        `${adapterId} chair session cannot be resumed without its retained bridge`,
+      );
+    }
+    let transport = retainedChairTransport ?? this.#transports.get(adapterId);
     if (transport === undefined || transport.closed) {
+      if (retainedChairTransport?.closed === true && chairKey !== undefined) {
+        this.#chairTransports.delete(chairKey);
+        throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} retained chair bridge is unavailable`);
+      }
       transport = new AdapterProcessTransport(definition);
       this.#transports.set(adapterId, transport);
     }
     try {
-      return await transport.request(method, params, {
+      const result = await transport.request(method, params, {
         timeoutMs: isLongProviderOperation(method, params) ? this.#providerTurnTimeoutMs : this.#controlTimeoutMs,
       });
+      if (retainedChairTransport !== undefined && chairKey !== undefined && isReleaseRequest(method, params)) {
+        this.#chairTransports.delete(chairKey);
+        await transport.close().catch(() => undefined);
+      }
+      return result;
     } catch (error: unknown) {
-      this.#transports.delete(adapterId);
+      if (retainedChairTransport !== undefined && chairKey !== undefined) {
+        if (!isRetainedChairLoss(error, transport)) throw error;
+        this.#chairTransports.delete(chairKey);
+      } else {
+        this.#transports.delete(adapterId);
+      }
       await transport.close().catch(() => undefined);
+      if (retainedChairTransport !== undefined) {
+        throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} retained chair bridge was lost`);
+      }
       throw error;
     }
   }
@@ -114,7 +175,9 @@ export class AdapterSupervisor {
       handoff.capability.length === 0 ||
       typeof handoff.socketPath !== "string" ||
       handoff.socketPath.length === 0 ||
-      !isAbsolute(handoff.socketPath)
+      !isAbsolute(handoff.socketPath) ||
+      typeof handoff.attestationChallenge !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(handoff.attestationChallenge)
     ) {
       throw new ProviderAdapterError(
         "PRIVATE_HANDOFF_UNAVAILABLE",
@@ -133,22 +196,42 @@ export class AdapterSupervisor {
         ...definition.environment,
         AGENT_FABRIC_CAPABILITY: handoff.capability,
         AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+        AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.attestationChallenge,
       },
     });
     try {
-      return parseChairLaunchProviderResult(await transport.request("launch_chair", request, {
+      const result = parseChairLaunchProviderResult(await transport.request("launch_chair", request, {
         timeoutMs: this.#providerTurnTimeoutMs,
-      }), request.providerContractDigest);
+      }), {
+        providerAdapterId: adapterId,
+        providerActionId: request.actionId,
+        providerContractDigest: request.providerContractDigest,
+        challengeDigest: chairLaunchChallengeDigest(handoff.attestationChallenge),
+      });
+      // This is a liveness handshake only; the provider-originated attestation
+      // above remains the sole continuity proof.
+      await transport.request("capabilities", {}, { timeoutMs: this.#controlTimeoutMs });
+      if (transport.closed) {
+        throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} chair bridge closed before terminal handoff`);
+      }
+      const key = chairTransportKey(adapterId, result.resumeReference);
+      if (this.#chairTransports.has(key)) {
+        throw new ProviderAdapterError("CHAIR_BRIDGE_CONFLICT", `${adapterId} already owns the provider chair session`);
+      }
+      this.#chairTransports.set(key, transport);
+      this.#knownChairSessions.add(key);
+      return result;
     } catch {
-      throw new ProviderAdapterError("CHAIR_LAUNCH_FAILED", `${adapterId} chair launch adapter handoff failed`);
-    } finally {
       await transport.close().catch(() => undefined);
+      throw new ProviderAdapterError("CHAIR_LAUNCH_FAILED", `${adapterId} chair launch adapter handoff failed`);
     }
   }
 
   async close(): Promise<void> {
-    const transports = [...this.#transports.values()];
+    const transports = [...new Set([...this.#transports.values(), ...this.#chairTransports.values()])];
     this.#transports.clear();
+    this.#chairTransports.clear();
+    this.#knownChairSessions.clear();
     await Promise.allSettled(transports.map((transport) => transport.close()));
   }
 }

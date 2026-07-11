@@ -4,8 +4,9 @@ import { isAbsolute } from "node:path";
 import { createProviderAdapter, type ProviderBoundary } from "./adapter.js";
 import {
   chairLaunchContinuityUnproven,
-  probeChairLaunchFabricContinuity,
-  type ChairLaunchContinuityProbe,
+  createChairLaunchFabricBridge,
+  type ChairLaunchFabricBridge,
+  type ChairLaunchFabricBridgeInput,
 } from "./chair-launch-continuity.js";
 import { CodexJsonRpcConnection } from "./codex-json-rpc.js";
 import { SqliteAdapterActionJournal } from "./journal.js";
@@ -69,6 +70,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     environment: {
       capability: "AGENT_FABRIC_CAPABILITY",
       socketPath: "AGENT_FABRIC_SOCKET_PATH",
+      attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE",
     },
     publicPayloadSchema: {
       type: "object",
@@ -86,6 +88,15 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
       },
     },
     noEffectProofSchemas: {},
+    attestation: {
+      method: "provider-session-random-challenge-v1",
+      bridgeContract: "agent-fabric-session-bridge-v1",
+      origin: "provider-session-tool-call",
+      oneUse: true,
+      bridgeLifetime: "provider-session",
+      digestAlgorithm: "sha256",
+      nativeAttribution: "codex-app-server-thread-turn-call-v1",
+    },
   },
 };
 
@@ -173,22 +184,63 @@ export function codexThreadConfiguration(payload: Record<string, unknown>): Reco
 
 type CodexConnection = Pick<
   CodexJsonRpcConnection,
-  "initialize" | "request" | "waitForNotification" | "close"
+  "initialize" | "request" | "waitForNotification" | "setServerRequestHandler" | "close"
 >;
 
 type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection;
+type BridgeFactory = (input: ChairLaunchFabricBridgeInput) => Promise<ChairLaunchFabricBridge>;
+
+type CodexChairSession = {
+  bridge: ChairLaunchFabricBridge;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  currentTurnId?: string;
+  busy?: boolean;
+};
+
+function codexChairDynamicTools(bridge: ChairLaunchFabricBridge): Record<string, unknown>[] {
+  return [
+    {
+      type: "function",
+      name: bridge.challengeToolName,
+      description: "Required one-use Agent Fabric provider-session continuity challenge.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { challengeResponse: { type: "string", pattern: "^[0-9a-f]{64}$" } },
+        required: ["challengeResponse"],
+      },
+      deferLoading: false,
+    },
+    {
+      type: "function",
+      name: "fabric_get_mailbox_state",
+      description: "Read this chair's mailbox state through its retained Agent Fabric bridge.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {}, required: [] },
+      deferLoading: false,
+    },
+  ];
+}
+
+function dynamicToolResponse(value: unknown): Record<string, unknown> {
+  return {
+    contentItems: [{ type: "inputText", text: JSON.stringify(value) }],
+    success: true,
+  };
+}
 
 export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   readonly #connectionFactory: ConnectionFactory;
-  readonly #continuityProbe: ChairLaunchContinuityProbe;
+  readonly #bridgeFactory: BridgeFactory;
   readonly #connections = new Map<string, CodexConnection>();
+  readonly #chairSessions = new Map<string, CodexChairSession>();
 
   constructor(
     connectionFactory: ConnectionFactory,
-    continuityProbe: ChairLaunchContinuityProbe = probeChairLaunchFabricContinuity,
+    bridgeFactory: BridgeFactory = createChairLaunchFabricBridge,
   ) {
     this.#connectionFactory = connectionFactory;
-    this.#continuityProbe = continuityProbe;
+    this.#bridgeFactory = bridgeFactory;
   }
 
   async #withConnection<T>(operation: (connection: CodexConnection) => Promise<T>): Promise<T> {
@@ -210,6 +262,15 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   async #sessionConnection(resumeReference: string): Promise<CodexConnection> {
     const existing = this.#connections.get(resumeReference);
     if (existing !== undefined) return existing;
+    const lostChair = this.#chairSessions.get(resumeReference);
+    if (lostChair !== undefined) {
+      this.#chairSessions.delete(resumeReference);
+      await lostChair.bridge.close();
+      throw new ProviderAdapterError(
+        "CHAIR_BRIDGE_LOST",
+        "Codex chair connection was lost and cannot be recreated from its thread reference",
+      );
+    }
     const connection = await this.#openConnection();
     try {
       await connection.request("thread/resume", { threadId: resumeReference });
@@ -225,40 +286,58 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     connection: CodexConnection,
     resumeReference: string,
     payload: Record<string, unknown>,
+    chairSession?: CodexChairSession,
+    attestationToolName?: string,
   ): Promise<Record<string, unknown>> {
+    const instruction = attestationToolName === undefined
+      ? textInput(payload)
+      : [{
+          type: "text" as const,
+          text: `Before continuing, invoke ${attestationToolName} exactly once with {"challengeResponse":"${chairSession?.bridge.challengeResponse ?? ""}"}. ${requiredString(payload.prompt ?? payload.instruction, "prompt")}`,
+        }];
     const response = await connection.request("turn/start", {
       threadId: resumeReference,
-      input: textInput(payload),
+      input: instruction,
       ...(typeof payload.model === "string" ? { model: payload.model } : {}),
       ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
     });
     const turn = turnFromResponse(response);
-    const completed = await connection.waitForNotification(
-      "turn/completed",
-      (params) => params.threadId === resumeReference && isRecord(params.turn) && params.turn.id === turn.id,
-    );
-    const completedTurn = isRecord(completed.turn) ? completed.turn : turn;
-    if (completedTurn.status !== "completed") codexCompletedTurnResult(completedTurn);
-    const readResponse = await connection.request("thread/read", { threadId: resumeReference, includeTurns: true });
-    const hydratedThread = threadFromResponse(readResponse, "thread/read");
-    const hydratedTurn = Array.isArray(hydratedThread.turns)
-      ? hydratedThread.turns.find((candidate) => isRecord(candidate) && candidate.id === turn.id)
-      : undefined;
-    if (!isRecord(hydratedTurn)) {
-      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex thread/read returned no completed turn");
+    if (chairSession !== undefined) chairSession.currentTurnId = String(turn.id);
+    try {
+      const completed = await connection.waitForNotification(
+        "turn/completed",
+        (params) => params.threadId === resumeReference && isRecord(params.turn) && params.turn.id === turn.id,
+      );
+      const completedTurn = isRecord(completed.turn) ? completed.turn : turn;
+      if (completedTurn.status !== "completed") codexCompletedTurnResult(completedTurn);
+      const readResponse = await connection.request("thread/read", { threadId: resumeReference, includeTurns: true });
+      const hydratedThread = threadFromResponse(readResponse, "thread/read");
+      const hydratedTurn = Array.isArray(hydratedThread.turns)
+        ? hydratedThread.turns.find((candidate) => isRecord(candidate) && candidate.id === turn.id)
+        : undefined;
+      if (!isRecord(hydratedTurn)) {
+        throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Codex thread/read returned no completed turn");
+      }
+      return {
+        resumeReference,
+        turnId: turn.id,
+        status: hydratedTurn.status,
+        result: codexCompletedTurnResult(hydratedTurn),
+      };
+    } finally {
+      if (chairSession !== undefined && chairSession.currentTurnId === turn.id) delete chairSession.currentTurnId;
     }
-    return {
-      resumeReference,
-      turnId: turn.id,
-      status: hydratedTurn.status,
-      result: codexCompletedTurnResult(hydratedTurn),
-    };
   }
 
   async closeAll(): Promise<void> {
     const connections = [...this.#connections.values()];
+    const bridges = [...this.#chairSessions.values()].map((session) => session.bridge);
     this.#connections.clear();
-    await Promise.all(connections.map(async (connection) => await connection.close()));
+    this.#chairSessions.clear();
+    await Promise.allSettled([
+      ...connections.map(async (connection) => await connection.close()),
+      ...bridges.map(async (bridge) => await bridge.close()),
+    ]);
   }
 
   async status(input: { resumeReference?: string }): Promise<Record<string, unknown>> {
@@ -287,31 +366,90 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async launchChair(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult> {
-    const connection = await this.#openConnection(input.environment);
+    const bridge = await this.#bridgeFactory({
+      providerAdapterId: input.providerAdapterId,
+      providerActionId: input.actionId,
+      providerContractDigest: input.providerContractDigest,
+      challengeDigest: input.challengeDigest,
+      capability: input.environment.AGENT_FABRIC_CAPABILITY,
+      socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+      attestationChallenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+    });
+    let connection: CodexConnection | undefined;
+    let evidence: {
+      resumeReference: string;
+      providerSessionGeneration: number;
+      providerContractDigest: string;
+    } | undefined;
     try {
-      const response = await connection.request("thread/start", codexThreadConfiguration(input.payload));
+      connection = await this.#openConnection();
+      let chairSession: CodexChairSession | undefined;
+      connection.setServerRequestHandler("item/tool/call", async (params) => {
+        if (
+          chairSession === undefined ||
+          typeof params.threadId !== "string" ||
+          params.threadId !== chairSession.providerSessionRef ||
+          typeof params.turnId !== "string" ||
+          params.turnId !== chairSession.currentTurnId ||
+          typeof params.callId !== "string" ||
+          params.callId.length === 0 ||
+          typeof params.tool !== "string" ||
+          (params.namespace !== undefined && params.namespace !== null)
+        ) {
+          throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex tool call is not attributable to the active chair turn");
+        }
+        if (params.tool === bridge.challengeToolName) {
+          if (
+            !isRecord(params.arguments) ||
+            Object.keys(params.arguments).length !== 1 ||
+            typeof params.arguments.challengeResponse !== "string"
+          ) {
+            throw new ProviderAdapterError("CHAIR_CONTINUITY_UNPROVEN", "Codex attestation omitted its challenge response");
+          }
+          await bridge.attest({
+            providerSessionRef: chairSession.providerSessionRef,
+            providerSessionGeneration: chairSession.providerSessionGeneration,
+            providerTurnRef: params.turnId,
+            providerInvocationRef: params.callId,
+            challengeResponse: params.arguments.challengeResponse,
+          });
+          return dynamicToolResponse({ attested: true, challengeDigest: bridge.challengeDigest });
+        }
+        if (params.tool === "fabric_get_mailbox_state") {
+          if (!isRecord(params.arguments) || Object.keys(params.arguments).length !== 0) {
+            throw new ProviderAdapterError("MCP_INPUT_INVALID", "Codex mailbox tool expects a closed empty object");
+          }
+          return dynamicToolResponse(await bridge.call("getMailboxState", {}));
+        }
+        throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "Codex requested an unknown chair bridge tool");
+      });
+      const response = await connection.request("thread/start", {
+        ...codexThreadConfiguration(input.payload),
+        dynamicTools: codexChairDynamicTools(bridge),
+      });
       const thread = threadFromResponse(response, "thread/start");
       const resumeReference = String(thread.id);
-      await this.#completeTurn(connection, resumeReference, input.payload);
-      const evidence = {
+      bridge.bindProviderSession(resumeReference, 1);
+      chairSession = { bridge, providerSessionRef: resumeReference, providerSessionGeneration: 1 };
+      evidence = {
         resumeReference,
         providerSessionGeneration: 1,
         providerContractDigest: input.providerContractDigest,
       };
-      let result: ChairLaunchProviderResult;
-      try {
-        result = parseChairLaunchProviderResult(await this.#continuityProbe({
-          capability: input.environment.AGENT_FABRIC_CAPABILITY,
-          socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
-          ...evidence,
-        }), input.providerContractDigest);
-      } catch {
-        throw chairLaunchContinuityUnproven(evidence);
-      }
+      await this.#completeTurn(connection, resumeReference, input.payload, chairSession, bridge.challengeToolName);
+      const result = parseChairLaunchProviderResult(await bridge.result(), {
+        providerAdapterId: input.providerAdapterId,
+        providerActionId: input.actionId,
+        providerContractDigest: input.providerContractDigest,
+        challengeDigest: input.challengeDigest,
+      });
       this.#connections.set(resumeReference, connection);
+      this.#chairSessions.set(resumeReference, chairSession);
       return result;
     } catch (error: unknown) {
-      await connection.close();
+      await connection?.close();
+      await bridge.close();
+      if (evidence !== undefined) throw chairLaunchContinuityUnproven(evidence);
       throw error;
     }
   }
@@ -335,7 +473,16 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   async sendTurn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resumeReference = threadId(payload);
     const connection = await this.#sessionConnection(resumeReference);
-    return await this.#completeTurn(connection, resumeReference, payload);
+    const chairSession = this.#chairSessions.get(resumeReference);
+    if (chairSession?.busy === true) {
+      throw new ProviderAdapterError("PROVIDER_SESSION_BUSY", "Codex chair session already has an active turn");
+    }
+    if (chairSession !== undefined) chairSession.busy = true;
+    try {
+      return await this.#completeTurn(connection, resumeReference, payload, chairSession);
+    } finally {
+      if (chairSession !== undefined) chairSession.busy = false;
+    }
   }
 
   async steer(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -382,8 +529,11 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     const resumeReference = optionalString(payload.resumeReference, "resumeReference");
     if (resumeReference !== undefined) {
       const connection = this.#connections.get(resumeReference);
+      const chairSession = this.#chairSessions.get(resumeReference);
       this.#connections.delete(resumeReference);
+      this.#chairSessions.delete(resumeReference);
       await connection?.close();
+      await chairSession?.bridge.close();
     }
     return { released: true, deleted: false, ...(resumeReference === undefined ? {} : { resumeReference }) };
   }

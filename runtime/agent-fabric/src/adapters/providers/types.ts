@@ -1,4 +1,11 @@
+import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
+
+export const CHAIR_ATTESTATION_METHOD = "provider-session-random-challenge-v1" as const;
+export const CHAIR_BRIDGE_CONTRACT = "agent-fabric-session-bridge-v1" as const;
+export type ChairLaunchNativeAttribution =
+  | "claude-sdk-assistant-request-tool-use-v1"
+  | "codex-app-server-thread-turn-call-v1";
 
 export type AdapterActionStatus =
   | "prepared"
@@ -44,9 +51,19 @@ export type ChairLaunchCapability = {
   environment: {
     capability: "AGENT_FABRIC_CAPABILITY";
     socketPath: "AGENT_FABRIC_SOCKET_PATH";
+    attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE";
   };
   publicPayloadSchema: Record<string, unknown>;
   noEffectProofSchemas: Record<string, Record<string, unknown>>;
+  attestation: {
+    method: typeof CHAIR_ATTESTATION_METHOD;
+    bridgeContract: typeof CHAIR_BRIDGE_CONTRACT;
+    origin: "provider-session-tool-call";
+    oneUse: true;
+    bridgeLifetime: "provider-session";
+    digestAlgorithm: "sha256";
+    nativeAttribution: ChairLaunchNativeAttribution;
+  };
 };
 
 function isClosedObjectSchema(value: unknown): value is Record<string, unknown> {
@@ -60,10 +77,14 @@ function isClosedObjectSchema(value: unknown): value is Record<string, unknown> 
   );
 }
 
+function isBoundedProviderEvidenceRef(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 512;
+}
+
 export function parseChairLaunchCapability(value: unknown): ChairLaunchCapability {
   if (
     !isRecord(value) ||
-    Object.keys(value).length !== 8 ||
+    Object.keys(value).length !== 9 ||
     value.schemaVersion !== 1 ||
     value.method !== "launch_chair" ||
     typeof value.inputSchemaId !== "string" ||
@@ -71,12 +92,23 @@ export function parseChairLaunchCapability(value: unknown): ChairLaunchCapabilit
     value.oneUse !== true ||
     value.secretTransport !== "private-environment" ||
     !isRecord(value.environment) ||
-    Object.keys(value.environment).length !== 2 ||
+    Object.keys(value.environment).length !== 3 ||
     value.environment.capability !== "AGENT_FABRIC_CAPABILITY" ||
     value.environment.socketPath !== "AGENT_FABRIC_SOCKET_PATH" ||
+    value.environment.attestationChallenge !== "AGENT_FABRIC_ATTESTATION_CHALLENGE" ||
     !isClosedObjectSchema(value.publicPayloadSchema) ||
     !isRecord(value.noEffectProofSchemas) ||
-    !Object.values(value.noEffectProofSchemas).every(isClosedObjectSchema)
+    !Object.values(value.noEffectProofSchemas).every(isClosedObjectSchema) ||
+    !isRecord(value.attestation) ||
+    Object.keys(value.attestation).length !== 7 ||
+    value.attestation.method !== CHAIR_ATTESTATION_METHOD ||
+    value.attestation.bridgeContract !== CHAIR_BRIDGE_CONTRACT ||
+    value.attestation.origin !== "provider-session-tool-call" ||
+    value.attestation.oneUse !== true ||
+    value.attestation.bridgeLifetime !== "provider-session" ||
+    value.attestation.digestAlgorithm !== "sha256" ||
+    (value.attestation.nativeAttribution !== "claude-sdk-assistant-request-tool-use-v1" &&
+      value.attestation.nativeAttribution !== "codex-app-server-thread-turn-call-v1")
   ) {
     throw new ProviderAdapterError(
       "CAPABILITY_CONTRACT_INVALID",
@@ -92,24 +124,38 @@ export function parseChairLaunchCapability(value: unknown): ChairLaunchCapabilit
     environment: {
       capability: "AGENT_FABRIC_CAPABILITY",
       socketPath: "AGENT_FABRIC_SOCKET_PATH",
+      attestationChallenge: "AGENT_FABRIC_ATTESTATION_CHALLENGE",
     },
     publicPayloadSchema: value.publicPayloadSchema,
     noEffectProofSchemas: value.noEffectProofSchemas as Record<string, Record<string, unknown>>,
+    attestation: {
+      method: CHAIR_ATTESTATION_METHOD,
+      bridgeContract: CHAIR_BRIDGE_CONTRACT,
+      origin: "provider-session-tool-call",
+      oneUse: true,
+      bridgeLifetime: "provider-session",
+      digestAlgorithm: "sha256",
+      nativeAttribution: value.attestation.nativeAttribution,
+    },
   };
 }
 
 export type ChairLaunchHandoff = {
   capability: string;
   socketPath: string;
+  attestationChallenge: string;
 };
 
 export type ChairLaunchBoundaryInput = {
   actionId: string;
+  providerAdapterId: string;
   providerContractDigest: string;
+  challengeDigest: string;
   payload: Record<string, unknown>;
   environment: {
     AGENT_FABRIC_CAPABILITY: string;
     AGENT_FABRIC_SOCKET_PATH: string;
+    AGENT_FABRIC_ATTESTATION_CHALLENGE: string;
   };
 };
 
@@ -121,12 +167,52 @@ export type ChairLaunchProviderResult = {
 
 export type ChairLaunchFabricContinuityEvidence = {
   schemaVersion: 1;
-  kind: "authenticated-fabric-continuity";
+  kind: "provider-session-fabric-attestation";
+  method: typeof CHAIR_ATTESTATION_METHOD;
+  bridgeContract: typeof CHAIR_BRIDGE_CONTRACT;
+  providerAdapterId: string;
+  providerActionId: string;
   providerContractDigest: string;
   providerSessionRef: string;
   providerSessionGeneration: number;
-  authenticated: true;
+  providerTurnRef: string;
+  challengeResponse: string;
+  challengeDigest: string;
+  providerInvocationRef: string;
+  attestationDigest: string;
 };
+
+export type ChairLaunchAttestationBinding = {
+  providerAdapterId: string;
+  providerActionId: string;
+  providerContractDigest: string;
+  challengeDigest: string;
+};
+
+export function chairLaunchChallengeDigest(challengeResponse: string): string {
+  return `sha256:${createHash("sha256").update(Buffer.from(challengeResponse, "hex")).digest("hex")}`;
+}
+
+export type ChairLaunchUnsignedAttestation = Omit<ChairLaunchFabricContinuityEvidence, "attestationDigest">;
+
+export function chairLaunchAttestationDigest(attestation: ChairLaunchUnsignedAttestation): string {
+  const canonical = JSON.stringify({
+    schemaVersion: attestation.schemaVersion,
+    kind: attestation.kind,
+    method: attestation.method,
+    bridgeContract: attestation.bridgeContract,
+    providerAdapterId: attestation.providerAdapterId,
+    providerActionId: attestation.providerActionId,
+    providerContractDigest: attestation.providerContractDigest,
+    providerSessionRef: attestation.providerSessionRef,
+    providerSessionGeneration: attestation.providerSessionGeneration,
+    providerTurnRef: attestation.providerTurnRef,
+    challengeResponse: attestation.challengeResponse,
+    challengeDigest: attestation.challengeDigest,
+    providerInvocationRef: attestation.providerInvocationRef,
+  });
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
 
 export type ChairLaunchContinuityUnprovenEvidence = {
   kind: "continuity-unproven";
@@ -144,8 +230,7 @@ export function parseChairLaunchContinuityUnprovenEvidence(
     Object.keys(value).length !== 4 ||
     value.kind !== "continuity-unproven" ||
     value.providerContractDigest !== expectedProviderContractDigest ||
-    typeof value.resumeReference !== "string" ||
-    value.resumeReference.length === 0 ||
+    !isBoundedProviderEvidenceRef(value.resumeReference) ||
     typeof value.providerSessionGeneration !== "number" ||
     !Number.isSafeInteger(value.providerSessionGeneration) ||
     value.providerSessionGeneration <= 0
@@ -165,14 +250,17 @@ export function parseChairLaunchContinuityUnprovenEvidence(
 
 export function parseChairLaunchProviderResult(
   value: unknown,
-  expectedProviderContractDigest: string,
+  expected: ChairLaunchAttestationBinding,
 ): ChairLaunchProviderResult {
   if (
+    !isBoundedProviderEvidenceRef(expected.providerAdapterId) ||
+    !isBoundedProviderEvidenceRef(expected.providerActionId) ||
+    !/^sha256:[0-9a-f]{64}$/u.test(expected.providerContractDigest) ||
+    !/^sha256:[0-9a-f]{64}$/u.test(expected.challengeDigest) ||
     !isRecord(value) ||
     Object.keys(value).length !== 3 ||
     !Object.hasOwn(value, "resumeReference") ||
-    typeof value.resumeReference !== "string" ||
-    value.resumeReference.length === 0 ||
+    !isBoundedProviderEvidenceRef(value.resumeReference) ||
     !Object.hasOwn(value, "providerSessionGeneration") ||
     typeof value.providerSessionGeneration !== "number" ||
     !Number.isSafeInteger(value.providerSessionGeneration) ||
@@ -187,31 +275,61 @@ export function parseChairLaunchProviderResult(
   }
   const continuity = value.fabricContinuity;
   if (
-    Object.keys(continuity).length !== 6 ||
+    Object.keys(continuity).length !== 14 ||
     continuity.schemaVersion !== 1 ||
-    continuity.kind !== "authenticated-fabric-continuity" ||
+    continuity.kind !== "provider-session-fabric-attestation" ||
+    continuity.method !== CHAIR_ATTESTATION_METHOD ||
+    continuity.bridgeContract !== CHAIR_BRIDGE_CONTRACT ||
+    continuity.providerAdapterId !== expected.providerAdapterId ||
+    continuity.providerActionId !== expected.providerActionId ||
     typeof continuity.providerContractDigest !== "string" ||
     !/^sha256:[0-9a-f]{64}$/u.test(continuity.providerContractDigest) ||
-    continuity.providerContractDigest !== expectedProviderContractDigest ||
+    continuity.providerContractDigest !== expected.providerContractDigest ||
     continuity.providerSessionRef !== value.resumeReference ||
     continuity.providerSessionGeneration !== value.providerSessionGeneration ||
-    continuity.authenticated !== true
+    !isBoundedProviderEvidenceRef(continuity.providerTurnRef) ||
+    typeof continuity.challengeResponse !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(continuity.challengeResponse) ||
+    typeof continuity.challengeDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(continuity.challengeDigest) ||
+    continuity.challengeDigest !== expected.challengeDigest ||
+    chairLaunchChallengeDigest(continuity.challengeResponse) !== expected.challengeDigest ||
+    !isBoundedProviderEvidenceRef(continuity.providerInvocationRef) ||
+    typeof continuity.attestationDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(continuity.attestationDigest)
   ) {
     throw new ProviderAdapterError(
       "PROVIDER_RESPONSE_INVALID",
       "chair launch Fabric continuity evidence does not match the launch contract",
     );
   }
+  const unsigned: ChairLaunchUnsignedAttestation = {
+    schemaVersion: 1,
+    kind: "provider-session-fabric-attestation",
+    method: CHAIR_ATTESTATION_METHOD,
+    bridgeContract: CHAIR_BRIDGE_CONTRACT,
+    providerAdapterId: expected.providerAdapterId,
+    providerActionId: expected.providerActionId,
+    providerContractDigest: expected.providerContractDigest,
+    providerSessionRef: value.resumeReference,
+    providerSessionGeneration: value.providerSessionGeneration,
+    providerTurnRef: continuity.providerTurnRef,
+    challengeResponse: continuity.challengeResponse,
+    challengeDigest: expected.challengeDigest,
+    providerInvocationRef: continuity.providerInvocationRef,
+  };
+  if (continuity.attestationDigest !== chairLaunchAttestationDigest(unsigned)) {
+    throw new ProviderAdapterError(
+      "PROVIDER_RESPONSE_INVALID",
+      "chair launch Fabric continuity digest does not match its canonical evidence",
+    );
+  }
   return {
     resumeReference: value.resumeReference,
     providerSessionGeneration: value.providerSessionGeneration,
     fabricContinuity: {
-      schemaVersion: 1,
-      kind: "authenticated-fabric-continuity",
-      providerContractDigest: continuity.providerContractDigest,
-      providerSessionRef: value.resumeReference,
-      providerSessionGeneration: value.providerSessionGeneration,
-      authenticated: true,
+      ...unsigned,
+      attestationDigest: continuity.attestationDigest,
     },
   };
 }
@@ -219,22 +337,26 @@ export function parseChairLaunchProviderResult(
 export function takeChairLaunchHandoff(environment: NodeJS.ProcessEnv): ChairLaunchHandoff | undefined {
   const capability = environment.AGENT_FABRIC_CAPABILITY;
   const socketPath = environment.AGENT_FABRIC_SOCKET_PATH;
+  const attestationChallenge = environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
   delete environment.AGENT_FABRIC_CAPABILITY;
   delete environment.AGENT_FABRIC_SOCKET_PATH;
-  if (capability === undefined && socketPath === undefined) return undefined;
+  delete environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  if (capability === undefined && socketPath === undefined && attestationChallenge === undefined) return undefined;
   if (
     typeof capability !== "string" ||
     capability.length === 0 ||
     typeof socketPath !== "string" ||
     socketPath.length === 0 ||
-    !isAbsolute(socketPath)
+    !isAbsolute(socketPath) ||
+    typeof attestationChallenge !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(attestationChallenge)
   ) {
     throw new ProviderAdapterError(
       "PRIVATE_HANDOFF_INVALID",
-      "chair launch private environment must contain a capability and absolute socket path",
+      "chair launch private environment must contain a capability, 32-byte challenge and absolute socket path",
     );
   }
-  return { capability, socketPath };
+  return { capability, socketPath, attestationChallenge };
 }
 
 export type AdapterRequestHandler = {

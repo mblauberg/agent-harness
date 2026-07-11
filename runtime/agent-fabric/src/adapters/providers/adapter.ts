@@ -1,5 +1,6 @@
 import {
   actionPayload,
+  chairLaunchChallengeDigest,
   isRecord,
   parseChairLaunchCapability,
   parseChairLaunchContinuityUnprovenEvidence,
@@ -58,6 +59,11 @@ export function createProviderAdapter(options: {
     : { ...options.capabilities, chairLaunch: parseChairLaunchCapability(options.capabilities.chairLaunch) };
   const supported = new Set(capabilities.operations);
   let chairLaunchHandoff = options.chairLaunch?.handoff;
+  const chairLaunchChallengeDigestValue = chairLaunchHandoff === undefined
+    ? undefined
+    : chairLaunchChallengeDigest(chairLaunchHandoff.attestationChallenge);
+  const liveChairLaunchActions = new Set<string>();
+  const liveChairActionBySession = new Map<string, string>();
 
   function chairLaunchRequest(params: Record<string, unknown>): {
     actionId: string;
@@ -102,14 +108,41 @@ export function createProviderAdapter(options: {
       capabilityUnavailable("launch_chair");
     }
     const request = chairLaunchRequest(params);
+    const attestationBinding = (): {
+      providerAdapterId: string;
+      providerActionId: string;
+      providerContractDigest: string;
+      challengeDigest: string;
+    } => {
+      if (chairLaunchChallengeDigestValue === undefined) {
+        throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "chair launch challenge is no longer available");
+      }
+      return {
+        providerAdapterId: capabilities.adapterId,
+        providerActionId: request.actionId,
+        providerContractDigest: request.providerContractDigest,
+        challengeDigest: chairLaunchChallengeDigestValue,
+      };
+    };
     const journalPayload = {
       schemaVersion: 1,
       providerContractDigest: request.providerContractDigest,
       payload: request.payload,
     };
     function replayOrConsumed(record: AdapterActionRecord): ChairLaunchProviderResult {
+      if (
+        record.status === "terminal" &&
+        record.idempotencyProven &&
+        liveChairLaunchActions.has(request.actionId)
+      ) {
+        return parseChairLaunchProviderResult(record.result, attestationBinding());
+      }
       if (record.status === "terminal" && record.idempotencyProven) {
-        return parseChairLaunchProviderResult(record.result, request.providerContractDigest);
+        throw new ProviderAdapterError(
+          "CHAIR_BRIDGE_LOST",
+          "chair launch result is durable but its volatile provider bridge is unavailable",
+          { actionId: request.actionId },
+        );
       }
       throw new ProviderAdapterError(
         "CHAIR_LAUNCH_ALREADY_CONSUMED",
@@ -131,8 +164,9 @@ export function createProviderAdapter(options: {
       return replayOrConsumed(existing);
     }
     const handoff = chairLaunchHandoff;
-    const privateValues = [handoff.capability, handoff.socketPath];
-    if (containsPrivateValue({ actionId: request.actionId, payload: request.payload }, privateValues)) {
+    const credentialValues = [handoff.capability, handoff.socketPath];
+    const privateInputValues = [...credentialValues, handoff.attestationChallenge];
+    if (containsPrivateValue({ actionId: request.actionId, payload: request.payload }, privateInputValues)) {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "chair launch payload contains private handoff material");
     }
     const prepared = options.journal.prepare(request.actionId, "launch_chair", journalPayload);
@@ -145,16 +179,21 @@ export function createProviderAdapter(options: {
     try {
       const result = parseChairLaunchProviderResult(await options.boundary.launchChair({
         ...request,
+        providerAdapterId: capabilities.adapterId,
+        challengeDigest: attestationBinding().challengeDigest,
         environment: {
           AGENT_FABRIC_CAPABILITY: handoff.capability,
           AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+          AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.attestationChallenge,
         },
-      }), request.providerContractDigest);
-      if (containsPrivateValue(result, privateValues)) {
+      }), attestationBinding());
+      if (containsPrivateValue(result, credentialValues)) {
         throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "chair launch result contains private handoff material");
       }
       options.journal.markAccepted(request.actionId);
       options.journal.markTerminal(request.actionId, result, true);
+      liveChairLaunchActions.add(request.actionId);
+      liveChairActionBySession.set(result.resumeReference, request.actionId);
       return result;
     } catch (error: unknown) {
       let current = options.journal.get(request.actionId);
@@ -168,7 +207,7 @@ export function createProviderAdapter(options: {
             error.details,
             request.providerContractDigest,
           );
-          if (containsPrivateValue(evidence, privateValues)) {
+          if (containsPrivateValue(evidence, credentialValues)) {
             throw new ProviderAdapterError(
               "PROVIDER_RESPONSE_INVALID",
               "chair launch continuity evidence contains private handoff material",
@@ -230,6 +269,11 @@ export function createProviderAdapter(options: {
           break;
         case "release":
           value = responseRecord(await options.boundary.release(payload), operation);
+          if (typeof payload.resumeReference === "string") {
+            const launchActionId = liveChairActionBySession.get(payload.resumeReference);
+            liveChairActionBySession.delete(payload.resumeReference);
+            if (launchActionId !== undefined) liveChairLaunchActions.delete(launchActionId);
+          }
           break;
         case "steer":
           if (options.boundary.steer === undefined) capabilityUnavailable(operation);
@@ -250,6 +294,27 @@ export function createProviderAdapter(options: {
     }
   }
 
+  function lookupAction(actionId: string): AdapterActionRecord {
+    const record = options.journal.get(actionId);
+    if (record.operation !== "launch_chair" || record.status !== "terminal") return record;
+    if (!isRecord(record.result) || !isRecord(record.result.fabricContinuity)) {
+      throw new ProviderAdapterError("JOURNAL_INVALID", "terminal chair launch journal evidence is malformed");
+    }
+    const continuity = record.result.fabricContinuity;
+    if (typeof continuity.providerContractDigest !== "string" || typeof continuity.challengeDigest !== "string") {
+      throw new ProviderAdapterError("JOURNAL_INVALID", "terminal chair launch journal binding is malformed");
+    }
+    return {
+      ...record,
+      result: parseChairLaunchProviderResult(record.result, {
+        providerAdapterId: capabilities.adapterId,
+        providerActionId: record.actionId,
+        providerContractDigest: continuity.providerContractDigest,
+        challengeDigest: continuity.challengeDigest,
+      }),
+    };
+  }
+
   return {
     async request(method: string, params: Record<string, unknown>): Promise<unknown> {
       if (method === "capabilities") return capabilities;
@@ -264,7 +329,7 @@ export function createProviderAdapter(options: {
         });
       }
       if (method === "lookup_action") {
-        return options.journal.get(requiredString(params.actionId, "actionId"));
+        return lookupAction(requiredString(params.actionId, "actionId"));
       }
       if (method === "cancel_action") {
         return options.journal.cancel(requiredString(params.actionId, "actionId"));
