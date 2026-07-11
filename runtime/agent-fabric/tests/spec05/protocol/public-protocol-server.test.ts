@@ -60,6 +60,7 @@ const credential: VerifiedProtocolCredential = {
 
 async function connectServer(
   dispatch: Parameters<typeof servePublicProtocolConnection>[1]["dispatch"],
+  afterResponse?: Parameters<typeof servePublicProtocolConnection>[1]["afterResponse"],
 ): Promise<NdjsonRpcTransport> {
   const root = await mkdtemp(join(tmpdir(), "fabric-public-protocol-"));
   roots.push(root);
@@ -77,6 +78,7 @@ async function connectServer(
         return credential;
       },
       dispatch,
+      ...(afterResponse === undefined ? {} : { afterResponse }),
     });
   });
   servers.push(server);
@@ -141,6 +143,25 @@ describe("public protocol server", () => {
         projectSessionId: "session_01" as never,
         expectedGeneration: 1,
       })).rejects.toMatchObject({ code: "PROTOCOL_INVALID" });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("runs shutdown handoff only after a valid success is written", async () => {
+    const afterResponse = vi.fn();
+    const transport = await connectServer(async () => session, afterResponse);
+    try {
+      await expect(transport.call(FABRIC_OPERATIONS.projectSessionGet, {
+        projectId: "project_01" as never,
+        projectSessionId: "session_01" as never,
+        expectedGeneration: 1,
+      })).resolves.toEqual(session);
+      await vi.waitFor(() => expect(afterResponse).toHaveBeenCalledTimes(1));
+      expect(afterResponse).toHaveBeenCalledWith(expect.objectContaining({
+        operation: FABRIC_OPERATIONS.projectSessionGet,
+        result: session,
+      }));
     } finally {
       await transport.close();
     }

@@ -307,6 +307,32 @@ export async function attemptIdleStop(options: {
   return elected.value;
 }
 
+export async function attemptDrainedStop(options: {
+  actionId: string;
+  token: QuiesceToken;
+  election: IdleElectionPort;
+  database: Database.Database;
+  clock?: () => number;
+  beforeFinalRecheck?: () => Promise<void>;
+  closeSocket(): Promise<void>;
+}): Promise<IdleStopResult> {
+  const clock = options.clock ?? Date.now;
+  const elected = await options.election.withExclusiveLock(options.actionId, async () => {
+    await options.beforeFinalRecheck?.();
+    const final = recheckIdle(options.database, { now: clock(), token: options.token });
+    if (final.state === "busy") return final;
+    await options.closeSocket();
+    completeIdleStop(options.database, { now: clock(), token: options.token });
+    return {
+      state: "stopped" as const,
+      daemonInstanceGeneration: options.token.daemonInstanceGeneration,
+      globalStateRevision: options.token.observedGlobalStateRevision,
+    };
+  });
+  if (elected.role === "observer") return { state: "busy", reason: "election-active" };
+  return elected.value;
+}
+
 export type DaemonRuntimeRecoveryResult = {
   instanceGeneration: number;
   recoveredGenerations: number[];

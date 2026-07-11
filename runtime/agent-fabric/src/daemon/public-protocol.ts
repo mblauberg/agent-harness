@@ -47,6 +47,12 @@ export type PublicProtocolServerOptions = {
     operation: Operation,
     input: OperationInputMap[Operation],
   ): Promise<OperationResultMap[Operation] | unknown> | OperationResultMap[Operation] | unknown;
+  afterResponse?(event: Readonly<{
+    context: PublicProtocolContext;
+    operation: ProtocolOperation;
+    input: OperationInputMap[ProtocolOperation];
+    result: unknown;
+  }>): void;
 };
 
 export type PublicProtocolConnection = {
@@ -199,6 +205,11 @@ export function servePublicProtocolConnection(
       const dispatched = await options.dispatch(context, operation, input);
       const result = parseOperationResult(operation, dispatched);
       await write({ id: request.id, operation, ok: true, result });
+      try {
+        options.afterResponse?.({ context, operation, input, result });
+      } catch {
+        stream.destroy();
+      }
     } catch (error: unknown) {
       await respondFailure(request.id, request.operation, error);
     } finally {

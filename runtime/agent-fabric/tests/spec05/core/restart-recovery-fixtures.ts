@@ -1,28 +1,12 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
 
-import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
-import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
+import { applyMigrations } from "../../../src/core/migrations.ts";
 import type { AuthenticatedAgentContext } from "../../../src/project-session/contracts.ts";
-
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
 
 export function openSpec05Database(filename = ":memory:"): Database.Database {
   const database = new Database(filename);
   database.pragma("foreign_keys = ON");
-  applyMigrations(database, [
-    migration(1, "0001-core.sql"),
-    migration(2, "0002-observer-event-sequence.sql"),
-    migration(3, "0003-integrity-and-query-plans.sql"),
-    migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-  ]);
+  applyMigrations(database);
   seedSpec05Run(database);
   return database;
 }

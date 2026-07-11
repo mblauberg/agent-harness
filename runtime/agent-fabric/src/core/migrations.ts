@@ -41,6 +41,7 @@ const defaultMigrationFiles = [
   "0003-integrity-and-query-plans.sql",
   "0004-project-session-operations.sql",
   "0005-launch-custody.sql",
+  "0006-operator-lifecycle.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {

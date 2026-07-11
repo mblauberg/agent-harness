@@ -61,11 +61,21 @@ import {
   type OperatorActionEffectPort,
   type OperatorActionStatePort,
 } from "../operator/action-store.js";
+import {
+  assertOperatorTaskRunnable,
+  assertRunAcceptingWork,
+  createProductionOperatorActionPorts,
+  type ProductionDaemonStopPort,
+} from "../operator/production-action-ports.js";
 import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
 import type { PublicProtocolContext } from "../daemon/public-protocol.js";
 import {
+  attemptDrainedStop as attemptRuntimeDrainedStop,
   markDaemonRuntimeRunning as markRuntimeEpochRunning,
   recoverDaemonRuntimeEpoch as recoverRuntimeEpoch,
+  type IdleElectionPort,
+  type IdleStopResult,
+  type QuiesceToken,
 } from "../daemon/global-liveness.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
@@ -114,6 +124,7 @@ export type FabricOperatorActionPorts = {
 
 export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   operatorActionPorts?: FabricOperatorActionPorts;
+  daemonStopPort?: ProductionDaemonStopPort;
 };
 
 type Row = Record<string, unknown>;
@@ -844,24 +855,30 @@ export class Fabric {
       privateStateRoot: dirname(realpathSync(options.databasePath)),
       clock: this.#clock,
     });
-    const unavailableStatePort: OperatorActionStatePort = {
-      read: async () => {
-        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator action runtime is unavailable");
+    this.#adapters = options.adapters ?? {};
+    this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
+    this.#providerSessions = new ProviderSessionCoordinator({
+      database: this.#database,
+      clock: this.#clock,
+      maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
+    });
+    this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
+    this.#executionProfile = options.executionProfile ?? "headless";
+    const productionOperatorPorts = createProductionOperatorActionPorts({
+      database: this.#database,
+      clock: this.#clock,
+      adapter: {
+        capabilities: async (adapterId) => await this.#adapterSupervisor.request(adapterId, "capabilities", {}),
+        dispatch: async (adapterId, input) => await this.#adapterSupervisor.request(adapterId, "dispatch", input),
+        lookup: async (adapterId, actionId) => await this.#adapterSupervisor.request(adapterId, "lookup_action", { actionId }),
       },
-    };
-    const unavailableEffectPort: OperatorActionEffectPort = {
-      dispatch: async () => {
-        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator effect runtime is unavailable");
-      },
-      observe: async () => {
-        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator effect runtime is unavailable");
-      },
-    };
+      ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
+    });
     this.#operatorActions = new OperatorActionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
-      statePort: options.operatorActionPorts?.statePort ?? unavailableStatePort,
-      effectPort: options.operatorActionPorts?.effectPort ?? unavailableEffectPort,
+      statePort: options.operatorActionPorts?.statePort ?? productionOperatorPorts.statePort,
+      effectPort: options.operatorActionPorts?.effectPort ?? productionOperatorPorts.effectPort,
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
@@ -895,15 +912,6 @@ export class Fabric {
     });
     this.#resources = new HierarchicalAdmissionStore({ database: this.#database, clock: this.#clock });
     this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
-    this.#adapters = options.adapters ?? {};
-    this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
-    this.#providerSessions = new ProviderSessionCoordinator({
-      database: this.#database,
-      clock: this.#clock,
-      maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
-    });
-    this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
-    this.#executionProfile = options.executionProfile ?? "headless";
   }
 
   recoverDaemonRuntimeEpoch(input: {
@@ -920,6 +928,19 @@ export class Fabric {
     return markRuntimeEpochRunning(this.#database, {
       instanceGeneration,
       now: this.#clock(),
+    });
+  }
+
+  async attemptDrainedStop(input: {
+    actionId: string;
+    token: QuiesceToken;
+    election: IdleElectionPort;
+    closeSocket(): Promise<void>;
+  }): Promise<IdleStopResult> {
+    return await attemptRuntimeDrainedStop({
+      ...input,
+      database: this.#database,
+      clock: this.#clock,
     });
   }
 
@@ -1067,6 +1088,7 @@ export class Fabric {
       SELECT p.run_id, p.action_id, p.adapter_id, p.status, p.updated_at, r.chair_agent_id
         FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
        WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
+         AND json_type(p.payload_json, '$.operatorCommandId') IS NULL
        ORDER BY p.updated_at, p.action_id
     `).all();
     for (const value of pendingActions) {
@@ -2372,6 +2394,7 @@ export class Fabric {
     },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertRunAcceptingWork(this.#database, runId);
       const agentContext = this.#agentContext(runId, actorAgentId);
       const dependencyRevision = numberField(
         rowOrNotFound(
@@ -2486,6 +2509,8 @@ export class Fabric {
     input: { taskId: string; expectedRevision: number; commandId: string },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertRunAcceptingWork(this.#database, runId);
+      assertOperatorTaskRunnable(this.#database, runId, input.taskId);
       const eligible = this.#database
         .prepare("SELECT 1 FROM task_eligible_agents WHERE run_id = ? AND task_id = ? AND agent_id = ?")
         .get(runId, input.taskId, actorAgentId);
@@ -3371,6 +3396,10 @@ export class Fabric {
     },
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
+    assertRunAcceptingWork(this.#database, runId);
+    if (typeof input.payload.taskId === "string") {
+      assertOperatorTaskRunnable(this.#database, runId, input.payload.taskId);
+    }
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const target = this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);

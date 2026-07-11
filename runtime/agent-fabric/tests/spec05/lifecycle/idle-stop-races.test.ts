@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT } from "../../../src/daemon/bootstrap-election.ts";
-import { attemptIdleStop } from "../../../src/daemon/global-liveness.ts";
+import { attemptDrainedStop, attemptIdleStop } from "../../../src/daemon/global-liveness.ts";
 import { createLivenessDatabase, seedProject } from "./liveness-fixture.ts";
 
 const databases: ReturnType<typeof createLivenessDatabase>[] = [];
@@ -72,6 +72,28 @@ describe("global idle stop races", () => {
       clock: () => 1_001,
       closeSocket,
     })).resolves.toMatchObject({ state: "busy", reason: "epoch-not-running" });
+    expect(closeSocket).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes only the exact receipt-bound quiescing epoch", async () => {
+    const database = createLivenessDatabase();
+    databases.push(database);
+    database.prepare(`
+      UPDATE daemon_runtime_epochs SET state='quiescing', observed_global_revision=1
+       WHERE instance_generation=7
+    `).run();
+    const root = await mkdtemp(join(tmpdir(), "fabric-drained-stop-"));
+    directories.push(root);
+    const closeSocket = vi.fn();
+
+    await expect(attemptDrainedStop({
+      actionId: "drained_stop_01",
+      token: { daemonInstanceGeneration: 7, observedGlobalStateRevision: 1 },
+      election: new BootstrapElection({ runtimeDirectory: join(root, "runtime") }),
+      database,
+      clock: () => 1_000,
+      closeSocket,
+    })).resolves.toMatchObject({ state: "stopped", globalStateRevision: 1 });
     expect(closeSocket).toHaveBeenCalledTimes(1);
   });
 });

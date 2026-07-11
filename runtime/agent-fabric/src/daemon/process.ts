@@ -24,6 +24,8 @@ import {
   type DaemonRequest,
 } from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
+import { BootstrapElection } from "./bootstrap-election.js";
+import type { QuiesceToken } from "./global-liveness.js";
 import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "./client.js";
 import { BootstrapElection } from "./bootstrap-election.js";
 import {
@@ -175,6 +177,7 @@ rmSync(socketPath, { force: true });
 
 const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON);
 const initializeResult = daemonInitializeResult(Object.keys(daemonAdapters));
+const pendingDaemonStops = new Map<string, QuiesceToken>();
 const fabric = await openFabric({
   databasePath,
   capabilityKey,
@@ -182,6 +185,18 @@ const fabric = await openFabric({
   maximumConcurrentProviderTurns,
   workspaceRoots,
   adapters: daemonAdapters,
+  daemonStopPort: {
+    request: async ({ commandId, token }) => {
+      const existing = pendingDaemonStops.get(commandId);
+      if (
+        existing !== undefined &&
+        (existing.daemonInstanceGeneration !== token.daemonInstanceGeneration ||
+          existing.observedGlobalStateRevision !== token.observedGlobalStateRevision)
+      ) return "busy";
+      pendingDaemonStops.set(commandId, token);
+      return "scheduled";
+    },
+  },
 });
 fabric.recoverDaemonRuntimeEpoch({
   instanceGeneration: daemonInstanceGeneration,
@@ -189,6 +204,7 @@ fabric.recoverDaemonRuntimeEpoch({
 });
 await fabric.recoverStartupState();
 const sockets = new Set<Socket>();
+let completeQueuedDaemonStop: (commandId: string) => void = () => undefined;
 let totalInFlight = 0;
 const serveLegacyConnection = (socket: Socket): void => {
   const writer = new BoundedNdjsonWriter(socket, {
@@ -373,6 +389,11 @@ const servePublicConnection = (socket: Socket): void => {
         totalInFlight -= 1;
       }
     },
+    afterResponse: ({ input }) => {
+      const value: unknown = input;
+      if (!isRecord(value) || !isRecord(value.command) || typeof value.command.commandId !== "string") return;
+      completeQueuedDaemonStop(value.command.commandId);
+    },
   });
 };
 
@@ -424,7 +445,7 @@ process.stdout.write(`${JSON.stringify({ ready: true })}\n`);
 
 let shuttingDown = false;
 const markProductionTerminal = async (
-  signal: "SIGINT" | "SIGTERM",
+  signal: NodeJS.Signals | null,
 ): Promise<void> => {
   if (bootstrapMode !== "production-election") return;
   const paths = privateDiscoveryPaths(runtimeDirectory);
@@ -460,6 +481,37 @@ const markProductionTerminal = async (
   }
 };
 
+const stopElection = new BootstrapElection({ runtimeDirectory });
+completeQueuedDaemonStop = (commandId: string): void => {
+  const token = pendingDaemonStops.get(commandId);
+  if (token === undefined || shuttingDown) return;
+  pendingDaemonStops.delete(commandId);
+  setImmediate(() => {
+    if (shuttingDown) return;
+    void fabric.attemptDrainedStop({
+      actionId: `operator-daemon-stop:${commandId}`,
+      token,
+      election: stopElection,
+      closeSocket: async () => {
+        await new Promise<void>((resolve) => {
+          server.close(() => resolve());
+          for (const active of sockets) active.end();
+        });
+      },
+    }).then(async (result) => {
+      if (result.state !== "stopped") return;
+      shuttingDown = true;
+      try {
+        await fabric.close();
+      } finally {
+        rmSync(socketPath, { force: true });
+        await releaseDaemonLocks(daemonLocks);
+        await markProductionTerminal(null).catch(() => undefined);
+        process.exit(0);
+      }
+    }).catch(() => undefined);
+  });
+};
 const shutdown = (signal: "SIGINT" | "SIGTERM"): void => {
   if (shuttingDown) return;
   shuttingDown = true;

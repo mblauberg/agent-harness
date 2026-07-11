@@ -32,6 +32,7 @@ import {
   timestampToMillis,
   type Row,
 } from "../project-session/store-support.js";
+import { assertOperatorTaskRunnable, assertRunAcceptingWork } from "../operator/production-action-ports.js";
 
 export type AuthenticatedIntegrationContext = Readonly<{
   integrationId: string;
@@ -99,6 +100,7 @@ export class AtomicDeliveryStore {
     const request = parseTaskRequest(value);
     this.#assertAgentContext(context, request.projectSessionId, request.coordinationRunId);
     return this.#executeAgentCommand(context, request.commandId, request, () => {
+      assertRunAcceptingWork(this.#database, context.coordinationRunId);
       if (request.task.taskRevision !== 1 || request.request.requestRevision !== 1) {
         throw new ProjectFabricCoreError("PROTOCOL_INVALID", "new task and request revisions must start at one");
       }
@@ -232,6 +234,7 @@ export class AtomicDeliveryStore {
     const request = parseTaskCompleteWithReply(value);
     this.#assertAgentContext(context, context.projectSessionId, context.coordinationRunId);
     return this.#executeAgentCommand(context, request.commandId, request, () => {
+      assertOperatorTaskRunnable(this.#database, context.coordinationRunId, request.taskId);
       const pending = row(this.#database.prepare(`
         SELECT * FROM task_requests WHERE request_message_id=?
       `).get(request.requestMessageId), "task request");
@@ -378,6 +381,7 @@ export class AtomicDeliveryStore {
   claim(context: DeliveryContext, request: ResultDeliveryClaimRequest): ResultDelivery {
     return this.#transition(context, request.commandId, "claim", request, () => {
       const delivery = this.#deliveryRow(request.resultDeliveryId);
+      assertOperatorTaskRunnable(this.#database, text(delivery, "run_id"), text(delivery, "task_id"));
       this.#assertDeliveryContext(context, delivery);
       this.#assertRevision(delivery, request.expectedRevision);
       if (text(delivery, "state") !== "pending") {

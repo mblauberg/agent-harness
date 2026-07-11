@@ -183,20 +183,6 @@ describe("public protocol credential routing", () => {
         databasePath,
         workspaceRoots: [directory],
         clock: () => Date.parse("2027-01-01T00:00:00Z"),
-        operatorActionPorts: {
-          statePort: {
-            read: async () => ({
-              kind: "control",
-              revision: 1,
-              lifecycleState: "active",
-              eligibleActions: ["pause"],
-            }),
-          },
-          effectPort: {
-            dispatch: async () => ({ status: "committed", afterState: { lifecycleState: "paused" } }),
-            observe: async () => ({ status: "committed", afterState: { lifecycleState: "paused" } }),
-          },
-        },
       });
       try {
         const verified = reopened.verifyProtocolCredential("operator-protocol-secret");
@@ -244,7 +230,7 @@ describe("public protocol credential routing", () => {
           project: { value: { projectId: principal.projectId } },
           session: { value: { projectSessionId } },
         });
-        await expect(reopened.dispatchPublicProtocol(
+        const preview = await reopened.dispatchPublicProtocol(
           context,
           FABRIC_OPERATIONS.operatorActionPreview,
           {
@@ -268,7 +254,37 @@ describe("public protocol credential routing", () => {
               },
             },
           } as never,
-        )).resolves.toMatchObject({ consequenceClass: "routine", confirmationMode: "explicit" });
+        );
+        expect(preview).toMatchObject({ consequenceClass: "routine", confirmationMode: "explicit" });
+        if (typeof preview !== "object" || preview === null || !("previewId" in preview)) {
+          throw new Error("expected a production operator preview");
+        }
+        const productionPreview = preview as {
+          previewId: string;
+          previewRevision: number;
+          previewDigest: string;
+          intentDigest: string;
+        };
+        await expect(reopened.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.operatorActionCommit,
+          {
+            command: {
+              credential: { capabilityId: "cap_operator_protocol", token: "operator-protocol-secret" },
+              commandId: "command_operator_commit_01",
+              expectedRevision: 1,
+              actor: "operator_protocol",
+              provenance: { kind: "console-direct-input", clientId: "console_01", inputEventId: "input_02" },
+              evidenceRefs: [],
+            },
+            projectId: principal.projectId,
+            previewId: productionPreview.previewId,
+            expectedPreviewRevision: productionPreview.previewRevision,
+            previewDigest: productionPreview.previewDigest,
+            expectedIntentDigest: productionPreview.intentDigest,
+            confirmation: { kind: "explicit", confirmationId: "confirm_pause_01" },
+          } as never,
+        )).resolves.toMatchObject({ commandId: "command_operator_commit_01" });
       } finally {
         await reopened.close();
       }
