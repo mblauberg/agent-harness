@@ -1,14 +1,15 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.8
+Version: 1.9
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.8 closes the review-discovered retained-child-bridge and attestation
-descriptor gaps. Version 1.7 closes the review-discovered MCP bootstrap,
+Version 1.9 closes the implementation-discovered typed Git grant, effect-custody
+and recovery gap. Version 1.8 closes the review-discovered retained-child-
+bridge and attestation descriptor gaps. Version 1.7 closes the review-discovered MCP bootstrap,
 secret-result and descriptor-ownership gaps. Version 1.6 closes the review-discovered bridge
 recovery, provider-native attestation evidence, resource projection and
 lifecycle-surface gaps. Version
@@ -829,3 +830,199 @@ and return retirement errors if sent manually. Child-bridge coverage drops a
 post-activation transport and proves loss persistence, capability revocation,
 generation advance, honest projection and later-call rejection without
 chair-level run fencing.
+
+### 9.13 Typed Git grants, effect custody and recovery
+
+Spec 01 section 32.13 owns `GitActionAuthorisation` and the observable Git
+semantics. This section owns their additive persistence, the one production Git
+effect owner and crash recovery. It does not authorise a Git mutation, push,
+pull-request merge, release or deployment.
+
+The next unused additive migration after the operator-lifecycle schema shall
+add immutable revisioned Git grants and a one-to-one Git binding for the
+existing `operator_effect_custody` owner. Its ordinal is assigned at serial
+integration so it cannot collide with another already approved additive
+migration. The migration shall not create a second operator command journal or
+a parallel effect state machine.
+
+The closed logical grant shape is:
+
+```sql
+CREATE TABLE operator_git_grants (
+  grant_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  project_id TEXT NOT NULL,
+  project_session_id TEXT NOT NULL,
+  session_generation INTEGER NOT NULL CHECK (session_generation >= 1),
+  coordination_run_id TEXT NOT NULL,
+  authority_ref TEXT NOT NULL,
+  authority_revision INTEGER NOT NULL CHECK (authority_revision >= 1),
+  repository_root TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  constraints_json TEXT NOT NULL,
+  grant_digest TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('active','revoked')),
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  PRIMARY KEY (grant_id, revision),
+  FOREIGN KEY (project_session_id, coordination_run_id)
+    REFERENCES runs(project_session_id, run_id),
+  CHECK (length(authority_ref)=71 AND substr(authority_ref,1,7)='sha256:'),
+  CHECK (length(grant_digest)=71 AND substr(grant_digest,1,7)='sha256:'),
+  CHECK ((state='active' AND revoked_at IS NULL) OR
+         (state<>'active' AND revoked_at IS NOT NULL))
+);
+```
+
+`constraints_json` is the closed canonical grant constraint object from Spec
+01, including the exact effect, remote, ref and canonical path-prefix sets.
+`grant_digest` hashes the immutable grant identity, authority, repository,
+constraints and expiry fields; later revocation fields are excluded. Grant
+creation or revision rechecks and narrows the live
+project/session and run authority in one transaction. A revision's binding and
+constraints are immutable; replacement appends the next contiguous revision
+and revokes the prior active
+revision atomically. Its binding and constraints remain immutable; only one
+compare-and-set `active -> revoked` lifecycle change is allowed. At most one
+revision of a grant is active. Revocation,
+expiry, session generation, run revision and authority revision are indexed
+for point-of-use checks. A grant record never contains a bearer capability,
+remote credential, URL with credentials, Git argument vector or executable.
+
+The one-to-one binding for the existing custody owner is logically:
+
+```sql
+CREATE TABLE operator_git_effect_bindings (
+  custody_id TEXT PRIMARY KEY
+    REFERENCES operator_effect_custody(custody_id),
+  project_id TEXT NOT NULL,
+  project_session_id TEXT NOT NULL,
+  prepared_session_revision INTEGER NOT NULL
+    CHECK (prepared_session_revision >= 1),
+  session_generation INTEGER NOT NULL CHECK (session_generation >= 1),
+  coordination_run_id TEXT NOT NULL,
+  prepared_run_revision INTEGER NOT NULL CHECK (prepared_run_revision >= 1),
+  authority_ref TEXT NOT NULL,
+  authority_revision INTEGER NOT NULL CHECK (authority_revision >= 1),
+  grant_id TEXT,
+  grant_revision INTEGER,
+  gate_id TEXT,
+  gate_revision INTEGER,
+  repository_root TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  repository_state_digest TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  effect_kind TEXT NOT NULL,
+  effect_binding_digest TEXT NOT NULL,
+  decision_digest TEXT NOT NULL,
+  before_git_state_json TEXT NOT NULL,
+  expected_terminal_state_json TEXT NOT NULL,
+  lookup_generation INTEGER NOT NULL CHECK (lookup_generation >= 0),
+  lookup_evidence_digest TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (project_session_id, coordination_run_id)
+    REFERENCES runs(project_session_id, run_id),
+  FOREIGN KEY (grant_id, grant_revision)
+    REFERENCES operator_git_grants(grant_id, revision),
+  FOREIGN KEY (gate_id) REFERENCES scoped_gates(gate_id),
+  FOREIGN KEY (operation_id) REFERENCES operation_admissions(operation_id),
+  CHECK ((grant_id IS NULL)=(grant_revision IS NULL)),
+  CHECK ((gate_id IS NULL)=(gate_revision IS NULL)),
+  CHECK ((grant_id IS NULL)<>(gate_id IS NULL))
+);
+```
+
+The implementation may add stricter same-session/run foreign keys and closed
+effect enumerations. It shall not weaken the fields or the check requiring
+exactly one grant or gate above. Binding, before-state and expected-terminal
+columns are immutable after insert. Only the generic custody state, bounded
+outcome, lookup generation/evidence and timestamps may advance through
+compare-and-set transitions. The binding is inserted in the same SQLite
+transaction that commits the operator command as `prepared`; absence of either
+row rolls back both. The custody ID is daemon-derived from operator, project,
+session and command identity. Exact replay returns the same record; changed
+intent, decision or binding conflicts.
+
+Preparation performs all capability, grant/gate, generation, revision,
+repository, worktree, writer-admission and fresh Git-state checks inside that
+transaction. It persists canonical before state and the exact terminal states
+that would prove applied or no effect. Only after commit may the single fixed
+Git port advance custody to `dispatching` and start process I/O. The port uses
+one trusted Git executable and operation-specific fixed arguments; it accepts
+no shell, caller argument vector, command name, option, alias, hook, editor,
+pager, executable override, environment source, remote URL or interactive
+prompt. Bounded stdin, stdout, stderr, deadline and child cleanup apply to every
+operation. A registered remote name resolves through trusted configuration;
+credentials are neither persisted nor returned.
+
+Each operation produces a closed result with command exit class, bounded output
+digests and one fresh typed repository/remote observation. Terminal success is
+committed only when that observation matches the exact expected terminal state.
+An exit failure is `no-effect` only when the inspector proves every affected
+local and remote ref, index, worktree and object remains at the persisted before
+state. Otherwise it is `ambiguous` or `quarantined`. Merge/rebase conflict,
+partial pull, unknown hook-like external behaviour, remote observation failure
+or any mismatch between process result and repository state is never silently
+normalised to success.
+
+Startup and live reconciliation use this closed policy:
+
+- `prepared`: perform zero Git process or remote calls, record proved
+  `no-effect` and terminalise the existing custody once;
+- `dispatching` or `ambiguous`: call only the fixed read-only Git effect
+  inspector for the exact custody ID and increment `lookup_generation`; never
+  execute, abort, continue, retry or reconstruct the mutation;
+- exact applied proof: record terminal success and the after-state digest once;
+- exact no-effect proof: record terminal no-effect once;
+- incomplete, unavailable, conflicting or mixed local/remote evidence: retain
+  `ambiguous` or enter `quarantined` with its evidence digest; and
+- terminal, no-effect, rejected or failed-with-proof: return the stored outcome
+  on replay with zero Git I/O.
+
+Lookup of fetch, pull or push includes the registered remote and exact refs.
+Remote absence, timeout or changed/unreadable advertised state cannot prove no
+effect. Lookup of commit, branch and worktree actions resolves exact objects and
+all registered worktrees. Merge and rebase lookup records their native
+operation state but never invokes automatic `--abort` or `--continue`. An
+unresolved binding is a project-session membership/closure blocker; the
+affected session remains in an existing liveness-contributing ambiguity or
+quarantine state. Pending Git custody is not discarded merely to permit daemon
+idle stop.
+
+Migration preflight shall reject malformed/non-canonical paths, unknown effect
+or state values, invalid digests, non-contiguous grant revisions, two active
+grant revisions, widened constraints, cross-project/session/run references and
+an existing generic Git custody row without a complete typed binding. It shall
+not infer a grant or human gate for historical data. Binding immutability,
+state-transition, digest, exclusive decision, same-run and global-revision
+triggers install transactionally. Recovery is forward repair or verified
+restore under section 7.
+
+Acceptance additionally requires deterministic oracles for:
+
+- migration preflight/rollback, foreign keys, immutable bindings, contiguous
+  grant revision, one-active-revision, exclusive grant/gate choice and indexed
+  current-grant/recovery queries;
+- absent, expired, revoked, stale, widened, wrong-project/session/run,
+  wrong-authority, wrong repository/worktree and constraint-mismatched grants
+  causing zero Git process I/O;
+- a gate whose ID, revision, resolver, run, dependency revision or blocked
+  effect digest differs causing zero Git process I/O;
+- one real temporary-repository operation for every Spec 01 Git effect and
+  mode, with fixed executable/arguments, disabled hooks/editor/pager/prompts,
+  bounded I/O and a receipt matching a fresh typed Git read;
+- fault injection before binding insert, after generic custody insert, after
+  prepare commit, before/after `dispatching`, before process spawn, during
+  process execution, after process exit and before terminal commit;
+- restart of `prepared` making no call, restart of `dispatching`/`ambiguous`
+  making exactly one bounded lookup call and no mutation call, and exact replay
+  of terminal custody making no call;
+- commit/branch/worktree local proof, fetch/pull/push remote proof, merge/rebase
+  conflict, partial pull and unavailable remote observation remaining honest;
+- unresolved Git custody blocking project-session closure and surviving daemon
+  and Console restart without a duplicate effect; and
+- capability, remote-credential, command, output and receipt canaries proving
+  that no secret, arbitrary argument or unbounded process output reaches
+  persistence, projection, logs or Console rendering.

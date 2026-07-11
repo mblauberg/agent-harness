@@ -1,15 +1,16 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.12
+Version: 0.13
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.12 closes the review-discovered retained-child-bridge and attestation
-descriptor gaps. Version 0.11 closes the review-discovered MCP bootstrap,
+Version 0.13 closes the implementation-discovered typed Git authority and
+operation-semantics gap. Version 0.12 closes the review-discovered retained-
+child-bridge and attestation descriptor gaps. Version 0.11 closes the review-discovered MCP bootstrap,
 secret-result and descriptor-ownership gaps. Version 0.10 closes the review-discovered
 chair-bridge recovery, provider-native attestation evidence, MCP resource parity
 and duplicate lifecycle-surface gaps.
@@ -2293,3 +2294,207 @@ clients; retained decoders return the typed retirement failure and point to
 - **AC-029:** protocol negotiation exposes no direct lifecycle shortcut, while
   typed lifecycle preview/commit survives restart and preserves exact global,
   session, run and consequence fences.
+
+### 32.13 Typed Git action authority and exact semantics
+
+Possession of a session-bound operator capability containing `git` admits only
+the typed Git action family. It never authorises a mutation by itself. Every
+`OperatorGitIntent` shall additionally carry one closed
+`GitActionAuthorisation` whose common binding is:
+
+```yaml
+git_action_authorisation:
+  project_id: exact-authenticated-project
+  project_session_id: exact-session
+  expected_session_revision: compare-and-set-integer
+  expected_session_generation: fenced-generation
+  coordination_run_id: exact-accountable-run
+  expected_run_revision: compare-and-set-integer
+  authority_ref: exact-active-run-authority-sha256
+  expected_authority_revision: compare-and-set-integer
+  repository_root: exact-canonical-trusted-root
+  worktree_path: exact-canonical-admitted-worktree
+  repository_state_digest: exact-sha256
+  operation_id: daemon-derived-stable-id
+  effect_binding_digest: exact-sha256
+  decision: preauthorised-or-gate-variant
+```
+
+The common binding and each variant reject unknown or missing fields. The
+daemon derives project and operator identity from the authenticated connection,
+then cross-checks every duplicated session, run, repository, worktree, revision
+and digest against the intent, current Fabric records and a fresh typed Git
+observation. `effect_binding_digest` is the canonical SHA-256 of the complete
+Git effect, repository binding and common authority binding, excluding only the
+operator credential, command ID, `operation_id` and the `decision` variant.
+`operation_id` is daemon-derived from that digest and is the stable operation
+identity used by a consequential gate. A changed action,
+path, ref, remote, mode, expected object or revision therefore requires a new
+preview and authorisation decision.
+
+The preauthorised variant is:
+
+```yaml
+decision:
+  kind: preauthorised
+  grant_id: stable-id
+  expected_grant_revision: compare-and-set-integer
+  grant_digest: exact-sha256
+```
+
+The referenced `GitActionGrant` is an immutable revisioned narrowing of the
+active, human-approved project/session and coordination-run authority:
+
+```yaml
+git_action_grant:
+  grant_id: stable-id
+  revision: compare-and-set-integer
+  project_id: exact-project
+  project_session_id: exact-session
+  session_generation: fenced-generation
+  coordination_run_id: exact-run
+  authority_ref: exact-active-run-authority-sha256
+  authority_revision: exact-revision
+  repository_root: exact-canonical-root
+  worktree_path: exact-canonical-worktree
+  effects: closed-non-empty-set
+  remotes: closed-exact-name-set
+  refs: closed-fully-qualified-ref-set
+  path_prefixes: closed-canonical-relative-prefix-set
+  expires_at: bounded-timestamp
+  revoked_at: null-or-timestamp
+```
+
+The daemon hashes the immutable identity, authority, repository, constraint and
+expiry fields of the closed canonical grant to `grant_digest`; `revoked_at` is
+excluded because it is a later lifecycle fact. Empty
+constraint sets mean that category is unavailable, not unconstrained. A
+concrete action must match one named effect, every named remote and fully
+qualified ref, and every canonical repository-relative path must be contained
+by a granted prefix. The exact worktree shall remain an active writer admission
+for the same project session and run when the effect can write files. Denies in
+the parent authority dominate the grant. Grant expiry, revocation, session or
+run revision change, authority rotation, generation change, repository or
+worktree change, or constraint mismatch fails before Git process I/O.
+
+A preauthorised grant may cover fetch, fast-forward-only pull, stage, unstage,
+commit, safe branch creation/rename/deletion, and clean worktree
+creation/move/removal when the approved envelope names those exact constraints.
+Push is preauthorised only when the grant names the exact remote plus source and
+destination refs and the effect uses `fast-forward-only`. Merge, rebase,
+force-with-lease push, destructive branch deletion and forced worktree removal
+cannot use this variant.
+
+The gate variant is:
+
+```yaml
+decision:
+  kind: gate
+  gate_id: exact-id
+  expected_gate_revision: compare-and-set-integer
+  expected_gate_status: approved
+  blocked_operation_id: exact-operation-id
+```
+
+The gate shall belong to the same project session and coordination run, have an
+`operation` enforcement point, bind `blocked_operation_id` exactly to
+`operation_id`, retain the current dependency revision and have an
+authenticated human resolver. Policy approval, a gate for another action, a
+stale/superseded gate or a general consequential-action capability is
+insufficient. Commit rechecks the gate and every common binding after Preview
+and immediately before effect preparation. The gate never supplies release or
+deployment authority; those retain the exact release binding in section 32.3.
+
+`OperatorGitIntent.operation` is extended only as needed to close these
+semantics:
+
+- **Fetch:** names one registered remote plus exact source and tracking refs.
+  It cannot accept a URL, refspec, executable, transport or arbitrary option.
+- **Pull:** names the same exact remote/ref pair and selects
+  `fast-forward-only`, `merge-commit` or `rebase`. Its fetch and integration
+  steps share one custody record; a partial fetch is an observable non-terminal
+  outcome, not permission to repeat the pull.
+- **Stage and unstage:** contain a non-empty, unique set of canonical
+  repository-relative paths. Absolute paths, traversal, NUL, pathspec magic,
+  option interpretation and paths outside the bound worktree are rejected.
+- **Commit:** binds the exact source index, parent and tree object digests, a
+  bounded non-empty message, explicit author/committer identities and timestamp,
+  and the deterministically derived resulting commit object. Dispatch cannot
+  substitute current time or mutable Git identity configuration. It does not
+  invoke an editor, pager, signing programme or repository hook, and it cannot
+  include unreviewed worktree content.
+- **Merge:** names exact source and destination objects and selects either
+  `fast-forward-only` or `merge-commit`. `merge-commit` means one non-interactive
+  non-fast-forward merge with no implicit strategy, editor, autostash or
+  project-configured command execution. Conflict is a typed non-terminal Git
+  state requiring explicit later handling; it is never auto-aborted or retried.
+- **Rebase:** always uses the gate variant. The source shall be the exact
+  currently checked-out local branch and HEAD object in the bound worktree; the
+  destination is one exact object/ref. V1 permits only a non-interactive,
+  current-branch, `no-autostash` rebase. It forbids `--onto`, root,
+  rebase-merges, interactive/exec and rebasing another branch. Dirty,
+  conflicted or detached state fails before preparation.
+- **Push:** names one registered remote, one exact local source ref and one
+  exact remote destination ref. `fast-forward-only` relies on the remote's
+  atomic non-fast-forward rejection. `force-with-lease` additionally binds the
+  exact expected remote object and always uses the gate variant. Neither form
+  implies pull-request merge, release or deployment authority.
+- **Branch create/rename/delete:** use fully qualified local refs and exact
+  objects. Safe deletion is `merged-only` against an exact base and refuses a
+  branch checked out in any worktree. Destructive deletion is an explicit
+  `force` mode, binds the deleted object and consequence in the gate, and never
+  follows from a broad branch grant.
+- **Worktree create:** selects `detached`, `new-branch` or `existing-branch`,
+  binds the exact source object and any fully qualified branch ref, and places
+  the destination at one absent direct child of
+  `<repository>/.worktrees/<task-agent>`. It requires the session envelope's
+  worktree-creation grant and cannot force an already checked-out branch.
+- **Worktree move:** binds the exact current worktree digest and moves only to
+  one absent direct child of the same repository-owned `.worktrees` directory.
+- **Worktree remove:** selects `clean` or `force`, binds the exact worktree and
+  worktree-state digest, and refuses the primary worktree or a locked worktree.
+  `clean` rejects modified, untracked, conflicted or unmerged state. `force`
+  always uses the gate variant and binds those consequences; no grant can
+  silently enable it.
+
+All ref names are fully qualified, validated data. The fixed Git port resolves
+them to current native objects and verifies the protocol object digests; no
+abbreviated revision, caller argument vector, shell, alias, hook, editor,
+pager, environment override or arbitrary Git subcommand is accepted. Remote
+access uses only a trusted registered remote and disables interactive prompts.
+The Preview shows repository, worktree, current branch, exact affected paths,
+source/destination refs and objects, remote, mode, expected revisions and the
+grant or gate evidence before confirmation.
+
+Added requirements are:
+
+- **FR-038:** Every Git mutation shall carry one closed, current
+  `GitActionAuthorisation` whose preauthorised or gate variant binds the exact
+  project session, run, authority, repository, worktree, revisions, effect,
+  remote, refs and path constraints; a broad `git` capability alone shall have
+  zero effect.
+- **FR-039:** Merge, rebase, branch deletion and worktree creation/removal shall
+  implement only the closed modes above; history rewriting or destructive
+  force shall require the exact human-approved gate variant.
+- **NFR-022:** Typed Git execution shall use one fixed bounded port with no
+  arbitrary shell, command, option, hook, editor, pager, executable or
+  environment injection surface.
+- **NFR-023:** Each Git effect shall be prepared durably before process I/O and
+  shall use evidence-only lookup after ambiguity; restart shall never blindly
+  repeat a Git mutation.
+
+Acceptance additionally requires:
+
+- **AC-031:** a matrix over missing, expired, revoked, wrong-project,
+  wrong-session/generation, wrong-run, stale-authority, stale-grant, wrong
+  repository/worktree, disallowed effect, remote, ref and path proves zero Git
+  process I/O. Matching routine grants succeed only inside their exact
+  constraints; push and every gate-only mode reject broad authority and a gate
+  for another effect.
+- **AC-032:** real temporary-repository tests cover every closed Git effect and
+  mode, including current-branch/no-autostash rebase, merged-only versus force
+  deletion, the three worktree-create modes and clean versus force removal.
+  Exact command replay has one effect; stale repository state fails before
+  dispatch; crash at each custody boundary performs no blind retry and exposes
+  any partial merge, rebase, pull or remote effect as ambiguous or quarantined
+  evidence.
