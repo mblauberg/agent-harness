@@ -111,6 +111,7 @@ describe("public protocol credential routing", () => {
       FABRIC_OPERATIONS.operatorActionPreview,
       FABRIC_OPERATIONS.operatorActionCommit,
       FABRIC_OPERATIONS.operatorActionReconcile,
+      FABRIC_OPERATIONS.operatorRepositoryRead,
     ]));
     expect(consequential.every((operation) => operationsForPrincipal("operator").has(operation as never))).toBe(true);
   });

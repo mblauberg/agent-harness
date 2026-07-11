@@ -65,7 +65,10 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
     FABRIC_OPERATIONS.daemonStop,
     ...operatorActionMutations,
   ],
-  git: operatorActionMutations,
+  git: [
+    FABRIC_OPERATIONS.operatorRepositoryRead,
+    ...operatorActionMutations,
+  ],
   "external-effect": operatorActionMutations,
 });
 

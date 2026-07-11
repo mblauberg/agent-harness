@@ -52,6 +52,7 @@ import {
   type LocalOperatorSessionCapabilityResult,
 } from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
+import { GitRepositoryReadService } from "../operator/git-repository-read.js";
 import {
   OperatorActionStore,
   type OperatorActionEffectPort,
@@ -805,6 +806,7 @@ export class Fabric {
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #operatorStore: OperatorStore;
   readonly #operatorProjections: OperatorProjectionStore;
+  readonly #gitRepositoryReads: GitRepositoryReadService;
   readonly #operatorActions: OperatorActionStore;
   readonly #projectSessions: ProjectSessionStore;
   readonly #intakes: IntakeStore;
@@ -831,6 +833,12 @@ export class Fabric {
     this.#operatorProjections = new OperatorProjectionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    this.#gitRepositoryReads = new GitRepositoryReadService({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      privateStateRoot: dirname(realpathSync(options.databasePath)),
       clock: this.#clock,
     });
     const unavailableStatePort: OperatorActionStatePort = {
@@ -1595,6 +1603,12 @@ export class Fabric {
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
         return this.#operatorProjections.messageBody(request);
+      }
+      case FABRIC_OPERATIONS.operatorRepositoryRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorRepositoryRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#gitRepositoryReads.read(request);
       }
       case FABRIC_OPERATIONS.operatorActionPreview: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
