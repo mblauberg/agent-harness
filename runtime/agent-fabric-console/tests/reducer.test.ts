@@ -154,9 +154,12 @@ describe("one semantic input reducer", () => {
       columns: 80,
       rows: 24,
     });
-    const events = decoder.push(
-      Buffer.from("\u001b[200~q\nconfirm\u001b[31m\u0003\u001b[201~"),
-    );
+    const events = [
+      ...decoder.push(
+        Buffer.from("\u001b[200~q\nconfirm\u001b[31m\u0003\u001b[201~"),
+      ),
+      ...decoder.flushPasteBoundary(),
+    ];
     let current = state;
     const intents: Console.ConsoleIntent[] = [];
     for (const event of events) {
@@ -228,5 +231,326 @@ describe("one semantic input reducer", () => {
       wide,
     );
     expect(released.intents).toStrictEqual([]);
+  });
+
+  it("cannot activate a focused control that is absent from the current frame", () => {
+    const stale = Console.createConsoleState({
+      focus: "actions",
+      focusedRegionId: "action:accept",
+      pendingCommandId: "pending-must-survive",
+    });
+    const compact = Console.renderConsoleFrame(projection, stale, {
+      columns: 40,
+      rows: 8,
+    });
+    expect(compact.hitRegions.some(({ id }) => id === "action:accept")).toBe(
+      false,
+    );
+
+    for (const event of [
+      { kind: "key", key: "enter" },
+      { kind: "key", key: "space" },
+    ] as const) {
+      const result = Console.reduceConsoleInput(stale, event, compact);
+      expect(result.intents).toStrictEqual([]);
+      expect(result.state.pendingCommandId).toBe("pending-must-survive");
+    }
+
+    const full = Console.renderConsoleFrame(projection, stale, {
+      columns: 80,
+      rows: 24,
+    });
+    const disabled: Console.ConsoleFrame = {
+      ...full,
+      hitRegions: full.hitRegions.map((region) => ({
+        ...region,
+        enabled: region.id !== "action:accept",
+      })),
+    };
+    expect(
+      Console.reduceConsoleInput(
+        stale,
+        { kind: "key", key: "enter" },
+        disabled,
+      ).intents,
+    ).toStrictEqual([]);
+  });
+
+  it("reaches every view and action from default keyboard state", () => {
+    let state = Console.createConsoleState();
+    let frame = Console.renderConsoleFrame(projection, state, {
+      columns: 80,
+      rows: 24,
+    });
+    expect(state.activeView).toBe("Attention");
+
+    const views = [
+      "Attention",
+      "Project",
+      "Runs",
+      "Work",
+      "Agents",
+      "Evidence",
+      "Activity",
+      "System",
+    ] as const;
+    const altKeys = [
+      "alt-1",
+      "alt-2",
+      "alt-3",
+      "alt-4",
+      "alt-5",
+      "alt-6",
+      "alt-7",
+      "alt-8",
+    ] as const;
+    for (const [index, view] of views.entries()) {
+      const result = Console.reduceConsoleInput(
+        state,
+        { kind: "key", key: altKeys[index] ?? "alt-1" },
+        frame,
+      );
+      state = result.state;
+      frame = Console.renderConsoleFrame(projection, state, {
+        columns: 80,
+        rows: 24,
+      });
+      expect(state.activeView).toBe(view);
+      expect(state.focusedRegionId).toBe(`tab:${view}`);
+    }
+
+    state = Console.createConsoleState();
+    frame = Console.renderConsoleFrame(projection, state, {
+      columns: 80,
+      rows: 24,
+    });
+    state = Console.reduceConsoleInput(
+      state,
+      { kind: "key", key: "tab" },
+      frame,
+    ).state;
+    expect(state.focusedRegionId).toBe("tab:Attention");
+    state = Console.reduceConsoleInput(
+      state,
+      { kind: "key", key: "right" },
+      frame,
+    ).state;
+    expect(state.focusedRegionId).toBe("tab:Project");
+    state = Console.reduceConsoleInput(
+      state,
+      { kind: "key", key: "left" },
+      frame,
+    ).state;
+    expect(state.focusedRegionId).toBe("tab:Attention");
+    state = Console.reduceConsoleInput(
+      state,
+      { kind: "key", key: "shift-tab" },
+      frame,
+    ).state;
+    expect(state.focusedRegionId).toBe("detach");
+
+    const actions = [
+      ["d", "action:discuss"],
+      ["a", "action:accept"],
+      ["c", "action:request-changes"],
+      ["f", "action:defer"],
+      ["i", "action:implement"],
+    ] as const;
+    for (const [shortcut, regionId] of actions) {
+      state = Console.createConsoleState();
+      frame = Console.renderConsoleFrame(projection, state, {
+        columns: 80,
+        rows: 24,
+      });
+      const focused = Console.reduceConsoleInput(
+        state,
+        { kind: "key", key: "text", text: shortcut },
+        frame,
+      );
+      expect(focused.intents).toStrictEqual([]);
+      expect(focused.state.focusedRegionId).toBe(regionId);
+      const activated = Console.reduceConsoleInput(
+        focused.state,
+        { kind: "key", key: "space" },
+        frame,
+      );
+      expect(activated.intents).toStrictEqual([
+        {
+          kind: "activate-region",
+          regionId,
+          provenance: "keyboard",
+        },
+      ]);
+    }
+
+    const escaped = Console.reduceConsoleInput(
+      state,
+      { kind: "key", key: "escape" },
+      frame,
+    );
+    expect(escaped.state).toMatchObject({
+      focus: "master",
+      focusedRegionId: null,
+      pressedRegionId: null,
+    });
+    expect(escaped.intents).toStrictEqual([]);
+  });
+
+  it("applies mouse capture through the terminal owner before rendering it", () => {
+    const state = Console.createConsoleState({ mouseCapture: false });
+    const frame = Console.renderConsoleFrame(projection, state, {
+      columns: 80,
+      rows: 24,
+    });
+    const requested = Console.reduceConsoleInput(
+      state,
+      { kind: "key", key: "alt-m" },
+      frame,
+    );
+
+    expect(requested.state.mouseCapture).toBe(false);
+    expect(requested.intents).toStrictEqual([
+      {
+        kind: "set-mouse-capture",
+        enabled: true,
+        provenance: "keyboard",
+      },
+    ]);
+    const terminal = {
+      mouseCapture: false,
+      setMouseCapture(enabled: boolean): void {
+        this.mouseCapture = enabled;
+      },
+    };
+    const applied = Console.applyConsoleTerminalIntent(
+      requested.state,
+      requested.intents[0],
+      terminal,
+    );
+    expect(applied.mouseCapture).toBe(true);
+    expect(
+      Console.renderConsoleFrame(projection, applied, {
+        columns: 80,
+        rows: 24,
+      }).rows[3],
+    ).toContain("MOUSE:ON");
+  });
+
+  it("finishes a splitter drag locally without activation", () => {
+    const state = Console.createConsoleState({ mouseCapture: true });
+    const frame = Console.renderConsoleFrame(projection, state, {
+      columns: 80,
+      rows: 24,
+    });
+    const splitter = frame.hitRegions.find(({ id }) => id === "splitter");
+    if (splitter === undefined) {
+      return;
+    }
+    const press = Console.reduceConsoleInput(
+      state,
+      {
+        kind: "mouse",
+        phase: "press",
+        button: "left",
+        x: 2,
+        y: splitter.rect.y1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      },
+      frame,
+    );
+    const release = Console.reduceConsoleInput(
+      press.state,
+      {
+        kind: "mouse",
+        phase: "release",
+        button: "left",
+        x: 2,
+        y: splitter.rect.y1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      },
+      frame,
+    );
+    expect(release.intents).toStrictEqual([]);
+    expect(release.state.pressedRegionId).toBeNull();
+  });
+
+  it("keeps tab selection local for keyboard and mouse", () => {
+    const initial = Console.createConsoleState({ mouseCapture: true });
+    const frame = Console.renderConsoleFrame(projection, initial, {
+      columns: 80,
+      rows: 24,
+    });
+    const focused = Console.reduceConsoleInput(
+      initial,
+      { kind: "key", key: "alt-2" },
+      frame,
+    );
+    const keyboard = Console.reduceConsoleInput(
+      focused.state,
+      { kind: "key", key: "enter" },
+      frame,
+    );
+    expect(keyboard.state.activeView).toBe("Project");
+    expect(keyboard.intents).toStrictEqual([]);
+
+    const runs = frame.hitRegions.find(({ id }) => id === "tab:Runs");
+    if (runs === undefined) {
+      return;
+    }
+    const press = Console.reduceConsoleInput(
+      initial,
+      {
+        kind: "mouse",
+        phase: "press",
+        button: "left",
+        x: runs.rect.x1,
+        y: runs.rect.y1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      },
+      frame,
+    );
+    const release = Console.reduceConsoleInput(
+      press.state,
+      {
+        kind: "mouse",
+        phase: "release",
+        button: "left",
+        x: runs.rect.x1,
+        y: runs.rect.y1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      },
+      frame,
+    );
+    expect(release.state.activeView).toBe("Runs");
+    expect(release.intents).toStrictEqual([]);
+  });
+
+  it("safe-detaches on fatal input and never activates focused Accept from paste", () => {
+    const accept = Console.createConsoleState({
+      focus: "actions",
+      focusedRegionId: "action:accept",
+      pendingCommandId: "pending-accept",
+    });
+    const frame = Console.renderConsoleFrame(projection, accept, {
+      columns: 80,
+      rows: 24,
+    });
+    const pasted = Console.reduceConsoleInput(
+      accept,
+      { kind: "paste", text: "\u001b[201~\rconfirm" },
+      frame,
+    );
+    expect(pasted.state).toStrictEqual(accept);
+    expect(pasted.intents).toStrictEqual([]);
+
+    const fatal = Console.reduceConsoleInput(
+      accept,
+      { kind: "fatal", reason: "input-quarantine-lost" },
+      frame,
+    );
+    expect(fatal.intents).toStrictEqual([
+      { kind: "detach", provenance: "safety" },
+    ]);
+    expect(fatal.state.pendingCommandId).toBe("pending-accept");
   });
 });

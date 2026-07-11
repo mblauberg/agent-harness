@@ -45,6 +45,9 @@ describe("pinned Unicode and terminal-neutral text", () => {
       { columns: 120, rows: 40 },
     );
     const output = frame.rows.join("\n");
+    const sanitized = Console.sanitizeDisplayText(hostile, {
+      lineBreaks: "visible",
+    });
 
     expect(output).not.toContain("\u001b");
     expect(output).not.toContain("\u009b");
@@ -52,10 +55,10 @@ describe("pinned Unicode and terminal-neutral text", () => {
     expect(output).not.toContain("\u2066");
     expect(output).toContain("<ESC>");
     expect(output).toContain("<BEL>");
-    expect(output).toContain("<C1-9B>");
-    expect(output).toContain("<DEL>");
-    expect(output).toContain("<BIDI-U+202E>");
-    expect(output).toContain("<BIDI-U+2066>");
-    expect(output).toContain("<LF>");
+    expect(sanitized).toContain("<C1-9B>");
+    expect(sanitized).toContain("<DEL>");
+    expect(sanitized).toContain("<BIDI-U+202E>");
+    expect(sanitized).toContain("<BIDI-U+2066>");
+    expect(sanitized).toContain("<LF>");
   });
 });

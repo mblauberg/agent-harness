@@ -18,6 +18,7 @@ export type KeyInputEvent = Readonly<{
     | "shift-tab"
     | "escape"
     | "backspace"
+    | "space"
     | "ctrl-c"
     | "alt-m"
     | `alt-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`
@@ -48,10 +49,16 @@ export type PasteInputEvent = Readonly<{
   text: string;
 }>;
 
+export type FatalInputEvent = Readonly<{
+  kind: "fatal";
+  reason: "input-quarantine-lost";
+}>;
+
 export type TerminalInputEvent =
   | KeyInputEvent
   | MouseInputEvent
   | PasteInputEvent
+  | FatalInputEvent
   | RejectedInputEvent;
 
 export type TerminalInputLimits = Readonly<{
@@ -59,6 +66,14 @@ export type TerminalInputLimits = Readonly<{
   maxPasteBytes: number;
   maxChunkBytes: number;
 }>;
+
+export type TerminalInputOptions = Partial<TerminalInputLimits> &
+  Readonly<{
+    escapeTimeoutMs?: number;
+    pasteIdleTimeoutMs?: number;
+    quarantineTimeoutMs?: number;
+    now?: () => number;
+  }>;
 
 const DEFAULT_LIMITS: TerminalInputLimits = Object.freeze({
   maxPendingBytes: 64,
@@ -199,15 +214,48 @@ export class TerminalInputDecoder {
   #pasteBytes: number[] = [];
   #pasteEndMatch = 0;
   #pasteOverflow = false;
+  #pasteCandidateStart: number | null = null;
+  #pasteCandidateSeen = false;
   #textDecoder = new StringDecoder("utf8");
+  readonly #escapeTimeoutMs: number;
+  readonly #pasteIdleTimeoutMs: number;
+  readonly #quarantineTimeoutMs: number;
+  readonly #now: () => number;
+  #pendingEscapeAt: number | null = null;
+  #lastInputAt: number | null = null;
+  #fatal = false;
 
-  constructor(limits: Partial<TerminalInputLimits> = {}) {
-    this.#limits = inputLimits(limits);
+  constructor(options: TerminalInputOptions = {}) {
+    this.#limits = inputLimits(options);
+    this.#escapeTimeoutMs = validLimit(options.escapeTimeoutMs ?? 25, 25);
+    this.#pasteIdleTimeoutMs = validLimit(
+      options.pasteIdleTimeoutMs ?? 25,
+      25,
+    );
+    this.#quarantineTimeoutMs = validLimit(
+      options.quarantineTimeoutMs ?? 1_000,
+      1_000,
+    );
+    this.#now = options.now ?? Date.now;
   }
 
   push(input: Uint8Array): readonly TerminalInputEvent[] {
+    if (this.#fatal) {
+      return [];
+    }
+    const receivedAt = this.#now();
+    this.#lastInputAt = receivedAt;
     if (input.byteLength > this.#limits.maxChunkBytes) {
-      this.#resetSequence();
+      if (
+        this.#inPaste ||
+        this.#discardControlString !== null ||
+        this.#discardEscape ||
+        this.#pendingEscape.length > 0
+      ) {
+        this.#enterFatalState();
+        return [{ kind: "fatal", reason: "input-quarantine-lost" }];
+      }
+      this.#textDecoder = new StringDecoder("utf8");
       return [{ kind: "rejected", reason: "chunk-overflow" }];
     }
 
@@ -226,7 +274,7 @@ export class TerminalInputDecoder {
 
     for (const byte of input) {
       if (this.#inPaste) {
-        this.#consumePasteByte(byte, events);
+        this.#consumePasteByte(byte);
         continue;
       }
       if (this.#discardControlString !== null) {
@@ -255,6 +303,7 @@ export class TerminalInputDecoder {
         if (this.#pendingEscape.length > this.#limits.maxPendingBytes) {
           events.push({ kind: "rejected", reason: "sequence-overflow" });
           this.#pendingEscape = [];
+          this.#pendingEscapeAt = null;
           this.#discardEscape = !(byte >= 0x40 && byte <= 0x7e);
           continue;
         }
@@ -269,6 +318,7 @@ export class TerminalInputDecoder {
         ) {
           events.push({ kind: "rejected", reason: "malformed-sequence" });
           this.#pendingEscape = [];
+          this.#pendingEscapeAt = null;
           this.#discardControlString = second === 0x5d ? "bel-or-st" : "st";
           this.#controlStringSawEscape = false;
           continue;
@@ -276,6 +326,7 @@ export class TerminalInputDecoder {
         if (second !== 0x5b) {
           events.push(decodeEscape(sequence));
           this.#pendingEscape = [];
+          this.#pendingEscapeAt = null;
           continue;
         }
         if (
@@ -288,10 +339,13 @@ export class TerminalInputDecoder {
             this.#pasteBytes = [];
             this.#pasteEndMatch = 0;
             this.#pasteOverflow = false;
+            this.#pasteCandidateStart = null;
+            this.#pasteCandidateSeen = false;
           } else {
             events.push(decodeEscape(sequence));
           }
           this.#pendingEscape = [];
+          this.#pendingEscapeAt = null;
         }
         continue;
       }
@@ -299,6 +353,7 @@ export class TerminalInputDecoder {
       if (byte === 0x1b) {
         flushPlain();
         this.#pendingEscape = [byte];
+        this.#pendingEscapeAt = receivedAt;
       } else if (byte === 0x0d || byte === 0x0a) {
         flushPlain();
         events.push({ kind: "key", key: "enter" });
@@ -311,6 +366,9 @@ export class TerminalInputDecoder {
       } else if (byte === 0x03) {
         flushPlain();
         events.push({ kind: "key", key: "ctrl-c" });
+      } else if (byte === 0x20) {
+        flushPlain();
+        events.push({ kind: "key", key: "space" });
       } else if (byte >= 0x20) {
         plainBytes.push(byte);
       } else {
@@ -322,15 +380,87 @@ export class TerminalInputDecoder {
     return events;
   }
 
+  flushTimedOut(now = this.#now()): readonly TerminalInputEvent[] {
+    if (this.#fatal) {
+      return [];
+    }
+    if (
+      this.#inPaste &&
+      this.#pasteCandidateSeen &&
+      this.#lastInputAt !== null &&
+      now - this.#lastInputAt >= this.#pasteIdleTimeoutMs
+    ) {
+      return this.flushPasteBoundary();
+    }
+    if (
+      this.#lastInputAt !== null &&
+      now - this.#lastInputAt >= this.#quarantineTimeoutMs &&
+      (this.#inPaste ||
+        this.#discardControlString !== null ||
+        this.#discardEscape)
+    ) {
+      this.#enterFatalState();
+      return [{ kind: "fatal", reason: "input-quarantine-lost" }];
+    }
+    if (
+      this.#pendingEscapeAt === null ||
+      now - this.#pendingEscapeAt < this.#escapeTimeoutMs
+    ) {
+      return [];
+    }
+    if (this.#pendingEscape.length === 1) {
+      this.#pendingEscape = [];
+      this.#pendingEscapeAt = null;
+      return [{ kind: "key", key: "escape" }];
+    }
+    if (this.#pendingEscape.length > 1) {
+      this.#pendingEscape = [];
+      this.#pendingEscapeAt = null;
+      this.#discardEscape = true;
+      return [{ kind: "rejected", reason: "malformed-sequence" }];
+    }
+    this.#pendingEscapeAt = null;
+    return [];
+  }
+
+  flushPasteBoundary(): readonly TerminalInputEvent[] {
+    if (this.#fatal || !this.#inPaste || !this.#pasteCandidateSeen) {
+      return [];
+    }
+    if (this.#pasteOverflow) {
+      this.#resetPaste();
+      return [{ kind: "rejected", reason: "paste-overflow" }];
+    }
+    const candidateStart = this.#pasteCandidateStart;
+    if (candidateStart === null) {
+      this.#enterFatalState();
+      return [{ kind: "fatal", reason: "input-quarantine-lost" }];
+    }
+    const content = Buffer.from([
+      ...this.#pasteBytes.slice(0, candidateStart),
+      ...this.#pasteBytes.slice(candidateStart + PASTE_END.length),
+    ]).toString("utf8");
+    this.#resetPaste();
+    return [{ kind: "paste", text: content }];
+  }
+
   end(): readonly TerminalInputEvent[] {
+    if (this.#fatal) {
+      return [];
+    }
     const events: TerminalInputEvent[] = [];
     if (this.#inPaste) {
-      events.push({
-        kind: "rejected",
-        reason: this.#pasteOverflow
-          ? "paste-overflow"
-          : "malformed-sequence",
-      });
+      const paste = this.flushPasteBoundary();
+      if (paste.length > 0) {
+        events.push(...paste);
+      } else {
+        events.push({
+          kind: "rejected",
+          reason: this.#pasteOverflow
+            ? "paste-overflow"
+            : "malformed-sequence",
+        });
+      }
     } else if (this.#pendingEscape.length === 1) {
       events.push({ kind: "key", key: "escape" });
     } else if (
@@ -349,7 +479,7 @@ export class TerminalInputDecoder {
     return events;
   }
 
-  #consumePasteByte(byte: number, events: TerminalInputEvent[]): void {
+  #consumePasteByte(byte: number): void {
     if (!this.#pasteOverflow) {
       this.#pasteBytes.push(byte);
     }
@@ -362,22 +492,18 @@ export class TerminalInputDecoder {
     }
 
     if (this.#pasteEndMatch === PASTE_END.length) {
-      if (this.#pasteOverflow) {
-        events.push({ kind: "rejected", reason: "paste-overflow" });
-      } else {
-        const contentLength = this.#pasteBytes.length - PASTE_END.length;
-        const content = Buffer.from(
-          this.#pasteBytes.slice(0, contentLength),
-        ).toString("utf8");
-        events.push({ kind: "paste", text: content });
+      this.#pasteCandidateSeen = true;
+      if (!this.#pasteOverflow) {
+        this.#pasteCandidateStart =
+          this.#pasteBytes.length - PASTE_END.length;
       }
-      this.#resetPaste();
-      return;
+      this.#pasteEndMatch = 0;
     }
 
     if (
       !this.#pasteOverflow &&
-      this.#pasteBytes.length - this.#pasteEndMatch >
+      this.#pasteBytes.length -
+        (this.#pasteCandidateStart === null ? 0 : PASTE_END.length) >
         this.#limits.maxPasteBytes
     ) {
       this.#pasteOverflow = true;
@@ -390,10 +516,24 @@ export class TerminalInputDecoder {
     this.#pasteBytes = [];
     this.#pasteEndMatch = 0;
     this.#pasteOverflow = false;
+    this.#pasteCandidateStart = null;
+    this.#pasteCandidateSeen = false;
+  }
+
+  #enterFatalState(): void {
+    this.#fatal = true;
+    this.#pendingEscape = [];
+    this.#pendingEscapeAt = null;
+    this.#discardEscape = false;
+    this.#discardControlString = null;
+    this.#controlStringSawEscape = false;
+    this.#resetPaste();
+    this.#textDecoder = new StringDecoder("utf8");
   }
 
   #resetSequence(): void {
     this.#pendingEscape = [];
+    this.#pendingEscapeAt = null;
     this.#discardEscape = false;
     this.#discardControlString = null;
     this.#controlStringSawEscape = false;

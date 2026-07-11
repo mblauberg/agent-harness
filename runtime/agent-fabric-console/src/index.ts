@@ -41,6 +41,7 @@ export type ConsoleState = Readonly<{
   pressedRegionId: string | null;
   pressedGeometryKey: string | null;
   splitterRatio: number;
+  activeView: ConsoleView;
 }>;
 
 export type ConsoleView =
@@ -53,6 +54,17 @@ export type ConsoleView =
   | "Activity"
   | "System";
 
+const CONSOLE_VIEWS: readonly ConsoleView[] = [
+  "Attention",
+  "Project",
+  "Runs",
+  "Work",
+  "Agents",
+  "Evidence",
+  "Activity",
+  "System",
+];
+
 export type Rect = Readonly<{
   x1: number;
   y1: number;
@@ -64,6 +76,7 @@ export type HitRegion = Readonly<{
   id: string;
   kind: "tab" | "action" | "splitter" | "detach";
   rect: Rect;
+  enabled: boolean;
 }>;
 
 export type ConsoleFrame = Readonly<{
@@ -98,6 +111,7 @@ export function createConsoleState(
       !Number.isFinite(overrides.splitterRatio)
         ? 5 / 9
         : Math.min(1, Math.max(0, overrides.splitterRatio)),
+    activeView: overrides.activeView ?? "Attention",
   };
 }
 
@@ -223,6 +237,56 @@ function chromeText(text: string): string {
   return sanitizeDisplayText(text, { lineBreaks: "visible" });
 }
 
+function composeFields(
+  columns: number,
+  fields: readonly string[],
+  baseWidths: readonly number[],
+  minimumWidths: readonly number[],
+  expansionOrder: readonly number[],
+): string {
+  if (fields.length === 0 || columns <= 0) {
+    return "";
+  }
+  const gapCells = fields.length - 1;
+  if (columns <= gapCells) {
+    return fitCells(fields.join("|"), columns);
+  }
+  const widths = baseWidths.map((width) => width);
+  const target = columns - gapCells;
+  let total = widths.reduce((sum, width) => sum + width, 0);
+  while (total > target) {
+    let changed = false;
+    for (const index of expansionOrder) {
+      const width = widths[index];
+      const minimum = minimumWidths[index];
+      if (width !== undefined && minimum !== undefined && width > minimum) {
+        widths[index] = width - 1;
+        total -= 1;
+        changed = true;
+        if (total === target) {
+          break;
+        }
+      }
+    }
+    if (!changed) {
+      return fitCells(fields.join("|"), columns);
+    }
+  }
+  let expansionIndex = 0;
+  while (total < target) {
+    const fieldIndex = expansionOrder[expansionIndex % expansionOrder.length];
+    if (fieldIndex === undefined || widths[fieldIndex] === undefined) {
+      break;
+    }
+    widths[fieldIndex] += 1;
+    total += 1;
+    expansionIndex += 1;
+  }
+  return fields
+    .map((field, index) => fitCells(chromeText(field), widths[index] ?? 0))
+    .join("|");
+}
+
 export function renderConsoleFrame(
   _projection: ConsoleProjection,
   _state: ConsoleState,
@@ -250,7 +314,7 @@ export function renderConsoleFrame(
   const mode =
     columns >= 80 && rowCount >= 24
       ? "full"
-      : columns >= 20 && rowCount >= 6
+      : columns >= 20 && rowCount >= 8
         ? "compact"
         : "inert";
   if (mode === "inert") {
@@ -268,10 +332,44 @@ export function renderConsoleFrame(
   }
 
   const sourceRows = [
-    chromeText(`P: ${_projection.project} |S: ${_projection.session} |R: ${_projection.run} |r${_projection.revision} |${_projection.freshness} ${_projection.age}`),
-    chromeText(`Phase: ${_projection.phase} |Owner: ${_projection.owner} |Health: ${_projection.health} |Attn: ${_projection.attentionCount} |Runs: ${_projection.runCount}`),
-    chromeText(`Now: ${_projection.currentMilestone} |Next: ${_projection.nextMilestone} |${_projection.declaredCount}`),
-    "Attention Project Runs Work Agents Evidence Activity System |MOUSE:OFF",
+    composeFields(
+      columns,
+      [
+        `P: ${_projection.project}`,
+        `S: ${_projection.session}`,
+        `R: ${_projection.run}`,
+        `r${_projection.revision}`,
+        `${_projection.freshness} ${_projection.age}`,
+      ],
+      [18, 16, 14, 21, 7],
+      [4, 4, 4, 2, 4],
+      [0, 1, 2, 3, 4],
+    ),
+    composeFields(
+      columns,
+      [
+        `Phase: ${_projection.phase}`,
+        `Owner: ${_projection.owner}`,
+        `Health: ${_projection.health}`,
+        `Attn: ${_projection.attentionCount}`,
+        `Runs: ${_projection.runCount}`,
+      ],
+      [20, 20, 16, 10, 10],
+      [5, 5, 7, 5, 5],
+      [0, 1, 2, 3, 4],
+    ),
+    composeFields(
+      columns,
+      [
+        `Now: ${_projection.currentMilestone}`,
+        `Next: ${_projection.nextMilestone}`,
+        _projection.declaredCount,
+      ],
+      [36, 34, 8],
+      [5, 6, 4],
+      [0, 1, 2],
+    ),
+    `Attention Project Runs Work Agents Evidence Activity System |MOUSE:${_state.mouseCapture ? "ON" : "OFF"}`,
   ];
   for (const [index, text] of sourceRows.entries()) {
     if (index >= rowCount) {
@@ -284,26 +382,20 @@ export function renderConsoleFrame(
   const statusRow = rowCount - 1;
   const helpRow = rowCount;
   const hitRegions: HitRegion[] = [];
-  const views: readonly ConsoleView[] = [
-    "Attention",
-    "Project",
-    "Runs",
-    "Work",
-    "Agents",
-    "Evidence",
-    "Activity",
-    "System",
-  ];
   let tabX = 1;
-  for (const view of views) {
+  for (const view of CONSOLE_VIEWS) {
     if (tabX > columns) {
       break;
     }
-    const x2 = Math.min(columns, tabX + cellWidth(view) - 1);
+    const x2 = tabX + cellWidth(view) - 1;
+    if (x2 > columns) {
+      break;
+    }
     hitRegions.push({
       id: `tab:${view}`,
       kind: "tab",
       rect: { x1: tabX, y1: 4, x2, y2: 4 },
+      enabled: true,
     });
     tabX = x2 + 2;
   }
@@ -328,6 +420,7 @@ export function renderConsoleFrame(
       id: "splitter",
       kind: "splitter",
       rect: { x1: 1, y1: splitterRow, x2: columns, y2: splitterRow },
+      enabled: true,
     });
   }
 
@@ -354,6 +447,7 @@ export function renderConsoleFrame(
         id: `action:${id}`,
         kind: "action",
         rect: { x1, y1: actionRow, x2, y2: actionRow },
+        enabled: true,
       });
       assigned += width;
       x1 = x2 + 1;
@@ -370,12 +464,14 @@ export function renderConsoleFrame(
     columns,
   );
   rows[helpRow - 1] = fitCells("? help | q detach", columns);
-  const detachStart = Math.max(1, columns - 7);
-  hitRegions.push({
-    id: "detach",
-    kind: "detach",
-    rect: { x1: detachStart, y1: helpRow, x2: columns, y2: helpRow },
-  });
+  if (columns >= 17) {
+    hitRegions.push({
+      id: "detach",
+      kind: "detach",
+      rect: { x1: 10, y1: helpRow, x2: 17, y2: helpRow },
+      enabled: true,
+    });
+  }
 
   return {
     columns,
@@ -393,12 +489,17 @@ export type ConsoleIntent =
       regionId: string;
       provenance: "keyboard" | "mouse";
     }>
-  | Readonly<{ kind: "detach"; provenance: "keyboard" }>
+  | Readonly<{ kind: "detach"; provenance: "keyboard" | "safety" }>
   | Readonly<{
       kind: "scroll";
       regionId: string | null;
       delta: -1 | 1;
       provenance: "mouse";
+    }>
+  | Readonly<{
+      kind: "set-mouse-capture";
+      enabled: boolean;
+      provenance: "keyboard";
     }>;
 
 export type ConsoleReduction = Readonly<{
@@ -406,10 +507,31 @@ export type ConsoleReduction = Readonly<{
   intents: readonly ConsoleIntent[];
 }>;
 
+export function resizeConsoleSurface(
+  projection: ConsoleProjection,
+  state: ConsoleState,
+  viewport: TerminalViewport,
+): Readonly<{
+  state: ConsoleState;
+  frame: ConsoleFrame;
+  intents: readonly ConsoleIntent[];
+}> {
+  return {
+    state,
+    frame: renderConsoleFrame(projection, state, viewport),
+    intents: [],
+  };
+}
+
 function regionAt(frame: ConsoleFrame, x: number, y: number): HitRegion | null {
   return (
     frame.hitRegions.find(
-      ({ rect }) => x >= rect.x1 && x <= rect.x2 && y >= rect.y1 && y <= rect.y2,
+      ({ enabled, rect }) =>
+        enabled &&
+        x >= rect.x1 &&
+        x <= rect.x2 &&
+        y >= rect.y1 &&
+        y <= rect.y2,
     ) ?? null
   );
 }
@@ -427,11 +549,69 @@ function focusForRegion(region: HitRegion): ConsoleState["focus"] {
   }
 }
 
+function focusRegion(state: ConsoleState, region: HitRegion): ConsoleState {
+  return {
+    ...state,
+    focus: focusForRegion(region),
+    focusedRegionId: region.id,
+  };
+}
+
+function cycleFocus(
+  state: ConsoleState,
+  frame: ConsoleFrame,
+  delta: -1 | 1,
+): ConsoleState {
+  const regions = frame.hitRegions.filter(({ enabled }) => enabled);
+  if (regions.length === 0) {
+    return { ...state, focus: "master", focusedRegionId: null };
+  }
+  const current = regions.findIndex(({ id }) => id === state.focusedRegionId);
+  const next =
+    current === -1
+      ? delta === 1
+        ? 0
+        : regions.length - 1
+      : (current + delta + regions.length) % regions.length;
+  const region = regions[next];
+  return region === undefined ? state : focusRegion(state, region);
+}
+
+function moveWithinRegionKind(
+  state: ConsoleState,
+  frame: ConsoleFrame,
+  delta: -1 | 1,
+): ConsoleState {
+  const current = frame.hitRegions.find(
+    ({ enabled, id }) => enabled && id === state.focusedRegionId,
+  );
+  if (current === undefined) {
+    return cycleFocus(state, frame, delta);
+  }
+  const peers = frame.hitRegions.filter(
+    ({ enabled, kind }) => enabled && kind === current.kind,
+  );
+  const index = peers.findIndex(({ id }) => id === current.id);
+  const next = peers[(index + delta + peers.length) % peers.length];
+  return next === undefined ? state : focusRegion(state, next);
+}
+
+function viewForTab(regionId: string): ConsoleView | null {
+  const view = CONSOLE_VIEWS.find((candidate) => `tab:${candidate}` === regionId);
+  return view ?? null;
+}
+
 export function reduceConsoleInput(
   state: ConsoleState,
   event: TerminalInputEvent,
   frame: ConsoleFrame,
 ): ConsoleReduction {
+  if (event.kind === "fatal") {
+    return {
+      state,
+      intents: [{ kind: "detach", provenance: "safety" }],
+    };
+  }
   if (event.kind === "rejected") {
     return { state, intents: [] };
   }
@@ -453,11 +633,16 @@ export function reduceConsoleInput(
       return {
         state: {
           ...state,
-          mouseCapture: !state.mouseCapture,
           pressedRegionId: null,
           pressedGeometryKey: null,
         },
-        intents: [],
+        intents: [
+          {
+            kind: "set-mouse-capture",
+            enabled: !state.mouseCapture,
+            provenance: "keyboard",
+          },
+        ],
       };
     }
     if (event.key === "ctrl-c") {
@@ -466,12 +651,49 @@ export function reduceConsoleInput(
         intents: [{ kind: "detach", provenance: "keyboard" }],
       };
     }
+    if (event.key === "escape") {
+      return {
+        state: {
+          ...state,
+          focus: "master",
+          focusedRegionId: null,
+          pressedRegionId: null,
+          pressedGeometryKey: null,
+        },
+        intents: [],
+      };
+    }
+    if (event.key === "tab" || event.key === "shift-tab") {
+      return {
+        state: cycleFocus(state, frame, event.key === "tab" ? 1 : -1),
+        intents: [],
+      };
+    }
+    if (event.key.startsWith("alt-")) {
+      const index = Number(event.key.slice(4)) - 1;
+      const view = CONSOLE_VIEWS[index];
+      const region =
+        view === undefined
+          ? undefined
+          : frame.hitRegions.find(
+              ({ enabled, id }) => enabled && id === `tab:${view}`,
+            );
+      if (view === undefined || region === undefined) {
+        return { state, intents: [] };
+      }
+      return {
+        state: { ...focusRegion(state, region), activeView: view },
+        intents: [],
+      };
+    }
     if (
       state.focus === "splitter" &&
       (event.key === "up" || event.key === "down") &&
       frame.splitterBounds !== null
     ) {
-      const splitter = frame.hitRegions.find(({ id }) => id === "splitter");
+      const splitter = frame.hitRegions.find(
+        ({ enabled, id }) => enabled && id === "splitter",
+      );
       if (splitter === undefined) {
         return { state, intents: [] };
       }
@@ -489,6 +711,22 @@ export function reduceConsoleInput(
           splitterRatio:
             range === 0 ? state.splitterRatio : (target - frame.splitterBounds.minY) / range,
         },
+        intents: [],
+      };
+    }
+    if (event.key === "left" || event.key === "right") {
+      return {
+        state: moveWithinRegionKind(
+          state,
+          frame,
+          event.key === "left" ? -1 : 1,
+        ),
+        intents: [],
+      };
+    }
+    if (event.key === "up" || event.key === "down") {
+      return {
+        state: cycleFocus(state, frame, event.key === "up" ? -1 : 1),
         intents: [],
       };
     }
@@ -510,8 +748,50 @@ export function reduceConsoleInput(
           intents: [{ kind: "detach", provenance: "keyboard" }],
         };
       }
+      const shortcutRegions: Readonly<Record<string, string>> = {
+        d: "action:discuss",
+        a: "action:accept",
+        c: "action:request-changes",
+        f: "action:defer",
+        i: "action:implement",
+      };
+      const regionId = shortcutRegions[event.text];
+      const region =
+        regionId === undefined
+          ? undefined
+          : frame.hitRegions.find(
+              ({ enabled, id }) => enabled && id === regionId,
+            );
+      if (region !== undefined) {
+        return { state: focusRegion(state, region), intents: [] };
+      }
     }
-    if (event.key === "enter" && state.focusedRegionId !== null) {
+    if (event.key === "space" && state.focus === "input") {
+      return {
+        state: { ...state, draft: `${state.draft} ` },
+        intents: [],
+      };
+    }
+    if (
+      (event.key === "enter" || event.key === "space") &&
+      state.focusedRegionId !== null
+    ) {
+      const currentRegion = frame.hitRegions.find(
+        ({ enabled, id }) => enabled && id === state.focusedRegionId,
+      );
+      if (currentRegion === undefined) {
+        return {
+          state: { ...state, focusedRegionId: null },
+          intents: [],
+        };
+      }
+      const selectedView = viewForTab(currentRegion.id);
+      if (selectedView !== null) {
+        return {
+          state: { ...state, activeView: selectedView },
+          intents: [],
+        };
+      }
       return {
         state,
         intents: [
@@ -590,11 +870,18 @@ export function reduceConsoleInput(
   if (event.phase === "release") {
     const activate =
       region !== null &&
+      region.kind !== "splitter" &&
       state.pressedRegionId === region.id &&
       state.pressedGeometryKey === frame.geometryKey;
+    const selectedView = region === null ? null : viewForTab(region.id);
     return {
-      state: { ...state, pressedRegionId: null, pressedGeometryKey: null },
-      intents: activate
+      state: {
+        ...state,
+        pressedRegionId: null,
+        pressedGeometryKey: null,
+        activeView: selectedView ?? state.activeView,
+      },
+      intents: activate && selectedView === null
         ? [
             {
               kind: "activate-region",
@@ -606,4 +893,21 @@ export function reduceConsoleInput(
     };
   }
   return { state, intents: [] };
+}
+
+export type MouseModeOwner = {
+  readonly mouseCapture: boolean;
+  setMouseCapture(enabled: boolean): void;
+};
+
+export function applyConsoleTerminalIntent(
+  state: ConsoleState,
+  intent: ConsoleIntent | undefined,
+  terminal: MouseModeOwner,
+): ConsoleState {
+  if (intent?.kind !== "set-mouse-capture") {
+    return state;
+  }
+  terminal.setMouseCapture(intent.enabled);
+  return { ...state, mouseCapture: terminal.mouseCapture };
 }

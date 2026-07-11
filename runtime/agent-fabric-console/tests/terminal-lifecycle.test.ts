@@ -78,6 +78,8 @@ describe("actual PTY terminal lifecycle", () => {
     ["error", 1],
     ["sigterm", 143],
     ["mouse-off", 0],
+    ["explicit-exit", 23],
+    ["mouse-toggle", 0],
   ])("restores termios and exact modes after %s", (scenario, expectedCode) => {
     const evidence = runPty(scenario);
     const transcript = Buffer.from(evidence.transcript, "base64").toString(
@@ -99,6 +101,8 @@ describe("actual PTY terminal lifecycle", () => {
     if (scenario === "mouse-off") {
       expect(transcript).not.toContain("\u001b[?1002h");
       expect(transcript).not.toContain("\u001b[?1006h");
+    } else if (scenario === "mouse-toggle") {
+      expect(transcript).toContain("\u001b[?2004h");
     } else {
       expect(transcript).toContain("\u001b[?1002h\u001b[?1006h");
     }
@@ -110,5 +114,43 @@ describe("actual PTY terminal lifecycle", () => {
     expect(transcript.indexOf("READY")).toBeLessThan(
       transcript.indexOf("\u001b[?2004l"),
     );
+  });
+
+  it("reports authoritative TIOCSWINSZ grow and shrink dimensions", () => {
+    const evidence = runPty("resize");
+    const transcript = Buffer.from(evidence.transcript, "base64").toString(
+      "utf8",
+    );
+    const dimensions = [...transcript.matchAll(/RESIZE:(\d+)x(\d+)/g)].map(
+      (match) => `${match[1]}x${match[2]}`,
+    );
+
+    expect(evidence.returncode).toBe(0);
+    expect(dimensions).toStrictEqual([
+      "80x24",
+      "100x30",
+      "40x8",
+      "1x1",
+      "120x40",
+      "1x1",
+      "40x8",
+      "100x30",
+      "80x24",
+    ]);
+    expect(evidence.restored).toBe(true);
+    expect(transcript).toContain("\u001b[?1006l\u001b[?1002l\u001b[?2004l");
+  });
+
+  it("owns idempotent runtime mouse-mode transitions", () => {
+    const evidence = runPty("mouse-toggle");
+    const transcript = Buffer.from(evidence.transcript, "base64").toString(
+      "utf8",
+    );
+    const mouseOn = transcript.match(/\u001b\[\?1002h\u001b\[\?1006h/g) ?? [];
+    const mouseOff = transcript.match(/\u001b\[\?1006l\u001b\[\?1002l/g) ?? [];
+
+    expect(mouseOn).toHaveLength(1);
+    expect(mouseOff).toHaveLength(2);
+    expect(evidence.restored).toBe(true);
   });
 });

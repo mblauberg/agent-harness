@@ -8,6 +8,7 @@ import os
 import pty
 import select
 import signal
+import struct
 import subprocess
 import sys
 import termios
@@ -46,6 +47,8 @@ def read_available(master: int, output: bytearray, timeout: float) -> None:
 def main() -> int:
     child_path, scenario = sys.argv[1], sys.argv[2]
     master, slave = pty.openpty()
+    if scenario == "resize":
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
     before = termios.tcgetattr(slave)
     process = subprocess.Popen(
         ["node", child_path, scenario],
@@ -57,11 +60,37 @@ def main() -> int:
     output = bytearray()
     deadline = time.monotonic() + 5
     signalled = False
+    resize_targets = [
+        (100, 30),
+        (40, 8),
+        (1, 1),
+        (120, 40),
+        (1, 1),
+        (40, 8),
+        (100, 30),
+        (80, 24),
+    ]
+    resize_index = 0
+    resize_sent = False
     while process.poll() is None and time.monotonic() < deadline:
         read_available(master, output, 0.05)
         if scenario == "sigterm" and not signalled and b"READY" in output:
             os.kill(process.pid, signal.SIGTERM)
             signalled = True
+        if scenario == "resize" and b"READY" in output and resize_index < len(resize_targets):
+            resize_event_count = output.count(b"RESIZE:")
+            if not resize_sent and resize_event_count >= resize_index + 1:
+                columns, rows = resize_targets[resize_index]
+                fcntl.ioctl(
+                    slave,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", rows, columns, 0, 0),
+                )
+                os.kill(process.pid, signal.SIGWINCH)
+                resize_sent = True
+            elif resize_sent and resize_event_count >= resize_index + 2:
+                resize_index += 1
+                resize_sent = False
     if process.poll() is None:
         process.kill()
     returncode = process.wait(timeout=2)

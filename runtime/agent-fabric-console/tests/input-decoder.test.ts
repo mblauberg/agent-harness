@@ -87,7 +87,8 @@ describe("bounded terminal input decoding", () => {
         Buffer.from("0~q\n\rconfirm\u001b[31m\u0003\u001b[20"),
       ),
     ).toStrictEqual([]);
-    expect(decoder.push(Buffer.from("1~"))).toStrictEqual([
+    expect(decoder.push(Buffer.from("1~"))).toStrictEqual([]);
+    expect(decoder.flushPasteBoundary()).toStrictEqual([
       {
         kind: "paste",
         text: "q\n\rconfirm\u001b[31m\u0003",
@@ -101,7 +102,10 @@ describe("bounded terminal input decoding", () => {
     });
     expect(
       overflow.push(Buffer.from("\u001b[200~123456789\u001b[201~")),
-    ).toStrictEqual([{ kind: "rejected", reason: "paste-overflow" }]);
+    ).toStrictEqual([]);
+    expect(overflow.flushPasteBoundary()).toStrictEqual([
+      { kind: "rejected", reason: "paste-overflow" },
+    ]);
   });
 
   it("drops partial UTF-8 state when an oversized chunk is quarantined", () => {
@@ -118,5 +122,106 @@ describe("bounded terminal input decoding", () => {
     expect(decoder.push(Buffer.from("A"))).toStrictEqual([
       { kind: "key", key: "text", text: "A" },
     ]);
+  });
+
+  it("flushes lone and partial Escape ambiguity without ending the decoder", () => {
+    let now = 1_000;
+    const decoder = new Console.TerminalInputDecoder({
+      escapeTimeoutMs: 25,
+      now: () => now,
+    });
+
+    expect(decoder.push(Buffer.from("\u001b"))).toStrictEqual([]);
+    now += 24;
+    expect(decoder.flushTimedOut()).toStrictEqual([]);
+    now += 1;
+    expect(decoder.flushTimedOut()).toStrictEqual([
+      { kind: "key", key: "escape" },
+    ]);
+    expect(decoder.push(Buffer.from("a"))).toStrictEqual([
+      { kind: "key", key: "text", text: "a" },
+    ]);
+
+    expect(decoder.push(Buffer.from("\u001b["))).toStrictEqual([]);
+    now += 25;
+    expect(decoder.flushTimedOut()).toStrictEqual([
+      { kind: "rejected", reason: "malformed-sequence" },
+    ]);
+    expect(decoder.push(Buffer.from("b"))).toStrictEqual([]);
+    expect(decoder.push(Buffer.from("c"))).toStrictEqual([
+      { kind: "key", key: "text", text: "c" },
+    ]);
+  });
+
+  it("fails safe when an oversized chunk interrupts paste or control quarantine", () => {
+    for (const prefix of ["\u001b[200~paste", "\u001b]0;title"] as const) {
+      const decoder = new Console.TerminalInputDecoder({
+        maxChunkBytes: 4_096,
+        maxPasteBytes: 8_192,
+      });
+      const initial = decoder.push(Buffer.from(prefix));
+      if (prefix.startsWith("\u001b]")) {
+        expect(initial).toStrictEqual([
+          { kind: "rejected", reason: "malformed-sequence" },
+        ]);
+      } else {
+        expect(initial).toStrictEqual([]);
+      }
+      expect(decoder.push(Buffer.alloc(4_097, 0x61))).toStrictEqual([
+        { kind: "fatal", reason: "input-quarantine-lost" },
+      ]);
+      expect(
+        decoder.push(Buffer.from("\u001b[201~\u0007accept\r")),
+      ).toStrictEqual([]);
+      expect(decoder.flushTimedOut(Number.MAX_SAFE_INTEGER)).toStrictEqual([]);
+    }
+  });
+
+  it("closes only the final idle paste candidate and keeps burst suffixes inert", () => {
+    let now = 5_000;
+    const decoder = new Console.TerminalInputDecoder({
+      maxChunkBytes: 256,
+      maxPasteBytes: 256,
+      pasteIdleTimeoutMs: 20,
+      now: () => now,
+    });
+
+    expect(decoder.push(Buffer.from("\u001b[200~draft\u001b[201"))).toStrictEqual(
+      [],
+    );
+    expect(
+      decoder.push(Buffer.from("~embedded\u001b[20")),
+    ).toStrictEqual([]);
+    expect(decoder.push(Buffer.from("1~a\rconfirm"))).toStrictEqual([]);
+    now += 19;
+    expect(decoder.flushTimedOut()).toStrictEqual([]);
+    now += 1;
+    expect(decoder.flushTimedOut()).toStrictEqual([
+      {
+        kind: "paste",
+        text: "draft\u001b[201~embeddeda\rconfirm",
+      },
+    ]);
+    expect(decoder.push(Buffer.from("b"))).toStrictEqual([
+      { kind: "key", key: "text", text: "b" },
+    ]);
+  });
+
+  it("fatal-detaches instead of trapping an unresynchronisable quarantine", () => {
+    for (const prefix of ["\u001b[200~unterminated", "\u001b]0;unterminated"] as const) {
+      let now = 9_000;
+      const decoder = new Console.TerminalInputDecoder({
+        quarantineTimeoutMs: 100,
+        now: () => now,
+      });
+      decoder.push(Buffer.from(prefix));
+      now += 99;
+      expect(decoder.flushTimedOut()).toStrictEqual([]);
+      now += 1;
+      expect(decoder.flushTimedOut()).toStrictEqual([
+        { kind: "fatal", reason: "input-quarantine-lost" },
+      ]);
+      expect(decoder.push(Buffer.from("accept\r"))).toStrictEqual([]);
+    }
   });
 });
