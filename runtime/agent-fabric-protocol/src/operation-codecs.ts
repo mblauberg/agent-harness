@@ -2400,7 +2400,11 @@ export function parseOperationInput<Operation extends ProtocolOperation>(
   value: unknown,
 ): OperationInputMap[Operation] {
   if (isRetiredOperation(operation)) {
-    throw new TypeError(`${operation} is retired; use daemon-owned scoped-gate operations`);
+    const definition = OPERATION_REGISTRY[operation];
+    throw new TypeError(
+      `${operation} is retired${definition.retirementReason === undefined ? "" : `: ${definition.retirementReason}`}` +
+      `${definition.replacementOperation === undefined ? "" : `; use ${definition.replacementOperation}`}`,
+    );
   }
   return OPERATION_CODECS[operation].input.parse(value, `${operation}.input`) as OperationInputMap[Operation];
 }
@@ -2447,7 +2451,11 @@ export function parseOperationResult<Operation extends ProtocolOperation>(
   value: unknown,
 ): OperationResultMap[Operation] {
   if (isRetiredOperation(operation)) {
-    throw new TypeError(`${operation} is retired; use daemon-owned scoped-gate operations`);
+    const definition = OPERATION_REGISTRY[operation];
+    throw new TypeError(
+      `${operation} is retired${definition.retirementReason === undefined ? "" : `: ${definition.retirementReason}`}` +
+      `${definition.replacementOperation === undefined ? "" : `; use ${definition.replacementOperation}`}`,
+    );
   }
   return OPERATION_CODECS[operation].result.parse(value, `${operation}.result`) as OperationResultMap[Operation];
 }

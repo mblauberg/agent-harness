@@ -140,10 +140,38 @@ const DEFINITIONS = defineOperations({
   operatorActionReconcile: { operation: "fabric.v1.operator-action.reconcile", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   messageBodyRead: { operation: "fabric.v1.message-body.read", feature: "message-body-read.v1", principals: ["operator"], kind: "extension" },
   operatorRepositoryRead: { operation: "fabric.v1.operator-repository.read", feature: "operator-repository-read.v1", principals: ["operator"], kind: "extension" },
-  projectSessionDrain: { operation: "fabric.v1.project-session.drain", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
-  projectSessionStop: { operation: "fabric.v1.project-session.stop", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
-  daemonDrain: { operation: "fabric.v1.daemon.drain", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
-  daemonStop: { operation: "fabric.v1.daemon.stop", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
+  projectSessionDrain: {
+    operation: "fabric.v1.project-session.drain",
+    feature: "lifecycle-control.v1",
+    principals: [],
+    kind: "retired",
+    replacementOperation: "fabric.v1.operator-action.preview",
+    retirementReason: "typed operator actions own lifecycle preview, revision and consequence fencing",
+  },
+  projectSessionStop: {
+    operation: "fabric.v1.project-session.stop",
+    feature: "lifecycle-control.v1",
+    principals: [],
+    kind: "retired",
+    replacementOperation: "fabric.v1.operator-action.preview",
+    retirementReason: "typed operator actions own lifecycle preview, revision and consequence fencing",
+  },
+  daemonDrain: {
+    operation: "fabric.v1.daemon.drain",
+    feature: "lifecycle-control.v1",
+    principals: [],
+    kind: "retired",
+    replacementOperation: "fabric.v1.operator-action.preview",
+    retirementReason: "typed operator actions own lifecycle preview, global revision and consequence fencing",
+  },
+  daemonStop: {
+    operation: "fabric.v1.daemon.stop",
+    feature: "lifecycle-control.v1",
+    principals: [],
+    kind: "retired",
+    replacementOperation: "fabric.v1.operator-action.preview",
+    retirementReason: "typed operator actions own lifecycle preview, global revision and consequence fencing",
+  },
 });
 
 type OperationConstants = {

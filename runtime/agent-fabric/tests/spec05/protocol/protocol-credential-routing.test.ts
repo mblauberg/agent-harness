@@ -115,6 +115,18 @@ describe("public protocol credential routing", () => {
     ]));
     expect(consequential).not.toContain(FABRIC_OPERATIONS.operatorRepositoryRead);
     expect(consequential.every((operation) => operationsForPrincipal("operator").has(operation as never))).toBe(true);
+
+    const lifecycle = operatorOperationsForActions(["drain", "stop"]);
+    expect(lifecycle).toEqual(expect.arrayContaining([
+      FABRIC_OPERATIONS.operatorActionPreview,
+      FABRIC_OPERATIONS.operatorActionCommit,
+      FABRIC_OPERATIONS.operatorActionStatus,
+      FABRIC_OPERATIONS.operatorActionReconcile,
+    ]));
+    expect(lifecycle).not.toContain(FABRIC_OPERATIONS.projectSessionDrain);
+    expect(lifecycle).not.toContain(FABRIC_OPERATIONS.projectSessionStop);
+    expect(lifecycle).not.toContain(FABRIC_OPERATIONS.daemonDrain);
+    expect(lifecycle).not.toContain(FABRIC_OPERATIONS.daemonStop);
   });
 
   it("resolves a current operator token through the same public verifier", async () => {

@@ -73,7 +73,7 @@ describe("operator mutation surface", () => {
 describe("discriminated gate enforcement checks", () => {
   it.each([
     { enforcementPoint: "task-readiness", taskId: "task_01" },
-    { enforcementPoint: "operation", operationId: "fabric.v1.daemon.stop" },
+    { enforcementPoint: "operation", operationId: "fabric.v1.operator-action.preview" },
     { enforcementPoint: "scoped-barrier", barrierId: "barrier_01" },
   ] as const)("accepts a targeted $enforcementPoint check", (target) => {
     expect(parseScopedGateCheckRequest({

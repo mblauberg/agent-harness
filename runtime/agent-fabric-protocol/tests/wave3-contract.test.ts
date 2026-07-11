@@ -88,8 +88,8 @@ class GrantLoopback extends Duplex {
           principal: operatorPrincipal,
           clientNonce: request.input.authentication.clientNonce,
           connectionNonce: "connection_01",
-          features: ["operator-projection.v1", "lifecycle-control.v1"],
-          allowedOperations: [FABRIC_OPERATIONS.projectDiscover, FABRIC_OPERATIONS.daemonStop],
+          features: ["operator-projection.v1", "project-sessions.v1"],
+          allowedOperations: [FABRIC_OPERATIONS.projectDiscover, FABRIC_OPERATIONS.projectSessionCreate],
           limits,
         },
       })}\n`);
@@ -102,7 +102,7 @@ describe("credential-derived initialization grants", () => {
   it("intersects a read-only credential grant with requested features and principal legality", () => {
     const result = createResultWithGrant(projectionRequest, [
       FABRIC_OPERATIONS.projectDiscover,
-      FABRIC_OPERATIONS.daemonStop,
+      FABRIC_OPERATIONS.projectSessionCreate,
       FABRIC_OPERATIONS.integrationInputAttest,
     ]);
     expect(result.allowedOperations).toStrictEqual([FABRIC_OPERATIONS.projectDiscover]);

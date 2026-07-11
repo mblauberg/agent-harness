@@ -56,16 +56,8 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
   pause: operatorActionMutations,
   resume: operatorActionMutations,
   cancel: operatorActionMutations,
-  drain: [
-    FABRIC_OPERATIONS.projectSessionDrain,
-    FABRIC_OPERATIONS.daemonDrain,
-    ...operatorActionMutations,
-  ],
-  stop: [
-    FABRIC_OPERATIONS.projectSessionStop,
-    FABRIC_OPERATIONS.daemonStop,
-    ...operatorActionMutations,
-  ],
+  drain: operatorActionMutations,
+  stop: operatorActionMutations,
   git: operatorActionMutations,
   "external-effect": operatorActionMutations,
 });

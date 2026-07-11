@@ -67,19 +67,14 @@ import type {
   ProjectionSnapshotRequest,
 } from "./projection.js";
 import type {
-  DaemonDrainRequest,
-  DaemonStopRequest,
   ProjectSession,
   ProjectSessionCloseRequest,
   ProjectSessionCreateRequest,
-  ProjectSessionDrainRequest,
   ProjectSessionGetRequest,
-  ProjectSessionStopRequest,
   ProjectSessionTransitionRequest,
 } from "./project-session.js";
 import type {
   ChairTakeoverResult,
-  DaemonLifecycleResult,
   OperationInputMap,
   OperationResultMap,
   ProtocolPrincipal,
@@ -224,13 +219,6 @@ export interface GitRepositoryReadClient {
   read(input: GitRepositoryReadRequest): Promise<GitRepositoryReadResult>;
 }
 
-export interface LifecycleControlClient {
-  drainProjectSession(input: ProjectSessionDrainRequest): Promise<ProjectSession>;
-  stopProjectSession(input: ProjectSessionStopRequest): Promise<ProjectSession>;
-  drainDaemon(input: DaemonDrainRequest): Promise<DaemonLifecycleResult>;
-  stopDaemon(input: DaemonStopRequest): Promise<DaemonLifecycleResult>;
-}
-
 export type NegotiatedOperatorClient = {
   kind: "operator";
   features: readonly ProtocolFeature[];
@@ -243,7 +231,6 @@ export type NegotiatedOperatorClient = {
   projection?: ProjectionClient;
   messages?: MessageBodyClient;
   repository?: GitRepositoryReadClient;
-  lifecycle?: LifecycleControlClient;
   console?: OperatorConsoleClient;
   close(): Promise<void>;
 };
@@ -329,15 +316,6 @@ function resources(transport: ProtocolRpcTransport): ResourceReservationClient {
     reserve: (input) => transport.call(FABRIC_OPERATIONS.resourceReserve, input),
     release: (input) => transport.call(FABRIC_OPERATIONS.resourceRelease, input),
     reconcile: (input) => transport.call(FABRIC_OPERATIONS.resourceReconcile, input),
-  };
-}
-
-function lifecycle(transport: ProtocolRpcTransport): LifecycleControlClient {
-  return {
-    drainProjectSession: (input) => transport.call(FABRIC_OPERATIONS.projectSessionDrain, input),
-    stopProjectSession: (input) => transport.call(FABRIC_OPERATIONS.projectSessionStop, input),
-    drainDaemon: (input) => transport.call(FABRIC_OPERATIONS.daemonDrain, input),
-    stopDaemon: (input) => transport.call(FABRIC_OPERATIONS.daemonStop, input),
   };
 }
 
@@ -436,12 +414,6 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
           },
         }
       : {}),
-    ...(hasFeature(transport, "lifecycle-control.v1") && hasOperations(transport, [
-      FABRIC_OPERATIONS.projectSessionDrain,
-      FABRIC_OPERATIONS.projectSessionStop,
-      FABRIC_OPERATIONS.daemonDrain,
-      FABRIC_OPERATIONS.daemonStop,
-    ]) ? { lifecycle: lifecycle(transport) } : {}),
     ...(hasFeature(transport, "scoped-gate-read.v1") &&
       hasFeature(transport, "operator-projection.v2") &&
       hasOperations(transport, [
