@@ -55,6 +55,9 @@ export async function writeDeliveryRunFixture(input: {
       throw new TypeError("generated delivery-run reference is invalid");
     }
     value.run_id = input.runId;
+    if (isRecord(value.fabric_relationships)) {
+      value.fabric_relationships.delivery_run_id = input.runId;
+    }
     if (input.accepted === true) {
       if (profile !== "agent-product" || !isRecord(value.human_gates.acceptance)) {
         throw new TypeError("only an agent-product reference can be accepted by this fixture");
