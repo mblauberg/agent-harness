@@ -59,7 +59,7 @@ describe("provider-session Fabric continuity", () => {
           vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })),
           close,
         ),
-        features: ["fabric-core.v1"],
+        features: ["fabric-core.v1"] as const,
       })),
     })).rejects.toThrow(/feature was not negotiated/iu);
     expect(close).toHaveBeenCalledOnce();
