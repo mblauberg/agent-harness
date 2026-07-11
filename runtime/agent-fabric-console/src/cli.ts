@@ -168,6 +168,7 @@ export async function runConsoleCli(
   let refreshLoop: ConsoleRefreshLoop | undefined;
   let decoderTimeout: NodeJS.Timeout | undefined;
   let onData: ((chunk: Buffer) => void) | undefined;
+  let inputTail: Promise<void> = Promise.resolve();
   const draw = (frame: FabricConsoleFrame): void => {
     if (!terminalReady) return;
     output.write(`\u001b[H${frame.rows.join("\n")}`);
@@ -219,13 +220,17 @@ export async function runConsoleCli(
     refreshLoop = startConsoleRefreshLoop({
       refresh: async () => await application?.refresh(),
       isClosed: () => application?.closed === true,
-      onClosed: () => finish?.(),
+      onClosed: () => {
+        void inputTail.then(() => finish?.(), (error: unknown) => fail?.(error));
+      },
     });
     const decoder = new TerminalInputDecoder();
     const handleEvent = (event: TerminalInputEvent): void => {
-      void application?.handleInput(event).then(() => {
+      inputTail = inputTail.then(async () => {
+        await application?.handleInput(event);
         if (application?.closed === true) finish?.();
-      }, (error) => fail?.(error));
+      });
+      void inputTail.catch((error: unknown) => fail?.(error));
     };
     onData = (chunk: Buffer): void => {
       for (const event of decoder.push(chunk)) handleEvent(event);
@@ -242,6 +247,7 @@ export async function runConsoleCli(
     if (decoderTimeout !== undefined) clearInterval(decoderTimeout);
     if (onData !== undefined) input.off("data", onData);
     const cleanupFailures: unknown[] = [];
+    await inputTail.catch(() => undefined);
     await refreshLoop?.stop().catch((error: unknown) => cleanupFailures.push(error));
     try {
       terminal?.close();

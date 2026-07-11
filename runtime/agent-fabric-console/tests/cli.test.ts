@@ -139,4 +139,62 @@ describe("standalone Console executable", () => {
     expect(onClosed).toHaveBeenCalledTimes(1);
     await loop.stop();
   });
+
+  it("does not finish terminal cleanup until the accepted detach input settles", async () => {
+    let data: ((chunk: Buffer) => void) | undefined;
+    let releaseDetach!: () => void;
+    const detach = new Promise<void>((resolvePromise) => { releaseDetach = resolvePromise; });
+    let closed = false;
+    const terminalClose = vi.fn();
+    const application = {
+      get closed() { return closed; },
+      repaint: vi.fn(),
+      refresh: vi.fn(async () => undefined),
+      resize: vi.fn(),
+      handleInput: vi.fn(async () => {
+        closed = true;
+        await detach;
+      }),
+      close: vi.fn(async () => {
+        closed = true;
+        await detach;
+      }),
+    };
+    const running = runConsoleCli([], {
+      input: {
+        isTTY: true,
+        isRaw: false,
+        readableFlowing: false,
+        setRawMode: () => {},
+        resume: () => {},
+        pause: () => {},
+        on: (_event, listener) => { data = listener; },
+        off: () => {},
+      },
+      output: {
+        isTTY: true,
+        columns: 80,
+        rows: 24,
+        write: () => true,
+        on: () => {},
+        removeListener: () => {},
+      },
+      startApplication: (async () => application) as never,
+      createTerminal: (() => ({
+        close: terminalClose,
+        setMouseCapture: () => {},
+        setEditorActive: () => {},
+      })) as never,
+    });
+
+    await vi.waitFor(() => expect(data).toBeDefined());
+    data?.(Buffer.from("q", "utf8"));
+    await vi.waitFor(() => expect(application.handleInput).toHaveBeenCalledOnce());
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 550));
+
+    expect(terminalClose).not.toHaveBeenCalled();
+    releaseDetach();
+    await expect(running).resolves.toBeUndefined();
+    expect(terminalClose).toHaveBeenCalledOnce();
+  });
 });
