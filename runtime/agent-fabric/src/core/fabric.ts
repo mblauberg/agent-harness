@@ -1058,7 +1058,7 @@ export class Fabric {
     const token = capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, 1);
     const now = this.#clock();
     this.#database.transaction(() => {
-      const projectInsert = this.#database.prepare(`
+      this.#database.prepare(`
         INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
         VALUES (?, ?, 1, 1, ?, ?)
         ON CONFLICT(project_id) DO NOTHING
@@ -1087,37 +1087,6 @@ export class Fabric {
         compatibility.manifestRef,
         now,
         now,
-      );
-      if (projectInsert.changes === 1) {
-        this.#database.prepare(`
-          INSERT INTO resource_scopes(
-            scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
-            scope_kind, owner_ref, state, revision
-          ) VALUES (?, ?, NULL, NULL, NULL, 'project', ?, 'active', 1)
-        `).run(compatibility.projectScopeId, compatibility.projectId, compatibility.projectId);
-      } else {
-        const projectScope = rowOrNotFound(this.#database.prepare(`
-          SELECT scope_id, owner_ref FROM resource_scopes
-           WHERE project_id=? AND scope_kind='project'
-        `).get(compatibility.projectId), "compatibility project resource scope");
-        if (
-          stringField(projectScope, "scope_id") !== compatibility.projectScopeId ||
-          stringField(projectScope, "owner_ref") !== compatibility.projectId
-        ) {
-          throw new FabricError("DEDUPE_CONFLICT", "compatibility project resource identity changed");
-        }
-      }
-      this.#database.prepare(`
-        INSERT INTO resource_scopes(
-          scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
-          scope_kind, owner_ref, state, revision
-        ) VALUES (?, ?, ?, NULL, ?, 'project-session', ?, 'active', 1)
-      `).run(
-        compatibility.sessionScopeId,
-        compatibility.projectId,
-        compatibility.projectSessionId,
-        compatibility.projectScopeId,
-        compatibility.projectSessionId,
       );
       this.#database.prepare(`
         INSERT INTO runs(
@@ -1166,38 +1135,29 @@ export class Fabric {
           required, state, revision, created_at, updated_at
         ) VALUES (?, ?, 'coordination-run', ?, 1, 'active', 1, ?, ?)
       `).run(compatibility.projectSessionId, input.runId, input.runId, now, now);
-      this.#database.prepare(`
-        INSERT INTO resource_scopes(
-          scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
-          scope_kind, owner_ref, state, revision
-        ) VALUES (?, ?, ?, ?, ?, 'coordination-run', ?, 'active', 1)
-      `).run(
-        compatibility.runScopeId,
-        compatibility.projectId,
-        compatibility.projectSessionId,
-        input.runId,
-        compatibility.sessionScopeId,
-        input.runId,
+      const storedProjectLimits = Object.fromEntries(this.#database.prepare(`
+        SELECT unit_key, limit_value FROM resource_dimensions
+         WHERE scope_id=? ORDER BY unit_key
+      `).all(compatibility.projectScopeId).map((value) => {
+        const dimension = rowOrNotFound(value, "compatibility project resource dimension");
+        return [stringField(dimension, "unit_key"), numberField(dimension, "limit_value")];
+      }));
+      const projectLimits = Object.keys(storedProjectLimits).length === 0
+        ? authority.budget
+        : storedProjectLimits;
+      this.#resources.ensureRunHierarchy(
+        {
+          projectId: compatibility.projectId,
+          projectSessionId: compatibility.projectSessionId,
+          coordinationRunId: input.runId,
+          actor: { kind: "compatibility-import", migrationManifestDigest: compatibility.manifestRef },
+        },
+        {
+          project: { scopeId: compatibility.projectScopeId, limits: projectLimits },
+          session: { scopeId: compatibility.sessionScopeId, limits: authority.budget },
+          run: { scopeId: compatibility.runScopeId, limits: authority.budget },
+        },
       );
-      const insertDimension = this.#database.prepare(`
-        INSERT INTO resource_dimensions(scope_id, unit_key, limit_value, used, reserved, usage_unknown)
-        VALUES (?, ?, ?, 0, 0, 0)
-      `);
-      for (const [unitKey, granted] of Object.entries(authority.budget)) {
-        if (projectInsert.changes === 1) {
-          insertDimension.run(compatibility.projectScopeId, unitKey, granted);
-        } else {
-          const projectDimension = rowOrNotFound(this.#database.prepare(`
-            SELECT limit_value FROM resource_dimensions WHERE scope_id=? AND unit_key=?
-          `).get(compatibility.projectScopeId, unitKey), "compatibility project resource dimension");
-          if (numberField(projectDimension, "limit_value") < granted) {
-            throw new FabricError("AUTHORITY_WIDENING", `compatibility run exceeds project resource ${unitKey}`);
-          }
-        }
-        for (const scopeId of [compatibility.sessionScopeId, compatibility.runScopeId]) {
-          insertDimension.run(scopeId, unitKey, granted);
-        }
-      }
       this.#database
         .prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
         .run(input.runId, input.chair.agentId);
