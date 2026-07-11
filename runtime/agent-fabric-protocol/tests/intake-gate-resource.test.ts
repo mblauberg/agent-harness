@@ -11,6 +11,15 @@ const artifact = {
   digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 } as const;
 
+const operatorCommand = {
+  credential: { capabilityId: "capability_01", token: "test-capability-token" },
+  commandId: "command_intake_01",
+  expectedRevision: 0,
+  actor: "operator_01",
+  provenance: { kind: "console-direct-input", clientId: "client_01", inputEventId: "input_01" },
+  evidenceRefs: [artifact],
+} as const;
+
 const taskRequest = {
   commandId: "command_request_intake",
   projectSessionId: "ps_01",
@@ -44,6 +53,7 @@ const taskRequest = {
 } as const;
 
 const intakeSubmission = {
+  command: operatorCommand,
   intake: {
     intakeId: "intake_01",
     projectSessionId: "ps_01",
@@ -151,8 +161,8 @@ const reservationRequest = {
     "input_tokens:openai": 1000,
   },
   writerAdmission: {
-    repositoryRoot: "/Users/user/.agents",
-    worktreePath: "/Users/user/.agents/.worktrees/spec05-protocol",
+    repositoryRoot: "/workspace/project",
+    worktreePath: "/workspace/project/.worktrees/spec05-protocol",
     sourcePrefixes: ["runtime/agent-fabric-protocol"],
     writerGeneration: 1,
   },

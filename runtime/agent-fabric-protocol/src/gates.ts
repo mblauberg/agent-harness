@@ -1,5 +1,7 @@
 import { isFabricOperation, type FabricOperation } from "./operations.js";
+import { parseOperatorMutationContext, type OperatorMutationContext } from "./operator.js";
 import {
+  oneOf,
   parseArtifactRef,
   parseIdentifier,
   parseSha256Digest,
@@ -9,8 +11,11 @@ import {
   strictRecord,
   stringArray,
   type ArtifactRef,
+  type BarrierId,
+  type CommandId,
   type CoordinationRunId,
   type GateId,
+  type InputAttestationId,
   type OperatorId,
   type ProjectSessionId,
   type Sha256Digest,
@@ -71,31 +76,164 @@ export type ScopedGate =
       releaseBinding?: ReleaseBinding;
     });
 
-export type ScopedGateCreateRequest = { gate: ScopedGate & { status: "pending" } };
-export type ScopedGateRebindRequest = {
-  gateId: GateId;
-  expectedRevision: number;
-  expectedDependencyRevision: number;
-  newDependencyRevision: number;
-  affectedTaskIds: readonly TaskId[];
+export type ScopedGateCreateRequest = {
+  command: OperatorMutationContext;
+  gate: ScopedGate & { status: "pending" };
 };
 export type ScopedGateResolveRequest = {
+  command: OperatorMutationContext;
   gateId: GateId;
-  expectedRevision: number;
   status: "approved" | "rejected" | "deferred" | "cancelled";
-  resolution: GateResolution;
+  decisionEvidence:
+    | { kind: "typed-console"; confirmationCommandId?: string }
+    | {
+        kind: "attested-input";
+        attestationId: InputAttestationId;
+        expectedIntegrationGeneration: number;
+        confirmationCommandId?: string;
+      };
 };
-export type ScopedGateCheckRequest = {
+type ScopedGateCheckBase = {
   projectSessionId: ProjectSessionId;
   coordinationRunId: CoordinationRunId;
-  taskId?: TaskId;
-  operationId?: FabricOperation;
-  enforcementPoint: GateEnforcementPoint;
   dependencyRevision: number;
 };
+export type ScopedGateCheckRequest = ScopedGateCheckBase & (
+  | { enforcementPoint: "task-readiness"; taskId: TaskId }
+  | { enforcementPoint: "operation"; operationId: FabricOperation }
+  | { enforcementPoint: "scoped-barrier"; barrierId: BarrierId }
+);
 export type ScopedGateCheckResult =
   | { allowed: true; checkedGateRevisions: Readonly<Record<string, number>> }
   | { allowed: false; blockingGateIds: readonly GateId[]; checkedGateRevisions: Readonly<Record<string, number>> };
+
+export function parseScopedGateCreateRequest(value: unknown): ScopedGateCreateRequest {
+  const record = strictRecord(value, "scopedGateCreate", ["command", "gate"]);
+  const gate = parseScopedGate(record.gate);
+  if (gate.status !== "pending") throw new TypeError("scopedGateCreate.gate.status must be pending");
+  return {
+    command: parseOperatorMutationContext(record.command, "scopedGateCreate.command"),
+    gate: { ...gate, status: "pending" },
+  };
+}
+
+export function parseScopedGateResolveRequest(value: unknown): ScopedGateResolveRequest {
+  const record = strictRecord(value, "scopedGateResolve", ["command", "gateId", "status", "decisionEvidence"]);
+  const status = oneOf(record.status, ["approved", "rejected", "deferred", "cancelled"] as const, "scopedGateResolve.status");
+  if (typeof record.decisionEvidence !== "object" || record.decisionEvidence === null || Array.isArray(record.decisionEvidence)) {
+    throw new TypeError("scopedGateResolve.decisionEvidence must be an object");
+  }
+  const kind: unknown = Reflect.get(record.decisionEvidence, "kind");
+  if (kind === "typed-console") {
+    const evidence = strictRecord(record.decisionEvidence, "scopedGateResolve.decisionEvidence", [
+      "kind",
+      "confirmationCommandId",
+    ]);
+    return {
+      command: parseOperatorMutationContext(record.command, "scopedGateResolve.command"),
+      gateId: parseIdentifier<"GateId">(record.gateId, "scopedGateResolve.gateId"),
+      status,
+      decisionEvidence: {
+        kind,
+        ...(evidence.confirmationCommandId === undefined
+          ? {}
+          : {
+              confirmationCommandId: parseIdentifier<"CommandId">(
+                evidence.confirmationCommandId,
+                "scopedGateResolve.decisionEvidence.confirmationCommandId",
+              ) as CommandId,
+            }),
+      },
+    };
+  }
+  if (kind === "attested-input") {
+    const evidence = strictRecord(record.decisionEvidence, "scopedGateResolve.decisionEvidence", [
+      "kind",
+      "attestationId",
+      "expectedIntegrationGeneration",
+      "confirmationCommandId",
+    ]);
+    return {
+      command: parseOperatorMutationContext(record.command, "scopedGateResolve.command"),
+      gateId: parseIdentifier<"GateId">(record.gateId, "scopedGateResolve.gateId"),
+      status,
+      decisionEvidence: {
+        kind,
+        attestationId: parseIdentifier<"InputAttestationId">(
+          evidence.attestationId,
+          "scopedGateResolve.decisionEvidence.attestationId",
+        ),
+        expectedIntegrationGeneration: safeInteger(
+          evidence.expectedIntegrationGeneration,
+          "scopedGateResolve.decisionEvidence.expectedIntegrationGeneration",
+          1,
+        ),
+        ...(evidence.confirmationCommandId === undefined
+          ? {}
+          : {
+              confirmationCommandId: parseIdentifier<"CommandId">(
+                evidence.confirmationCommandId,
+                "scopedGateResolve.decisionEvidence.confirmationCommandId",
+              ) as CommandId,
+            }),
+      },
+    };
+  }
+  throw new TypeError("scopedGateResolve.decisionEvidence.kind is invalid");
+}
+
+export function parseScopedGateCheckRequest(value: unknown): ScopedGateCheckRequest {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("scopedGateCheck must be an object");
+  }
+  const enforcementPoint: unknown = Reflect.get(value, "enforcementPoint");
+  const targetField = enforcementPoint === "task-readiness"
+    ? "taskId"
+    : enforcementPoint === "operation"
+      ? "operationId"
+      : enforcementPoint === "scoped-barrier"
+        ? "barrierId"
+        : undefined;
+  const record = strictRecord(value, "scopedGateCheck", [
+    "projectSessionId",
+    "coordinationRunId",
+    "dependencyRevision",
+    "enforcementPoint",
+    ...(targetField === undefined ? [] : [targetField]),
+  ]);
+  const base: ScopedGateCheckBase = {
+    projectSessionId: parseIdentifier<"ProjectSessionId">(record.projectSessionId, "scopedGateCheck.projectSessionId"),
+    coordinationRunId: parseIdentifier<"CoordinationRunId">(
+      record.coordinationRunId,
+      "scopedGateCheck.coordinationRunId",
+    ),
+    dependencyRevision: safeInteger(record.dependencyRevision, "scopedGateCheck.dependencyRevision"),
+  };
+  if (enforcementPoint === "task-readiness") {
+    if (record.taskId === undefined) throw new TypeError("scopedGateCheck.taskId is required");
+    return {
+      ...base,
+      enforcementPoint,
+      taskId: parseIdentifier<"TaskId">(record.taskId, "scopedGateCheck.taskId"),
+    };
+  }
+  if (enforcementPoint === "operation") {
+    if (record.operationId === undefined) throw new TypeError("scopedGateCheck.operationId is required");
+    if (typeof record.operationId !== "string" || !isFabricOperation(record.operationId)) {
+      throw new TypeError("scopedGateCheck.operationId is not a protocol operation");
+    }
+    return { ...base, enforcementPoint, operationId: record.operationId };
+  }
+  if (enforcementPoint === "scoped-barrier") {
+    if (record.barrierId === undefined) throw new TypeError("scopedGateCheck.barrierId is required");
+    return {
+      ...base,
+      enforcementPoint,
+      barrierId: parseIdentifier<"BarrierId">(record.barrierId, "scopedGateCheck.barrierId"),
+    };
+  }
+  throw new TypeError("scopedGateCheck.enforcementPoint is invalid");
+}
 
 function parseScope(value: unknown): GateScope {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("scopedGate.scope must be an object");

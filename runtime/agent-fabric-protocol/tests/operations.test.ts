@@ -11,10 +11,10 @@ describe("public operation vocabulary", () => {
     });
   });
 
-  it("publishes the complete Spec 05 operation vocabulary without aliases", () => {
+  it("publishes the Spec 05 extensions alongside the baseline without unsafe aliases", () => {
     const operations: unknown = Reflect.get(protocol, "FABRIC_OPERATIONS");
 
-    expect(operations).toStrictEqual({
+    expect(operations).toMatchObject({
       projectSessionCreate: "fabric.v1.project-session.create",
       projectSessionGet: "fabric.v1.project-session.read",
       projectSessionTransition: "fabric.v1.project-session.transition",
@@ -24,11 +24,10 @@ describe("public operation vocabulary", () => {
       operatorDetach: "fabric.v1.operator.detach",
       operatorHeartbeat: "fabric.v1.operator.heartbeat",
       operatorCommand: "fabric.v1.operator.command",
-      operatorInputAttest: "fabric.v1.operator.input-attest",
+      integrationInputAttest: "fabric.v1.integration.input-attest",
       intakeSubmit: "fabric.v1.intake.submit",
       intakeRevise: "fabric.v1.intake.revise",
       scopedGateCreate: "fabric.v1.scoped-gate.create",
-      scopedGateRebind: "fabric.v1.scoped-gate.rebind",
       scopedGateResolve: "fabric.v1.scoped-gate.resolve",
       scopedGateCheck: "fabric.v1.scoped-gate.check",
       resourceReserve: "fabric.v1.resource.reserve",
@@ -43,7 +42,9 @@ describe("public operation vocabulary", () => {
       resultDeliveryReassign: "fabric.v1.result-delivery.reassign",
       resultDeliveryAbandon: "fabric.v1.result-delivery.abandon",
       chairTakeover: "fabric.v1.chair.takeover",
+      projectDiscover: "fabric.v1.project.discover",
       projectionSnapshot: "fabric.v1.operator-projection.snapshot",
+      projectionPage: "fabric.v1.operator-projection.page",
       projectionEvents: "fabric.v1.operator-projection.events",
       messageBodyRead: "fabric.v1.message-body.read",
       projectSessionDrain: "fabric.v1.project-session.drain",
@@ -51,6 +52,8 @@ describe("public operation vocabulary", () => {
       daemonDrain: "fabric.v1.daemon.drain",
       daemonStop: "fabric.v1.daemon.stop",
     });
+    expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.scoped-gate.rebind");
+    expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.operator.input-attest");
   });
 });
 

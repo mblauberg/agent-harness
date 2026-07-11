@@ -1,5 +1,6 @@
 import {
   oneOf,
+  parseArtifactRef,
   parseIdentifier,
   parseSha256Digest,
   parseTimestamp,
@@ -13,6 +14,7 @@ import {
   type CoordinationRunId,
   type GateId,
   type InputAttestationId,
+  type IntegrationId,
   type NonEmptyReadonlyArray,
   type OperatorClientId,
   type OperatorId,
@@ -87,10 +89,10 @@ export type OperatorCapabilityCredential = {
 export type OperatorProvenance =
   | { kind: "console-direct-input"; clientId: OperatorClientId; inputEventId: string }
   | {
-      kind: "provider-direct-input";
-      providerId: string;
-      providerSessionRef: ProviderSessionRef;
-      inputEventId: string;
+      kind: "attested-provider-input";
+      attestationId: InputAttestationId;
+      integrationId: IntegrationId;
+      integrationGeneration: number;
     };
 
 export type OperatorMutationContext = {
@@ -106,12 +108,20 @@ export type GateDecision = "approve" | "reject" | "defer" | "request-changes";
 
 export type OperatorInputAttestation = {
   attestationId: InputAttestationId;
+  integrationId: IntegrationId;
+  integrationGeneration: number;
   operatorId: OperatorId;
   projectId: ProjectId;
   projectSessionId: ProjectSessionId;
-  providerMessageId: string;
+  providerEvent: {
+    providerId: string;
+    providerSessionRef: ProviderSessionRef;
+    providerMessageId: string;
+    inputEventId: string;
+    eventDigest: Sha256Digest;
+    classification: "direct-human";
+  };
   humanUtterance: string;
-  channel: OperatorProvenance;
   gateBinding: {
     gateId: GateId;
     expectedGateRevision: number;
@@ -119,6 +129,19 @@ export type OperatorInputAttestation = {
     interpretedDecision: GateDecision;
   };
   recordedAt: Timestamp;
+};
+
+export type IntegrationMutationContext = {
+  commandId: CommandId;
+  integrationId: IntegrationId;
+  expectedIntegrationGeneration: number;
+  eventId: string;
+  eventDigest: Sha256Digest;
+};
+
+export type IntegrationInputAttestationRequest = {
+  context: IntegrationMutationContext;
+  attestation: OperatorInputAttestation;
 };
 
 export type OperatorCommandAudit = {
@@ -278,30 +301,69 @@ function parseProvenance(value: unknown, path: string): OperatorProvenance {
       inputEventId: requiredString(record.inputEventId, `${path}.inputEventId`),
     };
   }
-  if (kind === "provider-direct-input") {
-    const record = strictRecord(value, path, ["kind", "providerId", "providerSessionRef", "inputEventId"]);
+  if (kind === "attested-provider-input") {
+    const record = strictRecord(value, path, ["kind", "attestationId", "integrationId", "integrationGeneration"]);
     return {
       kind,
-      providerId: requiredString(record.providerId, `${path}.providerId`),
-      providerSessionRef: parseIdentifier<"ProviderSessionRef">(record.providerSessionRef, `${path}.providerSessionRef`),
-      inputEventId: requiredString(record.inputEventId, `${path}.inputEventId`),
+      attestationId: parseIdentifier<"InputAttestationId">(record.attestationId, `${path}.attestationId`),
+      integrationId: parseIdentifier<"IntegrationId">(record.integrationId, `${path}.integrationId`),
+      integrationGeneration: safeInteger(record.integrationGeneration, `${path}.integrationGeneration`, 1),
     };
   }
-  throw new TypeError(`${path}.kind must be one of console-direct-input, provider-direct-input`);
+  throw new TypeError(`${path}.kind must be one of console-direct-input, attested-provider-input`);
+}
+
+export function parseOperatorMutationContext(value: unknown, path = "operatorMutation"): OperatorMutationContext {
+  const record = strictRecord(value, path, [
+    "credential",
+    "commandId",
+    "expectedRevision",
+    "actor",
+    "provenance",
+    "evidenceRefs",
+  ]);
+  const credential = strictRecord(record.credential, `${path}.credential`, ["capabilityId", "token"]);
+  if (!Array.isArray(record.evidenceRefs)) throw new TypeError(`${path}.evidenceRefs must be an array`);
+  return {
+    credential: {
+      capabilityId: parseIdentifier<"CapabilityId">(credential.capabilityId, `${path}.credential.capabilityId`),
+      token: requiredString(credential.token, `${path}.credential.token`),
+    },
+    commandId: parseIdentifier<"CommandId">(record.commandId, `${path}.commandId`),
+    expectedRevision: safeInteger(record.expectedRevision, `${path}.expectedRevision`),
+    actor: parseIdentifier<"OperatorId">(record.actor, `${path}.actor`),
+    provenance: parseProvenance(record.provenance, `${path}.provenance`),
+    evidenceRefs: record.evidenceRefs.map((evidence, index) => parseArtifactRef(
+      evidence,
+      `${path}.evidenceRefs[${String(index)}]`,
+    )),
+  };
 }
 
 export function parseOperatorInputAttestation(value: unknown): OperatorInputAttestation {
   const record = strictRecord(value, "operatorInputAttestation", [
     "attestationId",
+    "integrationId",
+    "integrationGeneration",
     "operatorId",
     "projectId",
     "projectSessionId",
-    "providerMessageId",
+    "providerEvent",
     "humanUtterance",
-    "channel",
     "gateBinding",
     "recordedAt",
   ]);
+  const providerEvent = strictRecord(record.providerEvent, "operatorInputAttestation.providerEvent", [
+    "providerId",
+    "providerSessionRef",
+    "providerMessageId",
+    "inputEventId",
+    "eventDigest",
+    "classification",
+  ]);
+  if (providerEvent.classification !== "direct-human") {
+    throw new TypeError("operatorInputAttestation.providerEvent.classification must be direct-human");
+  }
   const binding = strictRecord(record.gateBinding, "operatorInputAttestation.gateBinding", [
     "gateId",
     "expectedGateRevision",
@@ -322,15 +384,33 @@ export function parseOperatorInputAttestation(value: unknown): OperatorInputAtte
       record.attestationId,
       "operatorInputAttestation.attestationId",
     ),
+    integrationId: parseIdentifier<"IntegrationId">(record.integrationId, "operatorInputAttestation.integrationId"),
+    integrationGeneration: safeInteger(
+      record.integrationGeneration,
+      "operatorInputAttestation.integrationGeneration",
+      1,
+    ),
     operatorId: parseIdentifier<"OperatorId">(record.operatorId, "operatorInputAttestation.operatorId"),
     projectId: parseIdentifier<"ProjectId">(record.projectId, "operatorInputAttestation.projectId"),
     projectSessionId: parseIdentifier<"ProjectSessionId">(
       record.projectSessionId,
       "operatorInputAttestation.projectSessionId",
     ),
-    providerMessageId: requiredString(record.providerMessageId, "operatorInputAttestation.providerMessageId"),
+    providerEvent: {
+      providerId: requiredString(providerEvent.providerId, "operatorInputAttestation.providerEvent.providerId"),
+      providerSessionRef: parseIdentifier<"ProviderSessionRef">(
+        providerEvent.providerSessionRef,
+        "operatorInputAttestation.providerEvent.providerSessionRef",
+      ),
+      providerMessageId: requiredString(
+        providerEvent.providerMessageId,
+        "operatorInputAttestation.providerEvent.providerMessageId",
+      ),
+      inputEventId: requiredString(providerEvent.inputEventId, "operatorInputAttestation.providerEvent.inputEventId"),
+      eventDigest: parseSha256Digest(providerEvent.eventDigest, "operatorInputAttestation.providerEvent.eventDigest"),
+      classification: "direct-human",
+    },
     humanUtterance: requiredString(record.humanUtterance, "operatorInputAttestation.humanUtterance"),
-    channel: parseProvenance(record.channel, "operatorInputAttestation.channel"),
     gateBinding: {
       gateId: parseIdentifier<"GateId">(binding.gateId, "operatorInputAttestation.gateBinding.gateId"),
       expectedGateRevision: safeInteger(
@@ -346,4 +426,39 @@ export function parseOperatorInputAttestation(value: unknown): OperatorInputAtte
     },
     recordedAt: parseTimestamp(record.recordedAt, "operatorInputAttestation.recordedAt"),
   };
+}
+
+export function parseIntegrationInputAttestationRequest(value: unknown): IntegrationInputAttestationRequest {
+  const record = strictRecord(value, "integrationInputAttestation", ["context", "attestation"]);
+  const contextRecord = strictRecord(record.context, "integrationInputAttestation.context", [
+    "commandId",
+    "integrationId",
+    "expectedIntegrationGeneration",
+    "eventId",
+    "eventDigest",
+  ]);
+  const context: IntegrationMutationContext = {
+    commandId: parseIdentifier<"CommandId">(contextRecord.commandId, "integrationInputAttestation.context.commandId"),
+    integrationId: parseIdentifier<"IntegrationId">(
+      contextRecord.integrationId,
+      "integrationInputAttestation.context.integrationId",
+    ),
+    expectedIntegrationGeneration: safeInteger(
+      contextRecord.expectedIntegrationGeneration,
+      "integrationInputAttestation.context.expectedIntegrationGeneration",
+      1,
+    ),
+    eventId: requiredString(contextRecord.eventId, "integrationInputAttestation.context.eventId"),
+    eventDigest: parseSha256Digest(contextRecord.eventDigest, "integrationInputAttestation.context.eventDigest"),
+  };
+  const attestation = parseOperatorInputAttestation(record.attestation);
+  if (attestation.integrationId !== context.integrationId ||
+      attestation.integrationGeneration !== context.expectedIntegrationGeneration) {
+    throw new TypeError("integrationInputAttestation integration generation does not match authenticated context");
+  }
+  if (attestation.providerEvent.inputEventId !== context.eventId ||
+      attestation.providerEvent.eventDigest !== context.eventDigest) {
+    throw new TypeError("integrationInputAttestation immutable provider event does not match authenticated context");
+  }
+  return { context, attestation };
 }

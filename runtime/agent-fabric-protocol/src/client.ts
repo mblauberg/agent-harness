@@ -4,13 +4,17 @@ import type {
   ScopedGateCheckRequest,
   ScopedGateCheckResult,
   ScopedGateCreateRequest,
-  ScopedGateRebindRequest,
   ScopedGateResolveRequest,
 } from "./gates.js";
 import type { Intake, IntakeRevisionRequest, IntakeSubmission } from "./intake.js";
 import type { MembershipBindRequest, MembershipBindResult } from "./membership.js";
-import { FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
-import type { ChairTakeoverRequest, OperatorCommandAudit, OperatorInputAttestation } from "./operator.js";
+import { FABRIC_OPERATIONS, type BaselineOperation, type FabricOperation } from "./operations.js";
+import type {
+  ChairTakeoverRequest,
+  IntegrationInputAttestationRequest,
+  OperatorCommandAudit,
+  OperatorInputAttestation,
+} from "./operator.js";
 import type {
   MessageBodyReadRequest,
   MessageBodyReadResult,
@@ -19,8 +23,11 @@ import type {
   OperatorCommandRequest,
   OperatorDetachRequest,
   OperatorHeartbeatRequest,
-  OperatorInputAttestRequest,
   OperatorProjectionSnapshot,
+  ProjectDiscoveryRequest,
+  ProjectDiscoveryResult,
+  ProjectionPageRequest,
+  ProjectionPageResult,
   ProjectionEventsRequest,
   ProjectionEventsResult,
   ProjectionSnapshotRequest,
@@ -64,7 +71,7 @@ import type {
 
 export interface ProtocolRpcTransport {
   readonly features: readonly ProtocolFeature[];
-  call<Operation extends FabricOperation>(
+  call<Operation extends keyof OperationInputMap & FabricOperation>(
     operation: Operation,
     input: OperationInputMap[Operation],
   ): Promise<OperationResultMap[Operation]>;
@@ -79,12 +86,18 @@ export interface ProjectSessionClient {
   bindMembership(input: MembershipBindRequest): Promise<MembershipBindResult>;
 }
 
+export interface BaselineFabricClient {
+  call<Operation extends BaselineOperation>(
+    operation: Operation,
+    input: OperationInputMap[Operation],
+  ): Promise<OperationResultMap[Operation]>;
+}
+
 export interface OperatorControlClient {
   attach(input: OperatorAttachRequest): Promise<OperatorAttachment>;
   detach(input: OperatorDetachRequest): Promise<{ detached: true; revision: number }>;
   heartbeat(input: OperatorHeartbeatRequest): Promise<OperatorAttachment>;
   command(input: OperatorCommandRequest): Promise<OperatorCommandAudit>;
-  attestInput(input: OperatorInputAttestRequest): Promise<OperatorInputAttestation>;
 }
 
 export interface IntakeClient {
@@ -94,7 +107,6 @@ export interface IntakeClient {
 
 export interface ScopedGateClient {
   create(input: ScopedGateCreateRequest): Promise<ScopedGate>;
-  rebind(input: ScopedGateRebindRequest): Promise<ScopedGate>;
   resolve(input: ScopedGateResolveRequest): Promise<ScopedGate>;
   check(input: ScopedGateCheckRequest): Promise<ScopedGateCheckResult>;
 }
@@ -121,8 +133,14 @@ export interface TakeoverClient {
 }
 
 export interface ProjectionClient {
+  discover(input: ProjectDiscoveryRequest): Promise<ProjectDiscoveryResult>;
   snapshot(input: ProjectionSnapshotRequest): Promise<OperatorProjectionSnapshot>;
+  page(input: ProjectionPageRequest): Promise<ProjectionPageResult>;
   events(input: ProjectionEventsRequest): Promise<ProjectionEventsResult>;
+}
+
+export interface InputAttestationClient {
+  attestInput(input: IntegrationInputAttestationRequest): Promise<OperatorInputAttestation>;
 }
 
 export interface MessageBodyClient {
@@ -154,9 +172,17 @@ export type NegotiatedOperatorClient = {
 export type NegotiatedAgentClient = {
   kind: "agent";
   features: readonly ProtocolFeature[];
+  core?: BaselineFabricClient;
   gates?: Pick<ScopedGateClient, "check">;
   resources?: ResourceReservationClient;
   requestResults?: RequestResultClient;
+  close(): Promise<void>;
+};
+
+export type NegotiatedIntegrationClient = {
+  kind: "integration";
+  features: readonly ProtocolFeature[];
+  inputAttestation?: InputAttestationClient;
   close(): Promise<void>;
 };
 
@@ -180,7 +206,6 @@ function operatorControl(transport: ProtocolRpcTransport): OperatorControlClient
     detach: (input) => transport.call(FABRIC_OPERATIONS.operatorDetach, input),
     heartbeat: (input) => transport.call(FABRIC_OPERATIONS.operatorHeartbeat, input),
     command: (input) => transport.call(FABRIC_OPERATIONS.operatorCommand, input),
-    attestInput: (input) => transport.call(FABRIC_OPERATIONS.operatorInputAttest, input),
   };
 }
 
@@ -194,7 +219,6 @@ function intakes(transport: ProtocolRpcTransport): IntakeClient {
 function gates(transport: ProtocolRpcTransport): ScopedGateClient {
   return {
     create: (input) => transport.call(FABRIC_OPERATIONS.scopedGateCreate, input),
-    rebind: (input) => transport.call(FABRIC_OPERATIONS.scopedGateRebind, input),
     resolve: (input) => transport.call(FABRIC_OPERATIONS.scopedGateResolve, input),
     check: (input) => transport.call(FABRIC_OPERATIONS.scopedGateCheck, input),
   };
@@ -245,7 +269,9 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
     ...(hasFeature(transport, "operator-projection.v1")
       ? {
           projection: {
+            discover: (input: ProjectDiscoveryRequest) => transport.call(FABRIC_OPERATIONS.projectDiscover, input),
             snapshot: (input: ProjectionSnapshotRequest) => transport.call(FABRIC_OPERATIONS.projectionSnapshot, input),
+            page: (input: ProjectionPageRequest) => transport.call(FABRIC_OPERATIONS.projectionPage, input),
             events: (input: ProjectionEventsRequest) => transport.call(FABRIC_OPERATIONS.projectionEvents, input),
           },
         }
@@ -262,11 +288,37 @@ export function createAgentClient(transport: ProtocolRpcTransport): NegotiatedAg
   return {
     kind: "agent",
     features: [...transport.features],
+    ...(hasFeature(transport, "fabric-core.v1")
+      ? {
+          core: {
+            call: <Operation extends BaselineOperation>(
+              operation: Operation,
+              input: OperationInputMap[Operation],
+            ) => transport.call(operation, input),
+          },
+        }
+      : {}),
     ...(hasFeature(transport, "scoped-gates.v1")
       ? { gates: { check: (input: ScopedGateCheckRequest) => transport.call(FABRIC_OPERATIONS.scopedGateCheck, input) } }
       : {}),
     ...(hasFeature(transport, "resource-reservations.v1") ? { resources: resources(transport) } : {}),
     ...(hasFeature(transport, "request-results.v1") ? { requestResults: requestResults(transport) } : {}),
+    close: () => transport.close(),
+  };
+}
+
+export function createIntegrationClient(transport: ProtocolRpcTransport): NegotiatedIntegrationClient {
+  return {
+    kind: "integration",
+    features: [...transport.features],
+    ...(hasFeature(transport, "input-attestation.v1")
+      ? {
+          inputAttestation: {
+            attestInput: (input: IntegrationInputAttestationRequest) =>
+              transport.call(FABRIC_OPERATIONS.integrationInputAttest, input),
+          },
+        }
+      : {}),
     close: () => transport.close(),
   };
 }

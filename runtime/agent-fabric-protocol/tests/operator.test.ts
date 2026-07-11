@@ -49,16 +49,19 @@ describe("operator capability schema", () => {
 
 const directInputAttestation = {
   attestationId: "attest_01",
+  integrationId: "integration_codex",
+  integrationGeneration: 3,
   operatorId: "operator_01",
   projectId: "project_01",
   projectSessionId: "ps_01",
-  providerMessageId: "provider-message-01",
   humanUtterance: "Accept gate G-1 for the reviewed digest.",
-  channel: {
-    kind: "provider-direct-input",
+  providerEvent: {
     providerId: "codex",
     providerSessionRef: "thread_01",
+    providerMessageId: "provider-message-01",
     inputEventId: "input_01",
+    eventDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    classification: "direct-human",
   },
   gateBinding: {
     gateId: "gate_01",
@@ -70,21 +73,21 @@ const directInputAttestation = {
 } as const;
 
 describe("operator direct-input attestation schema", () => {
-  it("accepts independently attested direct provider input", () => {
+  it("accepts integration-recorded direct provider input", () => {
     expect(parseOperatorInputAttestation(directInputAttestation)).toStrictEqual(directInputAttestation);
   });
 
   it("rejects pane-injected text as approval provenance", () => {
     expect(() => parseOperatorInputAttestation({
       ...directInputAttestation,
-      channel: { kind: "pane-injection", paneId: "pane_01" },
-    })).toThrowError(/channel.kind must be one of console-direct-input, provider-direct-input/);
+      providerEvent: { ...directInputAttestation.providerEvent, classification: "pane-injection" },
+    })).toThrowError(/classification must be direct-human/);
   });
 
-  it("rejects unavailable input provenance", () => {
+  it("rejects agent-authored input provenance", () => {
     expect(() => parseOperatorInputAttestation({
       ...directInputAttestation,
-      channel: { kind: "unavailable" },
-    })).toThrowError(/channel.kind must be one of console-direct-input, provider-direct-input/);
+      providerEvent: { ...directInputAttestation.providerEvent, classification: "agent-authored" },
+    })).toThrowError(/classification must be direct-human/);
   });
 });

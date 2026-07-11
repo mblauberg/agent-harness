@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FABRIC_OPERATIONS,
+  createAgentClient,
   createOperatorClient,
   type FabricOperation,
   type OperationInputMap,
@@ -74,5 +75,23 @@ describe("negotiated operator client", () => {
       operation: FABRIC_OPERATIONS.projectSessionGet,
       input: { projectId: "project_01", projectSessionId: "ps_01", expectedGeneration: 1 },
     }]);
+  });
+});
+
+describe("negotiated baseline agent client", () => {
+  it("exposes the full typed baseline call surface only when fabric-core is negotiated", async () => {
+    const transport = new RecordingTransport(["fabric-core.v1"], { messageId: "message_01" });
+    const client = createAgentClient(transport);
+    if (client.core === undefined) throw new Error("expected baseline core feature");
+
+    await client.core.call(FABRIC_OPERATIONS.sendMessage, {
+      audience: { kind: "agents", agentIds: ["agent_02"] },
+      kind: "event",
+      body: "ready",
+      requiresAck: false,
+      dedupeKey: "message_01",
+    });
+
+    expect(transport.calls.at(-1)?.operation).toBe(FABRIC_OPERATIONS.sendMessage);
   });
 });

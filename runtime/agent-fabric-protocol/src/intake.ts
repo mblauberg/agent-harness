@@ -9,6 +9,7 @@ import {
   type IntakeId,
   type ProjectSessionId,
 } from "./primitives.js";
+import { parseOperatorMutationContext, type OperatorMutationContext } from "./operator.js";
 import { parseTaskRequest, type TaskRequest } from "./request-result.js";
 
 export const INTAKE_STATES = [
@@ -35,13 +36,14 @@ export type Intake = {
 };
 
 export type IntakeSubmission = {
+  command: OperatorMutationContext;
   intake: Intake & { revision: 1; state: "awaiting-chair" };
   chairRequest: TaskRequest & {
     request: TaskRequest["request"] & { intakeBinding: NonNullable<TaskRequest["request"]["intakeBinding"]> };
   };
 };
 
-export type IntakeRevisionRequest = {
+type IntakeRevision = {
   intakeId: IntakeId;
   expectedRevision: number;
   state: IntakeState;
@@ -50,6 +52,18 @@ export type IntakeRevisionRequest = {
   gateIds: readonly GateId[];
   chairRequest?: TaskRequest;
 };
+
+export type IntakeRevisionRequest =
+  | (IntakeRevision & { origin: "operator"; command: OperatorMutationContext })
+  | (IntakeRevision & {
+      origin: "chair";
+      command: {
+        commandId: string;
+        ownerLeaseId: string;
+        ownerLeaseGeneration: number;
+        expectedRevision: number;
+      };
+    });
 
 function parseIntake(value: unknown): Intake {
   const record = strictRecord(value, "intakeSubmission.intake", [
@@ -92,7 +106,8 @@ function sameOrderedStrings(left: readonly string[], right: readonly string[]): 
 }
 
 export function parseIntakeSubmission(value: unknown): IntakeSubmission {
-  const record = strictRecord(value, "intakeSubmission", ["intake", "chairRequest"]);
+  const record = strictRecord(value, "intakeSubmission", ["command", "intake", "chairRequest"]);
+  const command = parseOperatorMutationContext(record.command, "intakeSubmission.command");
   const intake = parseIntake(record.intake);
   if (intake.revision !== 1 || intake.state !== "awaiting-chair") {
     throw new TypeError("intakeSubmission.intake must start at revision 1 in awaiting-chair state");
@@ -112,5 +127,72 @@ export function parseIntakeSubmission(value: unknown): IntakeSubmission {
   if (chairRequest.projectSessionId !== intake.projectSessionId) {
     throw new TypeError("intakeSubmission chair request project session does not match");
   }
-  return { intake: { ...intake, revision: 1, state: "awaiting-chair" }, chairRequest: { ...chairRequest, request: { ...chairRequest.request, intakeBinding: binding } } };
+  return {
+    command,
+    intake: { ...intake, revision: 1, state: "awaiting-chair" },
+    chairRequest: { ...chairRequest, request: { ...chairRequest.request, intakeBinding: binding } },
+  };
+}
+
+export function parseIntakeRevisionRequest(value: unknown): IntakeRevisionRequest {
+  const record = strictRecord(value, "intakeRevision", [
+    "origin",
+    "command",
+    "intakeId",
+    "expectedRevision",
+    "state",
+    "summary",
+    "artifactRefs",
+    "gateIds",
+    "chairRequest",
+  ]);
+  const state = INTAKE_STATES.find((candidate) => candidate === record.state);
+  if (state === undefined) throw new TypeError("intakeRevision.state is invalid");
+  if (!Array.isArray(record.artifactRefs)) throw new TypeError("intakeRevision.artifactRefs must be an array");
+  if (!Array.isArray(record.gateIds)) throw new TypeError("intakeRevision.gateIds must be an array");
+  const revision = {
+    intakeId: parseIdentifier<"IntakeId">(record.intakeId, "intakeRevision.intakeId"),
+    expectedRevision: safeInteger(record.expectedRevision, "intakeRevision.expectedRevision", 1),
+    state,
+    summary: requiredString(record.summary, "intakeRevision.summary"),
+    artifactRefs: record.artifactRefs.map((artifact, index) => parseArtifactRef(
+      artifact,
+      `intakeRevision.artifactRefs[${String(index)}]`,
+    )),
+    gateIds: record.gateIds.map((gateId, index) => parseIdentifier<"GateId">(
+      gateId,
+      `intakeRevision.gateIds[${String(index)}]`,
+    )),
+    ...(record.chairRequest === undefined ? {} : { chairRequest: parseTaskRequest(record.chairRequest) }),
+  };
+  if (record.origin === "operator") {
+    return {
+      ...revision,
+      origin: "operator",
+      command: parseOperatorMutationContext(record.command, "intakeRevision.command"),
+    };
+  }
+  if (record.origin === "chair") {
+    const command = strictRecord(record.command, "intakeRevision.command", [
+      "commandId",
+      "ownerLeaseId",
+      "ownerLeaseGeneration",
+      "expectedRevision",
+    ]);
+    return {
+      ...revision,
+      origin: "chair",
+      command: {
+        commandId: requiredString(command.commandId, "intakeRevision.command.commandId"),
+        ownerLeaseId: requiredString(command.ownerLeaseId, "intakeRevision.command.ownerLeaseId"),
+        ownerLeaseGeneration: safeInteger(
+          command.ownerLeaseGeneration,
+          "intakeRevision.command.ownerLeaseGeneration",
+          1,
+        ),
+        expectedRevision: safeInteger(command.expectedRevision, "intakeRevision.command.expectedRevision", 1),
+      },
+    };
+  }
+  throw new TypeError("intakeRevision.origin must be operator or chair");
 }

@@ -1,8 +1,4 @@
-import type {
-  OperatorCapabilityCredential,
-  OperatorInputAttestation,
-  OperatorMutationContext,
-} from "./operator.js";
+import type { OperatorCapabilityCredential, OperatorMutationContext } from "./operator.js";
 import type {
   AgentId,
   ArtifactRef,
@@ -14,6 +10,7 @@ import type {
   ProjectionCursor,
   Sha256Digest,
   TaskId,
+  WorkstreamId,
   Timestamp,
 } from "./primitives.js";
 import type { ProjectSession } from "./project-session.js";
@@ -65,7 +62,7 @@ export type RunProjection = {
 export type OperatorProjectionSnapshot = {
   schemaVersion: 1;
   project: ProjectionFact<{ projectId: ProjectId; canonicalRoot: string }>;
-  session: ProjectionFact<ProjectSession>;
+  session: ProjectionFact<ProjectSession | null>;
   runs: ProjectionFact<readonly RunProjection[]>;
   attention: ProjectionFact<readonly AttentionItem[]>;
   capacity: ProjectionFact<Readonly<Record<string, JsonValue>>>;
@@ -85,7 +82,7 @@ export type ProjectionEvent = {
 export type ProjectionSnapshotRequest = {
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
-  projectSessionId: ProjectSessionId;
+  projectSessionId?: ProjectSessionId;
 };
 
 export type ProjectionEventsRequest = ProjectionSnapshotRequest & {
@@ -97,6 +94,134 @@ export type ProjectionEventsResult = {
   events: readonly ProjectionEvent[];
   nextCursor: ProjectionCursor;
 };
+
+export type ProjectSessionDiscovery = {
+  projectSessionId: ProjectSessionId;
+  mode: "coordinated" | "independent";
+  state: ProjectSession["state"];
+  revision: number;
+  generation: number;
+  lastEventAt: Timestamp;
+};
+
+export type ProjectDiscoveryRequest = {
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  after: number;
+  limit: number;
+};
+
+export type ProjectDiscoveryResult = {
+  project: ProjectionFact<{ projectId: ProjectId; canonicalRoot: string }>;
+  sessions: ProjectionFact<{
+    items: readonly ProjectSessionDiscovery[];
+    nextCursor: number;
+    hasMore: boolean;
+  }>;
+};
+
+export type ConsoleView =
+  | "attention"
+  | "project"
+  | "runs"
+  | "work"
+  | "agents"
+  | "evidence"
+  | "activity"
+  | "system";
+
+export type ProjectViewItem = {
+  projectId: ProjectId;
+  goal: string;
+  acceptedScopeRef: ArtifactRef | null;
+  repositoryRevision: string;
+  github: ProjectionFact<{ repository: string; openPullRequests: number }>;
+};
+
+export type WorkViewItem = {
+  taskId: TaskId;
+  workstreamId: WorkstreamId | null;
+  parentTaskId: TaskId | null;
+  state: string;
+  ownerAgentId: AgentId | null;
+  sourcePrefixes: readonly string[];
+  worktreePath: string | null;
+  barrierIds: readonly string[];
+  checkState: "pending" | "passing" | "failing" | "unknown";
+};
+
+export type AgentViewItem = {
+  agentId: AgentId;
+  stableTaskId: TaskId | null;
+  stableWorkstreamId: WorkstreamId | null;
+  role: "chair" | "lead" | "worker" | "reviewer";
+  provider: string;
+  modelFamily: string;
+  providerSessionRef: string | null;
+  providerSessionGeneration: number;
+  lifecycle: string;
+  contextPressure: "low" | "medium" | "high" | "unknown";
+  visibility: ProjectionFact<{ paneRef: string | null }>;
+};
+
+export type EvidenceViewItem = {
+  evidenceId: string;
+  kind: "artifact" | "diff" | "test" | "review" | "receipt";
+  artifactRef: ArtifactRef;
+  taskId: TaskId | null;
+  provenance: string;
+  status: "pass" | "fail" | "pending" | "informational";
+};
+
+export type ActivityViewItem = {
+  eventId: string;
+  kind: "message" | "decision" | "lifecycle" | "operation";
+  actorId: string | null;
+  taskId: TaskId | null;
+  summary: string;
+  occurredAt: Timestamp;
+  sourceRevision: number;
+};
+
+export type SystemViewItem = {
+  componentId: string;
+  kind: "daemon" | "adapter" | "trust" | "seat" | "integration";
+  state: "healthy" | "degraded" | "stale" | "unavailable" | "conflict";
+  generation: number;
+  expiresAt: Timestamp | null;
+  detail: string;
+};
+
+export type ProjectionViewItemMap = {
+  attention: AttentionItem;
+  project: ProjectViewItem;
+  runs: RunProjection;
+  work: WorkViewItem;
+  agents: AgentViewItem;
+  evidence: EvidenceViewItem;
+  activity: ActivityViewItem;
+  system: SystemViewItem;
+};
+
+export type ProjectionPageRequest<View extends ConsoleView = ConsoleView> = {
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  projectSessionId?: ProjectSessionId;
+  view: View;
+  after: number;
+  limit: number;
+};
+
+export type ProjectionPageResult<View extends ConsoleView = ConsoleView> = View extends ConsoleView
+  ? {
+      view: View;
+      page: ProjectionFact<{
+        items: readonly ProjectionViewItemMap[View][];
+        nextCursor: number;
+        hasMore: boolean;
+      }>;
+    }
+  : never;
 
 export type MessageBodyReadRequest = {
   credential: OperatorCapabilityCredential;
@@ -137,4 +262,3 @@ export type OperatorCommandRequest = {
   targetTaskId?: TaskId;
   payload: JsonValue;
 };
-export type OperatorInputAttestRequest = { command: OperatorMutationContext; attestation: OperatorInputAttestation };

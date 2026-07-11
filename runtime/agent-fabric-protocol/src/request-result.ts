@@ -1,5 +1,7 @@
 import {
   parseArtifactRef,
+  parseBoundedUtf8String,
+  parseCanonicalRelativePath,
   parseIdentifier,
   parseSha256Digest,
   parseTimestamp,
@@ -236,7 +238,12 @@ export function parseTaskRequest(value: unknown): TaskRequest {
       taskRevision: safeInteger(task.taskRevision, "taskRequest.task.taskRevision", 1),
       objective: requiredString(task.objective, "taskRequest.task.objective"),
       baseRevision: requiredString(task.baseRevision, "taskRequest.task.baseRevision"),
-      expectedArtifactPaths: stringArray(task.expectedArtifactPaths, "taskRequest.task.expectedArtifactPaths"),
+      expectedArtifactPaths: stringArray(task.expectedArtifactPaths, "taskRequest.task.expectedArtifactPaths").map(
+        (artifactPath, index) => parseCanonicalRelativePath(
+          artifactPath,
+          `taskRequest.task.expectedArtifactPaths[${String(index)}]`,
+        ),
+      ),
     },
     request: {
       requestRevision: safeInteger(request.requestRevision, "taskRequest.request.requestRevision", 1),
@@ -331,7 +338,7 @@ export function parseTaskCompleteWithReply(value: unknown): TaskCompleteWithRepl
         "taskCompleteWithReply.reply.conversationId",
       ),
       replyToMessageId,
-      body: requiredString(reply.body, "taskCompleteWithReply.reply.body"),
+      body: parseBoundedUtf8String(reply.body, "taskCompleteWithReply.reply.body", 4096),
       artifactRefs: parseArtifactRefs(reply.artifactRefs, "taskCompleteWithReply.reply.artifactRefs"),
     },
     terminalResult: {

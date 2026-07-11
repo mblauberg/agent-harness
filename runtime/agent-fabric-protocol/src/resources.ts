@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
   parseIdentifier,
+  parseCanonicalRelativePath,
   requiredString,
   safeInteger,
   strictRecord,
@@ -181,11 +182,10 @@ function parseWriterAdmission(value: unknown): WriterAdmission {
     throw new TypeError("resourceReservation.writerAdmission.sourcePrefixes must not be empty");
   }
   const sourcePrefixes = record.sourcePrefixes.map((prefix, index) => {
-    const parsed = requiredString(prefix, `resourceReservation.writerAdmission.sourcePrefixes[${String(index)}]`);
-    if (isAbsolute(parsed) || parsed.split(/[\\/]/u).includes("..") || /[*?\[\]]/u.test(parsed)) {
-      throw new TypeError(`resourceReservation.writerAdmission.sourcePrefixes[${String(index)}] must be canonical and relative`);
-    }
-    return parsed;
+    return parseCanonicalRelativePath(
+      prefix,
+      `resourceReservation.writerAdmission.sourcePrefixes[${String(index)}]`,
+    );
   });
   return {
     repositoryRoot,
@@ -217,6 +217,29 @@ export function parseResourceReservationRequest(value: unknown): ResourceReserva
     if (previous === undefined || current === undefined || scopeRank[current.kind] !== scopeRank[previous.kind] + 1) {
       throw new TypeError("resourceReservation.path must be a contiguous ancestor chain");
     }
+  }
+  if (path[0].projectId !== path[1].projectId) {
+    throw new TypeError("resourceReservation ancestor identity mismatch: project -> project-session");
+  }
+  const runScope = path[2];
+  if (runScope !== undefined && runScope.kind === "coordination-run" && runScope.projectSessionId !== path[1].projectSessionId) {
+    throw new TypeError("resourceReservation ancestor identity mismatch: project-session -> coordination-run");
+  }
+  const teamScope = path[3];
+  if (
+    runScope !== undefined && runScope.kind === "coordination-run" &&
+    teamScope !== undefined && teamScope.kind === "team" &&
+    teamScope.coordinationRunId !== runScope.coordinationRunId
+  ) {
+    throw new TypeError("resourceReservation ancestor identity mismatch: coordination-run -> team");
+  }
+  const agentScope = path[4];
+  if (
+    teamScope !== undefined && teamScope.kind === "team" &&
+    agentScope !== undefined && agentScope.kind === "agent" &&
+    agentScope.teamId !== teamScope.teamId
+  ) {
+    throw new TypeError("resourceReservation ancestor identity mismatch: team -> agent");
   }
   const projectSessionId = parseIdentifier<"ProjectSessionId">(
     record.projectSessionId,

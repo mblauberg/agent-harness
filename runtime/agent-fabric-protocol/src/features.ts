@@ -1,10 +1,16 @@
-import { FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
+import {
+  OPERATION_REGISTRY,
+  type FabricOperation,
+  type OperationFeature,
+} from "./operations.js";
 
 export const FABRIC_PROTOCOL_VERSION = 1 as const;
 
 export const PROTOCOL_FEATURES = [
+  "fabric-core.v1",
   "project-sessions.v1",
   "operator-control.v1",
+  "input-attestation.v1",
   "intakes.v1",
   "scoped-gates.v1",
   "resource-reservations.v1",
@@ -15,55 +21,19 @@ export const PROTOCOL_FEATURES = [
   "lifecycle-control.v1",
 ] as const;
 
-export type ProtocolFeature = (typeof PROTOCOL_FEATURES)[number];
+export type ProtocolFeature = OperationFeature;
 
-export const FEATURE_OPERATIONS = Object.freeze({
-  "project-sessions.v1": [
-    FABRIC_OPERATIONS.projectSessionCreate,
-    FABRIC_OPERATIONS.projectSessionGet,
-    FABRIC_OPERATIONS.projectSessionTransition,
-    FABRIC_OPERATIONS.projectSessionClose,
-    FABRIC_OPERATIONS.membershipBind,
-  ],
-  "operator-control.v1": [
-    FABRIC_OPERATIONS.operatorAttach,
-    FABRIC_OPERATIONS.operatorDetach,
-    FABRIC_OPERATIONS.operatorHeartbeat,
-    FABRIC_OPERATIONS.operatorCommand,
-    FABRIC_OPERATIONS.operatorInputAttest,
-  ],
-  "intakes.v1": [FABRIC_OPERATIONS.intakeSubmit, FABRIC_OPERATIONS.intakeRevise],
-  "scoped-gates.v1": [
-    FABRIC_OPERATIONS.scopedGateCreate,
-    FABRIC_OPERATIONS.scopedGateRebind,
-    FABRIC_OPERATIONS.scopedGateResolve,
-    FABRIC_OPERATIONS.scopedGateCheck,
-  ],
-  "resource-reservations.v1": [
-    FABRIC_OPERATIONS.resourceReserve,
-    FABRIC_OPERATIONS.resourceRelease,
-    FABRIC_OPERATIONS.resourceReconcile,
-  ],
-  "request-results.v1": [
-    FABRIC_OPERATIONS.taskRequest,
-    FABRIC_OPERATIONS.taskCompleteWithReply,
-    FABRIC_OPERATIONS.resultDeliveryClaim,
-    FABRIC_OPERATIONS.resultDeliveryProviderAccept,
-    FABRIC_OPERATIONS.resultDeliveryConsume,
-    FABRIC_OPERATIONS.resultDeliveryRetry,
-    FABRIC_OPERATIONS.resultDeliveryReassign,
-    FABRIC_OPERATIONS.resultDeliveryAbandon,
-  ],
-  "chair-takeover.v1": [FABRIC_OPERATIONS.chairTakeover],
-  "operator-projection.v1": [FABRIC_OPERATIONS.projectionSnapshot, FABRIC_OPERATIONS.projectionEvents],
-  "message-body-read.v1": [FABRIC_OPERATIONS.messageBodyRead],
-  "lifecycle-control.v1": [
-    FABRIC_OPERATIONS.projectSessionDrain,
-    FABRIC_OPERATIONS.projectSessionStop,
-    FABRIC_OPERATIONS.daemonDrain,
-    FABRIC_OPERATIONS.daemonStop,
-  ],
-} as const satisfies Record<ProtocolFeature, readonly FabricOperation[]>);
+function buildFeatureOperations(): Readonly<Record<ProtocolFeature, readonly FabricOperation[]>> {
+  const grouped = Object.fromEntries(PROTOCOL_FEATURES.map((feature) => [feature, [] as FabricOperation[]])) as
+    Record<ProtocolFeature, FabricOperation[]>;
+  for (const [operation, definition] of Object.entries(OPERATION_REGISTRY)) {
+    grouped[definition.feature].push(operation as FabricOperation);
+  }
+  for (const operations of Object.values(grouped)) Object.freeze(operations);
+  return Object.freeze(grouped);
+}
+
+export const FEATURE_OPERATIONS = buildFeatureOperations();
 
 export function operationsForFeatures(features: readonly ProtocolFeature[]): ReadonlySet<FabricOperation> {
   return new Set(features.flatMap((feature) => FEATURE_OPERATIONS[feature]));

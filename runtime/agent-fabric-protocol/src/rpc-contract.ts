@@ -1,10 +1,10 @@
+import type { BaselineOperationInputMap, BaselineOperationResultMap } from "./baseline-contracts.js";
 import type { ProtocolFeature } from "./features.js";
 import type {
   ScopedGate,
   ScopedGateCheckRequest,
   ScopedGateCheckResult,
   ScopedGateCreateRequest,
-  ScopedGateRebindRequest,
   ScopedGateResolveRequest,
 } from "./gates.js";
 import type { Intake, IntakeRevisionRequest, IntakeSubmission } from "./intake.js";
@@ -12,6 +12,7 @@ import type { MembershipBindRequest, MembershipBindResult } from "./membership.j
 import { FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
 import type {
   ChairTakeoverRequest,
+  IntegrationInputAttestationRequest,
   OperatorCommandAudit,
   OperatorInputAttestation,
 } from "./operator.js";
@@ -23,8 +24,11 @@ import type {
   OperatorCommandRequest,
   OperatorDetachRequest,
   OperatorHeartbeatRequest,
-  OperatorInputAttestRequest,
   OperatorProjectionSnapshot,
+  ProjectDiscoveryRequest,
+  ProjectDiscoveryResult,
+  ProjectionPageRequest,
+  ProjectionPageResult,
   ProjectionEventsRequest,
   ProjectionEventsResult,
   ProjectionSnapshotRequest,
@@ -45,6 +49,7 @@ import type {
   CallbackId,
   CommandId,
   JsonValue,
+  IntegrationId,
   OperatorId,
   ProjectId,
   ProjectSessionId,
@@ -93,6 +98,12 @@ export type ProtocolPrincipal =
       projectSessionId: ProjectSessionId;
       runId: string;
       principalGeneration: number;
+    }
+  | {
+      kind: "integration";
+      integrationId: IntegrationId;
+      projectId: ProjectId;
+      principalGeneration: number;
     };
 
 export type ProtocolInitializeRequest = {
@@ -111,7 +122,7 @@ export type ProtocolInitializeResult = {
   limits: ProtocolLimits;
 };
 
-export type OperationInputMap = {
+type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.projectSessionCreate]: ProjectSessionCreateRequest;
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSessionGetRequest;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSessionTransitionRequest;
@@ -121,11 +132,10 @@ export type OperationInputMap = {
   [FABRIC_OPERATIONS.operatorDetach]: OperatorDetachRequest;
   [FABRIC_OPERATIONS.operatorHeartbeat]: OperatorHeartbeatRequest;
   [FABRIC_OPERATIONS.operatorCommand]: OperatorCommandRequest;
-  [FABRIC_OPERATIONS.operatorInputAttest]: OperatorInputAttestRequest;
+  [FABRIC_OPERATIONS.integrationInputAttest]: IntegrationInputAttestationRequest;
   [FABRIC_OPERATIONS.intakeSubmit]: IntakeSubmission;
   [FABRIC_OPERATIONS.intakeRevise]: IntakeRevisionRequest;
   [FABRIC_OPERATIONS.scopedGateCreate]: ScopedGateCreateRequest;
-  [FABRIC_OPERATIONS.scopedGateRebind]: ScopedGateRebindRequest;
   [FABRIC_OPERATIONS.scopedGateResolve]: ScopedGateResolveRequest;
   [FABRIC_OPERATIONS.scopedGateCheck]: ScopedGateCheckRequest;
   [FABRIC_OPERATIONS.resourceReserve]: ResourceReservationRequest;
@@ -140,7 +150,9 @@ export type OperationInputMap = {
   [FABRIC_OPERATIONS.resultDeliveryReassign]: ResultDeliveryReassignRequest;
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: ResultDeliveryAbandonRequest;
   [FABRIC_OPERATIONS.chairTakeover]: ChairTakeoverRequest;
+  [FABRIC_OPERATIONS.projectDiscover]: ProjectDiscoveryRequest;
   [FABRIC_OPERATIONS.projectionSnapshot]: ProjectionSnapshotRequest;
+  [FABRIC_OPERATIONS.projectionPage]: ProjectionPageRequest;
   [FABRIC_OPERATIONS.projectionEvents]: ProjectionEventsRequest;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadRequest;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSessionDrainRequest;
@@ -148,6 +160,8 @@ export type OperationInputMap = {
   [FABRIC_OPERATIONS.daemonDrain]: DaemonDrainRequest;
   [FABRIC_OPERATIONS.daemonStop]: DaemonStopRequest;
 };
+
+export type OperationInputMap = BaselineOperationInputMap & ExtensionOperationInputMap;
 
 export type ChairTakeoverResult = {
   projectSessionId: ProjectSessionId;
@@ -177,7 +191,7 @@ export type DaemonLifecycleResult = {
   receiptDigest: Sha256Digest;
 };
 
-export type OperationResultMap = {
+type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.projectSessionCreate]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSession;
@@ -187,11 +201,10 @@ export type OperationResultMap = {
   [FABRIC_OPERATIONS.operatorDetach]: { detached: true; revision: number };
   [FABRIC_OPERATIONS.operatorHeartbeat]: OperatorAttachment;
   [FABRIC_OPERATIONS.operatorCommand]: OperatorCommandAudit;
-  [FABRIC_OPERATIONS.operatorInputAttest]: OperatorInputAttestation;
+  [FABRIC_OPERATIONS.integrationInputAttest]: OperatorInputAttestation;
   [FABRIC_OPERATIONS.intakeSubmit]: Intake;
   [FABRIC_OPERATIONS.intakeRevise]: Intake;
   [FABRIC_OPERATIONS.scopedGateCreate]: ScopedGate;
-  [FABRIC_OPERATIONS.scopedGateRebind]: ScopedGate;
   [FABRIC_OPERATIONS.scopedGateResolve]: ScopedGate;
   [FABRIC_OPERATIONS.scopedGateCheck]: ScopedGateCheckResult;
   [FABRIC_OPERATIONS.resourceReserve]: ResourceReservation;
@@ -206,7 +219,9 @@ export type OperationResultMap = {
   [FABRIC_OPERATIONS.resultDeliveryReassign]: ResultDelivery;
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: ResultDelivery;
   [FABRIC_OPERATIONS.chairTakeover]: ChairTakeoverResult;
+  [FABRIC_OPERATIONS.projectDiscover]: ProjectDiscoveryResult;
   [FABRIC_OPERATIONS.projectionSnapshot]: OperatorProjectionSnapshot;
+  [FABRIC_OPERATIONS.projectionPage]: ProjectionPageResult;
   [FABRIC_OPERATIONS.projectionEvents]: ProjectionEventsResult;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadResult;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSession;
@@ -215,32 +230,80 @@ export type OperationResultMap = {
   [FABRIC_OPERATIONS.daemonStop]: DaemonLifecycleResult;
 };
 
-export type ProtocolRequest<Operation extends FabricOperation = FabricOperation> = {
-  id: string;
-  operation: Operation;
-  input: OperationInputMap[Operation];
-};
+export type OperationResultMap = BaselineOperationResultMap & ExtensionOperationResultMap;
 
-export type ProtocolErrorCode =
-  | "PROTOCOL_INVALID"
-  | "PROTOCOL_UNSUPPORTED"
-  | "FEATURE_UNAVAILABLE"
-  | "AUTHENTICATION_FAILED"
-  | "CAPABILITY_FORBIDDEN"
-  | "CAPABILITY_EXPIRED"
-  | "CAPABILITY_REVOKED"
-  | "WRONG_PROJECT"
-  | "STALE_GENERATION"
-  | "STALE_REVISION"
-  | "DEDUPE_CONFLICT"
-  | "GATE_BLOCKED"
-  | "RESOURCE_EXHAUSTED"
-  | "RESOURCE_USAGE_UNKNOWN"
-  | "NOT_FOUND"
-  | "OVERLOADED"
-  | "DEADLINE_EXCEEDED"
-  | "CONFLICT"
-  | "RECOVERY_REQUIRED";
+export type ProtocolOperation = keyof OperationInputMap & keyof OperationResultMap & FabricOperation;
+
+export type ProtocolRequest<Operation extends ProtocolOperation = ProtocolOperation> =
+  Operation extends ProtocolOperation
+    ? { id: string; operation: Operation; input: OperationInputMap[Operation] }
+    : never;
+
+export const PROTOCOL_ERROR_CODES = [
+  "PROTOCOL_INVALID",
+  "PROTOCOL_UNSUPPORTED",
+  "FEATURE_UNAVAILABLE",
+  "AUTHENTICATION_FAILED",
+  "AUTHORITY_WIDENING",
+  "ARTIFACT_DIGEST_INVALID",
+  "ARTIFACT_PATH_FORBIDDEN",
+  "ADAPTER_ARTIFACT_MISSING",
+  "ADAPTER_COMPATIBILITY_INVALID",
+  "ADAPTER_DISABLED",
+  "ADAPTER_HASH_MISMATCH",
+  "ADAPTER_PIN_UNRESOLVED",
+  "ADAPTER_MODEL_REQUIRED",
+  "ADAPTER_FAMILY_FORBIDDEN",
+  "BARRIER_PRECONDITION_FAILED",
+  "BUDGET_EXCEEDED",
+  "CAPABILITY_FORBIDDEN",
+  "CAPABILITY_EXPIRED",
+  "CAPABILITY_REVOKED",
+  "CONFIG_UNTRUSTED_FIELD",
+  "CONFIG_WIDENING_FORBIDDEN",
+  "DEDUPE_CONFLICT",
+  "DELIVERY_ALREADY_RESOLVED",
+  "DELIVERY_REASON_REQUIRED",
+  "LEASE_NOT_EXPIRED",
+  "LEASE_EXPIRED",
+  "LEASE_QUARANTINED",
+  "CHECKPOINT_INCOMPLETE",
+  "CONTEXT_UNRECONCILED",
+  "LIFECYCLE_PRECONDITION_FAILED",
+  "MODEL_REQUIRED",
+  "MODEL_NOT_ALLOWED",
+  "MODEL_FAMILY_NOT_ALLOWED",
+  "MESSAGE_RELATIONSHIP_FORBIDDEN",
+  "MESSAGE_HOP_LIMIT_EXCEEDED",
+  "MESSAGE_QUOTA_EXCEEDED",
+  "NOT_FOUND",
+  "PROVIDER_TURN_ACTIVE",
+  "STALE_LEASE_GENERATION",
+  "STALE_PRINCIPAL_GENERATION",
+  "TASK_NOT_OWNER",
+  "TASK_DEPENDENCY_BLOCKED",
+  "TASK_SUBTREE_CONFLICT",
+  "TASK_REVISION_CONFLICT",
+  "TEAM_DEPTH_EXCEEDED",
+  "STALE_TEAM_GENERATION",
+  "BUDGET_USAGE_UNKNOWN",
+  "WRITE_SCOPE_CONFLICT",
+  "WRITE_SCOPE_RECOVERY_REQUIRED",
+  "WRITE_SCOPE_QUARANTINED",
+  "WRONG_PROJECT",
+  "STALE_GENERATION",
+  "STALE_REVISION",
+  "GATE_BLOCKED",
+  "RESOURCE_EXHAUSTED",
+  "RESOURCE_USAGE_UNKNOWN",
+  "OVERLOADED",
+  "DEADLINE_EXCEEDED",
+  "CONFLICT",
+  "RECOVERY_REQUIRED",
+  "PROJECTION_RESNAPSHOT_REQUIRED",
+] as const;
+
+export type ProtocolErrorCode = (typeof PROTOCOL_ERROR_CODES)[number];
 
 export type ProtocolFailure = {
   code: ProtocolErrorCode;
@@ -249,9 +312,12 @@ export type ProtocolFailure = {
   details?: JsonValue;
 };
 
-export type ProtocolResponse<Operation extends FabricOperation = FabricOperation> =
-  | { id: string; ok: true; operation: Operation; result: OperationResultMap[Operation] }
-  | { id: string; ok: false; operation: Operation; error: ProtocolFailure };
+export type ProtocolResponse<Operation extends ProtocolOperation = ProtocolOperation> =
+  Operation extends ProtocolOperation
+    ?
+      | { id: string; ok: true; operation: Operation; result: OperationResultMap[Operation] }
+      | { id: string; ok: false; operation: Operation; error: ProtocolFailure }
+    : never;
 
 export type AuditedCommandReceipt = {
   commandId: CommandId;

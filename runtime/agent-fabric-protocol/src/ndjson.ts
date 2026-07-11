@@ -1,16 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type { Duplex, Readable, Writable } from "node:stream";
 
-import { negotiateProtocol, operationsForFeatures, type ProtocolFeature } from "./features.js";
-import type { FabricOperation } from "./operations.js";
-import { strictRecord } from "./primitives.js";
+import { negotiateProtocol, operationsForFeatures, PROTOCOL_FEATURES, type ProtocolFeature } from "./features.js";
+import { isFabricOperation, type FabricOperation } from "./operations.js";
+import { parseOperationInput, parseOperationResult } from "./operation-codecs.js";
+import { parseJsonValue, strictRecord, type JsonValue } from "./primitives.js";
 import {
   PROTOCOL_LIMITS,
+  PROTOCOL_ERROR_CODES,
   type OperationInputMap,
   type OperationResultMap,
   type ProtocolInitializeRequest,
   type ProtocolInitializeResult,
   type ProtocolLimits,
+  type ProtocolErrorCode,
+  type ProtocolFailure,
+  type ProtocolOperation,
 } from "./rpc-contract.js";
 import type { ProtocolRpcTransport } from "./client.js";
 
@@ -47,8 +52,8 @@ function positiveInteger(value: number, label: string): number {
 
 export class BoundedNdjsonReader {
   readonly #input: Readable;
-  readonly #maximumFrameBytes: number;
-  readonly #idleTimeoutMs: number | undefined;
+  #maximumFrameBytes: number;
+  #idleTimeoutMs: number | undefined;
   readonly #onFrame: (frame: string) => void;
   readonly #onError: (error: NdjsonProtocolError) => void;
   readonly #onIdle: () => void;
@@ -78,6 +83,25 @@ export class BoundedNdjsonReader {
 
   close(): void {
     this.#finish();
+  }
+
+  tightenLimits(options: { maximumFrameBytes: number; idleTimeoutMs: number }): void {
+    const maximumFrameBytes = positiveInteger(options.maximumFrameBytes, "maximumFrameBytes");
+    const idleTimeoutMs = positiveInteger(options.idleTimeoutMs, "idleTimeoutMs");
+    if (maximumFrameBytes > this.#maximumFrameBytes ||
+        (this.#idleTimeoutMs !== undefined && idleTimeoutMs > this.#idleTimeoutMs)) {
+      throw new TypeError("negotiated reader limits may only narrow bootstrap limits");
+    }
+    this.#maximumFrameBytes = maximumFrameBytes;
+    this.#idleTimeoutMs = idleTimeoutMs;
+    if (this.#frameBytes > maximumFrameBytes) {
+      this.#fail(new NdjsonProtocolError(
+        "NDJSON_FRAME_TOO_LARGE",
+        `buffered NDJSON frame exceeds negotiated ${String(maximumFrameBytes)} bytes`,
+      ));
+      return;
+    }
+    this.#resetIdleTimer();
   }
 
   readonly #data = (chunk: Buffer | string): void => {
@@ -219,7 +243,7 @@ export type ProtocolTransportErrorCode =
   | "PROTOCOL_OVERLOADED"
   | "PROTOCOL_FEATURE_UNAVAILABLE"
   | "PROTOCOL_NEGOTIATION_FAILED"
-  | "PROTOCOL_REMOTE_ERROR";
+  | "PROTOCOL_RESULT_INVALID";
 
 export class ProtocolTransportError extends Error {
   readonly code: ProtocolTransportErrorCode;
@@ -231,12 +255,29 @@ export class ProtocolTransportError extends Error {
   }
 }
 
+export class ProtocolRemoteError extends Error {
+  readonly code: ProtocolErrorCode;
+  readonly retryable: boolean;
+  readonly details: JsonValue | undefined;
+
+  constructor(failure: ProtocolFailure) {
+    super(failure.message);
+    this.name = "ProtocolRemoteError";
+    this.code = failure.code;
+    this.retryable = failure.retryable;
+    this.details = failure.details;
+  }
+}
+
 type PendingCall = {
   operation: string;
+  state: "queued" | "in-flight";
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
 };
+
+type QueuedCall = { id: string; request: { id: string; operation: string; input: unknown } };
 
 function parseLimits(value: unknown): ProtocolLimits {
   const record = strictRecord(value, "initialize.result.limits", Object.keys(PROTOCOL_LIMITS));
@@ -274,32 +315,10 @@ function parseInitializeResult(value: unknown): ProtocolInitializeResult {
   if (!Array.isArray(record.features)) throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", "features must be an array");
   const known: ProtocolFeature[] = [];
   for (const feature of record.features) {
-    if (typeof feature !== "string" || ![
-      "project-sessions.v1",
-      "operator-control.v1",
-      "intakes.v1",
-      "scoped-gates.v1",
-      "resource-reservations.v1",
-      "request-results.v1",
-      "chair-takeover.v1",
-      "operator-projection.v1",
-      "message-body-read.v1",
-      "lifecycle-control.v1",
-    ].includes(feature)) {
+    if (typeof feature !== "string" || !PROTOCOL_FEATURES.some((candidate) => candidate === feature)) {
       throw new ProtocolTransportError("PROTOCOL_NEGOTIATION_FAILED", `unknown negotiated feature: ${String(feature)}`);
     }
-    const matched = ([
-      "project-sessions.v1",
-      "operator-control.v1",
-      "intakes.v1",
-      "scoped-gates.v1",
-      "resource-reservations.v1",
-      "request-results.v1",
-      "chair-takeover.v1",
-      "operator-projection.v1",
-      "message-body-read.v1",
-      "lifecycle-control.v1",
-    ] as const).find((candidate) => candidate === feature);
+    const matched = PROTOCOL_FEATURES.find((candidate) => candidate === feature);
     if (matched !== undefined) known.push(matched);
   }
   return {
@@ -316,6 +335,8 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
   readonly #reader: BoundedNdjsonReader;
   readonly #writer: BoundedNdjsonWriter;
   readonly #pending = new Map<string, PendingCall>();
+  readonly #queue: QueuedCall[] = [];
+  #inFlight = 0;
   #limits: ProtocolLimits = PROTOCOL_LIMITS;
   #features: readonly ProtocolFeature[] = [];
   #allowedOperations: ReadonlySet<FabricOperation> = new Set();
@@ -351,6 +372,10 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       transport.#features = negotiation.features;
       transport.#allowedOperations = operationsForFeatures(negotiation.features);
       transport.#limits = initialized.limits;
+      transport.#reader.tightenLimits({
+        maximumFrameBytes: initialized.limits.maximumFrameBytes,
+        idleTimeoutMs: initialized.limits.idleTimeoutMs,
+      });
       return transport;
     } catch (error: unknown) {
       stream.destroy();
@@ -362,7 +387,7 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     return this.#features;
   }
 
-  async call<Operation extends FabricOperation>(
+  async call<Operation extends ProtocolOperation>(
     operation: Operation,
     input: OperationInputMap[Operation],
   ): Promise<OperationResultMap[Operation]> {
@@ -372,9 +397,9 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
         `operation was not negotiated: ${operation}`,
       );
     }
-    const value = await this.#wireCall(operation, input);
-    // The operation discriminant and closed response envelope were validated above.
-    return value as OperationResultMap[Operation];
+    const parsedInput = parseOperationInput(operation, input);
+    const value = await this.#wireCall(operation, parsedInput);
+    return parseOperationResult(operation, value);
   }
 
   async #wireCall(operation: string, input: unknown): Promise<unknown> {
@@ -390,23 +415,54 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     }
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (!this.#pending.delete(id)) return;
+        const pending = this.#pending.get(id);
+        if (pending === undefined) return;
+        this.#pending.delete(id);
+        if (pending.state === "queued") {
+          const queueIndex = this.#queue.findIndex((entry) => entry.id === id);
+          if (queueIndex >= 0) this.#queue.splice(queueIndex, 1);
+          reject(new ProtocolTransportError("PROTOCOL_TIMEOUT", `queued protocol request timed out: ${operation}`));
+          return;
+        }
         reject(new ProtocolTransportError("PROTOCOL_TIMEOUT", `protocol request timed out: ${operation}`));
+        this.#fail(new ProtocolTransportError("PROTOCOL_TIMEOUT", `in-flight protocol request timed out: ${operation}`));
       }, this.#limits.requestTimeoutMs);
       timer.unref();
-      this.#pending.set(id, { operation, resolve, reject, timer });
+      this.#pending.set(id, { operation, state: "queued", resolve, reject, timer });
     });
-    try {
-      await this.#writer.write(request);
-    } catch (error: unknown) {
-      const pending = this.#pending.get(id);
-      if (pending !== undefined) {
-        clearTimeout(pending.timer);
-        this.#pending.delete(id);
-        pending.reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    }
+    this.#queue.push({ id, request });
+    this.#drainQueue();
     return await result;
+  }
+
+  #drainQueue(): void {
+    while (!this.#closed && this.#inFlight < this.#limits.maximumInFlightPerConnection) {
+      const queued = this.#queue.shift();
+      if (queued === undefined) return;
+      const pending = this.#pending.get(queued.id);
+      if (pending === undefined) continue;
+      pending.state = "in-flight";
+      this.#inFlight += 1;
+      void this.#writer.write(queued.request).catch((error: unknown) => {
+        const active = this.#pending.get(queued.id);
+        if (active === undefined) return;
+        clearTimeout(active.timer);
+        this.#pending.delete(queued.id);
+        this.#inFlight -= 1;
+        active.reject(error instanceof Error ? error : new Error(String(error)));
+        this.#drainQueue();
+      });
+    }
+  }
+
+  #completePending(id: string): PendingCall | undefined {
+    const pending = this.#pending.get(id);
+    if (pending === undefined) return undefined;
+    clearTimeout(pending.timer);
+    this.#pending.delete(id);
+    if (pending.state === "in-flight") this.#inFlight -= 1;
+    this.#drainQueue();
+    return pending;
   }
 
   #receive(line: string): void {
@@ -423,15 +479,25 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       const pending = this.#pending.get(record.id);
       if (pending === undefined) return;
       if (pending.operation !== record.operation) throw new TypeError("response operation does not match request");
-      clearTimeout(pending.timer);
-      this.#pending.delete(record.id);
-      if (record.ok) pending.resolve(record.result);
+      if (record.ok) {
+        if (record.operation !== "initialize" && isFabricOperation(record.operation)) {
+          try {
+            parseOperationResult(record.operation, record.result);
+          } catch (cause: unknown) {
+            const completed = this.#completePending(record.id);
+            completed?.reject(new ProtocolTransportError(
+              "PROTOCOL_RESULT_INVALID",
+              cause instanceof Error ? cause.message : String(cause),
+              { cause },
+            ));
+            return;
+          }
+        }
+        this.#completePending(record.id)?.resolve(record.result);
+      }
       else {
-        const error = strictRecord(record.error, "response.error", ["code", "message", "retryable", "details"]);
-        pending.reject(new ProtocolTransportError(
-          "PROTOCOL_REMOTE_ERROR",
-          typeof error.message === "string" ? error.message : "remote protocol error",
-        ));
+        const failure = parseProtocolFailure(record.error);
+        this.#completePending(record.id)?.reject(new ProtocolRemoteError(failure));
       }
     } catch (error: unknown) {
       this.#fail(new ProtocolTransportError(
@@ -452,6 +518,8 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       pending.reject(error);
     }
     this.#pending.clear();
+    this.#queue.length = 0;
+    this.#inFlight = 0;
   }
 
   async close(): Promise<void> {
@@ -460,4 +528,23 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     this.#reader.close();
     this.#stream.end();
   }
+}
+
+const protocolErrorCodes: ReadonlySet<string> = new Set(PROTOCOL_ERROR_CODES);
+
+export function parseProtocolFailure(value: unknown): ProtocolFailure {
+  const record = strictRecord(value, "response.error", ["code", "message", "retryable", "details"]);
+  if (typeof record.code !== "string" || !protocolErrorCodes.has(record.code)) {
+    throw new ProtocolTransportError("PROTOCOL_INVALID", "response error code is invalid");
+  }
+  if (typeof record.message !== "string" || record.message.length === 0 || typeof record.retryable !== "boolean") {
+    throw new ProtocolTransportError("PROTOCOL_INVALID", "response error fields are invalid");
+  }
+  const details = record.details === undefined ? undefined : parseJsonValue(record.details, "response.error.details");
+  return {
+    code: record.code as ProtocolErrorCode,
+    message: record.message,
+    retryable: record.retryable,
+    ...(details === undefined ? {} : { details }),
+  };
 }

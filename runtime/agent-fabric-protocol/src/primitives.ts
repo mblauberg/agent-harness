@@ -14,6 +14,7 @@ export type OperatorId = Identifier<"OperatorId">;
 export type OperatorClientId = Identifier<"OperatorClientId">;
 export type CapabilityId = Identifier<"CapabilityId">;
 export type InputAttestationId = Identifier<"InputAttestationId">;
+export type IntegrationId = Identifier<"IntegrationId">;
 export type CommandId = Identifier<"CommandId">;
 export type IntakeId = Identifier<"IntakeId">;
 export type GateId = Identifier<"GateId">;
@@ -39,13 +40,16 @@ export type Sha256Digest = string & { readonly [digestBrand]: "Sha256Digest" };
 declare const timestampBrand: unique symbol;
 export type Timestamp = string & { readonly [timestampBrand]: "Timestamp" };
 
+declare const relativePathBrand: unique symbol;
+export type CanonicalRelativePath = string & { readonly [relativePathBrand]: "CanonicalRelativePath" };
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue } | readonly JsonValue[];
 
 export type NonEmptyReadonlyArray<T> = readonly [T, ...T[]];
 
 export type ArtifactRef = {
-  path: string;
+  path: CanonicalRelativePath;
   digest: Sha256Digest;
 };
 
@@ -61,6 +65,7 @@ export class ProtocolValidationError extends TypeError {
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const digestPattern = /^sha256:[a-f0-9]{64}$/u;
+const rfc3339Pattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
 
 export function parseIdentifier<Kind extends string>(value: unknown, path: string): Identifier<Kind> {
   if (typeof value !== "string" || !identifierPattern.test(value)) {
@@ -79,19 +84,55 @@ export function parseSha256Digest(value: unknown, path: string): Sha256Digest {
 }
 
 export function parseTimestamp(value: unknown, path: string): Timestamp {
-  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
-    throw new ProtocolValidationError(path, "must be an ISO-8601 timestamp");
+  if (typeof value !== "string") throw new ProtocolValidationError(path, "must be a strict RFC3339 timestamp");
+  const match = rfc3339Pattern.exec(value);
+  if (match === null || !Number.isFinite(Date.parse(value))) {
+    throw new ProtocolValidationError(path, "must be a strict RFC3339 timestamp");
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0;
+  if (day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
+    throw new ProtocolValidationError(path, "must be a strict RFC3339 timestamp");
   }
   // A runtime-validated wire primitive is branded at this single boundary.
   return value as Timestamp;
 }
 
+export const PATH_RESOLUTION_REQUIREMENT =
+  "daemon-resolves-nearest-existing-ancestor-and-rejects-symlink-escape" as const;
+
+export function parseCanonicalRelativePath(value: unknown, path: string): CanonicalRelativePath {
+  const candidate = parseBoundedUtf8String(value, path, 4096);
+  const segments = candidate.split("/");
+  if (
+    candidate.startsWith("/") ||
+    /^[A-Za-z]:/u.test(candidate) ||
+    candidate.includes("\\") ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..") ||
+    /[*?\[\]]/u.test(candidate) ||
+    candidate.includes("\0")
+  ) {
+    throw new ProtocolValidationError(path, "must be a canonical workspace-relative path");
+  }
+  return candidate as CanonicalRelativePath;
+}
+
+export function parseBoundedUtf8String(value: unknown, path: string, maximumBytes: number): string {
+  const candidate = requiredString(value, path);
+  if (Buffer.byteLength(candidate, "utf8") > maximumBytes) {
+    throw new ProtocolValidationError(path, `must be at most ${String(maximumBytes)} UTF-8 bytes`);
+  }
+  return candidate;
+}
+
 export function parseArtifactRef(value: unknown, path: string): ArtifactRef {
   const record = strictRecord(value, path, ["path", "digest"]);
-  const artifactPath = requiredString(record.path, `${path}.path`);
-  if (artifactPath.includes("\0") || artifactPath.length > 4096) {
-    throw new ProtocolValidationError(`${path}.path`, "must be a bounded path without NUL bytes");
-  }
+  const artifactPath = parseCanonicalRelativePath(record.path, `${path}.path`);
   return { path: artifactPath, digest: parseSha256Digest(record.digest, `${path}.digest`) };
 }
 
