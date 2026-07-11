@@ -3,6 +3,7 @@ import { splitGraphemes } from "unicode-segmenter/grapheme";
 import type { TerminalInputEvent } from "./input.js";
 
 export * from "./input.js";
+export * from "./controller.js";
 export * from "./model.js";
 export * from "./protocol-adapter.js";
 export * from "./terminal.js";
