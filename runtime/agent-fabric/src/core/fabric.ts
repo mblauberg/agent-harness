@@ -138,6 +138,54 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function sha256Digest(value: string): string {
+  return `sha256:${sha256(value)}`;
+}
+
+function compatibilityRunIdentity(
+  runId: string,
+  canonicalRoot: string,
+  authorityId: string,
+  authorityHash: string,
+  budget: Readonly<Record<string, number>>,
+): {
+  projectId: string;
+  projectSessionId: string;
+  authorityRef: string;
+  budgetRef: string;
+  manifestRef: string;
+  launchPacketPath: string;
+  launchPacketDigest: string;
+  projectScopeId: string;
+  sessionScopeId: string;
+  runScopeId: string;
+} {
+  const projectId = `prj_${sha256(canonicalRoot).slice(0, 32)}`;
+  const projectSessionId = `psl_${sha256(`0004\0${runId}\0${canonicalRoot}`).slice(0, 32)}`;
+  const authorityRef = `sha256:${authorityHash}`;
+  const budgetRef = `legacy-authority:${authorityId}`;
+  const dimensions = Object.entries(budget)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([unit, granted]) => [unit, { granted, reserved: 0, consumed: 0, unknown: false }]);
+  const manifestValue = JSON.stringify({ runId, canonicalRoot, authorityRef, dimensions });
+  const launchValue = JSON.stringify({ runId, projectId, projectSessionId, authorityRef });
+  return {
+    projectId,
+    projectSessionId,
+    authorityRef,
+    budgetRef,
+    manifestRef: canonicalJson({
+      path: `.agent-run/migrations/0004/${runId}-manifest.json`,
+      digest: sha256Digest(manifestValue),
+    }),
+    launchPacketPath: `.agent-run/migrations/0004/${runId}-launch.json`,
+    launchPacketDigest: sha256Digest(launchValue),
+    projectScopeId: `rsp_${sha256(canonicalRoot).slice(0, 32)}`,
+    sessionScopeId: `rss_${sha256(projectSessionId).slice(0, 32)}`,
+    runScopeId: `rsr_${sha256(runId).slice(0, 32)}`,
+  };
+}
+
 function canonicalPath(path: string): string {
   if (
     path.length === 0 ||
@@ -920,21 +968,101 @@ export class Fabric {
       return { runId: input.runId, chairAuthorityId: stringField(existing, "authority_id"), chairCapability: capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, generation) };
     }
     const authorityId = uuidv7();
+    const authorityJson = canonicalJson(authority);
+    const authorityHash = sha256(authorityJson);
+    const compatibility = compatibilityRunIdentity(
+      input.runId,
+      location.workspaceRoot,
+      authorityId,
+      authorityHash,
+      authority.budget,
+    );
     const token = capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, 1);
     const now = this.#clock();
     this.#database.transaction(() => {
-      this.#database.prepare("INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      const projectInsert = this.#database.prepare(`
+        INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
+        VALUES (?, ?, 1, 1, ?, ?)
+        ON CONFLICT(project_id) DO NOTHING
+      `).run(compatibility.projectId, location.workspaceRoot, now, now);
+      const persistedProject = rowOrNotFound(this.#database.prepare(`
+        SELECT canonical_root FROM projects WHERE project_id=?
+      `).get(compatibility.projectId), "compatibility project");
+      if (stringField(persistedProject, "canonical_root") !== location.workspaceRoot) {
+        throw new FabricError("DEDUPE_CONFLICT", "compatibility project identity changed canonical root");
+      }
+      this.#database.prepare(`
+        INSERT INTO project_sessions(
+          project_session_id, project_id, mode, state, revision, generation,
+          authority_ref, budget_ref, launch_packet_path, launch_packet_digest,
+          membership_revision, origin_kind, origin_operator_id, migration_manifest_ref,
+          terminal_path_json, created_at, updated_at
+        ) VALUES (?, ?, 'independent', 'recovery_required', 1, 1, ?, ?, ?, ?, 1,
+                  'legacy-migration', NULL, ?, NULL, ?, ?)
+      `).run(
+        compatibility.projectSessionId,
+        compatibility.projectId,
+        compatibility.authorityRef,
+        compatibility.budgetRef,
+        compatibility.launchPacketPath,
+        compatibility.launchPacketDigest,
+        compatibility.manifestRef,
+        now,
+        now,
+      );
+      if (projectInsert.changes === 1) {
+        this.#database.prepare(`
+          INSERT INTO resource_scopes(
+            scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
+            scope_kind, owner_ref, state, revision
+          ) VALUES (?, ?, NULL, NULL, NULL, 'project', ?, 'active', 1)
+        `).run(compatibility.projectScopeId, compatibility.projectId, compatibility.projectId);
+      } else {
+        const projectScope = rowOrNotFound(this.#database.prepare(`
+          SELECT scope_id, owner_ref FROM resource_scopes
+           WHERE project_id=? AND scope_kind='project'
+        `).get(compatibility.projectId), "compatibility project resource scope");
+        if (
+          stringField(projectScope, "scope_id") !== compatibility.projectScopeId ||
+          stringField(projectScope, "owner_ref") !== compatibility.projectId
+        ) {
+          throw new FabricError("DEDUPE_CONFLICT", "compatibility project resource identity changed");
+        }
+      }
+      this.#database.prepare(`
+        INSERT INTO resource_scopes(
+          scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
+          scope_kind, owner_ref, state, revision
+        ) VALUES (?, ?, ?, NULL, ?, 'project-session', ?, 'active', 1)
+      `).run(
+        compatibility.sessionScopeId,
+        compatibility.projectId,
+        compatibility.projectSessionId,
+        compatibility.projectScopeId,
+        compatibility.projectSessionId,
+      );
+      this.#database.prepare(`
+        INSERT INTO runs(
+          run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
+          project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
+          authority_ref, budget_ref, dependency_revision, topology_slot
+        ) VALUES (?, ?, ?, ?, ?, ?, 'recovery_required', 1, 1, ?, ?, ?, 1, NULL)
+      `).run(
         input.runId,
         input.chair.agentId,
         location.workspaceRoot,
         location.projectRunDirectory,
         now,
+        compatibility.projectSessionId,
+        `chair:${input.runId}:1`,
+        compatibility.authorityRef,
+        compatibility.budgetRef,
       );
       this.#database
         .prepare(
           "INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at) VALUES (?, ?, NULL, ?, ?, ?)",
         )
-        .run(authorityId, input.runId, canonicalJson(authority), sha256(canonicalJson(authority)), now);
+        .run(authorityId, input.runId, authorityJson, authorityHash, now);
       for (const [unitKey, granted] of Object.entries(authority.budget)) {
         this.#database
           .prepare("INSERT INTO authority_budget(authority_id, unit_key, granted) VALUES (?, ?, ?)")
@@ -943,6 +1071,55 @@ export class Fabric {
       this.#database
         .prepare("INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id) VALUES (?, ?, NULL, ?)")
         .run(input.runId, input.chair.agentId, authorityId);
+      this.#database.prepare(`
+        INSERT INTO run_chair_leases(
+          project_session_id, run_id, lease_id, holder_agent_id, generation, status, updated_at
+        ) VALUES (?, ?, ?, ?, 1, 'frozen', ?)
+      `).run(
+        compatibility.projectSessionId,
+        input.runId,
+        `chair:${input.runId}:1`,
+        input.chair.agentId,
+        now,
+      );
+      this.#database.prepare(`
+        INSERT INTO project_session_memberships(
+          project_session_id, coordination_run_id, member_kind, member_id,
+          required, state, revision, created_at, updated_at
+        ) VALUES (?, ?, 'coordination-run', ?, 1, 'active', 1, ?, ?)
+      `).run(compatibility.projectSessionId, input.runId, input.runId, now, now);
+      this.#database.prepare(`
+        INSERT INTO resource_scopes(
+          scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
+          scope_kind, owner_ref, state, revision
+        ) VALUES (?, ?, ?, ?, ?, 'coordination-run', ?, 'active', 1)
+      `).run(
+        compatibility.runScopeId,
+        compatibility.projectId,
+        compatibility.projectSessionId,
+        input.runId,
+        compatibility.sessionScopeId,
+        input.runId,
+      );
+      const insertDimension = this.#database.prepare(`
+        INSERT INTO resource_dimensions(scope_id, unit_key, limit_value, used, reserved, usage_unknown)
+        VALUES (?, ?, ?, 0, 0, 0)
+      `);
+      for (const [unitKey, granted] of Object.entries(authority.budget)) {
+        if (projectInsert.changes === 1) {
+          insertDimension.run(compatibility.projectScopeId, unitKey, granted);
+        } else {
+          const projectDimension = rowOrNotFound(this.#database.prepare(`
+            SELECT limit_value FROM resource_dimensions WHERE scope_id=? AND unit_key=?
+          `).get(compatibility.projectScopeId, unitKey), "compatibility project resource dimension");
+          if (numberField(projectDimension, "limit_value") < granted) {
+            throw new FabricError("AUTHORITY_WIDENING", `compatibility run exceeds project resource ${unitKey}`);
+          }
+        }
+        for (const scopeId of [compatibility.sessionScopeId, compatibility.runScopeId]) {
+          insertDimension.run(scopeId, unitKey, granted);
+        }
+      }
       this.#database
         .prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
         .run(input.runId, input.chair.agentId);
