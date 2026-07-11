@@ -6,6 +6,7 @@ import {
   parseProtocolInitializeResult,
   ProtocolAuthenticationError,
 } from "./authentication.js";
+import { protocolFailureMessage } from "./codec.js";
 import { negotiateProtocol, operationsForFeatures, type ProtocolFeature } from "./features.js";
 import { isFabricOperation, type FabricOperation } from "./operations.js";
 import { parseOperationInputForPrincipal, parseOperationResult } from "./operation-codecs.js";
@@ -520,13 +521,22 @@ export function parseProtocolFailure(value: unknown): ProtocolFailure {
   if (typeof record.code !== "string" || !protocolErrorCodes.has(record.code)) {
     throw new ProtocolTransportError("PROTOCOL_INVALID", "response error code is invalid");
   }
-  if (typeof record.message !== "string" || record.message.length === 0 || typeof record.retryable !== "boolean") {
+  if (typeof record.retryable !== "boolean") {
     throw new ProtocolTransportError("PROTOCOL_INVALID", "response error fields are invalid");
+  }
+  let message: string;
+  try {
+    message = protocolFailureMessage.parse(record.message, "response.error.message");
+  } catch (error) {
+    throw new ProtocolTransportError(
+      "PROTOCOL_INVALID",
+      error instanceof Error ? error.message : "response error message is invalid",
+    );
   }
   const details = record.details === undefined ? undefined : parseJsonValue(record.details, "response.error.details");
   return {
     code: record.code as ProtocolErrorCode,
-    message: record.message,
+    message,
     retryable: record.retryable,
     ...(details === undefined ? {} : { details }),
   };

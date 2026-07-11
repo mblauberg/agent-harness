@@ -69,6 +69,8 @@ export const identifier = boundedString({
 });
 
 export const secret = boundedString({ minBytes: 16, maxBytes: 4096, example: "secret-token-0001" });
+export const protocolClientField = boundedString({ maxBytes: 128, example: "client-v1" });
+export const protocolFailureMessage = boundedString({ maxBytes: 4096, example: "protocol failure" });
 
 export const timestamp = defineCodec<string>(
   { type: "string", format: "date-time" },

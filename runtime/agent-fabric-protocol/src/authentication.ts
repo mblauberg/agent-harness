@@ -1,4 +1,4 @@
-import { boundedString, secret } from "./codec.js";
+import { protocolClientField, secret } from "./codec.js";
 import {
   negotiateProtocol,
   operationsForFeatures,
@@ -39,8 +39,6 @@ export class ProtocolAuthenticationError extends Error {
   }
 }
 
-const clientField = boundedString({ maxBytes: 128 });
-
 export type VerifiedProtocolCredential = {
   readonly principal: ProtocolPrincipal;
   readonly grantedOperations: readonly FabricOperation[];
@@ -61,11 +59,22 @@ export function parseProtocolPrincipal(value: unknown, path = "principal"): Prot
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${path} must be an object`);
   const kind: unknown = Reflect.get(value, "kind");
   if (kind === "operator") {
-    const record = strictRecord(value, path, ["kind", "operatorId", "projectId", "principalGeneration"]);
+    const record = strictRecord(value, path, [
+      "kind",
+      "operatorId",
+      "projectId",
+      "projectAuthorityGeneration",
+      "principalGeneration",
+    ]);
     return {
       kind,
       operatorId: parseIdentifier<"OperatorId">(record.operatorId, `${path}.operatorId`) as OperatorId,
       projectId: parseIdentifier<"ProjectId">(record.projectId, `${path}.projectId`) as ProjectId,
+      projectAuthorityGeneration: safeInteger(
+        record.projectAuthorityGeneration,
+        `${path}.projectAuthorityGeneration`,
+        1,
+      ),
       principalGeneration: safeInteger(record.principalGeneration, `${path}.principalGeneration`, 1),
     };
   }
@@ -121,8 +130,8 @@ export function parseProtocolInitializeRequest(value: unknown): ProtocolInitiali
   return {
     protocolVersion: 1,
     client: {
-      name: clientField.parse(client.name, "initialize.input.client.name"),
-      version: clientField.parse(client.version, "initialize.input.client.version"),
+      name: protocolClientField.parse(client.name, "initialize.input.client.name"),
+      version: protocolClientField.parse(client.version, "initialize.input.client.version"),
     },
     authentication: {
       scheme: "capability",
@@ -209,7 +218,7 @@ export function createProtocolInitializeResult(options: {
   );
   return {
     protocolVersion: 1,
-    daemonVersion: clientField.parse(options.daemonVersion, "daemonVersion"),
+    daemonVersion: protocolClientField.parse(options.daemonVersion, "daemonVersion"),
     daemonInstanceGeneration: safeInteger(options.daemonInstanceGeneration, "daemonInstanceGeneration", 1),
     principal: authorization.principal,
     clientNonce: options.request.authentication.clientNonce,
@@ -251,7 +260,7 @@ export function parseProtocolInitializeResult(value: unknown): ProtocolInitializ
   }
   return {
     protocolVersion: 1,
-    daemonVersion: clientField.parse(record.daemonVersion, "initialize.result.daemonVersion"),
+    daemonVersion: protocolClientField.parse(record.daemonVersion, "initialize.result.daemonVersion"),
     daemonInstanceGeneration: safeInteger(
       record.daemonInstanceGeneration,
       "initialize.result.daemonInstanceGeneration",

@@ -127,6 +127,8 @@
         "fabric.v1.operator.heartbeat",
         "fabric.v1.operator.command",
         "fabric.v1.integration.input-attest",
+        "fabric.v1.intake.draft.create",
+        "fabric.v1.intake.read",
         "fabric.v1.intake.submit",
         "fabric.v1.intake.revise",
         "fabric.v1.scoped-gate.create",
@@ -221,6 +223,8 @@
         "fabric.v1.operator.heartbeat",
         "fabric.v1.operator.command",
         "fabric.v1.integration.input-attest",
+        "fabric.v1.intake.draft.create",
+        "fabric.v1.intake.read",
         "fabric.v1.intake.submit",
         "fabric.v1.intake.revise",
         "fabric.v1.scoped-gate.create",
@@ -256,6 +260,7 @@
         "kind",
         "operatorId",
         "projectId",
+        "projectAuthorityGeneration",
         "principalGeneration"
       ],
       "properties": {
@@ -269,6 +274,10 @@
         "projectId": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "projectAuthorityGeneration": {
+          "type": "integer",
+          "minimum": 1
         },
         "principalGeneration": {
           "type": "integer",
@@ -344,6 +353,7 @@
             "kind",
             "operatorId",
             "projectId",
+            "projectAuthorityGeneration",
             "principalGeneration"
           ],
           "properties": {
@@ -357,6 +367,10 @@
             "projectId": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "projectAuthorityGeneration": {
+              "type": "integer",
+              "minimum": 1
             },
             "principalGeneration": {
               "type": "integer",
@@ -434,6 +448,7 @@
             "capabilityId",
             "operatorId",
             "projectId",
+            "projectAuthorityGeneration",
             "principalGeneration",
             "issuedAt",
             "expiresAt",
@@ -453,6 +468,10 @@
             "projectId": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "projectAuthorityGeneration": {
+              "type": "integer",
+              "minimum": 1
             },
             "principalGeneration": {
               "type": "integer",
@@ -493,6 +512,7 @@
             "capabilityId",
             "operatorId",
             "projectId",
+            "projectAuthorityGeneration",
             "principalGeneration",
             "issuedAt",
             "expiresAt",
@@ -514,6 +534,10 @@
             "projectId": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "projectAuthorityGeneration": {
+              "type": "integer",
+              "minimum": 1
             },
             "principalGeneration": {
               "type": "integer",
@@ -571,6 +595,7 @@
             "capabilityId",
             "operatorId",
             "projectId",
+            "projectAuthorityGeneration",
             "principalGeneration",
             "issuedAt",
             "expiresAt",
@@ -593,6 +618,10 @@
             "projectId": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "projectAuthorityGeneration": {
+              "type": "integer",
+              "minimum": 1
             },
             "principalGeneration": {
               "type": "integer",
@@ -765,7 +794,9 @@
         "message": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "x-minUtf8Bytes": 1,
+          "x-maxUtf8Bytes": 4096
         },
         "retryable": {
           "type": "boolean"
@@ -839,12 +870,16 @@
             "name": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 128
+              "maxLength": 128,
+              "x-minUtf8Bytes": 1,
+              "x-maxUtf8Bytes": 128
             },
             "version": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 128
+              "maxLength": 128,
+              "x-minUtf8Bytes": 1,
+              "x-maxUtf8Bytes": 128
             }
           }
         },
@@ -862,8 +897,10 @@
             },
             "credential": {
               "type": "string",
-              "minLength": 16,
-              "maxLength": 4096
+              "minLength": 1,
+              "maxLength": 4096,
+              "x-minUtf8Bytes": 16,
+              "x-maxUtf8Bytes": 4096
             },
             "clientNonce": {
               "type": "string",
@@ -943,7 +980,9 @@
         "daemonVersion": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
+          "maxLength": 128,
+          "x-minUtf8Bytes": 1,
+          "x-maxUtf8Bytes": 128
         },
         "daemonInstanceGeneration": {
           "type": "integer",
@@ -958,6 +997,7 @@
                 "kind",
                 "operatorId",
                 "projectId",
+                "projectAuthorityGeneration",
                 "principalGeneration"
               ],
               "properties": {
@@ -971,6 +1011,10 @@
                 "projectId": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "projectAuthorityGeneration": {
+                  "type": "integer",
+                  "minimum": 1
                 },
                 "principalGeneration": {
                   "type": "integer",
@@ -1070,7 +1114,7 @@
         },
         "allowedOperations": {
           "type": "array",
-          "maxItems": 89,
+          "maxItems": 91,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -1137,6 +1181,8 @@
               "fabric.v1.operator.heartbeat",
               "fabric.v1.operator.command",
               "fabric.v1.integration.input-attest",
+              "fabric.v1.intake.draft.create",
+              "fabric.v1.intake.read",
               "fabric.v1.intake.submit",
               "fabric.v1.intake.revise",
               "fabric.v1.scoped-gate.create",
@@ -1248,12 +1294,16 @@
                 "name": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 128
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128
                 },
                 "version": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 128
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128
                 }
               }
             },
@@ -1271,8 +1321,10 @@
                 },
                 "credential": {
                   "type": "string",
-                  "minLength": 16,
-                  "maxLength": 4096
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 16,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "clientNonce": {
                   "type": "string",
@@ -1374,7 +1426,9 @@
             "daemonVersion": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 128
+              "maxLength": 128,
+              "x-minUtf8Bytes": 1,
+              "x-maxUtf8Bytes": 128
             },
             "daemonInstanceGeneration": {
               "type": "integer",
@@ -1389,6 +1443,7 @@
                     "kind",
                     "operatorId",
                     "projectId",
+                    "projectAuthorityGeneration",
                     "principalGeneration"
                   ],
                   "properties": {
@@ -1402,6 +1457,10 @@
                     "projectId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectAuthorityGeneration": {
+                      "type": "integer",
+                      "minimum": 1
                     },
                     "principalGeneration": {
                       "type": "integer",
@@ -1501,7 +1560,7 @@
             },
             "allowedOperations": {
               "type": "array",
-              "maxItems": 89,
+              "maxItems": 91,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -1568,6 +1627,8 @@
                   "fabric.v1.operator.heartbeat",
                   "fabric.v1.operator.command",
                   "fabric.v1.integration.input-attest",
+                  "fabric.v1.intake.draft.create",
+                  "fabric.v1.intake.read",
                   "fabric.v1.intake.submit",
                   "fabric.v1.intake.revise",
                   "fabric.v1.scoped-gate.create",
@@ -1737,7 +1798,9 @@
             "message": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "x-minUtf8Bytes": 1,
+              "x-maxUtf8Bytes": 4096
             },
             "retryable": {
               "type": "boolean"
@@ -7054,6 +7117,7 @@
                     "origin",
                     "command",
                     "projectSessionId",
+                    "coordinationRunId",
                     "expectedMembershipRevision",
                     "members"
                   ],
@@ -7222,6 +7286,14 @@
                       "x-maxUtf8Bytes": 128,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
                     "expectedMembershipRevision": {
                       "type": "integer",
                       "minimum": 0
@@ -7236,6 +7308,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "runId",
                               "state"
                             ],
@@ -7244,6 +7317,14 @@
                                 "const": "coordination-run"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7270,6 +7351,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "runId",
                               "state"
                             ],
@@ -7278,6 +7360,14 @@
                                 "const": "coordination-run"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7304,6 +7394,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "runId",
                               "state",
                               "reason"
@@ -7313,6 +7404,14 @@
                                 "const": "coordination-run"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7346,6 +7445,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "workstreamId",
                               "state"
                             ],
@@ -7354,6 +7454,14 @@
                                 "const": "workstream"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7380,6 +7488,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "workstreamId",
                               "state"
                             ],
@@ -7388,6 +7497,14 @@
                                 "const": "workstream"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7414,6 +7531,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "workstreamId",
                               "state",
                               "reason"
@@ -7423,6 +7541,14 @@
                                 "const": "workstream"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7456,6 +7582,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "taskId",
                               "state"
                             ],
@@ -7464,6 +7591,14 @@
                                 "const": "task"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7490,6 +7625,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "taskId",
                               "state"
                             ],
@@ -7498,6 +7634,14 @@
                                 "const": "task"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7524,6 +7668,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "taskId",
                               "state",
                               "reason"
@@ -7533,6 +7678,14 @@
                                 "const": "task"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7566,6 +7719,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "leaseId",
                               "state"
                             ],
@@ -7574,6 +7728,14 @@
                                 "const": "lease"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7600,6 +7762,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "leaseId",
                               "state"
                             ],
@@ -7608,6 +7771,14 @@
                                 "const": "lease"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7634,6 +7805,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "leaseId",
                               "state",
                               "reason"
@@ -7643,6 +7815,14 @@
                                 "const": "lease"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7676,6 +7856,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "providerActionId",
                               "state"
                             ],
@@ -7684,6 +7865,14 @@
                                 "const": "provider-action"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7710,6 +7899,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "providerActionId",
                               "state"
                             ],
@@ -7718,6 +7908,14 @@
                                 "const": "provider-action"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7744,6 +7942,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "providerActionId",
                               "state",
                               "reason"
@@ -7753,6 +7952,14 @@
                                 "const": "provider-action"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7786,6 +7993,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "messageId",
                               "state"
                             ],
@@ -7794,6 +8002,14 @@
                                 "const": "required-message"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7820,6 +8036,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "messageId",
                               "state"
                             ],
@@ -7828,6 +8045,14 @@
                                 "const": "required-message"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7854,6 +8079,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "messageId",
                               "state",
                               "reason"
@@ -7863,6 +8089,14 @@
                                 "const": "required-message"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7896,6 +8130,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "artifactObligationId",
                               "state"
                             ],
@@ -7904,6 +8139,14 @@
                                 "const": "artifact-obligation"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7930,6 +8173,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "artifactObligationId",
                               "state"
                             ],
@@ -7938,6 +8182,14 @@
                                 "const": "artifact-obligation"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -7964,6 +8216,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "artifactObligationId",
                               "state",
                               "reason"
@@ -7973,6 +8226,14 @@
                                 "const": "artifact-obligation"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8006,6 +8267,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "gateId",
                               "state"
                             ],
@@ -8014,6 +8276,14 @@
                                 "const": "gate"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8040,6 +8310,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "gateId",
                               "state"
                             ],
@@ -8048,6 +8319,14 @@
                                 "const": "gate"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8074,6 +8353,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "gateId",
                               "state",
                               "reason"
@@ -8083,6 +8363,14 @@
                                 "const": "gate"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8116,6 +8404,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "barrierId",
                               "state"
                             ],
@@ -8124,6 +8413,14 @@
                                 "const": "scoped-barrier"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8150,6 +8447,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "barrierId",
                               "state"
                             ],
@@ -8158,6 +8456,14 @@
                                 "const": "scoped-barrier"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8184,6 +8490,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "barrierId",
                               "state",
                               "reason"
@@ -8193,6 +8500,14 @@
                                 "const": "scoped-barrier"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8234,6 +8549,7 @@
                     "origin",
                     "command",
                     "projectSessionId",
+                    "coordinationRunId",
                     "expectedMembershipRevision",
                     "members"
                   ],
@@ -8246,8 +8562,13 @@
                       "additionalProperties": false,
                       "required": [
                         "commandId",
-                        "ownerLeaseId",
-                        "ownerLeaseGeneration",
+                        "agentId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "principalGeneration",
+                        "chairLeaseId",
+                        "chairLeaseGeneration",
+                        "expectedRunRevision",
                         "expectedRevision"
                       ],
                       "properties": {
@@ -8259,7 +8580,7 @@
                           "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
-                        "ownerLeaseId": {
+                        "agentId": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128,
@@ -8267,9 +8588,41 @@
                           "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
-                        "ownerLeaseGeneration": {
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "principalGeneration": {
                           "type": "integer",
                           "minimum": 1
+                        },
+                        "chairLeaseId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "chairLeaseGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "expectedRevision": {
                           "type": "integer",
@@ -8278,6 +8631,14 @@
                       }
                     },
                     "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 128,
@@ -8299,6 +8660,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "runId",
                               "state"
                             ],
@@ -8307,6 +8669,14 @@
                                 "const": "coordination-run"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8333,6 +8703,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "runId",
                               "state"
                             ],
@@ -8341,6 +8712,14 @@
                                 "const": "coordination-run"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8367,6 +8746,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "runId",
                               "state",
                               "reason"
@@ -8376,6 +8756,14 @@
                                 "const": "coordination-run"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8409,6 +8797,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "workstreamId",
                               "state"
                             ],
@@ -8417,6 +8806,14 @@
                                 "const": "workstream"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8443,6 +8840,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "workstreamId",
                               "state"
                             ],
@@ -8451,6 +8849,14 @@
                                 "const": "workstream"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8477,6 +8883,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "workstreamId",
                               "state",
                               "reason"
@@ -8486,6 +8893,14 @@
                                 "const": "workstream"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8519,6 +8934,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "taskId",
                               "state"
                             ],
@@ -8527,6 +8943,14 @@
                                 "const": "task"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8553,6 +8977,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "taskId",
                               "state"
                             ],
@@ -8561,6 +8986,14 @@
                                 "const": "task"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8587,6 +9020,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "taskId",
                               "state",
                               "reason"
@@ -8596,6 +9030,14 @@
                                 "const": "task"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8629,6 +9071,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "leaseId",
                               "state"
                             ],
@@ -8637,6 +9080,14 @@
                                 "const": "lease"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8663,6 +9114,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "leaseId",
                               "state"
                             ],
@@ -8671,6 +9123,14 @@
                                 "const": "lease"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8697,6 +9157,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "leaseId",
                               "state",
                               "reason"
@@ -8706,6 +9167,14 @@
                                 "const": "lease"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8739,6 +9208,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "providerActionId",
                               "state"
                             ],
@@ -8747,6 +9217,14 @@
                                 "const": "provider-action"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8773,6 +9251,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "providerActionId",
                               "state"
                             ],
@@ -8781,6 +9260,14 @@
                                 "const": "provider-action"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8807,6 +9294,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "providerActionId",
                               "state",
                               "reason"
@@ -8816,6 +9304,14 @@
                                 "const": "provider-action"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8849,6 +9345,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "messageId",
                               "state"
                             ],
@@ -8857,6 +9354,14 @@
                                 "const": "required-message"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8883,6 +9388,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "messageId",
                               "state"
                             ],
@@ -8891,6 +9397,14 @@
                                 "const": "required-message"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8917,6 +9431,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "messageId",
                               "state",
                               "reason"
@@ -8926,6 +9441,14 @@
                                 "const": "required-message"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8959,6 +9482,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "artifactObligationId",
                               "state"
                             ],
@@ -8967,6 +9491,14 @@
                                 "const": "artifact-obligation"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -8993,6 +9525,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "artifactObligationId",
                               "state"
                             ],
@@ -9001,6 +9534,14 @@
                                 "const": "artifact-obligation"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9027,6 +9568,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "artifactObligationId",
                               "state",
                               "reason"
@@ -9036,6 +9578,14 @@
                                 "const": "artifact-obligation"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9069,6 +9619,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "gateId",
                               "state"
                             ],
@@ -9077,6 +9628,14 @@
                                 "const": "gate"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9103,6 +9662,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "gateId",
                               "state"
                             ],
@@ -9111,6 +9671,14 @@
                                 "const": "gate"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9137,6 +9705,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "gateId",
                               "state",
                               "reason"
@@ -9146,6 +9715,14 @@
                                 "const": "gate"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9179,6 +9756,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "barrierId",
                               "state"
                             ],
@@ -9187,6 +9765,14 @@
                                 "const": "scoped-barrier"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9213,6 +9799,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "barrierId",
                               "state"
                             ],
@@ -9221,6 +9808,14 @@
                                 "const": "scoped-barrier"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -9247,6 +9842,7 @@
                             "required": [
                               "kind",
                               "membershipId",
+                              "coordinationRunId",
                               "barrierId",
                               "state",
                               "reason"
@@ -9256,6 +9852,14 @@
                                 "const": "scoped-barrier"
                               },
                               "membershipId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "coordinationRunId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 128,
@@ -10337,6 +10941,313 @@
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
             },
             "operation": {
+              "const": "fabric.v1.intake.draft.create"
+            },
+            "input": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "command",
+                "intakeId",
+                "dedupeKey",
+                "summary",
+                "artifactRefs",
+                "gateIds"
+              ],
+              "properties": {
+                "command": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "credential",
+                    "commandId",
+                    "expectedRevision",
+                    "actor",
+                    "provenance",
+                    "evidenceRefs"
+                  ],
+                  "properties": {
+                    "credential": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "capabilityId",
+                        "token"
+                      ],
+                      "properties": {
+                        "capabilityId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "token": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 16,
+                          "x-maxUtf8Bytes": 4096
+                        }
+                      }
+                    },
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "actor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "provenance": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind",
+                            "clientId",
+                            "inputEventId"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "console-direct-input"
+                            },
+                            "clientId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "inputEventId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind",
+                            "attestationId",
+                            "integrationId",
+                            "integrationGeneration"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "attested-provider-input"
+                            },
+                            "attestationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "integrationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "integrationGeneration": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "evidenceRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    }
+                  }
+                },
+                "intakeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "dedupeKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "artifactRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path",
+                      "digest"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 128
+                },
+                "gateIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "input"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.intake.read"
+            },
+            "input": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "credential",
+                "intakeId"
+              ],
+              "properties": {
+                "credential": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "capabilityId",
+                    "token"
+                  ],
+                  "properties": {
+                    "capabilityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "token": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 16,
+                      "x-maxUtf8Bytes": 4096
+                    }
+                  }
+                },
+                "intakeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "input"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
               "const": "fabric.v1.intake.submit"
             },
             "input": {
@@ -10344,7 +11255,13 @@
               "additionalProperties": false,
               "required": [
                 "command",
-                "intake",
+                "intakeId",
+                "expectedRevision",
+                "projectSessionId",
+                "coordinationRunId",
+                "summary",
+                "artifactRefs",
+                "gateIds",
                 "chairRequest"
               ],
               "properties": {
@@ -10501,106 +11418,79 @@
                     }
                   }
                 },
-                "intake": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "intakeId",
-                    "projectSessionId",
-                    "revision",
-                    "state",
-                    "dedupeKey",
-                    "summary",
-                    "artifactRefs",
-                    "gateIds"
-                  ],
-                  "properties": {
-                    "intakeId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "projectSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "revision": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "state": {
-                      "type": "string",
-                      "enum": [
-                        "draft",
-                        "awaiting-chair",
-                        "discussing",
-                        "awaiting-human",
-                        "accepted",
-                        "deferred",
-                        "cancelled"
-                      ]
-                    },
-                    "dedupeKey": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 4096
-                    },
-                    "summary": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 4096
-                    },
-                    "artifactRefs": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "path",
-                          "digest"
-                        ],
-                        "properties": {
-                          "path": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4096,
-                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                          },
-                          "digest": {
-                            "type": "string",
-                            "pattern": "^sha256:[a-f0-9]{64}$"
-                          }
-                        }
-                      },
-                      "minItems": 0,
-                      "maxItems": 128
-                    },
-                    "gateIds": {
-                      "type": "array",
-                      "items": {
+                "intakeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "expectedRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "coordinationRunId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "artifactRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path",
+                      "digest"
+                    ],
+                    "properties": {
+                      "path": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 128,
-                        "x-minUtf8Bytes": 1,
-                        "x-maxUtf8Bytes": 128,
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        "maxLength": 4096,
+                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
                       },
-                      "minItems": 0,
-                      "maxItems": 256,
-                      "uniqueItems": true
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      }
                     }
-                  }
+                  },
+                  "minItems": 0,
+                  "maxItems": 128
+                },
+                "gateIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
                 },
                 "chairRequest": {
                   "type": "object",
@@ -10857,6 +11747,7 @@
                     "command",
                     "intakeId",
                     "projectSessionId",
+                    "coordinationRunId",
                     "expectedRevision",
                     "state",
                     "summary",
@@ -11036,6 +11927,14 @@
                       "x-maxUtf8Bytes": 128,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
                     "expectedRevision": {
                       "type": "integer",
                       "minimum": 1
@@ -11043,7 +11942,6 @@
                     "state": {
                       "type": "string",
                       "enum": [
-                        "draft",
                         "awaiting-chair",
                         "discussing",
                         "awaiting-human",
@@ -11333,6 +12231,7 @@
                     "command",
                     "intakeId",
                     "projectSessionId",
+                    "coordinationRunId",
                     "expectedRevision",
                     "state",
                     "summary",
@@ -11348,8 +12247,13 @@
                       "additionalProperties": false,
                       "required": [
                         "commandId",
-                        "ownerLeaseId",
-                        "ownerLeaseGeneration",
+                        "agentId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "principalGeneration",
+                        "chairLeaseId",
+                        "chairLeaseGeneration",
+                        "expectedRunRevision",
                         "expectedRevision"
                       ],
                       "properties": {
@@ -11361,7 +12265,7 @@
                           "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
-                        "ownerLeaseId": {
+                        "agentId": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128,
@@ -11369,9 +12273,41 @@
                           "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
-                        "ownerLeaseGeneration": {
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "principalGeneration": {
                           "type": "integer",
                           "minimum": 1
+                        },
+                        "chairLeaseId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "chairLeaseGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "expectedRevision": {
                           "type": "integer",
@@ -11395,6 +12331,14 @@
                       "x-maxUtf8Bytes": 128,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
                     "expectedRevision": {
                       "type": "integer",
                       "minimum": 1
@@ -11402,7 +12346,6 @@
                     "state": {
                       "type": "string",
                       "enum": [
-                        "draft",
                         "awaiting-chair",
                         "discussing",
                         "awaiting-human",
@@ -12050,6 +12993,8 @@
                               "fabric.v1.operator.heartbeat",
                               "fabric.v1.operator.command",
                               "fabric.v1.integration.input-attest",
+                              "fabric.v1.intake.draft.create",
+                              "fabric.v1.intake.read",
                               "fabric.v1.intake.submit",
                               "fabric.v1.intake.revise",
                               "fabric.v1.scoped-gate.create",
@@ -12248,8 +13193,13 @@
                       "additionalProperties": false,
                       "required": [
                         "commandId",
-                        "ownerLeaseId",
-                        "ownerLeaseGeneration",
+                        "agentId",
+                        "projectSessionId",
+                        "coordinationRunId",
+                        "principalGeneration",
+                        "chairLeaseId",
+                        "chairLeaseGeneration",
+                        "expectedRunRevision",
                         "expectedRevision"
                       ],
                       "properties": {
@@ -12261,7 +13211,7 @@
                           "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
-                        "ownerLeaseId": {
+                        "agentId": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128,
@@ -12269,9 +13219,41 @@
                           "x-maxUtf8Bytes": 128,
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         },
-                        "ownerLeaseGeneration": {
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "coordinationRunId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "principalGeneration": {
                           "type": "integer",
                           "minimum": 1
+                        },
+                        "chairLeaseId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "chairLeaseGeneration": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "expectedRunRevision": {
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "expectedRevision": {
                           "type": "integer",
@@ -12458,6 +13440,8 @@
                               "fabric.v1.operator.heartbeat",
                               "fabric.v1.operator.command",
                               "fabric.v1.integration.input-attest",
+                              "fabric.v1.intake.draft.create",
+                              "fabric.v1.intake.read",
                               "fabric.v1.intake.submit",
                               "fabric.v1.intake.revise",
                               "fabric.v1.scoped-gate.create",
@@ -13056,6 +14040,8 @@
                         "fabric.v1.operator.heartbeat",
                         "fabric.v1.operator.command",
                         "fabric.v1.integration.input-attest",
+                        "fabric.v1.intake.draft.create",
+                        "fabric.v1.intake.read",
                         "fabric.v1.intake.submit",
                         "fabric.v1.intake.revise",
                         "fabric.v1.scoped-gate.create",
@@ -16090,7 +17076,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -16238,7 +17226,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -16413,7 +17403,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -16588,7 +17580,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -16737,7 +17731,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -16901,7 +17897,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -17108,7 +18106,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -17243,7 +18243,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -17404,7 +18406,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -17560,7 +18564,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -17778,7 +18784,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -17996,7 +19004,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -18214,7 +19224,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -18380,7 +19392,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -18490,7 +19504,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -18634,7 +19650,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -18852,7 +19870,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -19070,7 +20090,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -19219,7 +20241,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -19437,7 +20461,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -19586,7 +20612,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -19721,7 +20749,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -19883,7 +20913,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -20069,7 +21101,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -20255,7 +21289,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -20441,7 +21477,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -20627,7 +21665,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -20785,7 +21825,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -20972,7 +22014,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -21159,7 +22203,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -21346,7 +22392,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -21533,7 +22581,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -21720,7 +22770,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -21907,7 +22959,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -22056,7 +23110,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -22223,7 +23279,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -22665,7 +23723,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -23107,7 +24167,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -23549,7 +24611,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -23991,7 +25055,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -24149,7 +25215,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -24377,7 +25445,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -24605,7 +25675,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -24833,7 +25905,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -25061,7 +26135,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -25289,7 +26365,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -25450,7 +26528,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -25634,7 +26714,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -25848,7 +26930,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -26058,7 +27142,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -26290,7 +27376,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -26477,7 +27565,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -26648,7 +27738,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -26805,7 +27897,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -27484,7 +28578,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -28163,7 +29259,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -28842,7 +29940,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -29521,7 +30621,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -29558,11 +30660,20 @@
               "additionalProperties": false,
               "required": [
                 "projectSessionId",
+                "coordinationRunId",
                 "membershipRevision",
                 "members"
               ],
               "properties": {
                 "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "coordinationRunId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128,
@@ -29584,6 +30695,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "runId",
                           "state"
                         ],
@@ -29592,6 +30704,14 @@
                             "const": "coordination-run"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29618,6 +30738,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "runId",
                           "state"
                         ],
@@ -29626,6 +30747,14 @@
                             "const": "coordination-run"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29652,6 +30781,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "runId",
                           "state",
                           "reason"
@@ -29661,6 +30791,14 @@
                             "const": "coordination-run"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29694,6 +30832,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "workstreamId",
                           "state"
                         ],
@@ -29702,6 +30841,14 @@
                             "const": "workstream"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29728,6 +30875,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "workstreamId",
                           "state"
                         ],
@@ -29736,6 +30884,14 @@
                             "const": "workstream"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29762,6 +30918,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "workstreamId",
                           "state",
                           "reason"
@@ -29771,6 +30928,14 @@
                             "const": "workstream"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29804,6 +30969,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "taskId",
                           "state"
                         ],
@@ -29812,6 +30978,14 @@
                             "const": "task"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29838,6 +31012,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "taskId",
                           "state"
                         ],
@@ -29846,6 +31021,14 @@
                             "const": "task"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29872,6 +31055,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "taskId",
                           "state",
                           "reason"
@@ -29881,6 +31065,14 @@
                             "const": "task"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29914,6 +31106,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "leaseId",
                           "state"
                         ],
@@ -29922,6 +31115,14 @@
                             "const": "lease"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29948,6 +31149,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "leaseId",
                           "state"
                         ],
@@ -29956,6 +31158,14 @@
                             "const": "lease"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -29982,6 +31192,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "leaseId",
                           "state",
                           "reason"
@@ -29991,6 +31202,14 @@
                             "const": "lease"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30024,6 +31243,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "providerActionId",
                           "state"
                         ],
@@ -30032,6 +31252,14 @@
                             "const": "provider-action"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30058,6 +31286,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "providerActionId",
                           "state"
                         ],
@@ -30066,6 +31295,14 @@
                             "const": "provider-action"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30092,6 +31329,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "providerActionId",
                           "state",
                           "reason"
@@ -30101,6 +31339,14 @@
                             "const": "provider-action"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30134,6 +31380,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "messageId",
                           "state"
                         ],
@@ -30142,6 +31389,14 @@
                             "const": "required-message"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30168,6 +31423,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "messageId",
                           "state"
                         ],
@@ -30176,6 +31432,14 @@
                             "const": "required-message"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30202,6 +31466,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "messageId",
                           "state",
                           "reason"
@@ -30211,6 +31476,14 @@
                             "const": "required-message"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30244,6 +31517,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "artifactObligationId",
                           "state"
                         ],
@@ -30252,6 +31526,14 @@
                             "const": "artifact-obligation"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30278,6 +31560,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "artifactObligationId",
                           "state"
                         ],
@@ -30286,6 +31569,14 @@
                             "const": "artifact-obligation"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30312,6 +31603,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "artifactObligationId",
                           "state",
                           "reason"
@@ -30321,6 +31613,14 @@
                             "const": "artifact-obligation"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30354,6 +31654,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "gateId",
                           "state"
                         ],
@@ -30362,6 +31663,14 @@
                             "const": "gate"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30388,6 +31697,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "gateId",
                           "state"
                         ],
@@ -30396,6 +31706,14 @@
                             "const": "gate"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30422,6 +31740,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "gateId",
                           "state",
                           "reason"
@@ -30431,6 +31750,14 @@
                             "const": "gate"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30464,6 +31791,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "barrierId",
                           "state"
                         ],
@@ -30472,6 +31800,14 @@
                             "const": "scoped-barrier"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30498,6 +31834,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "barrierId",
                           "state"
                         ],
@@ -30506,6 +31843,14 @@
                             "const": "scoped-barrier"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30532,6 +31877,7 @@
                         "required": [
                           "kind",
                           "membershipId",
+                          "coordinationRunId",
                           "barrierId",
                           "state",
                           "reason"
@@ -30541,6 +31887,14 @@
                             "const": "scoped-barrier"
                           },
                           "membershipId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "x-minUtf8Bytes": 1,
+                            "x-maxUtf8Bytes": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "coordinationRunId": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128,
@@ -30675,7 +32029,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -30713,6 +32069,7 @@
               "required": [
                 "clientId",
                 "projectId",
+                "projectAuthorityGeneration",
                 "projectSessionId",
                 "generation",
                 "expiresAt"
@@ -30733,6 +32090,10 @@
                   "x-minUtf8Bytes": 1,
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "projectAuthorityGeneration": {
+                  "type": "integer",
+                  "minimum": 1
                 },
                 "projectSessionId": {
                   "oneOf": [
@@ -30859,7 +32220,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -31008,7 +32371,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -31046,6 +32411,7 @@
               "required": [
                 "clientId",
                 "projectId",
+                "projectAuthorityGeneration",
                 "projectSessionId",
                 "generation",
                 "expiresAt"
@@ -31066,6 +32432,10 @@
                   "x-minUtf8Bytes": 1,
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "projectAuthorityGeneration": {
+                  "type": "integer",
+                  "minimum": 1
                 },
                 "projectSessionId": {
                   "oneOf": [
@@ -31192,7 +32562,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -31489,7 +32861,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -31790,7 +33164,583 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "details": {
+                  "$ref": "#/$defs/boundedJsonValue"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "result"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.intake.draft.create"
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "intakeId",
+                "projectId",
+                "revision",
+                "state",
+                "dedupeKey",
+                "summary",
+                "artifactRefs",
+                "gateIds"
+              ],
+              "properties": {
+                "intakeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "state": {
+                  "const": "draft"
+                },
+                "dedupeKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "artifactRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path",
+                      "digest"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 128
+                },
+                "gateIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "error"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.intake.draft.create"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "PROTOCOL_INVALID",
+                    "PROTOCOL_UNSUPPORTED",
+                    "FEATURE_UNAVAILABLE",
+                    "AUTHENTICATION_FAILED",
+                    "AUTHORITY_WIDENING",
+                    "ARTIFACT_DIGEST_INVALID",
+                    "ARTIFACT_PATH_FORBIDDEN",
+                    "ADAPTER_ARTIFACT_MISSING",
+                    "ADAPTER_COMPATIBILITY_INVALID",
+                    "ADAPTER_DISABLED",
+                    "ADAPTER_HASH_MISMATCH",
+                    "ADAPTER_PIN_UNRESOLVED",
+                    "ADAPTER_MODEL_REQUIRED",
+                    "ADAPTER_FAMILY_FORBIDDEN",
+                    "BARRIER_PRECONDITION_FAILED",
+                    "BUDGET_EXCEEDED",
+                    "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_EXPIRED",
+                    "CAPABILITY_REVOKED",
+                    "CONFIG_UNTRUSTED_FIELD",
+                    "CONFIG_WIDENING_FORBIDDEN",
+                    "DEDUPE_CONFLICT",
+                    "DELIVERY_ALREADY_RESOLVED",
+                    "DELIVERY_REASON_REQUIRED",
+                    "LEASE_NOT_EXPIRED",
+                    "LEASE_EXPIRED",
+                    "LEASE_QUARANTINED",
+                    "CHECKPOINT_INCOMPLETE",
+                    "CONTEXT_UNRECONCILED",
+                    "LIFECYCLE_PRECONDITION_FAILED",
+                    "MODEL_REQUIRED",
+                    "MODEL_NOT_ALLOWED",
+                    "MODEL_FAMILY_NOT_ALLOWED",
+                    "MESSAGE_RELATIONSHIP_FORBIDDEN",
+                    "MESSAGE_HOP_LIMIT_EXCEEDED",
+                    "MESSAGE_QUOTA_EXCEEDED",
+                    "NOT_FOUND",
+                    "PROVIDER_TURN_ACTIVE",
+                    "STALE_LEASE_GENERATION",
+                    "STALE_PRINCIPAL_GENERATION",
+                    "TASK_NOT_OWNER",
+                    "TASK_DEPENDENCY_BLOCKED",
+                    "TASK_SUBTREE_CONFLICT",
+                    "TASK_REVISION_CONFLICT",
+                    "TEAM_DEPTH_EXCEEDED",
+                    "STALE_TEAM_GENERATION",
+                    "BUDGET_USAGE_UNKNOWN",
+                    "WRITE_SCOPE_CONFLICT",
+                    "WRITE_SCOPE_RECOVERY_REQUIRED",
+                    "WRITE_SCOPE_QUARANTINED",
+                    "WRONG_PROJECT",
+                    "STALE_GENERATION",
+                    "STALE_REVISION",
+                    "GATE_BLOCKED",
+                    "RESOURCE_EXHAUSTED",
+                    "RESOURCE_USAGE_UNKNOWN",
+                    "OVERLOADED",
+                    "DEADLINE_EXCEEDED",
+                    "CONFLICT",
+                    "RECOVERY_REQUIRED",
+                    "PROJECTION_RESNAPSHOT_REQUIRED"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "details": {
+                  "$ref": "#/$defs/boundedJsonValue"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "result"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.intake.read"
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "intakeId",
+                    "projectId",
+                    "revision",
+                    "state",
+                    "dedupeKey",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds"
+                  ],
+                  "properties": {
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "state": {
+                      "const": "draft"
+                    },
+                    "dedupeKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "intakeId",
+                    "projectId",
+                    "projectSessionId",
+                    "coordinationRunId",
+                    "revision",
+                    "state",
+                    "dedupeKey",
+                    "summary",
+                    "artifactRefs",
+                    "gateIds"
+                  ],
+                  "properties": {
+                    "intakeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "projectSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "coordinationRunId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "awaiting-chair",
+                        "discussing",
+                        "awaiting-human",
+                        "accepted",
+                        "deferred",
+                        "cancelled"
+                      ]
+                    },
+                    "dedupeKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    },
+                    "artifactRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "gateIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "minItems": 0,
+                      "maxItems": 256,
+                      "uniqueItems": true
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "operation",
+            "ok",
+            "error"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operation": {
+              "const": "fabric.v1.intake.read"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "PROTOCOL_INVALID",
+                    "PROTOCOL_UNSUPPORTED",
+                    "FEATURE_UNAVAILABLE",
+                    "AUTHENTICATION_FAILED",
+                    "AUTHORITY_WIDENING",
+                    "ARTIFACT_DIGEST_INVALID",
+                    "ARTIFACT_PATH_FORBIDDEN",
+                    "ADAPTER_ARTIFACT_MISSING",
+                    "ADAPTER_COMPATIBILITY_INVALID",
+                    "ADAPTER_DISABLED",
+                    "ADAPTER_HASH_MISMATCH",
+                    "ADAPTER_PIN_UNRESOLVED",
+                    "ADAPTER_MODEL_REQUIRED",
+                    "ADAPTER_FAMILY_FORBIDDEN",
+                    "BARRIER_PRECONDITION_FAILED",
+                    "BUDGET_EXCEEDED",
+                    "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_EXPIRED",
+                    "CAPABILITY_REVOKED",
+                    "CONFIG_UNTRUSTED_FIELD",
+                    "CONFIG_WIDENING_FORBIDDEN",
+                    "DEDUPE_CONFLICT",
+                    "DELIVERY_ALREADY_RESOLVED",
+                    "DELIVERY_REASON_REQUIRED",
+                    "LEASE_NOT_EXPIRED",
+                    "LEASE_EXPIRED",
+                    "LEASE_QUARANTINED",
+                    "CHECKPOINT_INCOMPLETE",
+                    "CONTEXT_UNRECONCILED",
+                    "LIFECYCLE_PRECONDITION_FAILED",
+                    "MODEL_REQUIRED",
+                    "MODEL_NOT_ALLOWED",
+                    "MODEL_FAMILY_NOT_ALLOWED",
+                    "MESSAGE_RELATIONSHIP_FORBIDDEN",
+                    "MESSAGE_HOP_LIMIT_EXCEEDED",
+                    "MESSAGE_QUOTA_EXCEEDED",
+                    "NOT_FOUND",
+                    "PROVIDER_TURN_ACTIVE",
+                    "STALE_LEASE_GENERATION",
+                    "STALE_PRINCIPAL_GENERATION",
+                    "TASK_NOT_OWNER",
+                    "TASK_DEPENDENCY_BLOCKED",
+                    "TASK_SUBTREE_CONFLICT",
+                    "TASK_REVISION_CONFLICT",
+                    "TEAM_DEPTH_EXCEEDED",
+                    "STALE_TEAM_GENERATION",
+                    "BUDGET_USAGE_UNKNOWN",
+                    "WRITE_SCOPE_CONFLICT",
+                    "WRITE_SCOPE_RECOVERY_REQUIRED",
+                    "WRITE_SCOPE_QUARANTINED",
+                    "WRONG_PROJECT",
+                    "STALE_GENERATION",
+                    "STALE_REVISION",
+                    "GATE_BLOCKED",
+                    "RESOURCE_EXHAUSTED",
+                    "RESOURCE_USAGE_UNKNOWN",
+                    "OVERLOADED",
+                    "DEADLINE_EXCEEDED",
+                    "CONFLICT",
+                    "RECOVERY_REQUIRED",
+                    "PROJECTION_RESNAPSHOT_REQUIRED"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -31827,7 +33777,9 @@
               "additionalProperties": false,
               "required": [
                 "intakeId",
+                "projectId",
                 "projectSessionId",
+                "coordinationRunId",
                 "revision",
                 "state",
                 "dedupeKey",
@@ -31844,7 +33796,23 @@
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                 },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
                 "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "coordinationRunId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128,
@@ -31859,7 +33827,6 @@
                 "state": {
                   "type": "string",
                   "enum": [
-                    "draft",
                     "awaiting-chair",
                     "discussing",
                     "awaiting-human",
@@ -32023,7 +33990,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -32060,7 +34029,9 @@
               "additionalProperties": false,
               "required": [
                 "intakeId",
+                "projectId",
                 "projectSessionId",
+                "coordinationRunId",
                 "revision",
                 "state",
                 "dedupeKey",
@@ -32077,7 +34048,23 @@
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                 },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
                 "projectSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "coordinationRunId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128,
@@ -32092,7 +34079,6 @@
                 "state": {
                   "type": "string",
                   "enum": [
-                    "draft",
                     "awaiting-chair",
                     "discussing",
                     "awaiting-human",
@@ -32256,7 +34242,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -32856,7 +34844,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -33456,7 +35446,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -33624,7 +35616,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -34070,7 +36064,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -34516,7 +36512,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -34962,7 +36960,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -35126,7 +37126,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -36189,7 +38191,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -37233,7 +39237,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -38277,7 +40283,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -39321,7 +41329,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -40365,7 +42375,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -41409,7 +43421,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -42453,7 +44467,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -42626,7 +44642,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -43236,7 +45254,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -45483,7 +47503,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -49087,7 +51109,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -49339,7 +51363,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -49578,7 +51604,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -50257,7 +52285,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -50936,7 +52966,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -51101,7 +53133,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"
@@ -51266,7 +53300,9 @@
                 "message": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 4096,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 4096
                 },
                 "retryable": {
                   "type": "boolean"

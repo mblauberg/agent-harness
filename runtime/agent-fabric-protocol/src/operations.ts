@@ -103,6 +103,8 @@ const DEFINITIONS = defineOperations({
   operatorHeartbeat: { operation: "fabric.v1.operator.heartbeat", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
   operatorCommand: { operation: "fabric.v1.operator.command", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
   integrationInputAttest: { operation: "fabric.v1.integration.input-attest", feature: "input-attestation.v1", principals: ["integration"], kind: "extension" },
+  intakeDraftCreate: { operation: "fabric.v1.intake.draft.create", feature: "intakes.v1", principals: ["operator"], kind: "extension" },
+  intakeRead: { operation: "fabric.v1.intake.read", feature: "intakes.v1", principals: ["operator"], kind: "extension" },
   intakeSubmit: { operation: "fabric.v1.intake.submit", feature: "intakes.v1", principals: ["operator"], kind: "extension" },
   intakeRevise: { operation: "fabric.v1.intake.revise", feature: "intakes.v1", principals: ["operator", "agent"], kind: "extension" },
   scopedGateCreate: { operation: "fabric.v1.scoped-gate.create", feature: "scoped-gates.v1", principals: ["operator", "agent"], kind: "extension", gateOwner: "scoped-gate" },

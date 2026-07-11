@@ -185,23 +185,20 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
   }, { ...session, state: "closed", terminalPath: { kind: "cancelled", reason: "fixture" } });
   set(FABRIC_OPERATIONS.intakeSubmit, {
     command: operatorCommand,
-    intake: {
-      intakeId: "intake_01",
-      projectSessionId: "ps_01",
-      revision: 1,
-      state: "awaiting-chair",
-      dedupeKey: "intake_dedupe_01",
-      summary: "Discuss protocol.",
-      artifactRefs: [artifact],
-      gateIds: ["gate_01"],
-    },
+    intakeId: "intake_01",
+    expectedRevision: 1,
+    projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
+    summary: "Discuss protocol.",
+    artifactRefs: [artifact],
+    gateIds: ["gate_01"],
     chairRequest: {
       ...taskRequest,
       request: {
         ...taskRequest.request,
         intakeBinding: {
           intakeId: "intake_01",
-          intakeRevision: 1,
+          intakeRevision: 2,
           gateIds: ["gate_01"],
           artifactDigests: [digestA],
         },
@@ -209,8 +206,10 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     },
   }, {
     intakeId: "intake_01",
+    projectId: "project_01",
     projectSessionId: "ps_01",
-    revision: 1,
+    coordinationRunId: "run_01",
+    revision: 2,
     state: "awaiting-chair",
     dedupeKey: "intake_dedupe_01",
     summary: "Discuss protocol.",
@@ -222,6 +221,7 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     command: operatorCommand,
     intakeId: "intake_01",
     projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
     expectedRevision: 1,
     state: "discussing",
     summary: "Discuss protocol.",
@@ -229,7 +229,9 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     gateIds: ["gate_01"],
   }, {
     intakeId: "intake_01",
+    projectId: "project_01",
     projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
     revision: 2,
     state: "discussing",
     dedupeKey: "intake_dedupe_01",

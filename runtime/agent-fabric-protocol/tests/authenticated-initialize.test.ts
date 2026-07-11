@@ -113,6 +113,7 @@ describe("authenticated initialize", () => {
           kind: "operator",
           operatorId: "operator_01" as never,
           projectId: "project_01" as never,
+          projectAuthorityGeneration: 1,
           principalGeneration: 1,
         },
         grantedOperations: [

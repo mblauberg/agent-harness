@@ -34,8 +34,14 @@ import {
   parseOperatorInputAttestation,
   parseOperatorMutationContext,
 } from "./operator.js";
-import { parseIntakeRevisionRequest, parseIntakeSubmission } from "./intake.js";
-import { parseMembershipBindRequest } from "./membership.js";
+import {
+  parseIntake,
+  parseIntakeDraftCreateRequest,
+  parseIntakeReadRequest,
+  parseIntakeRevisionRequest,
+  parseIntakeSubmission,
+} from "./intake.js";
+import { parseMembershipBindRequest, parseMembershipBindResult } from "./membership.js";
 import {
   parseScopedGate,
   parseScopedGateCheckRequest,
@@ -129,14 +135,16 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectId", "projectSessionId", "expectedGeneration"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["command", "projectSessionId", "expectedGeneration", "transition"]),
   [FABRIC_OPERATIONS.projectSessionClose]: object(["command", "projectSessionId", "expectedGeneration", "terminalPath"]),
-  [FABRIC_OPERATIONS.membershipBind]: object(["origin", "command", "projectSessionId", "expectedMembershipRevision", "members"]),
+  [FABRIC_OPERATIONS.membershipBind]: object(["origin", "command", "projectSessionId", "coordinationRunId", "expectedMembershipRevision", "members"]),
   [FABRIC_OPERATIONS.operatorAttach]: object(["command", "projectId", "requestedExpiresAt"], ["projectSessionId", "expectedAttachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["command", "attachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorHeartbeat]: object(["command", "attachmentGeneration", "extendUntil"]),
   [FABRIC_OPERATIONS.operatorCommand]: object(["command", "action", "payload"], ["targetTaskId"]),
   [FABRIC_OPERATIONS.integrationInputAttest]: object(["context", "attestation"]),
-  [FABRIC_OPERATIONS.intakeSubmit]: object(["command", "intake", "chairRequest"]),
-  [FABRIC_OPERATIONS.intakeRevise]: object(["origin", "command", "intakeId", "projectSessionId", "expectedRevision", "state", "summary", "artifactRefs", "gateIds"], ["chairRequest"]),
+  [FABRIC_OPERATIONS.intakeDraftCreate]: object(["command", "intakeId", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
+  [FABRIC_OPERATIONS.intakeRead]: object(["credential", "intakeId"]),
+  [FABRIC_OPERATIONS.intakeSubmit]: object(["command", "intakeId", "expectedRevision", "projectSessionId", "coordinationRunId", "summary", "artifactRefs", "gateIds", "chairRequest"]),
+  [FABRIC_OPERATIONS.intakeRevise]: object(["origin", "command", "intakeId", "projectSessionId", "coordinationRunId", "expectedRevision", "state", "summary", "artifactRefs", "gateIds"], ["chairRequest"]),
   [FABRIC_OPERATIONS.scopedGateCreate]: object(["origin", "command", "intent"]),
   [FABRIC_OPERATIONS.scopedGateResolve]: object(["command", "gateId", "status", "decisionEvidence"]),
   [FABRIC_OPERATIONS.scopedGateCheck]: object(["projectSessionId", "coordinationRunId", "dependencyRevision", "enforcementPoint"], ["taskId", "operationId", "barrierId"]),
@@ -222,14 +230,16 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionClose]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin", "terminalPath"]),
-  [FABRIC_OPERATIONS.membershipBind]: object(["projectSessionId", "membershipRevision", "members"]),
-  [FABRIC_OPERATIONS.operatorAttach]: object(["clientId", "projectId", "projectSessionId", "generation", "expiresAt"]),
+  [FABRIC_OPERATIONS.membershipBind]: object(["projectSessionId", "coordinationRunId", "membershipRevision", "members"]),
+  [FABRIC_OPERATIONS.operatorAttach]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["detached", "revision"]),
-  [FABRIC_OPERATIONS.operatorHeartbeat]: object(["clientId", "projectId", "projectSessionId", "generation", "expiresAt"]),
+  [FABRIC_OPERATIONS.operatorHeartbeat]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorCommand]: object(["commandId", "actor", "provenance", "operation", "expectedRevision", "committedRevision", "before", "after", "evidenceRefs", "committedAt"]),
   [FABRIC_OPERATIONS.integrationInputAttest]: object(["attestationId", "integrationId", "integrationGeneration", "operatorId", "projectId", "projectSessionId", "providerEvent", "humanUtterance", "gateBinding", "recordedAt"]),
-  [FABRIC_OPERATIONS.intakeSubmit]: object(["intakeId", "projectSessionId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
-  [FABRIC_OPERATIONS.intakeRevise]: object(["intakeId", "projectSessionId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
+  [FABRIC_OPERATIONS.intakeDraftCreate]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
+  [FABRIC_OPERATIONS.intakeRead]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"], ["projectSessionId", "coordinationRunId"]),
+  [FABRIC_OPERATIONS.intakeSubmit]: object(["intakeId", "projectId", "projectSessionId", "coordinationRunId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
+  [FABRIC_OPERATIONS.intakeRevise]: object(["intakeId", "projectId", "projectSessionId", "coordinationRunId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
   [FABRIC_OPERATIONS.scopedGateCreate]: object(["gateId", "projectSessionId", "coordinationRunId", "scope", "affectedTaskIds", "dependencyRevision", "blockedOperationIds", "enforcementPoints", "question", "reason", "options", "recommendation", "consequences", "evidenceRefs", "revision", "createdByRef", "expectedApproverRef", "status"], ["deadline", "default", "resolution", "releaseBinding"]),
   [FABRIC_OPERATIONS.scopedGateResolve]: object(["gateId", "projectSessionId", "coordinationRunId", "scope", "affectedTaskIds", "dependencyRevision", "blockedOperationIds", "enforcementPoints", "question", "reason", "options", "recommendation", "consequences", "evidenceRefs", "revision", "createdByRef", "expectedApproverRef", "status"], ["deadline", "default", "resolution", "releaseBinding"]),
   [FABRIC_OPERATIONS.scopedGateCheck]: object(["allowed", "checkedGateRevisions"], ["blockingGateIds"]),
@@ -330,8 +340,13 @@ const operatorMutationCodec = parserBacked(
 );
 const chairMutationBaseCodec = objectCodec({
   commandId: identifier,
-  ownerLeaseId: identifier,
-  ownerLeaseGeneration: positiveInteger,
+  agentId: identifier,
+  projectSessionId: identifier,
+  coordinationRunId: identifier,
+  principalGeneration: positiveInteger,
+  chairLeaseId: identifier,
+  chairLeaseGeneration: positiveInteger,
+  expectedRunRevision: integer(),
   expectedRevision: positiveInteger,
 });
 const chairMutationCodec = parserBacked(
@@ -712,16 +727,45 @@ const attestationCodec = objectCodec({
   recordedAt: timestamp,
 });
 
-const intakeCodec = objectCodec({
+const intakeDraftCodec = objectCodec({
   intakeId: identifier,
-  projectSessionId: identifier,
+  projectId: identifier,
   revision: positiveInteger,
-  state: enumeration(["draft", "awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
+  state: literal("draft"),
   dedupeKey: text,
   summary: text,
   artifactRefs: artifactRefsCodec,
   gateIds: stringList,
 });
+const boundIntakeCodec = objectCodec({
+  intakeId: identifier,
+  projectId: identifier,
+  projectSessionId: identifier,
+  coordinationRunId: identifier,
+  revision: positiveInteger,
+  state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
+  dedupeKey: text,
+  summary: text,
+  artifactRefs: artifactRefsCodec,
+  gateIds: stringList,
+});
+const intakeCodec = unionOf([intakeDraftCodec, boundIntakeCodec]);
+const intakeDraftCreateBaseCodec = objectCodec({
+  command: operatorMutationCodec,
+  intakeId: identifier,
+  dedupeKey: text,
+  summary: text,
+  artifactRefs: artifactRefsCodec,
+  gateIds: stringList,
+});
+const intakeDraftCreateCodec = parserBacked(
+  intakeDraftCreateBaseCodec,
+  parseIntakeDraftCreateRequest,
+  parseIntakeDraftCreateRequest({
+    ...intakeDraftCreateBaseCodec.example,
+    command: { ...operatorMutationCodec.example, expectedRevision: 0 },
+  }),
+);
 
 const gateScopeCodec = unionOf([
   objectCodec({ kind: literal("task"), taskId: identifier }),
@@ -756,8 +800,9 @@ const gateIntentCodec = objectCodec({
 const intakeRevisionCommonFields = {
   intakeId: identifier,
   projectSessionId: identifier,
+  coordinationRunId: identifier,
   expectedRevision: positiveInteger,
-  state: enumeration(["draft", "awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
+  state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "accepted", "deferred", "cancelled"]),
   summary: text,
   artifactRefs: artifactRefsCodec,
   gateIds: stringList,
@@ -814,7 +859,12 @@ const scopedGateCheckCodec = unionOf([
 ]);
 
 function memberVariants(kind: string, identityField: string): Codec<unknown>[] {
-  const identity = { kind: literal(kind), membershipId: identifier, [identityField]: identifier };
+  const identity = {
+    kind: literal(kind),
+    membershipId: identifier,
+    coordinationRunId: identifier,
+    [identityField]: identifier,
+  };
   return [
     objectCodec({ ...identity, state: literal("active") }),
     objectCodec({ ...identity, state: literal("terminal") }),
@@ -837,6 +887,7 @@ const membershipBindCodec = unionOf([
     origin: literal("operator"),
     command: operatorMutationCodec,
     projectSessionId: identifier,
+    coordinationRunId: identifier,
     expectedMembershipRevision: integer(),
     members: arrayOf(projectSessionMemberCodec, { maximum: 256 }),
   }),
@@ -844,6 +895,7 @@ const membershipBindCodec = unionOf([
     origin: literal("chair"),
     command: chairMutationCodec,
     projectSessionId: identifier,
+    coordinationRunId: identifier,
     expectedMembershipRevision: positiveInteger,
     members: arrayOf(projectSessionMemberCodec, { maximum: 256 }),
   }),
@@ -1305,6 +1357,7 @@ const projectionEventsResultCodec = unionOf([
 const operatorAttachmentCodec = objectCodec({
   clientId: identifier,
   projectId: identifier,
+  projectAuthorityGeneration: positiveInteger,
   projectSessionId: nullable(identifier),
   generation: positiveInteger,
   expiresAt: timestamp,
@@ -1371,6 +1424,7 @@ const budgetResultOperations: ReadonlySet<ProtocolOperation> = new Set([
 function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.sendMessage) return legacyMessageCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateCodec;
+  if (operation === FABRIC_OPERATIONS.intakeDraftCreate) return intakeDraftCreateCodec;
   if (operation === FABRIC_OPERATIONS.scopedGateCheck) return parsedBy(scopedGateCheckCodec, parseScopedGateCheckRequest);
   if (operation === FABRIC_OPERATIONS.membershipBind) return parsedBy(membershipBindCodec, parseMembershipBindRequest);
   if (operation === FABRIC_OPERATIONS.intakeRevise) return parsedBy(intakeRevisionCodec, parseIntakeRevisionRequest);
@@ -1378,6 +1432,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.taskRequest) return parsedBy(taskRequestCodec, parseTaskRequest);
   if (operation === FABRIC_OPERATIONS.taskCompleteWithReply) return parsedBy(taskCompletionCodec, parseTaskCompleteWithReply);
   const base = semanticShapeCodec(operation, "input", OPERATION_INPUT_SHAPES[operation]);
+  if (operation === FABRIC_OPERATIONS.intakeRead) return parsedBy(base, parseIntakeReadRequest);
   if (operation === FABRIC_OPERATIONS.integrationInputAttest) return parsedBy(base, parseIntegrationInputAttestationRequest);
   if (operation === FABRIC_OPERATIONS.intakeSubmit) return parsedBy(base, parseIntakeSubmission);
   if (operation === FABRIC_OPERATIONS.scopedGateResolve) return parsedBy(base, parseScopedGateResolveRequest);
@@ -1404,7 +1459,17 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
     return operatorAttachmentCodec;
   }
   if (operation === FABRIC_OPERATIONS.integrationInputAttest) return parsedBy(attestationCodec, parseOperatorInputAttestation);
-  if (operation === FABRIC_OPERATIONS.intakeSubmit || operation === FABRIC_OPERATIONS.intakeRevise) return intakeCodec;
+  if (operation === FABRIC_OPERATIONS.membershipBind) {
+    const base = semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
+    return parsedBy(base, parseMembershipBindResult);
+  }
+  if (operation === FABRIC_OPERATIONS.intakeDraftCreate) {
+    return parsedBy(intakeDraftCodec, parseIntake);
+  }
+  if (operation === FABRIC_OPERATIONS.intakeRead) return parsedBy(intakeCodec, parseIntake);
+  if (operation === FABRIC_OPERATIONS.intakeSubmit || operation === FABRIC_OPERATIONS.intakeRevise) {
+    return parsedBy(boundIntakeCodec, parseIntake);
+  }
   if (operation === FABRIC_OPERATIONS.scopedGateCreate || operation === FABRIC_OPERATIONS.scopedGateResolve) {
     const base = semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
     return parsedBy(base, parseScopedGate);

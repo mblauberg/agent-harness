@@ -36,6 +36,7 @@ const operatorPrincipal = {
   kind: "operator",
   operatorId: "operator_01" as never,
   projectId: "project_01" as never,
+  projectAuthorityGeneration: 1,
   principalGeneration: 1,
 } as const;
 const projectionRequest = {
@@ -124,8 +125,13 @@ describe("credential-derived initialization grants", () => {
 
 const chairCommand = {
   commandId: "command_chair_01",
-  ownerLeaseId: "lease_chair_01",
-  ownerLeaseGeneration: 1,
+  agentId: "agent_chair_01",
+  projectSessionId: "ps_01",
+  coordinationRunId: "run_01",
+  principalGeneration: 1,
+  chairLeaseId: "lease_chair_01",
+  chairLeaseGeneration: 1,
+  expectedRunRevision: 1,
   expectedRevision: 1,
 } as const;
 
@@ -143,6 +149,9 @@ describe("principal-discriminated chair commands", () => {
     const fixture = OPERATION_CONTRACT_FIXTURES[operation];
     principalParse("agent", operation, {
       ...(fixture.input as Record<string, unknown>),
+      ...(operation === FABRIC_OPERATIONS.membershipBind
+        ? { projectSessionId: "ps_01", coordinationRunId: "run_01" }
+        : {}),
       origin: "chair",
       command: chairCommand,
     });
@@ -166,6 +175,7 @@ describe("principal-discriminated chair commands", () => {
     principalParse("agent", FABRIC_OPERATIONS.intakeRevise, {
       ...revise,
       projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
       origin: "chair",
       command: chairCommand,
       chairRequest: matchingRequest,
@@ -173,6 +183,7 @@ describe("principal-discriminated chair commands", () => {
     expect(() => principalParse("agent", FABRIC_OPERATIONS.intakeRevise, {
       ...revise,
       projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
       origin: "chair",
       command: chairCommand,
       chairRequest: {

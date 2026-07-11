@@ -256,6 +256,7 @@ export type MessageBodyReadResult =
 export type OperatorAttachment = {
   clientId: string;
   projectId: ProjectId;
+  projectAuthorityGeneration: number;
   projectSessionId: ProjectSessionId | null;
   generation: number;
   expiresAt: Timestamp;

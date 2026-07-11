@@ -15,6 +15,7 @@ import {
   type GateId,
   type InputAttestationId,
   type IntegrationId,
+  type LeaseId,
   type NonEmptyReadonlyArray,
   type OperatorClientId,
   type OperatorId,
@@ -47,6 +48,7 @@ type CapabilityBase = {
   capabilityId: CapabilityId;
   operatorId: OperatorId;
   projectId: ProjectId;
+  projectAuthorityGeneration: number;
   principalGeneration: number;
   issuedAt: Timestamp;
   expiresAt: Timestamp;
@@ -81,6 +83,37 @@ export type OperatorCapabilityGrant =
       takeoverBinding: TakeoverBinding;
     });
 
+export type OperatorAuthorityBinding = {
+  projectId: ProjectId;
+  projectAuthorityGeneration: number;
+  principalGeneration: number;
+  projectSessionId?: ProjectSessionId;
+  sessionGeneration?: number;
+};
+
+/** Rechecks a persisted grant against daemon-owned authority state immediately before use. */
+export function assertOperatorCapabilityAuthority(
+  grant: OperatorCapabilityGrant,
+  current: OperatorAuthorityBinding,
+): void {
+  if (grant.projectId !== current.projectId) {
+    throw new TypeError("operatorCapability project does not match current authority");
+  }
+  if (grant.projectAuthorityGeneration !== current.projectAuthorityGeneration) {
+    throw new TypeError("operatorCapability project authority generation is stale");
+  }
+  if (grant.principalGeneration !== current.principalGeneration) {
+    throw new TypeError("operatorCapability principal generation is stale");
+  }
+  if (grant.kind === "project-launch") return;
+  if (grant.projectSessionId !== current.projectSessionId) {
+    throw new TypeError("operatorCapability project session does not match current authority");
+  }
+  if (grant.sessionGeneration !== current.sessionGeneration) {
+    throw new TypeError("operatorCapability session generation is stale");
+  }
+}
+
 export type OperatorCapabilityCredential = {
   capabilityId: CapabilityId;
   token: string;
@@ -106,10 +139,50 @@ export type OperatorMutationContext = {
 
 export type ChairMutationContext = {
   commandId: CommandId;
-  ownerLeaseId: string;
-  ownerLeaseGeneration: number;
+  agentId: AgentId;
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  principalGeneration: number;
+  chairLeaseId: LeaseId;
+  chairLeaseGeneration: number;
+  expectedRunRevision: number;
   expectedRevision: number;
 };
+
+export type ChairAuthorityBinding = {
+  agentId: AgentId;
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  principalGeneration: number;
+  chairLeaseId: LeaseId;
+  chairLeaseGeneration: number;
+  runRevision: number;
+};
+
+/** Rechecks a chair command against the authenticated agent and daemon-owned run state. */
+export function assertChairMutationAuthority(
+  command: ChairMutationContext,
+  current: ChairAuthorityBinding,
+): void {
+  if (command.agentId !== current.agentId) {
+    throw new TypeError("chairCommand authenticated agent is not the current chair");
+  }
+  if (command.projectSessionId !== current.projectSessionId || command.coordinationRunId !== current.coordinationRunId) {
+    throw new TypeError("chairCommand authenticated session or run does not match current chair");
+  }
+  if (command.principalGeneration !== current.principalGeneration) {
+    throw new TypeError("chairCommand authenticated principal generation is stale");
+  }
+  if (
+    command.chairLeaseId !== current.chairLeaseId ||
+    command.chairLeaseGeneration !== current.chairLeaseGeneration
+  ) {
+    throw new TypeError("chairCommand chair lease is stale");
+  }
+  if (command.expectedRunRevision !== current.runRevision) {
+    throw new TypeError("chairCommand run revision is stale");
+  }
+}
 
 export type GateDecision = "approve" | "reject" | "defer" | "request-changes";
 
@@ -167,14 +240,27 @@ export type OperatorCommandAudit = {
 export function parseChairMutationContext(value: unknown, path = "chairCommand"): ChairMutationContext {
   const record = strictRecord(value, path, [
     "commandId",
-    "ownerLeaseId",
-    "ownerLeaseGeneration",
+    "agentId",
+    "projectSessionId",
+    "coordinationRunId",
+    "principalGeneration",
+    "chairLeaseId",
+    "chairLeaseGeneration",
+    "expectedRunRevision",
     "expectedRevision",
   ]);
   return {
     commandId: parseIdentifier<"CommandId">(record.commandId, `${path}.commandId`),
-    ownerLeaseId: parseIdentifier<"LeaseId">(record.ownerLeaseId, `${path}.ownerLeaseId`),
-    ownerLeaseGeneration: safeInteger(record.ownerLeaseGeneration, `${path}.ownerLeaseGeneration`, 1),
+    agentId: parseIdentifier<"AgentId">(record.agentId, `${path}.agentId`),
+    projectSessionId: parseIdentifier<"ProjectSessionId">(record.projectSessionId, `${path}.projectSessionId`),
+    coordinationRunId: parseIdentifier<"CoordinationRunId">(
+      record.coordinationRunId,
+      `${path}.coordinationRunId`,
+    ),
+    principalGeneration: safeInteger(record.principalGeneration, `${path}.principalGeneration`, 1),
+    chairLeaseId: parseIdentifier<"LeaseId">(record.chairLeaseId, `${path}.chairLeaseId`),
+    chairLeaseGeneration: safeInteger(record.chairLeaseGeneration, `${path}.chairLeaseGeneration`, 1),
+    expectedRunRevision: safeInteger(record.expectedRunRevision, `${path}.expectedRunRevision`),
     expectedRevision: safeInteger(record.expectedRevision, `${path}.expectedRevision`, 1),
   };
 }
@@ -195,6 +281,7 @@ const baseCapabilityFields = [
   "capabilityId",
   "operatorId",
   "projectId",
+  "projectAuthorityGeneration",
   "principalGeneration",
   "issuedAt",
   "expiresAt",
@@ -224,6 +311,11 @@ function parseCapabilityBase(record: Record<string, unknown>): CapabilityBase {
     capabilityId: parseIdentifier<"CapabilityId">(record.capabilityId, "operatorCapability.capabilityId"),
     operatorId: parseIdentifier<"OperatorId">(record.operatorId, "operatorCapability.operatorId"),
     projectId: parseIdentifier<"ProjectId">(record.projectId, "operatorCapability.projectId"),
+    projectAuthorityGeneration: safeInteger(
+      record.projectAuthorityGeneration,
+      "operatorCapability.projectAuthorityGeneration",
+      1,
+    ),
     principalGeneration: safeInteger(record.principalGeneration, "operatorCapability.principalGeneration", 1),
     issuedAt,
     expiresAt,

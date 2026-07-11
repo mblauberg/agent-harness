@@ -9,6 +9,7 @@ const baseCapability = {
   capabilityId: "cap_01",
   operatorId: "operator_01",
   projectId: "project_01",
+  projectAuthorityGeneration: 2,
   principalGeneration: 3,
   issuedAt: "2026-07-11T08:00:00.000Z",
   expiresAt: "2026-07-11T09:00:00.000Z",

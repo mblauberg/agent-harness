@@ -165,6 +165,51 @@ const scopeRank: Record<ResourceScopeRef["kind"], number> = {
   agent: 4,
 };
 
+function isWithin(root: string, candidate: string): boolean {
+  const child = relative(root, candidate);
+  return child === "" || (
+    child !== ".." &&
+    !child.startsWith(`..${sep}`) &&
+    !isAbsolute(child)
+  );
+}
+
+function nearestExistingAncestor(path: string): string {
+  let candidate = path;
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) throw new TypeError("writer admission path has no existing ancestor");
+    candidate = parent;
+  }
+  return candidate;
+}
+
+function assertSourcePrefixesContained(
+  admission: WriterAdmission,
+  requireExistingWorktree: boolean,
+): void {
+  if (requireExistingWorktree && !existsSync(admission.worktreePath)) {
+    throw new TypeError("resourceReservation.writerAdmission.worktreePath must exist at admission time");
+  }
+  const confinementRoot = existsSync(admission.worktreePath)
+    ? realpathSync(admission.worktreePath)
+    : admission.repositoryRoot;
+  for (const [index, prefix] of admission.sourcePrefixes.entries()) {
+    const target = resolve(admission.worktreePath, prefix);
+    if (!isWithin(admission.worktreePath, target)) {
+      throw new TypeError(
+        `resourceReservation.writerAdmission.sourcePrefixes[${String(index)}] escapes the worktree`,
+      );
+    }
+    const resolvedAncestor = realpathSync(nearestExistingAncestor(target));
+    if (!isWithin(admission.repositoryRoot, resolvedAncestor) || !isWithin(confinementRoot, resolvedAncestor)) {
+      throw new TypeError(
+        `resourceReservation.writerAdmission.sourcePrefixes[${String(index)}] is a symlink escape`,
+      );
+    }
+  }
+}
+
 function parseWriterAdmission(value: unknown): WriterAdmission {
   const record = strictRecord(value, "resourceReservation.writerAdmission", [
     "repositoryRoot",
@@ -224,12 +269,21 @@ function parseWriterAdmission(value: unknown): WriterAdmission {
       `resourceReservation.writerAdmission.sourcePrefixes[${String(index)}]`,
     );
   });
-  return {
+  const admission = {
     repositoryRoot,
     worktreePath,
     sourcePrefixes,
     writerGeneration: safeInteger(record.writerGeneration, "resourceReservation.writerAdmission.writerGeneration", 1),
   };
+  assertSourcePrefixesContained(admission, false);
+  return admission;
+}
+
+/** Rechecks path and symlink containment immediately before admitting a writer. */
+export function assertWriterAdmissionCurrent(value: WriterAdmission): WriterAdmission {
+  const admission = parseWriterAdmission(value);
+  assertSourcePrefixesContained(admission, true);
+  return admission;
 }
 
 export function parseResourceReservationRequest(value: unknown): ResourceReservationRequest {

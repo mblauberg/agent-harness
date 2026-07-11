@@ -20,6 +20,7 @@ class NoopTransport implements ProtocolRpcTransport {
     kind: "operator",
     operatorId: "operator_01" as never,
     projectId: "project_01" as never,
+    projectAuthorityGeneration: 1,
     principalGeneration: 1,
   };
   readonly allowedOperations: ReadonlySet<FabricOperation> = new Set([

@@ -9,7 +9,14 @@ import type {
   ScopedGateCreateRequest,
   ScopedGateResolveRequest,
 } from "./gates.js";
-import type { Intake, IntakeRevisionRequest, IntakeSubmission } from "./intake.js";
+import type {
+  Intake,
+  IntakeDraft,
+  IntakeDraftCreateRequest,
+  IntakeReadRequest,
+  IntakeRevisionRequest,
+  IntakeSubmission,
+} from "./intake.js";
 import type { MembershipBindRequest, MembershipBindResult } from "./membership.js";
 import {
   FABRIC_OPERATIONS,
@@ -114,6 +121,8 @@ export interface OperatorControlClient {
 }
 
 export interface IntakeClient {
+  createDraft(input: IntakeDraftCreateRequest): Promise<IntakeDraft>;
+  read(input: IntakeReadRequest): Promise<Intake>;
   submit(input: IntakeSubmission): Promise<Intake>;
   revise(input: Extract<IntakeRevisionRequest, { origin: "operator" }>): Promise<Intake>;
 }
@@ -264,6 +273,8 @@ function operatorControl(transport: ProtocolRpcTransport): OperatorControlClient
 
 function intakes(transport: ProtocolRpcTransport): IntakeClient {
   return {
+    createDraft: (input) => transport.call(FABRIC_OPERATIONS.intakeDraftCreate, input),
+    read: (input) => transport.call(FABRIC_OPERATIONS.intakeRead, input),
     submit: (input) => transport.call(FABRIC_OPERATIONS.intakeSubmit, input),
     revise: (input) => transport.call(FABRIC_OPERATIONS.intakeRevise, input),
   };
@@ -305,6 +316,8 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
       FABRIC_OPERATIONS.operatorCommand,
     ]) ? { operatorControl: operatorControl(transport) } : {}),
     ...(hasFeature(transport, "intakes.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.intakeDraftCreate,
+      FABRIC_OPERATIONS.intakeRead,
       FABRIC_OPERATIONS.intakeSubmit,
       FABRIC_OPERATIONS.intakeRevise,
     ]) ? { intakes: intakes(transport) } : {}),

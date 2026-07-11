@@ -2,6 +2,9 @@ import { PROTOCOL_FEATURES } from "./features.js";
 import {
   BOUNDED_JSON_VALUE_SCHEMA,
   JSON_VALUE_NODE_SCHEMA,
+  protocolClientField,
+  protocolFailureMessage,
+  secret,
 } from "./codec.js";
 import { OPERATION_CODECS } from "./operation-codecs.js";
 import { OPERATION_REGISTRY } from "./operations.js";
@@ -24,11 +27,12 @@ const principalSchemas = {
   operator: {
     type: "object",
     additionalProperties: false,
-    required: ["kind", "operatorId", "projectId", "principalGeneration"],
+    required: ["kind", "operatorId", "projectId", "projectAuthorityGeneration", "principalGeneration"],
     properties: {
       kind: { const: "operator" },
       operatorId: idSchema,
       projectId: idSchema,
+      projectAuthorityGeneration: { type: "integer", minimum: 1 },
       principalGeneration: { type: "integer", minimum: 1 },
     },
   },
@@ -63,7 +67,7 @@ const protocolFailureSchema = {
   required: ["code", "message", "retryable"],
   properties: {
     code: { type: "string", enum: PROTOCOL_ERROR_CODES },
-    message: { type: "string", minLength: 1, maxLength: 4096 },
+    message: protocolFailureMessage.schema,
     retryable: { type: "boolean" },
     details: { "$ref": "#/$defs/boundedJsonValue" },
   },
@@ -100,8 +104,8 @@ const initializeInputSchema = {
       additionalProperties: false,
       required: ["name", "version"],
       properties: {
-        name: { type: "string", minLength: 1, maxLength: 128 },
-        version: { type: "string", minLength: 1, maxLength: 128 },
+        name: protocolClientField.schema,
+        version: protocolClientField.schema,
       },
     },
     authentication: {
@@ -110,7 +114,7 @@ const initializeInputSchema = {
       required: ["scheme", "credential", "clientNonce"],
       properties: {
         scheme: { const: "capability" },
-        credential: { type: "string", minLength: 16, maxLength: 4096 },
+        credential: secret.schema,
         clientNonce: idSchema,
       },
     },
@@ -136,7 +140,7 @@ const initializeResultSchema = {
   ],
   properties: {
     protocolVersion: { const: 1 },
-    daemonVersion: { type: "string", minLength: 1, maxLength: 128 },
+    daemonVersion: protocolClientField.schema,
     daemonInstanceGeneration: { type: "integer", minimum: 1 },
     principal: { oneOf: Object.values(principalSchemas) },
     clientNonce: idSchema,
@@ -205,6 +209,7 @@ const capabilityBaseProperties = {
   capabilityId: idSchema,
   operatorId: idSchema,
   projectId: idSchema,
+  projectAuthorityGeneration: { type: "integer", minimum: 1 },
   principalGeneration: { type: "integer", minimum: 1 },
   issuedAt: timestampSchema,
   expiresAt: timestampSchema,
@@ -234,7 +239,7 @@ function capabilityVariant(kind: "project-launch" | "session" | "takeover", acti
     type: "object",
     additionalProperties: false,
     required: [
-      "capabilityId", "operatorId", "projectId", "principalGeneration", "issuedAt", "expiresAt", "status", "kind", "actions",
+      "capabilityId", "operatorId", "projectId", "projectAuthorityGeneration", "principalGeneration", "issuedAt", "expiresAt", "status", "kind", "actions",
       ...(kind === "project-launch" ? [] : ["projectSessionId", "sessionGeneration"]),
       ...(kind === "takeover" ? ["takeoverBinding"] : []),
     ],

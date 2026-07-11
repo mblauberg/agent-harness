@@ -18,7 +18,7 @@ const artifact = {
 const operatorCommand = {
   credential: { capabilityId: "capability_01", token: "test-capability-token" },
   commandId: "command_intake_01",
-  expectedRevision: 0,
+  expectedRevision: 1,
   actor: "operator_01",
   provenance: { kind: "console-direct-input", clientId: "client_01", inputEventId: "input_01" },
   evidenceRefs: [artifact],
@@ -49,7 +49,7 @@ const taskRequest = {
     dependentBarrierId: "barrier_intake_01",
     intakeBinding: {
       intakeId: "intake_01",
-      intakeRevision: 1,
+      intakeRevision: 2,
       gateIds: ["gate_scope_01"],
       artifactDigests: [artifact.digest],
     },
@@ -58,16 +58,13 @@ const taskRequest = {
 
 const intakeSubmission = {
   command: operatorCommand,
-  intake: {
-    intakeId: "intake_01",
-    projectSessionId: "ps_01",
-    revision: 1,
-    state: "awaiting-chair",
-    dedupeKey: "intake-01-submit",
-    summary: "Implement the approved console spec.",
-    artifactRefs: [artifact],
-    gateIds: ["gate_scope_01"],
-  },
+  intakeId: "intake_01",
+  expectedRevision: 1,
+  projectSessionId: "ps_01",
+  coordinationRunId: "run_01",
+  summary: "Implement the approved console spec.",
+  artifactRefs: [artifact],
+  gateIds: ["gate_scope_01"],
   chairRequest: taskRequest,
 } as const;
 
@@ -83,7 +80,7 @@ describe("revisioned intake schema", () => {
         ...taskRequest,
         request: {
           ...taskRequest.request,
-          intakeBinding: { ...taskRequest.request.intakeBinding, intakeRevision: 2 },
+          intakeBinding: { ...taskRequest.request.intakeBinding, intakeRevision: 3 },
         },
       },
     })).toThrowError(/intake revision does not match/);

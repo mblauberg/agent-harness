@@ -25,19 +25,20 @@ export type MembershipDisposition =
   | { state: "abandoned"; reason: string };
 
 export type ProjectSessionMember = MembershipDisposition & (
-  | { kind: "coordination-run"; membershipId: MembershipId; runId: CoordinationRunId }
-  | { kind: "workstream"; membershipId: MembershipId; workstreamId: WorkstreamId }
-  | { kind: "task"; membershipId: MembershipId; taskId: TaskId }
-  | { kind: "lease"; membershipId: MembershipId; leaseId: LeaseId }
-  | { kind: "provider-action"; membershipId: MembershipId; providerActionId: ProviderActionId }
-  | { kind: "required-message"; membershipId: MembershipId; messageId: MessageId }
-  | { kind: "artifact-obligation"; membershipId: MembershipId; artifactObligationId: ArtifactObligationId }
-  | { kind: "gate"; membershipId: MembershipId; gateId: GateId }
-  | { kind: "scoped-barrier"; membershipId: MembershipId; barrierId: BarrierId }
+  | { kind: "coordination-run"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; runId: CoordinationRunId }
+  | { kind: "workstream"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; workstreamId: WorkstreamId }
+  | { kind: "task"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; taskId: TaskId }
+  | { kind: "lease"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; leaseId: LeaseId }
+  | { kind: "provider-action"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; providerActionId: ProviderActionId }
+  | { kind: "required-message"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; messageId: MessageId }
+  | { kind: "artifact-obligation"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; artifactObligationId: ArtifactObligationId }
+  | { kind: "gate"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; gateId: GateId }
+  | { kind: "scoped-barrier"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; barrierId: BarrierId }
 );
 
 type MembershipBindBase = {
   projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
   expectedMembershipRevision: number;
   members: readonly ProjectSessionMember[];
 };
@@ -49,6 +50,7 @@ export type MembershipBindRequest = MembershipBindBase & (
 
 export type MembershipBindResult = {
   projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
   membershipRevision: number;
   members: readonly ProjectSessionMember[];
 };
@@ -76,7 +78,14 @@ function parseProjectSessionMember(value: unknown, index: number): ProjectSessio
   const memberKind = kind as keyof typeof memberIdentityFields;
   const identityField = memberIdentityFields[memberKind];
   const state: unknown = Reflect.get(value, "state");
-  const fields = ["kind", "membershipId", identityField, "state", ...(state === "abandoned" ? ["reason"] : [])];
+  const fields = [
+    "kind",
+    "membershipId",
+    "coordinationRunId",
+    identityField,
+    "state",
+    ...(state === "abandoned" ? ["reason"] : []),
+  ];
   const record = strictRecord(value, `membershipBind.members[${String(index)}]`, fields);
   const identity = parseIdentifier<string>(record[identityField], `membershipBind.members[${String(index)}].${identityField}`);
   const common = {
@@ -84,6 +93,10 @@ function parseProjectSessionMember(value: unknown, index: number): ProjectSessio
     membershipId: parseIdentifier<"MembershipId">(
       record.membershipId,
       `membershipBind.members[${String(index)}].membershipId`,
+    ),
+    coordinationRunId: parseIdentifier<"CoordinationRunId">(
+      record.coordinationRunId,
+      `membershipBind.members[${String(index)}].coordinationRunId`,
     ),
     [identityField]: identity,
   };
@@ -100,22 +113,48 @@ function parseProjectSessionMember(value: unknown, index: number): ProjectSessio
   throw new TypeError(`membershipBind.members[${String(index)}].state is invalid`);
 }
 
+function assertMemberRunBinding(
+  coordinationRunId: CoordinationRunId,
+  members: readonly ProjectSessionMember[],
+): void {
+  for (const [index, member] of members.entries()) {
+    if (member.coordinationRunId !== coordinationRunId) {
+      throw new TypeError(`membershipBind.members[${String(index)}] coordination run does not match batch`);
+    }
+    if (member.kind === "coordination-run" && member.runId !== coordinationRunId) {
+      throw new TypeError(`membershipBind.members[${String(index)}] run ID does not match batch`);
+    }
+  }
+}
+
 export function parseMembershipBindRequest(value: unknown): MembershipBindRequest {
   const record = strictRecord(value, "membershipBind", [
     "origin",
     "command",
     "projectSessionId",
+    "coordinationRunId",
     "expectedMembershipRevision",
     "members",
   ]);
   if (!Array.isArray(record.members)) throw new TypeError("membershipBind.members must be an array");
+  const projectSessionId = parseIdentifier<"ProjectSessionId">(
+    record.projectSessionId,
+    "membershipBind.projectSessionId",
+  );
+  const coordinationRunId = parseIdentifier<"CoordinationRunId">(
+    record.coordinationRunId,
+    "membershipBind.coordinationRunId",
+  );
+  const members = record.members.map(parseProjectSessionMember);
+  assertMemberRunBinding(coordinationRunId, members);
   const base = {
-    projectSessionId: parseIdentifier<"ProjectSessionId">(record.projectSessionId, "membershipBind.projectSessionId"),
+    projectSessionId,
+    coordinationRunId,
     expectedMembershipRevision: safeInteger(
       record.expectedMembershipRevision,
       "membershipBind.expectedMembershipRevision",
     ),
-    members: record.members.map(parseProjectSessionMember),
+    members,
   };
   if (record.origin === "operator") {
     const command = parseOperatorMutationContext(record.command, "membershipBind.command");
@@ -129,7 +168,35 @@ export function parseMembershipBindRequest(value: unknown): MembershipBindReques
     if (command.expectedRevision !== base.expectedMembershipRevision) {
       throw new TypeError("membershipBind command revision does not match membership revision");
     }
+    if (command.projectSessionId !== projectSessionId || command.coordinationRunId !== coordinationRunId) {
+      throw new TypeError("membershipBind chair command session or run does not match batch");
+    }
     return { ...base, origin: "chair", command };
   }
   throw new TypeError("membershipBind.origin must be operator or chair");
+}
+
+export function parseMembershipBindResult(value: unknown): MembershipBindResult {
+  const record = strictRecord(value, "membershipBindResult", [
+    "projectSessionId",
+    "coordinationRunId",
+    "membershipRevision",
+    "members",
+  ]);
+  if (!Array.isArray(record.members)) throw new TypeError("membershipBindResult.members must be an array");
+  const coordinationRunId = parseIdentifier<"CoordinationRunId">(
+    record.coordinationRunId,
+    "membershipBindResult.coordinationRunId",
+  );
+  const members = record.members.map(parseProjectSessionMember);
+  assertMemberRunBinding(coordinationRunId, members);
+  return {
+    projectSessionId: parseIdentifier<"ProjectSessionId">(
+      record.projectSessionId,
+      "membershipBindResult.projectSessionId",
+    ),
+    coordinationRunId,
+    membershipRevision: safeInteger(record.membershipRevision, "membershipBindResult.membershipRevision", 1),
+    members,
+  };
 }

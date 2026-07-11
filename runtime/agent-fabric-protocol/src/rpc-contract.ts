@@ -7,7 +7,14 @@ import type {
   ScopedGateCreateRequest,
   ScopedGateResolveRequest,
 } from "./gates.js";
-import type { Intake, IntakeRevisionRequest, IntakeSubmission } from "./intake.js";
+import type {
+  Intake,
+  IntakeDraft,
+  IntakeDraftCreateRequest,
+  IntakeReadRequest,
+  IntakeRevisionRequest,
+  IntakeSubmission,
+} from "./intake.js";
 import type { MembershipBindRequest, MembershipBindResult } from "./membership.js";
 import { FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
 import type {
@@ -91,7 +98,13 @@ export const PROTOCOL_LIMITS: Readonly<ProtocolLimits> = Object.freeze({
 });
 
 export type ProtocolPrincipal =
-  | { kind: "operator"; operatorId: OperatorId; projectId: ProjectId; principalGeneration: number }
+  | {
+      kind: "operator";
+      operatorId: OperatorId;
+      projectId: ProjectId;
+      projectAuthorityGeneration: number;
+      principalGeneration: number;
+    }
   | {
       kind: "agent";
       agentId: AgentId;
@@ -142,6 +155,8 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.operatorHeartbeat]: OperatorHeartbeatRequest;
   [FABRIC_OPERATIONS.operatorCommand]: OperatorCommandRequest;
   [FABRIC_OPERATIONS.integrationInputAttest]: IntegrationInputAttestationRequest;
+  [FABRIC_OPERATIONS.intakeDraftCreate]: IntakeDraftCreateRequest;
+  [FABRIC_OPERATIONS.intakeRead]: IntakeReadRequest;
   [FABRIC_OPERATIONS.intakeSubmit]: IntakeSubmission;
   [FABRIC_OPERATIONS.intakeRevise]: IntakeRevisionRequest;
   [FABRIC_OPERATIONS.scopedGateCreate]: ScopedGateCreateRequest;
@@ -211,6 +226,8 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.operatorHeartbeat]: OperatorAttachment;
   [FABRIC_OPERATIONS.operatorCommand]: OperatorCommandAudit;
   [FABRIC_OPERATIONS.integrationInputAttest]: OperatorInputAttestation;
+  [FABRIC_OPERATIONS.intakeDraftCreate]: IntakeDraft;
+  [FABRIC_OPERATIONS.intakeRead]: Intake;
   [FABRIC_OPERATIONS.intakeSubmit]: Intake;
   [FABRIC_OPERATIONS.intakeRevise]: Intake;
   [FABRIC_OPERATIONS.scopedGateCreate]: ScopedGate;
