@@ -214,9 +214,15 @@ BEGIN SELECT RAISE(ABORT, 'INVARIANT_chair_bridge_loss_resolutions_immutable'); 
 
 CREATE TRIGGER chair_bridge_loss_freezes_capability_grants
 BEFORE INSERT ON capabilities
-WHEN EXISTS (
-  SELECT 1 FROM launched_chair_bridge_state bridge
-   WHERE bridge.coordination_run_id=NEW.run_id AND bridge.state='lost'
+WHEN (
+  EXISTS (
+    SELECT 1 FROM launched_chair_bridge_state bridge
+     WHERE bridge.coordination_run_id=NEW.run_id AND bridge.state='lost'
+  ) OR EXISTS (
+    SELECT 1 FROM chair_bridge_recovery_custody recovery
+     WHERE recovery.path='rebind' AND recovery.state='prepared'
+       AND recovery.new_capability_hash=NEW.token_hash
+  )
 ) AND NOT EXISTS (
   SELECT 1 FROM chair_bridge_recovery_custody recovery
   JOIN chair_bridge_losses loss ON loss.loss_id=recovery.loss_id
@@ -225,6 +231,18 @@ WHEN EXISTS (
     AND loss.chair_agent_id=NEW.agent_id
     AND recovery.new_capability_hash=NEW.token_hash
     AND recovery.new_principal_generation=NEW.principal_generation
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_chair_bridge_loss_freezes_grants'); END;
+
+CREATE TRIGGER chair_bridge_recovery_capability_identity_immutable
+BEFORE UPDATE OF token_hash, run_id, agent_id, principal_generation ON capabilities
+WHEN (
+  OLD.token_hash<>NEW.token_hash OR OLD.run_id<>NEW.run_id OR
+  OLD.agent_id<>NEW.agent_id OR OLD.principal_generation<>NEW.principal_generation
+) AND EXISTS (
+  SELECT 1 FROM chair_bridge_recovery_custody recovery
+   WHERE recovery.path='rebind' AND recovery.state='prepared'
+     AND recovery.new_capability_hash IN (OLD.token_hash, NEW.token_hash)
 )
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_chair_bridge_loss_freezes_grants'); END;
 

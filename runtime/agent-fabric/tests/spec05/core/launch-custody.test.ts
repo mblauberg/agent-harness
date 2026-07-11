@@ -983,7 +983,7 @@ describe("launch custody", () => {
       attestationChallenge,
       socketPath: "/private/agent-fabric.sock",
     });
-    fixture.database.exec("SAVEPOINT wrong_agent_rebind_capability");
+    fixture.database.exec("SAVEPOINT invalid_rebind_capability_identity");
     try {
       const chair = fixture.database.prepare(`
         SELECT authority_id FROM agents WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
@@ -997,15 +997,75 @@ describe("launch custody", () => {
           FROM chair_bridge_recovery_custody
          WHERE operator_command_id='recovery_rebind_01'
       `).get() as { new_capability_hash: string; new_principal_generation: number };
-      fixture.database.prepare(`DELETE FROM capabilities WHERE token_hash=?`).run(fresh.new_capability_hash);
-      expect(() => fixture.database.prepare(`
-        INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
-        VALUES (?, 'run_launch_01', 'wrong_rebind_agent', ?, ?)
-      `).run(fresh.new_capability_hash, fresh.new_principal_generation, now + 60_000))
-        .toThrow(/INVARIANT_chair_bridge_loss_freezes_grants/u);
+      fixture.database.prepare(`
+        INSERT INTO runs(
+          run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
+          project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
+          authority_ref, budget_ref, dependency_revision, topology_slot
+        ) SELECT 'foreign_rebind_run', 'foreign_rebind_agent', workspace_root, NULL, ?,
+                 project_session_id, 'closed', 1, 1, 'foreign-rebind-chair-lease',
+                 authority_ref, budget_ref, 1, NULL
+            FROM runs WHERE run_id='run_launch_01'
+      `).run(now);
+      fixture.database.prepare(`
+        INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
+        VALUES ('foreign_rebind_authority', 'foreign_rebind_run', NULL, '{}', 'foreign-rebind-hash', ?)
+      `).run(now);
+      fixture.database.prepare(`
+        INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, lifecycle)
+        VALUES ('foreign_rebind_run', 'foreign_rebind_agent', NULL, 'foreign_rebind_authority', 'ready')
+      `).run();
+
+      let updateBlocked = false;
+      fixture.database.exec("SAVEPOINT rebind_capability_update");
+      try {
+        fixture.database.prepare(`
+          UPDATE capabilities SET agent_id='wrong_rebind_agent' WHERE token_hash=?
+        `).run(fresh.new_capability_hash);
+      } catch (error: unknown) {
+        updateBlocked = error instanceof Error && /INVARIANT_chair_bridge_loss_freezes_grants/u.test(error.message);
+      } finally {
+        fixture.database.exec("ROLLBACK TO rebind_capability_update");
+        fixture.database.exec("RELEASE rebind_capability_update");
+      }
+
+      let sameRunInsertBlocked = false;
+      fixture.database.exec("SAVEPOINT rebind_capability_same_run_insert");
+      try {
+        fixture.database.prepare(`DELETE FROM capabilities WHERE token_hash=?`).run(fresh.new_capability_hash);
+        fixture.database.prepare(`
+          INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+          VALUES (?, 'run_launch_01', 'wrong_rebind_agent', ?, ?)
+        `).run(fresh.new_capability_hash, fresh.new_principal_generation, now + 60_000);
+      } catch (error: unknown) {
+        sameRunInsertBlocked = error instanceof Error && /INVARIANT_chair_bridge_loss_freezes_grants/u.test(error.message);
+      } finally {
+        fixture.database.exec("ROLLBACK TO rebind_capability_same_run_insert");
+        fixture.database.exec("RELEASE rebind_capability_same_run_insert");
+      }
+
+      let wrongRunInsertBlocked = false;
+      fixture.database.exec("SAVEPOINT rebind_capability_wrong_run_insert");
+      try {
+        fixture.database.prepare(`DELETE FROM capabilities WHERE token_hash=?`).run(fresh.new_capability_hash);
+        fixture.database.prepare(`
+          INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+          VALUES (?, 'foreign_rebind_run', 'foreign_rebind_agent', ?, ?)
+        `).run(fresh.new_capability_hash, fresh.new_principal_generation, now + 60_000);
+      } catch (error: unknown) {
+        wrongRunInsertBlocked = error instanceof Error && /INVARIANT_chair_bridge_loss_freezes_grants/u.test(error.message);
+      } finally {
+        fixture.database.exec("ROLLBACK TO rebind_capability_wrong_run_insert");
+        fixture.database.exec("RELEASE rebind_capability_wrong_run_insert");
+      }
+      expect({ updateBlocked, sameRunInsertBlocked, wrongRunInsertBlocked }).toEqual({
+        updateBlocked: true,
+        sameRunInsertBlocked: true,
+        wrongRunInsertBlocked: true,
+      });
     } finally {
-      fixture.database.exec("ROLLBACK TO wrong_agent_rebind_capability");
-      fixture.database.exec("RELEASE wrong_agent_rebind_capability");
+      fixture.database.exec("ROLLBACK TO invalid_rebind_capability_identity");
+      fixture.database.exec("RELEASE invalid_rebind_capability_identity");
     }
     const concurrentInspection = await fixture.service.inspectChairRecovery({
       ...intent,
