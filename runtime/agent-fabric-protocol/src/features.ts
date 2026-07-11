@@ -21,6 +21,7 @@ export const PROTOCOL_FEATURES = [
   "operator-projection.v2",
   "operator-actions.v1",
   "message-body-read.v1",
+  "operator-repository-read.v1",
   "lifecycle-control.v1",
 ] as const;
 

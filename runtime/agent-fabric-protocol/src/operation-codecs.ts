@@ -172,6 +172,10 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.operatorActionStatus]: object(["credential", "projectId", "commandId"]),
   [FABRIC_OPERATIONS.operatorActionReconcile]: object(["command", "projectId", "targetCommandId", "expectedStatus", "expectedAttemptGeneration", "mode"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["credential", "projectSessionId", "messageId", "expectedRevision"]),
+  [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
+    ["credential", "projectId", "snapshotRevision", "target", "diff", "log"],
+    ["projectSessionId"],
+  ),
   [FABRIC_OPERATIONS.projectSessionDrain]: object(["command", "projectSessionId", "expectedGeneration", "consequencePreviewRef", "confirmedPreviewRevision"]),
   [FABRIC_OPERATIONS.projectSessionStop]: object(["command", "projectSessionId", "expectedGeneration", "consequencePreviewRef", "confirmedPreviewRevision", "drainReceiptRef"]),
   [FABRIC_OPERATIONS.daemonDrain]: object(["command", "expectedDaemonGeneration", "expectedGlobalStateRevision"]),
@@ -274,6 +278,10 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "receipt", "code", "evidenceRefs"]),
   [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "receipt", "code", "evidenceRefs"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["available", "messageId", "revision"], ["body", "terminalNeutralised", "capabilityValuesRedacted", "artifactRefs", "reason"]),
+  [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
+    ["status"],
+    ["projectId", "projectSessionId", "snapshotRevision", "readTransactionId", "repository", "reason", "currentSnapshotRevision"],
+  ),
   [FABRIC_OPERATIONS.projectSessionDrain]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionStop]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.daemonDrain]: object(["daemonInstanceGeneration", "globalStateRevision", "state", "receiptDigest"]),
@@ -499,25 +507,28 @@ const attentionItemCodec = objectCodec({
 });
 const projectionSourceCodec = enumeration(["fabric", "delivery-run", "git", "github", "herdr", "provider"]);
 
-function projectionFact(valueCodec: Codec<unknown>): Codec<unknown> {
+function projectionFact(
+  valueCodec: Codec<unknown>,
+  sourceCodec: Codec<unknown> = projectionSourceCodec,
+): Codec<unknown> {
   return unionOf([
     objectCodec({
       freshness: enumeration(["live", "snapshot", "stale"]),
-      source: projectionSourceCodec,
+      source: sourceCodec,
       revision: integer(),
       observedAt: timestamp,
       value: valueCodec,
     }),
     objectCodec({
       freshness: literal("unavailable"),
-      source: projectionSourceCodec,
+      source: sourceCodec,
       revision: integer(),
       observedAt: timestamp,
       reason: text,
     }),
     objectCodec({
       freshness: literal("conflict"),
-      source: projectionSourceCodec,
+      source: sourceCodec,
       revision: integer(),
       observedAt: timestamp,
       candidates: arrayOf(valueCodec, { minimum: 2, maximum: 16 }),
@@ -533,6 +544,162 @@ const resourceScopeCodec = unionOf([
   objectCodec({ kind: literal("agent"), scopeId: identifier, teamId: identifier, agentId: identifier }),
 ]);
 const absoluteFilesystemPathCodec = boundedString({ maxBytes: 4096, pattern: "^/", example: "/workspace/project" });
+const canonicalAbsoluteFilesystemPathCodec = boundedString({
+  maxBytes: 4096,
+  pattern: "^/(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//).+$",
+  example: "/workspace/project",
+});
+const gitRefNameCodec = boundedString({ maxBytes: 1024, example: "refs/heads/main" });
+const gitDiffSelectorCodec = unionOf([
+  objectCodec({ kind: literal("working-tree") }),
+  objectCodec({ kind: literal("staged") }),
+  objectCodec({ kind: literal("objects"), baseObjectDigest: sha256, targetObjectDigest: sha256 }),
+]);
+const gitLogCursorCodec = objectCodec({ repositoryStateDigest: sha256, afterObjectDigest: sha256 });
+const gitLogRequestCodec = objectCodec({ limit: integer({ minimum: 1, maximum: 128 }) }, { cursor: gitLogCursorCodec });
+const repositoryReadCommonFields = {
+  credential: credentialCodec,
+  projectId: identifier,
+  snapshotRevision: positiveInteger,
+  diff: gitDiffSelectorCodec,
+  log: gitLogRequestCodec,
+};
+const gitRepositoryReadInputCodec = unionOf([
+  objectCodec({
+    ...repositoryReadCommonFields,
+    target: objectCodec({ kind: literal("project-root") }),
+  }, { projectSessionId: identifier }),
+  objectCodec({
+    ...repositoryReadCommonFields,
+    projectSessionId: identifier,
+    target: objectCodec({
+      kind: literal("session-worktree"),
+      canonicalWorktreePath: canonicalAbsoluteFilesystemPathCodec,
+    }),
+  }),
+]);
+const gitHeadCodec = unionOf([
+  objectCodec({ detached: literal(false), refName: gitRefNameCodec, objectDigest: sha256 }),
+  objectCodec({ detached: literal(true), objectDigest: sha256 }),
+]);
+const gitPathPageCodec = objectCodec({
+  paths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  truncated: boolean,
+});
+const gitOperationStateCodec = unionOf([
+  objectCodec({ kind: literal("clean") }),
+  objectCodec({ kind: literal("merge") }),
+  objectCodec({ kind: literal("rebase") }),
+  objectCodec({ kind: literal("cherry-pick") }),
+  objectCodec({ kind: literal("bisect") }),
+]);
+const gitUpstreamIdentityCodec = objectCodec({ remoteName: identifier, branchName: gitRefNameCodec });
+const gitUpstreamCodec = objectCodec({
+  remoteName: identifier,
+  branchName: gitRefNameCodec,
+  ahead: integer(),
+  behind: integer(),
+});
+const gitHostedChecksCodec = objectCodec({
+  repository: boundedString({ maxBytes: 1024 }),
+  headObjectDigest: sha256,
+  state: enumeration(["passing", "failing", "pending", "unknown"]),
+  total: integer(),
+  passing: integer(),
+  failing: integer(),
+  pending: integer(),
+});
+const gitDiffProjectionCodec = objectCodec({
+  selector: gitDiffSelectorCodec,
+  artifactRef: artifactRefCodec,
+  baseDigest: sha256,
+  targetDigest: sha256,
+});
+const gitLogEntryCodec = objectCodec({
+  objectDigest: sha256,
+  parentObjectDigests: arrayOf(sha256, { maximum: 64, unique: true }),
+  subject: boundedString({ maxBytes: 1024 }),
+  authorTimestamp: timestamp,
+});
+const gitLogPageCodec = unionOf([
+  objectCodec({
+    items: arrayOf(gitLogEntryCodec, { maximum: 128 }),
+    hasMore: literal(false),
+    nextCursor: literal(null),
+  }),
+  objectCodec({
+    items: arrayOf(gitLogEntryCodec, { maximum: 128 }),
+    hasMore: literal(true),
+    nextCursor: gitLogCursorCodec,
+  }),
+]);
+const gitBranchRecordCodec = objectCodec({
+  refName: gitRefNameCodec,
+  objectDigest: sha256,
+  checkedOut: boolean,
+  upstream: nullable(gitUpstreamIdentityCodec),
+});
+const gitWorktreeRecordCodec = objectCodec({
+  canonicalPath: canonicalAbsoluteFilesystemPathCodec,
+  head: gitHeadCodec,
+  current: boolean,
+  locked: boolean,
+});
+const gitRepositoryProjectionCodec = objectCodec({
+  freshness: enumeration(["live", "snapshot", "stale"]),
+  source: literal("git"),
+  revision: positiveInteger,
+  observedAt: timestamp,
+  canonicalRepositoryRoot: canonicalAbsoluteFilesystemPathCodec,
+  canonicalWorktreePath: canonicalAbsoluteFilesystemPathCodec,
+  repositoryStateDigest: sha256,
+  head: gitHeadCodec,
+  headDigest: sha256,
+  indexDigest: sha256,
+  worktreeDigest: sha256,
+  remoteDigest: sha256,
+  changes: objectCodec({
+    staged: gitPathPageCodec,
+    unstaged: gitPathPageCodec,
+    untracked: gitPathPageCodec,
+    conflicted: gitPathPageCodec,
+  }),
+  operationState: gitOperationStateCodec,
+  upstream: nullable(gitUpstreamCodec),
+  diff: gitDiffProjectionCodec,
+  log: gitLogPageCodec,
+  branches: objectCodec({ items: arrayOf(gitBranchRecordCodec, { maximum: 128 }), truncated: boolean }),
+  worktrees: objectCodec({ items: arrayOf(gitWorktreeRecordCodec, { maximum: 64 }), truncated: boolean }),
+  hostedChecks: projectionFact(nullable(gitHostedChecksCodec), literal("github")),
+});
+const gitRepositorySummaryCodec = objectCodec({
+  freshness: enumeration(["live", "snapshot", "stale"]),
+  source: literal("git"),
+  revision: positiveInteger,
+  observedAt: timestamp,
+  repositoryStateDigest: sha256,
+  head: gitHeadCodec,
+  operationState: enumeration(["clean", "merge", "rebase", "cherry-pick", "bisect"]),
+  counts: objectCodec({ staged: integer(), unstaged: integer(), untracked: integer(), conflicted: integer() }),
+  pathsTruncated: boolean,
+  upstream: nullable(gitUpstreamCodec),
+  hostedChecks: projectionFact(nullable(gitHostedChecksCodec), literal("github")),
+});
+const gitRepositoryReadResultCodec = unionOf([
+  objectCodec({
+    status: literal("current"),
+    projectId: identifier,
+    projectSessionId: nullable(identifier),
+    snapshotRevision: positiveInteger,
+    readTransactionId: identifier,
+    repository: gitRepositoryProjectionCodec,
+  }),
+  objectCodec({
+    status: literal("resnapshot-required"),
+    reason: literal("snapshot-mismatch"),
+    currentSnapshotRevision: positiveInteger,
+  }),
+]);
 const writerAdmissionCodec = objectCodec({
   repositoryRoot: absoluteFilesystemPathCodec,
   worktreePath: absoluteFilesystemPathCodec,
@@ -1171,6 +1338,11 @@ const systemDetailRefCodec = objectCodec({
   componentId: identifier,
   expectedRevision: positiveInteger,
 });
+const messageBodyRefCodec = objectCodec({
+  projectSessionId: identifier,
+  messageId: identifier,
+  expectedRevision: positiveInteger,
+});
 
 const attentionSummaryCodec = objectCodec({
   kind: literal("attention"),
@@ -1178,7 +1350,10 @@ const attentionSummaryCodec = objectCodec({
   priority: enumeration(["safety-integrity", "critical-path", "expiring-authority", "acceptance-ready", "advisory"]),
   title: text,
 });
-const projectSummaryCodec = objectCodec({ kind: literal("project"), goal: text, repositoryRevision: text });
+const projectSummaryCodec = objectCodec(
+  { kind: literal("project"), goal: text, repositoryRevision: text },
+  { repository: gitRepositorySummaryCodec },
+);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
@@ -1202,12 +1377,22 @@ const evidenceSummaryCodec = objectCodec({
   status: enumeration(["pass", "fail", "pending", "informational"]),
   provenance: text,
 });
-const activitySummaryCodec = objectCodec({
+const activitySummaryFields = {
   kind: literal("activity"),
-  activityKind: enumeration(["message", "decision", "lifecycle", "operation"]),
   summary: text,
   occurredAt: timestamp,
-});
+};
+const activitySummaryCodec = unionOf([
+  objectCodec({
+    ...activitySummaryFields,
+    activityKind: literal("message"),
+    messageBodyRef: messageBodyRefCodec,
+  }),
+  objectCodec({
+    ...activitySummaryFields,
+    activityKind: enumeration(["decision", "lifecycle", "operation"]),
+  }),
+]);
 const systemSummaryCodec = objectCodec({
   kind: literal("system"),
   systemKind: enumeration(["daemon", "adapter", "trust", "seat", "integration"]),
@@ -1285,7 +1470,10 @@ const operatorViewPageResultCodec = parserBacked(
 );
 
 const operatorDetailCodec = unionOf([
-  objectCodec({ kind: literal("project"), projectId: identifier, canonicalRoot: absoluteFilesystemPathCodec, goal: text, repositoryRevision: text }),
+  objectCodec(
+    { kind: literal("project"), projectId: identifier, canonicalRoot: absoluteFilesystemPathCodec, goal: text, repositoryRevision: text },
+    { repository: gitRepositoryProjectionCodec },
+  ),
   objectCodec({
     kind: literal("session"),
     projectSessionId: identifier,
@@ -1325,7 +1513,15 @@ const operatorDetailCodec = unionOf([
   objectCodec({
     kind: literal("activity"),
     eventId: identifier,
-    activityKind: enumeration(["message", "decision", "lifecycle", "operation"]),
+    activityKind: literal("message"),
+    summary: text,
+    occurredAt: timestamp,
+    messageBodyRef: messageBodyRefCodec,
+  }),
+  objectCodec({
+    kind: literal("activity"),
+    eventId: identifier,
+    activityKind: enumeration(["decision", "lifecycle", "operation"]),
     summary: text,
     occurredAt: timestamp,
   }),
@@ -1570,15 +1766,18 @@ const evidenceViewItemCodec = objectCodec({
   provenance: text,
   status: enumeration(["pass", "fail", "pending", "informational"]),
 });
-const activityViewItemCodec = objectCodec({
+const activityViewItemFields = {
   eventId: identifier,
-  kind: enumeration(["message", "decision", "lifecycle", "operation"]),
   actorId: nullable(identifier),
   taskId: nullable(identifier),
   summary: text,
   occurredAt: timestamp,
   sourceRevision: integer(),
-});
+};
+const activityViewItemCodec = unionOf([
+  objectCodec({ ...activityViewItemFields, kind: literal("message"), messageBodyRef: messageBodyRefCodec }),
+  objectCodec({ ...activityViewItemFields, kind: enumeration(["decision", "lifecycle", "operation"]) }),
+]);
 const systemViewItemCodec = objectCodec({
   componentId: identifier,
   kind: enumeration(["daemon", "adapter", "trust", "seat", "integration"]),
@@ -2034,6 +2233,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.scopedGateRead) return scopedGateReadInputCodec;
   if (operation === FABRIC_OPERATIONS.projectionViewPage) return operatorViewPageInputCodec;
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadInputCodec;
+  if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionCommitCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus) return operatorActionStatusInputCodec;
@@ -2106,6 +2306,7 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   }
   if (operation === FABRIC_OPERATIONS.projectionViewPage) return operatorViewPageResultCodec;
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadResultCodec;
+  if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionReceiptCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus || operation === FABRIC_OPERATIONS.operatorActionReconcile) {

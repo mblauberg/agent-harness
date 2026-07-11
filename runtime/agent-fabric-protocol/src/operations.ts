@@ -16,6 +16,7 @@ export type OperationFeature =
   | "operator-projection.v2"
   | "operator-actions.v1"
   | "message-body-read.v1"
+  | "operator-repository-read.v1"
   | "lifecycle-control.v1";
 
 type OperationDefinition = {
@@ -137,6 +138,7 @@ const DEFINITIONS = defineOperations({
   operatorActionStatus: { operation: "fabric.v1.operator-action.status", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   operatorActionReconcile: { operation: "fabric.v1.operator-action.reconcile", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   messageBodyRead: { operation: "fabric.v1.message-body.read", feature: "message-body-read.v1", principals: ["operator"], kind: "extension" },
+  operatorRepositoryRead: { operation: "fabric.v1.operator-repository.read", feature: "operator-repository-read.v1", principals: ["operator"], kind: "extension" },
   projectSessionDrain: { operation: "fabric.v1.project-session.drain", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
   projectSessionStop: { operation: "fabric.v1.project-session.stop", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },
   daemonDrain: { operation: "fabric.v1.daemon.drain", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension" },

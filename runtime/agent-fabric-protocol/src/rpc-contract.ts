@@ -37,6 +37,8 @@ import type {
 import type {
   MessageBodyReadRequest,
   MessageBodyReadResult,
+  GitRepositoryReadRequest,
+  GitRepositoryReadResult,
   OperatorAttachRequest,
   OperatorAttachment,
   OperatorCommandRequest,
@@ -201,6 +203,7 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.operatorActionStatus]: OperatorActionStatusRequest;
   [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionReconcileRequest;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadRequest;
+  [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadRequest;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSessionDrainRequest;
   [FABRIC_OPERATIONS.projectSessionStop]: ProjectSessionStopRequest;
   [FABRIC_OPERATIONS.daemonDrain]: DaemonDrainRequest;
@@ -279,6 +282,7 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.operatorActionStatus]: OperatorActionStatus;
   [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionStatus;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadResult;
+  [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadResult;
   [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionStop]: ProjectSession;
   [FABRIC_OPERATIONS.daemonDrain]: DaemonLifecycleResult;

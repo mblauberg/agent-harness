@@ -46,6 +46,8 @@ import type {
 import type {
   MessageBodyReadRequest,
   MessageBodyReadResult,
+  GitRepositoryReadRequest,
+  GitRepositoryReadResult,
   OperatorAttachRequest,
   OperatorAttachment,
   OperatorCommandRequest,
@@ -218,6 +220,10 @@ export interface MessageBodyClient {
   read(input: MessageBodyReadRequest): Promise<MessageBodyReadResult>;
 }
 
+export interface GitRepositoryReadClient {
+  read(input: GitRepositoryReadRequest): Promise<GitRepositoryReadResult>;
+}
+
 export interface LifecycleControlClient {
   drainProjectSession(input: ProjectSessionDrainRequest): Promise<ProjectSession>;
   stopProjectSession(input: ProjectSessionStopRequest): Promise<ProjectSession>;
@@ -236,6 +242,7 @@ export type NegotiatedOperatorClient = {
   takeover?: TakeoverClient;
   projection?: ProjectionClient;
   messages?: MessageBodyClient;
+  repository?: GitRepositoryReadClient;
   lifecycle?: LifecycleControlClient;
   console?: OperatorConsoleClient;
   close(): Promise<void>;
@@ -415,6 +422,14 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
       : {}),
     ...(hasFeature(transport, "message-body-read.v1") && hasOperation(transport, FABRIC_OPERATIONS.messageBodyRead)
       ? { messages: { read: (input: MessageBodyReadRequest) => transport.call(FABRIC_OPERATIONS.messageBodyRead, input) } }
+      : {}),
+    ...(hasFeature(transport, "operator-repository-read.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.operatorRepositoryRead)
+      ? {
+          repository: {
+            read: (input: GitRepositoryReadRequest) => transport.call(FABRIC_OPERATIONS.operatorRepositoryRead, input),
+          },
+        }
       : {}),
     ...(hasFeature(transport, "lifecycle-control.v1") && hasOperations(transport, [
       FABRIC_OPERATIONS.projectSessionDrain,

@@ -18,24 +18,24 @@ import type { ProjectSession } from "./project-session.js";
 
 export type ProjectionSource = "fabric" | "delivery-run" | "git" | "github" | "herdr" | "provider";
 
-export type ProjectionFact<T> =
+export type ProjectionFact<T, Source extends ProjectionSource = ProjectionSource> =
   | {
       freshness: "live" | "snapshot" | "stale";
-      source: ProjectionSource;
+      source: Source;
       revision: number;
       observedAt: Timestamp;
       value: T;
     }
   | {
       freshness: "unavailable";
-      source: ProjectionSource;
+      source: Source;
       revision: number;
       observedAt: Timestamp;
       reason: string;
     }
   | {
       freshness: "conflict";
-      source: ProjectionSource;
+      source: Source;
       revision: number;
       observedAt: Timestamp;
       candidates: readonly [T, T, ...T[]];
@@ -185,15 +185,184 @@ export type EvidenceViewItem = {
   status: "pass" | "fail" | "pending" | "informational";
 };
 
-export type ActivityViewItem = {
+export type MessageBodyRef = {
+  projectSessionId: ProjectSessionId;
+  messageId: MessageId;
+  expectedRevision: number;
+};
+
+type ActivityViewItemBase = {
   eventId: string;
-  kind: "message" | "decision" | "lifecycle" | "operation";
   actorId: string | null;
   taskId: TaskId | null;
   summary: string;
   occurredAt: Timestamp;
   sourceRevision: number;
 };
+
+export type ActivityViewItem = ActivityViewItemBase & (
+  | { kind: "message"; messageBodyRef: MessageBodyRef }
+  | { kind: "decision" | "lifecycle" | "operation"; messageBodyRef?: never }
+);
+
+export type ActivityViewSummary = {
+  kind: "activity";
+  summary: string;
+  occurredAt: Timestamp;
+} & (
+  | { activityKind: "message"; messageBodyRef: MessageBodyRef }
+  | { activityKind: "decision" | "lifecycle" | "operation"; messageBodyRef?: never }
+);
+
+export type ActivityDetail = ActivityViewSummary & { eventId: string };
+
+export type GitRepositoryReadTarget =
+  | { kind: "project-root" }
+  | { kind: "session-worktree"; canonicalWorktreePath: string };
+
+export type GitDiffSelector =
+  | { kind: "working-tree" }
+  | { kind: "staged" }
+  | { kind: "objects"; baseObjectDigest: Sha256Digest; targetObjectDigest: Sha256Digest };
+
+export type GitLogCursor = {
+  repositoryStateDigest: Sha256Digest;
+  afterObjectDigest: Sha256Digest;
+};
+
+type GitRepositoryReadRequestBase = {
+  credential: OperatorCapabilityCredential;
+  projectId: ProjectId;
+  snapshotRevision: number;
+  diff: GitDiffSelector;
+  log: { cursor?: GitLogCursor; limit: number };
+};
+
+export type GitRepositoryReadRequest = GitRepositoryReadRequestBase & (
+  | {
+      target: Extract<GitRepositoryReadTarget, { kind: "project-root" }>;
+      projectSessionId?: ProjectSessionId;
+    }
+  | {
+      target: Extract<GitRepositoryReadTarget, { kind: "session-worktree" }>;
+      projectSessionId: ProjectSessionId;
+    }
+);
+
+export type GitHead =
+  | { detached: false; refName: string; objectDigest: Sha256Digest }
+  | { detached: true; objectDigest: Sha256Digest; refName?: never };
+
+export type GitPathPage = {
+  paths: readonly string[];
+  truncated: boolean;
+};
+
+export type GitOperationState =
+  | { kind: "clean" }
+  | { kind: "merge" }
+  | { kind: "rebase" }
+  | { kind: "cherry-pick" }
+  | { kind: "bisect" };
+
+export type GitUpstream = {
+  remoteName: string;
+  branchName: string;
+  ahead: number;
+  behind: number;
+};
+
+export type GitHostedChecks = {
+  repository: string;
+  headObjectDigest: Sha256Digest;
+  state: "passing" | "failing" | "pending" | "unknown";
+  total: number;
+  passing: number;
+  failing: number;
+  pending: number;
+};
+
+export type GitLogEntry = {
+  objectDigest: Sha256Digest;
+  parentObjectDigests: readonly Sha256Digest[];
+  subject: string;
+  authorTimestamp: Timestamp;
+};
+
+export type GitLogPage =
+  | { items: readonly GitLogEntry[]; hasMore: false; nextCursor: null }
+  | { items: readonly GitLogEntry[]; hasMore: true; nextCursor: GitLogCursor };
+
+export type GitBranchRecord = {
+  refName: string;
+  objectDigest: Sha256Digest;
+  checkedOut: boolean;
+  upstream: Pick<GitUpstream, "remoteName" | "branchName"> | null;
+};
+
+export type GitWorktreeRecord = {
+  canonicalPath: string;
+  head: GitHead;
+  current: boolean;
+  locked: boolean;
+};
+
+export type GitRepositoryProjection = {
+  freshness: "live" | "snapshot" | "stale";
+  source: "git";
+  revision: number;
+  observedAt: Timestamp;
+  canonicalRepositoryRoot: string;
+  canonicalWorktreePath: string;
+  repositoryStateDigest: Sha256Digest;
+  head: GitHead;
+  headDigest: Sha256Digest;
+  indexDigest: Sha256Digest;
+  worktreeDigest: Sha256Digest;
+  remoteDigest: Sha256Digest;
+  changes: {
+    staged: GitPathPage;
+    unstaged: GitPathPage;
+    untracked: GitPathPage;
+    conflicted: GitPathPage;
+  };
+  operationState: GitOperationState;
+  upstream: GitUpstream | null;
+  diff: {
+    selector: GitDiffSelector;
+    artifactRef: ArtifactRef;
+    baseDigest: Sha256Digest;
+    targetDigest: Sha256Digest;
+  };
+  log: GitLogPage;
+  branches: { items: readonly GitBranchRecord[]; truncated: boolean };
+  worktrees: { items: readonly GitWorktreeRecord[]; truncated: boolean };
+  hostedChecks: ProjectionFact<GitHostedChecks | null, "github">;
+};
+
+export type GitRepositorySummary = Pick<
+  GitRepositoryProjection,
+  "freshness" | "source" | "revision" | "observedAt" | "repositoryStateDigest" | "head" | "upstream" | "hostedChecks"
+> & {
+  operationState: GitOperationState["kind"];
+  counts: { staged: number; unstaged: number; untracked: number; conflicted: number };
+  pathsTruncated: boolean;
+};
+
+export type GitRepositoryReadResult =
+  | {
+      status: "current";
+      projectId: ProjectId;
+      projectSessionId: ProjectSessionId | null;
+      snapshotRevision: number;
+      readTransactionId: string;
+      repository: GitRepositoryProjection;
+    }
+  | {
+      status: "resnapshot-required";
+      reason: "snapshot-mismatch";
+      currentSnapshotRevision: number;
+    };
 
 export type SystemViewItem = {
   componentId: string;
@@ -252,7 +421,7 @@ export type OperatorViewSummaryMap = {
     priority: AttentionItem["priority"];
     title: string;
   };
-  project: { kind: "project"; goal: string; repositoryRevision: string };
+  project: { kind: "project"; goal: string; repositoryRevision: string; repository?: GitRepositorySummary };
   runs: { kind: "run"; phase: string; health: RunProjection["health"]; nextMilestone: string };
   work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
   agents: {
@@ -267,7 +436,7 @@ export type OperatorViewSummaryMap = {
     status: EvidenceViewItem["status"];
     provenance: string;
   };
-  activity: { kind: "activity"; activityKind: ActivityViewItem["kind"]; summary: string; occurredAt: Timestamp };
+  activity: ActivityViewSummary;
   system: { kind: "system"; systemKind: SystemViewItem["kind"]; state: SystemViewItem["state"]; detail: string };
 };
 
@@ -325,7 +494,14 @@ export type OperatorViewPageResult<View extends ConsoleView = ConsoleView> = Vie
   : never;
 
 export type OperatorDetail =
-  | { kind: "project"; projectId: ProjectId; canonicalRoot: string; goal: string; repositoryRevision: string }
+  | {
+      kind: "project";
+      projectId: ProjectId;
+      canonicalRoot: string;
+      goal: string;
+      repositoryRevision: string;
+      repository?: GitRepositoryProjection;
+    }
   | {
       kind: "session";
       projectSessionId: ProjectSessionId;
@@ -358,7 +534,7 @@ export type OperatorDetail =
       artifactRef: ArtifactRef;
       status: EvidenceViewItem["status"];
     }
-  | { kind: "activity"; eventId: string; activityKind: ActivityViewItem["kind"]; summary: string; occurredAt: Timestamp }
+  | ActivityDetail
   | {
       kind: "system";
       componentId: string;
@@ -390,11 +566,8 @@ export type OperatorDetailReadResult =
       currentSnapshotRevision: number;
     };
 
-export type MessageBodyReadRequest = {
+export type MessageBodyReadRequest = MessageBodyRef & {
   credential: OperatorCapabilityCredential;
-  projectSessionId: ProjectSessionId;
-  messageId: MessageId;
-  expectedRevision: number;
 };
 
 export type MessageBodyReadResult =

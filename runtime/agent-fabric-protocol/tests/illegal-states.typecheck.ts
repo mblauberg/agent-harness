@@ -1,8 +1,12 @@
 import type {
+  ActivityViewItem,
+  ActivityViewSummary,
   OperatorCapabilityGrant,
   OperatorActionIntent,
   OperatorActionReconcileRequest,
   OperatorGitIntent,
+  GitRepositoryReadRequest,
+  MessageBodyRef,
   OperatorMutationContext,
   OperatorRevisionTarget,
   ProjectSession,
@@ -30,6 +34,10 @@ declare const reconcileBase: Omit<OperatorActionReconcileRequest, "mode">;
 declare const promotionBase: Omit<Extract<OperatorActionIntent, { kind: "promotion" }>, "releaseBinding">;
 declare const externalIntent: Extract<OperatorActionIntent, { kind: "registered-external-effect" }>;
 declare const operatorMutation: OperatorMutationContext;
+declare const repositoryReadBase: Omit<GitRepositoryReadRequest, "projectSessionId" | "target">;
+declare const activityItemBase: Omit<ActivityViewItem, "kind" | "messageBodyRef">;
+declare const activitySummaryBase: Omit<ActivityViewSummary, "activityKind" | "messageBodyRef">;
+declare const messageBodyRef: MessageBodyRef;
 
 type RequestUnion = ProtocolRequest<"fabric.v1.task.read" | "fabric.v1.task.list">;
 type ResponseUnion = ProtocolResponse<"fabric.v1.task.read" | "fabric.v1.task.list">;
@@ -99,6 +107,25 @@ export function compileTimeIllegalStateWitnesses(): void {
     mode: "redispatch",
   };
 
+  // @ts-expect-error a session worktree read must bind the exact project session
+  const unboundSessionWorktree: GitRepositoryReadRequest = {
+    ...repositoryReadBase,
+    target: { kind: "session-worktree", canonicalWorktreePath: "/workspace/project/.worktrees/writer" },
+  };
+
+  // @ts-expect-error message activity items cannot make the exact body reference optional
+  const messageWithoutBodyRef: ActivityViewItem = { ...activityItemBase, kind: "message" };
+
+  // @ts-expect-error non-message activity items cannot acquire message read authority
+  const decisionWithBodyRef: ActivityViewItem = {
+    ...activityItemBase,
+    kind: "decision",
+    messageBodyRef,
+  };
+
+  // @ts-expect-error v2 message summaries preserve the same required body reference
+  const messageSummaryWithoutBodyRef: ActivityViewSummary = { ...activitySummaryBase, activityKind: "message" };
+
   void closedWithoutEvidence;
   void unboundTakeover;
   void fireAndForget;
@@ -111,5 +138,9 @@ export function compileTimeIllegalStateWitnesses(): void {
   void promotionWithoutRelease;
   void externalWithRelease;
   void redispatchReconcile;
+  void unboundSessionWorktree;
+  void messageWithoutBodyRef;
+  void decisionWithBodyRef;
+  void messageSummaryWithoutBodyRef;
   void operatorMutation;
 }
