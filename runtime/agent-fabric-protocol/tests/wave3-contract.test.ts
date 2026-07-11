@@ -309,6 +309,7 @@ describe("bounded JSON and path parity", () => {
     ["unknown authority action", { actions: ["fabric.v1.unknown.operation"] }],
     ["operator-only authority action", { actions: [FABRIC_OPERATIONS.daemonStop] }],
     ["unqualified budget unit", { budget: { tokens: 10 } }],
+    ["unrecognised ISO-4217 currency", { budget: { "cost:ZZZ": 10 } }],
   ] as const)("rejects %s in delegated authority at runtime and schema", (_label, mutation) => {
     const operation = FABRIC_OPERATIONS.delegateAuthority;
     const fixture = OPERATION_CONTRACT_FIXTURES[operation];

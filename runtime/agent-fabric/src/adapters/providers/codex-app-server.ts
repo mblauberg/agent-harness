@@ -3,6 +3,10 @@ import { isAbsolute } from "node:path";
 
 import { createProviderAdapter, type ProviderBoundary } from "./adapter.js";
 import {
+  AgentSessionFabricBridge,
+  type AgentSessionFabricBridgeInput,
+} from "./agent-session-continuity.js";
+import {
   chairLaunchContinuityUnproven,
   createChairLaunchFabricBridge,
   type ChairLaunchFabricBridge,
@@ -18,6 +22,10 @@ import {
   ProviderAdapterError,
   requiredString,
   takeChairLaunchHandoff,
+  takeAgentBridgeHandoff,
+  type AgentBridgeHandoff,
+  type AgentProvisionBoundaryInput,
+  type AgentProvisionProviderResult,
   type AdapterRequestHandler,
   type ChairLaunchBoundaryInput,
   type ChairLaunchHandoff,
@@ -98,6 +106,15 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
       digestAlgorithm: "sha256",
       nativeAttribution: "codex-app-server-thread-turn-call-v1",
     },
+  },
+  agentBridge: {
+    schemaVersion: 1,
+    method: "provision_agent",
+    operations: ["spawn", "attach"],
+    secretTransport: "private-handoff",
+    bridgeContract: "agent-fabric-session-bridge-v1",
+    generationBound: true,
+    providerOriginatedActivation: true,
   },
 };
 
@@ -190,14 +207,16 @@ type CodexConnection = Pick<
 
 type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection;
 type BridgeFactory = (input: ChairLaunchFabricBridgeInput) => Promise<ChairLaunchFabricBridge>;
+type AgentBridgeFactory = (input: AgentSessionFabricBridgeInput) => Promise<AgentSessionFabricBridge>;
 
 type CodexChairSession = {
-  bridge: ChairLaunchFabricBridge;
+  bridge: ChairLaunchFabricBridge | AgentSessionFabricBridge;
   providerSessionRef: string;
   providerSessionGeneration: number;
   nativeInvocationKeys: Set<string>;
   currentTurnId?: string;
   busy?: boolean;
+  bridgeGeneration?: number;
 };
 
 function consumeCodexNativeInvocation(
@@ -209,8 +228,8 @@ function consumeCodexNativeInvocation(
   const key = JSON.stringify([threadId, turnId, callId]);
   if (session.nativeInvocationKeys.has(key)) {
     throw new ProviderAdapterError(
-      "CHAIR_CONTINUITY_UNPROVEN",
-      "Codex replayed a native provider tool-call tuple",
+      session.bridgeGeneration === undefined ? "CHAIR_CONTINUITY_UNPROVEN" : "AGENT_BRIDGE_UNPROVEN",
+      "Codex replayed a native provider Fabric tool-call tuple",
     );
   }
   if (session.nativeInvocationKeys.size >= 256) return false;
@@ -218,7 +237,7 @@ function consumeCodexNativeInvocation(
   return true;
 }
 
-function codexChairDynamicTools(bridge: ChairLaunchFabricBridge): Record<string, unknown>[] {
+function codexChairDynamicTools(bridge: ChairLaunchFabricBridge | AgentSessionFabricBridge): Record<string, unknown>[] {
   return bridge.descriptors.map((descriptor) => ({
     type: "function",
     name: descriptor.name,
@@ -241,15 +260,18 @@ function dynamicToolResponse(value: ProviderSessionToolResult): Record<string, u
 export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   readonly #connectionFactory: ConnectionFactory;
   readonly #bridgeFactory: BridgeFactory;
+  readonly #agentBridgeFactory: AgentBridgeFactory;
   readonly #connections = new Map<string, CodexConnection>();
   readonly #chairSessions = new Map<string, CodexChairSession>();
 
   constructor(
     connectionFactory: ConnectionFactory,
     bridgeFactory: BridgeFactory = createChairLaunchFabricBridge,
+    agentBridgeFactory: AgentBridgeFactory = AgentSessionFabricBridge.create,
   ) {
     this.#connectionFactory = connectionFactory;
     this.#bridgeFactory = bridgeFactory;
+    this.#agentBridgeFactory = agentBridgeFactory;
   }
 
   async #withConnection<T>(operation: (connection: CodexConnection) => Promise<T>): Promise<T> {
@@ -276,8 +298,8 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       this.#chairSessions.delete(resumeReference);
       await lostChair.bridge.close();
       throw new ProviderAdapterError(
-        "CHAIR_BRIDGE_LOST",
-        "Codex chair connection was lost and cannot be recreated from its thread reference",
+        lostChair.bridgeGeneration === undefined ? "CHAIR_BRIDGE_LOST" : "AGENT_BRIDGE_LOST",
+        "Codex provider connection was lost and cannot be recreated from its thread reference",
       );
     }
     const connection = await this.#openConnection();
@@ -299,11 +321,18 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     attestationToolName?: string,
   ): Promise<Record<string, unknown>> {
     if (chairSession !== undefined) chairSession.nativeInvocationKeys.clear();
+    const invocationArguments = chairSession?.bridgeGeneration === undefined
+      ? `{"challengeResponse":"${(chairSession?.bridge as ChairLaunchFabricBridge | undefined)?.challengeResponse ?? ""}"}`
+      : "{}";
     const instruction = attestationToolName === undefined
       ? textInput(payload)
       : [{
           type: "text" as const,
-          text: `Before continuing, invoke ${attestationToolName} exactly once with {"challengeResponse":"${chairSession?.bridge.challengeResponse ?? ""}"}. ${requiredString(payload.prompt ?? payload.instruction, "prompt")}`,
+          text: `Before continuing, invoke ${attestationToolName} exactly once with ${invocationArguments}. ${
+            typeof (payload.prompt ?? payload.instruction) === "string"
+              ? String(payload.prompt ?? payload.instruction)
+              : "Establish the retained Agent Fabric bridge."
+          }`,
         }];
     const response = await connection.request("turn/start", {
       threadId: resumeReference,
@@ -369,6 +398,19 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       connection !== undefined &&
       !connection.closed
     );
+  }
+
+  hasLiveAgentSession(
+    resumeReference: string,
+    providerSessionGeneration: number,
+    bridgeGeneration: number,
+  ): boolean {
+    const session = this.#chairSessions.get(resumeReference);
+    const connection = this.#connections.get(resumeReference);
+    return session !== undefined && session.bridgeGeneration !== undefined &&
+      session.providerSessionGeneration === providerSessionGeneration &&
+      session.bridgeGeneration === bridgeGeneration && !session.bridge.closed &&
+      connection !== undefined && !connection.closed;
   }
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -475,6 +517,71 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     }
   }
 
+  async provisionAgent(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult> {
+    const bridge = await this.#agentBridgeFactory({
+      providerAdapterId: "codex-app-server",
+      providerActionId: input.actionId,
+      targetAgentId: input.targetAgentId,
+      bridgeGeneration: input.bridgeGeneration,
+      bridgeContractDigest: input.bridgeContractDigest,
+      capability: input.environment.AGENT_FABRIC_CAPABILITY,
+      socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+    });
+    let connection: CodexConnection | undefined;
+    try {
+      connection = await this.#openConnection();
+      let session: CodexChairSession | undefined;
+      connection.setServerRequestHandler("item/tool/call", async (params) => {
+        if (
+          session === undefined || typeof params.threadId !== "string" ||
+          params.threadId !== session.providerSessionRef || typeof params.turnId !== "string" ||
+          params.turnId !== session.currentTurnId || typeof params.callId !== "string" ||
+          params.callId.length === 0 || Buffer.byteLength(params.callId, "utf8") > 512 ||
+          typeof params.tool !== "string" || (params.namespace !== undefined && params.namespace !== null) ||
+          !isRecord(params.arguments)
+        ) throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "Codex child tool call is not attributable");
+        if (!consumeCodexNativeInvocation(session, params.threadId, params.turnId, params.callId)) {
+          throw new ProviderAdapterError("AGENT_BRIDGE_LOST", "Codex child invocation capacity exceeded");
+        }
+        return dynamicToolResponse(await bridge.invokeTool(params.tool, params.arguments, {
+          providerSessionRef: session.providerSessionRef,
+          providerSessionGeneration: session.providerSessionGeneration,
+          providerTurnRef: params.turnId,
+          providerInvocationRef: params.callId,
+        }));
+      });
+      const response = input.operation === "spawn"
+        ? await connection.request("thread/start", {
+            ...codexThreadConfiguration(input.payload),
+            dynamicTools: codexChairDynamicTools(bridge),
+          })
+        : await connection.request("thread/resume", {
+            threadId: requiredString(input.providerSessionRef, "providerSessionRef"),
+            ...codexThreadConfiguration(input.payload),
+            dynamicTools: codexChairDynamicTools(bridge),
+          });
+      const thread = threadFromResponse(response, input.operation === "spawn" ? "thread/start" : "thread/resume");
+      const resumeReference = String(thread.id);
+      bridge.bindProviderSession(resumeReference, 1);
+      session = {
+        bridge,
+        providerSessionRef: resumeReference,
+        providerSessionGeneration: 1,
+        bridgeGeneration: input.bridgeGeneration,
+        nativeInvocationKeys: new Set(),
+      };
+      await this.#completeTurn(connection, resumeReference, input.payload, session, bridge.activationToolName);
+      const result = bridge.result();
+      this.#connections.set(resumeReference, connection);
+      this.#chairSessions.set(resumeReference, session);
+      return result;
+    } catch (error: unknown) {
+      await connection?.close();
+      await bridge.close();
+      throw error;
+    }
+  }
+
   async attach(input: { resumeReference: string; payload: Record<string, unknown> }): Promise<Record<string, unknown>> {
     const connection = await this.#openConnection();
     try {
@@ -564,6 +671,7 @@ export function createCodexAppServerAdapter(options: {
   boundary: CodexAppServerBoundary;
   journal: SqliteAdapterActionJournal;
   chairLaunchHandoff?: ChairLaunchHandoff;
+  agentBridgeHandoff?: AgentBridgeHandoff;
 }): AdapterRequestHandler {
   return createProviderAdapter({
     capabilities: CAPABILITIES,
@@ -573,12 +681,16 @@ export function createCodexAppServerAdapter(options: {
       ...(options.chairLaunchHandoff === undefined ? {} : { handoff: options.chairLaunchHandoff }),
       validatePayload: validateCodexChairLaunchPayload,
     },
+    agentBridge: {
+      ...(options.agentBridgeHandoff === undefined ? {} : { handoff: options.agentBridgeHandoff }),
+    },
   });
 }
 
 export async function runCodexAppServerAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("codex-app-server", arguments_));
   const chairLaunchHandoff = takeChairLaunchHandoff(process.env);
+  const agentBridgeHandoff = takeAgentBridgeHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
   if (providerExecutable === undefined) throw new Error("codex-app-server adapter requires --provider-executable");
@@ -591,6 +703,7 @@ export async function runCodexAppServerAdapter(arguments_: string[] = process.ar
         boundary,
         journal,
         ...(chairLaunchHandoff === undefined ? {} : { chairLaunchHandoff }),
+        ...(agentBridgeHandoff === undefined ? {} : { agentBridgeHandoff }),
       }),
       { input: process.stdin, output: process.stdout },
     );

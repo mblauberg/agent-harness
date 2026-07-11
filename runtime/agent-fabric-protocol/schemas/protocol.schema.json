@@ -2033,6 +2033,7 @@
             "BARRIER_PRECONDITION_FAILED",
             "BUDGET_EXCEEDED",
             "CAPABILITY_FORBIDDEN",
+            "CAPABILITY_UNAVAILABLE",
             "CAPABILITY_EXPIRED",
             "CAPABILITY_REVOKED",
             "CONFIG_UNTRUSTED_FIELD",
@@ -3085,6 +3086,7 @@
                 "BARRIER_PRECONDITION_FAILED",
                 "BUDGET_EXCEEDED",
                 "CAPABILITY_FORBIDDEN",
+                "CAPABILITY_UNAVAILABLE",
                 "CAPABILITY_EXPIRED",
                 "CAPABILITY_REVOKED",
                 "CONFIG_UNTRUSTED_FIELD",
@@ -3198,10 +3200,17 @@
                     "workspaceRoots": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        "oneOf": [
+                          {
+                            "const": "."
+                          },
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          }
+                        ]
                       },
                       "minItems": 1,
                       "maxItems": 64,
@@ -3210,10 +3219,17 @@
                     "sourcePaths": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        "oneOf": [
+                          {
+                            "const": "."
+                          },
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          }
+                        ]
                       },
                       "minItems": 0,
                       "maxItems": 256,
@@ -3222,10 +3238,17 @@
                     "artifactPaths": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        "oneOf": [
+                          {
+                            "const": "."
+                          },
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          }
+                        ]
                       },
                       "minItems": 0,
                       "maxItems": 256,
@@ -3388,7 +3411,28 @@
                       "minProperties": 0,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "turns",
+                              "provider_calls",
+                              "concurrent_turns",
+                              "descendants",
+                              "message_bytes",
+                              "artifact_bytes",
+                              "wall_clock_milliseconds"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                          }
+                        ]
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -3398,10 +3442,17 @@
                     "deniedPaths": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                        "oneOf": [
+                          {
+                            "const": "."
+                          },
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                          }
+                        ]
                       },
                       "minItems": 0,
                       "maxItems": 256,
@@ -5937,10 +5988,17 @@
                             "workspaceRoots": {
                               "type": "array",
                               "items": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 4096,
-                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                "oneOf": [
+                                  {
+                                    "const": "."
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  }
+                                ]
                               },
                               "minItems": 1,
                               "maxItems": 64,
@@ -5949,10 +6007,17 @@
                             "sourcePaths": {
                               "type": "array",
                               "items": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 4096,
-                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                "oneOf": [
+                                  {
+                                    "const": "."
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  }
+                                ]
                               },
                               "minItems": 0,
                               "maxItems": 256,
@@ -5961,10 +6026,17 @@
                             "artifactPaths": {
                               "type": "array",
                               "items": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 4096,
-                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                "oneOf": [
+                                  {
+                                    "const": "."
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  }
+                                ]
                               },
                               "minItems": 0,
                               "maxItems": 256,
@@ -6127,7 +6199,28 @@
                               "minProperties": 0,
                               "maxProperties": 128,
                               "propertyNames": {
-                                "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                                "oneOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "turns",
+                                      "provider_calls",
+                                      "concurrent_turns",
+                                      "descendants",
+                                      "message_bytes",
+                                      "artifact_bytes",
+                                      "wall_clock_milliseconds"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                                  }
+                                ]
                               },
                               "additionalProperties": {
                                 "type": "integer",
@@ -6137,10 +6230,17 @@
                             "deniedPaths": {
                               "type": "array",
                               "items": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 4096,
-                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                "oneOf": [
+                                  {
+                                    "const": "."
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  }
+                                ]
                               },
                               "minItems": 0,
                               "maxItems": 256,
@@ -6296,10 +6396,17 @@
                               "workspaceRoots": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  "oneOf": [
+                                    {
+                                      "const": "."
+                                    },
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 4096,
+                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                    }
+                                  ]
                                 },
                                 "minItems": 1,
                                 "maxItems": 64,
@@ -6308,10 +6415,17 @@
                               "sourcePaths": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  "oneOf": [
+                                    {
+                                      "const": "."
+                                    },
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 4096,
+                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                    }
+                                  ]
                                 },
                                 "minItems": 0,
                                 "maxItems": 256,
@@ -6320,10 +6434,17 @@
                               "artifactPaths": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  "oneOf": [
+                                    {
+                                      "const": "."
+                                    },
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 4096,
+                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                    }
+                                  ]
                                 },
                                 "minItems": 0,
                                 "maxItems": 256,
@@ -6486,7 +6607,28 @@
                                 "minProperties": 0,
                                 "maxProperties": 128,
                                 "propertyNames": {
-                                  "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                                  "oneOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "turns",
+                                        "provider_calls",
+                                        "concurrent_turns",
+                                        "descendants",
+                                        "message_bytes",
+                                        "artifact_bytes",
+                                        "wall_clock_milliseconds"
+                                      ]
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                                    }
+                                  ]
                                 },
                                 "additionalProperties": {
                                   "type": "integer",
@@ -6496,10 +6638,17 @@
                               "deniedPaths": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                  "oneOf": [
+                                    {
+                                      "const": "."
+                                    },
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 4096,
+                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                    }
+                                  ]
                                 },
                                 "minItems": 0,
                                 "maxItems": 256,
@@ -6633,7 +6782,28 @@
                       "minProperties": 1,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "turns",
+                              "provider_calls",
+                              "concurrent_turns",
+                              "descendants",
+                              "message_bytes",
+                              "artifact_bytes",
+                              "wall_clock_milliseconds"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                          }
+                        ]
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -6763,7 +6933,28 @@
                       "minProperties": 0,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "turns",
+                              "provider_calls",
+                              "concurrent_turns",
+                              "descendants",
+                              "message_bytes",
+                              "artifact_bytes",
+                              "wall_clock_milliseconds"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                          }
+                        ]
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -6775,7 +6966,28 @@
                       "minProperties": 0,
                       "maxProperties": 128,
                       "propertyNames": {
-                        "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "turns",
+                              "provider_calls",
+                              "concurrent_turns",
+                              "descendants",
+                              "message_bytes",
+                              "artifact_bytes",
+                              "wall_clock_milliseconds"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                          }
+                        ]
                       },
                       "additionalProperties": {
                         "type": "integer",
@@ -7093,7 +7305,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -7150,7 +7383,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -7214,7 +7468,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -15918,7 +16193,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -16032,7 +16328,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -16095,7 +16412,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -22665,6 +23003,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -22816,6 +23155,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -22903,21 +23243,26 @@
               "type": "object",
               "additionalProperties": false,
               "required": [
-                "capability",
-                "providerSessionRef",
+                "agentId",
+                "authorityId",
                 "adapterId",
-                "actionId"
+                "actionId",
+                "providerSessionRef",
+                "providerSessionGeneration",
+                "bridgeState",
+                "bridgeGeneration",
+                "evidenceDigest"
               ],
               "properties": {
-                "capability": {
+                "agentId": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096,
-                  "x-agent-fabric-sensitive": true
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                 },
-                "providerSessionRef": {
+                "authorityId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128,
@@ -22940,6 +23285,33 @@
                   "x-minUtf8Bytes": 1,
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "providerSessionRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "providerSessionGeneration": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "bridgeState": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "none"
+                  ]
+                },
+                "bridgeGeneration": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "evidenceDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
                 }
               }
             }
@@ -22994,6 +23366,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -23081,21 +23454,26 @@
               "type": "object",
               "additionalProperties": false,
               "required": [
-                "capability",
-                "providerSessionRef",
+                "agentId",
+                "authorityId",
                 "adapterId",
-                "actionId"
+                "actionId",
+                "providerSessionRef",
+                "providerSessionGeneration",
+                "bridgeState",
+                "bridgeGeneration",
+                "evidenceDigest"
               ],
               "properties": {
-                "capability": {
+                "agentId": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 16,
-                  "x-maxUtf8Bytes": 4096,
-                  "x-agent-fabric-sensitive": true
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                 },
-                "providerSessionRef": {
+                "authorityId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128,
@@ -23118,6 +23496,33 @@
                   "x-minUtf8Bytes": 1,
                   "x-maxUtf8Bytes": 128,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "providerSessionRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "providerSessionGeneration": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "bridgeState": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "none"
+                  ]
+                },
+                "bridgeGeneration": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "evidenceDigest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
                 }
               }
             }
@@ -23172,6 +23577,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -23323,6 +23729,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -23489,6 +23896,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -23707,6 +24115,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -23853,6 +24262,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -24016,6 +24426,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -24174,6 +24585,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -24394,6 +24806,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -24614,6 +25027,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -24834,6 +25248,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -25002,6 +25417,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -25114,6 +25530,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -25260,6 +25677,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -25480,6 +25898,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -25700,6 +26119,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -25851,6 +26271,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -26071,6 +26492,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -26222,6 +26644,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -26359,6 +26782,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -26524,6 +26948,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -26712,6 +27137,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -26900,6 +27326,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -27088,6 +27515,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -27276,6 +27704,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -27436,6 +27865,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -27625,6 +28055,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -27814,6 +28245,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -28003,6 +28435,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -28193,6 +28626,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -28383,6 +28817,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -28573,6 +29008,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -28724,6 +29160,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -28893,6 +29330,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -29143,7 +29581,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -29155,8 +29614,7 @@
                   "additionalProperties": false,
                   "required": [
                     "agentId",
-                    "authorityId",
-                    "capability"
+                    "authorityId"
                   ],
                   "properties": {
                     "agentId": {
@@ -29174,14 +29632,6 @@
                       "x-minUtf8Bytes": 1,
                       "x-maxUtf8Bytes": 128,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "capability": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096,
-                      "x-minUtf8Bytes": 16,
-                      "x-maxUtf8Bytes": 4096,
-                      "x-agent-fabric-sensitive": true
                     }
                   }
                 },
@@ -29338,6 +29788,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -29588,7 +30039,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -29748,6 +30220,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -29998,7 +30471,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -30158,6 +30652,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -30408,7 +30903,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -30568,6 +31084,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -30728,6 +31245,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -30858,7 +31376,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -30898,7 +31437,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -30958,6 +31518,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -31088,7 +31649,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31128,7 +31710,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31188,6 +31791,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -31318,7 +31922,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31358,7 +31983,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31418,6 +32064,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -31548,7 +32195,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31588,7 +32256,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31648,6 +32337,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -31778,7 +32468,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "object",
@@ -31818,7 +32529,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -31878,6 +32610,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -32045,6 +32778,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -32235,6 +32969,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -32451,6 +33186,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -32663,6 +33399,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -32897,6 +33634,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -32995,7 +33733,9 @@
                     "required": [
                       "agentId",
                       "parentAgentId",
-                      "lifecycle"
+                      "lifecycle",
+                      "bridgeState",
+                      "bridgeGeneration"
                     ],
                     "properties": {
                       "agentId": {
@@ -33027,6 +33767,18 @@
                         "maxLength": 4096,
                         "x-minUtf8Bytes": 1,
                         "x-maxUtf8Bytes": 4096
+                      },
+                      "bridgeState": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "none",
+                          "lost"
+                        ]
+                      },
+                      "bridgeGeneration": {
+                        "type": "integer",
+                        "minimum": 1
                       }
                     }
                   },
@@ -33086,6 +33838,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -33263,6 +34016,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -33426,6 +34180,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -33577,6 +34332,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -34258,6 +35014,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -34939,6 +35696,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -35620,6 +36378,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -36301,6 +37060,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -37709,6 +38469,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -37900,6 +38661,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -38051,6 +38813,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -38242,6 +39005,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -38541,6 +39305,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -38844,6 +39609,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -39070,6 +39836,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -39418,6 +40185,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -39670,6 +40438,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -39922,6 +40691,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -40524,6 +41294,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -41126,6 +41897,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -41296,6 +42068,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -42429,6 +43202,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -42745,7 +43519,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -42757,7 +43552,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -42877,6 +43693,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -43193,7 +44010,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -43205,7 +44043,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -43325,6 +44184,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -43641,7 +44501,28 @@
                   "minProperties": 1,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "type": "integer",
@@ -43653,7 +44534,28 @@
                   "minProperties": 0,
                   "maxProperties": 128,
                   "propertyNames": {
-                    "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    ]
                   },
                   "additionalProperties": {
                     "oneOf": [
@@ -43773,6 +44675,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -43939,6 +44842,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -45004,6 +45908,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -46050,6 +46955,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -47096,6 +48002,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -48142,6 +49049,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -49188,6 +50096,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -50234,6 +51143,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -51280,6 +52190,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -51455,6 +52366,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -52067,6 +52979,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -54316,6 +55229,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -58134,6 +59048,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -58388,6 +59303,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -63626,6 +64542,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -67071,6 +67988,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -69918,6 +70836,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -70443,6 +71362,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -71654,6 +72574,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -72865,6 +73786,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -73106,6 +74028,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -74275,6 +75198,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -74387,6 +75311,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -74499,6 +75424,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -74611,6 +75537,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",
@@ -74723,6 +75650,7 @@
                     "BARRIER_PRECONDITION_FAILED",
                     "BUDGET_EXCEEDED",
                     "CAPABILITY_FORBIDDEN",
+                    "CAPABILITY_UNAVAILABLE",
                     "CAPABILITY_EXPIRED",
                     "CAPABILITY_REVOKED",
                     "CONFIG_UNTRUSTED_FIELD",

@@ -223,20 +223,33 @@ export function unionOf<const Codecs extends readonly [Codec<unknown>, ...Codec<
 
 export function recordOf<T>(
   valueCodec: Codec<T>,
-  options: { minimum?: number; maximum?: number; keyPattern?: string; exampleKey?: string } = {},
+  options: {
+    minimum?: number;
+    maximum?: number;
+    keyPattern?: string;
+    keyCodec?: Codec<string>;
+    exampleKey?: string;
+  } = {},
 ): Codec<Readonly<Record<string, T>>> {
   const minimum = options.minimum ?? 0;
   const maximum = options.maximum ?? 256;
   const pattern = options.keyPattern === undefined ? undefined : new RegExp(options.keyPattern, "u");
+  if (pattern !== undefined && options.keyCodec !== undefined) {
+    throw new TypeError("record codec cannot combine keyPattern and keyCodec");
+  }
   const exampleKey = options.exampleKey ?? "key_01";
   if (minimum > 0 && pattern !== undefined && !pattern.test(exampleKey)) {
     throw new TypeError("record codec exampleKey must satisfy keyPattern");
+  }
+  if (minimum > 0 && options.keyCodec !== undefined) {
+    options.keyCodec.parse(exampleKey, "record codec exampleKey");
   }
   return defineCodec({
     type: "object",
     minProperties: minimum,
     maxProperties: maximum,
     ...(options.keyPattern === undefined ? {} : { propertyNames: { pattern: options.keyPattern } }),
+    ...(options.keyCodec === undefined ? {} : { propertyNames: options.keyCodec.schema }),
     additionalProperties: valueCodec.schema,
   }, minimum > 0 ? { [exampleKey]: valueCodec.example } : {}, (value, path) => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${path} must be an object`);
@@ -247,6 +260,7 @@ export function recordOf<T>(
     const result: Record<string, T> = {};
     for (const [key, entry] of entries) {
       if (pattern !== undefined && !pattern.test(key)) throw new TypeError(`${path}.${key} has an invalid key`);
+      options.keyCodec?.parse(key, `${path}.${key}`);
       result[key] = valueCodec.parse(entry, `${path}.${key}`);
     }
     return result;

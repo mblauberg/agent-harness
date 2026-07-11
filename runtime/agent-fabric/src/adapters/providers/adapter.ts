@@ -3,11 +3,16 @@ import {
   chairLaunchChallengeDigest,
   isRecord,
   parseChairLaunchCapability,
+  parseAgentBridgeCapability,
+  parseAgentProvisionProviderResult,
   parseChairLaunchContinuityUnprovenEvidence,
   parseChairLaunchProviderResult,
   ProviderAdapterError,
   requiredString,
   type AdapterActionRecord,
+  type AgentBridgeHandoff,
+  type AgentProvisionBoundaryInput,
+  type AgentProvisionProviderResult,
   type AdapterRequestHandler,
   type ChairLaunchBoundaryInput,
   type ChairLaunchHandoff,
@@ -26,7 +31,9 @@ export type ProviderBoundary = {
   steer?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   compact?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   launchChair?(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult>;
+  provisionAgent?(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult>;
   hasLiveChairSession?(resumeReference: string, providerSessionGeneration: number): boolean;
+  hasLiveAgentSession?(resumeReference: string, providerSessionGeneration: number, bridgeGeneration: number): boolean;
 };
 
 type SupportedOperation = "spawn" | "attach" | "send_turn" | "interrupt" | "release" | "steer" | "compact";
@@ -54,18 +61,133 @@ export function createProviderAdapter(options: {
     handoff?: ChairLaunchHandoff;
     validatePayload(payload: Record<string, unknown>): Record<string, unknown>;
   };
+  agentBridge?: { handoff?: AgentBridgeHandoff };
 }): AdapterRequestHandler {
-  const capabilities: ProviderAdapterCapabilities = options.capabilities.chairLaunch === undefined
-    ? options.capabilities
-    : { ...options.capabilities, chairLaunch: parseChairLaunchCapability(options.capabilities.chairLaunch) };
+  const capabilities: ProviderAdapterCapabilities = {
+    ...options.capabilities,
+    ...(options.capabilities.chairLaunch === undefined
+      ? {}
+      : { chairLaunch: parseChairLaunchCapability(options.capabilities.chairLaunch) }),
+    ...(options.capabilities.agentBridge === undefined
+      ? {}
+      : { agentBridge: parseAgentBridgeCapability(options.capabilities.agentBridge) }),
+  };
   const supported = new Set(capabilities.operations);
   let chairLaunchHandoff = options.chairLaunch?.handoff;
+  let agentBridgeHandoff = options.agentBridge?.handoff;
   const chairLaunchChallengeDigestValue = chairLaunchHandoff === undefined
     ? undefined
     : chairLaunchChallengeDigest(chairLaunchHandoff.attestationChallenge);
   const liveChairLaunchActions = new Set<string>();
   const liveChairActionBySession = new Map<string, string>();
   const liveChairSessionByAction = new Map<string, string>();
+  const liveAgentSessionByAction = new Map<string, { resumeReference: string; generation: number; bridgeGeneration: number }>();
+
+  async function provisionAgent(params: Record<string, unknown>): Promise<AgentProvisionProviderResult> {
+    const bridge = capabilities.agentBridge;
+    if (bridge === undefined || options.boundary.provisionAgent === undefined || agentBridgeHandoff === undefined) {
+      capabilityUnavailable("provision_agent");
+    }
+    const allowed = new Set([
+      "schemaVersion", "operation", "actionId", "targetAgentId", "authorityId",
+      "bridgeGeneration", "bridgeContractDigest", "payload", "providerSessionRef",
+    ]);
+    if (Object.keys(params).some((key) => !allowed.has(key)) || params.schemaVersion !== 1) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "agent provision request does not match its closed schema");
+    }
+    const operation = params.operation;
+    if ((operation !== "spawn" && operation !== "attach") || !bridge.operations.includes(operation)) {
+      capabilityUnavailable(`provision_agent:${String(operation)}`);
+    }
+    if (!isRecord(params.payload)) throw new ProviderAdapterError("INVALID_PARAMS", "agent provision payload must be an object");
+    const actionId = requiredString(params.actionId, "actionId");
+    const targetAgentId = requiredString(params.targetAgentId, "targetAgentId");
+    const authorityId = requiredString(params.authorityId, "authorityId");
+    const bridgeGeneration = params.bridgeGeneration;
+    if (typeof bridgeGeneration !== "number" || !Number.isSafeInteger(bridgeGeneration) || bridgeGeneration < 1) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "bridgeGeneration must be positive");
+    }
+    const bridgeContractDigest = requiredString(params.bridgeContractDigest, "bridgeContractDigest");
+    if (!/^sha256:[0-9a-f]{64}$/u.test(bridgeContractDigest)) {
+      throw new ProviderAdapterError("INVALID_PARAMS", "bridgeContractDigest must be sha256");
+    }
+    const publicPayload = {
+      schemaVersion: 1,
+      operation,
+      targetAgentId,
+      authorityId,
+      bridgeGeneration,
+      bridgeContractDigest,
+      payload: params.payload,
+      ...(typeof params.providerSessionRef === "string" ? { providerSessionRef: params.providerSessionRef } : {}),
+    };
+    const prepared = options.journal.prepare(actionId, "provision_agent", publicPayload);
+    if (!prepared.created) {
+      if (prepared.record.status !== "terminal" || !isRecord(prepared.record.result)) {
+        throw new ProviderAdapterError("ACTION_RECONCILIATION_REQUIRED", "agent provision action requires lookup");
+      }
+      const result = parseAgentProvisionProviderResult(prepared.record.result, {
+        adapterId: capabilities.adapterId,
+        actionId,
+        targetAgentId,
+        bridgeGeneration,
+        bridgeContractDigest,
+      });
+      const live = liveAgentSessionByAction.get(actionId);
+      if (
+        live?.resumeReference !== result.providerSessionRef ||
+        options.boundary.hasLiveAgentSession?.(
+          result.providerSessionRef,
+          result.providerSessionGeneration,
+          result.bridgeGeneration,
+        ) !== true
+      ) throw new ProviderAdapterError("AGENT_BRIDGE_LOST", "agent provision result has no retained bridge");
+      return result;
+    }
+    const handoff = agentBridgeHandoff;
+    agentBridgeHandoff = undefined;
+    if (containsPrivateValue(publicPayload, [handoff.capability, handoff.socketPath])) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "agent provision payload contains private handoff material");
+    }
+    options.journal.markDispatched(actionId);
+    try {
+      const result = parseAgentProvisionProviderResult(await options.boundary.provisionAgent({
+        schemaVersion: 1,
+        operation,
+        actionId,
+        targetAgentId,
+        authorityId,
+        bridgeGeneration,
+        bridgeContractDigest,
+        payload: params.payload,
+        ...(typeof params.providerSessionRef === "string" ? { providerSessionRef: params.providerSessionRef } : {}),
+        environment: {
+          AGENT_FABRIC_CAPABILITY: handoff.capability,
+          AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+        },
+      }), {
+        adapterId: capabilities.adapterId,
+        actionId,
+        targetAgentId,
+        bridgeGeneration,
+        bridgeContractDigest,
+      });
+      if (containsPrivateValue(result, [handoff.capability, handoff.socketPath])) {
+        throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "agent provision result contains private handoff material");
+      }
+      options.journal.markAccepted(actionId);
+      options.journal.markTerminal(actionId, result, true);
+      liveAgentSessionByAction.set(actionId, {
+        resumeReference: result.providerSessionRef,
+        generation: result.providerSessionGeneration,
+        bridgeGeneration: result.bridgeGeneration,
+      });
+      return result;
+    } catch (error: unknown) {
+      if (options.journal.get(actionId).status === "dispatched") options.journal.markAmbiguous(actionId);
+      throw error;
+    }
+  }
 
   function chairLaunchRequest(params: Record<string, unknown>): {
     actionId: string;
@@ -351,6 +473,7 @@ export function createProviderAdapter(options: {
     async request(method: string, params: Record<string, unknown>): Promise<unknown> {
       if (method === "capabilities") return capabilities;
       if (method === "launch_chair") return await launchChair(params);
+      if (method === "provision_agent") return await provisionAgent(params);
       if (method === "status") {
         return await options.boundary.status({
           ...(typeof params.providerSessionRef === "string"

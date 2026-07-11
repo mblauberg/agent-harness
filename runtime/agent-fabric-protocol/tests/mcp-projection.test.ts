@@ -21,9 +21,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const temporarilyNonProjectable = new Set<FabricOperation>([
   FABRIC_OPERATIONS.registerAgent,
-  FABRIC_OPERATIONS.spawnAgent,
-  FABRIC_OPERATIONS.attachAgent,
-  FABRIC_OPERATIONS.createTeam,
   FABRIC_OPERATIONS.revokeCapability,
   FABRIC_OPERATIONS.rotateCapability,
 ]);
@@ -33,6 +30,18 @@ function containsSensitiveSchema(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return record["x-agent-fabric-sensitive"] === true || Object.values(record).some(containsSensitiveSchema);
+}
+
+function containsBearerProperty(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsBearerProperty);
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  const properties = record.properties;
+  if (
+    typeof properties === "object" && properties !== null && !Array.isArray(properties) &&
+    Object.keys(properties).some((name) => /^(?:capability|credential|token)$/iu.test(name))
+  ) return true;
+  return Object.values(record).some(containsBearerProperty);
 }
 
 function digest(value: unknown): string {
@@ -104,6 +113,44 @@ describe("registry-owned current-agent MCP projection", () => {
     }
     expect(Buffer.byteLength(JSON.stringify(generated.tools), "utf8"))
       .toBeLessThanOrEqual(MCP_PROJECTION_LIMITS.maximumDescriptorSetBytes);
+  });
+
+  it("projects spawn, attach and identity-only team creation without bearer material", () => {
+    const generated = buildMcpDescriptorSet(new Set(operationsForPrincipal("agent"))).tools;
+    for (const operation of [
+      FABRIC_OPERATIONS.spawnAgent,
+      FABRIC_OPERATIONS.attachAgent,
+      FABRIC_OPERATIONS.createTeam,
+    ]) {
+      const descriptor = generated.find((candidate) => candidate.operation === operation);
+      expect(descriptor, operation).toBeDefined();
+      expect(containsSensitiveSchema(descriptor?.outputSchema)).toBe(false);
+      expect(containsBearerProperty(descriptor?.outputSchema)).toBe(false);
+    }
+
+    const spawn = generated.find(({ operation }) => operation === FABRIC_OPERATIONS.spawnAgent);
+    expect(spawn?.outputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "agentId", "authorityId", "adapterId", "actionId", "providerSessionRef",
+        "providerSessionGeneration", "bridgeState", "bridgeGeneration", "evidenceDigest",
+      ],
+      properties: { bridgeState: { enum: ["active", "none"] } },
+    });
+
+    const team = generated.find(({ operation }) => operation === FABRIC_OPERATIONS.createTeam);
+    expect(team?.outputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        leader: {
+          type: "object",
+          additionalProperties: false,
+          required: ["agentId", "authorityId"],
+        },
+      },
+    });
   });
 
   it("projects the four resources through their generated read tools", () => {

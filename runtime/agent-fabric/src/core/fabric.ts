@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolv
 import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
 import type {
+  AgentCustodyResult,
   OperationInputMap,
   ProtocolOperation,
   VerifiedProtocolCredential,
@@ -36,7 +37,11 @@ import {
 } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
 import { AdapterSupervisor } from "../adapters/supervisor.js";
-import { parseChairLaunchProviderResult } from "../adapters/providers/types.js";
+import {
+  parseAgentBridgeCapability,
+  parseChairLaunchProviderResult,
+  type AgentBridgeCapability,
+} from "../adapters/providers/types.js";
 import { assessAdapterModelPolicy } from "../adapters/model-selection.js";
 import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
@@ -86,6 +91,8 @@ import {
   LaunchCustodyService,
   parseLaunchAdapterContract,
   type LaunchAdapterContract,
+  type AgentBridgeContract,
+  type AgentDispatchHandle,
   type LaunchDispatchHandle,
 } from "../project-session/launch-custody.js";
 import { IntakeStore } from "../project-session/intake-store.js";
@@ -905,7 +912,27 @@ export class Fabric {
             dispatch: async (handle) => await this.#dispatchLaunchAdapter(handle),
             lookup: async (input) => await this.#lookupLaunchAdapter(input),
           },
+          agentEffects: {
+            dispatch: async (handle) => await this.#dispatchAgentAdapter(handle),
+            attachWithoutBridge: async (handle) => await this.#attachWithoutBridge(handle),
+            lookup: async (input) => await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId }),
+            hasRetainedBridge: (result, handle) => this.#adapterSupervisor.hasRetainedChildBridge({
+              runId: handle.runId,
+              agentId: result.agentId,
+              adapterId: result.adapterId,
+              actionId: result.actionId,
+              providerSessionRef: result.providerSessionRef,
+              providerSessionGeneration: result.providerSessionGeneration,
+              bridgeGeneration: result.bridgeGeneration,
+            }),
+          },
+          daemonInstanceGeneration: () => this.#currentDaemonInstanceGeneration(),
         });
+    if (this.#launchCustody !== undefined) {
+      this.#adapterSupervisor.setChildBridgeLossHandler((entry, reason) => {
+        this.#launchCustody?.observeChildBridgeLoss({ ...entry, reason });
+      });
+    }
     this.#operatorActions = new OperatorActionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
@@ -1179,6 +1206,11 @@ export class Fabric {
     `).get(runId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "launch provider actions mutate only through launch custody");
     }
+    if (this.#database.prepare(`
+      SELECT 1 FROM provider_agent_custody WHERE run_id=? AND action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
+    }
   }
 
   async #inspectLaunchAdapterContract(adapterId: string): Promise<LaunchAdapterContract> {
@@ -1188,6 +1220,71 @@ export class Fabric {
       throw new FabricError("CAPABILITY_FORBIDDEN", "adapter does not advertise a chair launch contract");
     }
     return parseLaunchAdapterContract(capabilities.chairLaunch);
+  }
+
+  async #inspectAgentBridgeContract(
+    adapterId: string,
+    operation: "spawn" | "attach",
+  ): Promise<AgentBridgeCapability | undefined> {
+    const capabilities = await this.#requestAdapter(adapterId, "capabilities", {});
+    assertAdapterOperation(capabilities, operation);
+    if (!isRow(capabilities) || capabilities.agentBridge === undefined) return undefined;
+    return parseAgentBridgeCapability(capabilities.agentBridge);
+  }
+
+  async #dispatchAgentAdapter(handle: AgentDispatchHandle): Promise<unknown> {
+    if (handle.capability === undefined || handle.socketPath === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "agent bridge private handoff is unavailable");
+    }
+    return await this.#adapterSupervisor.provisionAgent(
+      handle.adapterId,
+      {
+        schemaVersion: 1,
+        runId: handle.runId,
+        operation: handle.operation,
+        actionId: handle.actionId,
+        targetAgentId: handle.targetAgentId,
+        authorityId: handle.authorityId,
+        bridgeGeneration: handle.bridgeGeneration,
+        bridgeContractDigest: handle.bridgeContractDigest,
+        payload: handle.publicPayload,
+        ...(handle.requestedProviderSessionRef === undefined
+          ? {}
+          : { providerSessionRef: handle.requestedProviderSessionRef }),
+      },
+      { capability: handle.capability, socketPath: handle.socketPath },
+    );
+  }
+
+  async #attachWithoutBridge(handle: AgentDispatchHandle): Promise<unknown> {
+    if (handle.operation !== "attach" || handle.requestedProviderSessionRef === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "bridge-less custody is attach-only");
+    }
+    const result = await this.#requestAdapter(handle.adapterId, "attach", {
+      actionId: handle.actionId,
+      resumeReference: handle.requestedProviderSessionRef,
+      ...handle.publicPayload,
+    });
+    if (!isRow(result)) throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter attach returned no typed result");
+    return {
+      providerSessionRef: typeof result.resumeReference === "string"
+        ? result.resumeReference
+        : handle.requestedProviderSessionRef,
+      providerSessionGeneration: typeof result.providerSessionGeneration === "number"
+        ? result.providerSessionGeneration
+        : 1,
+    };
+  }
+
+  #currentDaemonInstanceGeneration(): number {
+    const current = this.#database.prepare(`
+      SELECT instance_generation FROM daemon_runtime_epochs
+       WHERE state IN ('starting','running','quiescing')
+       ORDER BY instance_generation DESC LIMIT 1
+    `).get();
+    return isRow(current) && typeof current.instance_generation === "number"
+      ? current.instance_generation
+      : 1;
   }
 
   #launchResourceUsage(providerAdapterId: string, providerActionId: string): Record<string, "unknown"> {
@@ -1364,22 +1461,6 @@ export class Fabric {
         this.#database.prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?").run(now, runId, actionId);
         this.#event(runId, "startup-provider-action-quarantined", null, { actionId, adapterId: stringField(action, "adapter_id"), reason: error instanceof Error ? error.message : String(error) });
         actionsQuarantined += 1;
-      }
-    }
-    for (const intent of this.#providerSessions.recoverableLifecycleIntents()) {
-      try {
-        this.registerAgent(intent.runId, intent.actorAgentId, {
-          agentId: intent.targetAgentId,
-          authorityId: intent.authorityId,
-          providerSessionRef: intent.providerResumeReference,
-          adapterId: intent.adapterId,
-        });
-        this.#providerSessions.finalizeLifecycleIntent(intent.runId, intent.actionId);
-      } catch (error: unknown) {
-        this.#event(intent.runId, "startup-lifecycle-intent-quarantined", intent.actorAgentId, {
-          actionId: intent.actionId,
-          reason: error instanceof Error ? error.message : String(error),
-        });
       }
     }
     let sessionsDegraded = 0;
@@ -2117,13 +2198,21 @@ export class Fabric {
     const authority = parseAuthority(stringField(authorityRow, "authority_json"));
     const existing = this.#database.prepare(`
       SELECT g.parent_agent_id, g.authority_id, g.provider_session_ref, c.principal_generation, c.revoked_at, b.adapter_id
-        FROM agents g JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
+        FROM agents g LEFT JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
         LEFT JOIN agent_adapter_bindings b ON b.run_id = g.run_id AND b.agent_id = g.agent_id
        WHERE g.run_id = ? AND g.agent_id = ? ORDER BY c.principal_generation DESC LIMIT 1
     `).get(runId, input.agentId);
     if (isRow(existing)) {
       const same = existing.parent_agent_id === actorAgentId && existing.authority_id === input.authorityId && existing.provider_session_ref === (input.providerSessionRef ?? null) && existing.adapter_id === (input.adapterId ?? null);
       if (!same) throw new FabricError("DEDUPE_CONFLICT", "agent ID was reused with changed registration input");
+      if (existing.principal_generation === null) {
+        const token = capabilityToken(this.#capabilityKey, runId, input.agentId, 1);
+        this.#database.prepare(
+          "INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at) VALUES (?, ?, ?, 1, ?)",
+        ).run(sha256(token), runId, input.agentId, Date.parse(authority.expiresAt));
+        this.#event(runId, "agent-capability-issued", actorAgentId, { agentId: input.agentId, principalGeneration: 1 });
+        return { capability: token };
+      }
       if (existing.revoked_at !== null) throw new FabricError("AUTHENTICATION_FAILED", "agent capability was revoked");
       return { capability: capabilityToken(this.#capabilityKey, runId, input.agentId, numberField(existing, "principal_generation")) };
     }
@@ -2151,6 +2240,46 @@ export class Fabric {
     return { capability: token };
   }
 
+  #registerAgentIdentity(
+    runId: string,
+    actorAgentId: string,
+    input: { agentId: string; authorityId: string },
+  ): void {
+    assertRunAcceptingWork(this.#database, runId);
+    const authority = rowOrNotFound(
+      this.#database.prepare(
+        "SELECT parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?",
+      ).get(input.authorityId, runId),
+      "authority",
+    );
+    const actor = rowOrNotFound(
+      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?")
+        .get(runId, actorAgentId),
+      "agent",
+    );
+    if (authority.parent_authority_id !== stringField(actor, "authority_id")) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "actor cannot register an identity for this authority");
+    }
+    const existing = this.#database.prepare(`
+      SELECT parent_agent_id, authority_id, provider_session_ref
+        FROM agents WHERE run_id=? AND agent_id=?
+    `).get(runId, input.agentId);
+    if (isRow(existing)) {
+      if (
+        existing.parent_agent_id !== actorAgentId ||
+        existing.authority_id !== input.authorityId ||
+        existing.provider_session_ref !== null
+      ) throw new FabricError("DEDUPE_CONFLICT", "agent identity was reused with changed registration input");
+      return;
+    }
+    this.#database.prepare(
+      "INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref) VALUES (?, ?, ?, ?, NULL)",
+    ).run(runId, input.agentId, actorAgentId, input.authorityId);
+    this.#database.prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
+      .run(runId, input.agentId);
+    this.#event(runId, "agent-identity-registered", actorAgentId, { agentId: input.agentId });
+  }
+
   async spawnAgent(
     runId: string,
     actorAgentId: string,
@@ -2161,7 +2290,7 @@ export class Fabric {
       actionId: string;
       payload: Record<string, unknown>;
     },
-  ): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  ): Promise<AgentCustodyResult> {
     assertRunAcceptingWork(this.#database, runId);
     this.#adapter(input.adapterId);
     this.#providerSessions.preflightRegistration({
@@ -2173,38 +2302,21 @@ export class Fabric {
     });
     const providerPayload = this.#admitProviderPayload(runId, input.authorityId, input.payload);
     this.#assertAdapterModel(input.adapterId, providerPayload);
-    const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
-    assertAdapterOperation(capabilities, "spawn");
-    this.#providerSessions.prepareLifecycleIntent({
-      runId,
-      actionId: input.actionId,
-      operation: "spawn",
-      actorAgentId,
-      targetAgentId: input.agentId,
-      authorityId: input.authorityId,
-      adapterId: input.adapterId,
-      intentHash: sha256(canonicalJson(input)),
-    });
-    const action = await this.#executeAdapterOperation({
-      runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-      operation: "spawn",
-      method: "spawn",
-      payload: { ...providerPayload, agentId: input.agentId },
-    });
-    if (!isRow(action.result) || typeof action.result.resumeReference !== "string") {
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter spawn returned no resume reference");
+    const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "spawn");
+    if (this.#launchCustody === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "agent custody requires an elected daemon socket");
     }
-    this.#providerSessions.markLifecycleProviderTerminal(runId, input.actionId, action.result.resumeReference);
-    const registered = this.registerAgent(runId, actorAgentId, {
+    return await this.#launchCustody.provisionAgent({
+      runId,
+      actorAgentId,
+      operation: "spawn",
       agentId: input.agentId,
       authorityId: input.authorityId,
-      providerSessionRef: action.result.resumeReference,
       adapterId: input.adapterId,
+      actionId: input.actionId,
+      payload: { ...providerPayload, agentId: input.agentId },
+      ...(bridgeContract === undefined ? {} : { bridgeContract: bridgeContract as AgentBridgeContract }),
     });
-    this.#providerSessions.finalizeLifecycleIntent(runId, input.actionId);
-    return { ...registered, providerSessionRef: action.result.resumeReference, adapterId: input.adapterId, actionId: input.actionId };
   }
 
   async attachAgent(
@@ -2217,7 +2329,7 @@ export class Fabric {
       actionId: string;
       providerSessionRef: string;
     },
-  ): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  ): Promise<AgentCustodyResult> {
     assertRunAcceptingWork(this.#database, runId);
     this.#adapter(input.adapterId);
     this.#providerSessions.preflightRegistration({
@@ -2229,39 +2341,22 @@ export class Fabric {
       providerSessionRef: input.providerSessionRef,
     });
     const providerPayload = this.#admitProviderPayload(runId, input.authorityId, {});
-    const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
-    assertAdapterOperation(capabilities, "attach");
-    this.#providerSessions.prepareLifecycleIntent({
+    const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "attach");
+    if (this.#launchCustody === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "agent custody requires an elected daemon socket");
+    }
+    return await this.#launchCustody.provisionAgent({
       runId,
-      actionId: input.actionId,
-      operation: "attach",
       actorAgentId,
-      targetAgentId: input.agentId,
-      authorityId: input.authorityId,
-      adapterId: input.adapterId,
-      requestedResumeReference: input.providerSessionRef,
-      intentHash: sha256(canonicalJson(input)),
-    });
-    const action = await this.#executeAdapterOperation({
-      runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
       operation: "attach",
-      method: "attach",
-      payload: { ...providerPayload, agentId: input.agentId, resumeReference: input.providerSessionRef },
-    });
-    const attachedReference = isRow(action.result) && typeof action.result.resumeReference === "string"
-      ? action.result.resumeReference
-      : input.providerSessionRef;
-    this.#providerSessions.markLifecycleProviderTerminal(runId, input.actionId, attachedReference);
-    const registered = this.registerAgent(runId, actorAgentId, {
       agentId: input.agentId,
       authorityId: input.authorityId,
-      providerSessionRef: attachedReference,
       adapterId: input.adapterId,
+      actionId: input.actionId,
+      payload: { ...providerPayload, agentId: input.agentId },
+      providerSessionRef: input.providerSessionRef,
+      ...(bridgeContract === undefined ? {} : { bridgeContract: bridgeContract as AgentBridgeContract }),
     });
-    this.#providerSessions.finalizeLifecycleIntent(runId, input.actionId);
-    return { ...registered, providerSessionRef: attachedReference, adapterId: input.adapterId, actionId: input.actionId };
   }
 
   sendMessage(runId: string, senderId: string, input: MessageInput): { messageId: string } {
@@ -4054,7 +4149,7 @@ export class Fabric {
       authority: input.leader.authority,
       commandId: `${input.commandId}:leader-authority`,
     });
-    const leaderRegistration = this.registerAgent(runId, actorAgentId, {
+    this.#registerAgentIdentity(runId, actorAgentId, {
       agentId: input.leader.agentId,
       authorityId: leaderGrant.authorityId,
     });
@@ -4065,7 +4160,7 @@ export class Fabric {
         authority: member.authority,
         commandId: `${input.commandId}:member-authority:${member.agentId}`,
       });
-      this.registerAgent(runId, input.leader.agentId, { agentId: member.agentId, authorityId: grant.authorityId });
+      this.#registerAgentIdentity(runId, input.leader.agentId, { agentId: member.agentId, authorityId: grant.authorityId });
       memberIds.push(member.agentId);
     }
     const rootTask = this.createTask(runId, actorAgentId, {
@@ -4106,7 +4201,6 @@ export class Fabric {
       leader: {
         agentId: input.leader.agentId,
         authorityId: leaderGrant.authorityId,
-        capability: leaderRegistration.capability,
       },
       rootTask,
       initialMemberAgentIds: memberIds,
@@ -4954,9 +5048,22 @@ export class Fabric {
     return { tasks };
   }
 
-  listAgents(runId: string, requesterId: string): { agents: Array<{ agentId: string; parentAgentId: string | null; lifecycle: string }> } {
+  listAgents(runId: string, requesterId: string): { agents: Array<{
+    agentId: string;
+    parentAgentId: string | null;
+    lifecycle: string;
+    bridgeState: "active" | "none" | "lost";
+    bridgeGeneration: number;
+  }> } {
     const agents = this.#database
-      .prepare("SELECT agent_id, parent_agent_id, lifecycle FROM agents WHERE run_id = ? ORDER BY agent_id")
+      .prepare(`
+        SELECT a.agent_id, a.parent_agent_id, a.lifecycle,
+               COALESCE(b.bridge_state, 'none') AS bridge_state,
+               COALESCE(b.bridge_generation, 1) AS bridge_generation
+          FROM agents a
+          LEFT JOIN agent_bridge_state b ON b.run_id=a.run_id AND b.agent_id=a.agent_id
+         WHERE a.run_id = ? ORDER BY a.agent_id
+      `)
       .all(runId)
       .map((value) => {
         const row = rowOrNotFound(value, "agent");
@@ -4964,10 +5071,16 @@ export class Fabric {
         if (parentValue !== null && typeof parentValue !== "string") {
           throw new Error("stored parent agent is invalid");
         }
+        const bridgeState = stringField(row, "bridge_state");
+        if (bridgeState !== "active" && bridgeState !== "none" && bridgeState !== "lost") {
+          throw new Error("stored agent bridge state is invalid");
+        }
         return {
           agentId: stringField(row, "agent_id"),
           parentAgentId: parentValue,
           lifecycle: stringField(row, "lifecycle"),
+          bridgeState: bridgeState as "active" | "none" | "lost",
+          bridgeGeneration: numberField(row, "bridge_generation"),
         };
       })
       .filter((agent) => this.#readPolicy.canReadAgent(runId, requesterId, agent.agentId));

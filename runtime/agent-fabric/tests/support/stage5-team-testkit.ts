@@ -3,12 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { openFabric } from "../../src/index.ts";
+import { expandAuthorityActions } from "../../src/domain/operations.ts";
+
+const teamAuthorityActions = expandAuthorityActions(["read", "write", "delegate", "message", "team"]);
+if (!teamAuthorityActions.ok) throw new Error("team test authority actions are invalid");
 
 export const TEAM_ROOT_AUTHORITY = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message", "team"],
+  actions: teamAuthorityActions.operations,
   disclosure: ["local"],
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 200, "cost:USD": 200, descendants: 20 },
@@ -117,6 +121,24 @@ export async function createTeam(client: object, input: Record<string, unknown>)
     throw new Error("FabricClient.createTeam is not implemented");
   }
   return requireRecord(await Reflect.apply(method, client, [input]), "team result");
+}
+
+export async function issueTeamLeaderCapability(
+  parentClient: object,
+  team: Record<string, unknown>,
+): Promise<string> {
+  const leader = requireRecord(team.leader, "team leader identity");
+  if (typeof leader.agentId !== "string" || typeof leader.authorityId !== "string") {
+    throw new TypeError("team leader identity is incomplete");
+  }
+  const method: unknown = Reflect.get(parentClient, "registerAgent");
+  if (typeof method !== "function") throw new Error("FabricClient.registerAgent is not implemented");
+  const registration = requireRecord(await Reflect.apply(method, parentClient, [{
+    agentId: leader.agentId,
+    authorityId: leader.authorityId,
+  }]), "team leader registration");
+  if (typeof registration.capability !== "string") throw new TypeError("team leader capability is missing");
+  return registration.capability;
 }
 
 export async function createStage5TeamFixture(runId: string) {

@@ -40,7 +40,142 @@ export type ProviderAdapterCapabilities = {
   compactInPlace: boolean;
   idempotencyEvidence: "per-action-fail-closed";
   chairLaunch?: ChairLaunchCapability;
+  agentBridge?: AgentBridgeCapability;
 };
+
+export type AgentBridgeCapability = {
+  schemaVersion: 1;
+  method: "provision_agent";
+  operations: ("spawn" | "attach")[];
+  secretTransport: "private-handoff";
+  bridgeContract: typeof CHAIR_BRIDGE_CONTRACT;
+  generationBound: true;
+  providerOriginatedActivation: true;
+};
+
+export function parseAgentBridgeCapability(value: unknown): AgentBridgeCapability {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 7 ||
+    value.schemaVersion !== 1 ||
+    value.method !== "provision_agent" ||
+    !Array.isArray(value.operations) ||
+    value.operations.length === 0 ||
+    new Set(value.operations).size !== value.operations.length ||
+    !value.operations.every((operation) => operation === "spawn" || operation === "attach") ||
+    value.secretTransport !== "private-handoff" ||
+    value.bridgeContract !== CHAIR_BRIDGE_CONTRACT ||
+    value.generationBound !== true ||
+    value.providerOriginatedActivation !== true
+  ) {
+    throw new ProviderAdapterError(
+      "CAPABILITY_CONTRACT_INVALID",
+      "agent bridge capability does not match its closed schema",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    method: "provision_agent",
+    operations: [...value.operations] as ("spawn" | "attach")[],
+    secretTransport: "private-handoff",
+    bridgeContract: CHAIR_BRIDGE_CONTRACT,
+    generationBound: true,
+    providerOriginatedActivation: true,
+  };
+}
+
+export type AgentBridgeHandoff = {
+  capability: string;
+  socketPath: string;
+};
+
+export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBridgeHandoff | undefined {
+  if (environment.AGENT_FABRIC_HANDOFF_KIND !== "agent") return undefined;
+  const capability = environment.AGENT_FABRIC_CAPABILITY;
+  const socketPath = environment.AGENT_FABRIC_SOCKET_PATH;
+  delete environment.AGENT_FABRIC_HANDOFF_KIND;
+  delete environment.AGENT_FABRIC_CAPABILITY;
+  delete environment.AGENT_FABRIC_SOCKET_PATH;
+  if (
+    typeof capability !== "string" || capability.length === 0 ||
+    typeof socketPath !== "string" || !isAbsolute(socketPath)
+  ) {
+    throw new ProviderAdapterError("PRIVATE_HANDOFF_INVALID", "agent bridge private handoff is incomplete");
+  }
+  return { capability, socketPath };
+}
+
+export type AgentProvisionBoundaryInput = {
+  schemaVersion: 1;
+  operation: "spawn" | "attach";
+  actionId: string;
+  targetAgentId: string;
+  authorityId: string;
+  bridgeGeneration: number;
+  bridgeContractDigest: string;
+  payload: Record<string, unknown>;
+  providerSessionRef?: string;
+  environment: {
+    AGENT_FABRIC_CAPABILITY: string;
+    AGENT_FABRIC_SOCKET_PATH: string;
+  };
+};
+
+export type AgentProvisionProviderResult = {
+  schemaVersion: 1;
+  adapterId: string;
+  actionId: string;
+  targetAgentId: string;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+  bridgeContractDigest: string;
+  activationEvidenceDigest: string;
+};
+
+export function parseAgentProvisionProviderResult(
+  value: unknown,
+  expected: {
+    adapterId: string;
+    actionId: string;
+    targetAgentId: string;
+    bridgeGeneration: number;
+    bridgeContractDigest: string;
+  },
+): AgentProvisionProviderResult {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 9 ||
+    value.schemaVersion !== 1 ||
+    value.adapterId !== expected.adapterId ||
+    value.actionId !== expected.actionId ||
+    value.targetAgentId !== expected.targetAgentId ||
+    !isBoundedProviderEvidenceRef(value.providerSessionRef) ||
+    typeof value.providerSessionGeneration !== "number" ||
+    !Number.isSafeInteger(value.providerSessionGeneration) ||
+    value.providerSessionGeneration < 1 ||
+    value.bridgeGeneration !== expected.bridgeGeneration ||
+    value.bridgeContractDigest !== expected.bridgeContractDigest ||
+    typeof value.activationEvidenceDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(value.activationEvidenceDigest)
+  ) {
+    throw new ProviderAdapterError(
+      "PROVIDER_RESPONSE_INVALID",
+      "agent bridge result does not match its exact generation-bound contract",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    adapterId: expected.adapterId,
+    actionId: expected.actionId,
+    targetAgentId: expected.targetAgentId,
+    providerSessionRef: value.providerSessionRef,
+    providerSessionGeneration: value.providerSessionGeneration,
+    bridgeGeneration: expected.bridgeGeneration,
+    bridgeContractDigest: expected.bridgeContractDigest,
+    activationEvidenceDigest: value.activationEvidenceDigest,
+  };
+}
 
 export type ChairLaunchCapability = {
   schemaVersion: 1;
@@ -335,12 +470,14 @@ export function parseChairLaunchProviderResult(
 }
 
 export function takeChairLaunchHandoff(environment: NodeJS.ProcessEnv): ChairLaunchHandoff | undefined {
+  if (environment.AGENT_FABRIC_HANDOFF_KIND === "agent") return undefined;
   const capability = environment.AGENT_FABRIC_CAPABILITY;
   const socketPath = environment.AGENT_FABRIC_SOCKET_PATH;
   const attestationChallenge = environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
   delete environment.AGENT_FABRIC_CAPABILITY;
   delete environment.AGENT_FABRIC_SOCKET_PATH;
   delete environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  delete environment.AGENT_FABRIC_HANDOFF_KIND;
   if (capability === undefined && socketPath === undefined && attestationChallenge === undefined) return undefined;
   if (
     typeof capability !== "string" ||

@@ -89,10 +89,9 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       required: ["budgetId", "parentBudgetId", "state", "dimensions", "returned"],
     });
 
-    // Atomic team creation still returns a leader bearer capability and is
-    // therefore registry-classified `none`; bootstrap it through the private
-    // compatibility client, then exercise every secret-free team operation
-    // through the generated MCP surface.
+    // Atomic team creation is identity/topology only. Activate the test leader
+    // explicitly through the private compatibility client, then exercise the
+    // secret-free team operations through the generated MCP surface.
     const created = requireRecord(await chairCompatibility.call("createTeam", {
       ...teamCreateInput({
         teamId: "stage5-mcp-team",
@@ -102,13 +101,19 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       discussionGroups: [],
     }), "created team");
     const leader = requireRecord(created.leader, "created leader");
-    if (typeof leader.capability !== "string") throw new TypeError("leader capability is missing");
+    if (typeof leader.agentId !== "string" || typeof leader.authorityId !== "string") {
+      throw new TypeError("leader identity is incomplete");
+    }
+    const registration = await chairDaemon.registerAgent({
+      agentId: leader.agentId,
+      authorityId: leader.authorityId,
+    });
     leaderProxy = await spawnMcpProxy({
       socketPath,
-      capability: leader.capability,
+      capability: registration.capability,
       label: "stage5-leader",
     });
-    leaderDaemon = await connectFabricDaemon({ socketPath, capability: leader.capability });
+    leaderDaemon = await connectFabricDaemon({ socketPath, capability: registration.capability });
 
     await expect(leaderDaemon.freezeSubtree({
       teamId: "stage5-mcp-team",

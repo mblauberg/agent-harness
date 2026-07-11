@@ -101,6 +101,7 @@ describe("public authority contract", () => {
         reservedBudget: { turns: 40, "cost:USD": 40, "input_tokens:google": 400, descendants: 6 },
       });
       const leader = requireRecord(input.leader, "team leader");
+      const leaderAuthority = requireRecord(leader.authority, "team leader authority");
       const created = await callTool(chairProxy.client, "fabric_team_create", {
         ...input,
         leader: {
@@ -109,7 +110,7 @@ describe("public authority contract", () => {
             workspaceRoots: ["."],
             sourcePaths: ["src/public-contract"],
             artifactPaths: [".agent-run/public-contract"],
-            actions: ["read", "write", "delegate", "message", "team"],
+            actions: leaderAuthority.actions,
             deniedPaths: ["src/public-contract/private"],
             deniedActions: ["fabric.v1.task.update"],
             disclosure: { level: "scoped", scopes: ["approved-provider"] },
@@ -119,7 +120,7 @@ describe("public authority contract", () => {
         },
         discussionGroups: [],
       });
-      expect(created.isError).toBe(false);
+      expect(created.isError, created.text).toBe(false);
       const createdLeader = requireRecord(created.structured.leader, "created leader");
       if (typeof createdLeader.authorityId !== "string") throw new TypeError("created leader authority is missing");
       expect(storedAuthority(databasePath, createdLeader.authorityId)).toMatchObject({

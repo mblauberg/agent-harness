@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
@@ -467,11 +468,12 @@ describe("provider session admission", () => {
     }
   });
 
-  it("finalises and replays a lifecycle spawn intent exactly once", async () => {
+  it("retires direct lifecycle spawn when no elected daemon owns child custody", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-provider-lifecycle-intent-"));
     const journalPath = join(directory, "provider-journal.json");
+    const databasePath = join(directory, "fabric.sqlite3");
     const fabric = await openFabric({
-      databasePath: join(directory, "fabric.sqlite3"),
+      databasePath,
       workspaceRoots: [directory],
       adapters: {
         lifecycle: {
@@ -497,8 +499,17 @@ describe("provider session admission", () => {
         actionId: "spawn-worker-once",
         payload: { initialPrompt: "bounded task" },
       };
-      const first = await chair.spawnAgent(input);
-      await expect(chair.spawnAgent(input)).resolves.toEqual(first);
+      await expect(chair.spawnAgent(input)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+      await expect(chair.spawnAgent(input)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+      expect(existsSync(journalPath)).toBe(false);
+      const database = new Database(databasePath, { readonly: true });
+      try {
+        expect(database.prepare("SELECT COUNT(*) AS count FROM provider_lifecycle_intents").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM provider_agent_custody").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM agents WHERE agent_id='worker'").get()).toEqual({ count: 0 });
+      } finally {
+        database.close();
+      }
     } finally {
       await fabric.close();
       await rm(directory, { recursive: true, force: true });

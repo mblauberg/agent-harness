@@ -18,12 +18,16 @@
       "reason": "result contains a bearer capability"
     },
     "fabric.v1.agent.spawn": {
-      "projection": "none",
-      "reason": "pending secret-free spawn custody result"
+      "projection": "tool",
+      "name": "fabric_agent_spawn",
+      "description": "Invoke the closed fabric.v1.agent.spawn operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "agent-custody-v1"
     },
     "fabric.v1.agent.attach": {
-      "projection": "none",
-      "reason": "pending secret-free attach custody result"
+      "projection": "tool",
+      "name": "fabric_agent_attach",
+      "description": "Invoke the closed fabric.v1.agent.attach operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "agent-custody-v1"
     },
     "fabric.v1.message.send": {
       "projection": "tool",
@@ -208,8 +212,10 @@
       "receiptRenderer": "generic-v1"
     },
     "fabric.v1.team.create": {
-      "projection": "none",
-      "reason": "pending secret-free atomic team custody result"
+      "projection": "tool",
+      "name": "fabric_team_create",
+      "description": "Invoke the closed fabric.v1.team.create operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "generic-v1"
     },
     "fabric.v1.team.read": {
       "projection": "tool",
@@ -430,6 +436,114 @@
   },
   "tools": [
     {
+      "operation": "fabric.v1.agent.attach",
+      "name": "fabric_agent_attach",
+      "description": "Invoke the closed fabric.v1.agent.attach operation as the authenticated Agent Fabric principal.",
+      "feature": "fabric-core.v1",
+      "receiptRenderer": "agent-custody-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentId",
+          "authorityId",
+          "adapterId",
+          "actionId",
+          "providerSessionRef"
+        ],
+        "properties": {
+          "agentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "adapterId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "actionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "providerSessionRef": {
+            "$ref": "#/$defs/generated_1"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentId",
+          "authorityId",
+          "adapterId",
+          "actionId",
+          "providerSessionRef",
+          "providerSessionGeneration",
+          "bridgeState",
+          "bridgeGeneration",
+          "evidenceDigest"
+        ],
+        "properties": {
+          "agentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "adapterId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "actionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "providerSessionRef": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "providerSessionGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "bridgeState": {
+            "type": "string",
+            "enum": [
+              "active",
+              "none"
+            ]
+          },
+          "bridgeGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidenceDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:bfb05b37c58be6f0a37634dd0ca952c6d4f436f768ffea87a6af865192af1b62",
+      "outputCodecDigest": "sha256:77a590403968b9fba83712f3046a74b246748e99ae02723a28a1c853e96b053a"
+    },
+    {
       "operation": "fabric.v1.agent.list",
       "name": "fabric_agent_list",
       "description": "Invoke the closed fabric.v1.agent.list operation as the authenticated Agent Fabric principal.",
@@ -467,7 +581,9 @@
               "required": [
                 "agentId",
                 "parentAgentId",
-                "lifecycle"
+                "lifecycle",
+                "bridgeState",
+                "bridgeGeneration"
               ],
               "properties": {
                 "agentId": {
@@ -489,6 +605,18 @@
                   "maxLength": 4096,
                   "x-minUtf8Bytes": 1,
                   "x-maxUtf8Bytes": 4096
+                },
+                "bridgeState": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "none",
+                    "lost"
+                  ]
+                },
+                "bridgeGeneration": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               }
             },
@@ -508,7 +636,115 @@
         }
       },
       "inputCodecDigest": "sha256:5ba2b508b9b253924acd5c599798af04e117d6bfd927434c4e779e22e6a9cb2b",
-      "outputCodecDigest": "sha256:8cfeceed8557f4d7302c057fd3dd19a58a56b649eae81c2a701d578008e64c91"
+      "outputCodecDigest": "sha256:b02a75f36d601d5e3e8cc610ac007557bcf4881b9cb427320848f95fba8607a6"
+    },
+    {
+      "operation": "fabric.v1.agent.spawn",
+      "name": "fabric_agent_spawn",
+      "description": "Invoke the closed fabric.v1.agent.spawn operation as the authenticated Agent Fabric principal.",
+      "feature": "fabric-core.v1",
+      "receiptRenderer": "agent-custody-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentId",
+          "authorityId",
+          "adapterId",
+          "actionId",
+          "payload"
+        ],
+        "properties": {
+          "agentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "adapterId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "actionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "payload": {
+            "$ref": "#/$defs/boundedJsonValue"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentId",
+          "authorityId",
+          "adapterId",
+          "actionId",
+          "providerSessionRef",
+          "providerSessionGeneration",
+          "bridgeState",
+          "bridgeGeneration",
+          "evidenceDigest"
+        ],
+        "properties": {
+          "agentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "adapterId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "actionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "providerSessionRef": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "providerSessionGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "bridgeState": {
+            "type": "string",
+            "enum": [
+              "active",
+              "none"
+            ]
+          },
+          "bridgeGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidenceDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:108f2d4a1820461b86731b812f243eaf0c2246048ddb35671cfdf5c9ea3bc67a",
+      "outputCodecDigest": "sha256:77a590403968b9fba83712f3046a74b246748e99ae02723a28a1c853e96b053a"
     },
     {
       "operation": "fabric.v1.artifact.publish",
@@ -608,7 +844,7 @@
         ],
         "properties": {
           "parentAuthorityId": {
-            "$ref": "#/$defs/generated_4"
+            "$ref": "#/$defs/generated_5"
           },
           "authority": {
             "type": "object",
@@ -626,7 +862,7 @@
               "workspaceRoots": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/$defs/generated_5"
+                  "$ref": "#/$defs/generated_1"
                 },
                 "minItems": 1,
                 "maxItems": 64,
@@ -639,7 +875,7 @@
                 "$ref": "#/$defs/generated_2"
               },
               "actions": {
-                "$ref": "#/$defs/generated_1"
+                "$ref": "#/$defs/generated_3"
               },
               "disclosure": {
                 "oneOf": [
@@ -719,7 +955,28 @@
                 "minProperties": 0,
                 "maxProperties": 128,
                 "propertyNames": {
-                  "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "turns",
+                        "provider_calls",
+                        "concurrent_turns",
+                        "descendants",
+                        "message_bytes",
+                        "artifact_bytes",
+                        "wall_clock_milliseconds"
+                      ]
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                    }
+                  ]
                 },
                 "additionalProperties": {
                   "type": "integer",
@@ -730,34 +987,44 @@
                 "$ref": "#/$defs/generated_2"
               },
               "deniedActions": {
-                "$ref": "#/$defs/generated_1"
+                "$ref": "#/$defs/generated_3"
               }
             }
           },
           "commandId": {
-            "$ref": "#/$defs/generated_4"
+            "$ref": "#/$defs/generated_5"
           }
         },
         "$defs": {
           "generated_1": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/generated_3"
-            },
-            "minItems": 0,
-            "maxItems": 256,
-            "uniqueItems": true
+            "oneOf": [
+              {
+                "const": "."
+              },
+              {
+                "$ref": "#/$defs/generated_6"
+              }
+            ]
           },
           "generated_2": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_5"
+              "$ref": "#/$defs/generated_1"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
           },
           "generated_3": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_4"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_4": {
             "type": "string",
             "enum": [
               "fabric.v1.agent.attach",
@@ -830,7 +1097,7 @@
               "fabric.v1.write-lease.renew"
             ]
           },
-          "generated_4": {
+          "generated_5": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -838,7 +1105,7 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_5": {
+          "generated_6": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
@@ -863,7 +1130,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:805b5bdd2cfc40286cb12587a8d32fd53cf837e90d960d3a5ce45e1ecb3096e4",
+      "inputCodecDigest": "sha256:cb44a369bf28c769ff00a5d64f6223ccad82cc610b41728c216685d87b4b9879",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -999,12 +1266,12 @@
         ],
         "properties": {
           "budgetId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "parentBudgetId": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_2"
+                "$ref": "#/$defs/generated_3"
               },
               {
                 "type": "null"
@@ -1074,20 +1341,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
       "inputCodecDigest": "sha256:8dbd1e053d966d8ec489b98a2ab4765dbba5a2b76858c1660449504f01b6da9b",
-      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
+      "outputCodecDigest": "sha256:b890b24efeee7b2dc4f35e9cec0e1b5600e39e32305501d623eab3a78d2ba81d"
     },
     {
       "operation": "fabric.v1.budget.release",
@@ -1133,12 +1427,12 @@
         ],
         "properties": {
           "budgetId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "parentBudgetId": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_2"
+                "$ref": "#/$defs/generated_3"
               },
               {
                 "type": "null"
@@ -1208,20 +1502,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
       "inputCodecDigest": "sha256:4ce6a3dc5dcdee44055f0cf28c012dd81123bfaaddabc3f7f4b1fe2d77abfbb7",
-      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
+      "outputCodecDigest": "sha256:b890b24efeee7b2dc4f35e9cec0e1b5600e39e32305501d623eab3a78d2ba81d"
     },
     {
       "operation": "fabric.v1.budget.reserve",
@@ -1259,7 +1580,28 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -1293,12 +1635,12 @@
         ],
         "properties": {
           "budgetId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "parentBudgetId": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_2"
+                "$ref": "#/$defs/generated_3"
               },
               {
                 "type": "null"
@@ -1368,20 +1710,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
-      "inputCodecDigest": "sha256:dfc6239be196e3aef17c723b9715219965c5f20145fe90ddf42679bd28482832",
-      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
+      "inputCodecDigest": "sha256:40de1b215fbf1a19ae318c64ce1d9bd6c59423b1840b34ed6994dafc1ceb917b",
+      "outputCodecDigest": "sha256:b890b24efeee7b2dc4f35e9cec0e1b5600e39e32305501d623eab3a78d2ba81d"
     },
     {
       "operation": "fabric.v1.budget.usage.reconcile",
@@ -1406,7 +1775,28 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -1440,12 +1830,12 @@
         ],
         "properties": {
           "budgetId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "parentBudgetId": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_2"
+                "$ref": "#/$defs/generated_3"
               },
               {
                 "type": "null"
@@ -1515,20 +1905,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
-      "inputCodecDigest": "sha256:65fa0ad689266f07d3cf50aa84d38b4fc2e9327be5956649c37384950fd38b76",
-      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
+      "inputCodecDigest": "sha256:3dca5556a5aa51be26f5a89a77d6c1cbf7e934b95209692c6f934d12bc38e003",
+      "outputCodecDigest": "sha256:b890b24efeee7b2dc4f35e9cec0e1b5600e39e32305501d623eab3a78d2ba81d"
     },
     {
       "operation": "fabric.v1.budget.usage.record",
@@ -1553,7 +1970,28 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "oneOf": [
@@ -1594,12 +2032,12 @@
         ],
         "properties": {
           "budgetId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "parentBudgetId": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_2"
+                "$ref": "#/$defs/generated_3"
               },
               {
                 "type": "null"
@@ -1669,20 +2107,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
-      "inputCodecDigest": "sha256:c7c1f4d18df73b7e3d0a557cb394c7461c5dca46a83913726bdfd15041bbdb09",
-      "outputCodecDigest": "sha256:3e9d7c3e82dd449e62870f0ef29f60c5249f5f324bc4d704fdd4941a60744e2a"
+      "inputCodecDigest": "sha256:8cbc261ef6e7845c8cc38ab715d9c3760f3e682980e1d5d9faefdfce9406d19d",
+      "outputCodecDigest": "sha256:b890b24efeee7b2dc4f35e9cec0e1b5600e39e32305501d623eab3a78d2ba81d"
     },
     {
       "operation": "fabric.v1.delivery.abandon",
@@ -5565,7 +6030,28 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "oneOf": [
@@ -5611,7 +6097,7 @@
         ],
         "properties": {
           "reservationId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "revision": {
             "type": "integer",
@@ -5643,10 +6129,10 @@
                       "const": "project"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -5664,13 +6150,13 @@
                       "const": "project-session"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectSessionId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -5688,13 +6174,13 @@
                       "const": "coordination-run"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectSessionId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "coordinationRunId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -5712,13 +6198,13 @@
                       "const": "team"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "coordinationRunId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "teamId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -5736,13 +6222,13 @@
                       "const": "agent"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "teamId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "agentId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 }
@@ -5838,20 +6324,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
-      "inputCodecDigest": "sha256:73f4b71dec3a01e5bd22c6e3d724fd507a7d3f56c5d79b0fdddf99ccc77b3c8e",
-      "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
+      "inputCodecDigest": "sha256:1a79d1a8c18d32b9faff8edcba2ffa78545b031e4432599dc43a899e16646742",
+      "outputCodecDigest": "sha256:2f87f123b030ef6e1e0e9a292ac645b6bcfe473d6ff17bc9467806cb18d10185"
     },
     {
       "operation": "fabric.v1.resource.release",
@@ -5884,7 +6397,28 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -5916,7 +6450,7 @@
         ],
         "properties": {
           "reservationId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "revision": {
             "type": "integer",
@@ -5948,10 +6482,10 @@
                       "const": "project"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -5969,13 +6503,13 @@
                       "const": "project-session"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectSessionId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -5993,13 +6527,13 @@
                       "const": "coordination-run"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectSessionId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "coordinationRunId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -6017,13 +6551,13 @@
                       "const": "team"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "coordinationRunId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "teamId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -6041,13 +6575,13 @@
                       "const": "agent"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "teamId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "agentId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 }
@@ -6143,20 +6677,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
-      "inputCodecDigest": "sha256:e9918ffba9ee727b20846d503668d58a5e938bcb026d5ea5338765c276f00fb5",
-      "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
+      "inputCodecDigest": "sha256:af86d45736044adbd8fb63582a698a8eb6510dee7c9c6045f809ae0a508681bf",
+      "outputCodecDigest": "sha256:2f87f123b030ef6e1e0e9a292ac645b6bcfe473d6ff17bc9467806cb18d10185"
     },
     {
       "operation": "fabric.v1.resource.reserve",
@@ -6314,7 +6875,28 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -6391,7 +6973,7 @@
         ],
         "properties": {
           "reservationId": {
-            "$ref": "#/$defs/generated_2"
+            "$ref": "#/$defs/generated_3"
           },
           "revision": {
             "type": "integer",
@@ -6423,10 +7005,10 @@
                       "const": "project"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -6444,13 +7026,13 @@
                       "const": "project-session"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectSessionId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -6468,13 +7050,13 @@
                       "const": "coordination-run"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "projectSessionId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "coordinationRunId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -6492,13 +7074,13 @@
                       "const": "team"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "coordinationRunId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "teamId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 },
@@ -6516,13 +7098,13 @@
                       "const": "agent"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "teamId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     },
                     "agentId": {
-                      "$ref": "#/$defs/generated_2"
+                      "$ref": "#/$defs/generated_3"
                     }
                   }
                 }
@@ -6618,20 +7200,47 @@
         },
         "$defs": {
           "generated_1": {
-            "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_2"
+              },
+              {
+                "$ref": "#/$defs/generated_4"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
           },
           "generated_2": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_3": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
             "x-minUtf8Bytes": 1,
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_4": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
         }
       },
-      "inputCodecDigest": "sha256:eb0a00ebf1d6b1ed5d620731f39d7ebef5eb0b7f3b590e263dffae9c6bb575d4",
-      "outputCodecDigest": "sha256:7714b27eca4d4a35655c185c35b770f14931199d69758499c14e79f34fe6559f"
+      "inputCodecDigest": "sha256:2e66ffac04640ada5e0378efa67eed61b9c8aaef0320df5bc61b420e48a99a31",
+      "outputCodecDigest": "sha256:2f87f123b030ef6e1e0e9a292ac645b6bcfe473d6ff17bc9467806cb18d10185"
     },
     {
       "operation": "fabric.v1.result-delivery.abandon",
@@ -11433,7 +12042,28 @@
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -11521,7 +12151,7 @@
         }
       },
       "inputCodecDigest": "sha256:fe5e7016f0ba4fd4e4cc48a858a5de205512fdec5a99e07b09903364ce93dcef",
-      "outputCodecDigest": "sha256:0a50a3fa5e012f983b8e9f9d692c2eb5812c9d37373ba5375163f726e3a86790"
+      "outputCodecDigest": "sha256:88b44f63e6f4ad49f818f2dc86c40e1824b3bc475cb9863f2074bf34876826b1"
     },
     {
       "operation": "fabric.v1.subtree.freeze",
@@ -11659,7 +12289,28 @@
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -11747,7 +12398,7 @@
         }
       },
       "inputCodecDigest": "sha256:f230a66d282867e82217c8ca6c19b37f3d8304a86eaa18050a2203419ae4f800",
-      "outputCodecDigest": "sha256:0a50a3fa5e012f983b8e9f9d692c2eb5812c9d37373ba5375163f726e3a86790"
+      "outputCodecDigest": "sha256:88b44f63e6f4ad49f818f2dc86c40e1824b3bc475cb9863f2074bf34876826b1"
     },
     {
       "operation": "fabric.v1.task.claim",
@@ -13847,6 +14498,714 @@
       "outputCodecDigest": "sha256:0089437c829ad1ed0b22d94b3e5756fa6cd85b2a42720ee769447d0a2a4b3df1"
     },
     {
+      "operation": "fabric.v1.team.create",
+      "name": "fabric_team_create",
+      "description": "Invoke the closed fabric.v1.team.create operation as the authenticated Agent Fabric principal.",
+      "feature": "fabric-core.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "teamId",
+              "leader",
+              "rootTask",
+              "initialMembers",
+              "discussionGroups",
+              "reservedBudget",
+              "commandId"
+            ],
+            "properties": {
+              "teamId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "leader": {
+                "$ref": "#/$defs/generated_12"
+              },
+              "rootTask": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "taskId",
+                  "objective",
+                  "baseRevision"
+                ],
+                "properties": {
+                  "taskId": {
+                    "$ref": "#/$defs/generated_21"
+                  },
+                  "objective": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 4096
+                  },
+                  "baseRevision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 4096
+                  }
+                }
+              },
+              "initialMembers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/generated_12"
+                },
+                "minItems": 0,
+                "maxItems": 5
+              },
+              "discussionGroups": {
+                "$ref": "#/$defs/generated_6"
+              },
+              "reservedBudget": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 128,
+                "propertyNames": {
+                  "$ref": "#/$defs/generated_3"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "commandId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "parentTeamId": {
+                "$ref": "#/$defs/generated_21"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "teamId",
+              "leaderAgentId",
+              "rootTaskId",
+              "commandId"
+            ],
+            "properties": {
+              "teamId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "leaderAgentId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "rootTaskId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "commandId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "parentTeamId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "ownedTaskIds": {
+                "$ref": "#/$defs/generated_10"
+              },
+              "memberAgentIds": {
+                "$ref": "#/$defs/generated_10"
+              },
+              "initialMemberAgentIds": {
+                "$ref": "#/$defs/generated_10"
+              },
+              "authorityId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "budget": {
+                "$ref": "#/$defs/generated_18"
+              },
+              "reservedBudget": {
+                "$ref": "#/$defs/generated_18"
+              },
+              "discussionGroups": {
+                "$ref": "#/$defs/generated_6"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "generated_1": {
+            "oneOf": [
+              {
+                "const": "."
+              },
+              {
+                "$ref": "#/$defs/generated_22"
+              }
+            ]
+          },
+          "generated_2": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_15"
+              },
+              {
+                "$ref": "#/$defs/generated_16"
+              },
+              {
+                "$ref": "#/$defs/generated_14"
+              },
+              {
+                "$ref": "#/$defs/generated_8"
+              }
+            ]
+          },
+          "generated_3": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_20"
+              },
+              {
+                "$ref": "#/$defs/generated_23"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
+          },
+          "generated_4": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_1"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_5": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_1"
+            },
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true
+          },
+          "generated_6": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_13"
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "generated_7": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_19"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_8": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "local",
+                "approved-provider",
+                "external"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "generated_9": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "local",
+                "approved-provider",
+                "external"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "generated_10": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_21"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_11": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_21"
+            },
+            "minItems": 2,
+            "maxItems": 64,
+            "uniqueItems": true
+          },
+          "generated_12": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agentId",
+              "authority"
+            ],
+            "properties": {
+              "agentId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "authority": {
+                "$ref": "#/$defs/generated_17"
+              }
+            }
+          },
+          "generated_13": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "groupId",
+              "memberAgentIds"
+            ],
+            "properties": {
+              "groupId": {
+                "$ref": "#/$defs/generated_21"
+              },
+              "memberAgentIds": {
+                "$ref": "#/$defs/generated_11"
+              }
+            }
+          },
+          "generated_14": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level",
+              "scopes"
+            ],
+            "properties": {
+              "level": {
+                "const": "scoped"
+              },
+              "scopes": {
+                "$ref": "#/$defs/generated_9"
+              }
+            }
+          },
+          "generated_15": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level"
+            ],
+            "properties": {
+              "level": {
+                "const": "allowed"
+              }
+            }
+          },
+          "generated_16": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level"
+            ],
+            "properties": {
+              "level": {
+                "const": "forbidden"
+              }
+            }
+          },
+          "generated_17": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "workspaceRoots",
+              "sourcePaths",
+              "artifactPaths",
+              "actions",
+              "disclosure",
+              "expiresAt",
+              "budget"
+            ],
+            "properties": {
+              "workspaceRoots": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "sourcePaths": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "artifactPaths": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "actions": {
+                "$ref": "#/$defs/generated_7"
+              },
+              "disclosure": {
+                "$ref": "#/$defs/generated_2"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "budget": {
+                "$ref": "#/$defs/generated_18"
+              },
+              "deniedPaths": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "deniedActions": {
+                "$ref": "#/$defs/generated_7"
+              }
+            }
+          },
+          "generated_18": {
+            "type": "object",
+            "minProperties": 0,
+            "maxProperties": 128,
+            "propertyNames": {
+              "$ref": "#/$defs/generated_3"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "generated_19": {
+            "type": "string",
+            "enum": [
+              "fabric.v1.agent.attach",
+              "fabric.v1.agent.list",
+              "fabric.v1.agent.register",
+              "fabric.v1.agent.spawn",
+              "fabric.v1.artifact.publish",
+              "fabric.v1.authority.delegate",
+              "fabric.v1.barrier.close",
+              "fabric.v1.budget.read",
+              "fabric.v1.budget.release",
+              "fabric.v1.budget.reserve",
+              "fabric.v1.budget.usage.reconcile",
+              "fabric.v1.budget.usage.record",
+              "fabric.v1.capability.revoke",
+              "fabric.v1.capability.rotate",
+              "fabric.v1.delivery.abandon",
+              "fabric.v1.delivery.acknowledge",
+              "fabric.v1.discussion-group.create",
+              "fabric.v1.events.observe",
+              "fabric.v1.intake.revise",
+              "fabric.v1.launch.attest",
+              "fabric.v1.lease.revocation-proof.record",
+              "fabric.v1.lifecycle.read",
+              "fabric.v1.lifecycle.request",
+              "fabric.v1.mailbox.read",
+              "fabric.v1.message.receive",
+              "fabric.v1.message.send",
+              "fabric.v1.operator-intervention.record",
+              "fabric.v1.project-session.membership.bind",
+              "fabric.v1.provider-action.dispatch",
+              "fabric.v1.provider-action.read",
+              "fabric.v1.provider-action.reconcile",
+              "fabric.v1.provider-state.report",
+              "fabric.v1.receipt.export",
+              "fabric.v1.receipt.list",
+              "fabric.v1.resource.reconcile",
+              "fabric.v1.resource.release",
+              "fabric.v1.resource.reserve",
+              "fabric.v1.result-delivery.abandon",
+              "fabric.v1.result-delivery.claim",
+              "fabric.v1.result-delivery.consume",
+              "fabric.v1.result-delivery.reassign",
+              "fabric.v1.result-delivery.retry",
+              "fabric.v1.run-status.read",
+              "fabric.v1.scoped-gate.check",
+              "fabric.v1.scoped-gate.create",
+              "fabric.v1.subtree-barrier.close",
+              "fabric.v1.subtree.adopt",
+              "fabric.v1.subtree.freeze",
+              "fabric.v1.task.claim",
+              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.task.create",
+              "fabric.v1.task.handoff.acknowledge",
+              "fabric.v1.task.list",
+              "fabric.v1.task.objective-check.record",
+              "fabric.v1.task.owner-recovery-proof.record",
+              "fabric.v1.task.owner.recover",
+              "fabric.v1.task.read",
+              "fabric.v1.task.readiness.refresh",
+              "fabric.v1.task.request",
+              "fabric.v1.task.update",
+              "fabric.v1.team.create",
+              "fabric.v1.team.read",
+              "fabric.v1.visibility-failure.record",
+              "fabric.v1.write-lease.acquire",
+              "fabric.v1.write-lease.read",
+              "fabric.v1.write-lease.recover",
+              "fabric.v1.write-lease.release",
+              "fabric.v1.write-lease.renew"
+            ]
+          },
+          "generated_20": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_21": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_22": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+          },
+          "generated_23": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "teamId",
+          "parentTeamId",
+          "depth",
+          "leaderAgentId",
+          "rootTaskId",
+          "ownedTaskIds",
+          "memberAgentIds",
+          "budgetId",
+          "state",
+          "generation",
+          "successorAgentId",
+          "discussionGroups",
+          "reservedBudget"
+        ],
+        "properties": {
+          "teamId": {
+            "$ref": "#/$defs/generated_3"
+          },
+          "parentTeamId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leaderAgentId": {
+            "$ref": "#/$defs/generated_3"
+          },
+          "rootTaskId": {
+            "$ref": "#/$defs/generated_3"
+          },
+          "ownedTaskIds": {
+            "$ref": "#/$defs/generated_2"
+          },
+          "memberAgentIds": {
+            "$ref": "#/$defs/generated_2"
+          },
+          "budgetId": {
+            "$ref": "#/$defs/generated_3"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "frozen",
+              "barrier-closed"
+            ]
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "successorAgentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "discussionGroups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "groupId",
+                "memberAgentIds"
+              ],
+              "properties": {
+                "groupId": {
+                  "$ref": "#/$defs/generated_3"
+                },
+                "memberAgentIds": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/generated_3"
+                  },
+                  "minItems": 2,
+                  "maxItems": 64,
+                  "uniqueItems": true
+                }
+              }
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "reservedBudget": {
+            "type": "object",
+            "minProperties": 0,
+            "maxProperties": 128,
+            "propertyNames": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "leader": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agentId",
+              "authorityId"
+            ],
+            "properties": {
+              "agentId": {
+                "$ref": "#/$defs/generated_3"
+              },
+              "authorityId": {
+                "$ref": "#/$defs/generated_3"
+              }
+            }
+          },
+          "rootTask": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "taskId",
+              "ownerAgentId",
+              "state",
+              "revision",
+              "ownerLeaseGeneration",
+              "proposedOwnerAgentId",
+              "dependencies"
+            ],
+            "properties": {
+              "taskId": {
+                "$ref": "#/$defs/generated_3"
+              },
+              "ownerAgentId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "blocked",
+                  "ready",
+                  "active",
+                  "complete",
+                  "cancelled",
+                  "degraded"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "ownerLeaseGeneration": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "proposedOwnerAgentId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "dependencies": {
+                "$ref": "#/$defs/generated_2"
+              }
+            }
+          },
+          "initialMemberAgentIds": {
+            "$ref": "#/$defs/generated_2"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_3"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generated_2": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_3"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_3": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:853c248e7901bcd013f961af10573b207209165795c88f0a98599ba64c2a0460",
+      "outputCodecDigest": "sha256:8aa83937ef68ab3f6c8965a180666c94d4b0c6c1825d2d075f854440fca047c5"
+    },
+    {
       "operation": "fabric.v1.team.read",
       "name": "fabric_team_read",
       "description": "Invoke the closed fabric.v1.team.read operation as the authenticated Agent Fabric principal.",
@@ -13960,7 +15319,28 @@
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "pattern": "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "turns",
+                    "provider_calls",
+                    "concurrent_turns",
+                    "descendants",
+                    "message_bytes",
+                    "artifact_bytes",
+                    "wall_clock_milliseconds"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                }
+              ]
             },
             "additionalProperties": {
               "type": "integer",
@@ -14048,7 +15428,7 @@
         }
       },
       "inputCodecDigest": "sha256:28942f788bf36e90e63029f275b3287a764915b493c25753f5ee839919947cf4",
-      "outputCodecDigest": "sha256:0a50a3fa5e012f983b8e9f9d692c2eb5812c9d37373ba5375163f726e3a86790"
+      "outputCodecDigest": "sha256:88b44f63e6f4ad49f818f2dc86c40e1824b3bc475cb9863f2074bf34876826b1"
     },
     {
       "operation": "fabric.v1.visibility-failure.record",

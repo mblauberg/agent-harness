@@ -1517,3 +1517,195 @@ describe("Codex app-server fabric adapter", () => {
     actionJournal.close();
   });
 });
+
+describe("primary provider retained child bridges", () => {
+  it("provisions and reuses the exact Claude SDK child MCP bridge", async () => {
+    const fabricServer = await fabricSocketFixture();
+    let mcp: ReturnType<typeof createClaudeChairMcpBridge> | undefined;
+    let queryCount = 0;
+    const queryFactory = vi.fn((input: unknown) => {
+      queryCount += 1;
+      const turn = queryCount;
+      return {
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield { type: "system", subtype: "init", session_id: "claude-child-session" };
+          if (mcp === undefined) throw new Error("Claude child MCP bridge missing");
+          yield {
+            type: "assistant",
+            session_id: "claude-child-session",
+            uuid: `claude-child-message-${String(turn)}`,
+            request_id: `claude-child-turn-${String(turn)}`,
+            parent_tool_use_id: null,
+            message: {
+              content: [{
+                type: "tool_use",
+                name: mcp.attestationToolName,
+                id: `claude-child-call-${String(turn)}`,
+                input: {},
+              }],
+            },
+          };
+          await mcp.invokeTool("fabric_mailbox_read", {});
+          yield {
+            type: "result",
+            subtype: "success",
+            session_id: "claude-child-session",
+            result: turn === 1 ? "child activated" : "child continued",
+            usage: {},
+            total_cost_usd: 0,
+          };
+        },
+        input,
+      };
+    });
+    const boundary = Reflect.construct(InstalledClaudeAgentSdkBoundary, [{
+      query: queryFactory,
+      mcpBridgeFactory: (session: Parameters<typeof createClaudeChairMcpBridge>[0]) => {
+        mcp = createClaudeChairMcpBridge(session);
+        return mcp;
+      },
+    }]);
+    const bridgeContractDigest = `sha256:${"7".repeat(64)}`;
+    const capability = `afc_${"7".repeat(43)}`;
+
+    const result = await boundary.provisionAgent({
+      schemaVersion: 1,
+      operation: "spawn",
+      actionId: "claude-child-action",
+      targetAgentId: "claude-child",
+      authorityId: "claude-child-authority",
+      bridgeGeneration: 3,
+      bridgeContractDigest,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "anthropic",
+        model: "claude-test",
+        initialPrompt: "perform bounded work",
+      },
+      environment: {
+        AGENT_FABRIC_CAPABILITY: capability,
+        AGENT_FABRIC_SOCKET_PATH: fabricServer.socketPath,
+      },
+    });
+    expect(result).toMatchObject({
+      schemaVersion: 1,
+      adapterId: "claude-agent-sdk",
+      actionId: "claude-child-action",
+      targetAgentId: "claude-child",
+      providerSessionRef: "claude-child-session",
+      providerSessionGeneration: 1,
+      bridgeGeneration: 3,
+      bridgeContractDigest,
+      activationEvidenceDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    });
+    const publicQueryInputs = queryFactory.mock.calls.map(([value]) => {
+      const input = value as { prompt?: unknown; options?: { env?: unknown } };
+      return { prompt: input.prompt, env: input.options?.env };
+    });
+    expect(JSON.stringify(publicQueryInputs)).not.toContain(capability);
+    expect(JSON.stringify(publicQueryInputs)).not.toContain(fabricServer.socketPath);
+    expect(boundary.hasLiveAgentSession("claude-child-session", 1, 3)).toBe(true);
+    await boundary.sendTurn({ resumeReference: "claude-child-session", prompt: "read the mailbox again" });
+    expect(fabricServer.rpcCall).toHaveBeenCalledTimes(2);
+    await fabricServer.drop();
+    await vi.waitFor(() => expect(boundary.hasLiveAgentSession("claude-child-session", 1, 3)).toBe(false));
+    await boundary.closeAll();
+  });
+
+  it("provisions and reuses the exact Codex dynamic-tool child bridge", async () => {
+    const fabricServer = await fabricSocketFixture();
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    let handler: ((params: Record<string, unknown>) => Promise<unknown>) | undefined;
+    let turn = 0;
+    let currentTurnId = "";
+    let closed = false;
+    const connection = {
+      get closed() { return closed; },
+      initialize: vi.fn(async () => undefined),
+      setServerRequestHandler: vi.fn((_method: string, value: (params: Record<string, unknown>) => Promise<unknown>) => {
+        handler = value;
+      }),
+      request: vi.fn(async (method: string, params: Record<string, unknown>) => {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "codex-child-thread" } };
+        if (method === "turn/start") {
+          turn += 1;
+          currentTurnId = `codex-child-turn-${String(turn)}`;
+          return { turn: { id: currentTurnId, status: "inProgress" } };
+        }
+        if (method === "thread/read") {
+          return {
+            thread: {
+              id: "codex-child-thread",
+              turns: [{
+                id: currentTurnId,
+                status: "completed",
+                items: [{ type: "agentMessage", text: "child turn complete" }],
+              }],
+            },
+          };
+        }
+        throw new Error(`unexpected Codex method ${method}`);
+      }),
+      waitForNotification: vi.fn(async () => {
+        if (handler === undefined) throw new Error("Codex child tool handler missing");
+        await handler({
+          arguments: {},
+          callId: `codex-child-call-${String(turn)}`,
+          threadId: "codex-child-thread",
+          tool: "fabric_mailbox_read",
+          turnId: currentTurnId,
+        });
+        return {
+          threadId: "codex-child-thread",
+          turn: { id: currentTurnId, status: "completed" },
+        };
+      }),
+      close: vi.fn(async () => { closed = true; }),
+    };
+    const connectionFactory = vi.fn(() => connection);
+    const boundary = new InstalledCodexAppServerBoundary(connectionFactory as never);
+    const bridgeContractDigest = `sha256:${"8".repeat(64)}`;
+    const capability = `afc_${"8".repeat(43)}`;
+
+    const result = await boundary.provisionAgent({
+      schemaVersion: 1,
+      operation: "spawn",
+      actionId: "codex-child-action",
+      targetAgentId: "codex-child",
+      authorityId: "codex-child-authority",
+      bridgeGeneration: 4,
+      bridgeContractDigest,
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "openai",
+        model: "gpt-test",
+        initialPrompt: "perform bounded work",
+      },
+      environment: {
+        AGENT_FABRIC_CAPABILITY: capability,
+        AGENT_FABRIC_SOCKET_PATH: fabricServer.socketPath,
+      },
+    });
+    expect(result).toMatchObject({
+      schemaVersion: 1,
+      adapterId: "codex-app-server",
+      actionId: "codex-child-action",
+      targetAgentId: "codex-child",
+      providerSessionRef: "codex-child-thread",
+      providerSessionGeneration: 1,
+      bridgeGeneration: 4,
+      bridgeContractDigest,
+      activationEvidenceDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    });
+    expect(JSON.stringify(requests)).not.toContain(capability);
+    expect(JSON.stringify(requests)).not.toContain(fabricServer.socketPath);
+    expect(boundary.hasLiveAgentSession("codex-child-thread", 1, 4)).toBe(true);
+    await boundary.sendTurn({ resumeReference: "codex-child-thread", prompt: "read the mailbox again" });
+    expect(fabricServer.rpcCall).toHaveBeenCalledTimes(2);
+    await fabricServer.drop();
+    await vi.waitFor(() => expect(boundary.hasLiveAgentSession("codex-child-thread", 1, 4)).toBe(false));
+    await boundary.closeAll();
+  });
+});

@@ -2,6 +2,10 @@ import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  AgentSessionFabricBridge,
+  type AgentSessionFabricBridgeInput,
+} from "./agent-session-continuity.js";
+import {
   getSessionInfo,
   query,
   type Options,
@@ -33,6 +37,10 @@ import {
   ProviderAdapterError,
   requiredString,
   takeChairLaunchHandoff,
+  takeAgentBridgeHandoff,
+  type AgentBridgeHandoff,
+  type AgentProvisionBoundaryInput,
+  type AgentProvisionProviderResult,
   type AdapterRequestHandler,
   type ChairLaunchBoundaryInput,
   type ChairLaunchHandoff,
@@ -98,6 +106,15 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
       digestAlgorithm: "sha256",
       nativeAttribution: "claude-sdk-assistant-request-tool-use-v1",
     },
+  },
+  agentBridge: {
+    schemaVersion: 1,
+    method: "provision_agent",
+    operations: ["spawn", "attach"],
+    secretTransport: "private-handoff",
+    bridgeContract: "agent-fabric-session-bridge-v1",
+    generationBound: true,
+    providerOriginatedActivation: true,
   },
 };
 
@@ -194,7 +211,7 @@ async function consumeQuery(
 }
 
 type ClaudeChairSession = {
-  bridge: ChairLaunchFabricBridge;
+  bridge: ChairLaunchFabricBridge | AgentSessionFabricBridge;
   mcp?: ClaudeChairMcpBridge;
   providerSessionRef?: string;
   providerSessionGeneration: number;
@@ -203,6 +220,7 @@ type ClaudeChairSession = {
   seenNativeFabricInvocationOrder: string[];
   attested?: boolean;
   busy?: boolean;
+  bridgeGeneration?: number;
 };
 
 type ClaudeNativeFabricInvocation = {
@@ -323,7 +341,10 @@ export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeC
     `mcp__${serverName}__${descriptor.name}`,
   ]));
   const nameByQualified = new Map([...qualifiedByName.entries()].map(([name, qualified]) => [qualified, name]));
-  const attestationToolName = qualifiedByName.get(session.bridge.challengeToolName);
+  const requiredToolName = session.bridgeGeneration === undefined
+    ? (session.bridge as ChairLaunchFabricBridge).challengeToolName
+    : (session.bridge as AgentSessionFabricBridge).activationToolName;
+  const attestationToolName = qualifiedByName.get(requiredToolName);
   const mailboxToolName = qualifiedByName.get("fabric_mailbox_read");
   if (attestationToolName === undefined || mailboxToolName === undefined) {
     throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "Claude chair launch grant lacks required Fabric descriptors");
@@ -354,7 +375,7 @@ export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeC
         providerTurnRef: invocation.providerTurnRef,
         providerInvocationRef: invocation.providerInvocationRef,
       });
-      if (name === session.bridge.challengeToolName) {
+      if (name === requiredToolName) {
         session.attested = true;
         session.nativeFabricInvocations.length = 0;
       }
@@ -370,7 +391,7 @@ export function createClaudeChairMcpBridge(session: ClaudeChairSession): ClaudeC
       description,
       inputSchema,
       outputSchema,
-      ...(name === session.bridge.challengeToolName
+      ...(name === requiredToolName
         ? { _meta: { "anthropic/alwaysLoad": true } }
         : {}),
     })),
@@ -409,6 +430,7 @@ function claudeChairOptions(
 }
 
 type BridgeFactory = (input: ChairLaunchFabricBridgeInput) => Promise<ChairLaunchFabricBridge>;
+type AgentBridgeFactory = (input: AgentSessionFabricBridgeInput) => Promise<AgentSessionFabricBridge>;
 type ClaudeMcpBridgeFactory = (session: ClaudeChairSession) => ClaudeChairMcpBridge;
 
 export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
@@ -416,6 +438,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   readonly #query: typeof query;
   readonly #bridgeFactory: BridgeFactory;
   readonly #mcpBridgeFactory: ClaudeMcpBridgeFactory;
+  readonly #agentBridgeFactory: AgentBridgeFactory;
   readonly #chairSessions = new Map<string, ClaudeChairSession>();
 
   constructor(options?: string | {
@@ -423,17 +446,20 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     query?: typeof query;
     bridgeFactory?: BridgeFactory;
     mcpBridgeFactory?: ClaudeMcpBridgeFactory;
+    agentBridgeFactory?: AgentBridgeFactory;
   }) {
     if (typeof options === "string" || options === undefined) {
       this.#executable = options;
       this.#query = query;
       this.#bridgeFactory = createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = createClaudeChairMcpBridge;
+      this.#agentBridgeFactory = AgentSessionFabricBridge.create;
     } else {
       this.#executable = options.executable;
       this.#query = options.query ?? query;
       this.#bridgeFactory = options.bridgeFactory ?? createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = options.mcpBridgeFactory ?? createClaudeChairMcpBridge;
+      this.#agentBridgeFactory = options.agentBridgeFactory ?? AgentSessionFabricBridge.create;
     }
   }
 
@@ -458,6 +484,17 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       session.providerSessionGeneration === providerSessionGeneration &&
       !session.bridge.closed
     );
+  }
+
+  hasLiveAgentSession(
+    resumeReference: string,
+    providerSessionGeneration: number,
+    bridgeGeneration: number,
+  ): boolean {
+    const session = this.#chairSessions.get(resumeReference);
+    return session !== undefined && session.bridgeGeneration !== undefined &&
+      session.providerSessionGeneration === providerSessionGeneration &&
+      session.bridgeGeneration === bridgeGeneration && !session.bridge.closed;
   }
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -509,6 +546,50 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       } catch {
         throw chairLaunchContinuityUnproven(evidence);
       }
+    } catch (error: unknown) {
+      await bridge.close();
+      throw error;
+    }
+  }
+
+  async provisionAgent(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult> {
+    const bridge = await this.#agentBridgeFactory({
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: input.actionId,
+      targetAgentId: input.targetAgentId,
+      bridgeGeneration: input.bridgeGeneration,
+      bridgeContractDigest: input.bridgeContractDigest,
+      capability: input.environment.AGENT_FABRIC_CAPABILITY,
+      socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+    });
+    const session: ClaudeChairSession = {
+      bridge,
+      providerSessionGeneration: 1,
+      bridgeGeneration: input.bridgeGeneration,
+      nativeFabricInvocations: [],
+      seenNativeFabricInvocationKeys: new Set(),
+      seenNativeFabricInvocationOrder: [],
+    };
+    const mcp = this.#mcpBridgeFactory(session);
+    session.mcp = mcp;
+    try {
+      const resume = input.operation === "attach" ? input.providerSessionRef : undefined;
+      const requestedPrompt = input.payload.prompt ?? input.payload.initialPrompt ?? input.payload.instruction;
+      const activationPrompt = `Invoke ${mcp.attestationToolName} exactly once with {} before continuing. ${
+        typeof requestedPrompt === "string" && requestedPrompt.length > 0
+          ? requestedPrompt
+          : "Establish the retained Agent Fabric bridge."
+      }`;
+      const completed = await consumeQuery(this.#query({
+        prompt: activationPrompt,
+        options: claudeChairOptions(input.payload, this.#executable, resume, mcp),
+      }), (sessionId) => {
+        session.providerSessionRef = sessionId;
+        bridge.bindProviderSession(sessionId, 1);
+      }, (message) => observeClaudeFabricToolUses(session, message, mcp));
+      const result = bridge.result();
+      this.#chairSessions.set(completed.resumeReference, session);
+      return result;
     } catch (error: unknown) {
       await bridge.close();
       throw error;
@@ -589,6 +670,7 @@ export function createClaudeAgentSdkAdapter(options: {
   boundary: ClaudeAgentSdkBoundary;
   journal: SqliteAdapterActionJournal;
   chairLaunchHandoff?: ChairLaunchHandoff;
+  agentBridgeHandoff?: AgentBridgeHandoff;
 }): AdapterRequestHandler {
   return createProviderAdapter({
     capabilities: CAPABILITIES,
@@ -598,12 +680,16 @@ export function createClaudeAgentSdkAdapter(options: {
       ...(options.chairLaunchHandoff === undefined ? {} : { handoff: options.chairLaunchHandoff }),
       validatePayload: validateClaudeChairLaunchPayload,
     },
+    agentBridge: {
+      ...(options.agentBridgeHandoff === undefined ? {} : { handoff: options.agentBridgeHandoff }),
+    },
   });
 }
 
 export async function runClaudeAgentSdkAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("claude-agent-sdk", arguments_));
   const chairLaunchHandoff = takeChairLaunchHandoff(process.env);
+  const agentBridgeHandoff = takeAgentBridgeHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
   const boundary = new InstalledClaudeAgentSdkBoundary(providerExecutable);
@@ -613,6 +699,7 @@ export async function runClaudeAgentSdkAdapter(arguments_: string[] = process.ar
         boundary,
         journal,
         ...(chairLaunchHandoff === undefined ? {} : { chairLaunchHandoff }),
+        ...(agentBridgeHandoff === undefined ? {} : { agentBridgeHandoff }),
       }),
       { input: process.stdin, output: process.stdout },
     );

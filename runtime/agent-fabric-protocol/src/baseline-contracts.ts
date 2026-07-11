@@ -133,11 +133,23 @@ export type LegacyTeamResult = {
   state: "active" | "frozen" | "barrier-closed";
   generation: number;
   successorAgentId: string | null;
-  leader?: { agentId: string; authorityId: string; capability: string };
+  leader?: { agentId: string; authorityId: string };
   rootTask?: LegacyTaskResult;
   initialMemberAgentIds?: readonly string[];
   discussionGroups: readonly { groupId: string; memberAgentIds: readonly string[] }[];
   reservedBudget: Readonly<Record<string, number>>;
+};
+
+export type AgentCustodyResult = {
+  agentId: string;
+  authorityId: string;
+  adapterId: string;
+  actionId: string;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeState: "active" | "none";
+  bridgeGeneration: number;
+  evidenceDigest: `sha256:${string}`;
 };
 export type LegacyBudgetResult = {
   budgetId: string;
@@ -226,8 +238,8 @@ export type BaselineOperationInputMap = {
 export type BaselineOperationResultMap = {
   [FABRIC_OPERATIONS.delegateAuthority]: { authorityId: string };
   [FABRIC_OPERATIONS.registerAgent]: { capability: string };
-  [FABRIC_OPERATIONS.spawnAgent]: { capability: string; providerSessionRef: string; adapterId: string; actionId: string };
-  [FABRIC_OPERATIONS.attachAgent]: { capability: string; providerSessionRef: string; adapterId: string; actionId: string };
+  [FABRIC_OPERATIONS.spawnAgent]: AgentCustodyResult;
+  [FABRIC_OPERATIONS.attachAgent]: AgentCustodyResult;
   [FABRIC_OPERATIONS.sendMessage]: { messageId: string };
   [FABRIC_OPERATIONS.createDiscussionGroup]: { groupId: string; memberAgentIds: readonly string[] };
   [FABRIC_OPERATIONS.receiveMessages]: { deliveries: readonly { deliveryId: string; messageId: string; sequence: number; body: string; attempt: number; senderId: string; kind: LegacyMessageInput["kind"]; requiresAck: boolean }[] };
@@ -275,7 +287,13 @@ export type BaselineOperationResultMap = {
   [FABRIC_OPERATIONS.getRunStatus]: { runId: string; chairAgentId: string; barrier: { state: "open" | "closed" }; counts: { agents: number; tasks: number; tasksTerminal: number; messages: number; deliveriesUnacknowledged: number; leasesActive: number } };
   [FABRIC_OPERATIONS.observeEvents]: { events: readonly LegacyObserverEvent[]; nextCursor: number };
   [FABRIC_OPERATIONS.listTasks]: { tasks: readonly LegacyTaskResult[] };
-  [FABRIC_OPERATIONS.listAgents]: { agents: readonly { agentId: string; parentAgentId: string | null; lifecycle: string }[] };
+  [FABRIC_OPERATIONS.listAgents]: { agents: readonly {
+    agentId: string;
+    parentAgentId: string | null;
+    lifecycle: string;
+    bridgeState: "active" | "none" | "lost";
+    bridgeGeneration: number;
+  }[] };
   [FABRIC_OPERATIONS.listReceipts]: { receipts: readonly { relativePath: string; sha256: string; exportedAt: number }[] };
   [FABRIC_OPERATIONS.exportReceipt]: LegacyReceiptResult;
 };

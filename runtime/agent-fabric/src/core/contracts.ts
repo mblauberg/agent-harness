@@ -83,7 +83,7 @@ export type TeamResult = {
   state: "active" | "frozen" | "barrier-closed";
   generation: number;
   successorAgentId: string | null;
-  leader?: { agentId: string; authorityId: string; capability: string };
+  leader?: { agentId: string; authorityId: string };
   rootTask?: TaskResult;
   initialMemberAgentIds?: string[];
   discussionGroups: DiscussionGroupInput[];

@@ -1,4 +1,5 @@
 import { FABRIC_OPERATIONS, type FabricOperation } from "../domain/operations.js";
+import type { AgentCustodyResult } from "@local/agent-fabric-protocol";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { FabricError } from "../errors.js";
 import type {
@@ -63,7 +64,7 @@ export class FabricClient {
     adapterId: string;
     actionId: string;
     payload: Record<string, unknown>;
-  }): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  }): Promise<AgentCustodyResult> {
     this.#authorise(FABRIC_OPERATIONS.spawnAgent);
     return await this.#fabric.spawnAgent(this.#runId, this.#agentId, input);
   }
@@ -74,7 +75,7 @@ export class FabricClient {
     adapterId: string;
     actionId: string;
     providerSessionRef: string;
-  }): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  }): Promise<AgentCustodyResult> {
     this.#authorise(FABRIC_OPERATIONS.attachAgent);
     return await this.#fabric.attachAgent(this.#runId, this.#agentId, input);
   }

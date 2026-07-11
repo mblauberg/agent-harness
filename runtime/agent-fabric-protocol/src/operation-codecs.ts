@@ -63,6 +63,7 @@ import type {
   OperationResultMap,
   ProtocolOperation,
 } from "./rpc-contract.js";
+import { budgetUnitKey } from "./resource-unit-keys.js";
 
 export type ObjectWireShape = {
   kind: "object";
@@ -188,8 +189,8 @@ export const OPERATION_INPUT_SHAPES = {
 export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.delegateAuthority]: object(["authorityId"]),
   [FABRIC_OPERATIONS.registerAgent]: object(["capability"]),
-  [FABRIC_OPERATIONS.spawnAgent]: object(["capability", "providerSessionRef", "adapterId", "actionId"]),
-  [FABRIC_OPERATIONS.attachAgent]: object(["capability", "providerSessionRef", "adapterId", "actionId"]),
+  [FABRIC_OPERATIONS.spawnAgent]: object(["agentId", "authorityId", "adapterId", "actionId", "providerSessionRef", "providerSessionGeneration", "bridgeState", "bridgeGeneration", "evidenceDigest"]),
+  [FABRIC_OPERATIONS.attachAgent]: object(["agentId", "authorityId", "adapterId", "actionId", "providerSessionRef", "providerSessionGeneration", "bridgeState", "bridgeGeneration", "evidenceDigest"]),
   [FABRIC_OPERATIONS.sendMessage]: object(["messageId"]),
   [FABRIC_OPERATIONS.createDiscussionGroup]: object(["groupId", "memberAgentIds"]),
   [FABRIC_OPERATIONS.receiveMessages]: object(["deliveries"]),
@@ -298,18 +299,17 @@ const positiveInteger = integer({ minimum: 1 });
 const stringList = arrayOf(identifier, { maximum: 256, unique: true });
 const textList = arrayOf(text, { maximum: 256 });
 const integerList = arrayOf(integer(), { maximum: 256, unique: true });
-const resourceUnitPattern = "^(?:turns|provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$";
-const numberRecord = recordOf(integer(), { maximum: 128, keyPattern: resourceUnitPattern });
+const numberRecord = recordOf(integer(), { maximum: 128, keyCodec: budgetUnitKey });
 const nonEmptyNumberRecord = recordOf(integer(), {
   minimum: 1,
   maximum: 128,
-  keyPattern: resourceUnitPattern,
+  keyCodec: budgetUnitKey,
   exampleKey: "concurrent_turns",
 });
 const nullableNumberRecord = recordOf(nullable(integer()), {
   minimum: 1,
   maximum: 128,
-  keyPattern: resourceUnitPattern,
+  keyCodec: budgetUnitKey,
   exampleKey: "concurrent_turns",
 });
 const stringRecord = recordOf(text, { maximum: 128 });
@@ -394,16 +394,17 @@ const disclosureCodec = unionOf([
   }),
   arrayOf(enumeration(["local", "approved-provider", "external"]), { maximum: 3, unique: true }),
 ]);
+const authorityPathCodec = unionOf([literal("."), relativePath]);
 const authorityCodec = objectCodec({
-  workspaceRoots: arrayOf(relativePath, { minimum: 1, maximum: 64, unique: true }),
-  sourcePaths: arrayOf(relativePath, { maximum: 256, unique: true }),
-  artifactPaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  workspaceRoots: arrayOf(authorityPathCodec, { minimum: 1, maximum: 64, unique: true }),
+  sourcePaths: arrayOf(authorityPathCodec, { maximum: 256, unique: true }),
+  artifactPaths: arrayOf(authorityPathCodec, { maximum: 256, unique: true }),
   actions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
   disclosure: disclosureCodec,
   expiresAt: timestamp,
   budget: numberRecord,
 }, {
-  deniedPaths: arrayOf(relativePath, { maximum: 256, unique: true }),
+  deniedPaths: arrayOf(authorityPathCodec, { maximum: 256, unique: true }),
   deniedActions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
 });
 
@@ -769,6 +770,17 @@ const providerActionResultCodec = objectCodec({
   executionCount: integer(),
   effectCount: integer(),
 }, { resultDigest: sha256 });
+const agentCustodyResultCodec = objectCodec({
+  agentId: identifier,
+  authorityId: identifier,
+  adapterId: identifier,
+  actionId: identifier,
+  providerSessionRef: identifier,
+  providerSessionGeneration: positiveInteger,
+  bridgeState: enumeration(["active", "none"]),
+  bridgeGeneration: positiveInteger,
+  evidenceDigest: sha256,
+});
 const budgetDimensionCodec = objectCodec({
   granted: integer(),
   reserved: integer(),
@@ -780,7 +792,7 @@ const budgetResultCodec = objectCodec({
   budgetId: identifier,
   parentBudgetId: nullable(identifier),
   state: enumeration(["active", "usage-unknown", "released"]),
-  dimensions: recordOf(budgetDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern }),
+  dimensions: recordOf(budgetDimensionCodec, { maximum: 128, keyCodec: budgetUnitKey }),
   returned: numberRecord,
 });
 const teamResultCodec = objectCodec({
@@ -798,7 +810,7 @@ const teamResultCodec = objectCodec({
   discussionGroups: arrayOf(discussionGroupCodec, { maximum: 64 }),
   reservedBudget: numberRecord,
 }, {
-  leader: objectCodec({ agentId: identifier, authorityId: identifier, capability: secret }),
+  leader: objectCodec({ agentId: identifier, authorityId: identifier }),
   rootTask: taskResultCodec,
   initialMemberAgentIds: stringList,
 });
@@ -1925,6 +1937,16 @@ const teamCreateLegacyCodec = objectCodec({
 });
 const teamCreateCodec = unionOf([teamCreateStructuredCodec, teamCreateLegacyCodec]);
 
+const agentListResultCodec = objectCodec({
+  agents: arrayOf(objectCodec({
+    agentId: identifier,
+    parentAgentId: nullable(identifier),
+    lifecycle: text,
+    bridgeState: enumeration(["active", "none", "lost"]),
+    bridgeGeneration: positiveInteger,
+  }), { maximum: 256 }),
+});
+
 const deliveryItemCodec = objectCodec({
   deliveryId: identifier,
   messageId: identifier,
@@ -2059,7 +2081,7 @@ function semanticFieldCodec(
   if (field === "evidence" && operation === FABRIC_OPERATIONS.recoverWriteLease) return recoveryEvidenceCodec;
   if (field === "payload" || field === "result") return jsonValue;
   if (field === "detail") return stringRecord;
-  if (field === "leader") return direction === "input" ? teamLeaderCodec : objectCodec({ agentId: identifier, authorityId: identifier, capability: secret });
+  if (field === "leader") return direction === "input" ? teamLeaderCodec : objectCodec({ agentId: identifier, authorityId: identifier });
   if (field === "rootTask") return direction === "input" ? rootTaskInputCodec : taskResultCodec;
   if (field === "initialMembers") return arrayOf(teamMemberCodec, { maximum: 5 });
   if (field === "discussionGroups") return arrayOf(discussionGroupCodec, { maximum: 64 });
@@ -2098,16 +2120,16 @@ function semanticFieldCodec(
   if (field === "observedUsage") return recordOf(unionOf([integer(), literal("unknown")]), {
     minimum: 1,
     maximum: 128,
-    keyPattern: resourceUnitPattern,
+    keyCodec: budgetUnitKey,
     exampleKey: "concurrent_turns",
   });
   if (field === "dimensions") return direction === "input"
     ? nonEmptyNumberRecord
-    : recordOf(budgetDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern });
+    : recordOf(budgetDimensionCodec, { maximum: 128, keyCodec: budgetUnitKey });
   if (field === "returned") return numberRecord;
   if (field === "capacity") return operation === FABRIC_OPERATIONS.projectionSnapshot
     ? projectionFact(jsonRecord)
-    : recordOf(resourceDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern });
+    : recordOf(resourceDimensionCodec, { maximum: 128, keyCodec: budgetUnitKey });
   if (field === "checkedGateRevisions") return recordOf(positiveInteger, { maximum: 128 });
   if (field === "task") return taskRequestTaskCodec;
   if (field === "reply") return replyCodec;
@@ -2249,7 +2271,7 @@ const resourceReservationResultCodec = objectCodec({
   state: enumeration(["active", "released", "ambiguous", "reconciled"]),
   path: arrayOf(resourceScopeCodec, { minimum: 2, maximum: 5 }),
   amounts: nonEmptyNumberRecord,
-  capacity: recordOf(resourceDimensionCodec, { maximum: 128, keyPattern: resourceUnitPattern }),
+  capacity: recordOf(resourceDimensionCodec, { maximum: 128, keyCodec: budgetUnitKey }),
 });
 
 export type OperationCodecPair = {
@@ -2332,11 +2354,15 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
 
 function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationResultCodec;
+  if (operation === FABRIC_OPERATIONS.spawnAgent || operation === FABRIC_OPERATIONS.attachAgent) {
+    return agentCustodyResultCodec;
+  }
   if (taskResultOperations.has(operation)) return taskResultCodec;
   if (leaseResultOperations.has(operation)) return leaseResultCodec;
   if (lifecycleResultOperations.has(operation)) return lifecycleResultCodec;
   if (providerActionResultOperations.has(operation)) return providerActionResultCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamResultCodec;
+  if (operation === FABRIC_OPERATIONS.listAgents) return agentListResultCodec;
   if (teamResultOperations.has(operation)) return visibleTeamResultCodec;
   if (budgetResultOperations.has(operation)) return budgetResultCodec;
   if (([

@@ -8,6 +8,9 @@ import {
   parseProjectSessionLaunchCurrentState,
   parseArtifactRef,
   parseProviderActionRefV1,
+  parseOperationResult,
+  FABRIC_OPERATIONS,
+  type AgentCustodyResult,
   type ProjectSessionLaunchCurrentState,
   type ProjectSessionLaunchIntent,
   type ProviderActionRefV1,
@@ -262,6 +265,54 @@ type LaunchCustodyServiceOptions = Readonly<{
       attestationChallengeDigest: Digest;
     }>): Promise<unknown>;
   };
+  agentEffects?: {
+    dispatch(handle: AgentDispatchHandle): Promise<unknown>;
+    attachWithoutBridge(handle: AgentDispatchHandle): Promise<unknown>;
+    lookup(input: Readonly<{ adapterId: string; actionId: string }>): Promise<unknown>;
+    hasRetainedBridge(result: AgentCustodyResult, handle: AgentDispatchHandle): boolean;
+  };
+  daemonInstanceGeneration?: () => number;
+}>;
+
+export type AgentBridgeContract = Readonly<{
+  schemaVersion: 1;
+  method: "provision_agent";
+  operations: readonly ("spawn" | "attach")[];
+  secretTransport: "private-handoff";
+  bridgeContract: "agent-fabric-session-bridge-v1";
+  generationBound: true;
+  providerOriginatedActivation: true;
+}>;
+
+export type AgentCustodyInput = Readonly<{
+  runId: string;
+  actorAgentId: string;
+  operation: "spawn" | "attach";
+  agentId: string;
+  authorityId: string;
+  adapterId: string;
+  actionId: string;
+  payload: Record<string, unknown>;
+  providerSessionRef?: string;
+  bridgeContract?: AgentBridgeContract;
+}>;
+
+export type AgentDispatchHandle = Readonly<{
+  schemaVersion: 1;
+  runId: string;
+  operation: "spawn" | "attach";
+  actorAgentId: string;
+  targetAgentId: string;
+  authorityId: string;
+  adapterId: string;
+  actionId: string;
+  publicPayload: Record<string, unknown>;
+  requestedProviderSessionRef?: string;
+  bridgeCapable: boolean;
+  bridgeContractDigest: Digest;
+  bridgeGeneration: number;
+  capability?: string;
+  socketPath?: string;
 }>;
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
@@ -610,7 +661,11 @@ export class LaunchCustodyService {
   readonly #fabricSocketPath: string;
   readonly #adapterContracts: LaunchCustodyServiceOptions["adapterContracts"];
   readonly #adapterEffects: LaunchCustodyServiceOptions["adapterEffects"];
+  readonly #agentEffects: LaunchCustodyServiceOptions["agentEffects"];
+  readonly #daemonInstanceGeneration: () => number;
   readonly #consumedHandles = new Set<string>();
+  readonly #consumedAgentHandles = new Set<string>();
+  readonly #agentInFlight = new Map<string, Promise<AgentCustodyResult>>();
 
   constructor(options: LaunchCustodyServiceOptions) {
     this.#database = options.database;
@@ -621,7 +676,535 @@ export class LaunchCustodyService {
     this.#fabricSocketPath = options.fabricSocketPath;
     this.#adapterContracts = options.adapterContracts;
     this.#adapterEffects = options.adapterEffects;
+    this.#agentEffects = options.agentEffects;
+    this.#daemonInstanceGeneration = options.daemonInstanceGeneration ?? (() => 1);
     if (!isAbsolute(this.#fabricSocketPath)) throw new TypeError("Fabric socket path must be absolute");
+  }
+
+  async provisionAgent(input: AgentCustodyInput): Promise<AgentCustodyResult> {
+    const key = `${input.adapterId}\0${input.actionId}`;
+    const existing = this.#agentInFlight.get(key);
+    if (existing !== undefined) return await existing;
+    const work = this.#provisionAgentOnce(input);
+    this.#agentInFlight.set(key, work);
+    try {
+      return await work;
+    } finally {
+      if (this.#agentInFlight.get(key) === work) this.#agentInFlight.delete(key);
+    }
+  }
+
+  async #provisionAgentOnce(input: AgentCustodyInput): Promise<AgentCustodyResult> {
+    if (input.operation === "spawn" && input.bridgeContract === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "adapter cannot provision a retained child bridge");
+    }
+    if (
+      input.bridgeContract !== undefined &&
+      !input.bridgeContract.operations.includes(input.operation)
+    ) {
+      if (input.operation === "spawn") {
+        throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "adapter cannot provision a spawn bridge");
+      }
+    }
+    const prepared = this.#database.transaction(() => this.prepareAgentInTransaction(input))();
+    if (prepared.kind === "replay") return prepared.result;
+    return await this.dispatchPreparedAgent(prepared.handle);
+  }
+
+  prepareAgentInTransaction(input: AgentCustodyInput):
+    | { kind: "dispatch"; handle: AgentDispatchHandle }
+    | { kind: "replay"; result: AgentCustodyResult } {
+    if (!this.#database.inTransaction) throw new Error("agent custody preparation requires a transaction");
+    const bridgeCapable = input.bridgeContract?.operations.includes(input.operation) === true;
+    const bridgeContractDigest = `sha256:${sha256(canonicalJson(
+      input.bridgeContract ?? { schemaVersion: 1, kind: "bridge-unavailable", adapterId: input.adapterId },
+    ))}` as Digest;
+    const intentDigest = `sha256:${sha256(canonicalJson({
+      runId: input.runId,
+      actorAgentId: input.actorAgentId,
+      operation: input.operation,
+      agentId: input.agentId,
+      authorityId: input.authorityId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+      payload: input.payload,
+      providerSessionRef: input.providerSessionRef ?? null,
+      bridgeContractDigest,
+      bridgeCapable,
+    }))}` as Digest;
+    const existing = this.#database.prepare(`
+      SELECT c.intent_digest, p.status, p.result_json,
+             b.bridge_state, b.bridge_generation
+        FROM provider_agent_custody c
+        JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+        LEFT JOIN agent_bridge_state b ON b.run_id=c.run_id AND b.agent_id=c.target_agent_id
+       WHERE c.adapter_id=? AND c.action_id=?
+    `).get(input.adapterId, input.actionId);
+    if (isRow(existing)) {
+      if (existing.intent_digest !== intentDigest) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "agent custody action was reused with changed input");
+      }
+      if (existing.status === "terminal" && typeof existing.result_json === "string") {
+        const stored: unknown = JSON.parse(existing.result_json);
+        if (isRow(stored) && stored.kind === "agent-custody-pre-dispatch-no-effect") {
+          throw new ProjectFabricCoreError(
+            "CONTEXT_UNRECONCILED",
+            "agent custody was proved not dispatched before daemon restart",
+          );
+        }
+        const parsed = parseOperationResult(
+          input.operation === "spawn" ? FABRIC_OPERATIONS.spawnAgent : FABRIC_OPERATIONS.attachAgent,
+          stored,
+        );
+        if (
+          isRow(parsed) && parsed.bridgeState === "active" &&
+          (
+            existing.bridge_state !== "active" ||
+            existing.bridge_generation !== parsed.bridgeGeneration
+          )
+        ) {
+          throw new ProjectFabricCoreError(
+            "CONTEXT_UNRECONCILED",
+            "agent custody result outlived its retained provider bridge",
+          );
+        }
+        return { kind: "replay", result: parsed as AgentCustodyResult };
+      }
+      throw new ProjectFabricCoreError("CONFLICT", "agent custody action is already in progress");
+    }
+
+    const actor = row(this.#database.prepare(`
+      SELECT authority_id FROM agents WHERE run_id=? AND agent_id=?
+    `).get(input.runId, input.actorAgentId), "agent custody actor");
+    const authority = row(this.#database.prepare(`
+      SELECT parent_authority_id, authority_json FROM authorities
+       WHERE run_id=? AND authority_id=?
+    `).get(input.runId, input.authorityId), "agent custody authority");
+    if (authority.parent_authority_id !== actor.authority_id) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "actor cannot provision this agent authority");
+    }
+    const authorityValue = JSON.parse(text(authority, "authority_json")) as unknown;
+    if (!isRow(authorityValue) || typeof authorityValue.expiresAt !== "string") {
+      throw new Error("agent custody authority is invalid");
+    }
+    const expiresAt = Date.parse(authorityValue.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= this.#clock()) {
+      throw new ProjectFabricCoreError("CAPABILITY_EXPIRED", "agent custody authority is expired");
+    }
+
+    const currentAgent = this.#database.prepare(`
+      SELECT parent_agent_id, authority_id FROM agents WHERE run_id=? AND agent_id=?
+    `).get(input.runId, input.agentId);
+    if (isRow(currentAgent)) {
+      if (currentAgent.parent_agent_id !== input.actorAgentId || currentAgent.authority_id !== input.authorityId) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "agent identity was reused with changed authority");
+      }
+    } else {
+      this.#database.prepare(`
+        INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref)
+        VALUES (?, ?, ?, ?, NULL)
+      `).run(input.runId, input.agentId, input.actorAgentId, input.authorityId);
+      this.#database.prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
+        .run(input.runId, input.agentId);
+    }
+    this.#fault("agent:prepare:identity");
+
+    const priorBridge = this.#database.prepare(`
+      SELECT bridge_generation, bridge_state FROM agent_bridge_state WHERE run_id=? AND agent_id=?
+    `).get(input.runId, input.agentId);
+    if (isRow(priorBridge) && (priorBridge.bridge_state === "active" || priorBridge.bridge_state === "pending")) {
+      throw new ProjectFabricCoreError("CONFLICT", "agent already has an active or pending provider bridge");
+    }
+    const bridgeGeneration = !isRow(priorBridge)
+      ? 1
+      : priorBridge.bridge_state === "lost"
+        ? integer(priorBridge, "bridge_generation")
+        : integer(priorBridge, "bridge_generation") + 1;
+    let capability: string | undefined;
+    let capabilityHash: string | null = null;
+    let principalGeneration: number | null = null;
+    if (bridgeCapable) {
+      principalGeneration = integer(row(this.#database.prepare(`
+        SELECT COALESCE(MAX(principal_generation), 0) + 1 AS generation
+          FROM capabilities WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId), "agent principal generation"), "generation");
+      capability = this.#randomCapability();
+      if (!/^afc_[A-Za-z0-9_-]{32,}$/u.test(capability)) {
+        throw new Error("random agent capability has invalid format");
+      }
+      capabilityHash = sha256(capability);
+      this.#database.prepare(`
+        UPDATE capabilities SET revoked_at=?
+         WHERE run_id=? AND agent_id=? AND revoked_at IS NULL
+      `).run(this.#clock(), input.runId, input.agentId);
+      this.#database.prepare(`
+        INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(capabilityHash, input.runId, input.agentId, principalGeneration, expiresAt);
+    }
+    this.#fault("agent:prepare:capability");
+
+    const publicPayload = {
+      schemaVersion: 1,
+      operation: input.operation,
+      actorAgentId: input.actorAgentId,
+      targetAgentId: input.agentId,
+      authorityId: input.authorityId,
+      bridgeGeneration,
+      bridgeContractDigest,
+      payload: input.payload,
+      ...(input.providerSessionRef === undefined ? {} : { providerSessionRef: input.providerSessionRef }),
+    };
+    const payloadJson = canonicalJson(publicPayload);
+    this.#database.prepare(`
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, result_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, 'prepared', '["prepared"]', 0, 0, 0, NULL, ?)
+    `).run(
+      input.runId,
+      input.actionId,
+      input.adapterId,
+      input.operation,
+      input.agentId,
+      sha256(canonicalJson({ input: publicPayload, intentDigest })),
+      sha256(payloadJson),
+      payloadJson,
+      this.#clock(),
+    );
+    this.#fault("agent:prepare:action");
+    this.#database.prepare(`
+      INSERT INTO provider_agent_custody(
+        run_id, action_id, operation, actor_agent_id, target_agent_id, authority_id,
+        adapter_id, bridge_contract_digest, bridge_capable, capability_hash,
+        capability_expires_at, principal_generation, requested_provider_session_ref,
+        intent_digest, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.runId,
+      input.actionId,
+      input.operation,
+      input.actorAgentId,
+      input.agentId,
+      input.authorityId,
+      input.adapterId,
+      bridgeContractDigest,
+      bridgeCapable ? 1 : 0,
+      capabilityHash,
+      bridgeCapable ? expiresAt : null,
+      principalGeneration,
+      input.providerSessionRef ?? null,
+      intentDigest,
+      this.#clock(),
+    );
+    this.#fault("agent:prepare:custody");
+    const bridgeValues = [
+      input.runId,
+      input.agentId,
+      input.adapterId,
+      input.actionId,
+      bridgeCapable ? "pending" : "none",
+      bridgeGeneration,
+      capabilityHash,
+      this.#clock(),
+      this.#clock(),
+    ];
+    this.#database.prepare(`
+      INSERT INTO agent_bridge_state(
+        run_id, agent_id, adapter_id, action_id, provider_session_ref,
+        provider_session_generation, bridge_state, bridge_generation,
+        capability_hash, activation_evidence_digest, revision, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, 1, ?, ?)
+      ON CONFLICT(run_id, agent_id) DO UPDATE SET
+        adapter_id=excluded.adapter_id,
+        action_id=excluded.action_id,
+        provider_session_ref=NULL,
+        provider_session_generation=NULL,
+        bridge_state=excluded.bridge_state,
+        bridge_generation=excluded.bridge_generation,
+        capability_hash=excluded.capability_hash,
+        activation_evidence_digest=NULL,
+        revision=agent_bridge_state.revision+1,
+        updated_at=excluded.updated_at
+    `).run(...bridgeValues);
+    this.#fault("agent:prepare:bridge-state");
+    return {
+      kind: "dispatch",
+      handle: {
+        schemaVersion: 1,
+        runId: input.runId,
+        operation: input.operation,
+        actorAgentId: input.actorAgentId,
+        targetAgentId: input.agentId,
+        authorityId: input.authorityId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        publicPayload: input.payload,
+        ...(input.providerSessionRef === undefined ? {} : { requestedProviderSessionRef: input.providerSessionRef }),
+        bridgeCapable,
+        bridgeContractDigest,
+        bridgeGeneration,
+        ...(capability === undefined ? {} : { capability, socketPath: this.#fabricSocketPath }),
+      },
+    };
+  }
+
+  async dispatchPreparedAgent(handle: AgentDispatchHandle): Promise<AgentCustodyResult> {
+    if (this.#agentEffects === undefined) throw new Error("agent custody effects are unavailable");
+    const key = `${handle.adapterId}\0${handle.actionId}`;
+    if (this.#consumedAgentHandles.has(key)) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "agent custody handoff is one-use");
+    }
+    const changed = this.#database.prepare(`
+      UPDATE provider_actions
+         SET status='dispatched', history_json='["prepared","dispatched"]',
+             execution_count=1, journal_revision=journal_revision+1, updated_at=?
+       WHERE adapter_id=? AND action_id=? AND status='prepared'
+         AND EXISTS (
+           SELECT 1 FROM provider_agent_custody c
+            WHERE c.adapter_id=provider_actions.adapter_id
+              AND c.action_id=provider_actions.action_id
+              AND c.bridge_contract_digest=?
+         )
+    `).run(this.#clock(), handle.adapterId, handle.actionId, handle.bridgeContractDigest);
+    if (changed.changes !== 1) throw new ProjectFabricCoreError("CONFLICT", "agent action is not prepared");
+    this.#consumedAgentHandles.add(key);
+    try {
+      const raw = handle.bridgeCapable
+        ? await this.#agentEffects.dispatch(handle)
+        : await this.#agentEffects.attachWithoutBridge(handle);
+      const result = this.#normaliseAgentResult(handle, raw);
+      if (handle.bridgeCapable && !this.#agentEffects.hasRetainedBridge(result, handle)) {
+        throw new ProjectFabricCoreError("CONTEXT_UNRECONCILED", "agent provider bridge was not retained");
+      }
+      this.#database.transaction(() => this.#activateAgent(handle, result))();
+      if (handle.bridgeCapable && !this.#agentEffects.hasRetainedBridge(result, handle)) {
+        this.observeChildBridgeLoss({
+          runId: handle.runId,
+          agentId: result.agentId,
+          adapterId: result.adapterId,
+          actionId: result.actionId,
+          providerSessionRef: result.providerSessionRef,
+          providerSessionGeneration: result.providerSessionGeneration,
+          bridgeGeneration: result.bridgeGeneration,
+          reason: "retained child bridge closed during activation commit",
+        });
+        throw new ProjectFabricCoreError("CONTEXT_UNRECONCILED", "agent provider bridge was lost during activation");
+      }
+      return result;
+    } catch (error: unknown) {
+      const evidence = `sha256:${sha256(canonicalJson({
+        code: error instanceof Error ? error.name : "agent-dispatch-error",
+        message: error instanceof Error ? error.message : String(error),
+      }))}`;
+      this.#database.transaction(() => this.#fenceUnprovenAgent(handle, evidence))();
+      throw new ProjectFabricCoreError(
+        "CONTEXT_UNRECONCILED",
+        "agent provider custody is ambiguous and requires lookup recovery",
+      );
+    }
+  }
+
+  #normaliseAgentResult(handle: AgentDispatchHandle, value: unknown): AgentCustodyResult {
+    if (!isRow(value)) protocol("agent adapter result must be an object");
+    const providerSessionRef = nonEmptyString(value.providerSessionRef, "agent provider session reference");
+    const providerSessionGeneration = positiveOutcomeInteger(value.providerSessionGeneration ?? 1);
+    const evidenceDigest = handle.bridgeCapable
+      ? exactDigest(value.activationEvidenceDigest, "agent activation evidence digest")
+      : (`sha256:${sha256(canonicalJson({
+          kind: "bridge-unavailable-attach",
+          adapterId: handle.adapterId,
+          actionId: handle.actionId,
+          providerSessionRef,
+          providerSessionGeneration,
+        }))}` as Digest);
+    const result = {
+      agentId: handle.targetAgentId,
+      authorityId: handle.authorityId,
+      adapterId: handle.adapterId,
+      actionId: handle.actionId,
+      providerSessionRef,
+      providerSessionGeneration,
+      bridgeState: handle.bridgeCapable ? "active" as const : "none" as const,
+      bridgeGeneration: handle.bridgeGeneration,
+      evidenceDigest,
+    };
+    return parseOperationResult(
+      handle.operation === "spawn" ? FABRIC_OPERATIONS.spawnAgent : FABRIC_OPERATIONS.attachAgent,
+      result,
+    ) as AgentCustodyResult;
+  }
+
+  #activateAgent(handle: AgentDispatchHandle, result: AgentCustodyResult): void {
+    const now = this.#clock();
+    const action = this.#database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal', history_json='["prepared","dispatched","accepted","terminal"]',
+             effect_count=1, idempotency_proven=1, provider_session_generation=?,
+             result_json=?, journal_revision=journal_revision+1, updated_at=?
+       WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+    `).run(
+      result.providerSessionGeneration,
+      canonicalJson(result),
+      now,
+      handle.adapterId,
+      handle.actionId,
+    );
+    if (action.changes !== 1) throw new ProjectFabricCoreError("CONFLICT", "agent action changed before activation");
+    this.#database.prepare(`
+      UPDATE agents SET provider_session_ref=?, lifecycle='ready'
+       WHERE run_id=? AND agent_id=?
+    `).run(result.providerSessionRef, handle.runId, handle.targetAgentId);
+    this.#database.prepare(`
+      INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256)
+      VALUES (?, ?, ?, NULL, NULL)
+      ON CONFLICT(run_id, agent_id) DO UPDATE SET
+        provider_session_generation=excluded.provider_session_generation,
+        context_revision=NULL,
+        reconciled_checkpoint_sha256=NULL
+    `).run(handle.runId, handle.targetAgentId, result.providerSessionGeneration);
+    this.#database.prepare(`
+      INSERT INTO agent_adapter_bindings(run_id, agent_id, adapter_id, bound_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(run_id, agent_id) DO UPDATE SET
+        adapter_id=excluded.adapter_id, bound_at=excluded.bound_at
+    `).run(handle.runId, handle.targetAgentId, handle.adapterId, now);
+    const bridge = this.#database.prepare(`
+      UPDATE agent_bridge_state
+         SET provider_session_ref=?, provider_session_generation=?, bridge_state=?,
+             capability_hash=CASE WHEN ?='active' THEN (
+               SELECT capability_hash FROM provider_agent_custody
+                WHERE adapter_id=? AND action_id=?
+             ) ELSE NULL END,
+             activation_evidence_digest=?, revision=revision+1, updated_at=?
+       WHERE run_id=? AND agent_id=? AND adapter_id=? AND action_id=?
+         AND bridge_generation=? AND bridge_state IN ('pending','none')
+    `).run(
+      result.providerSessionRef,
+      result.providerSessionGeneration,
+      result.bridgeState,
+      result.bridgeState,
+      handle.adapterId,
+      handle.actionId,
+      result.bridgeState === "active" ? result.evidenceDigest : null,
+      now,
+      handle.runId,
+      handle.targetAgentId,
+      handle.adapterId,
+      handle.actionId,
+      handle.bridgeGeneration,
+    );
+    if (bridge.changes !== 1) throw new ProjectFabricCoreError("CONFLICT", "agent bridge changed before activation");
+  }
+
+  #fenceUnprovenAgent(handle: AgentDispatchHandle, evidenceDigest: string): void {
+    const now = this.#clock();
+    const custody = this.#database.prepare(`
+      SELECT capability_hash FROM provider_agent_custody WHERE adapter_id=? AND action_id=?
+    `).get(handle.adapterId, handle.actionId);
+    if (isRow(custody) && typeof custody.capability_hash === "string") {
+      this.#database.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
+        .run(now, custody.capability_hash);
+    }
+    this.#database.prepare(`
+      UPDATE agent_bridge_state
+         SET bridge_state='none', capability_hash=NULL, activation_evidence_digest=NULL,
+             revision=revision+1, updated_at=?
+       WHERE run_id=? AND agent_id=? AND adapter_id=? AND action_id=? AND bridge_state='pending'
+    `).run(now, handle.runId, handle.targetAgentId, handle.adapterId, handle.actionId);
+    this.#database.prepare("UPDATE agents SET lifecycle='context-unreconciled' WHERE run_id=? AND agent_id=?")
+      .run(handle.runId, handle.targetAgentId);
+    this.#database.prepare(`
+      UPDATE provider_actions
+         SET status='ambiguous', history_json='["prepared","dispatched","ambiguous"]',
+             result_json=?, journal_revision=journal_revision+1, updated_at=?
+       WHERE adapter_id=? AND action_id=? AND status IN ('dispatched','accepted','ambiguous')
+    `).run(
+      canonicalJson({ schemaVersion: 1, kind: "agent-custody-ambiguous", evidenceDigest }),
+      now,
+      handle.adapterId,
+      handle.actionId,
+    );
+  }
+
+  observeChildBridgeLoss(input: Readonly<{
+    runId: string;
+    agentId: string;
+    adapterId: string;
+    actionId: string;
+    providerSessionRef: string;
+    providerSessionGeneration: number;
+    bridgeGeneration: number;
+    reason: string;
+  }>): void {
+    this.#database.transaction(() => this.#persistChildBridgeLoss(input))();
+  }
+
+  #persistChildBridgeLoss(input: Readonly<{
+    runId: string;
+    agentId: string;
+    adapterId: string;
+    actionId: string;
+    providerSessionRef: string;
+    providerSessionGeneration: number;
+    bridgeGeneration: number;
+    reason: string;
+  }>): boolean {
+    const state = this.#database.prepare(`
+      SELECT capability_hash
+        FROM agent_bridge_state
+       WHERE run_id=? AND agent_id=? AND adapter_id=? AND action_id=?
+         AND provider_session_ref=? AND provider_session_generation=?
+         AND bridge_generation=? AND bridge_state='active'
+    `).get(
+      input.runId,
+      input.agentId,
+      input.adapterId,
+      input.actionId,
+      input.providerSessionRef,
+      input.providerSessionGeneration,
+      input.bridgeGeneration,
+    );
+    if (!isRow(state)) return false;
+    const capabilityHash = text(state, "capability_hash");
+    const reason = input.reason.slice(0, 160) || "retained child bridge lost";
+    const evidenceDigest = `sha256:${sha256(canonicalJson({ ...input, reason }))}`;
+    const lossId = `child-loss:${sha256(`${input.runId}\0${input.agentId}\0${String(input.bridgeGeneration)}`).slice(0, 40)}`;
+    this.#database.prepare(`
+      INSERT OR IGNORE INTO child_bridge_losses(
+        loss_id, run_id, agent_id, adapter_id, action_id, provider_session_ref,
+        provider_session_generation, lost_bridge_generation, next_bridge_generation,
+        capability_hash, daemon_instance_generation, reason, evidence_digest, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      lossId,
+      input.runId,
+      input.agentId,
+      input.adapterId,
+      input.actionId,
+      input.providerSessionRef,
+      input.providerSessionGeneration,
+      input.bridgeGeneration,
+      input.bridgeGeneration + 1,
+      capabilityHash,
+      this.#daemonInstanceGeneration(),
+      reason,
+      evidenceDigest,
+      this.#clock(),
+    );
+    this.#database.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
+      .run(this.#clock(), capabilityHash);
+    this.#database.prepare(`
+      UPDATE agent_bridge_state
+         SET bridge_state='lost', bridge_generation=bridge_generation+1,
+             revision=revision+1, updated_at=?
+       WHERE run_id=? AND agent_id=? AND bridge_state='active' AND bridge_generation=?
+    `).run(this.#clock(), input.runId, input.agentId, input.bridgeGeneration);
+    this.#database.prepare("UPDATE agents SET lifecycle='context-unreconciled' WHERE run_id=? AND agent_id=?")
+      .run(input.runId, input.agentId);
+    return true;
   }
 
   async inspect(intent: LaunchCustodyIntent): Promise<LaunchInspection> {
@@ -1159,6 +1742,232 @@ export class LaunchCustodyService {
     throw new Error(`launch provider action has invalid status ${status}`);
   }
 
+  #agentDispatchHandle(custody: Row): AgentDispatchHandle {
+    const payloadValue: unknown = JSON.parse(text(custody, "payload_json"));
+    if (!isRow(payloadValue) || !isRow(payloadValue.payload)) {
+      throw new Error("agent custody payload is invalid");
+    }
+    const operation = text(custody, "operation");
+    if (operation !== "spawn" && operation !== "attach") throw new Error("agent custody operation is invalid");
+    const bridgeCapable = integer(custody, "bridge_capable") === 1;
+    return {
+      schemaVersion: 1,
+      runId: text(custody, "run_id"),
+      operation,
+      actorAgentId: text(custody, "actor_agent_id"),
+      targetAgentId: text(custody, "target_agent_id"),
+      authorityId: text(custody, "authority_id"),
+      adapterId: text(custody, "adapter_id"),
+      actionId: text(custody, "action_id"),
+      publicPayload: payloadValue.payload,
+      ...(typeof custody.requested_provider_session_ref === "string"
+        ? { requestedProviderSessionRef: custody.requested_provider_session_ref }
+        : {}),
+      bridgeCapable,
+      bridgeContractDigest: exactDigest(custody.bridge_contract_digest, "agent bridge contract digest"),
+      bridgeGeneration: integer(custody, "bridge_generation"),
+    };
+  }
+
+  #failPreparedAgent(custody: Row): void {
+    const now = this.#clock();
+    const adapterId = text(custody, "adapter_id");
+    const actionId = text(custody, "action_id");
+    const proof = {
+      schemaVersion: 1,
+      kind: "agent-custody-pre-dispatch-no-effect",
+      adapterId,
+      actionId,
+      observedAt: new Date(now).toISOString(),
+      executionCount: 0,
+    };
+    const changed = this.#database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal', history_json='["prepared","terminal"]',
+             execution_count=0, effect_count=0, idempotency_proven=1,
+             result_json=?, journal_revision=journal_revision+1, updated_at=?
+       WHERE adapter_id=? AND action_id=? AND status='prepared'
+    `).run(canonicalJson({ ...proof, evidenceDigest: jsonEvidenceDigest(proof) }), now, adapterId, actionId);
+    if (changed.changes !== 1) throw new ProjectFabricCoreError("CONFLICT", "prepared agent custody changed during recovery");
+    if (typeof custody.capability_hash === "string") {
+      this.#database.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
+        .run(now, custody.capability_hash);
+    }
+    this.#database.prepare(`
+      UPDATE agent_bridge_state
+         SET bridge_state='none', capability_hash=NULL, activation_evidence_digest=NULL,
+             revision=revision+1, updated_at=?
+       WHERE run_id=? AND agent_id=? AND adapter_id=? AND action_id=? AND bridge_state='pending'
+    `).run(
+      now,
+      text(custody, "run_id"),
+      text(custody, "target_agent_id"),
+      adapterId,
+      actionId,
+    );
+    this.#database.prepare("UPDATE agents SET lifecycle='context-unreconciled' WHERE run_id=? AND agent_id=?")
+      .run(text(custody, "run_id"), text(custody, "target_agent_id"));
+  }
+
+  #agentLookupResult(handle: AgentDispatchHandle, record: unknown): AgentCustodyResult {
+    const expectedOperation = handle.bridgeCapable ? "provision_agent" : "attach";
+    const expectedPayload = handle.bridgeCapable
+      ? {
+          schemaVersion: 1,
+          operation: handle.operation,
+          targetAgentId: handle.targetAgentId,
+          authorityId: handle.authorityId,
+          bridgeGeneration: handle.bridgeGeneration,
+          bridgeContractDigest: handle.bridgeContractDigest,
+          payload: handle.publicPayload,
+          ...(handle.requestedProviderSessionRef === undefined
+            ? {}
+            : { providerSessionRef: handle.requestedProviderSessionRef }),
+        }
+      : {
+          resumeReference: handle.requestedProviderSessionRef,
+          ...handle.publicPayload,
+        };
+    if (
+      !isRow(record) || record.actionId !== handle.actionId || record.status !== "terminal" ||
+      record.operation !== expectedOperation ||
+      record.payloadHash !== sha256(canonicalJson(expectedPayload)) ||
+      record.executionCount !== 1 || record.effectCount !== 1 || !isRow(record.result)
+    ) {
+      throw new Error("agent custody lookup is not a terminal one-effect record");
+    }
+    if (handle.bridgeCapable) {
+      const value = record.result;
+      if (
+        Object.keys(value).length !== 9 ||
+        value.schemaVersion !== 1 || value.adapterId !== handle.adapterId ||
+        value.actionId !== handle.actionId || value.targetAgentId !== handle.targetAgentId ||
+        value.bridgeGeneration !== handle.bridgeGeneration ||
+        value.bridgeContractDigest !== handle.bridgeContractDigest
+      ) throw new Error("agent custody lookup binding changed");
+      return this.#normaliseAgentResult(handle, value);
+    }
+    const resumeReference = record.result.resumeReference;
+    return this.#normaliseAgentResult(handle, {
+      providerSessionRef: typeof resumeReference === "string"
+        ? resumeReference
+        : handle.requestedProviderSessionRef,
+      providerSessionGeneration: record.result.providerSessionGeneration ?? 1,
+    });
+  }
+
+  async #recoverAgentCustody(result: {
+    preparedFailed: number;
+    lookedUp: number;
+    activated: number;
+    failed: number;
+    ambiguous: number;
+    recoveryRequired: number;
+  }): Promise<void> {
+    const prepared = this.#database.prepare(`
+      SELECT c.*, p.payload_json, b.bridge_generation
+        FROM provider_agent_custody c
+        JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+        JOIN agent_bridge_state b ON b.run_id=c.run_id AND b.agent_id=c.target_agent_id
+       WHERE p.status='prepared'
+       ORDER BY c.created_at, c.action_id
+    `).all().filter(isRow);
+    for (const custody of prepared) {
+      this.#database.transaction(() => this.#failPreparedAgent(custody))();
+      result.preparedFailed += 1;
+      result.failed += 1;
+    }
+
+    if (this.#agentEffects !== undefined) {
+      const observable = this.#database.prepare(`
+        SELECT c.*, p.payload_json, b.bridge_generation
+          FROM provider_agent_custody c
+          JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+          JOIN agent_bridge_state b ON b.run_id=c.run_id AND b.agent_id=c.target_agent_id
+         WHERE p.status IN ('dispatched','accepted','ambiguous')
+         ORDER BY c.created_at, c.action_id
+      `).all().filter(isRow);
+      for (const custody of observable) {
+        const handle = this.#agentDispatchHandle(custody);
+        let raw: unknown;
+        try {
+          raw = await this.#agentEffects.lookup({ adapterId: handle.adapterId, actionId: handle.actionId });
+          result.lookedUp += 1;
+          const custodyResult = this.#agentLookupResult(handle, raw);
+          this.#database.transaction(() => {
+            this.#activateAgent(handle, custodyResult);
+            if (
+              handle.bridgeCapable &&
+              !this.#agentEffects?.hasRetainedBridge(custodyResult, handle)
+            ) {
+              this.#persistChildBridgeLoss({
+                runId: handle.runId,
+                agentId: custodyResult.agentId,
+                adapterId: custodyResult.adapterId,
+                actionId: custodyResult.actionId,
+                providerSessionRef: custodyResult.providerSessionRef,
+                providerSessionGeneration: custodyResult.providerSessionGeneration,
+                bridgeGeneration: custodyResult.bridgeGeneration,
+                reason: "daemon restart found no retained child bridge",
+              });
+            }
+          })();
+          if (handle.bridgeCapable) result.recoveryRequired += 1;
+          else result.activated += 1;
+        } catch (error: unknown) {
+          const evidence = jsonEvidenceDigest({
+            kind: "agent-custody-lookup-incomplete",
+            adapterId: handle.adapterId,
+            actionId: handle.actionId,
+            error: error instanceof Error ? error.name : "lookup-error",
+          });
+          this.#database.transaction(() => this.#fenceUnprovenAgent(handle, evidence))();
+          result.ambiguous += 1;
+        }
+      }
+    }
+
+    const active = this.#database.prepare(`
+      SELECT c.*, p.payload_json, b.bridge_generation, b.provider_session_ref,
+             b.provider_session_generation, b.activation_evidence_digest
+        FROM agent_bridge_state b
+        JOIN provider_agent_custody c ON c.run_id=b.run_id AND c.action_id=b.action_id
+        JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+       WHERE b.bridge_state='active'
+       ORDER BY c.created_at, c.action_id
+    `).all().filter(isRow);
+    for (const custody of active) {
+      const handle = this.#agentDispatchHandle(custody);
+      const storedResult = parseOperationResult(
+        handle.operation === "spawn" ? FABRIC_OPERATIONS.spawnAgent : FABRIC_OPERATIONS.attachAgent,
+        {
+          agentId: handle.targetAgentId,
+          authorityId: handle.authorityId,
+          adapterId: handle.adapterId,
+          actionId: handle.actionId,
+          providerSessionRef: text(custody, "provider_session_ref"),
+          providerSessionGeneration: integer(custody, "provider_session_generation"),
+          bridgeState: "active",
+          bridgeGeneration: handle.bridgeGeneration,
+          evidenceDigest: exactDigest(custody.activation_evidence_digest, "agent activation evidence"),
+        },
+      ) as AgentCustodyResult;
+      if (!this.#agentEffects?.hasRetainedBridge(storedResult, handle)) {
+        this.#database.transaction(() => this.#persistChildBridgeLoss({
+          runId: handle.runId,
+          agentId: storedResult.agentId,
+          adapterId: storedResult.adapterId,
+          actionId: storedResult.actionId,
+          providerSessionRef: storedResult.providerSessionRef,
+          providerSessionGeneration: storedResult.providerSessionGeneration,
+          bridgeGeneration: storedResult.bridgeGeneration,
+          reason: "daemon restart found no retained child bridge",
+        }))();
+        result.recoveryRequired += 1;
+      }
+    }
+  }
+
   async recover(): Promise<LaunchRecoveryResult> {
     const result: {
       preparedFailed: number;
@@ -1175,6 +1984,7 @@ export class LaunchCustodyService {
       ambiguous: 0,
       recoveryRequired: 0,
     };
+    await this.#recoverAgentCustody(result);
     const prepared = this.#database.prepare(`
       SELECT c.*
         FROM project_session_launch_custody c

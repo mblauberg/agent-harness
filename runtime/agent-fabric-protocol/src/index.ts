@@ -17,6 +17,7 @@ export * from "./primitives.js";
 export * from "./project-session.js";
 export * from "./projection.js";
 export * from "./request-result.js";
+export * from "./resource-unit-keys.js";
 export * from "./resources.js";
 export * from "./rpc-contract.js";
 export * from "./schema.js";

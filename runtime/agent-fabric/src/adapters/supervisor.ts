@@ -6,8 +6,11 @@ import { assessAdapterModelPolicy } from "./model-selection.js";
 import { FabricError } from "../errors.js";
 import {
   chairLaunchChallengeDigest,
+  parseAgentProvisionProviderResult,
   parseChairLaunchProviderResult,
   ProviderAdapterError,
+  type AgentBridgeHandoff,
+  type AgentProvisionProviderResult,
   type ChairLaunchHandoff,
   type ChairLaunchProviderResult,
 } from "./providers/types.js";
@@ -29,6 +32,29 @@ export type AdapterChairLaunchRequest = {
   providerContractDigest: string;
   payload: Record<string, unknown>;
 };
+
+export type AdapterAgentProvisionRequest = {
+  schemaVersion: 1;
+  runId: string;
+  operation: "spawn" | "attach";
+  actionId: string;
+  targetAgentId: string;
+  authorityId: string;
+  bridgeGeneration: number;
+  bridgeContractDigest: string;
+  payload: Record<string, unknown>;
+  providerSessionRef?: string;
+};
+
+export type RetainedChildBridge = Readonly<{
+  runId: string;
+  agentId: string;
+  adapterId: string;
+  actionId: string;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+}>;
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 30_000;
 const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 30 * 60_000;
@@ -98,6 +124,20 @@ function isRetainedChairLoss(error: unknown, transport: AdapterProcessTransport)
   );
 }
 
+function isRetainedChildLoss(error: unknown, transport: AdapterProcessTransport): boolean {
+  return (
+    transport.closed ||
+    error instanceof AdapterTransportError ||
+    (error instanceof Error && [
+      "AGENT_BRIDGE_LOST",
+      "PROVIDER_CLOSED",
+      "PROVIDER_EXITED",
+      "PROVIDER_SPAWN_FAILED",
+      "PROVIDER_STDIN_FAILED",
+    ].includes(error.name))
+  );
+}
+
 function enforceModelPolicy(adapterId: string, definition: AdapterProcessDefinition, method: string, params: Record<string, unknown>): void {
   const policy = definition.modelPolicy;
   const payload = modelPayload(method, params);
@@ -124,6 +164,13 @@ export class AdapterSupervisor {
   readonly #knownChairSessions = new Map<string, number>();
   readonly #chairSessionByAction = new Map<string, string>();
   readonly #consumedChairHandoffHashes = new Set<string>();
+  readonly #childTransports = new Map<string, AdapterProcessTransport>();
+  readonly #knownChildSessions = new Map<string, number>();
+  readonly #childSessionByAction = new Map<string, string>();
+  readonly #childEntryBySession = new Map<string, RetainedChildBridge>();
+  readonly #lostChildSessions = new Set<string>();
+  readonly #consumedChildHandoffHashes = new Set<string>();
+  #childLossHandler: ((entry: RetainedChildBridge, reason: string) => void) | undefined;
   readonly #controlTimeoutMs: number;
   readonly #providerTurnTimeoutMs: number;
 
@@ -131,6 +178,10 @@ export class AdapterSupervisor {
     this.#definitions = definitions;
     this.#controlTimeoutMs = options.controlTimeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
     this.#providerTurnTimeoutMs = options.providerTurnTimeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
+  }
+
+  setChildBridgeLossHandler(handler: (entry: RetainedChildBridge, reason: string) => void): void {
+    this.#childLossHandler = handler;
   }
 
   async request(adapterId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -149,6 +200,21 @@ export class AdapterSupervisor {
     const actionChairKey = method === "lookup_action" && typeof params.actionId === "string"
       ? this.#chairSessionByAction.get(chairActionKey(adapterId, params.actionId))
       : undefined;
+    const actionChildKey = method === "lookup_action" && typeof params.actionId === "string"
+      ? this.#childSessionByAction.get(chairActionKey(adapterId, params.actionId))
+      : undefined;
+    const sessionChildKey = sessionRef === undefined ? undefined : chairTransportKey(adapterId, sessionRef);
+    if (sessionChildKey !== undefined && this.#lostChildSessions.has(sessionChildKey) && method !== "lookup_action") {
+      throw new ProviderAdapterError(
+        "AGENT_BRIDGE_LOST",
+        `${adapterId} child session cannot be resumed without a newly provisioned bridge`,
+      );
+    }
+    const childKey = actionChildKey ?? (
+      sessionChildKey !== undefined && this.#knownChildSessions.has(sessionChildKey)
+        ? sessionChildKey
+        : undefined
+    );
     if (sessionChairKey !== undefined && actionChairKey !== undefined && sessionChairKey !== actionChairKey) {
       throw new ProviderAdapterError(
         "STALE_LEASE_GENERATION",
@@ -182,7 +248,26 @@ export class AdapterSupervisor {
         `${adapterId} chair session cannot be resumed without its retained bridge`,
       );
     }
-    let transport = retainedChairTransport ?? this.#transports.get(adapterId);
+    const retainedChildTransport = childKey === undefined ? undefined : this.#childTransports.get(childKey);
+    const knownChildGeneration = childKey === undefined ? undefined : this.#knownChildSessions.get(childKey);
+    if (
+      childKey !== undefined && knownChildGeneration !== undefined &&
+      (retainedChildTransport === undefined || retainedChildTransport.closed)
+    ) {
+      this.#loseChildBridge(childKey, "retained child bridge is unavailable");
+      throw new ProviderAdapterError("AGENT_BRIDGE_LOST", `${adapterId} retained child bridge is unavailable`);
+    }
+    if (
+      knownChildGeneration !== undefined &&
+      requestedGenerations.length > 0 &&
+      requestedGenerations.some((generation) => generation !== knownChildGeneration)
+    ) {
+      throw new ProviderAdapterError(
+        "STALE_LEASE_GENERATION",
+        `${adapterId} child request does not match its retained provider-session generation`,
+      );
+    }
+    let transport = retainedChairTransport ?? retainedChildTransport ?? this.#transports.get(adapterId);
     if (transport === undefined || transport.closed) {
       if (retainedChairTransport?.closed === true && chairKey !== undefined) {
         this.#chairTransports.delete(chairKey);
@@ -199,11 +284,18 @@ export class AdapterSupervisor {
         this.#chairTransports.delete(chairKey);
         await transport.close().catch(() => undefined);
       }
+      if (retainedChildTransport !== undefined && childKey !== undefined && isReleaseRequest(method, params)) {
+        this.#removeChildBridge(childKey);
+        await transport.close().catch(() => undefined);
+      }
       return result;
     } catch (error: unknown) {
       if (retainedChairTransport !== undefined && chairKey !== undefined) {
         if (!isRetainedChairLoss(error, transport)) throw error;
         this.#chairTransports.delete(chairKey);
+      } else if (retainedChildTransport !== undefined && childKey !== undefined) {
+        if (!isRetainedChildLoss(error, transport)) throw error;
+        this.#loseChildBridge(childKey, error instanceof Error ? error.message : "retained child bridge lost");
       } else {
         this.#transports.delete(adapterId);
       }
@@ -212,6 +304,113 @@ export class AdapterSupervisor {
         throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} retained chair bridge was lost`);
       }
       throw error;
+    }
+  }
+
+  async provisionAgent(
+    adapterId: string,
+    request: AdapterAgentProvisionRequest,
+    handoff: AgentBridgeHandoff,
+  ): Promise<AgentProvisionProviderResult> {
+    const definition = this.#definitions[adapterId];
+    if (definition === undefined) throw new Error(`adapter is not configured: ${adapterId}`);
+    if (
+      typeof handoff.capability !== "string" || handoff.capability.length === 0 ||
+      typeof handoff.socketPath !== "string" || !isAbsolute(handoff.socketPath)
+    ) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "agent bridge private handoff is invalid");
+    }
+    enforceModelPolicy(adapterId, definition, request.operation, { payload: request.payload });
+    const handoffHash = createHash("sha256").update(handoff.capability).digest("hex");
+    if (this.#consumedChildHandoffHashes.has(handoffHash)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "agent bridge private handoff was already consumed");
+    }
+    this.#consumedChildHandoffHashes.add(handoffHash);
+    const transport = new AdapterProcessTransport({
+      ...definition,
+      environment: {
+        ...definition.environment,
+        AGENT_FABRIC_HANDOFF_KIND: "agent",
+        AGENT_FABRIC_CAPABILITY: handoff.capability,
+        AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+      },
+    });
+    try {
+      const publicRequest = {
+        schemaVersion: request.schemaVersion,
+        operation: request.operation,
+        actionId: request.actionId,
+        targetAgentId: request.targetAgentId,
+        authorityId: request.authorityId,
+        bridgeGeneration: request.bridgeGeneration,
+        bridgeContractDigest: request.bridgeContractDigest,
+        payload: request.payload,
+        ...(request.providerSessionRef === undefined ? {} : { providerSessionRef: request.providerSessionRef }),
+      };
+      const result = parseAgentProvisionProviderResult(
+        await transport.request("provision_agent", publicRequest, { timeoutMs: this.#providerTurnTimeoutMs }),
+        {
+          adapterId,
+          actionId: request.actionId,
+          targetAgentId: request.targetAgentId,
+          bridgeGeneration: request.bridgeGeneration,
+          bridgeContractDigest: request.bridgeContractDigest,
+        },
+      );
+      await transport.request("capabilities", {}, { timeoutMs: this.#controlTimeoutMs });
+      if (transport.closed) throw new ProviderAdapterError("AGENT_BRIDGE_LOST", "agent bridge closed before retention");
+      const key = chairTransportKey(adapterId, result.providerSessionRef);
+      if (this.#childTransports.has(key) || this.#chairTransports.has(key)) {
+        throw new ProviderAdapterError("AGENT_BRIDGE_CONFLICT", "provider session already has a retained bridge");
+      }
+      const entry: RetainedChildBridge = Object.freeze({
+        runId: request.runId,
+        agentId: request.targetAgentId,
+        adapterId,
+        actionId: request.actionId,
+        providerSessionRef: result.providerSessionRef,
+        providerSessionGeneration: result.providerSessionGeneration,
+        bridgeGeneration: result.bridgeGeneration,
+      });
+      this.#childTransports.set(key, transport);
+      this.#lostChildSessions.delete(key);
+      this.#knownChildSessions.set(key, result.providerSessionGeneration);
+      this.#childSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
+      this.#childEntryBySession.set(key, entry);
+      transport.onClose(() => {
+        if (this.#childTransports.get(key) === transport) this.#loseChildBridge(key, "retained adapter transport closed");
+      });
+      return result;
+    } catch (error: unknown) {
+      await transport.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  hasRetainedChildBridge(entry: RetainedChildBridge): boolean {
+    const key = chairTransportKey(entry.adapterId, entry.providerSessionRef);
+    const current = this.#childEntryBySession.get(key);
+    return current !== undefined && current.actionId === entry.actionId &&
+      current.runId === entry.runId && current.agentId === entry.agentId &&
+      current.providerSessionGeneration === entry.providerSessionGeneration &&
+      current.bridgeGeneration === entry.bridgeGeneration &&
+      this.#childTransports.get(key)?.closed === false;
+  }
+
+  #removeChildBridge(key: string): void {
+    const entry = this.#childEntryBySession.get(key);
+    this.#childTransports.delete(key);
+    this.#knownChildSessions.delete(key);
+    this.#childEntryBySession.delete(key);
+    if (entry !== undefined) this.#childSessionByAction.delete(chairActionKey(entry.adapterId, entry.actionId));
+  }
+
+  #loseChildBridge(key: string, reason: string): void {
+    const entry = this.#childEntryBySession.get(key);
+    this.#removeChildBridge(key);
+    if (entry !== undefined) {
+      this.#lostChildSessions.add(key);
+      this.#childLossHandler?.(entry, reason);
     }
   }
 
@@ -246,6 +445,7 @@ export class AdapterSupervisor {
       ...definition,
       environment: {
         ...definition.environment,
+        AGENT_FABRIC_HANDOFF_KIND: "chair",
         AGENT_FABRIC_CAPABILITY: handoff.capability,
         AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
         AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.attestationChallenge,
@@ -281,9 +481,11 @@ export class AdapterSupervisor {
   }
 
   async close(): Promise<void> {
-    const transports = [...new Set([...this.#transports.values(), ...this.#chairTransports.values()])];
+    const transports = [...new Set([...this.#transports.values(), ...this.#chairTransports.values(), ...this.#childTransports.values()])];
     this.#transports.clear();
     this.#chairTransports.clear();
+    this.#lostChildSessions.clear();
+    for (const key of [...this.#childTransports.keys()]) this.#removeChildBridge(key);
     await Promise.allSettled(transports.map((transport) => transport.close()));
   }
 }

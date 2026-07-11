@@ -146,8 +146,14 @@ export class ProviderSessionCoordinator {
        WHERE g.run_id = ? AND g.agent_id = ?
     `).get(input.runId, input.agentId);
     if (!isRow(existing)) return;
-    const same = existing.parent_agent_id === input.actorAgentId &&
-      existing.authority_id === input.authorityId &&
+    const sameIdentity = existing.parent_agent_id === input.actorAgentId &&
+      existing.authority_id === input.authorityId;
+    if (
+      sameIdentity &&
+      existing.provider_session_ref === null &&
+      existing.adapter_id === null
+    ) return;
+    const same = sameIdentity &&
       (input.providerSessionRef === undefined || existing.provider_session_ref === input.providerSessionRef) &&
       existing.adapter_id === input.adapterId;
     if (!same) {

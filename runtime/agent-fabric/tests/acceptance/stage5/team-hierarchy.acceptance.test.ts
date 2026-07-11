@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { join } from "node:path";
 
 import { callTool, createMcpFixture } from "../../support/mcp-testkit.ts";
 import {
   createStage5TeamFixture,
   createTeam,
-  requireRecord,
+  issueTeamLeaderCapability,
   teamAuthority,
   teamCreateInput,
 } from "../../support/stage5-team-testkit.ts";
@@ -22,7 +24,6 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
         leader: {
           agentId: "team-alpha-leader",
           authorityId: expect.any(String),
-          capability: expect.any(String),
         },
         rootTask: {
           taskId: "team-alpha-root-task",
@@ -41,14 +42,22 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
         }],
         reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
       });
+      expect(result.leader).not.toHaveProperty("capability");
+
+      const database = new Database(join(fixture.directory, "fabric.sqlite3"), { readonly: true });
+      try {
+        expect(database.prepare("SELECT COUNT(*) AS count FROM capabilities").get()).toEqual({ count: 1 });
+      } finally {
+        database.close();
+      }
 
       const status = await fixture.chair.getRunStatus({ runId: fixture.run.runId });
       expect(status.counts).toMatchObject({ agents: 4, tasks: 1 });
       const agents = await fixture.chair.listAgents({ runId: fixture.run.runId });
       expect(agents.agents).toEqual(expect.arrayContaining([
-        expect.objectContaining({ agentId: "team-alpha-leader", parentAgentId: "chair" }),
-        expect.objectContaining({ agentId: "team-alpha-worker-a", parentAgentId: "team-alpha-leader" }),
-        expect.objectContaining({ agentId: "team-alpha-worker-b", parentAgentId: "team-alpha-leader" }),
+        expect.objectContaining({ agentId: "team-alpha-leader", parentAgentId: "chair", bridgeState: "none" }),
+        expect.objectContaining({ agentId: "team-alpha-worker-a", parentAgentId: "team-alpha-leader", bridgeState: "none" }),
+        expect.objectContaining({ agentId: "team-alpha-worker-b", parentAgentId: "team-alpha-leader", bridgeState: "none" }),
       ]));
     } finally {
       await fixture.fabric.close();
@@ -127,12 +136,7 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
     const fixture = await createStage5TeamFixture("run-stage5-team-depth");
     try {
       const levelOne = await createTeam(fixture.chair, teamCreateInput({ teamId: "team-level-1", memberAuthorities: [] }));
-      const leaderOne = requireRecord(levelOne.leader, "level-one leader");
-      const leaderOneCapability = leaderOne.capability;
-      expect(typeof leaderOneCapability).toBe("string");
-      if (typeof leaderOneCapability !== "string") {
-        throw new TypeError("level-one leader capability is missing");
-      }
+      const leaderOneCapability = await issueTeamLeaderCapability(fixture.chair, levelOne);
       const levelOneClient = fixture.fabric.connect(leaderOneCapability);
       const levelTwo = await createTeam(levelOneClient, teamCreateInput({
         teamId: "team-level-2",
@@ -143,12 +147,7 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
       }));
       expect(levelTwo).toMatchObject({ parentTeamId: "team-level-1", depth: 2 });
 
-      const leaderTwo = requireRecord(levelTwo.leader, "level-two leader");
-      const leaderTwoCapability = leaderTwo.capability;
-      expect(typeof leaderTwoCapability).toBe("string");
-      if (typeof leaderTwoCapability !== "string") {
-        throw new TypeError("level-two leader capability is missing");
-      }
+      const leaderTwoCapability = await issueTeamLeaderCapability(levelOneClient, levelTwo);
       const levelTwoClient = fixture.fabric.connect(leaderTwoCapability);
       const before = await fixture.chair.getRunStatus({ runId: fixture.run.runId });
       await expect(createTeam(levelTwoClient, teamCreateInput({
@@ -169,10 +168,8 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
     const fixture = await createStage5TeamFixture("run-stage5-parent-budget");
     try {
       const parent = await createTeam(fixture.chair, teamCreateInput({ teamId: "team-budget-parent", memberAuthorities: [], reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 } }));
-      const leader = requireRecord(parent.leader, "parent leader");
-      if (typeof leader.capability !== "string") throw new TypeError("parent leader capability is missing");
       if (typeof parent.budgetId !== "string") throw new TypeError("parent budget id is missing");
-      const parentLeader = fixture.fabric.connect(leader.capability);
+      const parentLeader = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, parent));
       await createTeam(parentLeader, teamCreateInput({
         teamId: "team-budget-child-a", parentTeamId: "team-budget-parent",
         sourcePath: "src/team-budget-parent/child-a", artifactPath: ".agent-run/team-budget-parent/child-a",
@@ -201,18 +198,11 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
       const listed = await fixture.chairProxy.client.listTools();
       const tool = listed.tools.find((candidate) => candidate.name === "fabric_team_create");
       expect(tool).toBeDefined();
-      expect(tool?.inputSchema).toMatchObject({
+      expect(tool?.inputSchema).toMatchObject({ type: "object", oneOf: expect.any(Array) });
+      expect((tool?.inputSchema as { oneOf?: unknown[] } | undefined)?.oneOf?.[0]).toMatchObject({
         type: "object",
         additionalProperties: false,
-        required: [
-          "teamId",
-          "leader",
-          "rootTask",
-          "initialMembers",
-          "discussionGroups",
-          "reservedBudget",
-          "commandId",
-        ],
+        required: ["teamId", "leader", "rootTask", "initialMembers", "discussionGroups", "reservedBudget", "commandId"],
       });
       if (tool === undefined) {
         throw new Error("fabric_team_create is absent from the MCP surface");
@@ -223,7 +213,7 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
         "fabric_team_create",
         teamCreateInput({ teamId: "team-mcp" }),
       );
-      expect(outcome.isError).toBe(false);
+      expect(outcome.isError, outcome.text).toBe(false);
       expect(outcome.structured).toMatchObject({
         teamId: "team-mcp",
         leader: { agentId: "team-mcp-leader" },

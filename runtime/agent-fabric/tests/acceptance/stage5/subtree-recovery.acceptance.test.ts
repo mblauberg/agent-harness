@@ -6,7 +6,7 @@ import { createStage5RecoveryFixture, createTeamA } from "../../support/stage5-r
 import {
   createStage5TeamFixture,
   createTeam,
-  requireRecord,
+  issueTeamLeaderCapability,
   teamCreateInput,
 } from "../../support/stage5-team-testkit.ts";
 
@@ -132,8 +132,7 @@ describe("Stage 5 subtree ownership and recovery", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
     }));
-    const parentCapability = requireRecord(parent.leader, "parent leader").capability;
-    if (typeof parentCapability !== "string") throw new TypeError("parent leader capability is missing");
+    const parentCapability = await issueTeamLeaderCapability(fixture.chair, parent);
     const parentLeader = fixture.fabric.connect(parentCapability);
     const child = await createTeam(parentLeader, teamCreateInput({
       teamId: "recursive-child",
@@ -143,8 +142,7 @@ describe("Stage 5 subtree ownership and recovery", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 20, "cost:USD": 20, descendants: 3 },
     }));
-    const childCapability = requireRecord(child.leader, "child leader").capability;
-    if (typeof childCapability !== "string") throw new TypeError("child leader capability is missing");
+    const childCapability = await issueTeamLeaderCapability(parentLeader, child);
     const childLeader = fixture.fabric.connect(childCapability);
 
     await fixture.chair.freezeSubtree({
@@ -176,9 +174,8 @@ describe("Stage 5 subtree ownership and recovery", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
     }));
-    const parentCapability = requireRecord(parent.leader, "parent leader").capability;
-    if (typeof parentCapability !== "string") throw new TypeError("parent leader capability is missing");
-    const child = await createTeam(fixture.fabric.connect(parentCapability), teamCreateInput({
+    const parentLeader = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, parent));
+    const child = await createTeam(parentLeader, teamCreateInput({
       teamId: "adoption-child",
       parentTeamId: "adoption-parent",
       sourcePath: "src/adoption-parent/adoption-child",
