@@ -291,6 +291,8 @@ export type FabricDaemonHandle = {
   address: { transport: "unix"; path: string };
   pid: number;
   ownsProcess: boolean;
+  /** Releases only this caller's process handles. It never stops the daemon. */
+  release(): void;
   stop(): Promise<void>;
   waitForExit(): Promise<void>;
 };
@@ -508,6 +510,7 @@ type SpawnedDaemonChild = {
   ready: Promise<void>;
   exit: Promise<ChildExit>;
   isRunning(): boolean;
+  release(): void;
   terminate(): Promise<void>;
 };
 
@@ -516,6 +519,7 @@ type ProductionSpawn = {
   pid: number;
   identity: Promise<PrivateDiscoveryIdentity>;
   exit: Promise<void>;
+  release(): void;
   stop(clean: boolean): Promise<void>;
 };
 
@@ -606,6 +610,7 @@ async function spawnDaemonChild(
     child.once("exit", (code, signal) => resolvePromise({ code, signal }));
   });
   const pid = child.pid;
+  let released = false;
   let stopPromise: Promise<void> | undefined;
   const stopChild = async (): Promise<void> => {
     if (child.exitCode !== null || child.signalCode !== null) {
@@ -646,6 +651,15 @@ async function spawnDaemonChild(
     exit: exitPromise,
     isRunning(): boolean {
       return child.exitCode === null && child.signalCode === null;
+    },
+    release(): void {
+      if (released) return;
+      released = true;
+      child.unref();
+      const stdout = child.stdout as typeof child.stdout & { unref?: () => void };
+      const stderrStream = child.stderr as typeof child.stderr & { unref?: () => void };
+      stdout.unref?.();
+      stderrStream.unref?.();
     },
     terminate(): Promise<void> {
       stopPromise ??= stopChild();
@@ -855,6 +869,9 @@ async function spawnProductionDaemon(input: {
     pid: child.pid,
     identity,
     exit,
+    release(): void {
+      child.release();
+    },
     stop(clean: boolean): Promise<void> {
       if (clean && child.isRunning()) cleanStopRequested = true;
       stopPromise ??= child.terminate().then(async () => await exit);
@@ -870,6 +887,9 @@ function ownerHandle(spawned: ProductionSpawn, socketPath: string): FabricDaemon
     address: { transport: "unix", path: socketPath },
     pid: spawned.pid,
     ownsProcess: true,
+    release(): void {
+      spawned.release();
+    },
     stop(): Promise<void> {
       stopPromise ??= spawned.stop(true);
       return stopPromise;
@@ -885,9 +905,10 @@ function attachedHandle(
   paths: PrivateDiscoveryPaths,
 ): FabricDaemonHandle {
   let detach: (() => void) | undefined;
+  let released = false;
   const detached = new Promise<void>((resolvePromise) => { detach = resolvePromise; });
   const incumbentExit = (async (): Promise<void> => {
-    for (;;) {
+    while (!released) {
       const current = await readPrivateDiscovery(paths, attachment.owner.socketPath);
       if (current.status !== "active" || !identityMatchesOwner(attachment.owner, current.owner)) return;
       await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
@@ -900,7 +921,12 @@ function attachedHandle(
     address: { transport: "unix", path: attachment.receipt.socketPath },
     pid: attachment.receipt.pid,
     ownsProcess: false,
+    release(): void {
+      released = true;
+      detach?.();
+    },
     async stop(): Promise<void> {
+      released = true;
       detach?.();
     },
     waitForExit(): Promise<void> {
@@ -999,6 +1025,9 @@ export async function forceStartFabricDaemonForTests(options: DaemonStartOptions
     address: { transport: "unix", path: prepared.socketPath },
     pid: child.pid,
     ownsProcess: true,
+    release(): void {
+      child.release();
+    },
     stop(): Promise<void> {
       stopPromise ??= child.terminate();
       return stopPromise;

@@ -8,6 +8,18 @@ export {
   FabricRemoteError,
   startFabricDaemon,
 } from "./daemon/client.js";
+export type {
+  DaemonStartOptions,
+  FabricDaemonHandle,
+} from "./daemon/client.js";
+export {
+  LocalOperatorConsoleUnavailableError,
+  openLocalOperatorConsoleSession,
+} from "./operator/local-console-session.js";
+export type {
+  LocalOperatorConsoleSession,
+  LocalOperatorConsoleSessionOptions,
+} from "./operator/local-console-session.js";
 export { FabricError } from "./errors.js";
 export {
   AUTHORITY_ACTION_VOCABULARY,

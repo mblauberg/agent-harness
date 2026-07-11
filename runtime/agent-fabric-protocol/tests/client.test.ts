@@ -21,7 +21,12 @@ class RecordingTransport implements ProtocolRpcTransport {
   readonly allowedOperations: ReadonlySet<FabricOperation>;
   readonly #result: unknown;
 
-  constructor(features: readonly ProtocolFeature[], result: unknown, kind: ProtocolPrincipal["kind"] = "operator") {
+  constructor(
+    features: readonly ProtocolFeature[],
+    result: unknown,
+    kind: ProtocolPrincipal["kind"] = "operator",
+    allowedOperations?: readonly FabricOperation[],
+  ) {
     this.features = features;
     this.#result = result;
     this.principal = kind === "operator"
@@ -35,9 +40,8 @@ class RecordingTransport implements ProtocolRpcTransport {
       : kind === "agent"
         ? { kind, agentId: "agent_01" as never, projectSessionId: "ps_01" as never, runId: "run_01", principalGeneration: 1 }
         : { kind, integrationId: "integration_01" as never, projectId: "project_01" as never, principalGeneration: 1 };
-    this.allowedOperations = new Set(
-      [...operationsForFeatures(features)].filter((operation) => OPERATION_REGISTRY[operation].principals.includes(kind)),
-    );
+    this.allowedOperations = new Set(allowedOperations ??
+      [...operationsForFeatures(features)].filter((operation) => OPERATION_REGISTRY[operation].principals.includes(kind)));
   }
 
   call<Operation extends FabricOperation>(
@@ -94,6 +98,28 @@ describe("negotiated operator client", () => {
       operation: FABRIC_OPERATIONS.projectSessionGet,
       input: { projectId: "project_01", projectSessionId: "ps_01", expectedGeneration: 1 },
     }]);
+  });
+
+  it("exposes attachment lifecycle without requiring the deprecated generic command", () => {
+    const transport = new RecordingTransport(
+      ["operator-control.v1"],
+      {},
+      "operator",
+      [
+        FABRIC_OPERATIONS.operatorAttach,
+        FABRIC_OPERATIONS.operatorDetach,
+        FABRIC_OPERATIONS.operatorHeartbeat,
+      ],
+    );
+
+    const client = createOperatorClient(transport);
+
+    expect(client.operatorControl).toMatchObject({
+      attach: expect.any(Function),
+      detach: expect.any(Function),
+      heartbeat: expect.any(Function),
+    });
+    expect(client.operatorControl?.command).toBeUndefined();
   });
 });
 

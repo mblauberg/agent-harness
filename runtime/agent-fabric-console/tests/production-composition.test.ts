@@ -1,0 +1,481 @@
+import { describe, expect, it } from "vitest";
+
+import type {
+  OperatorActionPreview,
+  OperatorCapabilityCredential,
+  OperatorProjectionSnapshot,
+  ProjectId,
+  ProjectSessionId,
+  Sha256Digest,
+  Timestamp,
+} from "@local/agent-fabric-protocol";
+
+import {
+  createProductionConsoleActionPlanner,
+  createProductionConsoleBootstrap,
+} from "../src/production-composition.js";
+import type { ConsoleControllerState } from "../src/controller.js";
+import { createEmptyViewPages, revisionFromProtocol } from "../src/model.js";
+import type { FabricConsoleDataset } from "../src/protocol-adapter.js";
+import type { FabricRuntimeActivation } from "../src/runtime.js";
+
+const credential = {
+  capabilityId: "capability_console_production",
+  token: "secret-never-render",
+} as OperatorCapabilityCredential;
+const projectId = "project_console_production" as ProjectId;
+const projectSessionId = "session_console_production" as ProjectSessionId;
+const observedAt = "2026-07-12T00:00:00.000Z" as Timestamp;
+const digest = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
+
+function dataset(): FabricConsoleDataset {
+  const pages = createEmptyViewPages();
+  const snapshot: OperatorProjectionSnapshot = {
+    schemaVersion: 1,
+    snapshotRevision: 11,
+    readTransactionId: "read_console_production",
+    project: {
+      freshness: "live",
+      source: "fabric",
+      revision: 1,
+      observedAt,
+      value: { projectId, canonicalRoot: "/repo" },
+    },
+    session: {
+      freshness: "live",
+      source: "fabric",
+      revision: 8,
+      observedAt,
+      value: {
+        projectSessionId,
+        projectId,
+        mode: "coordinated",
+        state: "active",
+        revision: 8,
+        generation: 3,
+        authorityRef: digest,
+        budgetRef: "budget_console_production",
+        launchPacketRef: { path: "launch/packet.json" as never, digest },
+        membershipRevision: 2,
+        origin: { kind: "operator-launch", operatorId: "operator_console_production" as never },
+      },
+    },
+    runs: {
+      freshness: "live",
+      source: "fabric",
+      revision: 4,
+      observedAt,
+      value: [],
+    },
+    attention: {
+      freshness: "live",
+      source: "fabric",
+      revision: 0,
+      observedAt,
+      value: [],
+    },
+    capacity: {
+      freshness: "live",
+      source: "fabric",
+      revision: 11,
+      observedAt,
+      value: {},
+    },
+    cursor: 0,
+    stateDigest: digest,
+  };
+  return {
+    connection: { state: "live" },
+    snapshot,
+    snapshotRevision: revisionFromProtocol(11),
+    cursor: 0,
+    loadedAtMs: Date.parse(observedAt),
+    canMutate: true,
+    pages: {
+      ...pages,
+      runs: {
+        view: "runs",
+        rows: [{
+          view: "runs",
+          stableId: "run_console_production",
+          revision: revisionFromProtocol(4),
+          urgency: "normal",
+          freshness: {
+            state: "live",
+            source: "fabric",
+            revision: revisionFromProtocol(4),
+            observedAt,
+            ageMs: 0,
+          },
+          summary: {
+            kind: "run",
+            phase: "active",
+            health: "healthy",
+            nextMilestone: "verification",
+          },
+          detailRef: {
+            kind: "run",
+            coordinationRunId: "run_console_production" as never,
+            expectedRevision: 4,
+          },
+          actionAvailability: {
+            state: "available",
+            actions: ["pause", "resume", "cancel", "steer"],
+            requiresPreview: true,
+          },
+        }],
+        nextCursor: 1,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(11),
+        readTransactionId: "page_runs_console_production",
+      },
+    },
+  };
+}
+
+function state(): ConsoleControllerState {
+  const selection = Object.fromEntries(
+    ["attention", "project", "runs", "work", "agents", "evidence", "activity", "system"]
+      .map((view) => [view, null]),
+  ) as ConsoleControllerState["selectionByView"];
+  return {
+    activeView: "runs",
+    selectionByView: {
+      ...selection,
+      runs: { stableId: "run_console_production", revision: revisionFromProtocol(4) },
+    },
+    scrollAnchorByView: Object.fromEntries(
+      ["attention", "project", "runs", "work", "agents", "evidence", "activity", "system"]
+        .map((view) => [view, null]),
+    ) as ConsoleControllerState["scrollAnchorByView"],
+    review: null,
+    pendingCommandIds: [],
+    lastActionStatus: null,
+    lastReceipt: null,
+    lastFailure: null,
+  };
+}
+
+function activation(action: string, eventId: string): FabricRuntimeActivation {
+  return {
+    regionId: `action:${action}`,
+    provenance: "keyboard",
+    eventId,
+    binding: {
+      view: "runs",
+      itemId: "run_console_production",
+      itemRevision: revisionFromProtocol(4),
+      projectionRevision: revisionFromProtocol(11),
+    },
+  };
+}
+
+describe("production Console mutation planner", () => {
+  it("binds a typed action to exact row, target revision and direct-input provenance", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+
+    const request = await planner.plan({
+      activation: activation("resume", "input_resume_01"),
+      dataset: dataset(),
+      state: state(),
+      draft: "this is not parsed as a command",
+    });
+
+    expect(request).toMatchObject({
+      view: "runs",
+      itemId: "run_console_production",
+      itemRevision: "4",
+      projectionRevision: "11",
+      availableAction: "resume",
+      intent: {
+        kind: "control",
+        action: "resume",
+        target: {
+          kind: "run",
+          projectSessionId,
+          coordinationRunId: "run_console_production",
+          expectedRevision: 4,
+        },
+      },
+      command: {
+        credential,
+        expectedRevision: 4,
+        actor: "operator_console_production",
+        provenance: {
+          kind: "console-direct-input",
+          clientId: "console_client_production",
+          inputEventId: "input_resume_01",
+        },
+        evidenceRefs: [],
+      },
+    });
+    expect(request?.command.commandId).toMatch(/^console_[a-f0-9]{48}$/u);
+  });
+
+  it("uses draft text only as the typed steer/cancel payload and refuses unsupported actions", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+    const steer = await planner.plan({
+      activation: activation("steer", "input_steer_01"),
+      dataset: dataset(),
+      state: state(),
+      draft: "Keep the exact public contract.",
+    });
+    expect(steer?.intent).toMatchObject({
+      kind: "control",
+      action: "steer",
+      instruction: "Keep the exact public contract.",
+      evidenceRefs: [],
+    });
+    await expect(planner.plan({
+      activation: activation("steer", "input_steer_empty"),
+      dataset: dataset(),
+      state: state(),
+      draft: "   ",
+    })).resolves.toBeNull();
+    await expect(planner.plan({
+      activation: activation("git", "input_git_01"),
+      dataset: dataset(),
+      state: state(),
+      draft: "push --force",
+    })).resolves.toBeNull();
+  });
+
+  it("builds confirmation and reconciliation commands from the bound preview revision", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+    const planned = await planner.plan({
+      activation: activation("pause", "input_pause_01"),
+      dataset: dataset(),
+      state: state(),
+      draft: "",
+    });
+    if (planned === null) throw new Error("pause should be planned");
+    const preview: OperatorActionPreview = {
+      previewId: "preview_console_production",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent: planned.intent,
+      intentDigest: (`sha256:${"b".repeat(64)}`) as Sha256Digest,
+      beforeStateDigest: (`sha256:${"c".repeat(64)}`) as Sha256Digest,
+      consequenceClass: "consequential",
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit",
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    };
+    const reviewing: ConsoleControllerState = {
+      ...state(),
+      review: {
+        stage: "confirm",
+        binding: {
+          view: "runs",
+          itemId: "run_console_production",
+          itemRevision: revisionFromProtocol(4),
+          projectionRevision: revisionFromProtocol(11),
+        },
+        availableAction: "pause",
+        preview,
+        gates: [],
+        openedByEventId: "input_pause_01",
+        armedByEventId: "input_pause_02",
+        changes: [],
+        status: null,
+      },
+    };
+    const confirmation = await planner.confirmation({
+      activation: activation("pause", "input_pause_03"),
+      dataset: dataset(),
+      state: reviewing,
+      draft: "",
+    });
+    expect(confirmation.command).toMatchObject({
+      expectedRevision: 4,
+      provenance: { inputEventId: "input_pause_03" },
+    });
+    expect(confirmation.command.commandId).not.toBe(planned.command.commandId);
+
+    const reconcile = await planner.reconcile?.({
+      targetCommandId: confirmation.command.commandId,
+      activation: activation("pause", "input_pause_observe_01"),
+      dataset: dataset(),
+      state: reviewing,
+    });
+    expect(reconcile).toMatchObject({
+      expectedRevision: 4,
+      provenance: { inputEventId: "input_pause_observe_01" },
+    });
+  });
+
+  it("binds session drain to session generation, session revision and global revision", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+    const current = dataset();
+    const run = current.pages.runs.rows[0];
+    if (run === undefined) throw new Error("run fixture is unavailable");
+    const draining: FabricConsoleDataset = {
+      ...current,
+      pages: {
+        ...current.pages,
+        runs: {
+          ...current.pages.runs,
+          rows: [{
+            ...run,
+            actionAvailability: {
+              state: "available",
+              actions: ["project-session-drain"],
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
+    };
+
+    const request = await planner.plan({
+      activation: activation("project-session-drain", "input_drain_01"),
+      dataset: draining,
+      state: state(),
+      draft: "ignored",
+    });
+
+    expect(request).toMatchObject({
+      availableAction: "project-session-drain",
+      intent: {
+        kind: "project-session-drain",
+        projectSessionId,
+        expectedSessionRevision: 8,
+        expectedSessionGeneration: 3,
+        expectedGlobalStateRevision: 11,
+      },
+      command: { expectedRevision: 8 },
+    });
+  });
+});
+
+describe("production Console package-root bootstrap", () => {
+  it("maps the public Fabric session into protocol binding, planner and idempotent close", async () => {
+    const detach = async () => {};
+    const close = async () => {};
+    const operatorId = "operator_console_production" as never;
+    const clientId = "console_client_production" as never;
+    const client = {
+      kind: "operator",
+      features: ["operator-projection.v1", "operator-projection.v2", "scoped-gate-read.v1"],
+      projection: {
+        snapshot: async () => dataset().snapshot,
+        events: async () => ({
+          status: "continuation",
+          events: [],
+          nextCursor: 0,
+          hasMore: false,
+          snapshotRevision: 11,
+          readTransactionId: "events_console_production",
+        }),
+      },
+      console: {
+        readOnly: false,
+        launchAvailable: false,
+        actions: {
+          preview: async () => { throw new Error("not called"); },
+          commit: async () => { throw new Error("not called"); },
+          status: async () => { throw new Error("not called"); },
+          reconcile: async () => { throw new Error("not called"); },
+        },
+        gates: { read: async () => { throw new Error("not called"); } },
+        projection: {
+          viewPage: async () => { throw new Error("not called"); },
+          readDetail: async () => { throw new Error("not called"); },
+        },
+      },
+      operations: {},
+      close,
+    };
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => ({
+          client,
+          credential,
+          projectId,
+          projectSessionId,
+          operatorId,
+          clientId,
+          daemonPid: 123,
+          detach,
+          close,
+        }),
+      }),
+    });
+
+    const connected = await bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    });
+
+    expect(connected).toMatchObject({
+      status: "connected",
+      credential,
+      projectId,
+      projectSessionId,
+      binding: { ok: true, readOnly: false },
+      actionPlanner: expect.objectContaining({
+        plan: expect.any(Function),
+        confirmation: expect.any(Function),
+      }),
+    });
+  });
+
+  it.each([
+    ["configuration-missing", "configuration-missing"],
+    ["start-failed", "start-failed"],
+    ["authority-unavailable", "authority-unavailable"],
+  ] as const)("renders %s as an explicit read-only unavailable reason", async (reason, expected) => {
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => {
+          throw Object.assign(new Error("secret detail"), { reason });
+        },
+      }),
+    });
+
+    await expect(bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    })).resolves.toStrictEqual({ status: "unavailable", reason: expected });
+  });
+
+  it("closes an attached public session when protocol binding fails", async () => {
+    let closeCount = 0;
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => ({
+          client: { features: {} },
+          credential,
+          projectId,
+          operatorId: "operator_console_production",
+          clientId: "console_client_production",
+          detach: async () => {},
+          close: async () => { closeCount += 1; },
+        }),
+      }),
+    });
+
+    await expect(bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    })).resolves.toStrictEqual({ status: "unavailable", reason: "start-failed" });
+    expect(closeCount).toBe(1);
+  });
+});

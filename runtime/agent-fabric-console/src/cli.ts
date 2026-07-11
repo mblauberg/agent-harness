@@ -1,22 +1,21 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import {
-  startFabricConsoleApplication,
-  type ConsoleBootstrapPort,
-} from "./application.js";
+import { startFabricConsoleApplication } from "./application.js";
 import { TerminalInputDecoder } from "./input.js";
 import {
   reduceFabricPointer,
   renderFabricConsoleFrame,
   type FabricConsoleFrame,
 } from "./index.js";
+import { createProductionConsoleBootstrap } from "./production-composition.js";
 import { TerminalSession } from "./terminal.js";
 
 export const CONSOLE_CLI_USAGE =
   "usage: agent-fabric-console [--project ABSOLUTE_ROOT] [--herdr]\n" +
-  "This build uses the typed injected bootstrap boundary. If no lock-safe provider is installed, the System view reports bootstrap unavailable and all mutations remain disabled.\n";
+  "Starts or attaches through the lock-safe local Fabric bootstrap. If configuration, startup, or authority is unavailable, the explicit unavailable state remains read-only.\n";
 
 function option(arguments_: readonly string[], name: string): string | undefined {
   const index = arguments_.indexOf(name);
@@ -39,13 +38,6 @@ function validateArguments(arguments_: readonly string[]): void {
   }
 }
 
-const unavailableBootstrap: ConsoleBootstrapPort = {
-  startOrAttach: async () => ({
-    status: "unavailable",
-    reason: "feature-unavailable",
-  }),
-};
-
 export async function runConsoleCli(arguments_: readonly string[]): Promise<void> {
   validateArguments(arguments_);
   if (arguments_.includes("--help") || arguments_.includes("-h")) {
@@ -63,7 +55,7 @@ export async function runConsoleCli(arguments_: readonly string[]): Promise<void
     process.stdout.write(`\u001b[H${frame.rows.join("\n")}`);
   };
   application = await startFabricConsoleApplication({
-    bootstrap: unavailableBootstrap,
+    bootstrap: createProductionConsoleBootstrap(),
     projectRoot,
     surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
     viewport: {
@@ -75,7 +67,7 @@ export async function runConsoleCli(arguments_: readonly string[]): Promise<void
       let sequence = 0;
       return () => `cli-input-${String(++sequence)}`;
     })(),
-    confirmationId: () => "bootstrap-unavailable",
+    confirmationId: () => `console-confirmation-${randomUUID()}`,
     render: renderFabricConsoleFrame,
     reducePointer: reduceFabricPointer,
     setMouseCapture: (enabled) => terminal?.setMouseCapture(enabled),

@@ -87,6 +87,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             runtime/agent-fabric-console/package-lock.json
+            runtime/agent-fabric/package-lock.json
             runtime/agent-fabric-protocol/package-lock.json
       - name: Install locked Console dependencies
         working-directory: runtime/agent-fabric-console

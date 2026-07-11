@@ -333,6 +333,43 @@ describe("typed Console application bootstrap boundary", () => {
     },
   );
 
+  it("enables mutations from the production planner returned by bootstrap", async () => {
+    const port = protocolPort();
+    const actions = {
+      preview: vi.fn(async () => { throw new Error("unused"); }),
+      commit: vi.fn(async () => { throw new Error("unused"); }),
+      status: vi.fn(async () => { throw new Error("unused"); }),
+      reconcile: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const actionPlanner = {
+      plan: vi.fn(async () => null),
+      confirmation: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: async () => ({
+          status: "connected",
+          binding: { ok: true, port, readOnly: false, actions },
+          credential,
+          projectId,
+          actionPlanner,
+          detach: async () => {},
+          close: async () => {},
+        }),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => "event-production-planner",
+      confirmationId: () => "confirmation-production-planner",
+      ...runtimeDependencies,
+    });
+
+    expect(application.dataset.canMutate).toBe(true);
+    await application.close("operator");
+  });
+
   it("reads an Activity message only from its exact revision-bound messageBodyRef on activation", async () => {
     const projectSessionId = "session-application" as ProjectSessionId;
     const messageId = "message-exact" as MessageId;

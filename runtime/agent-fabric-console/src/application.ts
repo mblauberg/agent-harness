@@ -47,6 +47,7 @@ export type ConsoleBootstrapConnection = Readonly<{
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
   projectSessionId?: ProjectSessionId;
+  actionPlanner?: ConsoleActionPlanner;
   detach(input: Readonly<{ reason: FabricDetachReason }>): Promise<void>;
   close(): Promise<void>;
 }>;
@@ -358,6 +359,7 @@ export async function startFabricConsoleApplication(
   let connected: ConsoleBootstrapConnection | null = null;
   let dataset: FabricConsoleDataset;
   let plannerEnablesMutation = false;
+  let planner = options.actionPlanner;
   if (bootstrap.status === "unavailable") {
     dataset = createBootstrapUnavailableDataset(bootstrap.reason);
     controller = new ReadOnlyProjectionController(dataset);
@@ -373,8 +375,9 @@ export async function startFabricConsoleApplication(
     });
     dataset = await adapter.open();
     const actionClient = adapter.actionClient;
+    planner ??= bootstrap.actionPlanner;
     plannerEnablesMutation =
-      actionClient !== null && options.actionPlanner !== undefined;
+      actionClient !== null && planner !== undefined;
     if (!plannerEnablesMutation) dataset = { ...dataset, canMutate: false };
     mutationController = new ConsoleController({
       dataset,
@@ -422,7 +425,7 @@ export async function startFabricConsoleApplication(
     runtime,
     controller,
     adapter,
-    planner: options.actionPlanner,
+    planner,
     mutationController,
     plannerEnablesMutation,
   });

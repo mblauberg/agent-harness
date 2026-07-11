@@ -47,7 +47,7 @@ const digestA = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
 const digestB = (`sha256:${"b".repeat(64)}`) as Sha256Digest;
 const digestC = (`sha256:${"c".repeat(64)}`) as Sha256Digest;
 
-function context(commandId: string, inputEventId: string, revision = 11): OperatorMutationContext {
+function context(commandId: string, inputEventId: string, revision = 7): OperatorMutationContext {
   return {
     credential,
     commandId: commandId as CommandId,
@@ -209,6 +209,30 @@ function actionRequest(
 }
 
 describe("Console controller and two-phase actions", () => {
+  it("keeps projection and mutation-target revisions distinct", async () => {
+    const service = actions();
+    const controller = new ConsoleController({
+      dataset: dataset(),
+      actions: service,
+      credential,
+      projectId,
+      projectSessionId: sessionId,
+      confirmationId: () => "confirmation-1",
+    });
+    controller.select("attention", "attention:task-1");
+
+    const targetBound = actionRequest(
+      context("preview-target-revision", "event-open", 7),
+    );
+    await expect(controller.beginAction(targetBound)).resolves.toMatchObject({
+      binding: { projectionRevision: "11", itemRevision: "7" },
+      preview: { intent: { target: { expectedRevision: 7 } } },
+    });
+    expect(service.preview).toHaveBeenCalledWith(expect.objectContaining({
+      command: expect.objectContaining({ expectedRevision: 7 }),
+    }));
+  });
+
   it("preserves stable selection and scroll anchors while revisions advance", () => {
     const controller = new ConsoleController({
       dataset: dataset(),

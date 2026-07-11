@@ -18,9 +18,10 @@ import type {
   Sha256Digest,
 } from "@local/agent-fabric-protocol";
 
+import { operatorIntentRevision } from "./action-revision.js";
+
 import {
   FABRIC_VIEWS,
-  revisionToProtocol,
   type ConsoleRow,
   type FabricView,
   type Revision,
@@ -350,7 +351,11 @@ export class ConsoleController {
     if (!directActivation(request.activation)) {
       throw new TypeError("action activation must be direct keyboard or mouse input");
     }
-    this.#assertCommand(request.command, request.activation.eventId);
+    this.#assertCommand(
+      request.command,
+      request.activation.eventId,
+      request.intent,
+    );
     if (request.projectionRevision !== this.#dataset.snapshotRevision) {
       throw new Error("action projection revision is stale");
     }
@@ -510,7 +515,7 @@ export class ConsoleController {
     ) {
       throw new Error("commit requires a distinct confirmation input event");
     }
-    this.#assertCommand(command, input.eventId);
+    this.#assertCommand(command, input.eventId, review.preview.intent);
     this.#assertReviewCurrent(review);
     const confirmation: OperatorActionConfirmation =
       review.preview.confirmationMode === "echo"
@@ -613,7 +618,11 @@ export class ConsoleController {
     }
   }
 
-  #assertCommand(command: OperatorMutationContext, inputEventId?: string): void {
+  #assertCommand(
+    command: OperatorMutationContext,
+    inputEventId?: string,
+    intent?: OperatorActionIntent,
+  ): void {
     if (
       command.credential.capabilityId !== this.#credential.capabilityId ||
       command.credential.token !== this.#credential.token
@@ -621,9 +630,11 @@ export class ConsoleController {
       throw new Error("operator command capability does not match this Console");
     }
     if (
-      this.#dataset.snapshotRevision === null ||
-      command.expectedRevision !==
-        revisionToProtocol(this.#dataset.snapshotRevision)
+      !Number.isSafeInteger(command.expectedRevision) ||
+      command.expectedRevision < 0 ||
+      (intent !== undefined &&
+        operatorIntentRevision(intent) !== null &&
+        command.expectedRevision !== operatorIntentRevision(intent))
     ) {
       throw new Error("operator command expected revision is stale");
     }

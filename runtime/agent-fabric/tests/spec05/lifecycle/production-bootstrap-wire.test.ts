@@ -108,6 +108,31 @@ describe("production daemon bootstrap wiring", () => {
     ].filter((name) => name.endsWith(".lock.sqlite3"))).toEqual([]);
   });
 
+  it("releases a bootstrap owner's local process handles without stopping the daemon", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-production-release-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "state", "fabric.sqlite3"),
+      stateDirectory: join(root, "state"),
+      runtimeDirectory: join(root, "runtime"),
+      socketPath: join(root, "runtime", "fabric.sock"),
+      workspaceRoots: [root],
+    };
+
+    const owner = await startFabricDaemon(options);
+    handles.push(owner);
+    expect(owner.ownsProcess).toBe(true);
+    owner.release();
+
+    const attached = await startFabricDaemon(options);
+    handles.push(attached);
+    expect(attached.pid).toBe(owner.pid);
+    expect(attached.ownsProcess).toBe(false);
+    attached.release();
+    await expect(attached.waitForExit()).resolves.toBeUndefined();
+    process.kill(owner.pid, 0);
+  });
+
   it("coalesces twelve production contenders onto exactly one child and one private discovery owner", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-production-contention-"));
     roots.push(root);

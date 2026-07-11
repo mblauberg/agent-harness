@@ -10,6 +10,16 @@
     "agent-fabric": "dist/cli/main.js",
     "agent-fabric-mcp": "dist/mcp/main.js"
   },
+  "files": [
+    "dist",
+    "schemas"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -22,15 +22,17 @@
   },
   "scripts": {
     "check:protocol": "npm --prefix ../agent-fabric-protocol ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric-protocol run build",
+    "check:fabric": "npm --prefix ../agent-fabric ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric run build",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:evaluation": "vitest run tests/evaluation.test.ts",
     "test:load": "vitest run tests/load.test.ts",
-    "check": "npm run check:protocol && npm run typecheck && npm run build && npm run test",
+    "check": "npm run check:protocol && npm run check:fabric && npm run typecheck && npm run build && npm run test",
     "audit": "npm audit --audit-level=high"
   },
   "dependencies": {
+    "@local/agent-fabric": "file:../agent-fabric",
     "@local/agent-fabric-protocol": "file:../agent-fabric-protocol",
     "string-width": "8.2.2",
     "unicode-segmenter": "0.17.0"
