@@ -1,0 +1,76 @@
+# Provider adapter and runtime boundaries
+
+Status: Durable research reference
+
+Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
+
+Normative owners: [Spec 01 adapter/route contracts](../specs/01-agent-fabric.md),
+[Spec 03 activation](../specs/03-agent-fabric-activation.md),
+[Spec 04 daemon hardening](../specs/04-agent-fabric-operational-hardening.md)
+
+## Conclusions
+
+- Adapters publish versioned capability snapshots and exact effective
+  configuration. Product names and previous success do not establish current
+  model, effort, context, native-mode or permission capability.
+- Runtime discovery and version-pinned conformance are distinct evidence
+  sources. Unsupported or unobserved values are unavailable/unknown, never
+  silently inferred.
+- The provider-neutral route contract is generated and shared across the
+  TypeScript daemon and offline Python resolver. Capability data is explicit
+  resolver input; the resolver does not read daemon activation state behind the
+  caller.
+- Node 24/TypeScript remains the protocol, daemon, adapter and Console stack;
+  SQLite/WAL remains the one-machine transaction store; Python remains useful
+  for offline evaluation. Rust is a narrow process/FD/terminal isolation or
+  measured performance fallback, not an architectural rewrite.
+- Host-global configuration is user-owned. Per-run overlays are minimal,
+  recorded and reversible; ignored/unsupported fields stay visible. Persistent
+  hooks or global default changes need explicit human authority.
+- Operational spans are content-free and never substitute for authority,
+  review, disclosure or artifact receipts.
+- OpenCode is an optional host/adapter and conformance programme, not a model
+  family or current load-bearing route. Login, subscription, credentials,
+  region/data policy and activation remain human gates.
+
+## Evidence
+
+| Evidence | Durable lesson | Boundary |
+|---|---|---|
+| Local TypeScript/Python routing seam | One generated request/receipt schema and explicit capability input fix ownership direction. | A language rewrite does not fix a contract leak. |
+| Current provider capability differences | Actual model/effort/context/native-mode evidence must be source-labelled and may remain unknown. | Provider state is volatile and must be rediscovered. |
+| OpenCode ACP and server documentation | ACP/stdio is the preferred first optional seam; loopback HTTP requires authentication and isolation. | No login, subscription or activation is authorised by research. |
+| GitHub Agentic Workflows | Separate stochastic proposal from constrained privileged apply. | Does not add another workflow schema or state owner. |
+| Spec 05 portal supervisor | Rust is justified for bounded opaque framing, FD/process/peer identity and crash custody while TypeScript owns JSON semantics. | No general Rust daemon rewrite follows. |
+
+## Adapter admission checklist
+
+An active adapter binds executable/package identity, wrapper closure, protocol
+fixture, capability snapshot, effective configuration, exact provider/model
+allowlist, permission source, cancellation/lookup semantics, actual-route
+evidence and expiry. New action admission and final pre-dispatch CAS recheck the
+same snapshot and contract. Ambiguity stays with the original pair-keyed
+recovery owner.
+
+Optional OpenCode work begins disabled and read-only. It must prove pinned ACP
+framing, deny-first permissions, cancellation/timeout/duplicate/crash behavior,
+actual provider/model/fallback receipts, credential isolation and task-local
+objective evaluation before advisory activation. Open models do not satisfy a
+mandatory other-primary gate under the current constitution.
+
+## Unknowns
+
+- OpenCode account/provider availability and acceptable data region/policy.
+- Current official discovery surfaces for each Claude/Cursor/Agy route.
+- Whether a remote/multi-machine workload justifies a gateway, service
+  database or workflow engine.
+- Which optional lifecycle hooks are worth manifest-managed installation.
+- Cross-provider comparable quota/cost attestation.
+
+## Refresh triggers
+
+Refresh after a provider CLI/SDK/protocol release, adapter binary/wrapper
+change, capability or permission drift, observed hidden fallback, host-config
+schema change, OpenCode ACP/server change, or measured SQLite/Node bottleneck.
+Provider login, paid activation, persistent hooks and global configuration
+changes remain explicit human decisions.

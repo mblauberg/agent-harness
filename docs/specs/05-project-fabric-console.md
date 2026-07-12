@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.10
+Version: 1.11
 Date: 13 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,7 +10,12 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.10 adds truthful preparation progress, live route-recovery actions,
+Version 1.11 adopts the mature continuity/routing research into the existing
+Console owner: topology-wave rationale, exact route evidence with honest
+unknown/source/confidence, and native-mode boundary tests. It keeps 80x24 as
+the reference/default while preserving the 30x6 dynamic minimum and does not
+approve automatic pressure control, learned routing or provider-deep-mode
+registries. Version 1.10 adds truthful preparation progress, live route-recovery actions,
 paged-finding capacity gates, exact review-family labels and a clipped inert
 layout below 30 columns or 6 rows. It preserves operator state through every
 resize and keeps quit/detach plus terminal restoration live even when content
@@ -37,7 +42,7 @@ records only exact references plus a bounded adjudication disposition. Fabric
 derives provider/model identity, answer/result digest and reviewer-family
 relation, then exports the immutable lineage. Direct provider CLI review
 remains a degraded, non-certifying artifact. This is a current Spec 05
-hardening clarification, not approval of proposed Spec 06 continuity-routing
+hardening clarification, not approval of automatic continuity-routing
 capabilities. Version 1.6 records the live MCP review finding that provider turns can exceed
 the binding 30-second public request maximum. Review dispatch therefore returns
 the durable action receipt promptly and the chair reads that exact action until
@@ -1291,11 +1296,11 @@ changes affordance execute its typed revision-bound review/confirm path; no
 required action remains an implementation placeholder. Version 1.6 binds those
 review tasks to durable dispatch/read completion within the existing public
 protocol deadline. Version 1.7 binds trusted-router admission and daemon-derived
-review lineage to those same tasks without adding Spec 06 continuity modes.
+review lineage to those same tasks without adding automatic continuity modes.
 Version 1.8 binds those reviews to one current complete immutable bundle,
 linear slot heads, frozen safe results and the exact four-slot completion
 predicate above. It also closes the existing asynchronous lifecycle-rotation
-custody contract without adding automatic Spec 06 routing policy.
+custody contract without adding automatic routing policy.
 Version 1.9 makes target construction a durable asynchronous preparation,
 preserves evidence through proved same-agent lifecycle bindings, replaces the
 helper's inherited descriptor with authenticated crash-safe Unix-socket
@@ -1304,7 +1309,83 @@ closes capability, annotation, receipt and context-telemetry projections. It
 adds no continuity routing or automatic successor-selection policy. Version
 1.10 freezes the failure-receipt, terminal-sequence/cut, paged-finding,
 capacity, live-recovery and exact resize contracts, and removes the remaining
-stale lifecycle-blocking language. It does not add Spec 06 continuity routing,
+stale lifecycle-blocking language. It does not add automatic continuity routing,
 legacy schemas or compatibility paths.
 Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.
+
+## 17. Continuity and route-evidence UX amendment
+
+The durable conclusions in the
+[July 2026 continuity and routing snapshot](../research/evidence-snapshots/agent-continuity-routing-2026-07.md)
+specialise existing Console behaviour; they do not create another
+specification or state owner.
+
+Each coordination run still has exactly one accountable chair. Before a
+topology wave starts, the plan projection shows its dependency/decomposability
+assessment, selected single-owner/fabric-explicit/host-native shape,
+shared-state contention, one stage owner, non-overlapping write partition,
+budget and stop condition. Dynamic team changes remain inside the resolved
+authority envelope and append a new wave rationale; agent count is never shown
+as a quality or progress measure. A host-native leg is one bounded task beneath
+the chair unless a contract-tested native-child identity bridge exists.
+
+Section 5.3 remains binding: substantial or larger implementation starts in a
+fresh provider context from the accepted digest-bound scope/handoff. Resuming
+the same full history is crash recovery, not fresh implementation or policy
+rotation. Parent compact/rotate never implies child completion or continuity,
+and no deep/native workflow may become a second chair, own a human gate or hold
+an unpartitioned shared write scope.
+
+The Agents, Runs and Evidence views consume the exact Spec 01
+`deployedRouteAdmissionV1` plus optional `deployedRouteObservationV1`
+projection. They display requested, admitted and
+observed host/adapter/provider/family/model, raw provider effort, normalised
+reasoning effort, raw native mode and orchestration mode as distinct labelled
+fields. Every observed value displays its source and confidence. A null value
+renders `Unknown`; the Console never copies an admitted value into actual,
+infers effort or native mode from a model label, or turns a vendor/product name
+into capability evidence. Capability snapshot source, expiry and route-policy/
+discovery-surface revisions are visible in detail. Route/topology evaluation
+references from Spec 02 show task class, trial count, baseline, evidence age,
+expiry and promotion state without presenting a universal model rank.
+
+Context pressure and spend are separate rows. Context pressure displays
+`low`, `medium`, `high` or `unknown` plus source, confidence and observation
+age; tokens/cost/turn reservations remain in resource capacity. Unknown current
+window state never becomes a fabricated percentage. This amendment adds no
+automatic threshold, hysteresis, maximum-compaction count or successor picker.
+Existing lifecycle actions and recovery custody remain the only mutation path.
+
+Usability and protocol fixtures add:
+
+1. one-chair/topology-wave views for single-owner, explicit Fabric and opaque
+   host-native legs, including shared-state contention and stop condition;
+2. fresh implementation versus same-history crash-recovery and parent/child
+   lifecycle independence;
+3. requested/admitted/observed equality, authorised substitution and honest
+   unknown actual identity with source/confidence labels;
+4. raw `max`/`ultra`-style provider values remaining distinct from normalised
+   reasoning and orchestration fields, with unsupported native mode failing or
+   showing the authorised fallback;
+5. host-native negative cases for a second chair, embedded semantic gate,
+   unpartitioned writer scope and double decomposition ownership;
+6. route-evidence expiry/baseline display and content-free operational spans;
+   and
+7. context pressure remaining independent from spend across unknown, stale and
+   exact observations.
+
+All fixtures run through the existing geometry matrix: invalid/zero, 29x5
+inert, exact 30x6 compact, reference/default 80x24 and a wide terminal, including
+resize transitions between them. They preserve stable selection, focus,
+scroll, drafts and pending-command identity. Below 30 columns or 6 rows every
+mutation and mouse activation remains inert while `q`/Detach and terminal
+restoration remain live. Native-mode or route detail never introduces a fixed
+80x24-only coordinate path.
+
+Future decisions remain nonbinding: automatic context-pressure control and its
+thresholds/hysteresis/maximum compactions; task-local Pareto or learned routing
+and its quality floors/trial volumes/expiry policy; versioned provider deep-mode
+IDs or cross-primary deep execution; a total provider-visible discovery-surface
+ceiling; OpenCode login/activation; and global model, effort, hook or paid
+data-residency preferences.
