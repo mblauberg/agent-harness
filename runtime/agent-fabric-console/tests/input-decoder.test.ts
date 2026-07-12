@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import * as Console from "../src/index.js";
 
 describe("bounded terminal input decoding", () => {
+  it("preserves distinct printable key receipts inside one terminal chunk", () => {
+    const decoder = new Console.TerminalInputDecoder();
+
+    expect(decoder.push(Buffer.from("13"))).toStrictEqual([
+      { kind: "key", key: "text", text: "1" },
+      { kind: "key", key: "text", text: "3" },
+    ]);
+  });
+
   it("decodes paging and boundary navigation keys", () => {
     const decoder = new Console.TerminalInputDecoder();
     expect(

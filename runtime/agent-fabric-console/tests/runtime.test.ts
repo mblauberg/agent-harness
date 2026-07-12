@@ -554,6 +554,26 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.inputMode).toBe("browse");
   });
 
+  it("keeps a same-burst palette opener and payload in modal input", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "same-burst-palette-input",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    const open = runtime.handleInput({ kind: "key", key: "text", text: ":" });
+    const payload = runtime.handleInput({ kind: "paste", text: "{\"kind\":\"draft\"}" });
+    await Promise.all([open, payload]);
+
+    expect(runtime.ui.inputMode).toBe("palette");
+    expect(runtime.ui.draft).toBe("{\"kind\":\"draft\"}");
+  });
+
   it("collects an echo confirmation as inert editor text before activation", async () => {
     const setEditorActive = vi.fn();
     const activate = vi.fn(async () => {});
@@ -881,6 +901,32 @@ describe("Fabric Console runtime routing", () => {
     expectEnabledVisibleFocus(runtime, "review:cancel");
   });
 
+  it("rejects a queued underlying action after its first input opens Review", async () => {
+    const activations: string[] = [];
+    let runtime: FabricConsoleRuntime;
+    runtime = new FabricConsoleRuntime({
+      controller: stateBoundControlController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "action:resume" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async ({ regionId }) => {
+        activations.push(regionId);
+        runtime.setWorkflowReview(shortWorkflowReview("review"));
+      },
+      eventId: () => "underlying-action-review-epoch",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    const first = runtime.handleInput({ kind: "key", key: "enter" });
+    const queuedRepeat = runtime.handleInput({ kind: "key", key: "enter" });
+    await Promise.all([first, queuedRepeat]);
+
+    expect(activations).toStrictEqual(["action:resume"]);
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
+  });
+
   it("binds numbered Review actions to the stage in which they were received", async () => {
     const activations: string[] = [];
     let runtime: FabricConsoleRuntime;
@@ -902,6 +948,10 @@ describe("Fabric Console runtime routing", () => {
     runtime.setWorkflowReview(shortWorkflowReview("review"));
     expect(runtime.frame.rows.join("\n")).toContain("[1 Continue to confirmation]");
     expect(runtime.frame.rows.join("\n")).toContain("[2 Cancel Review]");
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "review:continue"))
+      .toMatchObject({ shortcut: "1" });
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "review:cancel"))
+      .toMatchObject({ shortcut: "2" });
 
     const continueInput = runtime.handleInput({ kind: "key", key: "text", text: "1" });
     const queuedCancel = runtime.handleInput({ kind: "key", key: "text", text: "2" });
@@ -920,6 +970,28 @@ describe("Fabric Console runtime routing", () => {
 
     await runtime.handleInput({ kind: "key", key: "text", text: "3" });
     expect(activations).toStrictEqual(["review:continue", "review:confirm"]);
+  });
+
+  it("rejects a Review action received against pre-resize hit geometry", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "pre-resize-review-input",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("review"));
+
+    const queued = runtime.handleInput({ kind: "key", key: "text", text: "1" });
+    runtime.resize({ columns: 96, rows: 28 });
+    await queued;
+
+    expect(activate).not.toHaveBeenCalled();
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
   });
 
   it("blocks ambient confirmation keys only on Confirm, not safe controls", async () => {
@@ -945,6 +1017,48 @@ describe("Fabric Console runtime routing", () => {
     await runtime.handleInput({ kind: "key", key: "space" });
     expect(activate).toHaveBeenCalledTimes(1);
     expect(runtime.ui.notice).toContain("explicit numbered confirmation");
+  });
+
+  it("does not remap a queued Review click after the stage changes", async () => {
+    const activations: string[] = [];
+    let runtime: FabricConsoleRuntime;
+    runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ mouseCapture: true }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async ({ regionId }) => {
+        activations.push(regionId);
+        if (regionId === "review:continue") {
+          runtime.setWorkflowReview(shortWorkflowReview("confirm"));
+        }
+      },
+      eventId: () => "stale-review-click",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("review"));
+    const cancel = runtime.frame.hitRegions.find(
+      ({ id }) => id === "review:cancel",
+    );
+    expect(cancel).toBeDefined();
+    if (cancel === undefined) return;
+    const mouse = {
+      kind: "mouse" as const,
+      button: "left" as const,
+      x: cancel.rect.x1,
+      y: cancel.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    };
+
+    const continueInput = runtime.handleInput({ kind: "key", key: "text", text: "1" });
+    const queuedPress = runtime.handleInput({ ...mouse, phase: "press" });
+    const queuedRelease = runtime.handleInput({ ...mouse, phase: "release" });
+    await Promise.all([continueInput, queuedPress, queuedRelease]);
+
+    expect(activations).toStrictEqual(["review:continue"]);
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
   });
 
   it("anchors an incomplete Review by content across widening and continues without Home", async () => {

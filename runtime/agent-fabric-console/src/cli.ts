@@ -235,7 +235,7 @@ export async function runConsoleCli(
   let refreshLoop: ConsoleRefreshLoop | undefined;
   let decoderTimeout: NodeJS.Timeout | undefined;
   let onData: ((chunk: Buffer) => void) | undefined;
-  let inputTail: Promise<void> = Promise.resolve();
+  const inputOperations = new Set<Promise<void>>();
   const draw = (frame: FabricConsoleFrame): void => {
     if (!terminalReady) return;
     output.write(`\u001b[H${frame.rows.join("\n")}`);
@@ -246,6 +246,14 @@ export async function runConsoleCli(
     finish = resolveFinished;
     fail = rejectFinished;
   });
+  const settleInputOperations = async (): Promise<void> => {
+    while (inputOperations.size > 0) {
+      await Promise.allSettled([...inputOperations]);
+    }
+  };
+  const finishWhenInputsSettle = (): void => {
+    void settleInputOperations().then(() => finish?.(), (error: unknown) => fail?.(error));
+  };
   let primaryFailure: unknown;
   let failed = false;
   try {
@@ -288,17 +296,28 @@ export async function runConsoleCli(
     refreshLoop = startConsoleRefreshLoop({
       refresh: async () => await application?.refresh(),
       isClosed: () => application?.closed === true,
-      onClosed: () => {
-        void inputTail.then(() => finish?.(), (error: unknown) => fail?.(error));
-      },
+      onClosed: finishWhenInputsSettle,
     });
     const decoder = new TerminalInputDecoder();
     const handleEvent = (event: TerminalInputEvent): void => {
-      inputTail = inputTail.then(async () => {
-        await application?.handleInput(event);
-        if (application?.closed === true) finish?.();
-      });
-      void inputTail.catch((error: unknown) => fail?.(error));
+      let operation: Promise<void>;
+      try {
+        operation = application?.handleInput(event) ?? Promise.resolve();
+      } catch (error: unknown) {
+        fail?.(error);
+        return;
+      }
+      inputOperations.add(operation);
+      void operation.then(
+        () => {
+          inputOperations.delete(operation);
+          if (application?.closed === true) finishWhenInputsSettle();
+        },
+        (error: unknown) => {
+          inputOperations.delete(operation);
+          fail?.(error);
+        },
+      );
     };
     onData = (chunk: Buffer): void => {
       for (const event of decoder.push(chunk)) handleEvent(event);
@@ -315,7 +334,7 @@ export async function runConsoleCli(
     if (decoderTimeout !== undefined) clearInterval(decoderTimeout);
     if (onData !== undefined) input.off("data", onData);
     const cleanupFailures: unknown[] = [];
-    await inputTail.catch(() => undefined);
+    await settleInputOperations();
     await refreshLoop?.stop().catch((error: unknown) => cleanupFailures.push(error));
     try {
       terminal?.close();

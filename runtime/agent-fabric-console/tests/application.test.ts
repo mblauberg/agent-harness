@@ -928,7 +928,7 @@ describe("typed Console application bootstrap boundary", () => {
     expect(commit).not.toHaveBeenCalled();
     expect(application.frame.rows.join("\n")).toContain("REVIEW CONFIRM");
 
-    await application.handleInput({ kind: "key", key: "text", text: "2" });
+    await application.handleInput({ kind: "key", key: "text", text: "3" });
     expect(commit).toHaveBeenCalledOnce();
     expect(application.frame.rows.join("\n")).toContain("REVIEW COMMITTED");
     expect(application.frame.rows.join("\n")).toContain("intake_application");
@@ -1142,7 +1142,7 @@ describe("typed Console application bootstrap boundary", () => {
     await application.handleInput({ kind: "paste", text: "{}" });
     await application.handleInput({ kind: "key", key: "enter" });
     await application.handleInput({ kind: "key", key: "enter" });
-    await application.handleInput({ kind: "key", key: "text", text: "2" });
+    await application.handleInput({ kind: "key", key: "text", text: "3" });
 
     expect(startOrAttach).toHaveBeenCalledTimes(2);
     expect(startOrAttach).toHaveBeenNthCalledWith(2, expect.objectContaining({

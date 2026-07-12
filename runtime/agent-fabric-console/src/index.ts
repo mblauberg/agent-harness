@@ -296,6 +296,7 @@ export type FabricHitRegion = Readonly<{
   enabled: boolean;
   geometryKey: string;
   binding: FabricHitBinding | null;
+  shortcut?: string;
   scrollMaximum?: number;
 }>;
 
@@ -1115,10 +1116,17 @@ function renderFabricActions(
     "review:observe": "Observe",
     "review:close": "Close",
   };
+  const stableReviewShortcuts: Readonly<Record<string, string>> = {
+    "review:continue": "1",
+    "review:cancel": "2",
+    "review:confirm": "3",
+  };
+  const actionShortcut = (action: PresentedAction, index: number): string =>
+    stableReviewShortcuts[action.id] ?? String(index + 1);
   const actionLabel = (action: PresentedAction, index: number, compact: boolean): string => {
     const marker = presentation.focusId === action.id ? ">" : "";
     const text = compact ? compactLabels[action.id] ?? action.label : action.label;
-    return `${marker}[${String(index + 1)} ${action.enabled ? "" : "×"}${text}]`;
+    return `${marker}[${actionShortcut(action, index)} ${action.enabled ? "" : "×"}${text}]`;
   };
   const fullWidth = actions.reduce(
     (width, action, index) =>
@@ -1142,6 +1150,7 @@ function renderFabricActions(
       enabled: action.enabled,
       geometryKey,
       binding: actionBindingFor(action, presentation, dataset),
+      shortcut: actionShortcut(action, index),
     });
     x = x1 + width;
   }
@@ -1284,7 +1293,9 @@ function renderFabricStrip(
       rows,
       columns,
       footerRow,
-      inputModal ? footerPrefix : reviewProgressLabel(reviewState.coverage, true),
+      inputModal
+        ? footerPrefix
+        : presentation.notice ?? reviewProgressLabel(reviewState.coverage, true),
       presentation,
       geometryKey,
       hitRegions,

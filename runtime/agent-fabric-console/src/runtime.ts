@@ -10,6 +10,7 @@ import type {
   FabricConsoleFrame,
   FabricHitBinding,
   FabricHitRegion,
+  FabricPointerIntent,
   FabricPointerState,
 } from "./index.js";
 import { FABRIC_VIEWS, type FabricView } from "./model.js";
@@ -111,6 +112,47 @@ function cellSlice(value: string, start: number, end: number): string {
     if (column >= end) break;
   }
   return output;
+}
+
+type CapturedActionTarget =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "shortcut";
+      actionContext: boolean;
+      region: FabricHitRegion | null;
+    }>
+  | Readonly<{
+      kind: "focused-region";
+      region: FabricHitRegion | null;
+    }>;
+
+type CapturedPointerIntent = Readonly<{
+  intent: FabricPointerIntent;
+  region: FabricHitRegion | null;
+}>;
+
+type CapturedInput = Readonly<{
+  event: TerminalInputEvent;
+  frame: FabricConsoleFrame;
+  reviewEpoch: string | null;
+  actionTarget: CapturedActionTarget;
+  pointerIntents: readonly CapturedPointerIntent[];
+}>;
+
+function reviewEpoch(frame: FabricConsoleFrame): string | null {
+  const review = frame.presentation.review;
+  return review === null
+    ? null
+    : JSON.stringify([
+        review.stage,
+        review.workflowId,
+        review.itemId,
+        review.itemRevision,
+        review.projectionRevision,
+        review.previewRevision,
+        review.previewDigest,
+        review.confirmationMode,
+      ]);
 }
 
 export class FabricConsoleRuntime {
@@ -525,11 +567,91 @@ export class FabricConsoleRuntime {
   }
 
   handleInput(event: TerminalInputEvent): Promise<void> {
+    const input = this.#captureInput(event);
     const operation = this.#inputTail.then(async () => {
-      if (!this.#closed) await this.#handleInput(event);
+      if (!this.#closed) await this.#handleInput(input);
     });
     this.#inputTail = operation.catch(() => {});
     return operation;
+  }
+
+  #captureInput(event: TerminalInputEvent): CapturedInput {
+    const frame = this.#frame;
+    let actionTarget: CapturedActionTarget = { kind: "none" };
+    let pointerIntents: readonly CapturedPointerIntent[] = [];
+    if (event.kind === "mouse" && this.#ui.mouseCapture) {
+      const reduced = this.#reducePointer(
+        this.#pointer,
+        event,
+        frame,
+        this.#controller.dataset,
+      );
+      this.#pointer = reduced.state;
+      pointerIntents = reduced.intents.map((intent) => ({
+        intent,
+        region: intent.regionId === null
+          ? null
+          : frame.hitRegions.find(({ id }) => id === intent.regionId) ?? null,
+      }));
+    } else if (
+      this.#ui.inputMode === "browse" &&
+      event.kind === "key" &&
+      event.key === "text" &&
+      event.text !== undefined &&
+      /^[1-8]$/u.test(event.text)
+    ) {
+      const actionRegions = frame.hitRegions.filter(
+        (region) => region.kind === "action",
+      );
+      const actionContext = actionRegions.some(
+        ({ id }) => id === this.#ui.focusId,
+      );
+      actionTarget = {
+        kind: "shortcut",
+        actionContext,
+        region: actionContext
+          ? actionRegions.find(
+              (region, index) =>
+                (region.shortcut ?? String(index + 1)) === event.text,
+            ) ?? null
+          : null,
+      };
+    } else if (
+      this.#ui.inputMode === "browse" &&
+      event.kind === "key" &&
+      (event.key === "enter" || event.key === "space")
+    ) {
+      actionTarget = {
+        kind: "focused-region",
+        region: frame.hitRegions.find(
+          ({ id }) => id === this.#ui.focusId,
+        ) ?? null,
+      };
+    }
+    return {
+      event,
+      frame,
+      reviewEpoch: reviewEpoch(frame),
+      actionTarget,
+      pointerIntents,
+    };
+  }
+
+  #reviewInputIsCurrent(input: CapturedInput): boolean {
+    const currentReviewEpoch = reviewEpoch(this.#frame);
+    if (
+      input.reviewEpoch === currentReviewEpoch &&
+      input.frame === this.#frame
+    ) return true;
+    const reviewContext = input.reviewEpoch !== null || currentReviewEpoch !== null;
+    this.#ui = {
+      ...this.#ui,
+      notice: reviewContext
+        ? "Stale Review input ignored; use a control from the current Review stage."
+        : "Stale action input ignored; use a control from the current frame.",
+    };
+    this.repaint();
+    return false;
   }
 
   close(reason: FabricDetachReason): Promise<void> {
@@ -540,7 +662,8 @@ export class FabricConsoleRuntime {
     return this.#closePromise;
   }
 
-  async #handleInput(event: TerminalInputEvent): Promise<void> {
+  async #handleInput(input: CapturedInput): Promise<void> {
+    const { event } = input;
     this.#restorableResizeFocus = null;
     if (event.kind === "fatal") {
       await this.close("safety");
@@ -570,7 +693,7 @@ export class FabricConsoleRuntime {
       return;
     }
     if (this.#ui.inputMode !== "browse" && event.kind === "mouse") {
-      await this.#handleModalMouse(event);
+      await this.#handleModalMouse(input);
       return;
     }
     if (this.#ui.inputMode !== "browse") {
@@ -581,40 +704,29 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.kind === "mouse") {
-      await this.#handleMouse(event);
+      await this.#handleMouse(input);
       return;
     }
-    await this.#handleBrowseKey(event);
+    await this.#handleBrowseKey(input);
   }
 
   async #handleModalMouse(
-    event: Extract<TerminalInputEvent, { kind: "mouse" }>,
+    input: CapturedInput,
   ): Promise<void> {
-    if (!this.#ui.mouseCapture) return;
-    const reduced = this.#reducePointer(
-      this.#pointer,
-      event,
-      this.#frame,
-      this.#controller.dataset,
-    );
-    this.#pointer = reduced.state;
-    for (const intent of reduced.intents) {
+    for (const { intent, region } of input.pointerIntents) {
       if (
         intent.kind === "scroll" &&
         intent.regionId === "review:scroll" &&
         this.#frame.presentation.review !== null
       ) {
+        if (!this.#reviewInputIsCurrent(input)) return;
         this.#page(intent.direction ?? 1, intent.regionId);
         continue;
       }
       if (intent.kind !== "activate-region" || intent.regionId !== "detach") {
         continue;
       }
-      const detach = this.#frame.hitRegions.find(
-        (region) =>
-          region.id === "detach" && region.kind === "detach" && region.enabled,
-      );
-      if (detach !== undefined) await this.#activateRegion(detach, "mouse");
+      if (region?.kind === "detach") await this.#activateRegion(region, "mouse");
     }
   }
 
@@ -715,8 +827,10 @@ export class FabricConsoleRuntime {
   }
 
   async #handleBrowseKey(
-    event: Extract<TerminalInputEvent, { kind: "key" }>,
+    input: CapturedInput,
   ): Promise<void> {
+    const event = input.event;
+    if (event.kind !== "key") return;
     if (event.key === "alt-m") {
       const enabled = !this.#ui.mouseCapture;
       this.#setMouseCapture?.(enabled);
@@ -809,22 +923,27 @@ export class FabricConsoleRuntime {
         return;
       }
       if (/^[1-8]$/u.test(event.text)) {
-        const actionRegions = this.#frame.hitRegions.filter(
-          (region) => region.kind === "action",
-        );
-        const actionContext = actionRegions.some(
-          ({ id }) => id === this.#ui.focusId,
-        );
         const index = Number(event.text) - 1;
-        if (!actionContext) {
+        const target = input.actionTarget;
+        if (target.kind !== "shortcut") return;
+        if (!target.actionContext) {
           this.#activateView(index);
           return;
         }
-        const region = actionRegions[index];
+        const region = target.region;
+        if (!this.#reviewInputIsCurrent(input)) return;
+        if (region?.id === "review:confirm" && event.text !== "3") {
+          this.#ui = {
+            ...this.#ui,
+            notice: "Confirm requires the explicit [3] binding from the current Confirm stage.",
+          };
+          this.repaint();
+          return;
+        }
         if (region?.enabled === true) {
           await this.#activateRegion(region, "keyboard");
-        } else if (region !== undefined) {
-          const reason = this.#frame.presentation.actions.find(
+        } else if (region !== null) {
+          const reason = input.frame.presentation.actions.find(
             ({ id }) => id === region.id,
           )?.reason;
           this.#ui = {
@@ -905,7 +1024,13 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "enter" || event.key === "space") {
-      if (this.#frame.presentation.review?.stage === "confirm") {
+      const target = input.actionTarget;
+      const region = target.kind === "focused-region" ? target.region : null;
+      if (
+        region?.kind === "action" &&
+        !this.#reviewInputIsCurrent(input)
+      ) return;
+      if (region?.id === "review:confirm") {
         this.#ui = {
           ...this.#ui,
           notice: "Bare Enter/Space cannot confirm; use the explicit numbered confirmation binding.",
@@ -913,44 +1038,31 @@ export class FabricConsoleRuntime {
         this.repaint();
         return;
       }
-      const region = this.#frame.hitRegions.find(
-        (candidate) => candidate.id === this.#ui.focusId && candidate.enabled,
-      );
-      if (region !== undefined) await this.#activateRegion(region, "keyboard");
+      if (region?.enabled === true) await this.#activateRegion(region, "keyboard");
     }
   }
 
   async #handleMouse(
-    event: Extract<TerminalInputEvent, { kind: "mouse" }>,
+    input: CapturedInput,
   ): Promise<void> {
-    if (!this.#ui.mouseCapture) return;
-    const reduced = this.#reducePointer(
-      this.#pointer,
-      event,
-      this.#frame,
-      this.#controller.dataset,
-    );
-    this.#pointer = reduced.state;
-    for (const intent of reduced.intents) {
+    for (const { intent, region } of input.pointerIntents) {
+      if (
+        (region?.kind === "action" || intent.regionId === "review:scroll") &&
+        !this.#reviewInputIsCurrent(input)
+      ) return;
       if (intent.kind === "scroll") {
         this.#page(intent.direction ?? 1, intent.regionId);
         continue;
       }
       if (intent.kind === "move-splitter") {
         const ratio =
-          this.#frame.mode === "wide"
-            ? (intent.x ?? 1) / Math.max(1, this.#frame.columns)
-            : (intent.y ?? 1) / Math.max(1, this.#frame.rows.length);
+          input.frame.mode === "wide"
+            ? (intent.x ?? 1) / Math.max(1, input.frame.columns)
+            : (intent.y ?? 1) / Math.max(1, input.frame.rows.length);
         this.#setSplitterRatio(ratio);
         continue;
       }
-      const region =
-        intent.regionId === null
-          ? undefined
-          : this.#frame.hitRegions.find(
-              (candidate) => candidate.id === intent.regionId,
-            );
-      if (region !== undefined) await this.#activateRegion(region, "mouse");
+      if (region !== null) await this.#activateRegion(region, "mouse");
     }
   }
 

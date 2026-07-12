@@ -277,8 +277,8 @@ export class TerminalInputDecoder {
       }
       const text = this.#textDecoder.write(Buffer.from(plainBytes));
       plainBytes.length = 0;
-      if (text.length > 0) {
-        events.push({ kind: "key", key: "text", text });
+      for (const character of text) {
+        events.push({ kind: "key", key: "text", text: character });
       }
     };
 
