@@ -241,7 +241,9 @@ input.on("line", (line) => {
           result: {
             ...(isRecord(action.result) ? action.result : {}),
             result: lookupCount === 1 ? "recovered provider review" : "divergent provider review",
-            resourceUsage: { turns: lookupCount === 1 ? 1 : 2 },
+            resourceUsage: lookupCount === 1
+              ? { turns: 1 }
+              : { turns: 2, "cost:USD": 2 },
           },
         };
         saveJournal(journal);

@@ -4942,6 +4942,21 @@ export class Fabric {
         const existing = this.#providerActionReconciliations.get(key);
         if (existing !== undefined) {
           await existing;
+          this.#assertChair(runId, actorAgentId);
+          this.#assertGenericProviderAction(runId, input.actionId);
+          const concurrentReplay = this.#commandJournal.read(
+            runId,
+            actorAgentId,
+            input.commandId,
+            input,
+            isProviderActionResult,
+          );
+          if (concurrentReplay !== undefined) return concurrentReplay;
+          const current = this.getProviderAction(runId, input.actionId);
+          if (current.status === "terminal" || current.status === "quarantined") {
+            this.#commandJournal.write(runId, actorAgentId, input.commandId, input, current);
+            return current;
+          }
           return await this.#reconcileProviderAction(runId, actorAgentId, input);
         }
         const owned = this.#reconcileProviderAction(runId, actorAgentId, input);

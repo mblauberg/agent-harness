@@ -1453,7 +1453,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         ...fixture.rootAuthority,
         sourcePaths: ["src/leader"],
         actions: [...fixture.rootAuthority.actions],
-        budget: { turns: 2 },
+        budget: { turns: 2, "cost:USD": 2 },
       },
       commandId: "provider-review-concurrent:authority",
     });
@@ -1506,6 +1506,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     expect(providerJournal.actions[actionId]?.lookupCount).toBe(1);
     expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
       turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
+      "cost:USD": { granted: 2, reserved: 2, consumed: 0, usageUnknown: true },
     });
     const database = new Database(fixture.databasePath, { readonly: true });
     try {
