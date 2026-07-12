@@ -134,11 +134,18 @@ export type UsabilityObservation = Readonly<{
   nativeNotificationVisible: boolean;
   dynamicResizeSafe: boolean;
   artifactReviewSafe: boolean;
+  actionMatrixSafe: boolean;
+  scrollAndSelectionSafe: boolean;
   exactViewport: boolean;
   identificationObserver: "human-recorded" | "automated-proxy";
   keyboardEventCount: number;
   mouseEventCount: number;
+  scrollEventCount: number;
   resizeEventCount: number;
+  actionIdsCovered: readonly string[];
+  actionMatrixFailures: readonly string[];
+  keyboardActionIds: readonly string[];
+  mouseActionIds: readonly string[];
 }>;
 
 export type UsabilityEvaluationReport = Readonly<{
@@ -177,6 +184,28 @@ const VIEW_KEYS = [
   "alt-7",
   "alt-8",
 ] as const;
+
+export const REQUIRED_USABILITY_ACTION_IDS = Object.freeze([
+  "action:pause",
+  "action:resume",
+  "action:cancel",
+  "action:steer",
+  "action:project-session-drain",
+  "action:project-session-stop",
+  "workflow:launch",
+  "workflow:git",
+  "workflow:promotion",
+  "workflow:discuss",
+  "workflow:accept",
+  "workflow:request-changes",
+  "workflow:defer",
+  "workflow:implement",
+  "artifact:confirm-terminal-neutralised",
+] as const);
+
+const REQUIRED_USABILITY_ACTION_SET = new Set<string>(
+  REQUIRED_USABILITY_ACTION_IDS,
+);
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -598,6 +627,116 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
           requiresPreview: true,
         },
       }];
+  const projectRows: readonly ConsoleRow<"project">[] = [{
+    view: "project",
+    stableId: fixture.project,
+    revision: revisionFromProtocol(revision),
+    urgency: "normal",
+    freshness: freshness("live", 100),
+    summary: {
+      kind: "project",
+      goal: fixture.description,
+      acceptedScopeRef: evidenceReview === null
+        ? null
+        : { path: evidenceReview.path as never, digest: evidenceReview.sourceDigest },
+      repositoryRevision: "fixture-revision",
+    },
+    detailRef: { kind: "project", projectId, expectedRevision: revision },
+    actionAvailability: {
+      state: "available",
+      actions: [
+        "project-session-drain",
+        "project-session-stop",
+        "project-session-launch",
+        "git",
+        "promotion",
+      ],
+      requiresPreview: true,
+    },
+  }];
+  const runRows: readonly ConsoleRow<"runs">[] = runs.map((run) => ({
+    view: "runs",
+    stableId: run.runId,
+    revision: revisionFromProtocol(revision),
+    urgency: run.health === "blocked" || run.health === "quarantined"
+      ? "critical-path"
+      : "normal",
+    freshness: freshness("live", 100),
+    summary: {
+      kind: "run",
+      phase: run.phase,
+      health: run.health,
+      nextMilestone: run.nextMilestone,
+    },
+    detailRef: {
+      kind: "run",
+      coordinationRunId: run.runId,
+      expectedRevision: revision,
+    },
+    actionAvailability: {
+      state: "available",
+      actions: ["pause", "resume", "cancel", "steer"],
+      requiresPreview: true,
+    },
+  }));
+  const workRows: readonly ConsoleRow<"work">[] = runs.map((run, index) => ({
+    view: "work",
+    stableId: `task-evaluation-${String(index + 1)}-${run.runId}`,
+    revision: revisionFromProtocol(revision),
+    urgency: "normal",
+    freshness: freshness("live", 100),
+    summary: { kind: "work", state: "active", checkState: "passing" },
+    detailRef: {
+      kind: "task",
+      taskId: `task-evaluation-${String(index + 1)}-${run.runId}` as never,
+      expectedRevision: revision,
+    },
+    actionAvailability: { state: "read-only", reason: "state-ineligible" },
+  }));
+  const agentRows: readonly ConsoleRow<"agents">[] = runs.map((run) => ({
+    view: "agents",
+    stableId: run.chairAgentId,
+    revision: revisionFromProtocol(revision),
+    urgency: "normal",
+    freshness: freshness("live", 100),
+    summary: {
+      kind: "agent",
+      role: "chair",
+      lifecycle: "working",
+      contextPressure: "unknown",
+    },
+    detailRef: {
+      kind: "agent",
+      agentId: run.chairAgentId,
+      expectedRevision: revision,
+    },
+    actionAvailability: { state: "read-only", reason: "state-ineligible" },
+  }));
+  const activityRows: readonly ConsoleRow<"activity">[] = Array.from(
+    { length: 12 },
+    (_, index) => ({
+      view: "activity" as const,
+      stableId: `activity-evaluation-${String(index + 1)}`,
+      revision: revisionFromProtocol(revision + index),
+      urgency: "normal" as const,
+      freshness: freshness("live", index * 10),
+      summary: {
+        kind: "activity" as const,
+        activityKind: "lifecycle" as const,
+        summary: `Evaluation activity ${String(index + 1)}`,
+        occurredAt: timestamp,
+      },
+      detailRef: {
+        kind: "activity" as const,
+        eventId: `activity-evaluation-${String(index + 1)}`,
+        expectedRevision: revision + index,
+      },
+      actionAvailability: {
+        state: "read-only" as const,
+        reason: "state-ineligible" as const,
+      },
+    }),
+  );
   const pages = createEmptyViewPages();
   const attentionFacts: AttentionItem[] = fixture.attention.map((item) => ({
     itemId: item.id,
@@ -665,6 +804,38 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     cursor: revision,
     pages: {
       ...pages,
+      project: {
+        view: "project",
+        rows: projectRows,
+        nextCursor: projectRows.length,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(revision),
+        readTransactionId: `fixture:${fixture.id}:project`,
+      },
+      runs: {
+        view: "runs",
+        rows: runRows,
+        nextCursor: runRows.length,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(revision),
+        readTransactionId: `fixture:${fixture.id}:runs`,
+      },
+      work: {
+        view: "work",
+        rows: workRows,
+        nextCursor: workRows.length,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(revision),
+        readTransactionId: `fixture:${fixture.id}:work`,
+      },
+      agents: {
+        view: "agents",
+        rows: agentRows,
+        nextCursor: agentRows.length,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(revision),
+        readTransactionId: `fixture:${fixture.id}:agents`,
+      },
       attention: {
         view: "attention",
         rows: attentionRows,
@@ -689,9 +860,31 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
         snapshotRevision: revisionFromProtocol(revision),
         readTransactionId: `fixture:${fixture.id}:evidence`,
       },
+      activity: {
+        view: "activity",
+        rows: activityRows,
+        nextCursor: activityRows.length,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(revision),
+        readTransactionId: `fixture:${fixture.id}:activity`,
+      },
     },
     loadedAtMs: performance.now(),
     canMutate: true,
+    productionActionPlanning: true,
+    workflowCapabilities: {
+      intake: { state: "available" },
+      gate: { state: "available" },
+      launch: {
+        state: "unavailable",
+        reason: "daemon-launch-intent-preparation-unavailable",
+      },
+      git: {
+        state: "unavailable",
+        reason: "daemon-git-intent-preparation-unavailable",
+      },
+      promotion: { state: "available" },
+    },
     ...(evidenceReview === null ? {} : {
       inspection: {
         kind: "artifact" as const,
@@ -815,6 +1008,195 @@ class EvaluationRuntimeController implements FabricRuntimeController {
   updateDataset(dataset: FabricConsoleDataset): void {
     this.#dataset = dataset;
   }
+}
+
+type InteractionCoverage = Readonly<{
+  actionMatrixSafe: boolean;
+  scrollAndSelectionSafe: boolean;
+  keyboardEventCount: number;
+  mouseEventCount: number;
+  scrollEventCount: number;
+  actionIdsCovered: readonly string[];
+  actionMatrixFailures: readonly string[];
+  keyboardActionIds: readonly string[];
+  mouseActionIds: readonly string[];
+}>;
+
+async function exerciseInteractionCoverage(
+  dataset: FabricConsoleDataset,
+  viewport: UsabilityManifest["referenceViewport"],
+  dependencies: UsabilityEvaluationDependencies,
+  eventPrefix: string,
+): Promise<InteractionCoverage> {
+  const controller = new EvaluationRuntimeController(dataset);
+  const activations: Array<Readonly<{
+    regionId: string;
+    provenance: "keyboard" | "mouse";
+  }>> = [];
+  let sequence = 0;
+  let keyboardEventCount = 0;
+  let mouseEventCount = 0;
+  let scrollEventCount = 0;
+  let actionMatrixSafe = true;
+  const actionMatrixFailures: string[] = [];
+  const covered = new Set<string>();
+  const keyboardActions = new Set<string>();
+  const mouseActions = new Set<string>();
+  const runtime = new FabricConsoleRuntime({
+    controller,
+    viewport,
+    ui: createFabricUiState({
+      draft: "reason=scripted-usability-check",
+      mouseCapture: true,
+    }),
+    draw: () => {},
+    detach: async () => {},
+    activate: async ({ regionId, provenance }) => {
+      activations.push({ regionId, provenance });
+    },
+    eventId: () => `${eventPrefix}-${String(++sequence)}`,
+    render: dependencies.render,
+    reducePointer: dependencies.reducePointer,
+  });
+
+  const exerciseCurrentActions = async (): Promise<void> => {
+    const actions = runtime.frame.presentation.actions.filter(
+      ({ id }) => REQUIRED_USABILITY_ACTION_SET.has(id),
+    );
+    for (const action of actions) {
+      covered.add(action.id);
+      runtime.setFocus(action.id);
+      const keyboardStart = activations.length;
+      await runtime.handleInput({ kind: "key", key: "enter" });
+      keyboardEventCount += 1;
+      const keyboardActivations = activations.slice(keyboardStart);
+      const keyboardMatched = keyboardActivations.filter(
+        (activation) =>
+          activation.regionId === action.id && activation.provenance === "keyboard",
+      ).length;
+      if (keyboardMatched > 0) keyboardActions.add(action.id);
+
+      const region = runtime.frame.hitRegions.find(
+        (candidate) => candidate.kind === "action" && candidate.id === action.id,
+      );
+      if (region === undefined) {
+        actionMatrixSafe = false;
+        actionMatrixFailures.push(`${controller.state.activeView}:${action.id}:not-rendered`);
+        continue;
+      }
+      const mouseStart = activations.length;
+      for (const phase of ["press", "release"] as const) {
+        await runtime.handleInput({
+          kind: "mouse",
+          phase,
+          button: "left",
+          x: region.rect.x1,
+          y: region.rect.y1,
+          modifiers: { shift: false, alt: false, ctrl: false },
+        });
+        mouseEventCount += 1;
+      }
+      const mouseActivations = activations.slice(mouseStart);
+      const mouseMatched = mouseActivations.filter(
+        (activation) =>
+          activation.regionId === action.id && activation.provenance === "mouse",
+      ).length;
+      if (mouseMatched > 0) mouseActions.add(action.id);
+      const actionSafe = action.enabled
+        ? keyboardMatched === 1 && mouseMatched === 1
+        : keyboardMatched === 0 && mouseMatched === 0 &&
+          action.reason !== undefined;
+      actionMatrixSafe &&= actionSafe;
+      if (!actionSafe) {
+        actionMatrixFailures.push(
+          `${controller.state.activeView}:${action.id}:enabled=${String(action.enabled)}:keyboard=${String(keyboardMatched)}:mouse=${String(mouseMatched)}:reason=${action.reason ?? "missing"}`,
+        );
+      }
+    }
+  };
+
+  for (const view of FABRIC_VIEWS) {
+    const row = dataset.pages[view].rows[0];
+    if (row === undefined) continue;
+    controller.select(view, row.stableId);
+    runtime.repaint();
+    await exerciseCurrentActions();
+    const inspection = dataset.inspection;
+    if (
+      view === "evidence" &&
+      inspection?.kind === "artifact" &&
+      inspection.state === "current" &&
+      inspection.result.reviewDisposition === "confirm-terminal-neutralised"
+    ) {
+      runtime.setArtifactConfirmation({
+        evidenceId: inspection.binding.itemId,
+        evidenceRevision: inspection.result.evidenceRevision,
+        sourceDigest: inspection.result.artifactRef.digest,
+        renderedDigest: inspection.result.renderedArtifactDigest,
+        transformation: "terminal-neutralised",
+        pageCount: inspection.result.coverage.pageCount,
+      });
+      await exerciseCurrentActions();
+    }
+  }
+
+  const activity = dataset.pages.activity.rows[0];
+  let scrollAndSelectionSafe = false;
+  if (activity !== undefined) {
+    controller.select("activity", activity.stableId);
+    runtime.repaint();
+    const selectedBefore = controller.state.selectionByView.activity?.stableId ?? null;
+    const activationCountBeforeSelectionGesture = activations.length;
+    await runtime.handleInput({ kind: "key", key: "page-down" });
+    keyboardEventCount += 1;
+    scrollEventCount += 1;
+    const keyboardOffset = runtime.ui.scrollOffsetByView.activity ?? 0;
+    const rowRegion = runtime.frame.hitRegions.find(
+      (region) => region.kind === "row" && region.binding?.view === "activity",
+    );
+    if (rowRegion !== undefined) {
+      await runtime.handleInput({
+        kind: "mouse",
+        phase: "wheel",
+        button: "wheel-down",
+        x: rowRegion.rect.x1,
+        y: rowRegion.rect.y1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      });
+      mouseEventCount += 1;
+      scrollEventCount += 1;
+      const mouseOffset = runtime.ui.scrollOffsetByView.activity ?? 0;
+      for (const phase of ["press", "release"] as const) {
+        await runtime.handleInput({
+          kind: "mouse",
+          phase,
+          button: "left",
+          x: rowRegion.rect.x1,
+          y: rowRegion.rect.y1,
+          modifiers: { shift: true, alt: false, ctrl: false },
+        });
+        mouseEventCount += 1;
+      }
+      scrollAndSelectionSafe =
+        keyboardOffset > 0 &&
+        mouseOffset > keyboardOffset &&
+        (controller.state.selectionByView.activity?.stableId ?? null) ===
+          selectedBefore &&
+        activations.length === activationCountBeforeSelectionGesture;
+    }
+  }
+
+  return {
+    actionMatrixSafe,
+    scrollAndSelectionSafe,
+    keyboardEventCount,
+    mouseEventCount,
+    scrollEventCount,
+    actionIdsCovered: [...covered].sort(),
+    actionMatrixFailures,
+    keyboardActionIds: [...keyboardActions].sort(),
+    mouseActionIds: [...mouseActions].sort(),
+  };
 }
 
 async function observe(
@@ -957,7 +1339,12 @@ async function observe(
       resizeEventCount += evidenceFrames.length;
       const evidencePresentation = evidenceRuntime.frame.presentation;
       const evidenceText = evidenceFrames.map(({ rows }) => rows.join("\n")).join("\n");
-      const promotion = evidencePresentation.actions.find(({ id }) => id === "action:promotion");
+      const acceptance = evidencePresentation.actions.find(
+        ({ id }) => id === "workflow:accept",
+      );
+      const implementation = evidencePresentation.actions.find(
+        ({ id }) => id === "workflow:implement",
+      );
       const confirmation = evidencePresentation.actions.find(
         ({ id }) => id === "artifact:confirm-terminal-neutralised",
       );
@@ -1012,7 +1399,8 @@ async function observe(
         ).length === 1;
       }
       artifactReviewSafe =
-        promotion?.enabled === false &&
+        acceptance?.enabled === false &&
+        implementation?.enabled === false &&
         (evidenceReview.expectedDisposition === "confirm-terminal-neutralised"
           ? confirmation?.enabled === true && confirmationReached
           : confirmation === undefined) &&
@@ -1022,6 +1410,14 @@ async function observe(
         !/\b(?:afb_|afc_|afop_)/u.test(evidenceText);
     }
   }
+  const interactionCoverage = await exerciseInteractionCoverage(
+    dataset,
+    manifest.referenceViewport,
+    dependencies,
+    `evaluation-matrix-${fixture.id}-${String(repetition)}`,
+  );
+  keyboardEventCount += interactionCoverage.keyboardEventCount;
+  mouseEventCount += interactionCoverage.mouseEventCount;
   const identification = await dependencies.identify({ fixture, repetition, frame });
   if (
     (identification.observer !== "human-recorded" &&
@@ -1051,8 +1447,9 @@ async function observe(
     consequentialReviewRequired:
       top === undefined ||
       !fixture.attention.find((item) => item.id === top.stableId)?.consequential ||
-      (top.actionAvailability.state === "available" &&
-        top.actionAvailability.requiresPreview),
+      presentation.actions.every(
+        (action) => !action.enabled && action.reason !== undefined,
+      ),
     optionalIntegrationIndependent:
       !githubUnavailable ||
       (dataset.connection.state === "live" && presentation.connection === "LIVE"),
@@ -1065,6 +1462,8 @@ async function observe(
           )),
     dynamicResizeSafe,
     artifactReviewSafe,
+    actionMatrixSafe: interactionCoverage.actionMatrixSafe,
+    scrollAndSelectionSafe: interactionCoverage.scrollAndSelectionSafe,
     exactViewport:
       frame.columns === manifest.referenceViewport.columns &&
       frame.rows.length === manifest.referenceViewport.rows &&
@@ -1074,7 +1473,12 @@ async function observe(
     identificationObserver: identification.observer,
     keyboardEventCount,
     mouseEventCount,
+    scrollEventCount: interactionCoverage.scrollEventCount,
     resizeEventCount,
+    actionIdsCovered: interactionCoverage.actionIdsCovered,
+    actionMatrixFailures: interactionCoverage.actionMatrixFailures,
+    keyboardActionIds: interactionCoverage.keyboardActionIds,
+    mouseActionIds: interactionCoverage.mouseActionIds,
   };
 }
 
@@ -1127,6 +1531,8 @@ export async function evaluateUsabilityManifest(
         observation.nativeNotificationVisible &&
         observation.dynamicResizeSafe &&
         observation.artifactReviewSafe &&
+        observation.actionMatrixSafe &&
+        observation.scrollAndSelectionSafe &&
         observation.exactViewport;
     }
   }

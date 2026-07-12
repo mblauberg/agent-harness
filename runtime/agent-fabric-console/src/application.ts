@@ -26,6 +26,7 @@ import {
   createBootstrapUnavailableDataset,
   createProtocolIncompatibleDataset,
   type BootstrapUnavailableReason,
+  type ConsoleInspectionBinding,
   type ConsoleProtocolBinding,
   type FabricConsoleDataset,
 } from "./protocol-adapter.js";
@@ -239,7 +240,13 @@ const rejectingActions: OperatorActionClient = {
   reconcile: async () => Promise.reject(new Error("operator actions unavailable")),
 };
 
-function guidedWorkflowPrompt(action: GuidedWorkflowAction): string {
+export function guidedWorkflowPrompt(
+  action: GuidedWorkflowAction,
+  binding: ConsoleInspectionBinding,
+): string {
+  if (binding.view === "attention" || action === "promotion") {
+    return `GUIDED ${action}: enter gate=<stable-id>; Enter reviews; Esc cancels`;
+  }
   if (
     action === "discuss" || action === "accept" ||
     action === "request-changes" || action === "defer"
@@ -464,7 +471,7 @@ export class FabricConsoleApplication {
       this.#runtime.beginGuidedWorkflow({
         action: action as GuidedWorkflowAction,
         binding,
-        prompt: guidedWorkflowPrompt(action as GuidedWorkflowAction),
+        prompt: guidedWorkflowPrompt(action as GuidedWorkflowAction, binding),
       });
       return;
     }

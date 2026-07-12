@@ -607,9 +607,19 @@ describe("structured presenter and responsive Fabric renderer", () => {
     );
 
     expect(presentation.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "workflow:discuss", label: "Discuss", enabled: true }),
+      expect.objectContaining({
+        id: "workflow:discuss",
+        label: "Discuss",
+        enabled: false,
+        reason: "daemon-chair-request-preparation-unavailable",
+      }),
       expect.objectContaining({ id: "workflow:accept", label: "Accept", enabled: true }),
-      expect.objectContaining({ id: "workflow:request-changes", label: "Request changes", enabled: true }),
+      expect.objectContaining({
+        id: "workflow:request-changes",
+        label: "Request changes",
+        enabled: false,
+        reason: "daemon-chair-request-preparation-unavailable",
+      }),
       expect.objectContaining({ id: "workflow:defer", label: "Defer", enabled: true }),
       expect.objectContaining({
         id: "workflow:implement",
@@ -667,8 +677,16 @@ describe("structured presenter and responsive Fabric renderer", () => {
     );
 
     expect(presentation.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "action:pause", enabled: true }),
-      expect.objectContaining({ id: "action:resume", enabled: false, reason: "run-is-not-paused" }),
+      expect.objectContaining({
+        id: "action:pause",
+        enabled: false,
+        reason: "run-control-state-projection-unavailable",
+      }),
+      expect.objectContaining({
+        id: "action:resume",
+        enabled: false,
+        reason: "run-control-state-projection-unavailable",
+      }),
       expect.objectContaining({ id: "action:cancel", enabled: false, reason: "enter-a-reason" }),
       expect.objectContaining({ id: "action:steer", enabled: false, reason: "enter-an-instruction" }),
     ]));
@@ -778,10 +796,26 @@ describe("structured presenter and responsive Fabric renderer", () => {
       { columns: 80, rows: 24 },
     );
     expect(decision.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "workflow:discuss", enabled: true }),
-      expect.objectContaining({ id: "workflow:accept", enabled: true }),
-      expect.objectContaining({ id: "workflow:request-changes", enabled: true }),
-      expect.objectContaining({ id: "workflow:defer", enabled: true }),
+      expect.objectContaining({
+        id: "workflow:discuss",
+        enabled: false,
+        reason: "daemon-chair-request-preparation-unavailable",
+      }),
+      expect.objectContaining({
+        id: "workflow:accept",
+        enabled: false,
+        reason: "attention-gate-binding-projection-unavailable",
+      }),
+      expect.objectContaining({
+        id: "workflow:request-changes",
+        enabled: false,
+        reason: "attention-gate-binding-projection-unavailable",
+      }),
+      expect.objectContaining({
+        id: "workflow:defer",
+        enabled: false,
+        reason: "attention-gate-binding-projection-unavailable",
+      }),
     ]));
 
     const fyiController = controllerState();

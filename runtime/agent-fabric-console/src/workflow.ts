@@ -27,6 +27,7 @@ import {
 
 import { operatorIntentRevision } from "./action-revision.js";
 import {
+  CONSOLE_MISSING_SURFACES,
   revisionFromProtocol,
   type ConsoleWorkflowCapabilities,
   type GuidedWorkflowAction,
@@ -147,6 +148,16 @@ type PreparedWorkflow = Readonly<{
 const MAX_WORKFLOW_BYTES = 65_536;
 const MAX_GUIDED_INPUT_BYTES = 16_384;
 
+export class ConsoleGuidedInputError extends TypeError {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "ConsoleGuidedInputError";
+    this.code = code;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -202,7 +213,10 @@ function workflowEnvelope(raw: string): WorkflowEnvelope {
 
 function guidedFields(raw: string): Readonly<Record<string, string>> {
   if (Buffer.byteLength(raw) > MAX_GUIDED_INPUT_BYTES) {
-    throw new TypeError("guided workflow input exceeds 16384 bytes");
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_INPUT_TOO_LARGE",
+      "guided workflow input exceeds 16384 bytes",
+    );
   }
   const fields: Record<string, string> = {};
   for (const [index, sourceLine] of raw.split(/\r?\n/u).entries()) {
@@ -210,17 +224,36 @@ function guidedFields(raw: string): Readonly<Record<string, string>> {
     if (line.length === 0) continue;
     const separator = line.indexOf("=");
     if (separator < 1) {
-      throw new TypeError(`guided workflow line ${String(index + 1)} must be key=value`);
+      throw new ConsoleGuidedInputError(
+        "CONSOLE_GUIDED_KEY_VALUE_REQUIRED",
+        `guided workflow line ${String(index + 1)} must be key=value`,
+      );
     }
     const key = line.slice(0, separator).trim();
     const value = line.slice(separator + 1).trim();
     if (!/^[a-z][a-z0-9-]{0,63}$/u.test(key)) {
-      throw new TypeError(`guided workflow field ${key} is invalid`);
+      throw new ConsoleGuidedInputError(
+        "CONSOLE_GUIDED_FIELD_INVALID",
+        `guided workflow field ${key} is invalid`,
+      );
     }
-    if (key in fields) throw new TypeError(`guided workflow field ${key} is duplicated`);
-    if (value.length === 0) throw new TypeError(`guided workflow field ${key} is empty`);
+    if (key in fields) {
+      throw new ConsoleGuidedInputError(
+        "CONSOLE_GUIDED_FIELD_DUPLICATE",
+        `guided workflow field ${key} is duplicated`,
+      );
+    }
+    if (value.length === 0) {
+      throw new ConsoleGuidedInputError(
+        "CONSOLE_GUIDED_FIELD_EMPTY",
+        `guided workflow field ${key} is empty`,
+      );
+    }
     if (/credential|capability|token|secret/iu.test(key)) {
-      throw new TypeError(`guided workflow field ${key} is forbidden`);
+      throw new ConsoleGuidedInputError(
+        "CONSOLE_GUIDED_FIELD_FORBIDDEN",
+        `guided workflow field ${key} is forbidden`,
+      );
     }
     fields[key] = value;
   }
@@ -232,7 +265,12 @@ function requiredGuidedField(
   key: string,
 ): string {
   const value = fields[key];
-  if (value === undefined) throw new TypeError(`guided workflow requires ${key}`);
+  if (value === undefined) {
+    throw new ConsoleGuidedInputError(
+      `CONSOLE_GUIDED_REQUIRES_${key.toUpperCase()}`,
+      `guided workflow requires ${key}`,
+    );
+  }
   return value;
 }
 
@@ -664,6 +702,16 @@ export function createProductionConsoleWorkflowPlanner(
     if (input.dataset.snapshotRevision !== input.binding.projectionRevision) {
       throw new Error("guided workflow projection revision is stale");
     }
+    if (input.binding.view === "attention") {
+      throw new Error(
+        input.action === "discuss"
+          ? CONSOLE_MISSING_SURFACES.chairRequestPreparation
+          : CONSOLE_MISSING_SURFACES.attentionGateBinding,
+      );
+    }
+    if (input.action === "discuss" || input.action === "request-changes") {
+      throw new Error(CONSOLE_MISSING_SURFACES.chairRequestPreparation);
+    }
     if (
       input.action === "implement" || input.action === "launch" ||
       input.action === "git" || input.action === "promotion"
@@ -716,30 +764,8 @@ export function createProductionConsoleWorkflowPlanner(
         typedRevisionOverrides.delete(overrideKey);
       }
     }
-    if (
-      input.action !== "discuss" && input.action !== "accept" &&
-      input.action !== "request-changes" && input.action !== "defer"
-    ) {
+    if (input.action !== "accept" && input.action !== "defer") {
       throw new Error(`${input.action} typed planner is unavailable`);
-    }
-    if (input.binding.view === "attention" && input.action !== "discuss") {
-      const capability = capabilities.gate;
-      if (capability.state === "unavailable") throw new Error(capability.reason);
-      const fields = guidedFields(input.raw);
-      const gateId = requiredGuidedField(fields, "gate");
-      const status = input.action === "accept"
-        ? "approved"
-        : input.action === "request-changes"
-          ? "rejected"
-          : "deferred";
-      return await prepare({
-        raw: JSON.stringify({
-          kind: "scoped-gate-resolve",
-          request: { gateId, status },
-        }),
-        dataset: input.dataset,
-        eventId: input.eventId,
-      });
     }
     const intakes = options.client.intakes;
     if (intakes === undefined) throw new Error("intake protocol is unavailable");

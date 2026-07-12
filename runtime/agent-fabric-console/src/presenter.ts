@@ -12,6 +12,7 @@ import type {
 } from "./controller.js";
 import {
   FABRIC_VIEWS,
+  CONSOLE_MISSING_SURFACES,
   revisionFromProtocol,
   type ConsoleFreshness,
   type ConsoleRow,
@@ -584,10 +585,8 @@ function productionActionUnavailableReason(
     if (row.detailRef?.kind !== "run" && row.detailRef?.kind !== "session") {
       return "selected-row-has-no-control-target";
     }
-    if (row.summary?.kind === "run") {
-      const paused = row.summary.phase.toLowerCase().includes("pause");
-      if (action === "pause" && paused) return "run-is-already-paused";
-      if (action === "resume" && !paused) return "run-is-not-paused";
+    if (action === "pause" || action === "resume") {
+      return CONSOLE_MISSING_SURFACES.runControlState;
     }
     if (action === "cancel" && ui.draft.trim().length === 0) {
       return "enter-a-reason";
@@ -665,6 +664,9 @@ function evidenceWorkflowActions(
   const intakeReason = canMutate
     ? capabilityReason(capabilities.intake)
     : "operator-mutation-unavailable";
+  const discussionReason = canMutate
+    ? CONSOLE_MISSING_SURFACES.chairRequestPreparation
+    : "operator-mutation-unavailable";
   const inspection = dataset.inspection;
   const currentArtifact = inspection?.kind === "artifact" &&
     inspection.state === "current" &&
@@ -684,9 +686,9 @@ function evidenceWorkflowActions(
   const decisionReason = intakeReason ?? artifactReason;
   const launchReason = decisionReason ?? capabilityReason(capabilities.launch);
   return [
-    guidedAction("discuss", intakeReason),
+    guidedAction("discuss", discussionReason),
     guidedAction("accept", decisionReason),
-    guidedAction("request-changes", intakeReason),
+    guidedAction("request-changes", discussionReason),
     guidedAction("defer", intakeReason),
     guidedAction("implement", launchReason),
   ];
@@ -736,10 +738,12 @@ function attentionWorkflowActions(
   const capabilities = dataset.workflowCapabilities;
   if (capabilities === undefined) return [];
   const mutationReason = canMutate ? null : "operator-mutation-unavailable";
-  const intakeReason = mutationReason ?? capabilityReason(capabilities.intake);
-  const gateReason = mutationReason ?? capabilityReason(capabilities.gate);
+  const discussionReason = mutationReason ??
+    CONSOLE_MISSING_SURFACES.chairRequestPreparation;
+  const gateReason = mutationReason ??
+    CONSOLE_MISSING_SURFACES.attentionGateBinding;
   return [
-    guidedAction("discuss", intakeReason),
+    guidedAction("discuss", discussionReason),
     guidedAction("accept", gateReason),
     guidedAction("request-changes", gateReason),
     guidedAction("defer", gateReason),
@@ -780,12 +784,19 @@ function rowAndArtifactActions(
     inspection.result.reviewDisposition !== "confirm-terminal-neutralised" ||
     matchesArtifactConfirmation(ui.artifactConfirmation, row.stableId, inspection.result)
   ) return [...workflowActions, ...actions];
+  const pendingActions = workflowActions.map((action) =>
+    action.id === "workflow:request-changes"
+      ? { ...action, label: "Revise" }
+      : action.id === "workflow:implement"
+        ? { ...action, label: "Build" }
+        : action
+  );
   return [{
     id: "artifact:confirm-terminal-neutralised",
-    label: `Confirm ${inspection.result.transformation} + source digest`,
+    label: "Confirm digest",
     enabled: true,
     availableAction: null,
-  }, ...workflowActions, ...actions];
+  }, ...pendingActions, ...actions];
 }
 
 function scopeLabel(gate: ReviewGate): string {

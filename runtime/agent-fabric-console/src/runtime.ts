@@ -479,16 +479,30 @@ export class FabricConsoleRuntime {
       }
       if (/^[1-8]$/u.test(event.text)) {
         const actionRegions = this.#frame.hitRegions.filter(
-          (region) => region.kind === "action" && region.enabled,
+          (region) => region.kind === "action",
         );
-        const actionContext =
-          this.#ui.focusId?.startsWith("action:") === true ||
-          this.#ui.focusId?.startsWith("review:") === true;
+        const actionContext = actionRegions.some(
+          ({ id }) => id === this.#ui.focusId,
+        );
         const index = Number(event.text) - 1;
-        if (actionContext && actionRegions[index] !== undefined) {
-          await this.#activateRegion(actionRegions[index], "keyboard");
-        } else {
+        if (!actionContext) {
           this.#activateView(index);
+          return;
+        }
+        const region = actionRegions[index];
+        if (region?.enabled === true) {
+          await this.#activateRegion(region, "keyboard");
+        } else if (region !== undefined) {
+          const reason = this.#frame.presentation.actions.find(
+            ({ id }) => id === region.id,
+          )?.reason;
+          this.#ui = {
+            ...this.#ui,
+            notice: reason === undefined
+              ? "Action unavailable"
+              : `Action unavailable: ${reason}`,
+          };
+          this.repaint();
         }
         return;
       }

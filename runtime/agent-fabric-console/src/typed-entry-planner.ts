@@ -7,7 +7,10 @@ import type {
 } from "@local/agent-fabric-protocol";
 
 import type { ConsoleInspectionBinding, FabricConsoleDataset } from "./protocol-adapter.js";
-import type { ConsoleTypedEntryPlanner } from "./workflow.js";
+import {
+  ConsoleGuidedInputError,
+  type ConsoleTypedEntryPlanner,
+} from "./workflow.js";
 
 export type ProductionConsoleTypedEntryPlannerOptions = Readonly<{
   client: NegotiatedOperatorClient;
@@ -61,11 +64,17 @@ function exactProjectBinding(
 
 function exactGateField(fields: Readonly<Record<string, string>>): string {
   if (Object.keys(fields).sort().join(",") !== "gate") {
-    throw new TypeError("guided Promotion requires exactly gate=<stable-id>");
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_PROMOTION_FIELDS_INVALID",
+      "guided Promotion requires exactly gate=<stable-id>",
+    );
   }
   const gateId = fields.gate;
   if (gateId === undefined || gateId.length === 0) {
-    throw new TypeError("guided Promotion requires exactly gate=<stable-id>");
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_REQUIRES_GATE",
+      "guided Promotion requires exactly gate=<stable-id>",
+    );
   }
   return gateId;
 }

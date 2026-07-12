@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateUsabilityManifest,
   parseUsabilityManifest,
+  REQUIRED_USABILITY_ACTION_IDS,
 } from "../src/evaluation.js";
 import { reduceFabricPointer, renderFabricConsoleFrame } from "../src/index.js";
 
@@ -71,6 +72,9 @@ describe("versioned Console usability evaluation", () => {
           observation.nativeNotificationVisible &&
           observation.dynamicResizeSafe &&
           observation.artifactReviewSafe &&
+          observation.actionMatrixSafe &&
+          observation.actionMatrixFailures.length === 0 &&
+          observation.scrollAndSelectionSafe &&
           observation.exactViewport,
       ),
     ).toBe(true);
@@ -78,7 +82,15 @@ describe("versioned Console usability evaluation", () => {
       observation.identificationObserver === "automated-proxy" &&
       observation.keyboardEventCount >= 8 &&
       observation.mouseEventCount >= 2 &&
+      observation.scrollEventCount >= 2 &&
       observation.resizeEventCount >= 3
+    )).toBe(true);
+    expect([
+      ...new Set(report.observations.flatMap(({ actionIdsCovered }) => actionIdsCovered)),
+    ].sort()).toStrictEqual([...REQUIRED_USABILITY_ACTION_IDS].sort());
+    expect(report.observations.every(({ keyboardActionIds, mouseActionIds }) =>
+      keyboardActionIds.every((action) => mouseActionIds.includes(action)) &&
+      mouseActionIds.every((action) => keyboardActionIds.includes(action))
     )).toBe(true);
   });
 

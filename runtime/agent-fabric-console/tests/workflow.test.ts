@@ -420,7 +420,7 @@ describe("typed Console workflow planner", () => {
     });
 
     await expect(planner.prepareGuided({
-      action: "discuss",
+      action: "defer",
       binding: {
         view: "evidence",
         itemId: "evidence_wrong_session",
@@ -525,7 +525,7 @@ describe("typed Console workflow planner", () => {
     expect(buildIntent).toHaveBeenCalledTimes(1);
   });
 
-  it("turns guided Attention decisions into revision-bound gate workflows", async () => {
+  it("fails guided Attention decisions before read without an exact gate-row binding", async () => {
     const gate = sessionBoundFixture(
       OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateResolve].result,
     ) as ScopedGate;
@@ -559,30 +559,78 @@ describe("typed Console workflow planner", () => {
       projectionRevision: revisionFromProtocol(11),
     };
 
-    const review = await planner.prepareGuided({
+    await expect(planner.prepareGuided({
       action: "request-changes",
       binding,
       raw: `gate=${String(gate.gateId)}`,
       dataset: dataset(),
       eventId: "guided-gate-request-changes",
+    })).rejects.toThrow("attention-gate-binding-projection-unavailable");
+
+    expect(readGate).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it.each(["discuss", "request-changes"] as const)(
+    "fails guided %s before intake read without daemon chair-request preparation",
+    async (action) => {
+      const read = vi.fn();
+      const planner = createProductionConsoleWorkflowPlanner({
+        client: client({
+          intakes: { createDraft: vi.fn(), read, submit: vi.fn(), revise: vi.fn() },
+        }),
+        credential,
+        operatorId: "operator_workflow" as never,
+        clientId: "console_workflow" as never,
+        projectId,
+      });
+
+      await expect(planner.prepareGuided({
+        action,
+        binding: {
+          view: "evidence",
+          itemId: "evidence_discussion_blocked",
+          itemRevision: revisionFromProtocol(1),
+          projectionRevision: revisionFromProtocol(11),
+        },
+        raw: "intake=intake_discussion_blocked",
+        dataset: dataset(),
+        eventId: `guided-${action}-blocked`,
+      })).rejects.toThrow("daemon-chair-request-preparation-unavailable");
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns a stable safe code for malformed guided fields", async () => {
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: {
+          createDraft: vi.fn(),
+          read: vi.fn(),
+          submit: vi.fn(),
+          revise: vi.fn(),
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
     });
 
-    expect(readGate).toHaveBeenCalledWith(expect.objectContaining({ gateId: gate.gateId }));
-    expect(resolve).not.toHaveBeenCalled();
-    expect(review).toMatchObject({
-      kind: "scoped-gate-resolve",
-      summary: expect.stringContaining("Gate:"),
-      details: expect.arrayContaining([{ label: "status", value: '"rejected"' }]),
+    await expect(planner.prepareGuided({
+      action: "defer",
+      binding: {
+        view: "evidence",
+        itemId: "evidence_malformed_form",
+        itemRevision: revisionFromProtocol(1),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "this is not a named field",
+      dataset: dataset(),
+      eventId: "guided-malformed-form",
+    })).rejects.toMatchObject({
+      code: "CONSOLE_GUIDED_KEY_VALUE_REQUIRED",
     });
-    await planner.commit({
-      review: planner.arm(review, "guided-gate-arm"),
-      eventId: "guided-gate-confirm",
-    });
-    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
-      gateId: gate.gateId,
-      status: "rejected",
-      decisionEvidence: expect.objectContaining({ kind: "typed-console" }),
-    }));
   });
 
   it("requires the exact terminal-neutralised artifact confirmation before guided acceptance", async () => {

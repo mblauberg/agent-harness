@@ -236,6 +236,84 @@ describe("Fabric Console runtime routing", () => {
     expect(setEditorActive).toHaveBeenLastCalledWith(false);
   });
 
+  it("keeps displayed action numbers stable across disabled and workflow entries", async () => {
+    const controller = new FakeController();
+    const activate = vi.fn(async () => {});
+    const render: typeof renderFabricConsoleFrame = (
+      dataset,
+      state,
+      ui,
+      viewport,
+    ) => {
+      const frame = renderFabricConsoleFrame(dataset, state, ui, viewport);
+      const binding = frame.hitRegions.find(({ kind }) => kind === "action")?.binding ?? null;
+      const y = frame.rows.length - 2;
+      const actions = [
+        {
+          id: "workflow:discuss",
+          label: "Discuss",
+          enabled: false,
+          availableAction: null,
+          reason: "daemon-chair-request-preparation-unavailable",
+        },
+        {
+          id: "workflow:accept",
+          label: "Accept",
+          enabled: true,
+          availableAction: null,
+        },
+      ] as const;
+      return {
+        ...frame,
+        presentation: { ...frame.presentation, actions, focusId: ui.focusId },
+        hitRegions: [
+          ...frame.hitRegions.filter(({ kind }) => kind !== "action"),
+          {
+            id: actions[0].id,
+            kind: "action" as const,
+            rect: { x1: 1, y1: y, x2: 12, y2: y },
+            enabled: false,
+            geometryKey: frame.geometryKey,
+            binding,
+          },
+          {
+            id: actions[1].id,
+            kind: "action" as const,
+            rect: { x1: 14, y1: y, x2: 24, y2: y },
+            enabled: true,
+            geometryKey: frame.geometryKey,
+            binding,
+          },
+        ],
+      };
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "workflow:accept" }),
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "numbered-workflow-action",
+      render,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "1" });
+    expect(activate).not.toHaveBeenCalled();
+    expect(runtime.ui.notice).toBe(
+      "Action unavailable: daemon-chair-request-preparation-unavailable",
+    );
+    expect(controller.state.activeView).toBe("attention");
+    await runtime.handleInput({ kind: "key", key: "text", text: "2" });
+    expect(activate).toHaveBeenCalledOnce();
+    expect(activate).toHaveBeenCalledWith(expect.objectContaining({
+      regionId: "workflow:accept",
+      provenance: "keyboard",
+    }));
+    expect(controller.state.activeView).toBe("attention");
+  });
+
   it("opens the typed workflow palette and submits inert JSON only to Review", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({

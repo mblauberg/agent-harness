@@ -20,6 +20,7 @@ import type {
   ProjectionEventsResult,
 } from "@local/agent-fabric-protocol";
 import {
+  guidedWorkflowPrompt,
   startFabricConsoleApplication,
   type ConsoleBootstrapResult,
   type ConsoleBootstrapPort,
@@ -269,6 +270,20 @@ const runtimeDependencies = {
 };
 
 describe("typed Console application bootstrap boundary", () => {
+  it("names the exact required field in each guided workflow prompt", () => {
+    const binding = {
+      itemId: "prompt-item",
+      itemRevision: revisionFromProtocol(1),
+      projectionRevision: revisionFromProtocol(1),
+    };
+    expect(guidedWorkflowPrompt("accept", { ...binding, view: "evidence" }))
+      .toContain("intake=<stable-id>");
+    expect(guidedWorkflowPrompt("promotion", { ...binding, view: "project" }))
+      .toContain("gate=<stable-id>");
+    expect(guidedWorkflowPrompt("accept", { ...binding, view: "attention" }))
+      .toContain("gate=<stable-id>");
+  });
+
   it("renders an honest non-mutating System state when bootstrap is unavailable", async () => {
     const bootstrap: ConsoleBootstrapPort = {
       startOrAttach: vi.fn(async (): Promise<ConsoleBootstrapResult> => ({
@@ -628,28 +643,34 @@ describe("typed Console application bootstrap boundary", () => {
     application.controller.select("evidence", binding.itemId);
     application.repaint();
 
-    await application.handleActivation({
+    await expect(application.handleActivation({
       regionId: "workflow:discuss",
       binding,
       provenance: "keyboard",
       eventId: "guided-open",
+    })).rejects.toThrow("guided typed workflow is unavailable");
+    await application.handleActivation({
+      regionId: "workflow:defer",
+      binding,
+      provenance: "keyboard",
+      eventId: "guided-open-defer",
     });
     expect(application.ui).toMatchObject({
       inputMode: "guided",
-      guidedWorkflow: { action: "discuss", binding },
+      guidedWorkflow: { action: "defer", binding },
     });
     expect(prepareGuided).not.toHaveBeenCalled();
 
     application.resize({ columns: 54, rows: 16 });
     expect(application.ui).toMatchObject({
       inputMode: "guided",
-      guidedWorkflow: { action: "discuss", binding },
+      guidedWorkflow: { action: "defer", binding },
     });
     await application.handleInput({ kind: "paste", text: "intake=intake-guided" });
     await application.handleInput({ kind: "key", key: "enter" });
 
     expect(prepareGuided).toHaveBeenCalledWith(expect.objectContaining({
-      action: "discuss",
+      action: "defer",
       binding,
       raw: "intake=intake-guided",
     }));
