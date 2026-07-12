@@ -445,10 +445,43 @@ describe("coordinated workstreams", () => {
       settle,
     )).rejects.toMatchObject({ code: "BARRIER_PRECONDITION_FAILED" });
 
+    const outgoingMessage = new Database(fixture.databasePath);
+    outgoingMessage.prepare(`
+      UPDATE deliveries SET state='acknowledged', acknowledged_at=?
+       WHERE delivery_id='delivery_child_required'
+    `).run(now);
+    outgoingMessage.prepare(`
+      INSERT INTO messages(
+        message_id, run_id, sender_id, dedupe_key, payload_hash, audience_json,
+        kind, body, requires_ack, conversation_id, hop_count, created_at
+      ) VALUES
+        ('message_outgoing_required', 'run_workstream', 'lead_1', 'outgoing-required',
+         'payload-outgoing-required', '{"kind":"agents","agentIds":["chair_workstream"]}',
+         'request', 'Acknowledge workstream result', 1, 'conversation_outgoing_required', 0, ?),
+        ('message_unrelated_required', 'run_workstream', 'chair_workstream', 'unrelated-required',
+         'payload-unrelated-required', '{"kind":"agents","agentIds":["chair_workstream"]}',
+         'request', 'Unrelated chair traffic', 1, 'conversation_unrelated_required', 0, ?)
+    `).run(now, now);
+    outgoingMessage.prepare(`
+      INSERT INTO deliveries(
+        delivery_id, message_id, run_id, recipient_id, mailbox_sequence, state, attempt_count
+      ) VALUES
+        ('delivery_outgoing_required', 'message_outgoing_required', 'run_workstream',
+         'chair_workstream', 1, 'ready', 0),
+        ('delivery_unrelated_required', 'message_unrelated_required', 'run_workstream',
+         'chair_workstream', 2, 'ready', 0)
+    `).run();
+    outgoingMessage.close();
+    await expect(fixture.fabric.dispatchPublicProtocol(
+      fixture.chairContext,
+      FABRIC_OPERATIONS.workstreamSettle,
+      settle,
+    )).rejects.toMatchObject({ code: "BARRIER_PRECONDITION_FAILED" });
+
     const expectedArtifact = new Database(fixture.databasePath);
     expectedArtifact.prepare(`
       UPDATE deliveries SET state='acknowledged', acknowledged_at=?
-       WHERE delivery_id='delivery_child_required'
+       WHERE delivery_id='delivery_outgoing_required'
     `).run(now);
     expectedArtifact.prepare(`
       INSERT INTO task_expected_artifacts(run_id, task_id, relative_path)
@@ -514,6 +547,8 @@ describe("coordinated workstreams", () => {
     ]);
     expect(terminal.prepare("SELECT state FROM budgets WHERE budget_id='team_child_1:budget'").get())
       .toEqual({ state: "released" });
+    expect(terminal.prepare("SELECT state FROM deliveries WHERE delivery_id='delivery_unrelated_required'").get())
+      .toEqual({ state: "ready" });
     terminal.close();
   });
 });

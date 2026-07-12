@@ -682,13 +682,14 @@ export function createProviderAdapter(options: {
 
   function promoteRetainedBridge(params: Record<string, unknown>): Record<string, unknown> {
     const keys = [
-      "schemaVersion", "actionId", "agentId", "projectSessionId", "runId", "principalGeneration",
+      "schemaVersion", "actionId", "sourceActionId", "agentId", "projectSessionId", "runId", "principalGeneration",
       "providerSessionRef", "providerSessionGeneration", "sourceBridgeGeneration", "chairBridgeGeneration",
     ];
     if (Object.keys(params).length !== keys.length || keys.some((key) => !Object.hasOwn(params, key)) || params.schemaVersion !== 1) {
       throw new ProviderAdapterError("INVALID_PARAMS", "retained bridge promotion request is invalid");
     }
     const actionId = requiredString(params.actionId, "actionId");
+    const sourceActionId = requiredString(params.sourceActionId, "sourceActionId");
     const chairBinding = liveChairBindingByAction.get(actionId);
     const alreadyPromoted = chairBinding !== undefined &&
       chairBinding.agentId === params.agentId && chairBinding.projectSessionId === params.projectSessionId &&
@@ -701,7 +702,7 @@ export function createProviderAdapter(options: {
       Number(params.chairBridgeGeneration) > Number(params.sourceBridgeGeneration) &&
       options.boundary.hasLiveChairSession?.(chairBinding.resumeReference, chairBinding.generation) === true;
     if (alreadyPromoted) return { schemaVersion: 1, promoted: true };
-    const binding = liveAgentSessionByAction.get(actionId);
+    const binding = liveAgentSessionByAction.get(sourceActionId);
     const exact = binding !== undefined &&
       binding.agentId === params.agentId && binding.projectSessionId === params.projectSessionId &&
       binding.runId === params.runId && binding.principalGeneration === params.principalGeneration &&
@@ -710,7 +711,7 @@ export function createProviderAdapter(options: {
       Number.isSafeInteger(params.chairBridgeGeneration) && Number(params.chairBridgeGeneration) > binding.bridgeGeneration &&
       options.boundary.hasLiveAgentSession?.(binding.resumeReference, binding.generation, binding.bridgeGeneration) === true;
     if (!exact || binding === undefined) return { schemaVersion: 1, promoted: false };
-    liveAgentSessionByAction.delete(actionId);
+    liveAgentSessionByAction.delete(sourceActionId);
     liveChairLaunchActions.add(actionId);
     liveChairActionBySession.set(binding.resumeReference, actionId);
     liveChairSessionByAction.set(actionId, binding.resumeReference);

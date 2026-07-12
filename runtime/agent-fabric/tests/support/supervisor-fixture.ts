@@ -16,12 +16,20 @@ lines.on("line", async (line) => {
     id: string;
     method: string;
     params?: {
+      schemaVersion?: unknown;
       actionId?: unknown;
+      sourceActionId?: unknown;
+      agentId?: unknown;
+      projectSessionId?: unknown;
+      runId?: unknown;
+      principalGeneration?: unknown;
       providerContractDigest?: unknown;
       bridgeContractDigest?: unknown;
       bridgeGeneration?: unknown;
       sourceBridgeGeneration?: unknown;
       chairBridgeGeneration?: unknown;
+      providerSessionRef?: unknown;
+      providerSessionGeneration?: unknown;
       targetAgentId?: unknown;
       kind?: unknown;
       resumeReference?: unknown;
@@ -68,6 +76,29 @@ lines.on("line", async (line) => {
     })}\n`);
     return;
   }
+  if (request.method === "promote_retained_bridge") {
+    const expectedKeys = [
+      "schemaVersion", "actionId", "sourceActionId", "agentId", "projectSessionId", "runId",
+      "principalGeneration", "providerSessionRef", "providerSessionGeneration",
+      "sourceBridgeGeneration", "chairBridgeGeneration",
+    ];
+    const params = request.params ?? {};
+    if (
+      Object.keys(params).length !== expectedKeys.length ||
+      expectedKeys.some((key) => !Object.hasOwn(params, key)) ||
+      params.schemaVersion !== 1 ||
+      typeof params.actionId !== "string" || params.actionId.length === 0 ||
+      typeof params.sourceActionId !== "string" || params.sourceActionId.length === 0
+    ) {
+      process.stdout.write(`${JSON.stringify({
+        id: request.id,
+        error: { code: "INVALID_PARAMS", message: "retained bridge promotion request is invalid" },
+      })}\n`);
+      return;
+    }
+    process.stdout.write(`${JSON.stringify({ id: request.id, result: { schemaVersion: 1, promoted: true } })}\n`);
+    return;
+  }
   const providerSessionRef = request.method === "recover_chair"
     ? String(request.params?.resumeReference)
     : "fixture-chair-session";
@@ -112,9 +143,7 @@ lines.on("line", async (line) => {
           bridgeContractDigest: String(request.params?.bridgeContractDigest),
           activationEvidenceDigest: `sha256:${"a".repeat(64)}`,
         }
-    : request.method === "promote_retained_bridge"
-      ? { schemaVersion: 1, promoted: true }
-      : { method: request.method, pid: process.pid };
+    : { method: request.method, pid: process.pid };
   process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`, () => {
     if (request.method !== "launch_chair") return;
     if (process.env.SUPERVISOR_EXIT_AFTER_LAUNCH === "1") process.exit(0);

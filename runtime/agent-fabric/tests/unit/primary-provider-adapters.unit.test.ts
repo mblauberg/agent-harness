@@ -1971,6 +1971,95 @@ describe("Codex app-server fabric adapter", () => {
 
 describe("primary provider retained child bridges", () => {
   it.each(["claude", "codex"] as const)(
+    "promotes the exact %s child under a distinct promotion action identity",
+    async (provider) => {
+      const actionJournal = await journal();
+      const expectedPrincipal = {
+        agentId: `${provider}-successor`,
+        projectSessionId: "session-1",
+        runId: "run-1",
+        principalGeneration: 2,
+      } as const;
+      const adapterId = provider === "claude" ? "claude-agent-sdk" : "codex-app-server";
+      const sourceActionId = `${provider}-successor-spawn`;
+      const promotionActionId = `${provider}-successor-promotion`;
+      const providerSessionRef = `${provider}-successor-session`;
+      const bridgeContractDigest = `sha256:${"9".repeat(64)}`;
+      const boundary = provider === "claude" ? claudeBoundary() : codexBoundary();
+      Reflect.set(boundary, "provisionAgent", vi.fn(async () => ({
+        schemaVersion: 1,
+        adapterId,
+        actionId: sourceActionId,
+        targetAgentId: expectedPrincipal.agentId,
+        providerSessionRef,
+        providerSessionGeneration: 1,
+        bridgeGeneration: 3,
+        bridgeContractDigest,
+        activationEvidenceDigest: `sha256:${"a".repeat(64)}`,
+      })));
+      Reflect.set(boundary, "hasLiveAgentSession", vi.fn(() => true));
+      Reflect.set(boundary, "hasLiveChairSession", vi.fn(() => true));
+      const adapter = provider === "claude"
+        ? createClaudeAgentSdkAdapter({
+            boundary: boundary as ClaudeAgentSdkBoundary,
+            journal: actionJournal,
+            agentBridgeHandoff: {
+              capability: `${provider}-successor-capability-canary`,
+              socketPath: `/private/${provider}-successor.sock`,
+              expectedPrincipal,
+            },
+          })
+        : createCodexAppServerAdapter({
+            boundary: boundary as CodexAppServerBoundary,
+            journal: actionJournal,
+            agentBridgeHandoff: {
+              capability: `${provider}-successor-capability-canary`,
+              socketPath: `/private/${provider}-successor.sock`,
+              expectedPrincipal,
+            },
+          });
+      await adapter.request("provision_agent", {
+        schemaVersion: 1,
+        runId: expectedPrincipal.runId,
+        operation: "spawn",
+        actionId: sourceActionId,
+        targetAgentId: expectedPrincipal.agentId,
+        authorityId: `${provider}-successor-authority`,
+        bridgeGeneration: 3,
+        bridgeContractDigest,
+        payload: {},
+      });
+
+      await expect(adapter.request("promote_retained_bridge", {
+        schemaVersion: 1,
+        actionId: promotionActionId,
+        sourceActionId,
+        agentId: expectedPrincipal.agentId,
+        projectSessionId: expectedPrincipal.projectSessionId,
+        runId: expectedPrincipal.runId,
+        principalGeneration: expectedPrincipal.principalGeneration,
+        providerSessionRef,
+        providerSessionGeneration: 1,
+        sourceBridgeGeneration: 3,
+        chairBridgeGeneration: 4,
+      })).resolves.toEqual({ schemaVersion: 1, promoted: true });
+      await expect(adapter.request("retained_bridge_health", {
+        schemaVersion: 1,
+        kind: "chair",
+        actionId: promotionActionId,
+        agentId: expectedPrincipal.agentId,
+        projectSessionId: expectedPrincipal.projectSessionId,
+        runId: expectedPrincipal.runId,
+        principalGeneration: expectedPrincipal.principalGeneration,
+        providerSessionRef,
+        providerSessionGeneration: 1,
+        bridgeGeneration: 4,
+      })).resolves.toEqual({ schemaVersion: 1, kind: "chair", live: true });
+      actionJournal.close();
+    },
+  );
+
+  it.each(["claude", "codex"] as const)(
     "rejects a public run substitution in the %s wrapper before provider or journal I/O",
     async (provider) => {
       const actionJournal = await journal();

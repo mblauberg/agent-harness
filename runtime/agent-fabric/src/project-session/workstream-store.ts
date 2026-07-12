@@ -526,7 +526,10 @@ export class CoordinatedWorkstreamStore {
         UNION ALL
         SELECT 'required-message-delivery' FROM deliveries delivery
           JOIN messages message ON message.message_id=delivery.message_id
-         WHERE delivery.run_id=? AND delivery.recipient_id IN (SELECT agent_id FROM subtree_members)
+         WHERE delivery.run_id=? AND (
+             delivery.recipient_id IN (SELECT agent_id FROM subtree_members)
+             OR message.sender_id IN (SELECT agent_id FROM subtree_members)
+           )
            AND message.requires_ack=1
            AND delivery.state NOT IN ('acknowledged','abandoned','expired')
         UNION ALL
