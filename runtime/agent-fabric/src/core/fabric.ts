@@ -5877,6 +5877,7 @@ export class Fabric {
       "baseInstructions",
       "modelProvider",
       "serviceTier",
+      "readOnlyRoot",
     ];
     const forbidden = forbiddenControls.find((field) => Object.hasOwn(payload, field));
     if (forbidden !== undefined) {
@@ -5896,7 +5897,8 @@ export class Fabric {
     return {
       ...payload,
       cwd: resolve(root, relativeCwd),
-      allowedTools: [],
+      readOnlyRoot: resolve(root, relativeCwd),
+      allowedTools: ["Read", "Glob", "Grep"],
       approvalPolicy: "never",
       sandbox: "read-only",
     };

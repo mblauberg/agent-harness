@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -458,11 +458,12 @@ describe("primary provider chair recovery adapter", () => {
 });
 
 describe("Claude Agent SDK fabric adapter", () => {
-  it("translates the fabric boundary into explicit SDK plan and no-tools isolation", () => {
+  it("translates the fabric boundary into explicit SDK plan and path-bounded read-only isolation", () => {
     expect(claudeReadOnlyOptions({
       cwd: "/workspace/src",
       model: "claude-sonnet-4-5",
       effort: "max",
+      readOnlyRoot: "/workspace/src",
       allowedTools: ["Bash"],
       disallowedTools: [],
       sandbox: "read-only",
@@ -471,7 +472,7 @@ describe("Claude Agent SDK fabric adapter", () => {
       cwd: "/workspace/src",
       model: "claude-sonnet-4-5",
       effort: "max",
-      tools: [],
+      tools: ["Read", "Glob", "Grep"],
       permissionMode: "plan",
       settingSources: [],
       skills: [],
@@ -486,6 +487,43 @@ describe("Claude Agent SDK fabric adapter", () => {
       model: "opus",
       effort: "ultra",
     })).toThrowError(/effort must be one of low, medium, high, xhigh, max/u);
+  });
+
+  it("allows only path-bounded read tools for a delegated review root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "claude-review-root-"));
+    const outside = await mkdtemp(join(tmpdir(), "claude-review-outside-"));
+    temporaryDirectories.push(root, outside);
+    const insideFile = join(root, "inside.txt");
+    const outsideFile = join(outside, "outside.txt");
+    const escapingLink = join(root, "escaping-link.txt");
+    await Promise.all([
+      writeFile(insideFile, "inside\n"),
+      writeFile(outsideFile, "outside\n"),
+    ]);
+    await symlink(outsideFile, escapingLink);
+    const options = claudeReadOnlyOptions({ cwd: root, readOnlyRoot: root, model: "opus" });
+    expect(options.tools).toEqual(["Read", "Glob", "Grep"]);
+    expect(options.canUseTool).toBeTypeOf("function");
+    const permissionContext = {
+      signal: AbortSignal.timeout(5_000),
+      toolUseID: "tool-use-1",
+      requestId: "request-1",
+    };
+    await expect(options.canUseTool?.("Read", { file_path: insideFile }, permissionContext)).resolves.toMatchObject({
+      behavior: "allow",
+    });
+    await expect(options.canUseTool?.("Read", { file_path: outsideFile }, permissionContext)).resolves.toMatchObject({
+      behavior: "deny",
+    });
+    await expect(options.canUseTool?.("Read", { file_path: escapingLink }, permissionContext)).resolves.toMatchObject({
+      behavior: "deny",
+    });
+    await expect(options.canUseTool?.("Glob", { pattern: "../**" }, permissionContext)).resolves.toMatchObject({
+      behavior: "deny",
+    });
+    await expect(options.canUseTool?.("Bash", { command: "pwd" }, permissionContext)).resolves.toMatchObject({
+      behavior: "deny",
+    });
   });
 
   it("journals a provider effect before returning it and replays the terminal result without a second effect", async () => {

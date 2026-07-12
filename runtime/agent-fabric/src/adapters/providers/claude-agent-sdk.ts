@@ -1,4 +1,5 @@
-import { isAbsolute } from "node:path";
+import { realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -122,6 +123,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
 };
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+const CLAUDE_READ_ONLY_TOOLS = ["Read", "Glob", "Grep"] as const;
 
 function claudeEffort(value: unknown): (typeof CLAUDE_EFFORTS)[number] | undefined {
   if (value === undefined) return undefined;
@@ -129,6 +131,55 @@ function claudeEffort(value: unknown): (typeof CLAUDE_EFFORTS)[number] | undefin
     throw new ProviderAdapterError("INVALID_PARAMS", "effort must be one of low, medium, high, xhigh, max");
   }
   return value as (typeof CLAUDE_EFFORTS)[number];
+}
+
+function insideRoot(root: string, candidate: string): boolean {
+  const path = relative(root, candidate);
+  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
+}
+
+function boundedPath(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 32_768
+    ? value
+    : undefined;
+}
+
+function safeGlobPattern(value: unknown): boolean {
+  if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > 4096 || isAbsolute(value)) {
+    return false;
+  }
+  return !value.split(/[\\/]/u).includes("..");
+}
+
+function claudeReadOnlyPermission(root: string): NonNullable<Options["canUseTool"]> {
+  return async (toolName, input, context) => {
+    if (!CLAUDE_READ_ONLY_TOOLS.includes(toolName as (typeof CLAUDE_READ_ONLY_TOOLS)[number])) {
+      return { behavior: "deny", message: "provider review permits only path-bounded read tools", toolUseID: context.toolUseID };
+    }
+    if (toolName === "Glob" && !safeGlobPattern(input.pattern)) {
+      return { behavior: "deny", message: "provider review glob is outside the bounded read profile", toolUseID: context.toolUseID };
+    }
+    const requested = toolName === "Read"
+      ? boundedPath(input.file_path)
+      : input.path === undefined
+        ? root
+        : boundedPath(input.path);
+    if (requested === undefined) {
+      return { behavior: "deny", message: "provider review read path is missing or invalid", toolUseID: context.toolUseID };
+    }
+    try {
+      const [canonicalRoot, canonicalRequested] = await Promise.all([
+        realpath(root),
+        realpath(isAbsolute(requested) ? requested : resolve(root, requested)),
+      ]);
+      if (!insideRoot(canonicalRoot, canonicalRequested)) {
+        return { behavior: "deny", message: "provider review read path is outside delegated authority", toolUseID: context.toolUseID };
+      }
+    } catch {
+      return { behavior: "deny", message: "provider review read path cannot be verified", toolUseID: context.toolUseID };
+    }
+    return { behavior: "allow", updatedInput: input, toolUseID: context.toolUseID };
+  };
 }
 
 function validateClaudeChairLaunchPayload(payload: Record<string, unknown>): Record<string, unknown> {
@@ -170,6 +221,13 @@ export function claudeReadOnlyOptions(
   environment?: Record<string, string>,
 ): Options {
   const cwd = optionalString(payload.cwd, "cwd");
+  const readOnlyRoot = optionalString(payload.readOnlyRoot, "readOnlyRoot") ?? cwd;
+  if ((cwd === undefined) !== (readOnlyRoot === undefined)) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "Claude read-only root and cwd must be supplied together");
+  }
+  if (cwd !== undefined && (readOnlyRoot === undefined || !isAbsolute(cwd) || resolve(readOnlyRoot) !== resolve(cwd))) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "Claude read-only root must equal the absolute admitted cwd");
+  }
   const model = optionalString(payload.model, "model");
   const maxTurns = positiveInteger(payload.maxTurns, "maxTurns");
   const effort = claudeEffort(payload.effort);
@@ -181,8 +239,16 @@ export function claudeReadOnlyOptions(
     ...(resume === undefined ? {} : { resume }),
     ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
     ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
-    tools: [],
+    tools: cwd === undefined ? [] : [...CLAUDE_READ_ONLY_TOOLS],
+    ...(readOnlyRoot === undefined ? {} : { canUseTool: claudeReadOnlyPermission(readOnlyRoot) }),
     permissionMode: "plan",
+    ...(readOnlyRoot === undefined ? {} : { settings: {
+      permissions: {
+        defaultMode: "plan",
+        disableBypassPermissionsMode: "disable",
+        additionalDirectories: [],
+      },
+    } }),
     settingSources: [],
     skills: [],
     plugins: [],
