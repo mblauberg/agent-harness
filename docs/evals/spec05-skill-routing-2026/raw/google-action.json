@@ -1,0 +1,14 @@
+{
+  "action_id": "spec05-routing-google:spawn",
+  "adapter_id": "agy",
+  "base_revision": "b5a855c4c810f2ed53d607b2b92b995aa8da0737",
+  "model": "Gemini 3.1 Pro (High)",
+  "model_family": "google",
+  "prompt_sha256": "sha256:adbd4ce01e18fe26b29f9c5d66d75167cea24e6137b02d1176843fad792132d9",
+  "result_digest": "sha256:8d0955e9dbe05aced8b6ecae22ae084d7a77c32496500cb42c877f03475ce611",
+  "route": "generated MCP -> daemon -> task-bound ephemeral provider action",
+  "run_id": "spec05-skill-routing-evaluation",
+  "schema_version": 1,
+  "status": "terminal",
+  "task_id": "spec05-routing-google"
+}

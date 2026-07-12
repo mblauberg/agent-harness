@@ -153,6 +153,12 @@ def test_spec05_routing_validator_rejects_synthetic_or_self_declared_answers(tmp
         module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE, evidence_root=tmp_path)
 
 
+def test_spec05_retained_real_fabric_routing_result_passes():
+    module = load_spec05_evaluation()
+    result = json.loads((SPEC05_EVIDENCE / "routing-result.json").read_text())
+    module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE)
+
+
 def test_spec05_adapter_absent_workflows_execute_and_match_retained_result(tmp_path):
     module = load_spec05_evaluation()
     actual = module.run_portability_probe(ROOT, tmp_path / "probe")

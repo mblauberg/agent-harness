@@ -18,9 +18,9 @@ handoff behaviour.
 ## GREEN
 
 After the smallest affected-skill doctrine changes, the same command returned
-`2 passed`. The gate now proves focused routing/portability coverage, adaptive
-topology with one chair, digest-bound lifecycle handoffs, canonical receipt
-relationships and the separately target-bound release authority boundary.
+`2 passed`. That original gate proved fixture shape and doctrine only. Final
+implementation review correctly found that it did not execute the semantic
+routes or the adapter-absent workflows, so it was not accepted as AC24 evidence.
 
 Supporting static gates:
 
@@ -43,6 +43,24 @@ settlement and live-handoff custody, then passed after `orchestrate` bound
 settlement to recursive obligations and chair change to a generation-bound
 operator action. The entrypoint remained within its 500-word budget and the
 doctrine checker passed.
+
+## Executable AC24 repair
+
+Final native review produced a new right-reason RED: three new tests failed
+because no executable Spec 05 evaluator existed. The repair freezes all 36
+focused cases as opaque IDs, composes the complete live catalogue and exact
+classifier prompt, rejects synthetic adapters, executes every project-artifact
+fallback with Console, Herdr and GitHub absent, and validates retained terminal
+Fabric action evidence.
+
+Two real three-family semantic attempts were retained as non-passes rather than
+relabelled. They exposed one misowned adjacent fixture, two ambiguous prompts
+and an implicit companion boundary. After those inputs were corrected, a fresh
+Claude Opus, Cursor Grok 4.5 XHigh and Agy Gemini 3.1 Pro High run passed:
+108/108 primary routes, 101/108 exact companion routes and zero critical
+portability failures. The focused repository gate now returns `7 passed` and
+`scripts/check-harness` directly validates the frozen packet, executable probe
+and raw-answer-derived routing result.
 
 `scripts/check-harness` initially stopped in `public_release_check.py` on a
 pre-existing absolute path in

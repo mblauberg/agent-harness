@@ -1,7 +1,7 @@
 # Spec 05 lifecycle-skill evaluation
 
-Status: revised frozen inputs and adapter-absent executable probe pass; fresh
-real Fabric routing rerun pending after two retained semantic non-passes
+Status: pass; real three-family Fabric routing and adapter-absent executable
+probe complete after two retained semantic non-passes
 Date: 12 July 2026
 
 This evaluation closes Spec 05 AC24 without treating the focused skill YAML as
@@ -40,6 +40,14 @@ python3 skills/orchestrate/evals/spec05_skill_evaluation.py validate-routing \
 Provider generation is deliberately outside the deterministic evaluator. It
 must use one Fabric coordination run with one chair; direct provider CLIs and
 hand-authored outputs do not satisfy this gate.
+
+The accepted third run is bound to revision
+`b5a855c4c810f2ed53d607b2b92b995aa8da0737`. Claude Opus, Cursor Grok 4.5
+XHigh and Agy Gemini 3.1 Pro High each returned all 36 rows through terminal
+Fabric actions. The combined result is 108/108 primary routes, 101/108 exact
+companion routes (93.52%), and zero critical portability failures. Raw action
+and answer evidence is retained under `raw/`; `routing-result.json` is rebuilt
+and checked from those files.
 
 ## Retained non-passes
 
