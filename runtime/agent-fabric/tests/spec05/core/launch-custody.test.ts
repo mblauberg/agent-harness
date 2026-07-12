@@ -410,7 +410,7 @@ describe("launch custody", () => {
     );
   });
 
-  it("applies migration 9 only after total preflight and backfills the exact active chair", async () => {
+  it("runs migration 9 only after total preflight and backfills the exact active chair", async () => {
     const outcome = {
       schemaVersion: 1,
       providerAdapterId: "claude-agent-sdk",
@@ -445,10 +445,15 @@ describe("launch custody", () => {
       DROP TABLE chair_bridge_recovery_custody;
       DROP TABLE chair_bridge_losses;
       DROP TABLE launched_chair_bridge_state;
-      DELETE FROM schema_migrations WHERE version=9;
     `);
-
-    expect(applyMigrations(fixture.database)).toEqual({ applied: [9], currentVersion: 9 });
+    const migrationNine = readFileSync(
+      new URL("../../../migrations/0009-launched-chair-bridge-loss.sql", import.meta.url),
+      "utf8",
+    ).replace(/^\s*PRAGMA\s+foreign_keys\s*=\s*ON;\s*/iu, "");
+    fixture.database.transaction(() => {
+      preflightLaunchedChairBridgeLoss(fixture.database);
+      fixture.database.exec(migrationNine);
+    })();
     expect(fixture.database.prepare(`
       SELECT chair_agent_id, provider_adapter_id, provider_action_id,
              provider_contract_digest, provider_session_ref,

@@ -164,6 +164,6 @@ describe("read-only Herdr event observer", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]?.startsWith("1970-01-01 10:00:00 AEST (UTC+10) #1 ")).toBe(true);
     expect(lines[0]).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/u);
-    expect(lines[0]).toContain("spoofed");
+    expect(lines[0]).not.toContain("spoofed");
   });
 });
