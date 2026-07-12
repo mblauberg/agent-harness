@@ -9,16 +9,20 @@ import {
   type OperatorAttachRequest,
   type IntegrationInputAttestationRequest,
   type IntegrationId,
+  type ScopedGateResolveRequest,
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
+import { ScopedGateStore } from "../../../src/gates/store.ts";
 import type { AuthenticatedOperatorContext } from "../../../src/project-session/contracts.ts";
 import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
+const digestA = `sha256:${"a".repeat(64)}`;
 const digest = `sha256:${"b".repeat(64)}`;
+const digestC = `sha256:${"c".repeat(64)}`;
 
 function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
   return {
@@ -108,6 +112,109 @@ function setup(options: { now?: number; actions?: string[]; expiresAt?: string }
     },
   );
   return { database, store, context, command, target, execute };
+}
+
+function seedAttestationGate(fixture: ReturnType<typeof setup>): void {
+  fixture.database.exec(`
+    INSERT INTO runs(
+      run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
+      project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
+      authority_ref, budget_ref, dependency_revision, topology_slot
+    ) VALUES (
+      'run_01', 'chair_01', '/project/one', NULL, 1,
+      'session_01', 'active', 1, 1, 'chair:run_01:1',
+      '${digest}', 'budget_01', 1, 1
+    );
+    INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
+    VALUES ('authority_01', 'run_01', NULL, '{}', '${"d".repeat(64)}', 1);
+    INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+    VALUES ('run_01', 'chair_01', NULL, 'authority_01', 'provider_01', 'ready');
+  `);
+  fixture.database.prepare(`
+    INSERT INTO scoped_gates(
+      gate_id, project_session_id, coordination_run_id, dedupe_key, scope_kind,
+      scope_task_id, dependency_revision, blocked_operation_ids_json,
+      enforcement_points_json, question, reason, options_json, recommendation,
+      consequences_json, evidence_refs_json, created_by_ref, expected_approver_ref,
+      status, human_required, revision, created_at, updated_at
+    ) VALUES (
+      'gate_01', 'session_01', 'run_01', 'gate-dedupe', 'run', NULL, 1,
+      '[]', '["scoped-barrier"]', 'Proceed?', 'Human decision', '["approve","reject"]',
+      '', '[]', ?, 'policy:spec', 'authenticated-human-operator', 'pending', 1, 1, 1, 1
+    )
+  `).run(JSON.stringify([
+    { path: "evidence/a.json", digest: digestA },
+    { path: "evidence/b.json", digest },
+  ]));
+}
+
+function attestationRequest(options: {
+  suffix?: string;
+  artifactDigests?: readonly string[];
+} = {}): IntegrationInputAttestationRequest {
+  const suffix = options.suffix ?? "01";
+  const eventDigest = digestC;
+  return {
+    context: {
+      commandId: `attest_command_${suffix}`,
+      integrationId: "integration_01",
+      expectedIntegrationGeneration: 3,
+      eventId: `input_event_${suffix}`,
+      eventDigest,
+    },
+    attestation: {
+      attestationId: `attestation_${suffix}`,
+      integrationId: "integration_01",
+      integrationGeneration: 3,
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectSessionId: "session_01",
+      providerEvent: {
+        providerId: "codex",
+        providerSessionRef: "provider_01",
+        providerMessageId: `provider_message_${suffix}`,
+        inputEventId: `input_event_${suffix}`,
+        eventDigest,
+        classification: "direct-human",
+      },
+      humanUtterance: "Approve.",
+      gateBinding: {
+        gateId: "gate_01",
+        expectedGateRevision: 1,
+        artifactDigests: options.artifactDigests ?? [digestA, digest],
+        interpretedDecision: "approve",
+      },
+      recordedAt: "2027-01-01T00:00:00Z",
+    },
+  } as unknown as IntegrationInputAttestationRequest;
+}
+
+const integrationContext = {
+  integrationId: "integration_01" as IntegrationId,
+  projectId: "project_01" as ProjectId,
+  principalGeneration: 3,
+};
+
+function attestedResolution(fixture: ReturnType<typeof setup>): ScopedGateResolveRequest {
+  return {
+    command: {
+      ...fixture.command,
+      commandId: "resolve_attested_gate",
+      provenance: {
+        kind: "attested-provider-input",
+        attestationId: "attestation_01",
+        integrationId: "integration_01",
+        integrationGeneration: 3,
+      },
+    },
+    gateId: "gate_01",
+    status: "approved",
+    decisionEvidence: {
+      kind: "attested-input",
+      attestationId: "attestation_01",
+      expectedIntegrationGeneration: 3,
+    },
+  } as unknown as ScopedGateResolveRequest;
 }
 
 afterEach(() => {
@@ -248,73 +355,23 @@ describe("operator capability and command boundary", () => {
 
   it("accepts only an exact direct-human attestation bound to the current gate revision", () => {
     const fixture = setup();
-    fixture.database.exec(`
-      INSERT INTO runs(
-        run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
-        project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
-        authority_ref, budget_ref, dependency_revision, topology_slot
-      ) VALUES (
-        'run_01', 'chair_01', '/project/one', NULL, 1,
-        'session_01', 'active', 1, 1, 'chair:run_01:1',
-        '${digest}', 'budget_01', 1, 1
-      );
-      INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
-      VALUES ('authority_01', 'run_01', NULL, '{}', '${"d".repeat(64)}', 1);
-      INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
-      VALUES ('run_01', 'chair_01', NULL, 'authority_01', 'provider_01', 'ready');
-      INSERT INTO scoped_gates(
-        gate_id, project_session_id, coordination_run_id, dedupe_key, scope_kind,
-        scope_task_id, dependency_revision, blocked_operation_ids_json,
-        enforcement_points_json, question, reason, options_json, recommendation,
-        consequences_json, evidence_refs_json, created_by_ref, expected_approver_ref,
-        status, human_required, revision, created_at, updated_at
-      ) VALUES (
-        'gate_01', 'session_01', 'run_01', 'gate-dedupe', 'run', NULL, 1,
-        '[]', '["scoped-barrier"]', 'Proceed?', 'Human decision', '["approve","reject"]',
-        '', '[]', '[]', 'policy:spec', 'operator_01', 'pending', 1, 1, 1, 1
-      );
-    `);
-    const request = {
-      context: {
-        commandId: "attest_command_01",
-        integrationId: "integration_01",
-        expectedIntegrationGeneration: 3,
-        eventId: "input_event_01",
-        eventDigest: digest,
-      },
-      attestation: {
-        attestationId: "attestation_01",
-        integrationId: "integration_01",
-        integrationGeneration: 3,
-        operatorId: "operator_01",
-        projectId: "project_01",
-        projectSessionId: "session_01",
-        providerEvent: {
-          providerId: "codex",
-          providerSessionRef: "provider_01",
-          providerMessageId: "provider_message_01",
-          inputEventId: "input_event_01",
-          eventDigest: digest,
-          classification: "direct-human",
-        },
-        humanUtterance: "Approve.",
-        gateBinding: {
-          gateId: "gate_01",
-          expectedGateRevision: 1,
-          artifactDigests: [digest],
-          interpretedDecision: "approve",
-        },
-        recordedAt: "2027-01-01T00:00:00Z",
-      },
-    } as unknown as IntegrationInputAttestationRequest;
-    const integration = {
-      integrationId: "integration_01" as IntegrationId,
-      projectId: "project_01" as ProjectId,
-      principalGeneration: 3,
-    };
+    seedAttestationGate(fixture);
+    const request = attestationRequest();
 
-    expect(fixture.store.recordInputAttestation(integration, request)).toEqual(request.attestation);
-    expect(fixture.store.recordInputAttestation(integration, request)).toEqual(request.attestation);
+    expect(fixture.store.recordInputAttestation(integrationContext, request)).toEqual(request.attestation);
+    expect(fixture.store.recordInputAttestation(integrationContext, request)).toEqual(request.attestation);
+    for (const [suffix, artifactDigests] of [
+      ["missing", [digestA]],
+      ["extra", [digestA, digest, digestC]],
+      ["wrong", [digestA, digestC]],
+      ["duplicate", [digestA, digestA, digest]],
+      ["reordered", [digest, digestA]],
+    ] as const) {
+      expect(() => fixture.store.recordInputAttestation(
+        integrationContext,
+        attestationRequest({ suffix, artifactDigests }),
+      )).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
+    }
     const stale = {
       ...request,
       attestation: {
@@ -322,8 +379,30 @@ describe("operator capability and command boundary", () => {
         gateBinding: { ...request.attestation.gateBinding, expectedGateRevision: 2 },
       },
     } as IntegrationInputAttestationRequest;
-    expect(() => fixture.store.recordInputAttestation(integration, stale)).toThrowError(
+    expect(() => fixture.store.recordInputAttestation(integrationContext, stale)).toThrowError(
       expect.objectContaining({ code: "DEDUPE_CONFLICT" }),
     );
+    const gates = new ScopedGateStore({ database: fixture.database, operatorStore: fixture.store, clock: () => 1 });
+    expect(gates.resolveGate(fixture.context, attestedResolution(fixture))).toMatchObject({
+      status: "approved",
+      revision: 2,
+      resolution: { kind: "attested-input", attestationId: "attestation_01" },
+    });
+  });
+
+  it("rechecks the attested canonical artifact digests when resolving the gate", () => {
+    const fixture = setup();
+    seedAttestationGate(fixture);
+    const request = attestationRequest();
+    fixture.store.recordInputAttestation(integrationContext, request);
+    fixture.database.prepare(`
+      UPDATE operator_input_attestations SET artifact_digests_json=? WHERE attestation_id='attestation_01'
+    `).run(JSON.stringify([digestC]));
+    const gates = new ScopedGateStore({ database: fixture.database, operatorStore: fixture.store, clock: () => 1 });
+
+    expect(() => gates.resolveGate(fixture.context, attestedResolution(fixture))).toThrowError(
+      expect.objectContaining({ code: "STALE_REVISION" }),
+    );
+    expect(gates.getGate("gate_01")).toMatchObject({ status: "pending", revision: 1 });
   });
 });

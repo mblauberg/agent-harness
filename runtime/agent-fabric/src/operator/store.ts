@@ -25,6 +25,10 @@ import {
   type CoreServiceOptions,
 } from "../project-session/contracts.js";
 import {
+  assertExactGateAttestationDigests,
+  canonicalStoredGateAttestationDigests,
+} from "../gates/attestation-binding.js";
+import {
   canonicalJson,
   integer,
   isRow,
@@ -1249,7 +1253,8 @@ export class OperatorStore {
         return request.attestation;
       }
       const gate = row(this.database.prepare(`
-        SELECT g.coordination_run_id, g.revision, g.expected_approver_ref, s.project_id
+        SELECT g.coordination_run_id, g.revision, g.expected_approver_ref,
+               g.evidence_refs_json, g.release_binding_json, s.project_id
           FROM scoped_gates g
           JOIN project_sessions s ON s.project_session_id=g.project_session_id
          WHERE g.gate_id=? AND g.project_session_id=?
@@ -1260,6 +1265,13 @@ export class OperatorStore {
       if (integer(gate, "revision") !== request.attestation.gateBinding.expectedGateRevision) {
         throw new ProjectFabricCoreError("STALE_REVISION", "gate revision changed");
       }
+      assertExactGateAttestationDigests(
+        canonicalStoredGateAttestationDigests(
+          text(gate, "evidence_refs_json"),
+          nullableText(gate, "release_binding_json"),
+        ),
+        request.attestation.gateBinding.artifactDigests,
+      );
       const principal = row(this.database.prepare(`
         SELECT project_id, state FROM operator_principals WHERE operator_id=?
       `).get(request.attestation.operatorId), "operator principal");
@@ -1267,7 +1279,11 @@ export class OperatorStore {
         throw new ProjectFabricCoreError("AUTHENTICATION_FAILED", "attested operator is not active for the project");
       }
       const expectedApprover = text(gate, "expected_approver_ref");
-      if (expectedApprover !== request.attestation.operatorId && expectedApprover !== "authenticated-operator") {
+      if (
+        expectedApprover !== request.attestation.operatorId &&
+        expectedApprover !== "authenticated-operator" &&
+        expectedApprover !== "authenticated-human-operator"
+      ) {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "attested operator is not the expected approver");
       }
       this.database.prepare(`

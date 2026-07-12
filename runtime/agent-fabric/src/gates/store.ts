@@ -18,6 +18,11 @@ import type Database from "better-sqlite3";
 
 import { OperatorStore } from "../operator/store.js";
 import {
+  assertExactGateAttestationDigests,
+  canonicalGateAttestationDigests,
+  parseStoredAttestationDigests,
+} from "./attestation-binding.js";
+import {
   ProjectFabricCoreError,
   type AuthenticatedAgentContext,
   type AuthenticatedOperatorContext,
@@ -931,6 +936,13 @@ export class ScopedGateStore {
       }
       return { ...base, kind: "typed-console", confirmationCommandId: request.decisionEvidence.confirmationCommandId };
     }
+    if (
+      request.command.provenance.kind !== "attested-provider-input" ||
+      request.command.provenance.attestationId !== request.decisionEvidence.attestationId ||
+      request.command.provenance.integrationGeneration !== request.decisionEvidence.expectedIntegrationGeneration
+    ) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "gate resolution command lacks the exact attested-input provenance");
+    }
     const attestation = row(this.#database.prepare(`
       SELECT * FROM operator_input_attestations WHERE attestation_id=?
     `).get(request.decisionEvidence.attestationId), "operator input attestation");
@@ -943,6 +955,17 @@ export class ScopedGateStore {
     ) {
       throw new ProjectFabricCoreError("STALE_REVISION", "input attestation no longer matches the gate");
     }
+    if (request.command.provenance.integrationId !== text(attestation, "integration_id")) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "gate resolution integration provenance changed");
+    }
+    assertExactGateAttestationDigests(
+      canonicalGateAttestationDigests({
+        evidenceRefs: gate.evidenceRefs,
+        ...(gate.releaseBinding === undefined ? {} : { releaseBinding: gate.releaseBinding }),
+      }),
+      parseStoredAttestationDigests(text(attestation, "artifact_digests_json")),
+      "STALE_REVISION",
+    );
     const interpreted = text(attestation, "interpreted_decision");
     const expectedStatus = interpreted === "approve" ? "approved"
       : interpreted === "reject" ? "rejected"
