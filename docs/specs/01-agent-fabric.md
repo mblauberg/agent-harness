@@ -1,14 +1,20 @@
 # Shared agent fabric
 
-Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.23
+Status: Current protocol and provider-task extension approved; implementation in progress; final human acceptance pending
+Version: 0.24
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.23 is the normative pre-release consolidation. Fabric supports one
+Version 0.24 adds one current task-bound ephemeral provider path for fresh
+reviewers and bonus-family workers. `fabric_provider_action_dispatch` accepts
+`operation: spawn` only with an exact active task, narrowed authority,
+explicit model/family and read-only admitted payload. It records the provider
+action and bounded result without creating a retained agent identity or a
+second control plane. Version 0.23 remains the normative pre-release
+consolidation. Fabric supports one
 current database baseline and public protocol, preserves incompatible local
 state without mutation, and rejects it explicitly rather than importing or
 emulating it. It also owns exact project/session/run topology, coordinated
@@ -929,6 +935,10 @@ limits:
   reserve_for_verification_and_recovery_percent: 25
 ```
 
+`maximum_leaders` is the run-wide count of all active top-level and nested team
+leaders, not a per-depth allowance. The fifth leader is rejected atomically
+before any authority, agent, task, group or budget row survives.
+
 The Stage 1 core shall support at least 32 registered simulated agents. Stage 3
 shall support eight concurrent provider turns on the local development machine.
 Local mailbox and task operations shall complete within 100 ms at p95 under
@@ -993,6 +1003,10 @@ An adapter without a verified entry remains disabled.
 - **FR-016 (Stage 4):** An optional bonus-family leg shall follow its configured
   retry and acknowledgement deadline, then terminate as degraded or failed and
   record the reason rather than block the required primary path.
+- **FR-016A (Stage 4):** A fresh ephemeral provider worker or reviewer shall run
+  through a task-bound `provider-action.dispatch` `spawn`, return its bounded
+  answer in the durable provider-action result and create no retained agent
+  identity or implicit provider-session authority.
 - **FR-017 (Stage 1):** The daemon shall resume committed coordination state after an
   unclean restart.
 - **FR-018 (Stage 1):** Before barrier closure, the fabric shall export a
@@ -1157,6 +1171,19 @@ Then the optional leg becomes degraded or failed with the reason recorded
 And the required Claude/Codex path remains unblocked
 And no side-effecting action is replayed without reconciliation.
 
+### AC-014 (Stage 4): task-bound ephemeral provider review
+
+Given the chair owns or participates in one active review task and delegates a
+read-only externally disclosable authority envelope
+When it dispatches `operation: spawn` to an activated compatible adapter with
+an explicit model, model family, prompt and exact task ID
+Then Fabric persists one action and returns the bounded provider answer through
+the action result
+And a missing task, stale task scope, forbidden disclosure, model mismatch,
+duplicate changed action or unsupported adapter fails before provider work
+And no retained agent identity, capability or hidden direct-CLI result path is
+created.
+
 ## 24. Verification strategy
 
 ### Static and schema checks
@@ -1241,7 +1268,8 @@ but insufficient. A repeatable evaluation set shall cover:
 
 - Pi as the first generic worker adapter.
 - Agy, Cursor Composer/Grok and Kiro or ACP adapters behind the same contract.
-- Existing one-shot dispatch becomes a degraded compatibility wrapper.
+- Fresh optional-family work uses the current task-bound ephemeral provider
+  action; retained child agents continue to require a generation-bound bridge.
 
 ### Stage 5: teams and hardening
 

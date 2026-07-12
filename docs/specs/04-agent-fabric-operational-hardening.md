@@ -1,13 +1,20 @@
 # Agent fabric operational hardening
 
-Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.19
+Status: Console daemon-lifecycle and seat-generation extension approved; implementation in progress; final human acceptance pending
+Version: 1.20
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.19 is the normative pre-release consolidation. It owns one current
+Version 1.20 binds busy-incumbent attach before SQLite inspection and makes the
+current MCP seat roster a daemon-owned generation CAS. A compatible incumbent
+is authenticated through its private handshake without racing its live WAL;
+only the elected no-incumbent spawn path inspects/publishes state. Seat
+activation atomically supersedes and revokes the prior roster, and private
+filesystem publication compare-and-swaps the same expected generation so a
+delayed writer cannot roll the roster back. Version 1.19 remains the normative
+pre-release consolidation. It owns one current
 database baseline and manifest, one current public protocol, the current
 private-control wire, exact project/session/run topology, coordinated
 workstreams, generation-bound live chair handoff and typed operator effects.
@@ -287,6 +294,14 @@ the exact election generation or its bounded terminal result. Runtime
 directories remain `0700`, socket and lease material private, and no
 project-session record may be created before initialisation succeeds.
 
+A compatible incumbent handshake precedes database inspection and returns an
+attached client immediately. With no compatible incumbent, the caller performs
+a mutation-free inspection before creating bootstrap artifacts, then repeats
+the inspection while holding the winning election lock immediately before
+spawn. This ordering permits attachment to a legitimate busy WAL writer while
+retaining byte/mode/directory preservation for incompatible state and closing
+the absent-to-incompatible publication race.
+
 Election and shutdown use the same lock order: acquire the daemon-election lock
 first, then begin the SQLite liveness/recovery transaction. The daemon imports
 the winning bootstrap receipt into its audit journal only after it is the sole
@@ -347,6 +362,8 @@ The single current baseline shall create:
 - request-result delivery and transactional outbox state;
 - attention items and notification delivery journal;
 - daemon runtime epochs and current bootstrap audit receipts; and
+- one active MCP seat generation per project plus its exact session/run/chair,
+  roster, principal-generation and token bindings; and
 - schema-versioned operator projection cursors.
 
 The baseline installs same-project/run foreign-key and
@@ -354,6 +371,18 @@ enumeration/generation triggers plus indexes for active membership, gate
 enforcement, intake revision, callback deadline/claim, resource admission,
 notification dedupe and global-idle queries. It is created only for an absent
 database path and is verified before atomic publication.
+
+MCP roster rotation is one prepare/activate compare-and-swap. The caller
+supplies the expected active generation and a content-derived immutable next
+generation. Activation rechecks the current project session, run, chair lease,
+revisions and every principal, supersedes the prior generation and revokes its
+seat tokens in the same transaction. Initialisation and every later capability
+use join through the one active seat generation; a stale token or manually
+rolled-back filesystem pointer therefore fails closed. Filesystem staging holds
+one private project lock, publishes only when `current.json` equals the expected
+prior generation (or already equals the exact replay), and never replaces a
+newer pointer. Interrupted prepare/activation is recoverable without reviving a
+superseded roster.
 
 The baseline includes the append-only launch-attempt owner. Its closed logical
 shape is:
