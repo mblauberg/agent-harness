@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.7
+Version: 1.8
 Date: 13 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,7 +10,14 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.7 closes the already-binding v1.4 external-review lineage gap. Fresh
+Version 1.8 binds final review to the exact immutable bytes and current
+artifact revision. One clean native review and clean Fabric evidence for
+Claude/Anthropic, Cursor Grok/xAI and Agy Gemini/Google must all reference the
+current daemon-generated review packet. Provider answers use a strict
+CLEAN/P0-P2 result contract; raw output is never rendered or exported, chair
+adjudication cannot downgrade a finding, and repaired artifacts require fresh
+superseding evidence while history remains visible. The Console reads closed
+review state only through its operator Evidence projection. Version 1.7 closes the already-binding v1.4 external-review lineage gap. Fresh
 provider review dispatch now includes an exact reviewed-artifact reference and
 strict router request; the daemon binds its trusted-router receipt to the
 answer-bearing action before provider I/O. After the terminal answer, the chair
@@ -377,30 +384,45 @@ prompt.
 
 Fresh external implementation review is a Fabric review task, not an
 unattributed provider transcript. The chair shall register the exact immutable
-artifact to be reviewed, create the review task, and dispatch one task-bound
-answer-bearing ephemeral action with that artifact reference and the strict
-route request owned by Spec 01 section 32.19. The request names the adapter and
-model aliases, optional explicit model, reviewer role, lead family,
-distinctness requirement and explicit provider effort where applicable. The
-Console and Python router use the same closed `model-route.v1` protocol schema;
-the Console exposes no capability/evidence selector or continuity-routing
-mode. The daemon invokes the trusted router and binds its canonical
-receipt/digest to the
-action before provider I/O. The Console shall display the admitted adapter,
-resolved family/model/effort, route digest, task, reviewed artifact and action
-state from that durable binding; it shall never infer them from the answer or a
-route file supplied later.
+artifact to be reviewed and create the review task. The daemon then verifies
+the registered bytes, publication-time lineage and revision, creates one
+bounded content-addressed `review-packet.v1`, and injects that exact packet into
+the final prompt. Source mutation before/during capture fails admission;
+mutation afterwards cannot change the packet. Oversize scope requires a newly
+published bounded review-bundle artifact. Every certifying slot must bind that
+same packet and current artifact revision.
 
-After `provider-action.read` returns the terminal answer and canonical result
-digest, the chair may call the typed review-evidence operation with only the
-exact action, task, route, result and artifact references plus one closed
-adjudication disposition. Fabric derives the answer, family, model, effort,
-artifact publisher lineage and structural-independence state. The Console
-shall show `proved-distinct-family`, `same-family` or `unproved` exactly as
-returned and shall count only the first state toward a cross-family gate. It
-shall not offer editable provider-family or independence controls. A retained
-reviewer agent is neither created nor required; the terminal action and route
-are its identity.
+The chair dispatches route-bound ephemeral actions through the strict shared
+`model-route.v1` schema. The daemon invokes the trusted router, snapshots the
+current chair family/generation, and binds route request/receipt, packet and
+final-prompt digests before provider I/O. The four derived slots are
+`native` (the chair harness's native reviewer), `other-primary` (the primary
+family distinct from the admission chair),
+`cursor-grok` (Cursor/Grok/xAI) and `agy-gemini` (Agy/Gemini/Google). Adapter,
+family and model must match the activated route; the Console exposes no
+capability/evidence selector or continuity-routing mode.
+
+Terminal review reads expose only exact answer/result digests and the safe
+parsed `review-result.v1` verdict/findings. Raw provider answer, packet and final
+prompt content never enter the Console. The chair may create typed evidence by
+supplying exact equality refs/digests plus a bounded non-gating adjudication
+annotation. Fabric derives safety, slot, family/model/effort, publication
+lineage, `publisherIndependence`, `chairIndependence`, findings, supersession
+and current/superseded state. No editable family, verdict or independence
+control exists. A retained provider-reviewer agent is not required.
+
+The Console reads review evidence only through its exactly scoped operator
+Evidence row/detail projection, never an agent capability. The row shows slot,
+current/superseded, certifying, answer safety, CLEAN/FINDINGS/UNUSABLE, P0-P2 counts, provider/
+model, both independence states, artifact/packet/answer/result digests and
+supersession. Detail adds task/action, safe finding/digest, route/final-prompt
+and publication-lineage references. Unavailable or malformed fields fail the
+whole review variant rather than being inferred.
+
+The Evidence header displays the exact `reviewCompletionV1` response as
+`Final review: Complete` or `Blocked`, its target generation/artifact/packet and
+one row per required slot with the daemon's closed blockers. The Console does
+not recompute the boolean, choose a latest record or hide a blocker.
 
 A direct Claude, Cursor, Gemini or other provider CLI may be used only when
 Fabric is unavailable and the chair records the degraded reason. Its output may
@@ -738,6 +760,38 @@ schema belongs to the protocol/delivery contract, not to any UI package.
 
 ## 15. Verification and acceptance
 
+For this approved AFAB-004 delivery, `finalReviewComplete` is one daemon query,
+not a chair assertion. It is true only when:
+
+1. the run has exactly one `current` review target naming the current immutable
+   implementation artifact ID/revision/path/SHA-256, publication-lineage digest
+   and content-addressed review-packet digest;
+2. exactly one unsuperseded, current, terminal, safe, certifying `CLEAN` record
+   exists for each derived slot: `native` through Codex/OpenAI,
+   `other-primary` through Claude/Anthropic, `cursor-grok` through Cursor/Grok/
+   xAI and `agy-gemini` through Agy/Gemini/Google;
+3. all four records bind that target generation, artifact revision, packet and
+   their exact task/action/route/result/answer/final-prompt digests; route
+   adapter/family/model/effort agree with the activated receipt, every route
+   snapshots the same current run-chair generation, and no action is ambiguous,
+   quarantined or `UNUSABLE`;
+4. each external provider slot has `proved-distinct-publisher-family` and
+   `proved-distinct-chair-primary`; the `other-primary` record additionally
+   names the immutable AFAB-004 Codex/OpenAI chair generation, so Anthropic is
+   required for this run without hard-coding another run's equal primary; and
+5. the `native` record is a fresh Fabric task/action over the same packet. It
+   reports its honest same/distinct family states but makes no cross-family
+   claim.
+
+The daemon derives `CLEAN` by strict `review-result.v1` parsing. Chair
+adjudication is displayed but ignored by this predicate and cannot downgrade a
+P0-P2 finding. A `FINDINGS` or `UNUSABLE` record keeps its slot incomplete until
+a fresh safe `CLEAN` action explicitly supersedes it and links every open
+finding digest. When any finding was annotated substantiated, the successor
+must review a repaired artifact revision and new packet; prior evidence remains
+historical. An artifact/target advance makes earlier evidence `superseded`
+without invalidating its immutable action-bound snapshot.
+
 Implementation is accepted only when objective tests demonstrate:
 
 1. The Console runs inside and outside Herdr against the same protocol.
@@ -841,9 +895,8 @@ Implementation is accepted only when objective tests demonstrate:
     cover every configured dimension and the Console projects remaining or
     unknown capacity honestly.
 33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
-    Every provider review counted toward that gate has a terminal task-bound
-    answer-bearing action and typed Fabric review-evidence record; a direct CLI
-    artifact is degraded evidence only and cannot satisfy the gate.
+    The exact `finalReviewComplete` predicate above also proves current clean
+    Cursor Grok and Agy Gemini slots; direct CLI evidence cannot satisfy it.
 34. A real scoping intake registers a spec, ADR, decision/finding and Git diff;
     Project/Evidence row and detail preserve exact accepted scope, kind,
     revision, provenance and source digest. Multi-page content continues without
@@ -859,17 +912,20 @@ Implementation is accepted only when objective tests demonstrate:
     selects its secondary client, `s` returns to the retained project selector,
     and `--session` selects an exact stable ID for interactive or export use.
     A peer without `run-session-projection.v1` is explicitly incompatible.
-36. Provider-review routing invokes the trusted model router exactly once for a
-    new action, binds the canonical request/receipt and exact reviewed artifact
-    before provider I/O, and reuses that route on exact replay. Alias, explicit-
-    model, lead-family, distinctness, effort, adapter/model/family/payload,
-    artifact and changed-replay mismatches fail closed without provider work.
+36. Provider-review routing performs durable replay before bounded keyed router
+    single-flight, binds canonical route, publication lineage, current target,
+    verified packet and final prompt before provider I/O, and safely reruns only
+    after a pre-commit process crash. Timeout, process-tree leak, source
+    mutation and every route/payload/lineage mismatch leave no action or budget.
 37. Chair-only review evidence accepts the exact terminal action/task/route/
-    result/artifact tuple and derives the answer, family, model, effort and
-    publisher-lineage independence. Same-family, non-agent, missing or crossed
-    lineage is labelled honestly and cannot satisfy cross-family review;
-    receipt export preserves the complete immutable lineage without a retained
-    reviewer agent.
+    packet/result/artifact tuple and derives safety, safe result, both
+    independence states, supersession and currency. Exact replay survives chair
+    rotation; a new insert requires the current generation. Agent and operator
+    read/list/detail schemas leak no raw answer, packet, prompt or credentials.
+38. Terminal classification is frozen with classifier/secret-set identity;
+    later secret or usage reconciliation does not change review/result digests.
+    Source-before/during/after mutation, CLEAN/P0-P2 grammar, unsafe canaries,
+    four-slot completion and repaired-artifact supersession tests all pass.
 
 ## 16. Implementation gate
 
@@ -887,5 +943,7 @@ required action remains an implementation placeholder. Version 1.6 binds those
 review tasks to durable dispatch/read completion within the existing public
 protocol deadline. Version 1.7 binds trusted-router admission and daemon-derived
 review lineage to those same tasks without adding Spec 06 continuity modes.
+Version 1.8 binds those reviews to one current immutable packet, frozen safe
+results and the exact four-slot completion/supersession predicate above.
 Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.

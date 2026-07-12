@@ -1,13 +1,22 @@
 # Agent fabric operational hardening
 
-Status: Console daemon-lifecycle, provider-budget, route-lineage, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.25
+Status: Console daemon-lifecycle, provider-budget, review-snapshot, route-lineage, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
+Version: 1.26
 Date: 13 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.25 makes provider-review routing and certification daemon-owned. The
+Version 1.26 makes review bytes, publisher lineage, chair-family lineage and
+safe review output immutable daemon custody. It adds content-addressed review
+packets, bounded/cancellable router admission with exact-retry single-flight,
+closed provider/review read projections and current-artifact supersession.
+Raw certifying-review answers stay daemon-private and outside every public read,
+operator projection and receipt export;
+unsafe or unparseable output is retained privately but cannot certify. Missing
+routes including ambiguous actions retain/freeze budget under one explicit
+recovery owner. The squashed baseline contains no predecessor routing/review
+table, API or receipt shape. Version 1.25 makes provider-review routing and certification daemon-owned. The
 current baseline binds one canonical trusted-router request/receipt pair to
 each task-bound answer-bearing action before provider I/O, stores one
 chair-created but daemon-derived review-lineage record after terminal result,
@@ -37,11 +46,12 @@ activation transactionally revokes the prior roster. Every private and public
 credential check revalidates that active generation, the current session/run,
 chair lease, lifecycle and capability identity. Filesystem staging is immutable,
 fsynced and `flock`-serialised against the exact predecessor. Version 1.21
-permits one closed public text field for answer-bearing review
-work without weakening the raw-result boundary. A task-bound ephemeral spawn
-must use an adapter that advertises answer-bearing support; Fabric validates a
-nonempty bounded UTF-8 provider result string, persists the complete private
-result, and projects only `providerAnswer` plus the canonical result digest.
+permits one closed public text field for answer-bearing work without weakening
+the raw-result boundary. A task-bound ephemeral spawn must use an adapter that
+advertises answer-bearing support; Fabric validates a nonempty bounded UTF-8
+provider result string and persists the complete private result. Version 1.26
+narrows certifying-review projection to answer digest plus safe parsed result;
+non-review work retains the bounded answer contract.
 Resume references, usage, transport data, credentials and arbitrary result
 members remain private. Version 1.20 binds busy-incumbent attach before SQLite
 inspection and makes the
@@ -401,8 +411,8 @@ The single current baseline shall create:
 - daemon runtime epochs and current bootstrap audit receipts; and
 - one active MCP seat generation per project plus its exact session/run/chair,
   roster, principal-generation and token bindings; and
-- immutable provider-action route admissions and terminal review-evidence
-  lineage; and
+- immutable artifact-publication lineage, review targets/packets,
+  provider-action route/result custody and terminal review evidence; and
 - schema-versioned operator projection cursors.
 
 The baseline installs same-project/run foreign-key and
@@ -840,10 +850,10 @@ results replace the token with target identity plus `bridgeState` and
 `bridgeGeneration`. An adapter without bridge provisioning reports that closed
 capability before dispatch; attach may remain an honest bridge-less participant,
 but no surface claims provider-originated Fabric access. Raw adapter result JSON
-is never model-visible: the public codec exposes only typed contract evidence,
-the canonical digest, and for an adapter-advertised task-bound ephemeral review
-the validated bounded `providerAnswer` string. It has
-`additionalProperties: false`.
+is never model-visible: the public codec exposes only typed contract evidence
+and canonical digests. A non-review task-bound ephemeral action may retain its
+validated bounded `providerAnswer`; a certifying review exposes only answer
+digest and safe parsed result. Every variant has `additionalProperties: false`.
 
 The hard projection limits are 96 tools, 32 KiB canonical JSON per descriptor
 and 512 KiB for the complete descriptor set. The complete authorised set must
@@ -2463,9 +2473,9 @@ maximum, task-bound answer-bearing spawn is a durable asynchronous action.
 Dispatch commits `prepared` custody and its command receipt atomically, then
 returns promptly while exactly one tracked daemon completion owns adapter I/O.
 A bounded FIFO worker claims `prepared -> dispatched` only within the shared
-provider-turn ceiling. The Console, MCP caller or chair
-uses `provider-action.read` to observe terminal `providerAnswer` evidence; it
-does not redispatch. Local reconciliation cannot look up or quarantine queued
+provider-turn ceiling. The chair uses `provider-action.read` to observe the
+terminal answer digest and safe structured review result; it does not
+redispatch. Raw certifying-review output remains daemon-private. Local reconciliation cannot look up or quarantine queued
 or active work. Transport loss leaves the action live, daemon shutdown drains
 tracked work before adapter/database close, and restart resumes prepared work
 or reconciles dispatched work by lookup without blind replay.
@@ -2474,8 +2484,10 @@ Terminal adapter evidence moves exact usage to consumed and releases unused
 and concurrency reservation. A missing applicable usage value becomes unknown;
 an ambiguous action retains its reservation. Recovery validates an
 answer-bearing terminal lookup or replay before settlement. Empty, oversized
-or malformed answer evidence is quarantined, removes the public answer and
-freezes unproved dimensions. A later authenticated reconciliation may retry
+or invalid non-review answer evidence is quarantined and freezes unproved
+dimensions. Unsafe/malformed certifying-review output commits `UNUSABLE`,
+remains private/non-certifying and may still settle independently exact usage.
+A later authenticated reconciliation may retry
 the adapter's stable lookup and move unknown dimensions to exact settlement;
 clearing the authority-level unknown flag requires no other unknown owner.
 
@@ -2486,13 +2498,13 @@ current chair row; changed conversation correlation is recovery-required, and
 missing provider-session continuity yields no seed. Both paths use strict
 current protocol schemas and add no Console-owned state.
 
-The Claude answer-bearing review adapter receives a trusted absolute
-`readOnlyRoot` from Fabric composition. Its only source tools are `Read`,
-`Glob` and `Grep`; every requested path is realpath-resolved and must remain
-beneath that root. Absolute/outside paths, traversal, symlink escape, missing
-trust binding and a caller-selected root fail closed. Bash, edit/write and
-network tools are not admitted. Explicit `opus` effort `max` does not change
-those bounds.
+The Claude certifying-review adapter receives only the daemon-composed prompt
+containing the verified content-addressed packet. It has no mutable-workspace
+source tool; an adapter needing tool transport receives `Read` against the one
+packet object only and no `Glob`, `Grep`, Bash, edit/write or network tool.
+Packet-path substitution, caller-selected root and digest mismatch fail closed.
+Explicit `opus` effort `max` does not change those bounds. Non-review provider
+work retains its separately admitted source-tool policy.
 
 Deterministic verification additionally covers conditional vector-reserve
 races, task-completion races, crash/restart settlement, direct-SQL invariant
@@ -2503,9 +2515,101 @@ projections, and Claude traversal/absolute/symlink/tool-denial fixtures.
 
 ### 9.21 Provider-route custody and derived review evidence
 
-The current baseline replaces `model_routing_evidence` and
-`cross_family_review_evidence` with two immutable daemon-owned records. It does
-not migrate, import or project those earlier caller-certified shapes.
+The current baseline has six daemon-owned records:
+`artifact_publication_lineage`, `provider_review_packets`,
+`review_completion_targets`, `provider_action_routes`,
+`provider_review_results` and `provider_review_evidence`. It contains no
+predecessor caller-certified route/review table, import or projection.
+
+Every artifact registration inserts one `artifact_publication_lineage` row in
+the same transaction:
+
+```yaml
+artifact_publication_lineage:
+  artifact_id: exact-registered-artifact
+  artifact_revision: publication-time-revision
+  publisher_kind: agent-or-operator-or-fabric-or-project
+  publisher_ref: exact-registration-publisher
+  publisher_agent_id: null-or-exact-agent
+  publisher_principal_generation: null-or-exact-publication-generation
+  custody_action_id: null-or-unique-publisher-custody
+  provider_session_generation: null-or-exact-publication-generation
+  adapter_id: null-or-proved-adapter
+  model_family: null-or-proved-family
+  model: null-or-proved-model
+  route_receipt_digest: null-or-proved-route-digest
+  state: proved-or-unproved
+  reason: proved-or-non-agent-or-absent-custody-or-ambiguous-custody-or-crossed-custody
+  lineage_json: canonical-complete-snapshot
+  lineage_digest: sha256-prefixed-canonical-digest
+  created_at: daemon-time
+```
+
+The daemon derives every nullable provider field from the exact current agent,
+principal generation and unique provider custody/action. Missing, multiple or
+crossed joins are stored as `unproved`, never guessed. Insert checks the
+artifact/publisher tuple; update/delete triggers make the snapshot immutable.
+Later agent, route or registry revision cannot rebind it.
+
+`provider_review_packets` owns one private content-addressed snapshot:
+
+```yaml
+provider_review_packet:
+  packet_digest: sha256-prefixed-canonical-packet-digest
+  artifact_id: exact-source-artifact
+  artifact_revision: exact-source-revision
+  artifact_path: canonical-relative-path
+  artifact_sha256: exact-source-digest
+  publication_lineage_digest: exact-publication-snapshot-digest
+  media_type: closed-supported-text-media
+  source_byte_length: integer-at-most-49152
+  private_object_path: digest-derived-daemon-private-path
+  created_at: daemon-time
+```
+
+Packet creation uses the two-phase no-follow artifact-read invariant from
+section 9.14, writes canonical strict-UTF-8 JSON with create-exclusive mode,
+proves JSON content re-encodes byte-identically without normalisation, fsyncs
+file and directory, and publishes only under its computed digest. The
+phase-B artifact/lineage comparison occurs before target commit. Existing
+same-digest bytes are verified; a collision or changed source is integrity
+failure. Packet bytes never enter SQLite, operator projection or receipt.
+
+`review_completion_targets` is the run's CAS-owned current review scope. A
+chair-only prepare command creates the verified packet, supersedes the prior
+current row and inserts one higher generation containing run/task,
+`spec05-four-slot-v1` completion profile, exact
+artifact ref/revision, publication-lineage digest and packet digest. A partial
+unique index permits one `current` row per run; update/delete triggers allow
+only the prepare transaction's `current -> superseded` transition. Exact
+command replay returns the same generation. This row, not latest timestamp or
+registry order, defines review currency.
+
+`provider_review_results` freezes output classification in the provider
+action's terminal transaction:
+
+```yaml
+provider_review_result:
+  run_id: exact-action-run
+  action_id: exact-terminal-action
+  provider_answer_digest: sha256-of-exact-untrimmed-UTF8-bytes
+  provider_answer_byte_length: exact-nonnegative-length
+  safety_classifier_version: artifact-content-safety.v1
+  runtime_secret_selector_version: exact-versioned-selector
+  runtime_secret_set_hmac: daemon-keyed-digest-of-sorted-selected-secret-set
+  answer_safety: safe-or-unusable
+  review_result_json: null-or-canonical-safe-result
+  review_result_digest: null-or-sha256-prefixed-safe-result-digest
+  finding_digests_json: canonical-ordered-finding-digests
+  result_digest: exact-usage-independent-terminal-result-digest
+  created_at: daemon-time
+```
+
+The same transaction persists the private raw adapter result, terminal action
+state and this immutable row. Classification uses the selected secret set at
+that moment; later secret rotation cannot reclassify identical bytes. The set
+HMAC is private and non-exportable. Review-evidence record reads this frozen
+row and never reruns parsing or safety classification.
 
 `provider_action_routes` has exactly one row for every task-bound
 answer-bearing provider action and no row for another operation. Its logical
@@ -2517,10 +2621,14 @@ provider_action_route:
   adapter_id: exact-action-adapter
   action_id: exact-action-id
   task_id: exact-action-task
+  review_target_generation: null-or-current-at-admission-generation
   reviewed_artifact_id: null-or-exact-active-artifact
   reviewed_artifact_revision: null-or-positive-current-revision
   reviewed_artifact_path: null-or-canonical-relative-path
   reviewed_artifact_sha256: null-or-sha256-prefixed-source-digest
+  publication_lineage_digest: null-or-exact-artifact-lineage-digest
+  review_packet_digest: null-or-exact-content-addressed-packet
+  final_prompt_digest: null-or-sha256-prefixed-exact-prompt-digest
   route_request_json: canonical-closed-request
   route_request_digest: sha256-prefixed-canonical-digest
   route_receipt_json: canonical-complete-router-receipt
@@ -2537,6 +2645,12 @@ provider_action_route:
   resolved_model: exact-admitted-payload-model
   effective_effort: null-or-exact-admitted-payload-effort
   adapter_contract_digest: exact-activated-contract
+  review_slot: null-or-native-or-other-primary-or-cursor-grok-or-agy-gemini-or-other
+  chair_agent_id: exact-admission-chair
+  chair_generation: exact-admission-generation
+  chair_family: null-or-proved-admission-family
+  chair_model: null-or-proved-admission-model
+  chair_route_receipt_digest: null-or-proved-admission-route
   created_at: daemon-time
 ```
 
@@ -2549,34 +2663,38 @@ mode.
 
 Its primary key is `(run_id, action_id)`, with a unique
 `(adapter_id, action_id)` identity and foreign keys to the provider action,
-task and any non-null artifact. The four reviewed-artifact fields are either all null
-for other answer-bearing work or all exact for a review-certifying action.
-Checks and triggers require the action to have no target
-agent, use `spawn`, carry the same run/task/adapter/artifact choice and contain an
-answer-bearing payload whose model, model family and effort equal the resolved
-columns. The stored request and receipt are closed schema-version-1 canonical
-JSON; their recomputed hashes must equal the stored digests. Update and delete
-are forbidden. The adapter contract digest is rechecked against the activated
-compatibility record at admission, not against mutable runtime discovery after
-the action begins.
+task and any non-null artifact/packet. Artifact, lineage, packet and prompt
+fields are all null for non-review answer-bearing work and all exact for a
+certifying review. Checks require `spawn`, no target agent, matching run/task/
+adapter and payload model/family/effort. At admission, a proved publication
+family must equal `lead_family`; mismatch aborts the transaction. Chair agent,
+generation and provable family/model/route are snapshotted from the current
+chair lease and custody, never caller input. Stored request/receipt are closed
+canonical schema-v1 JSON with matching digests. Route rows and their request/
+receipt values are insert-only.
 
-For a new action, the daemon invokes the trusted router before entering the
-write transaction. A non-`ok`, malformed or mismatched receipt leaves no
-provider action, route, command result or budget reservation. A successful
-admission transaction rechecks task, authority, budget, adapter contract and
-any non-null artifact revision; inserts the route and provider action; reserves the full
-budget vector; and commits the command receipt together. Only then may the FIFO
-worker claim the action and call the adapter. The route request, reviewed
-canonical null-or-exact artifact and both route digests are included in provider-action identity and
-the command payload hash.
+Durable command/action replay runs before final-prompt composition or router work. Exact
+replay returns the stored route even after chair rotation; changed input
+conflicts. An action-keyed in-process single-flight coalesces concurrent exact
+command/input digests and serialises different digests to the later conflict.
+The router process runs in a new process group with no network/write authority,
+bounded stdout/stderr and one 5,000 ms deadline; timeout sends TERM then KILL
+after 250 ms. Timeout, overflow, non-`ok`, malformed or mismatch leaves no
+action, route, command result or budget reservation and does not change the
+separately committed current target/packet. Crash
+before commit may rerun this side-effect-free work; no global exactly-once
+router claim is made.
 
-Action replay first reads durable state. Exact command/action, payload,
-authority, route request and artifact identity return the existing action and
-route without router invocation or another reservation. Any changed route
-field conflicts even if current routing would reach the stored model. A router
-catalogue, capability or configuration change applies only to a new action.
+The admission transaction rechecks task, authority, budget, adapter contract,
+current review-target generation, artifact revision, publication lineage,
+packet bytes/digest and current chair;
+inserts action and route; reserves the complete vector; and commits the command
+receipt. The daemon-generated final prompt must equal the stored prompt digest
+and remain within 65,536 bytes. Only then may the FIFO worker call the adapter,
+with no mutable-workspace source tool. Route request, nullable artifact, packet,
+final prompt and chair snapshot all participate in action/command identity.
 
-`provider_review_evidence` is the one current terminal certification record:
+`provider_review_evidence` is the immutable terminal review record:
 
 ```yaml
 provider_review_evidence:
@@ -2589,78 +2707,134 @@ provider_review_evidence:
   action_id: exact-terminal-action
   route_receipt_digest: exact-action-route-digest
   result_digest: exact-canonical-terminal-result-digest
-  provider_answer: exact-bounded-terminal-answer
+  review_target_generation: exact-action-target-generation
+  review_packet_digest: exact-action-packet-digest
+  final_prompt_digest: exact-action-prompt-digest
+  provider_answer_digest: exact-untrimmed-answer-digest
+  answer_safety: safe-or-unusable
+  safety_classifier_version: exact-terminal-classifier-version
+  runtime_secret_selector_version: exact-terminal-selector-version
+  review_result_json: null-or-canonical-safe-CLEAN/FINDINGS-result
+  review_result_digest: null-or-sha256-prefixed-safe-result-digest
+  finding_digests_json: canonical-ordered-safe-finding-digests
+  verdict: CLEAN-or-FINDINGS-or-UNUSABLE
+  certifying: true-or-false
   provider_family: daemon-derived-route-family
   resolved_model: daemon-derived-route-model
   effective_effort: null-or-daemon-derived-route-effort
+  review_slot: native-or-other-primary-or-cursor-grok-or-agy-gemini-or-other
   reviewed_artifact_id: exact-action-reviewed-artifact
   reviewed_artifact_revision: exact-action-reviewed-revision
   reviewed_artifact_path: exact-action-reviewed-path
   reviewed_artifact_sha256: exact-action-reviewed-source-digest
-  publisher_lineage_json: canonical-daemon-derived-lineage
-  publisher_lineage_digest: sha256-prefixed-canonical-digest
-  structural_independence: proved-distinct-family-or-same-family-or-unproved
-  adjudication_disposition: clean-or-findings-substantiated-or-findings-unsubstantiated-or-findings-mixed-or-unusable
+  publication_lineage_digest: exact-action-publication-snapshot
+  publisher_independence: proved-distinct-publisher-family-or-same-publisher-family-or-unproved
+  chair_independence: proved-distinct-chair-primary-or-same-chair-family-or-unproved-chair-family
+  adjudication_disposition: none-or-findings-substantiated-or-findings-unsubstantiated-or-findings-mixed-or-unusable-noted
+  substantiated_finding_digests_json: canonical-ordered-subset-of-derived-findings
+  supersedes_evidence_id: null-or-prior-same-slot-evidence
+  superseded_finding_digests_json: canonical-ordered-prior-finding-digests
   created_at: daemon-time
 ```
 
-The current chair calls the typed operation with equality preconditions for
-action, task, route, result and artifact plus the closed adjudication value.
-Inside one transaction, the daemon rechecks its live chair lease/generation;
-loads a terminal answer-bearing action and its immutable route; computes the
-canonical result digest; reads the bounded answer; and revalidates the exact
-active artifact. A route whose artifact fields are null cannot create this
-record. It derives family, model and effort from the route receipt,
-never from the caller.
+Record command/evidence lookup and exact-input comparison occur before the live
+chair check. Exact replay therefore returns its immutable row after chair
+rotation; a changed replay conflicts. Only a new insert rechecks current chair
+lease/generation. It loads the exact terminal answer-bearing action, route and
+action-bound packet/publication snapshots. Registry advance does not prevent
+historical insertion and never changes those snapshots; read-time currency is
+separate. A route with null review fields cannot certify.
 
-The publisher-lineage snapshot starts with the artifact's durable
-publisher-kind/reference. An agent publisher is followed through its exact
-run/agent row and unique provider custody/action, including that action's
-admitted adapter, model-family payload and route digest when present. Missing,
-ambiguous or crossed links produce `unproved`. Equal durable publisher/reviewer
-families produce `same-family`. A distinct durable publisher family produces
-`proved-distinct-family` only when it also equals the review route's lead
-family and the immutable request/receipt prove required distinctness. A
-non-agent publisher is recorded exactly and remains `unproved`; the caller
-cannot upgrade it. The canonical snapshot and digest are stored so later
-agent, chair or routing changes do not rewrite historical evidence.
+Raw review output remains in daemon-private action custody. The shared
+`artifact-content-safety.v1` classifier runs in reject-only mode with its exact
+terminal controls, Fabric bearers, PEM/auth/userinfo/provider-token/secret-
+assignment expressions and current runtime-known secrets. Safe output must
+parse the closed `review-result.v1` CLEAN/FINDINGS JSON contract. Unsafe,
+credential-bearing, control-bearing or malformed output stores only its exact
+answer digest and `UNUSABLE`; it emits no public text and `certifying=0`.
 
-The review row is insert-only, unique for its action/artifact pair and fully
-foreign-keyed to the action, route, task, chair and artifact. Exact command and
-evidence replay returns the original row. Changed disposition or any crossed
-reference conflicts. A terminal provider answer can therefore be certified
-without creating a reviewer agent, capability or provider-session row.
+`provider_answer_digest` hashes exact untrimmed validated UTF-8 bytes.
+`result_digest` hashes canonical
+`{schemaVersion,actionId,terminalState,providerAnswerDigest,
+reviewResultDigest:null|sha256,answerSafety}` only. Usage, cost,
+timestamps, history, lookup attempts and budget settlement are excluded, so
+later usage reconciliation cannot change review identity. Safe result/finding
+JSON and digests are daemon-derived; the caller supplies none of them.
+
+Publisher independence uses only `artifact_publication_lineage`. Chair
+independence uses only the route's admission-chair snapshot. Their three-state
+results cannot be caller-upgraded. `review_slot` is derived from actual route
+adapter/family plus immutable chair family: `other-primary` follows the equal-
+primary mapping and is never hard-coded to one vendor. The review row is insert-only, unique for
+its action/artifact pair and fully linked to action, route, task, chair,
+artifact, packet and publication lineage. No retained provider-reviewer agent,
+capability or provider-session row is created.
+
+Constraints require the complete finding set for `findings-substantiated`, a
+nonempty proper subset for `findings-mixed`, and an empty substantiated set for
+every other annotation.
+
+Supersession is explicit and immutable. A successor names one prior same-slot
+evidence row and an ordered subset containing every open prior finding digest
+it closes. If any prior finding is annotated substantiated, the successor must
+bind a different artifact revision and packet. Prior rows remain queryable.
+Adjudication is annotation only: it cannot change provider verdict, findings,
+certifying state or completion. A fresh CLEAN action is required after every
+FINDINGS result; an unsubstantiated result may be re-reviewed on the same
+packet.
+
+`provider-action.dispatch` and `provider-action.read` project the same closed
+route row; review reads add only digest/safety/safe parsed result and never raw
+answer. Agent `review-evidence.read/list` select immutable review rows under
+the authenticated run, with bounded cursor paging. Operator Evidence row/detail
+joins the same tables under exact operator project/session/run `read` authority
+and returns only the closed safe subset from Spec 01. The Console path rejects
+agent capabilities and cannot fall back to core methods or SQLite.
+The read-only review-completion reducer selects the one current target and
+exactly one unsuperseded evidence row per profile slot, evaluates only durable
+joins, and returns the closed target/generation, boolean and sorted blockers.
+Agent read and operator System/Evidence projection call that same reducer; no
+second Console calculation exists.
 
 Startup and receipt export perform a bounded integrity pass over these joins:
 
-- a prepared, dispatched, accepted or terminal task-bound answer-bearing
+- a prepared, dispatched, accepted, ambiguous or terminal task-bound answer-bearing
   action without exactly one matching route becomes `quarantined` and
   `recovery_required`; it is never dispatched or redispatched;
-- dispatched/accepted ambiguity may use only pair-keyed adapter lookup to
+- dispatched/accepted/ambiguous custody may use only pair-keyed adapter lookup to
   establish the provider effect, but a missing/conflicting route remains
   non-certifying and is never reconstructed or replaced;
-- a route digest, canonical receipt, adapter contract, payload model/family/
-  effort, task or artifact mismatch blocks provider I/O or export;
-- a review row whose terminal result, answer, route, chair, artifact or
-  publisher-lineage digest no longer verifies blocks export as integrity
+- missing/conflicting route retains the full reservation and freezes every
+  route-qualified unit; only prepared zero-dispatch proof may terminalise
+  no-effect and release, while independently proved terminal usage may settle
+  its units without restoring review certification;
+- a route, packet, final-prompt, publication-lineage, chair, adapter-contract,
+  payload model/family/effort, task or artifact mismatch blocks provider I/O or
+  export;
+- a review row whose terminal result, answer digest, route, packet, chair or
+  publication-lineage digest no longer verifies blocks export as integrity
   failure; and
 - exact restart resumes prepared work from its stored route, reconciles
   dispatched work under its existing action ID and settles review budget once.
 
-`fabric-receipt.json` replaces the old `modelRoutingReceipts` and
-`crossFamilyReviews` arrays with closed `providerRoutes` and `providerReviews`
-arrays. Their entries are direct projections of the immutable rows and include
-the canonical request/receipt and exact publisher-lineage snapshot, not a
-caller-published route file or family/independence assertion. Direct provider
-CLI output may be registered only as an ordinary degraded review artifact and
-is excluded from both arrays and every review-completion predicate.
+Read-time currency compares evidence against current canonical artifact/packet
+and supersession; it does not rewrite historical rows. `fabric-receipt.json`
+contains closed `providerRoutes` and safe `providerReviews` projections only:
+references, digests, safe verdict/findings, both independence states,
+publication-lineage digest and supersession. Raw answer, packet and prompt
+content, private adapter result and usage are absent. The current baseline and
+schema manifests reject every predecessor snake/camel table, API and receipt
+field named in Spec 01. Direct provider CLI output is an ordinary degraded
+artifact excluded from completion.
 
 Deterministic verification additionally covers router invocation counting,
 shared Python/TypeScript schema-parity fixtures, all strict-codec and
 router/payload mismatches, adapter-contract drift,
-transaction rollback at every route/action/budget/command boundary, replay
-without router execution, changed-route conflict, immutable-row attacks,
-prepared/dispatched restart, lookup-only ambiguity, exact terminal result
-digesting, chair-generation fencing, each structural-independence state,
-publisher-lineage crossing, legacy caller-certification absence and exact
-receipt export.
+transaction rollback at every packet/route/action/budget/command boundary,
+source mutation before/during/after snapshot, replay without router execution,
+changed-route conflict, immutable-row attacks, every unresolved action state,
+lookup-only ambiguity and budget freeze/release, exact answer/result digesting
+across usage reconciliation, output-safety canaries, chair replay fencing,
+publisher/chair independence, current/superseded history, repair linkage,
+four-slot completion/blocker permutations, closed agent/operator projections,
+predecessor-shape absence and exact safe receipt export.
