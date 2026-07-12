@@ -1026,7 +1026,7 @@ export type FabricHitBinding = Readonly<{
 
 export type FabricHitRegion = Readonly<{
   id: string;
-  kind: "tab" | "row" | "action" | "detach" | "pager" | "splitter";
+  kind: "tab" | "row" | "session" | "action" | "detach" | "pager" | "splitter";
   rect: Rect;
   enabled: boolean;
   geometryKey: string;
@@ -1236,12 +1236,43 @@ function renderFabricMaster(
     0,
     Math.trunc(ui.scrollOffsetByView[presentation.activeView] ?? 0),
   );
-  const visibleRows = presentation.masterRows.slice(
+  const sessionChoices =
+    presentation.activeView === "project" &&
+    dataset.projectSessions?.selectedProjectSessionId === null
+      ? dataset.projectSessions.choices
+      : [];
+  const masterItems = [
+    ...sessionChoices.map((choice) => ({ kind: "session" as const, choice })),
+    ...presentation.masterRows.map((item) => ({ kind: "row" as const, item })),
+  ];
+  const visibleRows = masterItems.slice(
     offset,
     offset + (bounds.y2 - bounds.y1 + 1),
   );
-  for (const [index, item] of visibleRows.entries()) {
+  for (const [index, visible] of visibleRows.entries()) {
     const y = bounds.y1 + index;
+    if (visible.kind === "session") {
+      const { choice } = visible;
+      const id = `session:select:${choice.projectSessionId}`;
+      const text = `${presentation.focusId === id ? ">" : " "} SESSION ${choice.projectSessionId} | ${choice.mode} | ${choice.state} | r${String(choice.revision)}`;
+      if (bounds.x1 === 1 && bounds.x2 === columns) {
+        setFabricRow(rows, y, columns, text);
+      } else {
+        const existing = rows[y - 1] ?? " ".repeat(columns);
+        const leftWidth = bounds.x2 - bounds.x1 + 1;
+        rows[y - 1] = `${fitCells(chromeText(text), leftWidth)}${existing.slice(bounds.x2)}`;
+      }
+      hitRegions.push({
+        id,
+        kind: "session",
+        rect: { x1: bounds.x1, y1: y, x2: bounds.x2, y2: y },
+        enabled: true,
+        geometryKey,
+        binding: null,
+      });
+      continue;
+    }
+    const { item } = visible;
     const id = `row:${item.view}:${item.stableId}`;
     const text = rowText(item, presentation.focusId === id);
     if (bounds.x1 === 1 && bounds.x2 === columns) {
@@ -1261,7 +1292,7 @@ function renderFabricMaster(
       binding: presentedBinding(dataset, item),
     });
   }
-  if (presentation.masterRows.length === 0) {
+  if (masterItems.length === 0) {
     const message = "No projected items in this view.";
     if (bounds.x1 === 1 && bounds.x2 === columns) {
       setFabricRow(rows, bounds.y1, columns, message);

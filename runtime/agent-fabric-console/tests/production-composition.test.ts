@@ -426,6 +426,7 @@ describe("production Console package-root bootstrap", () => {
         "scoped-gate-read.v1",
         "native-notification-projection.v1",
         "run-session-projection.v1",
+        "artifact-content-read.v1",
       ],
       projection: {
         snapshot: async () => dataset().snapshot,
@@ -453,6 +454,7 @@ describe("production Console package-root bootstrap", () => {
           readDetail: async () => { throw new Error("not called"); },
         },
       },
+      artifacts: { readContent: async () => { throw new Error("not called"); } },
       operations: {},
       close,
     };
@@ -524,6 +526,7 @@ describe("production Console package-root bootstrap", () => {
               "scoped-gate-read.v1",
               "native-notification-projection.v1",
               "run-session-projection.v1",
+              "artifact-content-read.v1",
             ],
             projection: {
               snapshot: async () => dataset().snapshot,
@@ -583,6 +586,7 @@ describe("production Console package-root bootstrap", () => {
                 readDetail: async () => { throw new Error("unused"); },
               },
             },
+            artifacts: { readContent: async () => { throw new Error("unused"); } },
             operations: {},
             close,
           },
@@ -647,6 +651,7 @@ describe("production Console package-root bootstrap", () => {
         "scoped-gate-read.v1",
         "native-notification-projection.v1",
         "run-session-projection.v1",
+        "artifact-content-read.v1",
       ],
       projection: {
         snapshot: async () => dataset().snapshot,
@@ -669,6 +674,7 @@ describe("production Console package-root bootstrap", () => {
           readDetail: async () => { throw new Error("unused"); },
         },
       },
+      artifacts: { readContent: async () => { throw new Error("unused"); } },
       operations: {},
       close: async () => {},
     });
@@ -808,6 +814,34 @@ describe("production Console package-root bootstrap", () => {
         openLocalOperatorConsoleSession: async () => ({
           client: { features: {} },
           compatibility: { mode: "current" },
+          credential,
+          projectId,
+          operatorId: "operator_console_production",
+          clientId: "console_client_production",
+          detach: async () => {},
+          close: async () => { closeCount += 1; },
+        }),
+      }),
+    });
+
+    await expect(bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    })).resolves.toStrictEqual({ status: "unavailable", reason: "start-failed" });
+    expect(closeCount).toBe(1);
+  });
+
+  it("rejects and closes a pre-release legacy-compatibility session", async () => {
+    let closeCount = 0;
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => ({
+          client: {},
+          compatibility: {
+            mode: "legacy-compatibility",
+            primary: { code: "PROTOCOL_INVALID", message: "obsolete peer" },
+            retry: { status: "succeeded", profile: "strict-v1" },
+          },
           credential,
           projectId,
           operatorId: "operator_console_production",

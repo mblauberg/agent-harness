@@ -545,6 +545,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
+        "artifact-content-read.v1",
       ],
     });
 
@@ -561,6 +562,7 @@ describe("public protocol adapter", () => {
           "operator-projection.v2",
           "scoped-gate-read.v1",
           "run-session-projection.v1",
+          "artifact-content-read.v1",
         ],
       },
       snapshot: null,
@@ -568,9 +570,34 @@ describe("public protocol adapter", () => {
     });
   });
 
+  it("rejects stale Console surfaces that omit a required negotiated feature", () => {
+    const result = bindConsoleProtocolClient({
+      kind: "operator",
+      features: [
+        "operator-projection.v1",
+        "operator-projection.v2",
+        "scoped-gate-read.v1",
+        "artifact-content-read.v1",
+      ],
+      projection: {},
+      console: {
+        readOnly: true,
+        gates: { read: vi.fn() },
+        projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+      },
+      artifacts: { readContent: vi.fn() },
+    } as never);
+
+    expect(result).toStrictEqual({
+      ok: false,
+      missingFeatures: ["run-session-projection.v1"],
+    });
+  });
+
   it("binds negotiated message and repository reads through the Console protocol port", () => {
     const messageRead = vi.fn();
     const repositoryRead = vi.fn();
+    const artifactRead = vi.fn();
     const negotiated = {
       kind: "operator",
       features: [
@@ -578,6 +605,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
+        "artifact-content-read.v1",
         "message-body-read.v1",
         "operator-repository-read.v1",
       ],
@@ -589,6 +617,7 @@ describe("public protocol adapter", () => {
       },
       messages: { read: messageRead },
       repository: { read: repositoryRead },
+      artifacts: { readContent: artifactRead },
     } as never;
 
     const bound = bindConsoleProtocolClient(negotiated);
@@ -597,7 +626,7 @@ describe("public protocol adapter", () => {
     if (!bound.ok) return;
     expect(Reflect.get(bound.port, "readMessageBody")).toBe(messageRead);
     expect(Reflect.get(bound.port, "readRepository")).toBe(repositoryRead);
-    expect(bound.port.readArtifactContent).toBeNull();
+    expect(bound.port.readArtifactContent).toEqual(expect.any(Function));
 
     const withoutOptionalReads = bindConsoleProtocolClient({
       kind: "operator",
@@ -606,6 +635,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
+        "artifact-content-read.v1",
       ],
       projection: {},
       console: {
@@ -613,12 +643,13 @@ describe("public protocol adapter", () => {
         gates: { read: vi.fn() },
         projection: { viewPage: vi.fn(), readDetail: vi.fn() },
       },
+      artifacts: { readContent: artifactRead },
     } as never);
     expect(withoutOptionalReads.ok).toBe(true);
     if (!withoutOptionalReads.ok) return;
     expect(withoutOptionalReads.port.readMessageBody).toBeNull();
     expect(withoutOptionalReads.port.readRepository).toBeNull();
-    expect(withoutOptionalReads.port.readArtifactContent).toBeNull();
+    expect(withoutOptionalReads.port.readArtifactContent).toEqual(expect.any(Function));
   });
 
   it("fetches exact bounded artifact and diff content through the public read port", async () => {

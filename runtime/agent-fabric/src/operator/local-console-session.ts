@@ -54,6 +54,7 @@ const REQUIRED_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "operator-control.v1",
   "operator-projection.v1",
   RUN_SESSION_PROJECTION_FEATURE,
+  "artifact-content-read.v1",
 ] as const satisfies readonly ProtocolFeature[]);
 export const STRICT_V1_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "project-sessions.v1",

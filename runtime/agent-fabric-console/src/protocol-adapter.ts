@@ -146,49 +146,38 @@ export function bindConsoleProtocolClient(
   client: NegotiatedOperatorClient,
   sessionCompatibility?: ConsoleSessionCompatibility,
 ): ConsoleProtocolBinding {
-  if (client.projection === undefined || client.console === undefined) {
-    const available = new Set<string>(client.features);
-    const missingFeatures = [
-      "operator-projection.v2",
-      "scoped-gate-read.v1",
-      "run-session-projection.v1",
-    ].filter((feature) => !available.has(feature));
+  if (sessionCompatibility?.mode === "legacy-compatibility") {
+    return { ok: false, missingFeatures: ["current-protocol-baseline"] };
+  }
+  const available = new Set<string>(client.features);
+  const missingFeatures = [
+    "operator-projection.v2",
+    "scoped-gate-read.v1",
+    "run-session-projection.v1",
+    "artifact-content-read.v1",
+  ].filter((feature) => !available.has(feature));
+  if (missingFeatures.length > 0) {
     return {
       ok: false,
-      missingFeatures:
-        missingFeatures.length > 0
-          ? missingFeatures
-          : ["operator-console-operations"],
+      missingFeatures,
     };
+  }
+  if (
+    client.projection === undefined ||
+    client.console === undefined ||
+    client.artifacts === undefined
+  ) {
+    return { ok: false, missingFeatures: ["operator-console-operations"] };
   }
   const projection = client.projection;
   const consoleClient = client.console;
   const nativeNotificationProjection = client.features.includes(
     NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   ) ? "daemon-journal" : "legacy-fallback";
-  if (
-    (sessionCompatibility?.mode === "current") !==
-      (nativeNotificationProjection === "daemon-journal") &&
-    sessionCompatibility !== undefined
-  ) {
-    throw new TypeError("Console session compatibility contradicts negotiated notification projection");
-  }
-  const compatibility: ConsoleProtocolCompatibility = sessionCompatibility === undefined
-    ? nativeNotificationProjection === "daemon-journal"
-      ? { mode: "current" }
-      : { mode: "legacy-compatibility", profile: "strict-v1" }
-    : sessionCompatibility.mode === "current"
-      ? sessionCompatibility
-      : {
-          mode: "legacy-compatibility",
-          profile: sessionCompatibility.retry.profile,
-          primary: sessionCompatibility.primary,
-        };
+  const compatibility: ConsoleProtocolCompatibility = { mode: "current" };
   const artifacts = client.artifacts;
-  const artifactRead: ArtifactContentClient["readContent"] | null =
-    artifacts === undefined
-      ? null
-      : (request) => artifacts.readContent(request);
+  const artifactRead: ArtifactContentClient["readContent"] =
+    (request) => artifacts.readContent(request);
   return {
     ok: true,
     readOnly: consoleClient.readOnly,

@@ -134,6 +134,8 @@ describe("public local operator Console session", () => {
     expect(first.client.console?.readOnly).toBe(true);
     expect(first.compatibility).toEqual({ mode: "current" });
     expect(first.client.features).toContain(NATIVE_NOTIFICATION_PROJECTION_FEATURE);
+    expect(first.client.features).toContain("artifact-content-read.v1");
+    expect(first.client.artifacts).toBeDefined();
 
     await Promise.all([
       first.detach({ reason: "operator" }),

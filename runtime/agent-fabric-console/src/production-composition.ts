@@ -345,11 +345,8 @@ function publicSession(value: unknown): PublicLocalOperatorConsoleSession {
   ) {
     throw new TypeError("public agent-fabric Console session is invalid");
   }
-  if (
-    value.compatibility.mode !== "current" &&
-    value.compatibility.mode !== "legacy-compatibility"
-  ) {
-    throw new TypeError("public agent-fabric Console compatibility state is invalid");
+  if (value.compatibility.mode !== "current") {
+    throw new TypeError("public agent-fabric Console requires the current protocol baseline");
   }
   const selectionFields = [
     value.attachableProjectSessions,

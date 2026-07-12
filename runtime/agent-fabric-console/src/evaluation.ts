@@ -667,14 +667,18 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     freshness: freshness("live", 100),
     summary: {
       kind: "run",
-      projectSessionId: run.projectSessionId,
+      ...(run.projectSessionId === undefined
+        ? {}
+        : { projectSessionId: run.projectSessionId }),
       phase: run.phase,
       health: run.health,
       nextMilestone: run.nextMilestone,
     },
     detailRef: {
       kind: "run",
-      projectSessionId: run.projectSessionId,
+      ...(run.projectSessionId === undefined
+        ? {}
+        : { projectSessionId: run.projectSessionId }),
       coordinationRunId: run.runId,
       expectedRevision: revision,
     },

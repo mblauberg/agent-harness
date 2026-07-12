@@ -21,6 +21,7 @@ import type {
 } from "@local/agent-fabric-protocol";
 import {
   guidedWorkflowPrompt,
+  sessionSwitchBlockReason,
   startFabricConsoleApplication,
   type ConsoleBootstrapResult,
   type ConsoleBootstrapPort,
@@ -271,6 +272,21 @@ const runtimeDependencies = {
 };
 
 describe("typed Console application bootstrap boundary", () => {
+  it("blocks session navigation while operator-action custody is unresolved", () => {
+    expect(sessionSwitchBlockReason({
+      pendingCommandIds: ["command-pending"],
+      lastActionStatus: null,
+    })).toBe("SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION");
+    expect(sessionSwitchBlockReason({
+      pendingCommandIds: [],
+      lastActionStatus: { status: "ambiguous" } as never,
+    })).toBe("SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION");
+    expect(sessionSwitchBlockReason({
+      pendingCommandIds: [],
+      lastActionStatus: { status: "committed" } as never,
+    })).toBeNull();
+  });
+
   it("names the exact required field in each guided workflow prompt", () => {
     const binding = {
       itemId: "prompt-item",
@@ -413,6 +429,186 @@ describe("typed Console application bootstrap boundary", () => {
       expect(close).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("renders and opens exact zero-run session choices from the project selector", async () => {
+    const targetSessionId = "session-application-zero-run" as ProjectSessionId;
+    const choices = [
+      {
+        projectSessionId: targetSessionId,
+        mode: "coordinated" as const,
+        state: "draft" as const,
+        revision: 1,
+        generation: 1,
+        lastEventAt: timestamp,
+      },
+      {
+        projectSessionId: "session-application-existing" as ProjectSessionId,
+        mode: "independent" as const,
+        state: "active" as const,
+        revision: 2,
+        generation: 1,
+        lastEventAt: timestamp,
+      },
+    ];
+    const port = protocolPort();
+    const selectProjectSession = vi.fn();
+    const sessionSelection = {
+      choices,
+      selectProjectSession,
+      selectProject: vi.fn(),
+    };
+    const common = {
+      credential,
+      projectId,
+      sessionSelection,
+      detach: async () => {},
+      close: async () => {},
+    };
+    const selectedConnection = {
+      status: "connected" as const,
+      binding: currentBinding(port, true, null),
+      ...common,
+      projectSessionId: targetSessionId,
+    };
+    selectProjectSession.mockResolvedValue(selectedConnection);
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: async () => ({
+          status: "connected" as const,
+          binding: currentBinding(port, true, null),
+          ...common,
+        }),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => "session-choice-input",
+      confirmationId: () => "session-choice-confirmation",
+      ...runtimeDependencies,
+    });
+
+    await application.handleInput({ kind: "key", key: "text", text: "s" });
+    expect(application.controller.state.activeView).toBe("project");
+    expect(application.ui.focusId).toBe(`session:select:${targetSessionId}`);
+    expect(application.frame.hitRegions.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(choices.map(({ projectSessionId }) => `session:select:${projectSessionId}`)),
+    );
+    expect(application.frame.rows.join("\n")).toContain(targetSessionId);
+
+    await application.handleInput({ kind: "key", key: "enter" });
+    expect(selectProjectSession).toHaveBeenCalledWith(targetSessionId);
+    expect(application.dataset.projectSessions?.selectedProjectSessionId).toBe(targetSessionId);
+    await application.close("operator");
+  });
+
+  it("discards a late poll from the previously selected session", async () => {
+    const sessionA = "session-application-race-a" as ProjectSessionId;
+    const sessionB = "session-application-race-b" as ProjectSessionId;
+    const sessionSnapshot = (projectSessionId: ProjectSessionId): OperatorProjectionSnapshot => ({
+      ...snapshot(),
+      session: {
+        freshness: "live",
+        source: "fabric",
+        revision: 1,
+        observedAt: timestamp,
+        value: {
+          projectSessionId,
+          projectId,
+          mode: "independent",
+          state: "active",
+          revision: 1,
+          generation: 1,
+          authorityRef: digest,
+          budgetRef: "budget-application-race",
+          launchPacketRef: { path: "launch/race.json" as never, digest },
+          membershipRevision: 1,
+          origin: { kind: "operator-launch", operatorId: "operator-application-race" as never },
+        },
+      },
+    });
+    let releasePoll: ((value: ProjectionEventsResult) => void) | undefined;
+    const staleEvents = vi.fn(async () => await new Promise<ProjectionEventsResult>((resolve) => {
+      releasePoll = resolve;
+    }));
+    const portA: ConsoleProtocolPort = {
+      ...protocolPort(),
+      snapshot: vi.fn(async () => sessionSnapshot(sessionA)),
+      events: staleEvents,
+    };
+    const portB: ConsoleProtocolPort = {
+      ...protocolPort(),
+      snapshot: vi.fn(async () => sessionSnapshot(sessionB)),
+    };
+    const choices = [sessionA, sessionB].map((projectSessionId) => ({
+      projectSessionId,
+      mode: "independent" as const,
+      state: "active" as const,
+      revision: 1,
+      generation: 1,
+      lastEventAt: timestamp,
+    }));
+    const selectProjectSession = vi.fn(async (projectSessionId: ProjectSessionId) => ({
+      status: "connected" as const,
+      binding: currentBinding(projectSessionId === sessionB ? portB : portA, true, null),
+      credential,
+      projectId,
+      projectSessionId,
+      sessionSelection,
+      detach: async () => {},
+      close: async () => {},
+    }));
+    const sessionSelection = {
+      choices,
+      selectProjectSession,
+      selectProject: vi.fn(),
+    };
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: async () => ({
+          status: "connected" as const,
+          binding: currentBinding(portA, true, null),
+          credential,
+          projectId,
+          projectSessionId: sessionA,
+          sessionSelection,
+          detach: async () => {},
+          close: async () => {},
+        }),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => "session-race-input",
+      confirmationId: () => "session-race-confirmation",
+      ...runtimeDependencies,
+    });
+
+    const lateRefresh = application.refresh();
+    await vi.waitFor(() => expect(staleEvents).toHaveBeenCalledOnce());
+    await application.handleActivation({
+      regionId: `session:select:${sessionB}`,
+      binding: null,
+      provenance: "keyboard",
+      eventId: "select-session-b",
+    });
+    releasePoll?.({
+      status: "continuation",
+      events: [],
+      nextCursor: 1,
+      hasMore: false,
+      snapshotRevision: 1,
+      readTransactionId: "stale-session-a-poll",
+    });
+    await lateRefresh;
+
+    const currentSession = application.dataset.snapshot?.session;
+    expect(currentSession?.freshness === "live"
+      ? currentSession.value?.projectSessionId
+      : null).toBe(sessionB);
+    await application.close("operator");
+  });
 
   it("opens an exact run session from the project selector and returns with s", async () => {
     const projectSessionId = "session-application-independent" as ProjectSessionId;
@@ -644,7 +840,7 @@ describe("typed Console application bootstrap boundary", () => {
       armedByEventId: eventId,
     }));
     const commit = vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => ({
-      reconnectRequired: false,
+      reconnectProjectSessionId: null,
       review: {
         ...current,
         stage: "committed" as const,
@@ -742,7 +938,7 @@ describe("typed Console application bootstrap boundary", () => {
       arm: vi.fn((current: ConsoleWorkflowReview) => current),
       commit: vi.fn(async (input: { review: ConsoleWorkflowReview }) => ({
         review: input.review,
-        reconnectRequired: false,
+        reconnectProjectSessionId: null,
       })),
     };
     let event = 0;
@@ -874,7 +1070,7 @@ describe("typed Console application bootstrap boundary", () => {
         armedByEventId: eventId,
       })),
       commit: vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => ({
-        reconnectRequired: true,
+        reconnectProjectSessionId: "session-created" as ProjectSessionId,
         review: {
           ...current,
           stage: "committed" as const,
@@ -925,6 +1121,9 @@ describe("typed Console application bootstrap boundary", () => {
     await application.handleInput({ kind: "key", key: "text", text: "1" });
 
     expect(startOrAttach).toHaveBeenCalledTimes(2);
+    expect(startOrAttach).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      projectSessionId: "session-created",
+    }));
     expect(firstDetach).toHaveBeenCalledWith({ reason: "operator" });
     expect(firstClose).toHaveBeenCalledOnce();
     expect(application.frame.rows.join("\n")).toContain("session-created");

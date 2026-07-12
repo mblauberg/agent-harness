@@ -283,10 +283,22 @@ type ConsoleApplicationConnection = Readonly<{
   selectSession: ((projectSessionId: ProjectSessionId | null) => Promise<ConsoleApplicationConnection>) | null;
 }>;
 
+export function sessionSwitchBlockReason(
+  state: Pick<ConsoleControllerState, "pendingCommandIds" | "lastActionStatus"> | null,
+): "SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION" | null {
+  return state !== null && (
+    state.pendingCommandIds.length > 0 ||
+    state.lastActionStatus?.status === "pending" ||
+    state.lastActionStatus?.status === "ambiguous"
+  )
+    ? "SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION"
+    : null;
+}
+
 export class FabricConsoleApplication {
   readonly #runtime: FabricConsoleRuntime;
   readonly #controller: SwappableProjectionController;
-  readonly #connect: () => Promise<ConsoleApplicationConnection>;
+  readonly #connect: (projectSessionId?: ProjectSessionId) => Promise<ConsoleApplicationConnection>;
   #adapter: ConsoleProtocolAdapter | null;
   #planner: ConsoleActionPlanner | undefined;
   #workflowPlanner: ConsoleWorkflowPlanner | undefined;
@@ -294,12 +306,13 @@ export class FabricConsoleApplication {
   #plannerEnablesMutation: boolean;
   #connected: ConsoleBootstrapConnection | null;
   #selectSession: ConsoleApplicationConnection["selectSession"];
+  #connectionEpoch = 0;
 
   constructor(input: Readonly<{
     runtime: FabricConsoleRuntime;
     controller: SwappableProjectionController;
     connection: ConsoleApplicationConnection;
-    connect: () => Promise<ConsoleApplicationConnection>;
+    connect: (projectSessionId?: ProjectSessionId) => Promise<ConsoleApplicationConnection>;
   }>) {
     this.#runtime = input.runtime;
     this.#controller = input.controller;
@@ -346,9 +359,15 @@ export class FabricConsoleApplication {
   }
 
   async refresh(): Promise<FabricConsoleDataset> {
-    if (this.#adapter === null) return this.dataset;
+    const adapter = this.#adapter;
+    if (adapter === null) return this.dataset;
+    const connectionEpoch = this.#connectionEpoch;
     const inspection = this.dataset.inspection;
-    const next = await this.#adapter.poll();
+    const next = await adapter.poll();
+    if (
+      connectionEpoch !== this.#connectionEpoch ||
+      adapter !== this.#adapter
+    ) return this.dataset;
     const localCapabilities = {
       ...(this.dataset.workflowCapabilities === undefined
         ? {}
@@ -377,6 +396,7 @@ export class FabricConsoleApplication {
   }
 
   async detachCurrent(reason: FabricDetachReason): Promise<void> {
+    this.#connectionEpoch += 1;
     const connected = this.#connected;
     this.#connected = null;
     if (connected === null) return;
@@ -387,11 +407,12 @@ export class FabricConsoleApplication {
     }
   }
 
-  async #reconnectAfterProjectSessionCreate(): Promise<void> {
-    const next = await this.#connect();
+  async #reconnectAfterProjectSessionCreate(projectSessionId: ProjectSessionId): Promise<void> {
+    this.#connectionEpoch += 1;
+    const next = await this.#connect(projectSessionId);
     if (
       next.connected === null ||
-      next.connected.projectSessionId === undefined ||
+      next.connected.projectSessionId !== projectSessionId ||
       next.workflowPlanner === undefined
     ) {
       if (next.connected !== null) {
@@ -425,6 +446,19 @@ export class FabricConsoleApplication {
   }
 
   async handleActivation(activation: FabricRuntimeActivation): Promise<void> {
+    if (activation.regionId.startsWith("session:select:")) {
+      const projectSessionId = activation.regionId.slice("session:select:".length) as ProjectSessionId;
+      const exact = this.dataset.projectSessions?.choices.find(
+        (choice) => choice.projectSessionId === projectSessionId,
+      );
+      if (exact === undefined) {
+        throw Object.assign(new Error("project-session choice is stale"), {
+          code: "STALE_SESSION_CHOICE",
+        });
+      }
+      await this.#switchProjectSession(exact.projectSessionId);
+      return;
+    }
     if (activation.regionId === "session:switch-project") {
       await this.#switchProjectSession(null);
       return;
@@ -576,8 +610,10 @@ export class FabricConsoleApplication {
           echoText: this.#runtime.ui.draft,
         });
         this.#runtime.setWorkflowReview(committed.review);
-        if (committed.reconnectRequired) {
-          await this.#reconnectAfterProjectSessionCreate();
+        if (committed.reconnectProjectSessionId !== null) {
+          await this.#reconnectAfterProjectSessionCreate(
+            committed.reconnectProjectSessionId,
+          );
         } else {
           await this.refresh();
         }
@@ -658,12 +694,20 @@ export class FabricConsoleApplication {
   }
 
   async #switchProjectSession(projectSessionId: ProjectSessionId | null): Promise<void> {
+    const actionState = this.#mutationController?.state;
+    const blockReason = sessionSwitchBlockReason(actionState ?? null);
+    if (blockReason !== null || this.#runtime.ui.workflowReview?.stage === "pending") {
+      throw Object.assign(new Error("session switch is blocked by unresolved action custody"), {
+        code: blockReason ?? "SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION",
+      });
+    }
     const selectSession = this.#selectSession;
     if (selectSession === null) {
       throw Object.assign(new Error("project-session selection is unavailable"), {
         code: "SESSION_SELECTION_UNAVAILABLE",
       });
     }
+    this.#connectionEpoch += 1;
     const next = await selectSession(projectSessionId);
     this.#controller.swap(next.controller);
     this.#adapter = next.adapter;
@@ -787,8 +831,13 @@ async function openConsoleApplicationConnection(
 export async function startFabricConsoleApplication(
   options: ConsoleApplicationOptions,
 ): Promise<FabricConsoleApplication> {
-  const connect = async (): Promise<ConsoleApplicationConnection> =>
-    await openConsoleApplicationConnection(options);
+  const connect = async (
+    projectSessionId?: ProjectSessionId,
+  ): Promise<ConsoleApplicationConnection> =>
+    await openConsoleApplicationConnection({
+      ...options,
+      ...(projectSessionId === undefined ? {} : { projectSessionId }),
+    });
   const connection = await connect();
   const controller = new SwappableProjectionController(connection.controller);
 

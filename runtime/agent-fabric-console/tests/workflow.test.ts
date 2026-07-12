@@ -173,7 +173,7 @@ describe("typed Console workflow planner", () => {
         provenance: expect.objectContaining({ inputEventId: "workflow-confirm" }),
       }),
     }));
-    expect(committed.reconnectRequired).toBe(true);
+    expect(committed.reconnectProjectSessionId).toBe(projectSessionId);
     expect(committed.review).toMatchObject({ stage: "committed", result: expect.stringContaining(projectSessionId) });
   });
 

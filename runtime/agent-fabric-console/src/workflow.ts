@@ -21,6 +21,7 @@ import {
   type ProjectSession,
   type ProjectSessionCloseRequest,
   type ProjectSessionCreateRequest,
+  type ProjectSessionId,
   type ProjectSessionTransitionRequest,
   type ScopedGateResolveRequest,
 } from "@local/agent-fabric-protocol";
@@ -89,7 +90,7 @@ export type ConsoleWorkflowPlanner = Readonly<{
     echoText?: string;
   }>): Promise<Readonly<{
     review: ConsoleWorkflowReview;
-    reconnectRequired: boolean;
+    reconnectProjectSessionId: ProjectSessionId | null;
   }>>;
   prepareGuided(input: Readonly<{
     action: GuidedWorkflowAction;
@@ -837,7 +838,10 @@ export function createProductionConsoleWorkflowPlanner(
     review: ConsoleWorkflowReview;
     eventId: string;
     echoText?: string;
-  }>): Promise<Readonly<{ review: ConsoleWorkflowReview; reconnectRequired: boolean }>> => {
+  }>): Promise<Readonly<{
+    review: ConsoleWorkflowReview;
+    reconnectProjectSessionId: ProjectSessionId | null;
+  }>> => {
     const stored = prepared.get(input.review.workflowId);
     if (
       stored === undefined ||
@@ -861,15 +865,19 @@ export function createProductionConsoleWorkflowPlanner(
     );
     const pending = { ...stored.review, stage: "pending" as const, failure: null };
     let result: unknown;
+    let reconnectProjectSessionId: ProjectSessionId | null = null;
     try {
       switch (stored.review.kind) {
         case "project-session-create": {
           const client = options.client.projectSessions;
           if (client === undefined) throw new Error("project-session creation is unavailable");
-          result = await client.create(parseOperation<ProjectSessionCreateRequest>(
+          const request = parseOperation<ProjectSessionCreateRequest>(
             FABRIC_OPERATIONS.projectSessionCreate,
             { ...stored.request, command },
-          ));
+          );
+          const created = await client.create(request);
+          result = created;
+          reconnectProjectSessionId = created.projectSessionId;
           break;
         }
         case "project-session-transition": {
@@ -967,7 +975,7 @@ export function createProductionConsoleWorkflowPlanner(
         stage: "conflict",
         failure: failureCode,
       };
-      return { review: failed, reconnectRequired: false };
+      return { review: failed, reconnectProjectSessionId: null };
     }
     prepared.delete(input.review.workflowId);
     const completed: ConsoleWorkflowReview = {
@@ -977,7 +985,7 @@ export function createProductionConsoleWorkflowPlanner(
     };
     return {
       review: completed,
-      reconnectRequired: stored.review.kind === "project-session-create",
+      reconnectProjectSessionId,
     };
   };
 

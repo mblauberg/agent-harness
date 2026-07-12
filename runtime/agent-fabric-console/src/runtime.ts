@@ -454,9 +454,23 @@ export class FabricConsoleRuntime {
       }
       if (
         event.text === "s" &&
-        this.#controller.dataset.projectSessions?.selectedProjectSessionId !== null &&
-        this.#controller.dataset.projectSessions?.selectedProjectSessionId !== undefined
+        this.#controller.dataset.projectSessions !== undefined
       ) {
+        const sessions = this.#controller.dataset.projectSessions;
+        if (sessions.selectedProjectSessionId === null) {
+          this.#controller.activateView("project");
+          this.#ui = {
+            ...this.#ui,
+            focusId: sessions.choices[0] === undefined
+              ? null
+              : `session:select:${sessions.choices[0].projectSessionId}`,
+            notice: sessions.choices.length === 0
+              ? "No attachable project sessions"
+              : "Choose an exact project session",
+          };
+          this.repaint();
+          return;
+        }
         try {
           await this.#activate({
             regionId: "session:switch-project",
@@ -693,14 +707,24 @@ export class FabricConsoleRuntime {
       return;
     }
     const current = Math.max(0, Math.trunc(this.#ui.scrollOffsetByView[view] ?? 0));
-    const maximum = Math.max(0, this.#controller.dataset.pages[view].rows.length - 1);
+    const selectorCount =
+      view === "project" &&
+      this.#controller.dataset.projectSessions?.selectedProjectSessionId === null
+        ? this.#controller.dataset.projectSessions.choices.length
+        : 0;
+    const maximum = Math.max(
+      0,
+      selectorCount + this.#controller.dataset.pages[view].rows.length - 1,
+    );
     const offset = Math.min(maximum, Math.max(0, current + direction * 5));
     this.#ui = {
       ...this.#ui,
       scrollOffsetByView: { ...this.#ui.scrollOffsetByView, [view]: offset },
       notice: null,
     };
-    const anchor = this.#controller.dataset.pages[view].rows[offset]?.stableId ?? null;
+    const anchor = this.#controller.dataset.pages[view].rows[
+      Math.max(0, offset - selectorCount)
+    ]?.stableId ?? null;
     this.#controller.setScrollAnchor(view, anchor);
     this.repaint();
   }
