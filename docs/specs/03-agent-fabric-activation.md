@@ -1,9 +1,14 @@
 # Agent fabric activation and operations
 
-Status: Implemented; final human acceptance pending
-Date: 11 July 2026
+Status: Base activation implemented; v1.1 capability/effective-route amendment implementation and final human acceptance pending
+Version: 1.1
+Date: 13 July 2026
 Decision owner: Human maintainer
 Approval: Direct instruction to implement, activate and provider-smoke all listed capabilities, with quota use authorised
+
+Version 1.1 requires every active adapter to publish the shared versioned
+capability snapshot and effective launch configuration, and makes requested,
+actual or honestly unknown route identity part of activation evidence.
 
 ## Outcome
 
@@ -42,7 +47,7 @@ Each step must pass compatibility, boundary, conformance and negative tests befo
 
 ## Rollback
 
-Restore `activeAdapters: []`, restart the visible daemon, retain journals and seat generations for audit, and rerun coordination-only health plus Codex↔Claude mailbox smokes. Adapter activation is configuration-reversible. Observer sequencing adds migration `0002-observer-event-sequence.sql`; rollback retains that monotonic audit table because removing it would destroy cursor history.
+Restore `activeAdapters: []`, restart the visible daemon, retain journals and seat generations for audit, and rerun coordination-only health plus Codex↔Claude mailbox smokes. Adapter activation is configuration-reversible. The current squashed database baseline includes the observer event-sequence table; rollback retains its monotonic audit rows because removing them would destroy cursor history. No numbered predecessor migration or compatibility path is retained.
 
 ## Acceptance
 
@@ -52,3 +57,61 @@ Restore `activeAdapters: []`, restart the visible daemon, retain journals and se
 - Herdr observer resumes without loss after an orderly restart, provides at-least-once rendering across a crash window, shows bounded local message previews and exposes no capability data.
 - Expiry warning and explicit coordinated rotation tests pass.
 - Fresh native and Fable reviews report no unresolved P0–P2 findings.
+
+## Capability and effective-route evidence amendment
+
+Activation now requires the exact shared `adapterCapabilitySnapshotV1`,
+`deployedRouteAdmissionV1` and `deployedRouteObservationV1` codecs owned by
+Spec 01 section 32.21. This section
+adds no competing schema.
+
+An adapter may enter `activeAdapters` only when its current `kind: available`
+capability snapshot
+binds the activated executable/package, wrapper closure, adapter contract,
+host/version, model catalogue, raw effort values, raw native-mode values,
+context boundary claims, orchestration bounds and read-only enforcement. The
+snapshot source is exactly `runtime-discovery` or
+`version-pinned-conformance`. A conformance fixture cannot be reported as
+runtime discovery. A `source/kind: unavailable` snapshot is persisted negative
+evidence but cannot activate the adapter or admit answer-bearing work. Expiry
+or contract drift removes the adapter from new automatic admission without
+rewriting prior receipts.
+
+Every activation and provider-backed smoke stores one closed
+`adapterEffectiveConfigurationV1` beside the shared snapshot and route lineage:
+
+```yaml
+adapterEffectiveConfigurationV1:
+  schemaVersion: 1
+  adapterId: exact-adapter-id
+  adapterContractDigest: sha256-prefixed-digest
+  executableIdentityDigest: sha256-prefixed-digest
+  capabilitySnapshotDigest: sha256-prefixed-digest
+  requestedConfigurationDigest: sha256-prefixed-digest
+  effectiveConfigurationDigest: sha256-prefixed-digest
+  ignoredOrUnsupportedFields: [exact-field-paths]
+  permissionSource: adapter | host | config-overlay | unknown
+  observedAt: timestamp
+  configurationDigest: sha256-prefixed-digest
+```
+
+The object is closed; field paths are sorted and unique.
+`configurationDigest` is RFC 8785 JCS over the object with that field omitted.
+Host-global settings remain user-owned. Fabric generates only a minimal
+per-run overlay inside existing authority, records every unsupported field and
+does not silently persist global defaults or hooks.
+
+Smoke evidence round-trips the exact requested identity and the shared admitted
+identity. Where the provider reports actual host/adapter/provider/family/model/
+effort/native-mode values, they populate the observed route arm with its exact
+source and confidence. Where it does not, those observed fields remain null
+with `source: unavailable` and `confidence: unknown`; the admitted value is not
+copied into actual. An adapter whose required actual field is unknown is
+ineligible for a gate requiring that attestation.
+
+Conformance adds positive and negative fixtures for snapshot expiry, binary or
+contract drift, raw-effort/native-mode round-trip, ignored configuration,
+provider substitution, honest unknown actual identity and point-of-use
+capability revalidation. Subscription/login changes, OpenCode activation,
+paid-region selection and global model/effort preference changes remain
+separate human gates.

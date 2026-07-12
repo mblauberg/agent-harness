@@ -177,12 +177,12 @@ Provider bootstraps remain small and share the same precedence sentence.
 The Spec 05 Console remains a projection-only executable over the public
 Fabric protocol. Its terminal layer uses Node 24 with a project-owned
 responsive cell-grid renderer and bounded keyboard/SGR parser, selected through the
-[terminal-runtime decision](research/project-fabric-console-tui-options-2026.md).
-It does not use Ink, blessed or a native UI core. An early PTY gate must prove
-the exact default/reference 80 by 24 frame, dynamic terminal reflow,
-resize-state preservation, mouse selection, hostile-text handling and terminal
-restoration; failure switches the implementation to the documented
-Rust/Ratatui fallback.
+[terminal-runtime decision](research/project-fabric-console-terminal-runtime.md).
+It does not use Ink, blessed or a native UI core. The TypeScript spike passed
+the default/reference 80 by 24 frame, dynamic terminal reflow, resize-state
+preservation, mouse selection, hostile-text handling and terminal-restoration
+gates. Those oracles remain required; Rust/Ratatui is the objective fallback
+only if a future mandatory terminal gate fails after bounded repair.
 
 The language choice does not move authority into the Console. Fabric remains
 the transaction owner, and keyboard, mouse and typed commands converge on one
@@ -196,7 +196,9 @@ event truth. Consequential Git actions bind the source and expected destination
 object IDs plus state digests, hold or revalidate local state through the
 effect, and use an atomic destination lease. These and other retained patterns
 are recorded in the
-[open-source harness comparison](research/open-source-agent-harness-patterns-2026.md).
+[native orchestration and discovery reference](research/native-orchestration-and-discovery-surfaces.md),
+with adapter/runtime seams kept in the separate
+[provider boundary reference](research/provider-adapter-and-runtime-boundaries.md).
 
 The canonical skill catalogue is also a constrained interface. Every skill has
 balanced positive, negative and boundary routes; descriptions place the trigger

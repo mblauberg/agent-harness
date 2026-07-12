@@ -1,13 +1,16 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle, provider-budget, review-snapshot, route-lineage, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.28
+Version: 1.29
 Date: 13 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.28 makes receipt/bundle digest domains, paged finding custody,
+Version 1.29 persists the shared capability and deployed-route codecs, binds
+capability currency into admission and the final pre-dispatch CAS, and keeps
+context pressure separate from spend. It reuses the existing lifecycle owner
+and adds no automatic pressure controller or legacy schema. Version 1.28 makes receipt/bundle digest domains, paged finding custody,
 certification cuts, live route recovery, lifecycle exits and minimum terminal
 geometry directly enforceable in persistence. It closes the remaining
 crossed-key, crash-path and observation-replay gaps without a legacy path.
@@ -83,9 +86,9 @@ adapter artifacts remain security controls, not backward-compatibility paths.
 
 ## 1. Decision and relationship to existing specs
 
-Implement the remaining evidence-backed findings from the
-[external review adjudication](../research/gpt-sol-pro-review-adjudication.md)
-without reopening the accepted architecture in Specs 01–03.
+Implement the accepted evidence-backed operational hardening without reopening
+the accepted architecture in Specs 01–03. Superseded review transcripts and
+adjudication notes are run evidence, not durable research owners.
 
 - Spec 01 remains the fabric behaviour contract.
 - Spec 02 remains the domain-neutral delivery lifecycle and explicitly does
@@ -2598,10 +2601,12 @@ kind/content cannot satisfy that join. git-private-diff,
 operator-, Fabric- and project-published rows remain valid bundle evidence but
 are never silently promoted to eligible root targets.
 
-The current evidence/artifact-kind catalogue explicitly contains delivery-
-requirement-map.v1, implementation-delivery-manifest.v1 and coordination-gate-
-snapshot.v1; none
-is inferred by parsing generic receipt content. Their persistence owners are:
+The current evidence/artifact-kind catalogue explicitly contains
+delivery-requirement-map.v1, implementation-delivery-manifest.v1,
+coordination-gate-snapshot.v1 and discovery-surface.v1; none is inferred by
+parsing generic receipt content. The first three use the persistence owners
+below. Discovery-surface.v1 is registered only by the section 9.23 daemon
+renderer and is rejected by public/agent evidence publication.
 
 ~~~sql
 delivery_run_starts(
@@ -4158,4 +4163,174 @@ forward context jump, strict context inequality and observed high-water
 ratchet; custody-or-loss foreign keys, recovery/adopt/reopen/direct-open versus
 recovery-attempt abandon edges/action-pair nullability and absent/null/generic-
 resume negatives. No code in
-this amendment adds automatic pressure, successor selection or Spec 06 policy.
+this amendment adds automatic pressure, successor selection or research-only
+routing policy.
+
+### 9.23 Capability, route-lineage and context-pressure persistence
+
+Spec 01 section 32.21 owns the closed public
+`adapterCapabilitySnapshotV1`, `deployedRouteAdmissionV1`,
+`deployedRouteObservationV1` and
+`fabricOperationalSpanV1` semantics. The daemon owns their generated codecs,
+persistence and compare-and-set enforcement. The TypeScript caller and any
+offline Python route resolver validate the same checked-in JSON Schemas; the
+resolver receives capability input explicitly and may not read daemon
+activation configuration behind the caller.
+
+The current generated-contract inventory adds exactly:
+
+- `adapter-capability-snapshot.v1.schema.json`;
+- `deployed-route-admission.v1.schema.json`;
+- `deployed-route-observation.v1.schema.json`;
+- `fabric-operational-span.v1.schema.json`;
+- generated TypeScript validators/types; and
+- the same hash-bound schemas as explicit Python validator inputs.
+
+There is no hand-written parallel route codec. Generation checks fail when any
+generated surface or schema digest differs. The pre-release database baseline
+is updated in place; no predecessor table, decoder, import or compatibility
+view is retained.
+
+```sql
+adapter_capability_snapshots(
+  adapter_id, snapshot_generation, snapshot_id,
+  adapter_contract_digest, host_id, host_version, source,
+  observed_at, expires_at, snapshot_json, snapshot_digest, created_at,
+  PRIMARY KEY(adapter_id, snapshot_generation),
+  UNIQUE(snapshot_id), UNIQUE(snapshot_digest),
+  UNIQUE(adapter_id, snapshot_generation, snapshot_digest)
+)
+
+adapter_capability_current(
+  adapter_id PRIMARY KEY,
+  snapshot_generation, snapshot_digest, revision,
+  FOREIGN KEY(adapter_id, snapshot_generation, snapshot_digest)
+    REFERENCES adapter_capability_snapshots(
+      adapter_id, snapshot_generation, snapshot_digest)
+)
+```
+
+`snapshot_json` byte-equals JCS of the closed Spec 01 object. Insert validates
+the digest, contiguous positive generation, `expires_at > observed_at`, sorted
+unique catalogues and the activated contract. Snapshot rows are insert-only.
+The single current-pointer row advances by generation/digest/revision CAS in the
+activation transaction and additionally equality-checks the referenced row's
+digest. An expired or unavailable snapshot remains immutable audit evidence but
+cannot be selected by admission.
+
+The existing `provider_action_routes` row gains non-null
+`capability_snapshot_generation`, `capability_snapshot_digest`,
+`deployed_route_admission_json`, `deployed_route_admission_digest`,
+`route_policy_revision`, `harness_revision`, `harness_digest`,
+`context_policy_revision`, `context_policy_digest`,
+`permission_profile_digest`,
+`discovery_surface_evidence_id`, `discovery_surface_evidence_revision` and
+`discovery_surface_digest` for every new
+answer-bearing action. Foreign keys bind the exact adapter/generation/digest.
+
+```sql
+provider_action_routes(
+  ...existing columns...,
+  capability_snapshot_generation, capability_snapshot_digest,
+  ...new admission columns...,
+  FOREIGN KEY(adapter_id, capability_snapshot_generation,
+    capability_snapshot_digest)
+    REFERENCES adapter_capability_snapshots(
+      adapter_id, snapshot_generation, snapshot_digest)
+)
+```
+
+The explicit composite foreign key means a digest cannot cross another
+adapter/generation. Historical routes reference immutable snapshots, never the
+mutable current pointer.
+The route-admission action pair equals the row primary key; its admitted
+adapter, contract and snapshot equal the foreign row. Its discovery-surface ref
+foreign-keys the exact existing `EvidenceArtifactRegistration` revision and
+artifact digest, and the row must have evidence kind `discovery-surface.v1`,
+`publisherKind=fabric`, `producer=fabric-daemon` and the exact renderer/input
+digests from the route.
+Requested and admitted arms are immutable.
+
+Terminal observation is append-only and separate:
+
+```sql
+provider_action_route_observations(
+  adapter_id, action_id, admission_digest,
+  observation_json, observation_digest, observed_at,
+  PRIMARY KEY(adapter_id, action_id), UNIQUE(observation_digest),
+  FOREIGN KEY(adapter_id, action_id)
+    REFERENCES provider_action_routes(adapter_id, action_id)
+)
+```
+
+Insert equality-checks the parent action/admission digest and every closed
+field-evidence union. A missing provider field persists its explicit
+unavailable arm rather than admission data. No update, replacement or
+recomputed admission digest is legal. Public reads left-join zero or one
+observation and expose both immutable digests.
+
+Admission and dispatch use this order:
+
+1. classify exact command/action-pair replay;
+2. run the bounded pure resolver against explicit pinned inputs;
+3. in one transaction validate authority/budget plus the current unexpired
+   capability generation/digest, adapter contract, model, raw effort, raw
+   native mode, permission profile, context-policy revision/digest and
+   harness revision/digest plus discovery-surface registration/digest, then insert
+   route/action/reservations;
+4. immediately before initial provider I/O or a permitted no-effect retry,
+   equality-CAS that same capability/contract/model/effort/mode/permission/
+   harness/context/surface vector and route revision; and
+5. on pre-effect drift, terminalise/supersede the zero-effect action and resolve
+   afresh under a new action pair. After ambiguous effect, retain the original
+   route and invoke only its existing pair-keyed recovery owner.
+
+The pure resolver never persists, performs provider/network I/O or becomes the
+route owner. Its existing five-second process-group TERM/KILL boundary remains
+binding. The daemon persistence wrapper is not callable as a resolver.
+
+Context pressure is operational state, not spend or authority budget. Existing
+provider generation/context-revision telemetry remains append-only and
+lifecycle-owned as specified in sections 9.22 and Spec 01 section 32.20. The
+baseline adds a separate truthful projection:
+
+```sql
+provider_context_pressure_current(
+  run_id, agent_id, provider_generation,
+  context_revision, observation_source_event_id,
+  pressure, source, confidence,
+  window_tokens, used_tokens, remaining_tokens,
+  observed_at, expires_at, evidence_digest, revision,
+  PRIMARY KEY(run_id, agent_id),
+  CHECK(pressure IN ('low','medium','high','unknown')),
+  CHECK(source IN ('native-exact','native-estimated','hook-boundary','unavailable')),
+  CHECK(confidence IN ('exact','estimated','unknown'))
+)
+```
+
+Token fields are nullable nonnegative integers. They are all null for
+`source='unavailable'`; `pressure='unknown'` whenever the current-window basis
+cannot be proved. Cumulative provider usage cannot populate current-window
+pressure unless the adapter contract defines it as such. No row reserves,
+consumes or releases provider budget. Observation update CASes the same
+provider-generation/context-revision ordering already owned by lifecycle;
+lower/reordered input is audit-only and cannot regress the projection or infer
+principal/bridge generations.
+
+Automatic pressure thresholds, hysteresis, maximum compaction counts and
+successor selection are absent. Existing explicit lifecycle custody remains
+the only rotation/compaction mutator, preserves fresh-rotation versus
+same-history recovery, and keeps parent/child custody independent.
+
+Operational spans are append-only, bounded and content-free. Export validates
+the Spec 01 codec and rejects prompts, answers, tool arguments/results,
+artifact bytes, private messages, capabilities and absolute paths rather than
+redacting after persistence. Generic span export never satisfies receipt,
+authority, review, disclosure or gate evidence.
+
+Verification adds schema-generation parity; capability current-pointer and
+expiry races; raw/normalised effort and native-mode round-trip; point-of-use
+CAS drift before effect; ambiguous-effect non-rerouting; honest observed
+unknown; context-pressure/budget separation; lower/reordered observation; and
+telemetry content-denial fixtures. Full crash matrices prove there is one route
+owner and that lifecycle recovery remains ahead of generic provider recovery.

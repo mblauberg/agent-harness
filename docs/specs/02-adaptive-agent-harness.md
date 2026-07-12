@@ -1,10 +1,15 @@
 # Adaptive agent harness lifecycle
 
-Status: Implemented and machine verified; human acceptance pending
-Version: 1.0
-Date: 10 July 2026
+Status: Base implementation machine verified; v1.1 route-evidence amendment implementation and human acceptance pending
+Version: 1.1
+Date: 13 July 2026
 Chair: Codex
 Paired design peer: Claude Code, Fable 5 (Opus fallback)
+
+Version 1.1 binds route and topology evaluation references to the neutral
+delivery receipt, requires task-local repeated evidence with expiry and an
+explicit baseline/promotion state, and keeps exported aggregates content-free.
+It does not approve a learned or Pareto router.
 
 ## 1. Authority and decision
 
@@ -517,3 +522,120 @@ scope names its own expiry.
 
 Final lifecycle acceptance remains pending. Runtime activation, live
 installation, provider login, push and release remain separate human decisions.
+
+## 22. Route and topology evaluation evidence
+
+The mature route-evaluation findings from the
+[July 2026 continuity and routing snapshot](../research/evidence-snapshots/agent-continuity-routing-2026-07.md)
+extend the neutral delivery evidence contract. They do not authorise a learned
+router, a global model leaderboard or automatic preference mutation.
+
+When a model route or multi-agent topology materially affects an outcome or
+review gate, `RUN.json` includes one or more closed
+`routeEvaluationEvidenceRefV1` records in its `evidence` array. All fields are
+required; nullable values represent unavailable measurements rather than
+omitted truth.
+
+```yaml
+routeEvaluationEvidenceRefV1:
+  schemaVersion: 1
+  taskClass: stable-task-class
+  evaluatedRouteIdentityDigest: sha256-prefixed-digest
+  evaluationPlanRef: registeredEvidenceRefV1
+  plannedTrialCount: positive-integer-at-most-256
+  trialRoutes:
+    - ordinal: contiguous-positive-integer
+      actionRef: ProviderActionRefV1
+      deployedRouteAdmissionDigest: sha256-prefixed-digest
+      deployedRouteObservationDigest: sha256-prefixed-digest | null
+  topologyEvidenceRef: registeredEvidenceRefV1
+  harnessRevision: exact-revision
+  harnessDigest: sha256-prefixed-digest
+  discoverySurfaceEvidenceRef: registeredEvidenceRefV1
+  routePolicyRevision: exact-revision
+  contextPolicyRevision: exact-revision
+  contextPolicyDigest: sha256-prefixed-digest
+  datasetDigest: sha256-prefixed-digest
+  trialCount: positive-integer
+  objectivePassCount: nonnegative-integer | null
+  objectiveTrialCount: positive-integer | null
+  judgementAggregateRef: registeredEvidenceRefV1 | null
+  reliabilityAggregateRef: registeredEvidenceRefV1 | null
+  efficiencyAggregateRef: registeredEvidenceRefV1 | null
+  baseline:
+    kind: best-single | cheapest-acceptable | prior-policy | simple-single-owner | none
+    evidenceRef: registeredEvidenceRefV1 | null
+    absenceReason: exact-safe-reason | null
+  observedAt: timestamp
+  expiresAt: timestamp
+  promotionState: bootstrap | shadow | advisory | canary | task-class-active | expired
+  evidenceDigest: sha256-prefixed-digest
+```
+
+`registeredEvidenceRefV1` is not a new artifact-reference type. It is schema
+shorthand for the exact existing Spec 01 `EvidenceArtifactRegistration` tuple:
+`{evidenceId, evidenceRevision, artifactRef:{path,digest}}`, equality-bound to
+the same current run/session and immutable registration revision. The generated
+schema expands that tuple directly.
+
+The object, nested baseline and every registration reference are closed.
+`objectivePassCount` and
+`objectiveTrialCount` are both null or both non-null, and the count cannot
+exceed the denominator. A non-null denominator cannot exceed the number of
+distinct trial rows with a non-null, parent-bound proved observation. Baseline
+`none` requires a non-null reason and null reference; every other baseline
+requires a reference and null reason.
+`evidenceDigest` is RFC 8785 JCS over the complete record with that field
+omitted.
+
+`evaluationPlanRef` names the current immutable run-owned evaluation plan and
+its exact revision/digest; that plan declares this task class, route-evaluation
+kind, dataset, baseline and `plannedTrialCount`; those values must equal this
+record. The protocol safety maximum is
+256; it is not a recommendation for policy volume. `trialRoutes` is nonempty;
+ordinals are contiguous, action refs are unique, admission digests are unique
+and array length equals both `trialCount` and `plannedTrialCount`. Each
+action/admission/optional-observation tuple equality-resolves through the
+current Fabric receipt/evidence registration. Every admission has the same
+host, adapter/contract, endpoint, family/model, resolved raw effort,
+normalised reasoning, raw native mode, orchestration mode, permission profile,
+route policy, harness revision/digest, discovery-surface ref and context-policy
+revision/digest after removing action identity. The topology evidence
+registration path/digest is then added to that tuple. RFC 8785 JCS of that
+exact action-free tuple is
+`evaluatedRouteIdentityDigest`. The top-level discovery-surface registration
+must equal every admission's `discoverySurfaceRefV1` evidence ID/revision/path/
+digest. Top-level harness, route-policy and context-policy revisions/digests
+must likewise equal every admission; a different value rejects. A non-null observation digest
+must parent-bind its trial admission. Null means the trial has no proved
+terminal observation and cannot contribute an objective pass.
+
+Evidence is scoped to the deployed unit—host, adapter/contract, model, raw
+effort, native mode, harness revision, discovery surface, topology and context
+policy—not to a model name alone. Stochastic comparisons use repeated trials;
+deterministic cases retain exact numerator/denominator. A changed harness,
+adapter contract, route policy, discovery surface, dataset or expired record is
+not current route evidence. Capability and safety constraints remain hard gates
+regardless of an evaluation result.
+
+Every topology-bearing wave additionally stores, in `topologyEvidenceRef`, the
+dependency/decomposability assessment, selected
+single-owner/fabric-explicit/host-native shape, shared-state contention, one
+accountable chair, stage owner, write partition, budget and stop condition.
+Parallelism is evidence-driven and bounded; agent count is not a quality
+measure.
+
+Promotion is task-local. A new deployed route moves through bootstrap,
+shadow/advisory and canary evidence before `task-class-active`; expiry returns
+it to explicit stale/bootstrap handling. This amendment records the evidence
+and promotion state only. Candidate-pool construction, Pareto elimination,
+quality-floor values, trial volumes, expiry intervals and any learned selector
+remain future policy decisions.
+
+Portable aggregates may include counts, latency buckets, token/cost values and
+classified failure codes. They exclude prompts, answers, tool arguments,
+artifact content, private messages, secrets, project names and absolute paths.
+Rich local evidence stays run-owned and is referenced by digest. Validation
+fixtures cover repeated-trial arithmetic, baseline nullability, expiry and
+revision drift, task-class isolation, topology rationale, content-free export
+and the absence of any automatic promotion side effect.

@@ -1,14 +1,18 @@
 # Shared agent fabric
 
 Status: Current protocol, provider-task, review-snapshot, route-lineage, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
-Version: 0.32
+Version: 0.33
 Date: 13 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.32 closes the remaining receipt, bundle, recovery, lifecycle and
+Version 0.33 folds the mature July 2026 continuity and route-evidence findings
+into the existing owners. It adds one versioned adapter-capability snapshot,
+exact requested/admitted/observed deployed-route identity and privacy-minimised
+operational spans without adding an automatic pressure controller, learned
+router or provider-native deep-mode registry. Version 0.32 closes the remaining receipt, bundle, recovery, lifecycle and
 terminal-resize contradictions in v0.31. It makes provider failure and route
 history representable without inventing evidence, freezes every certification
 digest/cut, pages finding custody without truncation, exposes live recovery
@@ -44,8 +48,8 @@ changed route input conflicts. A chair-only typed review-evidence operation
 then derives reviewer identity, terminal answer/result digest and reviewer-
 family relation from durable action, route and reviewed-artifact publisher
 lineage. Caller-authored post-hoc route receipts, provider-family assertions
-and reviewer-family assertions no longer certify review. This clarification does
-not approve proposed continuity-routing modes or any other later-spec
+and reviewer-family assertions no longer certify review. This clarification
+does not approve automatic continuity-routing modes or any other unapproved
 capability. Version 0.28 keeps task-bound provider execution within the public protocol's
 30-second request ceiling. Dispatch atomically reserves and journals the action
 plus command receipt, queues one daemon-owned completion, and returns its
@@ -1188,11 +1192,30 @@ localProviderRoute:
   slotEnum: [native, other-primary, cursor-grok, agy-gemini, null]
 
 providerRoute:
-  required: [actionRef, taskId, route]
+  required: [actionRef, taskId, route, admission, observation]
   actionRef: ProviderActionRefV1
   route: localProviderRoute
+  admission: deployedRouteAdmissionV1
+  observation: deployedRouteObservationV1-or-null
   ids: [taskId]
-  invariant: actionRef.adapterId-equals-route.adapterId
+  invariant: actionRef equals admission.actionRef;
+    actionRef.adapterId equals route.adapterId;
+    admission.routeRequestDigest equals route.routeRequestDigest;
+    admission.routeReceiptDigest equals route.routeReceiptDigest;
+    admission.requested.rawProviderEffort equals route.requestedEffort;
+    admission.admitted.adapterId equals route.adapterId;
+    admission.admitted.adapterContractDigest equals route.adapterContractDigest;
+    admission.admitted.family equals route.providerFamily;
+    admission.admitted.model equals route.resolvedModel;
+    admission.admitted.resolvedEffort deep-equals route.resolvedEffort;
+    nonnull observation actionRef/admissionDigest equal admission
+
+The receipt's `deployedRouteAdmissionV1`,
+`deployedRouteObservationV1`, `discoverySurfaceRefV1` and typed
+`observedValueV1` names above are local `$defs`. Their byte shapes are generated
+once from the same protocol definitions used by public reads and are embedded
+inside the standalone receipt schema. They are not external references and
+need no runtime resolver or registry.
 
 safeFinding:
   required: [findingDigest, findingId, severity, summary, evidence,
@@ -5049,8 +5072,10 @@ worktree, scope/map/profile, required evidence, gate/check, chair lineage or
 registration revision change makes the sealed basis logically stale. Only a
 new seal supersedes it; history is immutable. The closed artifact-kind catalogue
 therefore contains explicit delivery-requirement-map.v1,
-implementation-delivery-manifest.v1 and coordination-gate-snapshot.v1 entries;
-eligibility is never inferred by parsing generic receipt JSON.
+implementation-delivery-manifest.v1, coordination-gate-snapshot.v1 and
+discovery-surface.v1 entries. The first three are owned by `fabric-seal`;
+discovery-surface.v1 is owned only by the section 32.21 daemon renderer.
+Eligibility is never inferred by parsing generic receipt JSON.
 
 The current chair requests target preparation with
 `fabric.v1.review-target.prepare` under provider-review-evidence.v1. This public
@@ -7118,7 +7143,7 @@ Acceptance additionally requires:
 ### 32.20 Asynchronous lifecycle rotation custody
 
 This closes FR-013 and AC-009. It does not add an automatic context-pressure
-controller, successor selector or Spec 06 routing mode.
+controller, successor selector or research-only routing mode.
 
 requestLifecycle with rotate or compact executes inside the caller's existing
 lifecycle/tool turn and carries no caller-turn ID. After committing delivery
@@ -7449,3 +7474,271 @@ action, source/high-water, capability issue or confirmation changes nothing.
   Duplicate/lower/reordered context callbacks with the same source event create
   one bounded audit row, and provider values cannot ratchet principal/bridge
   high-water.
+
+### 32.21 Capability-backed deployed routes and operational telemetry
+
+This amendment incorporates the mature findings from the
+[July 2026 continuity and routing research](../research/evidence-snapshots/agent-continuity-routing-2026-07.md)
+into the existing adapter, route and lifecycle owners. It adds no autonomous
+route learner, context-pressure controller, compaction threshold, global model
+preference, native deep-mode registry or OpenCode activation.
+
+Every activated adapter publishes one current immutable
+`adapterCapabilitySnapshotV1`. Every object below is closed; every array is
+bounded, ordered as stated and duplicate-free. Timestamps are RFC 3339 UTC,
+digests use lowercase `sha256:<64 hex>`, IDs are nonempty UTF-8 strings of at
+most 256 bytes, and `snapshotDigest` is RFC 8785 JCS over the complete object
+with that field omitted.
+
+~~~yaml
+adapterCapabilitySnapshotV1:
+  schemaVersion: 1
+  snapshotId: stable-id
+  snapshotGeneration: positive-integer
+  adapterId: exact-adapter-id
+  adapterContractDigest: sha256-prefixed-digest
+  hostId: exact-host-id
+  hostVersion: exact-host-version
+  source: runtime-discovery | version-pinned-conformance | unavailable
+  observedAt: timestamp
+  expiresAt: timestamp
+  capabilities:
+    oneOf:
+      - kind: available
+        modelCatalog:
+          - family: canonical-family
+            model: exact-provider-model
+            effort:
+              oneOf:
+                - kind: applied
+                  normalizations:
+                    - rawProviderEffort: exact-provider-value
+                      normalizedReasoningEffort: none | low | medium | high | xhigh | max
+                - kind: inapplicable
+            nativeModeNormalizations:
+              - rawNativeMode: exact-provider-value | null
+                orchestrationMode: single | native-subagents | dynamic-workflow | provider-multi-agent
+        context:
+          reporting: reported | estimated | unavailable
+          compactInPlace: true | false | unknown
+          freshSession: true | false | unknown
+          boundaryInjection: verified | unverified | unavailable
+        orchestration:
+          nativeSubagents: none | bounded | recursive | unknown
+          maxDepth: nonnegative-integer | null
+          maxConcurrency: positive-integer | null
+        safety:
+          enforcedReadOnly: true | false | unknown
+          permissionSource: adapter | host | config-overlay | unknown
+      - kind: unavailable
+        reason: exact-safe-unavailable-reason
+  snapshotDigest: sha256-prefixed-digest
+~~~
+
+The two `capabilities` arms are disjoint. `source: unavailable` requires the
+`kind: unavailable` arm; the available arm requires runtime discovery or
+version-pinned conformance. `modelCatalog` is nonempty, has at most 256 entries
+and is sorted by `(family, model)`. Applied effort normalisations and
+native-mode rows each have 1..64 entries, are sorted by raw provider value with
+null native mode first, and are unique.
+The inapplicable effort arm has no mappings. Each raw value maps to exactly one
+normalised value. Null depth/concurrency and explicit `unknown`
+mean unknown, not unlimited or false. Runtime discovery and version-pinned
+conformance are distinct sources. Product prose, a model alias or a prior
+successful call is not a capability snapshot.
+
+Every answer-bearing provider action binds one immutable
+`deployedRouteAdmissionV1`; terminal evidence may append one
+`deployedRouteObservationV1`. They supplement, and do not replace, the existing
+`model-route.v1`, `ProviderActionRefV1`, route-event and certifying-review
+contracts in section 32.19.
+
+~~~yaml
+discoverySurfaceRefV1:
+  evidenceId: exact-EvidenceArtifactRegistration-id
+  evidenceRevision: positive-integer
+  artifactRef:
+    path: canonical-relative-path
+    digest: sha256-prefixed-digest
+  hostId: exact-host-id
+  hostVersion: exact-host-version
+  providerProfile: exact-profile-id
+  rawNativeMode: exact-provider-value | null
+  principalScopeDigest: sha256-prefixed-digest
+  permissionProfileDigest: sha256-prefixed-digest
+  negotiatedFeatureSetDigest: sha256-prefixed-digest
+  evidenceKind: discovery-surface.v1
+  producer: fabric-daemon
+  rendererVersion: exact-version
+  bootstrapDigest: sha256-prefixed-digest
+  skillCatalogueDigest: sha256-prefixed-digest
+  toolRegistryDigest: sha256-prefixed-digest
+  agentCommandRegistryDigest: sha256-prefixed-digest
+  nativePreambleDigest: sha256-prefixed-digest
+  renderedSurfaceDigest: sha256-prefixed-digest
+
+deployedRouteAdmissionV1:
+  schemaVersion: 1
+  actionRef: ProviderActionRefV1
+  routeRequestDigest: sha256-prefixed-digest
+  routeReceiptDigest: sha256-prefixed-digest
+  requested:
+    adapterAlias: exact-configured-alias
+    modelAlias: exact-configured-alias
+    explicitModel: exact-provider-model | null
+    rawProviderEffort: exact-provider-value | null
+    rawNativeMode: exact-provider-value | null
+  admitted:
+    hostId: exact-host-id
+    adapterId: exact-adapter-id
+    adapterContractDigest: sha256-prefixed-digest
+    endpointProvider: exact-provider-id
+    family: canonical-family
+    model: exact-provider-model
+    resolvedEffort: resolvedEffortV1
+    normalizedReasoningEffort: none | low | medium | high | xhigh | max | null
+    rawNativeMode: exact-provider-value | null
+    orchestrationMode: single | native-subagents | dynamic-workflow | provider-multi-agent
+    capabilitySnapshotDigest: sha256-prefixed-digest
+    permissionProfileDigest: sha256-prefixed-digest
+    discoverySurfaceRef: discoverySurfaceRefV1
+  routePolicyRevision: exact-revision
+  harnessRevision: exact-revision
+  harnessDigest: sha256-prefixed-digest
+  contextPolicyRevision: exact-revision
+  contextPolicyDigest: sha256-prefixed-digest
+  admissionDigest: sha256-prefixed-digest
+
+observedValueV1:
+  oneOf:
+    - state: observed
+      value: exact-type-specific-value
+      source: provider-result | adapter-attestation
+      confidence: exact | attested
+    - state: unavailable
+      value: null
+      source: unavailable
+      confidence: unknown
+
+deployedRouteObservationV1:
+  schemaVersion: 1
+  actionRef: ProviderActionRefV1
+  admissionDigest: sha256-prefixed-digest
+  hostId: observedValueV1<nonempty-id>
+  adapterId: observedValueV1<nonempty-id>
+  endpointProvider: observedValueV1<nonempty-id>
+  family: observedValueV1<canonical-family>
+  model: observedValueV1<exact-provider-model>
+  resolvedEffort: observedValueV1<resolvedEffortV1>
+  rawNativeMode: observedValueV1<exact-provider-value-or-null>
+  orchestrationMode: observedValueV1<single-or-native-subagents-or-dynamic-workflow-or-provider-multi-agent>
+  observedAt: timestamp
+  observationDigest: sha256-prefixed-digest
+~~~
+
+`admissionDigest` and `observationDigest` are separate JCS digests over their
+complete objects with the respective digest field omitted. Admission never
+changes after action commit. Observation is absent before terminal evidence and
+is inserted at most once; it parent-binds the immutable admission digest.
+`observedValueV1` expands in the checked-in schema to a closed type-specific
+union. Required identity values cannot be null in the observed arm. Only raw
+native mode admits an observed null, which means the provider proved no raw
+native mode; `state: unavailable` remains distinguishable. Every field has its
+own evidence source/confidence, so a provider may prove model while effort
+remains honestly unavailable. `provider-result` and `exact` require a field
+directly present in the authenticated provider result. `adapter-attestation`
+and `attested` require a contract-defined adapter observation. Crossed source,
+confidence, state or null combinations reject.
+An observed null raw native mode requires observed `single` orchestration;
+non-single orchestration requires an observed non-null raw native mode. An
+unavailable native-mode field cannot be used to infer orchestration.
+
+An applied admitted `resolvedEffortV1.value` is the raw provider effort, must
+equal one applied capability normalisation and requires its corresponding
+non-null normalised reasoning value. `inapplicable` requires the snapshot's
+inapplicable arm, null requested effort and null normalised reasoning, as
+section 32.19 already specifies. Raw native mode
+and orchestration mode must equal one mapping row in the same model snapshot.
+The raw effort/native-mode values pass unchanged to the adapter; policy fields
+cannot reconstruct or overwrite them. Requested, admitted and observed values
+remain separate even when equal; substitutions stay in the existing ordered
+event journal.
+
+`discoverySurfaceRefV1` points to the existing immutable
+`EvidenceArtifactRegistration` from section 32.14, but only the daemon-internal
+discovery renderer may create evidence kind `discovery-surface.v1` with
+existing `publisherKind: fabric` and `producer: fabric-daemon`. Public/agent
+evidence publication rejects that kind.
+After resolving exact host/version/profile/native mode and the active generated
+skill/tool/agent-command registries, the daemon renders the session-start
+manifest, writes it as a run-file, registers that exact path/digest/revision and
+equality-binds principal scope, permission profile, negotiated features, the
+five content-input digests and renderer version above. Admission requires the
+surface permission-profile digest to equal its own field. Its bytes are
+the rendered bootstrap instructions, skill name/description catalogue,
+advertised tool names/descriptions/input schemas, agent/command descriptions
+and mandatory native-mode preamble visible at session start. The adapter launch
+envelope equality-binds the same ref and effective configuration; an adapter
+that cannot prove it applied that envelope leaves the route unavailable.
+Canonical JCS of the closed manifest yields `renderedSurfaceDigest`. This
+must equal `artifactRef.digest` because the registered source bytes are that
+canonical manifest. This records the actual surface; it creates no target or
+hard ceiling.
+
+At new-action admission, snapshot expiry or adapter-contract/model/effort/mode
+incompatibility rejects before provider I/O. Immediately before every initial
+dispatch or permitted retry, the daemon equality-CASes the same snapshot
+generation/digest, adapter contract, admitted model, permission-profile digest,
+discovery-surface registration/digest and route admission. Predispatch drift supersedes the zero-effect action and requires
+fresh resolution. Ambiguous effect stays with the original action/recovery
+owner and cannot reroute or replay.
+
+The existing `fabric.v1.provider-action.read`, generated agent/MCP read and
+scoped operator Evidence projection expose one closed route variant containing
+`admission: deployedRouteAdmissionV1` and
+`observation: null | deployedRouteObservationV1`. Receipt-v2 `providerRoutes`
+uses the same pair. No separate Console codec, latest-timestamp choice or
+action-ID-only lookup exists.
+
+Section 32.20 remains the only lifecycle authority. A policy-required rotation
+starts a genuinely fresh provider context and injects only the bounded,
+daemon-validated checkpoint/handoff. Same-history attach/resume is crash
+recovery only. Checkpoint identity binds canonical task, authority, lease,
+mailbox, child, open-work, evidence, artifact and repository revisions already
+owned by lifecycle custody; model narrative may describe but cannot author
+those values. Parent rotation never implies child rotation, completion or
+identity. A native child is independent only when the adapter provides the
+stable identity mapping required by the existing child-custody contracts;
+otherwise its native graph remains one opaque bounded task. Automatic pressure
+thresholds, hysteresis, maximum compaction counts and successor selection are
+explicitly outside this amendment.
+
+The fabric may export privacy-minimised `fabricOperationalSpanV1` rows:
+
+~~~yaml
+fabricOperationalSpanV1:
+  schemaVersion: 1
+  spanId: stable-id
+  parentSpanId: stable-id | null
+  runId: exact-run-id
+  taskId: exact-task-id | null
+  agentId: exact-agent-id | null
+  actionRef: ProviderActionRefV1 | null
+  routeAdmissionDigest: sha256-prefixed-digest | null
+  operation: exact-registered-operation
+  status: ok | error | cancelled | unknown
+  durationMs: nonnegative-integer
+  inputTokens: nonnegative-integer | null
+  outputTokens: nonnegative-integer | null
+  retryCount: nonnegative-integer
+  errorCode: exact-safe-code | null
+  observedAt: timestamp
+~~~
+
+Spans contain no prompt, answer, tool argument/result, artifact bytes, private
+message, capability or absolute path. Generic telemetry is operational evidence
+only; the richer receipt remains authoritative for authority, disclosure,
+reviewer relation, gates and artifact evidence. Conformance tests cover closed
+codec rejection, snapshot expiry, raw/normalised round-trip, honest unknown,
+pre-dispatch drift, ambiguous-action non-rerouting, fresh rotation versus
+same-history recovery, independent child custody and content-free telemetry.
