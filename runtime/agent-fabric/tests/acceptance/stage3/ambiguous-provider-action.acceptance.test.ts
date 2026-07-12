@@ -853,6 +853,143 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       .resolves.toMatchObject({ status: "terminal" });
   });
 
+  it.each(["ambiguous", "quarantined"] as const)(
+    "closes around a %s capacity holder without executing durable queued work",
+    async (holderStatus) => {
+      const fixture = await createLifecycleFixture({
+        maximumConcurrentProviderTurns: 2,
+        spawnDelayMs: 500,
+      });
+      let closed = false;
+      cleanup.push(async () => {
+        if (!closed) await fixture.fabric.close();
+        await rm(fixture.directory, { recursive: true, force: true });
+      });
+      const delegateReviewAuthority = async (suffix: string) => await fixture.chair.delegateAuthority({
+        parentAuthorityId: fixture.chairAuthorityId,
+        authority: {
+          ...fixture.rootAuthority,
+          sourcePaths: ["src/leader"],
+          actions: [...fixture.rootAuthority.actions],
+          budget: { turns: 1 },
+        },
+        commandId: `provider-review-close-queue:${holderStatus}:${suffix}:authority`,
+      });
+      const [holderAuthority, claimedAuthority, queuedAuthority] = await Promise.all([
+        delegateReviewAuthority("holder"),
+        delegateReviewAuthority("claimed"),
+        delegateReviewAuthority("queued"),
+      ]);
+      const actionId = (suffix: string): string =>
+        `provider-review-close-queue:${holderStatus}:${suffix}`;
+      const dispatch = async (
+        suffix: string,
+        authorityId: string,
+        scenario?: string,
+      ) => await fixture.chair.dispatchProviderAction({
+        adapterId: "fake-lifecycle",
+        actionId: actionId(suffix),
+        operation: "spawn",
+        authorityId,
+        payload: {
+          taskId: fixture.leaderTask.taskId,
+          model: "fake-reviewer-v1",
+          modelFamily: "fake",
+          prompt: `Close queue review ${suffix}.`,
+          cwd: "src/leader",
+          ...(scenario === undefined ? {} : { scenario }),
+        },
+        commandId: `${actionId(suffix)}:dispatch`,
+      });
+
+      await expect(dispatch(
+        "holder",
+        holderAuthority.authorityId,
+        holderStatus === "ambiguous" ? "ambiguous-review-valid" : "ambiguous-review-empty",
+      )).resolves.toMatchObject({ status: "prepared" });
+      await expect(waitForProviderAction(fixture.chair, actionId("holder")))
+        .resolves.toMatchObject({ status: "ambiguous" });
+      if (holderStatus === "quarantined") {
+        await expect(fixture.chair.reconcileProviderAction({
+          actionId: actionId("holder"),
+          commandId: `${actionId("holder")}:reconcile`,
+        })).resolves.toMatchObject({ status: "quarantined" });
+      }
+
+      await expect(dispatch("claimed", claimedAuthority.authorityId))
+        .resolves.toMatchObject({ status: "prepared" });
+      await expect(dispatch("queued", queuedAuthority.authorityId))
+        .resolves.toMatchObject({ status: "prepared" });
+      await expect(fixture.chair.getProviderAction({ actionId: actionId("claimed") }))
+        .resolves.toMatchObject({ status: "dispatched", executionCount: 1 });
+      await expect(fixture.chair.getProviderAction({ actionId: actionId("queued") }))
+        .resolves.toMatchObject({ status: "prepared", executionCount: 0 });
+
+      const closing = fixture.fabric.close();
+      let rescueTimer: ReturnType<typeof setTimeout> | undefined;
+      const rescued = new Promise<"rescued">((resolvePromise, rejectPromise) => {
+        rescueTimer = setTimeout(() => {
+          try {
+            const database = new Database(fixture.databasePath);
+            try {
+              database.prepare(`
+                UPDATE provider_actions
+                   SET status='terminal',history_json='["prepared","dispatched","terminal"]',
+                       updated_at=?
+                 WHERE run_id=? AND action_id=?
+              `).run(fixture.clock.now().getTime(), fixture.runId, actionId("holder"));
+            } finally {
+              database.close();
+            }
+          } catch (error: unknown) {
+            rejectPromise(error);
+            return;
+          }
+          void closing.then(() => resolvePromise("rescued"), rejectPromise);
+        }, 2_000);
+      });
+      const closeOutcome = await Promise.race([
+        closing.then(() => "closed" as const),
+        rescued,
+      ]);
+      if (rescueTimer !== undefined) clearTimeout(rescueTimer);
+      closed = true;
+
+      expect(closeOutcome).toBe("closed");
+      const database = new Database(fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT action_id,status,execution_count,effect_count
+            FROM provider_actions
+           WHERE action_id IN (?,?,?)
+           ORDER BY action_id
+        `).all(actionId("claimed"), actionId("holder"), actionId("queued"))).toEqual([
+          {
+            action_id: actionId("claimed"),
+            status: "terminal",
+            execution_count: 1,
+            effect_count: 1,
+          },
+          {
+            action_id: actionId("holder"),
+            status: holderStatus,
+            execution_count: 1,
+            effect_count: 0,
+          },
+          {
+            action_id: actionId("queued"),
+            status: "prepared",
+            execution_count: 0,
+            effect_count: 0,
+          },
+        ]);
+      } finally {
+        database.close();
+      }
+    },
+    10_000,
+  );
+
   it("wakes queued review work after out-of-band turn-lease release", async () => {
     const fixture = await createLifecycleFixture({ maximumConcurrentProviderTurns: 1 });
     cleanup.push(async () => {

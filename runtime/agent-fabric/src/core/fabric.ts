@@ -1254,14 +1254,16 @@ export class Fabric {
 
   async close(): Promise<void> {
     this.#closing = true;
+    if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
+    this.#deferredProviderPumpTimer = undefined;
+    this.#abandonDeferredProviderActions();
     while (this.#activeProviderOperations.size > 0 || this.#ownedProviderActions.size > 0) {
       await Promise.allSettled([
         ...this.#activeProviderOperations,
         ...this.#ownedProviderActions.values(),
       ]);
+      this.#abandonDeferredProviderActions();
     }
-    if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
-    this.#deferredProviderPumpTimer = undefined;
     await this.#adapterSupervisor.close();
     if (this.#database.open) {
       this.#database.pragma("wal_checkpoint(TRUNCATE)");
@@ -1300,6 +1302,7 @@ export class Fabric {
     actionId: string;
     execute: () => Promise<ProviderActionResult>;
   }): void {
+    if (this.#closing) return;
     const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
     if (this.#ownedProviderActions.has(key)) return;
     let settle = (): void => undefined;
@@ -1309,6 +1312,15 @@ export class Fabric {
     this.#ownedProviderActions.set(key, tracked);
     this.#deferredProviderActions.push({ key, ...input, settle });
     this.#pumpDeferredProviderActions();
+  }
+
+  #abandonDeferredProviderActions(): void {
+    let work = this.#deferredProviderActions.shift();
+    while (work !== undefined) {
+      this.#ownedProviderActions.delete(work.key);
+      work.settle();
+      work = this.#deferredProviderActions.shift();
+    }
   }
 
   #claimDeferredProviderAction(runId: string, actionId: string): "claimed" | "blocked" | "stale" {
@@ -1337,7 +1349,7 @@ export class Fabric {
   }
 
   #pumpDeferredProviderActions(): void {
-    if (this.#pumpingDeferredProviderActions) return;
+    if (this.#closing || this.#pumpingDeferredProviderActions) return;
     this.#pumpingDeferredProviderActions = true;
     try {
       while (this.#deferredProviderActions.length > 0) {
@@ -1366,7 +1378,7 @@ export class Fabric {
   }
 
   #scheduleDeferredProviderPump(): void {
-    if (this.#deferredProviderActions.length === 0) {
+    if (this.#closing || this.#deferredProviderActions.length === 0) {
       if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
       this.#deferredProviderPumpTimer = undefined;
       return;
