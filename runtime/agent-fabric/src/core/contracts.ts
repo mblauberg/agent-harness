@@ -1,10 +1,40 @@
 import type { AuthorityInput } from "../domain/types.js";
 
-export type RunCreation = {
+export type CurrentMcpSeatBinding = {
+  seat: string;
+  agentId: string;
+  expectedPrincipalGeneration: number;
+};
+
+export type CurrentMcpSeatBindingInput = {
+  canonicalRoot: string;
+  expectedPreviousGeneration: string | null;
+  generation: string;
+  projectSessionId: string;
+  expectedSessionRevision: number;
+  expectedSessionGeneration: number;
   runId: string;
-  workspaceRoot?: string;
-  projectRunDirectory?: string;
-  chair: { agentId: string; authority: AuthorityInput };
+  expectedRunRevision: number;
+  chairAgentId: string;
+  expectedChairGeneration: number;
+  chairLeaseId: string;
+  expiresAt: string;
+  bindings: CurrentMcpSeatBinding[];
+};
+
+export type CurrentMcpSeatBindingResult = {
+  expectedPreviousGeneration: string | null;
+  generation: string;
+  projectSessionId: string;
+  sessionRevision: number;
+  sessionGeneration: number;
+  runId: string;
+  runRevision: number;
+  chairAgentId: string;
+  chairGeneration: number;
+  chairLeaseId: string;
+  expiresAt: string;
+  credentials: Array<CurrentMcpSeatBinding & { capability: string }>;
 };
 
 export type LeaseResult = {
@@ -68,6 +98,7 @@ export type ProviderActionResult = {
   executionCount: number;
   effectCount: number;
   result?: unknown;
+  providerAnswer?: string;
 };
 export type InterventionResult = { interventionId: string };
 export type DiscussionGroupInput = { groupId: string; memberAgentIds: string[] };
@@ -83,9 +114,9 @@ export type TeamResult = {
   state: "active" | "frozen" | "barrier-closed";
   generation: number;
   successorAgentId: string | null;
-  leader?: { agentId: string; authorityId: string; capability: string };
+  leader?: { agentId: string; authorityId: string };
   rootTask?: TaskResult;
-  initialMemberAgentIds?: string[];
+  initialMembers?: Array<{ agentId: string; authorityId: string }>;
   discussionGroups: DiscussionGroupInput[];
   reservedBudget: Record<string, number>;
 };
@@ -103,7 +134,7 @@ export type BudgetResult = {
   dimensions: Record<string, BudgetDimensionResult>;
   returned: Record<string, number>;
 };
-export type AtomicTeamCreateInput = {
+export type TeamCreateInput = {
   teamId: string;
   parentTeamId?: string;
   leader: { agentId: string; authority: AuthorityInput };
@@ -113,18 +144,3 @@ export type AtomicTeamCreateInput = {
   reservedBudget: Record<string, number>;
   commandId: string;
 };
-export type ExistingTeamCreateInput = {
-  teamId: string;
-  parentTeamId?: string;
-  leaderAgentId: string;
-  rootTaskId: string;
-  ownedTaskIds?: string[];
-  memberAgentIds?: string[];
-  initialMemberAgentIds?: string[];
-  authorityId?: string;
-  budget?: Record<string, number>;
-  reservedBudget?: Record<string, number>;
-  discussionGroups?: DiscussionGroupInput[];
-  commandId: string;
-};
-export type TeamCreateInput = AtomicTeamCreateInput | ExistingTeamCreateInput;

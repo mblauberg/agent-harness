@@ -25,7 +25,7 @@ describe("AC-008 Stage 3 safe completion", () => {
     const blockedCheckpoint = await writeLifecycleCheckpoint(fixture, {
       agentId: "leader",
       inFlightChildren: ["child"],
-      openWork: ["leader-task", "child-task"],
+      openWork: ["leader-task"],
       nextAction: "release the write lease and reconcile child",
     });
     await fixture.leader.requestLifecycle({

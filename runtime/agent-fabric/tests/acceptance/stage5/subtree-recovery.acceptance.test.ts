@@ -6,7 +6,7 @@ import { createStage5RecoveryFixture, createTeamA } from "../../support/stage5-r
 import {
   createStage5TeamFixture,
   createTeam,
-  requireRecord,
+  issueTeamLeaderCapability,
   teamCreateInput,
 } from "../../support/stage5-team-testkit.ts";
 
@@ -34,29 +34,20 @@ describe("Stage 5 subtree ownership and recovery", () => {
       generation: 1,
     });
 
+    await expect(createTeam(fixture.chair, teamCreateInput({
+      teamId: "team-overlap",
+      leaderId: "leader-b",
+      sourcePath: "src/team-b",
+      artifactPath: ".agent-run/run-stage5/team-overlap",
+      memberAuthorities: [],
+      reservedBudget: { turns: 5, "cost:USD": 2 },
+    }))).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
     await expect(
-      fixture.chair.createTeam({
-        teamId: "team-overlap",
-        leaderAgentId: "leader-b",
-        rootTaskId: fixture.tasks.rootB.taskId,
-        ownedTaskIds: [fixture.tasks.rootB.taskId, fixture.tasks.workerA.taskId],
-        memberAgentIds: ["leader-b"],
-        authorityId: fixture.authorities.leaderB,
-        budget: { turns: 5, "cost:USD": 2 },
-        commandId: "stage5:team-overlap:create",
-      }),
-    ).rejects.toMatchObject({ code: "TASK_SUBTREE_CONFLICT" });
-    await expect(
-      fixture.leaderA.createTeam({
+      createTeam(fixture.leaderA, teamCreateInput({
         teamId: "unauthorised-top-level-team",
-        leaderAgentId: "worker-a",
-        rootTaskId: fixture.tasks.workerA.taskId,
-        ownedTaskIds: [fixture.tasks.workerA.taskId],
-        memberAgentIds: ["worker-a"],
-        authorityId: fixture.authorities.workerA,
-        budget: { turns: 1 },
-        commandId: "stage5:team-unauthorised:create",
-      }),
+        memberAuthorities: [],
+        reservedBudget: { turns: 1 },
+      })),
     ).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
   });
 
@@ -132,8 +123,7 @@ describe("Stage 5 subtree ownership and recovery", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
     }));
-    const parentCapability = requireRecord(parent.leader, "parent leader").capability;
-    if (typeof parentCapability !== "string") throw new TypeError("parent leader capability is missing");
+    const parentCapability = await issueTeamLeaderCapability(fixture.chair, parent);
     const parentLeader = fixture.fabric.connect(parentCapability);
     const child = await createTeam(parentLeader, teamCreateInput({
       teamId: "recursive-child",
@@ -143,8 +133,7 @@ describe("Stage 5 subtree ownership and recovery", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 20, "cost:USD": 20, descendants: 3 },
     }));
-    const childCapability = requireRecord(child.leader, "child leader").capability;
-    if (typeof childCapability !== "string") throw new TypeError("child leader capability is missing");
+    const childCapability = await issueTeamLeaderCapability(parentLeader, child);
     const childLeader = fixture.fabric.connect(childCapability);
 
     await fixture.chair.freezeSubtree({
@@ -176,9 +165,8 @@ describe("Stage 5 subtree ownership and recovery", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
     }));
-    const parentCapability = requireRecord(parent.leader, "parent leader").capability;
-    if (typeof parentCapability !== "string") throw new TypeError("parent leader capability is missing");
-    const child = await createTeam(fixture.fabric.connect(parentCapability), teamCreateInput({
+    const parentLeader = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, parent));
+    const child = await createTeam(parentLeader, teamCreateInput({
       teamId: "adoption-child",
       parentTeamId: "adoption-parent",
       sourcePath: "src/adoption-parent/adoption-child",

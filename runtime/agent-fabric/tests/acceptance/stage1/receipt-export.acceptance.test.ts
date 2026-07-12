@@ -6,9 +6,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
-import { openFabric } from "../../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
 import { assertFabricReceiptSchema } from "../../../src/exports/schema.ts";
 import { ManualClock } from "../../support/manual-clock.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -24,11 +25,13 @@ describe("Stage 1 fabric receipt export", () => {
     const capabilityKey = "receipt-upgrade-capability-key";
     await mkdir(runDirectory, { recursive: true });
     let fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-upgrade", projectRunDirectory: runDirectory,
       chair: { agentId: "chair", authority: {
         workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
-        actions: ["read", "write", "delegate", "message"], disclosure: ["local"],
+        actions: [...AUTHORITY_ACTION_VOCABULARY], disclosure: { level: "scoped", scopes: ["local"] } as const,
         expiresAt: "2099-01-01T00:00:00.000Z", budget: {},
       } },
     });
@@ -54,8 +57,9 @@ describe("Stage 1 fabric receipt export", () => {
     const runDirectory = join(root, ".agent-run", "run-receipt");
     await mkdir(runDirectory, { recursive: true });
     const clock = new ManualClock();
+    const databasePath = join(root, "fabric.sqlite3");
     const fabric = await openFabric({
-      databasePath: join(root, "fabric.sqlite3"),
+      databasePath,
       workspaceRoots: [root],
       clock: clock.now,
     });
@@ -63,7 +67,9 @@ describe("Stage 1 fabric receipt export", () => {
       await fabric.close();
       await rm(root, { recursive: true, force: true });
     });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-receipt",
       projectRunDirectory: runDirectory,
       chair: {
@@ -72,8 +78,8 @@ describe("Stage 1 fabric receipt export", () => {
           workspaceRoots: ["."],
           sourcePaths: ["."],
           artifactPaths: [".agent-run/run-receipt"],
-          actions: ["read", "write", "delegate", "message"],
-          disclosure: ["local"],
+          actions: [...AUTHORITY_ACTION_VOCABULARY],
+          disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z",
           budget: { turns: 10, "cost:USD": 5 },
         },
@@ -128,24 +134,27 @@ describe("Stage 1 fabric receipt export", () => {
     const runDirectory = join(root, ".agent-run", "run-receipt-state");
     await mkdir(runDirectory, { recursive: true });
     const clock = new ManualClock();
-    const fabric = await openFabric({ databasePath: join(root, "fabric.sqlite3"), workspaceRoots: [root], clock: clock.now });
+    const databasePath = join(root, "fabric.sqlite3");
+    const fabric = await openFabric({ databasePath, workspaceRoots: [root], clock: clock.now });
     cleanup.push(async () => {
       await fabric.close();
       await rm(root, { recursive: true, force: true });
     });
     const authority = {
       workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run/run-receipt-state"],
-      actions: ["read", "write", "delegate", "message"], disclosure: ["local"],
+      actions: [...AUTHORITY_ACTION_VOCABULARY], disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z", budget: { turns: 20, "cost:USD": 10 },
     };
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-receipt-state", projectRunDirectory: runDirectory,
       chair: { agentId: "chair", authority },
     });
     const chair = fabric.connect(run.chairCapability);
     const delegated = await chair.delegateAuthority({
       parentAuthorityId: run.chairAuthorityId,
-      authority: { ...authority, actions: ["read", "write", "message"], budget: { turns: 5, "cost:USD": 2 } },
+      authority: { ...authority, actions: [...AUTHORITY_ACTION_VOCABULARY], budget: { turns: 5, "cost:USD": 2 } },
     });
     const registration = await chair.registerAgent({ agentId: "alice", authorityId: delegated.authorityId });
     const alice = fabric.connect(registration.capability);

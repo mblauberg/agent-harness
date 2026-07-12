@@ -4,9 +4,10 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openFabric, startFabricDaemon } from "../../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric, startFabricDaemon } from "../../../src/index.ts";
 import { parseCliJson, runSourceCli } from "../../support/cli-process.ts";
 import { writeDeliveryRunFixture } from "../../support/delivery-run-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -19,7 +20,9 @@ async function createInspectionDatabase(databasePath: string, runId: string, pro
   await mkdir(projectRunDirectory, { recursive: true });
   const fabric = await openFabric({ databasePath, workspaceRoots: [dirname(dirname(projectRunDirectory))] });
   try {
-    await fabric.createRun({
+    await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: dirname(dirname(projectRunDirectory)),
       runId,
       projectRunDirectory,
       chair: {
@@ -28,8 +31,8 @@ async function createInspectionDatabase(databasePath: string, runId: string, pro
           workspaceRoots: ["."],
           sourcePaths: ["."],
           artifactPaths: [".agent-run"],
-          actions: ["read", "write", "delegate", "message"],
-          disclosure: ["local"],
+          actions: [...AUTHORITY_ACTION_VOCABULARY],
+          disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z",
           budget: { turns: 10, "cost:USD": 5 },
         },
@@ -58,7 +61,7 @@ describe("Stage 1 command-line inspection", () => {
     });
   });
 
-  it("reports the live serving socket recorded by the database owner lock", async () => {
+  it("reports the live serving socket recorded by private generation-bound discovery", async () => {
     const root = await mkdtemp(join(tmpdir(), "afcli-"));
     const databasePath = join(root, "state", "fabric.sqlite3");
     const runtimeDirectory = join(root, "r");
@@ -75,7 +78,14 @@ describe("Stage 1 command-line inspection", () => {
       await rm(root, { recursive: true, force: true });
     });
 
-    const result = await runSourceCli(["inspect", "--database", databasePath, "--json"]);
+    const result = await runSourceCli([
+      "inspect",
+      "--database",
+      databasePath,
+      "--runtime-directory",
+      runtimeDirectory,
+      "--json",
+    ]);
     expect(parseCliJson(result)).toMatchObject({ databasePath, runtimeDirectory, socketPath });
   });
 
@@ -86,7 +96,9 @@ describe("Stage 1 command-line inspection", () => {
     const databasePath = join(root, "fabric.sqlite3");
     await mkdir(runDirectory, { recursive: true });
     const fabric = await openFabric({ databasePath, workspaceRoots: [root] });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-receipt",
       projectRunDirectory: runDirectory,
       chair: {
@@ -95,8 +107,8 @@ describe("Stage 1 command-line inspection", () => {
           workspaceRoots: ["."],
           sourcePaths: ["."],
           artifactPaths: [".agent-run/run-receipt"],
-          actions: ["read", "write", "delegate", "message"],
-          disclosure: ["local"],
+          actions: [...AUTHORITY_ACTION_VOCABULARY],
+          disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z",
           budget: { turns: 10, "cost:USD": 5 },
         },

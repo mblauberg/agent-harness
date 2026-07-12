@@ -1,6 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { chmod, open, rename, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { startFabricDaemon, type DaemonStartOptions } from "../daemon/client.js";
 import { resolveFabricPaths } from "./paths.js";
@@ -49,68 +47,44 @@ function daemonConfiguration(arguments_: string[]): DaemonStartOptions["configur
   };
 }
 
-async function writeDiscoveryReceipt(path: string, receipt: Record<string, unknown>): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
-  const handle = await open(temporaryPath, "wx", 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-    await handle.sync();
-  } catch (error: unknown) {
-    await handle.close().catch(() => undefined);
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
-  await handle.close();
-  try {
-    await chmod(temporaryPath, 0o600);
-    await rename(temporaryPath, path);
-  } catch (error: unknown) {
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
-}
-
 export async function runForegroundDaemon(arguments_: string[]): Promise<void> {
   const paths = resolveFabricPaths();
   const configuration = daemonConfiguration(arguments_);
-  const daemon = await startFabricDaemon({
-    databasePath: paths.databasePath,
-    stateDirectory: paths.stateDirectory,
-    runtimeDirectory: paths.runtimeDirectory,
-    socketPath: paths.socketPath,
-    ...(configuration === undefined ? {} : { configuration }),
-  });
-  const discoveryPath = join(paths.runtimeDirectory, "fabric-v1.discovery.json");
+  let daemon: Awaited<ReturnType<typeof startFabricDaemon>> | undefined;
+  let signalRequested = false;
   let stopPromise: Promise<void> | undefined;
-  const stop = (): Promise<void> => {
+  const stop = async (): Promise<void> => {
+    if (daemon === undefined) return;
     stopPromise ??= daemon.stop();
     return stopPromise;
   };
   const onSignal = (): void => {
+    signalRequested = true;
     void stop().catch(() => undefined);
   };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
   try {
-    await writeDiscoveryReceipt(
-      discoveryPath,
-      {
-        schemaVersion: 1,
-        socketPath: daemon.address.path,
-        pid: daemon.pid,
-        bootstrapCapability: daemon.bootstrapCapability,
-      },
-    );
+    daemon = await startFabricDaemon({
+      databasePath: paths.databasePath,
+      stateDirectory: paths.stateDirectory,
+      runtimeDirectory: paths.runtimeDirectory,
+      socketPath: paths.socketPath,
+      ...(configuration === undefined ? {} : { configuration }),
+    });
+    const runningDaemon = daemon;
+    if (signalRequested) await stop();
     const startedAt = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Australia/Brisbane", dateStyle: "short", timeStyle: "medium", hourCycle: "h23",
     }).format(new Date());
-    process.stdout.write(`agent-fabric ready pid=${daemon.pid} protocol=1 socket=${daemon.address.path} started=${startedAt} AEST (UTC+10)\n`);
-    await daemon.waitForExit();
+    process.stdout.write(`agent-fabric ready pid=${runningDaemon.pid} protocol=1 socket=${runningDaemon.address.path} started=${startedAt} AEST (UTC+10)\n`);
+    await runningDaemon.waitForExit();
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
-    await rm(discoveryPath, { force: true });
     await stop();
-    process.stdout.write("agent-fabric stopped\n");
+    if (daemon !== undefined) {
+      process.stdout.write(daemon.ownsProcess ? "agent-fabric stopped\n" : "agent-fabric detached\n");
+    }
   }
 }

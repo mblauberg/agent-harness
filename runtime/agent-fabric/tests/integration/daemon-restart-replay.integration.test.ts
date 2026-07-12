@@ -1,4 +1,5 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import { describe, expect, it } from "vitest";
@@ -16,8 +17,13 @@ describe("Stage 1 daemon restart replay", () => {
       dedupeKey: "restart:committed-message",
     });
     await Promise.allSettled([fixture.chair.close(), fixture.peer.close(), fixture.bootstrap.close()]);
+    const initialEpoch = JSON.parse(await readFile(join(fixture.runtimeDirectory, "fabric-v1.discovery-owner.json"), "utf8")) as {
+      daemonInstanceGeneration: number;
+    };
     process.kill(fixture.daemon.pid, "SIGKILL");
     await fixture.daemon.waitForExit();
+    await expect(readFile(join(fixture.runtimeDirectory, "fabric-v1.discovery-owner.json"), "utf8").then((value) => JSON.parse(value)))
+      .resolves.toMatchObject({ state: "crashed", daemonInstanceGeneration: initialEpoch.daemonInstanceGeneration });
 
     const restarted = await startFabricDaemon({
       databasePath: fixture.databasePath,
@@ -26,6 +32,8 @@ describe("Stage 1 daemon restart replay", () => {
       socketPath: fixture.socketPath,
       workspaceRoots: [fixture.directory],
     });
+    await expect(readFile(join(fixture.runtimeDirectory, "fabric-v1.discovery-owner.json"), "utf8").then((value) => JSON.parse(value)))
+      .resolves.toMatchObject({ state: "active", daemonInstanceGeneration: initialEpoch.daemonInstanceGeneration + 1 });
     const peer = await connectFabricDaemon({ socketPath: fixture.socketPath, capability: fixture.peerCapability });
     const delivery = await peer.receiveMessages({ limit: 1, visibilityTimeoutMs: 5_000 });
     expect(delivery).toHaveLength(1);

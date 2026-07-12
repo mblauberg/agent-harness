@@ -1,51 +1,36 @@
-# Paired MCP session smoke
+# Registered MCP smoke
 
-This opt-in smoke starts one isolated temporary daemon and proves a real
-Codex/Fable round trip through two separately invoked MCP stdio proxies. It
-does not register MCP globally, invoke a model provider, use provider login, or
-leave the daemon running after the bounded session.
+These opt-in smokes inspect an explicitly provisioned current project session
+and coordination run. They never create a project, session, run, authority,
+agent or chair. Run them only after operator launch has established the exact
+current identity and `agent-fabric mcp provision` has bound its existing agents
+to the registered seat generation.
 
-From `runtime/agent-fabric`, first build the already-implemented runtime:
+From `runtime/agent-fabric`, build the runtime and resolve the project key from
+the current project-keyed seat pointer:
 
 ```sh
 npm run build
+export AGENT_FABRIC_PROJECT_KEY="$(../../scripts/agent-fabric mcp seat-path \
+  --project ../.. --seat codex | jq -r .projectKey)"
 ```
 
-In a coordinator terminal, choose a run-owned evidence directory:
+Verify all registered seats, discovery and readable current-run state:
 
 ```sh
-node smoke/paired-mcp.mjs coordinate \
-  --session ../../../.agent-run/AFAB-001/live-smoke/paired-session \
-  --timeout-ms 180000
+node smoke/registered-mcp-health.mjs ../..
 ```
 
-While it waits, invoke Codex and Fable independently (one command in each
-visible pane):
+Then prove a Codex-to-Claude and Claude-to-Codex mailbox exchange through two
+separate MCP stdio proxies:
 
 ```sh
-node smoke/paired-mcp.mjs participant \
-  --session ../../../.agent-run/AFAB-001/live-smoke/paired-session \
-  --role codex \
-  --message "Codex asks Fable to confirm this live MCP exchange."
+node smoke/registered-mcp-roundtrip.mjs ../..
 ```
 
-```sh
-node smoke/paired-mcp.mjs participant \
-  --session ../../../.agent-run/AFAB-001/live-smoke/paired-session \
-  --role fable \
-  --message "Fable asks Codex to confirm this live MCP exchange."
-```
-
-Each participant prints short, human-readable `sender → recipient` and
-`recipient ← sender` lines with message IDs and text. Tokens are read only
-from a mode-0600 rendezvous file and are never included in output or retained
-evidence. The coordinator cross-checks the two identities, message IDs, reply
-links, sender IDs and four acknowledgements, writes `summary.json`, removes the
-rendezvous, stops the daemon and deletes its private temporary state.
-
-The local automated proof uses the same coordinator, participant and MCP proxy
-paths:
-
-```sh
-node --test smoke/paired-mcp.self-test.mjs
-```
+Both commands consume the daemon-activated and atomically published current
+seat generation. They fail closed when seats disagree on the project/session/
+run or a credential belongs to an inactive generation, is stale, revoked,
+expired or no longer bound to its recorded principal generation. There is no
+flat-seat fallback. The smokes do not invoke a model provider or expose bearer
+credentials in output.

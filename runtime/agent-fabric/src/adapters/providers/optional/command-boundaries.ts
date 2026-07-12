@@ -155,6 +155,15 @@ type OneShotBoundaryOptions = {
   runner?: ProviderCommandRunner;
 };
 
+function assertTaskBoundOneShot(payload: Record<string, unknown>): void {
+  if (typeof payload.taskId === "string" && payload.maxTurns !== 1) {
+    throw new ProviderAdapterError(
+      "INVALID_PARAMS",
+      "task-bound answer-bearing spawn requires maxTurns=1",
+    );
+  }
+}
+
 export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
@@ -194,6 +203,7 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
         : { healthy: false, matches: false, resumeReference, reason: "headless conversation cannot be verified after wrapper restart" };
     },
     async spawn(payload) {
+      assertTaskBoundOneShot(payload);
       return await execute(payload);
     },
     async attach({ resumeReference, payload }) {
@@ -238,6 +248,7 @@ export function createCursorCliBoundary(options: OneShotBoundaryOptions): Provid
         : { healthy: false, matches: false, resumeReference, reason: "headless session cannot be verified after wrapper restart" };
     },
     async spawn(payload) {
+      assertTaskBoundOneShot(payload);
       return await execute(payload);
     },
     async attach({ resumeReference, payload }) {

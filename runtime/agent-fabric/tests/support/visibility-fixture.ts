@@ -2,8 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFabric } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
 
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 import { FakeHerdrBoundary, FakeProviderBoundary, VisibilityClock } from "./visibility-fakes.ts";
 
 export const MANAGED_CAPABILITIES = [
@@ -23,17 +24,23 @@ export const INTERACTIVE_CAPABILITIES = ["attach", "status", "wakeup", "resume_r
 export async function createVisibilityFixture(runId = "run-visibility") {
   const directory = await mkdtemp(join(tmpdir(), "fabric-visibility-"));
   const clock = new VisibilityClock();
-  const fabric = await openFabric({ databasePath: join(directory, "fabric.sqlite3"), workspaceRoots: [directory], clock: clock.now });
+  const databasePath = join(directory, "fabric.sqlite3");
+  const fabric = await openFabric({ databasePath, workspaceRoots: [directory], clock: clock.now });
   const authority = {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run"],
-    actions: ["read", "write", "delegate", "message"],
-    disclosure: ["local"],
+    actions: [...AUTHORITY_ACTION_VOCABULARY],
+    disclosure: { level: "scoped", scopes: ["local"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
     budget: { turns: 20, "cost:USD": 20 },
   };
-  const run = await fabric.createRun({ runId, chair: { agentId: "chair", authority } });
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
+    runId,
+    chair: { agentId: "chair", authority },
+  });
   const chair = fabric.connect(run.chairCapability);
   const peerAuthority = await chair.delegateAuthority({
     parentAuthorityId: run.chairAuthorityId,
@@ -42,7 +49,7 @@ export async function createVisibilityFixture(runId = "run-visibility") {
       ...authority,
       sourcePaths: ["src/peer"],
       artifactPaths: [".agent-run/peer"],
-      actions: ["read", "write", "message"],
+      actions: [...authority.actions],
       budget: { turns: 8, "cost:USD": 8 },
     },
   });

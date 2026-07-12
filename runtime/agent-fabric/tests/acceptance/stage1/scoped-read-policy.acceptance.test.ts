@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -14,20 +16,36 @@ afterEach(async () => Promise.all(cleanup.splice(0).map((close) => close())));
 describe("chair, owner and participant scoped reads", () => {
   it("does not expose an unrelated agent's task or agent record through direct or resource projections", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-read-policy-"));
-    const fabric = await openFabric({ databasePath: join(directory, "fabric.sqlite3"), workspaceRoots: [directory] });
+    const databasePath = join(directory, "fabric.sqlite3");
+    const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
     cleanup.push(async () => {
       await fabric.close();
       await rm(directory, { recursive: true, force: true });
     });
-    const run = await fabric.createRun({ runId: "run-read-policy", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: directory,
+      runId: "run-read-policy",
+      chair: { agentId: "chair", authority: ROOT_AUTHORITY },
+    });
     const chair = fabric.connect(run.chairCapability);
     const aliceAuthority = await chair.delegateAuthority({
       parentAuthorityId: run.chairAuthorityId,
-      authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/alice"], actions: ["read", "write"], budget: { turns: 5 } },
+      authority: {
+        ...ROOT_AUTHORITY,
+        sourcePaths: ["src/alice"],
+        actions: [FABRIC_OPERATIONS.getTask, FABRIC_OPERATIONS.listTasks, FABRIC_OPERATIONS.listAgents],
+        budget: { turns: 5 },
+      },
     });
     const bobAuthority = await chair.delegateAuthority({
       parentAuthorityId: run.chairAuthorityId,
-      authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/bob"], actions: ["read", "write"], budget: { turns: 5 } },
+      authority: {
+        ...ROOT_AUTHORITY,
+        sourcePaths: ["src/bob"],
+        actions: [FABRIC_OPERATIONS.getTask, FABRIC_OPERATIONS.listTasks, FABRIC_OPERATIONS.listAgents],
+        budget: { turns: 5 },
+      },
     });
     const aliceRegistration = await chair.registerAgent({ agentId: "alice", authorityId: aliceAuthority.authorityId });
     const bobRegistration = await chair.registerAgent({ agentId: "bob", authorityId: bobAuthority.authorityId });

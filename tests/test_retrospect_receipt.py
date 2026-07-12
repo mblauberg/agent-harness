@@ -284,6 +284,7 @@ def test_valid_canonical_delivery_source_is_accepted(tmp_path):
     spec.loader.exec_module(reference)
     delivery = reference.make_reference_run("software", ROOT)
     delivery["run_id"] = "DEL-example"
+    delivery["fabric_relationships"]["delivery_run_id"] = "DEL-example"
     source = tmp_path / "RUN.json"
     source.write_text(json.dumps(delivery))
     candidate = data()
@@ -299,6 +300,7 @@ def _write_policy_bound_delivery_source(workspace, policy_path="delivery-policy.
     spec.loader.exec_module(reference)
     delivery = reference.make_reference_run("software", ROOT)
     delivery["run_id"] = "DEL-example"
+    delivery["fabric_relationships"]["delivery_run_id"] = "DEL-example"
     policy = {
         "schema_version": 1,
         "profiles": {

@@ -4,6 +4,7 @@ import { isAbsolute, join } from "node:path";
 
 import type Database from "better-sqlite3";
 
+import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
 import { FabricError } from "../errors.js";
 
 type Row = Record<string, unknown>;
@@ -146,8 +147,14 @@ export class ProviderSessionCoordinator {
        WHERE g.run_id = ? AND g.agent_id = ?
     `).get(input.runId, input.agentId);
     if (!isRow(existing)) return;
-    const same = existing.parent_agent_id === input.actorAgentId &&
-      existing.authority_id === input.authorityId &&
+    const sameIdentity = existing.parent_agent_id === input.actorAgentId &&
+      existing.authority_id === input.authorityId;
+    if (
+      sameIdentity &&
+      existing.provider_session_ref === null &&
+      existing.adapter_id === null
+    ) return;
+    const same = sameIdentity &&
       (input.providerSessionRef === undefined || existing.provider_session_ref === input.providerSessionRef) &&
       existing.adapter_id === input.adapterId;
     if (!same) {
@@ -293,8 +300,9 @@ export class ProviderSessionCoordinator {
     ).get(runId, input.reviewerAgentId);
     if (!isRow(reviewer)) throw new FabricError("NOT_FOUND", "reviewer agent was not registered");
     const artifact = row(this.#database.prepare(`
-      SELECT publisher_agent_id FROM artifacts WHERE run_id = ? AND relative_path = ? AND sha256 = ?
-    `).get(runId, input.relativePath, input.sha256), "review artifact");
+      SELECT artifact_id, publisher_agent_id FROM artifacts
+       WHERE run_id = ? AND relative_path = ? AND sha256 = ? AND registry_state='active'
+    `).get(runId, input.relativePath, `sha256:${input.sha256}`), "review artifact");
     if (input.independent && artifact.publisher_agent_id === input.reviewerAgentId) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "reviewer cannot certify its own published artifact as independent");
     }
@@ -326,6 +334,10 @@ export class ProviderSessionCoordinator {
       input.sha256,
       this.#clock(),
     );
+    this.#database.prepare(`
+      UPDATE artifacts SET evidence_kind='review', revision=revision+1
+       WHERE artifact_id=? AND evidence_kind='artifact'
+    `).run(artifact.artifact_id);
   }
 
   #publishedArtifactBytes(runId: string, relativePath: string, digest: string): Buffer {
@@ -333,18 +345,17 @@ export class ProviderSessionCoordinator {
       relativePath.length === 0 || isAbsolute(relativePath) ||
       relativePath.split(/[\\/]/u).includes("..") || !/^[0-9a-f]{64}$/u.test(digest)
     ) throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "evidence artifact reference is invalid");
-    const run = row(
-      this.#database.prepare("SELECT project_run_directory FROM runs WHERE run_id = ?").get(runId),
-      "evidence run",
-    );
-    if (typeof run.project_run_directory !== "string") {
+    const root = resolveRunArtifactRoot(this.#database, runId);
+    if (root.artifactRoot === null) {
       throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "evidence run has no project directory");
     }
     const artifact = this.#database.prepare(`
-      SELECT 1 FROM artifacts WHERE run_id = ? AND relative_path = ? AND sha256 = ?
-    `).get(runId, relativePath, digest);
+      SELECT source_kind FROM artifacts
+       WHERE run_id = ? AND relative_path = ? AND sha256 = ? AND registry_state='active'
+    `).get(runId, relativePath, `sha256:${digest}`);
     if (!isRow(artifact)) throw new FabricError("ADAPTER_ARTIFACT_MISSING", "evidence artifact is not published");
-    const bytes = readFileSync(join(run.project_run_directory, relativePath));
+    const sourceRoot = artifact.source_kind === "project-file" ? root.projectRoot : root.artifactRoot;
+    const bytes = readFileSync(join(sourceRoot, relativePath));
     const actual = createHash("sha256").update(bytes).digest("hex");
     if (actual !== digest) throw new FabricError("ARTIFACT_DIGEST_INVALID", "evidence artifact digest changed");
     return bytes;
@@ -446,10 +457,13 @@ export class ProviderSessionCoordinator {
         throw new FabricError("PROVIDER_TURN_ACTIVE", "provider session already has an unresolved turn");
       }
       const unresolvedCount = row(this.#database.prepare(`
-        SELECT COUNT(*) AS count
-          FROM provider_session_turn_leases
-         WHERE run_id = ? AND status IN ('active', 'quarantined')
-      `).get(input.runId), "provider turn count");
+        SELECT
+          (SELECT COUNT(*) FROM provider_session_turn_leases
+            WHERE status IN ('active','quarantined')) +
+          (SELECT COUNT(*) FROM provider_actions
+            WHERE budget_authority_id IS NOT NULL
+              AND status IN ('dispatched','ambiguous','quarantined')) AS count
+      `).get(), "provider turn count");
       if (typeof unresolvedCount.count !== "number" || unresolvedCount.count >= this.#maximumConcurrentTurns) {
         throw new FabricError("PROVIDER_TURN_ACTIVE", "maximum concurrent provider turns reached");
       }

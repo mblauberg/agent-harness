@@ -1,14 +1,73 @@
 # Project Fabric Console and adaptive session orchestration
 
-Status: Approved; implementation pending fresh-session launch
-Version: 1.0
-Date: 11 July 2026
+Status: Approved; implementation in progress
+Version: 1.9
+Date: 13 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
 Design chairs: Codex with Claude Code adversarial review
 Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
-Review result: no unresolved P0-P2 on the approved revision
+Review result (v1.0): no unresolved P0-P2 on the approved revision
+
+Version 1.9 keeps target preparation below the public request deadline by
+projecting durable Preparing/Building/Committing state, preserves current
+review evidence across proved same-agent chair rotation, and makes unavailable
+certifying slots explicit instead of presenting only a missing-target symptom.
+It also binds the helper portal to the hardened Unix-socket supervisor, shows
+the canonical provider action pair and separate evidence annotation, and keeps
+dynamic terminal resize behaviour unchanged. Version 1.8 binds final review to
+a daemon-generated complete immutable
+review bundle over the sealed delivery basis, clean base/head Git state and all
+required evidence. A target snapshots its chair and closed four-slot profile;
+linear slot heads carry complete open findings, and any source or chair advance
+requires reprepare. One clean native review and clean Fabric evidence for
+Claude/Anthropic, Cursor Grok/xAI and Agy Gemini/Google must bind that current
+bundle/coverage digest. Raw answers/errors remain private, proved terminal
+provider failure is not ambiguity, and one bounded recovery owner closes route
+and intact certifying-action budget custody without replay. The Console reads only the operator Evidence
+projection. Version 1.7 closes the already-binding v1.4 external-review lineage gap. Fresh
+provider review dispatch now includes an exact reviewed-artifact reference and
+strict router request; the daemon binds its trusted-router receipt to the
+answer-bearing action before provider I/O. After the terminal answer, the chair
+records only exact references plus a bounded adjudication disposition. Fabric
+derives provider/model identity, answer/result digest and structural
+independence, then exports the immutable lineage. Direct provider CLI review
+remains a degraded, non-certifying artifact. This is a current Spec 05
+hardening clarification, not approval of proposed Spec 06 continuity-routing
+capabilities. Version 1.6 records the live MCP review finding that provider turns can exceed
+the binding 30-second public request maximum. Review dispatch therefore returns
+the durable action receipt promptly and the chair reads that exact action until
+its bounded terminal answer arrives; timeout, disconnect and polling never
+redispatch. Version 1.5 closes the implementation-review placeholders for
+Pause/Resume,
+Attention decisions and evidence Discuss/Request changes. Run control uses the
+existing revision-bound operator preview/commit path. Attention actions read
+and resolve only the exact daemon-projected open gate and revision. Discussion
+and requested changes read the exact intake then commit one atomic revision
+with a correlated successor chair request derived from daemon-owned state; the
+Console never guesses a chair, provider session, conversation or authority.
+Version 1.4 records the implementation instruction that fresh Claude, Cursor
+and Gemini reviews remain answer-bearing Fabric work. The chair creates an
+exact review task and uses the current task-bound ephemeral provider action;
+the durable action result and route evidence are reviewed independently. A
+direct provider CLI is only an explicitly recorded degraded fallback. Version
+1.3 records the human's pre-release simplification direction: Spec 05
+ships only the current Console/protocol/schema epoch. Old-daemon retry,
+vintage-wire presentation and implicit legacy-state import are not product
+requirements; incompatible state is preserved and rejected explicitly. This
+does not weaken current optional-feature negotiation or adapter verification.
+The project-scoped Console retains its project client, auto-selects only one
+attachable session, and otherwise uses exact session-labelled run projections
+plus an explicit selector. `run-session-projection.v1` is required; a peer
+without exact run/session identity is incompatible. Version 1.2 closes the
+implementation-review finding that bounded evidence
+content, continuation, safety disclosure and acceptance behaviour must remain
+owned by this Console specification rather than Spec 04. Version 1.1 records
+the human's implementation clarification of 11 July 2026:
+80x24 is the default/reference acceptance viewport, not a fixed-only terminal
+size. The Console follows current terminal dimensions, reflows dynamically and
+preserves operator state across resize events.
 
 ## 1. Decision and relationship to existing specs
 
@@ -34,6 +93,15 @@ another task orchestrator or authority store.
 Specs 01 and 04 shall be amended and accepted before implementation can claim
 this spec complete. Product requirements remain here; transaction, schema and
 daemon invariants remain with their existing canonical owners.
+
+This is a pre-release implementation. The Console requires its exact current
+project/run/session projection and evidence-review features. It presents a
+typed protocol/schema cutover-required state for an obsolete daemon or
+database; it shall not retry a vintage profile, translate legacy projection
+shapes or infer/import a session from an old run. The runtime leaves rejected
+state untouched. Fabric receipt schema version 2 is likewise the sole current
+receipt; no v1 decoder/import/projection is retained. Current independently
+optional integrations remain negotiated and visibly unavailable when absent.
 
 The Console is local and project-scoped. GitHub is an optional project adapter,
 not a prerequisite or authority store. No browser application is included in
@@ -125,6 +193,14 @@ A Console project view may contain either topology:
    lead and a bounded team, but it is not another chair authority.
 2. **Independent sessions:** unrelated or deliberately isolated runs each have
    one chair and separate fabric session authority.
+
+The project-scoped Console connection remains open in both topologies. When
+exactly one attachable project session exists it may open a secondary session
+client automatically. With zero or multiple attachable sessions it remains on
+the project projection until the operator selects a stable session ID. Every
+run projection, row summary, detail reference and detail carries that exact
+session ID. Selecting a run opens only its secondary session client; returning
+to the project selector closes only that secondary client.
 
 The Console is a projection-only client. The project-session lifecycle is a
 Fabric-owned protocol entity persisted by the daemon before its first run is
@@ -267,6 +343,34 @@ not authoritative. The Console shall provide an artifact view containing:
 - exact paths, revisions and digests;
 - `Discuss`, `Accept`, `Request changes`, `Defer` and `Implement...` actions.
 
+Artifact bytes are read only through negotiated
+`artifact-content-read.v1`. The Console requests pages of at most 131,072 UTF-8
+bytes and 2,000 lines, follows only daemon-issued monotonic cursors and can
+continue until `nextCursor` is null. It never opens a project or private path
+directly. Feature absence, unsupported/unsafe content and unavailable pages
+leave the metadata view usable but visibly incomplete.
+
+Every content pane displays, adjacent to the bytes, the exact source path and
+digest, evidence revision, publisher provenance, evidence kind, current page/
+coverage, source and complete-rendering sizes, complete-rendering digest and
+the transformation label. The source digest is explicitly labelled as
+certifying the immutable source, not displayed bytes, whenever transformation
+is not `none`. Each returned page digest is verified before display; after all
+pages, their ordered bytes must reproduce the complete-rendering digest.
+Missing, duplicate, skipped, reordered, stale or cross-artifact cursors discard
+the local review coverage and require a fresh detail/read sequence.
+
+`Accept` and `Implement...` remain disabled while any content page is missing,
+unverified, stale, unsafe or unavailable. A terminal-neutralised complete view
+requires a distinct explicit confirmation that names the transformation and
+source digest. A capability- or credential-redacted view cannot be accepted or
+implemented from the Console because material source bytes are hidden;
+`Discuss` and `Request changes` remain available to obtain a clean replacement.
+The confirmation preview records complete page coverage and the verified
+source/rendered digests but the reads themselves create no acknowledgement or
+authority. Resize, detach and restart preserve only cursor/review UI state that
+still matches the exact evidence revision; they never convert it into approval.
+
 Natural-language acceptance in the active chair conversation may satisfy a
 gate only when a contract-tested provider/Herdr integration identifies it as
 direct human input and binds it to the operator principal, expected revision,
@@ -287,6 +391,248 @@ the coordinated chair, a handoff-based chair replacement, or an independent
 run chair. The prompt shall reference artifact paths and digests and require the
 receiving owner to reopen them. It shall not paste large artifacts into the
 prompt.
+
+Fresh external implementation review is a Fabric review task, not an
+unattributed provider transcript. Through the authenticated current chair,
+Fabric seals `delivery-requirement-map.v1`,
+`coordination-gate-snapshot.v1` and
+`implementation-delivery-manifest.v1`, then creates the review task. Callers
+cannot supply their bytes, Git base or evidence list. AFAB-004's immutable
+approved run-start base is
+`c2fc623a2529f87feca27982e1a140969ab5a258`. Fabric proves the publication-time
+principal/bridge/provider-custody lineage; an operator-, Fabric-, project- or
+Git-published root remains honestly unproved and cannot satisfy this profile.
+Git diffs and other evidence remain valid covered inputs.
+
+Requirement-map seal is current-chair-only and requires expected generation
+zero iff none exists, otherwise the exact current generation. It hashes a
+generation-free catalogue/scope/source/requirement/evidence closure before
+allocation: an equal closure reuses the current map, and only a changed closure
+allocates current plus one. Command-ID churn cannot stale a completed basis.
+
+The seal derives the exhaustive profile/catalogue requirement/evidence closure,
+pre-review gate snapshot and clean canonical Git base/head state, then commits
+the immutable review basis. `review-target.prepare` accepts only that current
+sealed basis, with expected target generation 0 when none exists and the exact
+positive current generation otherwise. It performs bounded DB-only admission,
+reserves never-reused target/bundle generations and promptly returns one
+immutable accepted preparation receipt; it does not build the bundle inside the
+30-second public request. The Console polls only
+`review-target-preparation.read` and renders the durable states as Preparing,
+Building, Committing, Succeeded, Conflicted or Failed. It shows no percentage or
+ETA; a declared finite completed/total count is allowed only when the daemon
+actually supplies it.
+
+The daemon worker derives the complete changed-file and required-evidence set
+and builds one bounded `review-bundle.v1`. Exact before/after/diff/evidence
+objects are content-addressed and chunked; a coverage digest proves the complete
+manifest. Changed files use the checked-in `review-diff.v1` codec with exact
+status/mode/binary/rename/path/order/digest semantics and immutable full-base/
+head conformance fixture. The final target dynamically computes the actual
+approved run-start-to-sealed-HEAD counts/bytes; a prior delivery-HEAD measurement
+is not a gate. The request accepts no summary or caller-selected file list.
+Omission, truncation, dirty or changed source/evidence fails. Recovery resumes
+the same preparation/generations and may expose only one complete target or a
+terminal conflict.
+
+Source, delivery, unrebindable chair or adapter-contract/profile advance
+supersedes the target and requires reprepare. A finalized adopted same-agent
+lifecycle rotation is the exception: Fabric appends a contiguous chair binding
+with the same agent/family/adapter/contract/model/profile/task/source/bundle and
+preserves target, heads and evidence. Preparation racing rotation commits
+against the adopted same-agent binding or conflicts. Already-current evidence
+remains current; old-binding output terminalised after lifecycle adoption is
+permanently noncertifying but retains adverse findings. No human gate is added
+unless an existing ambiguous provider effect requires retirement.
+
+Bundle bytes stay behind the action-pair-only digest-bound portal, so the fixed
+rubric/target/profile envelope fits the prompt limit. Every portal read names
+the exact bundle, root/page, object and chunk digest. Mandatory consumption is
+the complete manifest/read map, delivery manifest/map, required scope/spec/ADR/
+decision/gate records and bounded pages containing every full carried finding.
+A daemon-owned immutable bundle search/risk map then
+selects exact highest-risk diff chunks from every nonempty group by checked-in
+score/path rules; at most 32 chunks/2 MiB are mandatory.
+Zero/insufficient reads cannot certify. Literal bundle search and all other
+diff/before/after objects remain available for deeper review.
+`certifying-review-packet-only.v1`
+binds each activated adapter contract. A daemon-built per-action 0700 synthetic
+HOME may contain only exact 0600 adapter auth/config bytes outside the model
+read/tool namespace; the model sees only the exact portal. Claude SDK/Codex app-
+server may use direct dynamic tools only with identical schema, ledger, source-
+denial and cleanup canaries; Codex must prove confinement independently. For
+Cursor/Agy, the outer daemon launches the contract-pinned std-only Rust
+`agent-fabric-review-portal-supervisor`, persists stopped-child PID/start/PGID/
+session/executable custody before exec, and gives the supervisor private control
+FD 3 with `CLOEXEC` before provider exec. The provider MCP manager launches that
+same binary in fixed `portal-stdio-v1` mode with exactly the non-secret action-
+socket/action-pair/contract locators. No inherited provider descriptor or
+bearer is used. A one-use AF_UNIX broker verifies local peer credential/PID,
+UID, start time, PGID/session, ancestry and exact executable identity. Their
+exact model allowlist is
+`mcp(agent-fabric-review-bundle/review_bundle_read)` and
+`mcp(agent-fabric-review-bundle/review_bundle_search)`; every other MCP,
+command, filesystem, web/network, resource and prompt effect is denied.
+Discovery returns that one server/two tools; list probes for resources/templates/
+prompts return empty. Any extra surface, successful denied effect or outside-
+portal/auth-file read invalidates the action.
+Portal requests are exactly one UTF-8 JSON object plus LF with no batch,
+duplicate key or trailing bytes. ID is integer `0..2147483647` or a 1..64-byte
+ASCII `[A-Za-z0-9._:-]` string; response is exact JCS plus LF. Read payloads use
+RFC 4648 padded base64 and at most 65,536 raw bytes. Generated templates, not a
+prose metadata allowance, prove the complete response is at most 98,304 bytes.
+Preparation reserves the maximum 64-byte-ID form; ledgers debit exact canonical
+wire bytes for the actual ID. Direct tools receive the same equivalent charge.
+Search retains its separate 65,536-byte response limit.
+Missing enforcement advertises false, fails before provider I/O and never
+falls back. Control EOF/HUP, deadline, cancellation, provider or supervisor
+death triggers TERM, 250-ms wait, KILL, reap and socket/capsule removal. Startup
+verifies PID plus start time before signalling and treats mismatch as integrity
+failure. A passing canary proves daemon/supervisor crash cleanup and that no
+pinned child can escape via `setsid`, double-fork, daemonisation or reparenting.
+The model has no executable
+tool. Seatbelt/`sandbox-exec` is usable only under an exact-OS-version passing
+canary. Agy requires proved direct execution or one exact pinned fixed-argv
+trampoline if its hook transits `/bin/sh`. A provider process that also exposes
+model web tools needs provider-native separation proof or a destination-
+constrained API proxy. The narrow hardened shim is a `std`-only Rust opaque
+relay for bounded binary framing/FD/process/peer checks; TypeScript owns JSON-
+RPC/MCP/hook semantics and journalling. Stock Cursor/Agy routes remain
+capability=false until the pinned supervisor/helper and outer confinement pass every
+current-build canary.
+
+One target has one logical bundle/root: up to 64 MiB unique objects, 16 MiB per
+object, 16,384 objects and 32,768 deterministic chunks, never a bundle chain.
+The mandatory set is at most 80 unique responses/6 MiB. Direct primaries reserve
+up to 112 portal calls plus 16 planning/final turns; helper routes reserve 128
+internal calls. Their guaranteed exploration headroom is respectively 32 or 48
+calls/4 MiB, with a 10 MiB combined wire-byte ceiling; search consumes it and
+is capped at 16 calls/1 MiB aggregate.
+
+The target owns an immutable review subject plus one append-only active chair-
+binding chain. Generation one snapshots the exact chair agent/principal/lease/
+provider-session/bridge generation, adapter/contract/family/model and the
+resolved checked-in `spec05-four-slot-v1` profile. Its slots are `native`,
+`other-primary`, `cursor-grok` and `agy-gemini`; for an OpenAI chair they
+resolve respectively to the native Codex route, Claude/Anthropic,
+cursor-agent/`grok-4.5-xhigh`/xAI and
+Agy/`Gemini 3.1 Pro (High)`/Google. Native is explicitly exempt from
+reviewer independence; each external slot must differ from the target-chair
+family. Publisher eligibility separately proves the root publisher equals that
+target family, so no duplicate publisher-independence flag exists. Any chair
+change outside the exact same-agent lifecycle-binding rule supersedes the
+target instead of reinterpreting prior evidence.
+
+Turns, mandatory/exploration reads and exact response bytes are separately
+reserved/debited before provider I/O. Mandatory unique reads cannot be spent by
+search/duplicates. An adapter or delivery that cannot meet
+the mandatory/risk predicate is unavailable, not silently one-shot or falsely
+byte-complete.
+
+The Evidence header projects required-slot capability independently of target
+existence. If a slot is unavailable it shows top-level
+`certifying-review-capability-unavailable` and a profile-ordered
+`unavailableSlots[]` row with adapter, contract, family, model and exact safe
+reason. It does not reduce this to `missing-target`. Preparation is disabled
+with the same reason before any action, budget or provider I/O.
+
+Only the current target chair at the active binding may dispatch a new
+certifying action. Every UI, protocol, recovery and receipt reference displays
+the canonical `(adapterId, actionId)` pair; action ID alone is never treated as
+identity. The shared
+`model-route.v1` codec validates structural routing data only; effort
+applicability, artifact/target currency and exact adapter/family/model/profile
+agreement are rechecked transactionally after the bounded side-effect-free
+router, and resolved adapter must equal the requested action adapter and slot.
+Pre-router single-flight is global by provider action pair and binds run plus
+authenticated actor/principal/full input: cross-run reuse conflicts before a
+second router, while another adapter may reuse the same action ID. One per-
+target/slot action-attempt CAS prevents concurrent actions from
+running against one evidence head.
+
+Terminal review reads expose safe CLEAN/FINDINGS/UNUSABLE result digests only.
+A proved terminal failure has exactly one of `max-turns-exhausted`, `provider-
+rejected`, `terminal-no-answer` or `adapter-terminal-failure`; it is distinct
+from effect ambiguity and from the broader routing/substitution catalogue.
+Every proved-effect safe/UNUSABLE/failure terminal
+settles complete authenticated usage exactly or conservatively consumes the
+remaining reservation when usage is absent/partial; proved no-effect releases,
+while true ambiguity retains. It exposes only the closed result/failure digest
+and is never redispatched. Raw answers, errors, bundle objects and final prompts
+never enter the Console.
+
+The other terminal noncertifying states are proved no-effect, route-integrity
+terminal and retired-unknown. Permanent provider-effect ambiguity remains
+ambiguous with its reservation held until an exact consequential
+provider-route-integrity-retire Preview/Commit receives direct-human
+confirmation. Retirement performs no provider call, charges the full remaining
+ceiling and exposes retired-unknown; it never fabricates no-effect. This is a
+genuine review-and-liveness gate: while open it blocks slot dispatch, target
+reprepare, review/run acceptance or close, and the budget. Retirement or
+proved terminal reconciliation is the only escape from unprovable effect.
+
+Every CLEAN, FINDINGS or UNUSABLE provider terminal transaction automatically
+inserts evidence and linearly CAS-advances one per-target/slot head before the
+result is visible. There is no chair-skippable terminal result. It names the
+prior head, separately reports provider-reported and daemon-accepted resolution
+sets, and carries complete prior/new open sets. Insufficient-read CLEAN becomes
+UNUSABLE and resolves nothing. Safely parsed insufficient-read FINDINGS stays
+visible/noncertifying, resolves nothing and adds every safe finding. An in-
+flight answer whose target becomes stale still settles and advances its
+reserved head; it resolves nothing, is stale/noncertifying and carries safe new
+findings into the successor target. Concurrent attempts
+conflict; a second FINDINGS action advances from the returned head. Every safe
+P0-P2 is automatically repair-required; no chair annotation can downgrade it.
+A repaired target carries full safe ID/severity/summary/evidence plus origin
+action/result in mandatory bundle objects, then CLEAN resolves the digests.
+Target reprepare rejects an unresolved old action. Optional chair annotation is
+non-gating and separate: its exact disposition is `substantiated`,
+`unsubstantiated`, `duplicate` or `needs-more-evidence`. The Console shows the
+one current append-only annotation revision/note/digest beside live evidence;
+it cannot change or appear in completion or receipt v2. The mutation receipt is
+immutable; currency appears only on fresh read/list/operator projection.
+
+The Console reads review state only through its scoped operator Evidence
+row/detail projection. Rows show slot/head, target chair/profile,
+current/superseded, certifying, answer safety or terminal-failure code,
+CLEAN/FINDINGS/UNUSABLE, P0-P2/open counts, provider/model, reviewer independence and
+artifact/bundle/coverage/answer/result digests. Detail adds task/action, safe
+pair, current annotation, active chair binding, findings, route/final-prompt
+and publication lineage. Malformed fields reject
+the whole variant.
+
+The Evidence header displays the exact `reviewCompletionV1` response as
+`Final review: Complete` or `Blocked`, including target chair, artifact,
+bundle/coverage/profile digests, top-level ordered blockers and, when a target
+profile exists, its four slot-head rows. Missing target or unavailable profile
+uses the closed empty-slot branch, so the header still shows the reason.
+Unavailable required capability uses the distinct typed blocker/slot list above.
+`open-findings` is the only finding blocker;
+`provider-terminal-failure`, `terminal-no-effect` and `retired-unknown` are
+distinct from `ambiguous-action`. The Console
+does not recompute, choose a latest timestamp or hide a blocker.
+
+Every certifying action is recovery-owned before generic provider recovery.
+Prepared zero-dispatch proof closes no-effect; dispatched/accepted ambiguity
+gets at most one pair lookup; valid answers use the same automatic terminal
+transaction. Unresolved effect reaches the direct-human retirement gate above.
+The Console never offers a generic retry/resume for that custody.
+The schema-v2 Fabric receipt exports this same reducer under
+`reviewCompletion`, exact safe route/review rows under `providerRoutes` and
+`providerReviews`, and safe recovery digests under `routeIntegrityRecoveries`;
+the Console does not invent alternate receipt
+fields. Receipt v2 validates standalone with literal local objective/provider/
+operator catalogues and no resolver; unknown future codes fail instead of
+being displayed as current truth. Raw provider-specific detail stays private
+behind its evidence digest.
+
+A direct Claude, Cursor, Gemini or other provider CLI may be used only when
+Fabric is unavailable and the chair records the degraded reason. Its output may
+be registered as an ordinary review artifact for diagnosis, but it is visibly
+`non-certifying`, cannot create provider-review evidence and cannot satisfy the
+fresh other-primary, cross-family or no-unresolved-P0-P2 completion gate. The
+review must be rerun through Fabric before completion; post-hoc import,
+self-attested family and caller-selected independence are unavailable.
 
 ## 7. Human-attention policy
 
@@ -349,24 +695,38 @@ Required views are:
 
 - **Attention:** decisions, blockers, quarantines, expiring authority and
   acceptance-ready work.
-- **Project:** goal, accepted scope, work map, repository and optional GitHub
-  summary.
+- **Project:** goal, explicitly registered accepted-scope ref, work map,
+  repository and optional GitHub summary.
 - **Runs:** active/history runs, leads, dependencies, evidence and completion.
 - **Work:** task graph, write scopes, worktrees, barriers and checks.
 - **Agents:** chair, leads, workers, provider/model, state, current task,
   context pressure and pane/session references.
-- **Evidence:** artifacts, diffs, tests, reviews, receipts and provenance.
+- **Evidence:** registered project/run artifacts, private Git diffs, tests,
+  reviews, receipts, revision, publisher provenance and content safety/coverage.
 - **Activity:** readable messages, decisions and lifecycle events.
 - **System:** daemon, adapters, trust, seats, expiry and degraded integrations.
 
-The TUI shall remain fully usable at 80x24 with a keyboard, visible focus and
-non-colour urgency indicators. It shall also accept mouse input inside and
-outside Herdr: click to focus/select/activate, wheel to scroll, and pointer
-actions for tabs, lists, links, buttons and split resizing where the terminal
-supports them. Mouse and keyboard actions shall use the same command,
-confirmation and audit paths; pointer input cannot bypass a consequential-action
-review. Mouse capture shall be configurable and preserve an explicit terminal
-text-selection gesture. No required information or action may be hover-only.
+The TUI shall remain fully usable at its default/reference viewport of 80x24
+with a keyboard, visible focus and non-colour urgency indicators. At other
+sizes it shall use the available rows and columns, reflow and expand or compact
+master/detail content, and recompute pointer regions without hiding required
+identity, freshness or action fields where the current geometry can display
+them. `SIGWINCH` and equivalent resize events shall preserve selected stable
+IDs, focus owner, scroll positions, input draft and pending command state;
+shrinking clamps layout and scroll safely and shall not submit, repeat or
+discard an action. Smaller-than-reference layouts may collapse panes or require
+scrolling, but shall remain bounded, retain the Detach binding and terminal
+restoration path, and show Help/Detach affordances whenever geometry permits.
+Zero, undefined and ultra-small dimensions shall enter a clipped inert state
+until a valid resize rather than allocating unboundedly or mutating Fabric.
+
+It shall also accept mouse input inside and outside Herdr: click to
+focus/select/activate, wheel to scroll, and pointer actions for tabs, lists,
+links, buttons and split resizing where the terminal supports them. Mouse and
+keyboard actions shall use the same command, confirmation and audit paths;
+pointer input cannot bypass a consequential-action review. Mouse capture shall
+be configurable and preserve an explicit terminal text-selection gesture. No
+required information or action may be hover-only.
 
 Normal message bodies shall be readable on demand; default list previews remain
 bounded and terminal-neutralised. The UI shall not suppress ordinary content
@@ -395,9 +755,11 @@ Provider identity and actual model/session references must reconcile before an
 agent becomes ready.
 
 Prompts shall normally travel through Fabric to a managed provider adapter.
-Direct terminal text injection is a compatibility fallback and remains
-`dispatched-unconfirmed`; only Fabric mailbox/request-result paths use delivery
-states or acknowledgements.
+Direct terminal text injection is not a protocol-compatibility path. If kept as
+an explicit degraded steering helper, it remains `dispatched-unconfirmed`,
+requires an already tracked no-answer task/message reference and cannot satisfy
+delivery, result or barrier state; only Fabric mailbox/request-result paths use
+delivery states or acknowledgements.
 
 ### 9.1 Reliable paired request/reply
 
@@ -600,6 +962,43 @@ schema belongs to the protocol/delivery contract, not to any UI package.
 
 ## 15. Verification and acceptance
 
+For this approved AFAB-004 delivery, `finalReviewComplete` is one daemon query,
+not a chair assertion. It is true only when:
+
+1. one current target binds the current fabric-sealed
+   implementation-delivery-manifest.v1 and delivery-requirement-map.v1, proved
+   publication lineage, sealed delivery review basis, clean
+   base/head source-state and review-diff.v1 digest, complete review bundle/
+   coverage digest, one unbroken active target-chair binding and one resolved
+   `spec05-four-slot-v1` snapshot;
+2. its four linear slot heads each name one current terminal safe certifying
+   CLEAN evidence record and an empty complete open-finding set;
+3. every head/action-pair/evidence record binds that target, active chair-
+   binding chain, artifact,
+   bundle, coverage, profile, task, route, answer/result and final-prompt digest,
+   and its route equals the activated adapter/family/model/effort snapshot;
+4. `native` satisfies its explicit reviewer-independence exemption, while
+   `other-primary`, `cursor-grok` and `agy-gemini` each prove reviewer family
+   distinct from the target-chair family; and
+5. required `unavailableSlots` is empty and top-level blockers and every slot
+   blocker array are empty. A nonterminal, ambiguous, route-integrity,
+   insufficient-read, stale, UNUSABLE or proved terminal provider-failure
+   action cannot complete a slot.
+
+For the current Codex/OpenAI target the resolved matrix requires native Codex,
+Claude/Anthropic, Cursor/Grok/xAI and Agy/Gemini/Google. This is a target
+snapshot, not a permanent vendor interpretation: any chair generation/family
+change outside the exact adopted same-agent binding rule supersedes the target
+and resolves all four slots again.
+
+The daemon derives CLEAN by strict review-result.v1 parsing over the exact
+target generation and coverage digest. Current chair annotation is displayed
+but ignored by completion and cannot downgrade P0-P2. FINDINGS/UNUSABLE advance one
+head but leave deterministic blockers. A later safe CLEAN must resolve the
+complete prior open set. Every safe P0-P2 finding carries into a repaired target
+and new bundle; immutable prior evidence remains historical. Live currency is
+read-derived and never changes the original mutation receipt.
+
 Implementation is accepted only when objective tests demonstrate:
 
 1. The Console runs inside and outside Herdr against the same protocol.
@@ -650,10 +1049,15 @@ Implementation is accepted only when objective tests demonstrate:
     focus is enabled only for a contract-tested actionable integration.
 21. Scripted keyboard-only and mouse usability evaluations at 80x24 verify
     every required view and action, visible focus, non-colour urgency, click
-    targets, scrolling, resizing, configurable capture and preserved text
-    selection. Mouse activation cannot duplicate a command or bypass review. A
+    targets, scrolling, configurable capture and preserved text selection.
+    Resize sequences across smaller-than-reference, 80x24 and larger terminal
+    sizes
+    verify dynamic reflow, recomputed hit regions and preservation of focus,
+    selected IDs, scroll, drafts and pending commands. Mouse activation or a
+    resize cannot duplicate a command or bypass review. A
     versioned usability-fixture manifest covers: empty/healthy work; concurrent
-    multi-run work; and consequential-gate plus degraded/stale/conflict state.
+    independent sessions or coordinated workstreams; and consequential-gate
+    plus degraded/stale/conflict state.
     Each fixture declares the expected top attention item and correct
     project/run/phase/owner/next-milestone/health answers. Across three timed
     repetitions per fixture, the top item is always correct and at least 95% of
@@ -698,9 +1102,127 @@ Implementation is accepted only when objective tests demonstrate:
     cover every configured dimension and the Console projects remaining or
     unknown capacity honestly.
 33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
+    The exact head-based `finalReviewComplete` predicate above also proves
+    current clean Cursor Grok and Agy Gemini slots against one complete bundle;
+    direct CLI evidence cannot satisfy it.
+34. A real scoping intake registers a spec, ADR, decision/finding and Git diff;
+    Project/Evidence row and detail preserve exact accepted scope, kind,
+    revision, provenance and source digest. Multi-page content continues without
+    gaps or replay, verifies page and complete-rendering digests and survives
+    compact/80x24/wide resize without losing valid coverage. Metadata-only,
+    stale, unsafe, incomplete or credential-redacted views cannot `Accept` or
+    `Implement...`; terminal-neutralised complete content requires a distinct
+    transformation/source-digest confirmation. Raw PTY output contains no
+    terminal-control or credential canary.
+35. A project with multiple attachable independent sessions does not
+    auto-select one. Project-scoped run snapshots, pages, row summaries, detail
+    references and details bind the exact `projectSessionId`; Enter on a run
+    selects its secondary client, `s` returns to the retained project selector,
+    and `--session` selects an exact stable ID for interactive or export use.
+    A peer without `run-session-projection.v1` is explicitly incompatible.
+36. Provider-review routing performs immutable replay before daemon-global
+    `(adapterId, actionId)` single-flight, whose owner digest includes run,
+    actor/principal and full input. It uses a structural shared codec and performs
+    effort/currency/adapter/model admission after the bounded router. It binds
+    current active target-chair binding, exact resolved profile, complete bundle/coverage,
+    publication lineage and final prompt before provider I/O. Requested,
+    resolved and slot adapters must match. Concurrent changed input or cross-run
+    pair reuse conflicts before a second router; same action ID on another
+    adapter remains legal. Timeout/process-tree/source/route failure leaves no
+    action or budget.
+37. Current-chair certifying dispatch accepts the exact target/head/action-pair/task/
+    route/bundle/artifact tuple. Every CLEAN/FINDINGS/UNUSABLE terminal
+    transaction atomically creates immutable evidence and advances one linear
+    head with complete open findings before visibility; concurrent forks fail,
+    old-target reprepare cannot leapfrog and second FINDINGS remains recoverable.
+    Stale or insufficient terminal input accepts zero resolutions but still
+    settles and retains safe new findings. Chair annotation is separate/non-
+    gating, append-only and limited to the exact four dispositions; currency
+    and current annotation appear only on reads, while completion/receipt stays
+    annotation-free.
+38. Terminal classification is frozen with classifier/secret-set identity.
+    Proved failure uses exactly max-turns-exhausted/provider-rejected/terminal-
+    no-answer/adapter-terminal-failure and is terminal/noncertifying rather
+    than ambiguous; every proved-effect terminal settles exact usage or
+    conservatively consumes its reservation, while no-effect releases and true
+    ambiguity retains. The terminal-input digest makes exact callback/lookup
+    replay idempotent and changed input an integrity quarantine. It exposes no
+    raw error and never redispatches. Bundle/source mutation, CLEAN/P0-P2
+    grammar, unsafe canaries, reviewer independence, all-certifying-action
+    recovery/generic exclusion, four-slot completion and repaired-target carry-
+    forward all pass.
+39. Rotate/compact returns an immutable accepted-suspended receipt after
+    unique caller inference, pre-digest write quarantine, durable checkpoint,
+    delivery and predecessor-turn fencing. Replacement is asynchronous; each
+    provider/principal target is its global run/agent durable high-water plus
+    one and bridge target its chair-or-child bridge high-water plus one, never
+    reused; only provider-originated launch.attest over the exact checkpoint and
+    exact source-row snapshot may atomically swap the proper bridge owner at
+    those reserved generations. Current state is read through lifecycle read.
+    A delivery cut keeps ready/unclaimed and later enqueues in stored state
+    `ready` with the derived `successor-pending` routing disposition outside
+    the adoption vector, so they cannot stale the checkpoint; claims/
+    acks are blocked and writes remain quarantined. Unannounced generation or
+    context advance creates the exact typed generation-loss predecessor;
+    provider-generation advance is canonical if both change. It ratchets
+    observed high-water and supports only validated-checkpoint fresh rotation or
+    abandon. Context revision is adapter-normalised/nonnegative and strictly
+    increases within one provider generation; duplicate/lower/reordered events
+    do not mutate lifecycle and arbitrary forward jumps are valid. Direct-open
+    abandon has a null recovery action/direct-open provenance; attempted-
+    recovery abandon carries the exact action pair. Startup adopt/no-effect/
+    quarantine/supersede recovery owns
+    every lifecycle row before generic scans without replay. A stranded agent
+    cannot self-rotate: exact narrow-capability `agent-lifecycle-recovery`
+    fresh-rotate binds distinct custody/action/adapter/contract and an empty
+    caller boundary without rewriting a finalized predecessor, or destructive-
+    confirmed abandon performs the exact delivery/watermark/barrier and owner-
+    row terminal transitions without orphaning work. Lifecycle is sole owner for a rotating chair;
+    generic Resume and chair-loss recovery cannot substitute.
+40. Review-target preparation returns a DB-only immutable accepted receipt
+    within the public deadline, then exposes Preparing/Building/Committing and
+    terminal state through its read. Exact replay and same-digest join preserve
+    one job; changed input conflicts. High-water target/bundle generations are
+    never reused. Crash at every build/CAS/Phase-B point resumes the same row or
+    exposes one complete target, never partial/duplicate state or fake progress.
+41. Same-agent lifecycle adoption appends one active target-chair binding and
+    preserves previously current evidence/head/finding IDs. Prepared old work
+    closes no-effect; effectful/ambiguous work blocks binding advance; late old-
+    binding output remains adverse but noncertifying. Every crossed agent,
+    family, adapter, contract, model, profile, task, source or bundle rejects.
+42. Claude, Codex, Cursor and Agy portal gates prove exact two-tool source
+    confinement and common ledgers. Helper gates additionally prove non-secret
+    UDS locators, local peer/PID/start/PGID/session/ancestry/executable identity,
+    one connection, FD-3 noninheritance, generated ID/wire bounds and daemon/
+    supervisor/PID-reuse/setsid/double-fork/reparent cleanup. Required capability
+    absence appears before target as typed unavailable slots. Receipt v2
+    validates without a resolver and rejects unknown future closed codes.
 
 ## 16. Implementation gate
 
-This spec records the human-approved product direction. Implementation remains
-pending an explicit fresh-session launch after the human reviews the final
-committed revision and prompt.
+Spec 05 v1.0 records the human-approved product direction. The direct
+instruction of 11 July 2026 launched canonical run AFAB-004 from a fresh
+context, authorised the local implementation and later clarified dynamic
+terminal resizing in v1.1. Version 1.2 records the review-required Console
+evidence UX needed to implement that approved artifact-review outcome without
+changing effect authority. Version 1.3 records exact multi-session selection
+without changing the one-live-run-per-session topology. Version 1.4 binds
+fresh external reviews to answer-bearing Fabric tasks. Version 1.5 makes every
+shipped Pause/Resume, Attention decision and evidence discussion/request-
+changes affordance execute its typed revision-bound review/confirm path; no
+required action remains an implementation placeholder. Version 1.6 binds those
+review tasks to durable dispatch/read completion within the existing public
+protocol deadline. Version 1.7 binds trusted-router admission and daemon-derived
+review lineage to those same tasks without adding Spec 06 continuity modes.
+Version 1.8 binds those reviews to one current complete immutable bundle,
+linear slot heads, frozen safe results and the exact four-slot completion
+predicate above. It also closes the existing asynchronous lifecycle-rotation
+custody contract without adding automatic Spec 06 routing policy.
+Version 1.9 makes target construction a durable asynchronous preparation,
+preserves evidence through proved same-agent lifecycle bindings, replaces the
+helper's inherited descriptor with authenticated crash-safe Unix-socket
+supervision, canonicalises provider action pairs and review-diff bytes, and
+closes capability, annotation, receipt and context-telemetry projections. It
+adds no continuity routing or automatic successor-selection policy.
+Final human acceptance remains pending; Git push,
+release, deployment and other separately gated effects remain unauthorised.

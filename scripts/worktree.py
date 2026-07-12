@@ -168,6 +168,40 @@ def list_worktrees(args: argparse.Namespace) -> dict[str, object]:
     return {"primary_root": str(root), "worktrees": worktree_records(root)}
 
 
+def check_worktrees(args: argparse.Namespace) -> dict[str, object]:
+    root = primary_root(args.repo)
+    shared = root / ".worktrees"
+    findings: list[str] = []
+    if shared.is_symlink() or not shared.is_dir():
+        findings.append("canonical .worktrees must be a real directory")
+    if git(root, "ls-files", "--", ".worktrees").stdout.strip():
+        findings.append("canonical .worktrees contains tracked paths")
+    ignored = git(root, "check-ignore", "--no-index", ".worktrees/.probe", check=False)
+    if ignored.returncode != 0:
+        findings.append("canonical .worktrees is not protected by a repository-local ignore rule")
+
+    for item in worktree_records(root):
+        value = item.get("worktree")
+        if value is None:
+            findings.append("registered worktree record has no path")
+            continue
+        path = Path(str(value))
+        resolved = path.resolve()
+        if resolved == root:
+            continue
+        if path.is_symlink() or resolved.parent != shared.resolve() or not SAFE_NAME.fullmatch(resolved.name):
+            findings.append(f"registered worktree is outside canonical .worktrees: {path}")
+            continue
+        if not resolved.is_dir():
+            findings.append(f"registered worktree path is missing: {path}")
+
+    return {
+        "status": "pass" if not findings else "fail",
+        "primary_root": str(root),
+        "findings": sorted(findings),
+    }
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
@@ -188,6 +222,10 @@ def parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--repo", type=Path, default=Path.cwd())
     list_parser.set_defaults(handler=list_worktrees)
 
+    check_parser = sub.add_parser("check")
+    check_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    check_parser.set_defaults(handler=check_worktrees)
+
     remove_parser = sub.add_parser("remove")
     remove_parser.add_argument("name")
     remove_parser.add_argument("--repo", type=Path, default=Path.cwd())
@@ -204,7 +242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"worktree policy: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(receipt, indent=2, sort_keys=True))
-    return 0
+    return 2 if receipt.get("status") == "fail" else 0
 
 
 if __name__ == "__main__":

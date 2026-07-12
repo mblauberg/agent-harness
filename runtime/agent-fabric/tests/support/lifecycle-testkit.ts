@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { openFabric } from "../../src/index.ts";
-import type { Fabric, FabricClient } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
+import type { AuthorityInput, Fabric, FabricClient } from "../../src/index.ts";
 
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
 
 const fakeProvider = fileURLToPath(new URL("./lifecycle-fake-provider.ts", import.meta.url));
@@ -42,7 +43,9 @@ type Stage3OpenOptions = {
   databasePath: string;
   workspaceRoots: string[];
   clock: ManualClock["now"];
+  maximumConcurrentProviderTurns?: number;
   adapters: Record<string, { command: string[]; environment: Record<string, string> }>;
+  fault?: (label: string) => void;
 };
 
 export type LifecycleFixture = {
@@ -54,6 +57,8 @@ export type LifecycleFixture = {
   clock: ManualClock;
   fabric: Fabric;
   capabilities: { chair: string; leader: string; child: string };
+  chairAuthorityId: string;
+  rootAuthority: AuthorityInput;
   chair: FabricClient;
   leader: FabricClient;
   child: FabricClient;
@@ -72,24 +77,60 @@ function adapterOptions(fixture: {
   clock: ManualClock;
   providerJournalPath: string;
   providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
+  capabilitiesDelayMs?: number;
+  spawnDelayMs?: number;
+  mandatoryUsageUnits?: boolean;
+  maximumConcurrentProviderTurns?: number;
+  payloadMaxTurns?: boolean;
+  spawnResultLost?: boolean;
+  spawnUnresolved?: boolean;
+  spawnLookupMissing?: boolean;
+  fault?: (label: string) => void;
 }): Stage3OpenOptions {
   return {
     databasePath: fixture.databasePath,
     workspaceRoots: [fixture.directory],
     clock: fixture.clock.now,
+    ...(fixture.maximumConcurrentProviderTurns === undefined
+      ? {}
+      : { maximumConcurrentProviderTurns: fixture.maximumConcurrentProviderTurns }),
     adapters: {
       "fake-lifecycle": {
         command: [process.execPath, "--import", "tsx", fakeProvider],
         environment: {
           LIFECYCLE_FAKE_JOURNAL: fixture.providerJournalPath,
           LIFECYCLE_FAKE_STATUS: fixture.providerStatus ?? "healthy",
+          ...(fixture.capabilitiesDelayMs === undefined
+            ? {}
+            : { LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS: String(fixture.capabilitiesDelayMs) }),
+          ...(fixture.spawnDelayMs === undefined
+            ? {}
+            : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(fixture.spawnDelayMs) }),
+          LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
+          LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS: fixture.payloadMaxTurns === true ? "1" : "0",
+          LIFECYCLE_FAKE_SPAWN_RESULT_LOST: fixture.spawnResultLost === true ? "1" : "0",
+          LIFECYCLE_FAKE_SPAWN_UNRESOLVED: fixture.spawnUnresolved === true ? "1" : "0",
+          LIFECYCLE_FAKE_SPAWN_LOOKUP_MISSING: fixture.spawnLookupMissing === true ? "1" : "0",
         },
       },
     },
+    ...(fixture.fault === undefined ? {} : { fault: fixture.fault }),
   };
 }
 
-export async function createLifecycleFixture(): Promise<LifecycleFixture> {
+export async function createLifecycleFixture(
+  options: {
+    capabilitiesDelayMs?: number;
+    spawnDelayMs?: number;
+    mandatoryUsageUnits?: boolean;
+    maximumConcurrentProviderTurns?: number;
+    payloadMaxTurns?: boolean;
+    spawnResultLost?: boolean;
+    spawnUnresolved?: boolean;
+    spawnLookupMissing?: boolean;
+    fault?: (label: string) => void;
+  } = {},
+): Promise<LifecycleFixture> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-lifecycle-"));
   const runDirectory = join(directory, ".agent-run", "run-stage3");
   const databasePath = join(directory, "fabric.sqlite3");
@@ -99,17 +140,36 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
   await mkdir(join(directory, "src", "leader", "child"), { recursive: true });
   await mkdir(runDirectory, { recursive: true });
   await writeFile(providerSessionMarker, '{"provider":"fake","session":"leader"}\n');
-  const fabric = await openFabric(adapterOptions({ databasePath, directory, clock, providerJournalPath }));
+  const fabric = await openFabric(adapterOptions({
+    databasePath,
+    directory,
+    clock,
+    providerJournalPath,
+    ...options,
+  }));
   const rootAuthority = {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run/run-stage3"],
-    actions: ["read", "write", "delegate", "message"],
-    disclosure: ["local", "approved-provider"],
+    actions: [...AUTHORITY_ACTION_VOCABULARY],
+    disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
-    budget: { turns: 40, "cost:USD": 20 },
+    budget: {
+      turns: 40,
+      provider_calls: 40,
+      concurrent_turns: 8,
+      wall_clock_milliseconds: 1_000_000,
+      "cost:USD": 20,
+      "input_tokens:fake": 100_000,
+      "output_tokens:fake": 100_000,
+      descendants: 10,
+      message_bytes: 1_000_000,
+      artifact_bytes: 1_000_000,
+    },
   };
-  const run = await fabric.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId: "run-stage3",
     projectRunDirectory: runDirectory,
     chair: { agentId: "chair", authority: rootAuthority },
@@ -120,7 +180,7 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     authority: {
       ...rootAuthority,
       sourcePaths: ["src/leader"],
-      actions: ["read", "write", "delegate", "message"],
+      actions: [...rootAuthority.actions],
       budget: { turns: 20, "cost:USD": 10 },
     },
   });
@@ -136,7 +196,7 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     authority: {
       ...rootAuthority,
       sourcePaths: ["src/leader/child"],
-      actions: ["read", "write", "message"],
+      actions: [...rootAuthority.actions],
       budget: { turns: 5, "cost:USD": 2 },
     },
   });
@@ -150,6 +210,7 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
   const leaderTaskReady = await chairBase.createTask({
     taskId: "leader-task",
     authorityId: leaderAuthority.authorityId,
+    participantAgentIds: ["chair", "leader"],
     eligibleAgentIds: ["leader"],
     objective: "own the Stage 3 lifecycle",
     baseRevision: "stage3-base",
@@ -187,6 +248,8 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
       leader: leaderRegistration.capability,
       child: childRegistration.capability,
     },
+    chairAuthorityId: run.chairAuthorityId,
+    rootAuthority,
     chair: asLifecycleClient(chairBase),
     leader: asLifecycleClient(leaderBase),
     child: asLifecycleClient(childBase),
@@ -218,6 +281,7 @@ export async function writeLifecycleCheckpoint(
     inFlightChildren?: string[];
     openWork?: string[];
     nextAction?: string;
+    providerResumeReference?: string;
   },
 ): Promise<LifecycleCheckpoint> {
   const relativePath = join("checkpoints", `${options.agentId}-${Date.now()}.json`);
@@ -231,8 +295,8 @@ export async function writeLifecycleCheckpoint(
     inFlightChildren: options.inFlightChildren ?? [],
     openWork: options.openWork ?? [],
     nextAction: options.nextAction ?? "release",
-    providerResumeReference:
-      options.agentId === "leader" ? fixture.providerSessionMarker : "fake-session:child:g1",
+    providerResumeReference: options.providerResumeReference ??
+      (options.agentId === "leader" ? fixture.providerSessionMarker : "fake-session:child:g1"),
   };
   const bytes = `${JSON.stringify(document, null, 2)}\n`;
   await writeFile(absolutePath, bytes, { mode: 0o600 });

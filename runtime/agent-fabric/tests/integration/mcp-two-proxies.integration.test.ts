@@ -20,7 +20,7 @@ describe("Stage 2 shared daemon through two stdio MCP proxies (FR-002, AC-012)",
     const fixture = await createMcpFixture("run-mcp-tasks");
     cleanup.push(() => fixture.cleanup());
 
-    const assigned = await callTool(fixture.chairProxy.client, "fabric_task_assign", {
+    const assigned = await callTool(fixture.chairProxy.client, "fabric_task_create", {
       taskId: "task-mcp-1",
       authorityId: fixture.peerAuthorityId,
       eligibleAgentIds: ["peer"],
@@ -56,7 +56,7 @@ describe("Stage 2 shared daemon through two stdio MCP proxies (FR-002, AC-012)",
     expect(stale.isError).toBe(true);
     expect(stale.structured).toMatchObject({ code: "TASK_REVISION_CONFLICT" });
 
-    const completed = await callTool(fixture.peerProxy.client, "fabric_task_complete", {
+    const completed = await callTool(fixture.peerProxy.client, "fabric_task_update", {
       taskId: "task-mcp-1",
       expectedRevision: 2,
       state: "complete",
@@ -68,7 +68,7 @@ describe("Stage 2 shared daemon through two stdio MCP proxies (FR-002, AC-012)",
     // Retrying the original assignment through the chair proxy replays the
     // committed result from the shared command journal — it does not recreate
     // or observe a different task state.
-    const replay = await callTool(fixture.chairProxy.client, "fabric_task_assign", {
+    const replay = await callTool(fixture.chairProxy.client, "fabric_task_create", {
       taskId: "task-mcp-1",
       authorityId: fixture.peerAuthorityId,
       eligibleAgentIds: ["peer"],
@@ -115,7 +115,7 @@ describe("Stage 2 shared daemon through two stdio MCP proxies (FR-002, AC-012)",
     if (firstDelivery === undefined || typeof firstDelivery.deliveryId !== "string") {
       throw new Error("expected a delivery id from the peer proxy");
     }
-    const acknowledged = await callTool(fixture.peerProxy.client, "fabric_message_ack", {
+    const acknowledged = await callTool(fixture.peerProxy.client, "fabric_delivery_acknowledge", {
       deliveryId: firstDelivery.deliveryId,
     });
     expect(acknowledged.isError).toBe(false);

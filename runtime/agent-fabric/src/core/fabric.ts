@@ -4,6 +4,19 @@ import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolv
 
 import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
+import {
+  GATE_SYSTEM_SUPERSESSION_FEATURE,
+  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  RUN_SESSION_PROJECTION_FEATURE,
+  type AgentCustodyResult,
+  type EvidenceArtifactRegistration,
+  type EvidencePublishRequest,
+  type GateOperationTarget,
+  type OperationInputMap,
+  type ProtocolOperation,
+  type VerifiedProtocolCredential,
+} from "@local/agent-fabric-protocol";
+import { parseEvidenceArtifactRegistration } from "@local/agent-fabric-protocol";
 
 import type {
   AuthorityInput,
@@ -16,8 +29,10 @@ import type {
 import { MESSAGE_POLICY } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import {
+  FABRIC_OPERATIONS,
+  OPERATION_REGISTRY,
   expandAuthorityActions,
-  isFabricOperation,
+  isAgentAuthorityOperation,
   isReadFabricOperation,
   type FabricOperation,
 } from "../domain/operations.js";
@@ -29,22 +44,126 @@ import {
 } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
 import { AdapterSupervisor } from "../adapters/supervisor.js";
+import {
+  parseAgentBridgeCapability,
+  parseChairLaunchProviderResult,
+  ProviderAdapterError,
+  type AgentBridgeCapability,
+} from "../adapters/providers/types.js";
 import { assessAdapterModelPolicy } from "../adapters/model-selection.js";
 import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
 import { renderSafePreview } from "../visibility/safe-preview.js";
+import {
+  OperatorStore,
+  type AuthenticatedOperatorCredential,
+  type LocalOperatorConsoleCapabilityInput,
+  type LocalOperatorConsoleCapabilityResult,
+  type LocalOperatorConsoleSessionCapabilityResult,
+  type LocalOperatorPrincipalRotationInput,
+  type LocalOperatorPrincipalRotationResult,
+  type LocalOperatorProvisioningInput,
+  type LocalOperatorProvisioningResult,
+  type LocalOperatorSessionCapabilityInput,
+  type LocalOperatorSessionCapabilityResult,
+} from "../operator/store.js";
+import { OperatorProjectionStore } from "../operator/projection-store.js";
+import {
+  GitRepositoryReadService,
+  type GitHostedChecksPort,
+} from "../operator/git-repository-read.js";
+import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
+import {
+  HerdrDaemonIntegration,
+  type HerdrDaemonActionRequest,
+  type HerdrDaemonActionResult,
+  type HerdrDaemonIntegrationConfiguration,
+  type HerdrDirectSteerRequest,
+} from "../integrations/herdr-daemon-integration.js";
+import { ArtifactContentReadService } from "../operator/artifact-content-read.js";
+import {
+  ExternalEffectService,
+  type ExternalEffectEvidencePort,
+  type RegisteredEffectPort,
+} from "../operator/external-effect-service.js";
+import { FixedGitMutationPort, type GitMutationPort } from "../operator/fixed-git-mutation-port.js";
+import { TypedGitService, type GitConflictInspectorPort } from "../operator/typed-git-service.js";
+import {
+  TrustedGitRegistry,
+  type TrustedGitConfiguration,
+  type TrustedRunGitAllowlist,
+} from "../operator/trusted-git-registry.js";
+import {
+  OperatorActionStore,
+  type OperatorActionEffectPort,
+  type OperatorActionStatePort,
+} from "../operator/action-store.js";
+import {
+  assertRunAcceptingWork,
+  assertTaskOperationAdmitted,
+  createProductionOperatorActionPorts,
+  resolveTaskBindingForActiveWork,
+  type ProductionDaemonStopPort,
+} from "../operator/production-action-ports.js";
+import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
+import type { PublicProtocolContext } from "../daemon/public-protocol.js";
+import {
+  attemptDrainedStop as attemptRuntimeDrainedStop,
+  attemptIdleStop as attemptRuntimeIdleStop,
+  markDaemonRuntimeRunning as markRuntimeEpochRunning,
+  recoverDaemonRuntimeEpoch as recoverRuntimeEpoch,
+  type IdleElectionPort,
+  type IdleStopResult,
+  type QuiesceToken,
+} from "../daemon/global-liveness.js";
+import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
+import { ProjectSessionStore } from "../project-session/store.js";
+import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
+import { CoordinatedWorkstreamStore } from "../project-session/workstream-store.js";
+import {
+  LaunchCustodyService,
+  parseLaunchAdapterContract,
+  type LaunchAdapterContract,
+  type AgentBridgeContract,
+  type AgentDispatchHandle,
+  type LaunchDispatchHandle,
+  type ChairRecoveryDispatchHandle,
+} from "../project-session/launch-custody.js";
+import { IntakeStore } from "../project-session/intake-store.js";
+import {
+  ProjectFabricCoreError,
+  type AuthenticatedAgentContext,
+} from "../project-session/contracts.js";
+import {
+  ScopedGateStore,
+  assertScopedBarrierAllowed,
+  assertScopedOperationAllowed,
+  assertScopedTaskReadinessAllowed,
+} from "../gates/store.js";
+import { HierarchicalAdmissionStore } from "../resources/store.js";
+import {
+  AtomicDeliveryStore,
+  type ResultDeadlinePassInput,
+  type ResultDeadlinePassResult,
+} from "../results/store.js";
+import { NotificationOutbox } from "../attention/outbox.js";
+import { MacOsNativeDesktopAdapter } from "../attention/native-desktop.js";
+import {
+  NativeNotificationWorker,
+  type NotificationWorkerPassResult,
+} from "../attention/notification-worker.js";
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
-  AtomicTeamCreateInput,
   AuthorityResult,
   BarrierResult,
   BudgetDimensionResult,
   BudgetResult,
   CapabilityRotationResult,
+  CurrentMcpSeatBindingInput,
+  CurrentMcpSeatBindingResult,
   DiscussionGroupInput,
-  ExistingTeamCreateInput,
   EventsAfterResult,
   InterventionResult,
   LeaseResult,
@@ -54,16 +173,54 @@ import type {
   ProviderActionResult,
   ReceiptResult,
   RevocationResult,
-  RunCreation,
   TaskResult,
   TeamCreateInput,
   TeamResult,
 } from "./contracts.js";
+import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
 import { FabricReadPolicy } from "./read-policy.js";
+import { ArtifactRegistry } from "../artifacts/registry.js";
+import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
 
 export { FabricClient } from "./client.js";
 
+export type FabricOperatorActionPorts = {
+  statePort: OperatorActionStatePort;
+  effectPort: OperatorActionEffectPort;
+};
+
+export type FabricRuntimeOpenOptions = FabricOpenOptions & {
+  operatorActionPorts?: FabricOperatorActionPorts;
+  daemonStopPort?: ProductionDaemonStopPort;
+  fabricSocketPath?: string;
+  gitHostedChecks?: GitHostedChecksPort;
+  externalEffects?: Readonly<{
+    registry: readonly RegisteredEffectPort[];
+    evidence: ExternalEffectEvidencePort;
+  }>;
+  herdr?: HerdrDaemonIntegrationConfiguration;
+  gitMutationPort?: GitMutationPort;
+  gitConflictInspector?: GitConflictInspectorPort;
+  trustedGitConfiguration?: TrustedGitConfiguration;
+  fault?: (label: string) => void;
+};
+
 type Row = Record<string, unknown>;
+type TaskCreateInput = {
+  taskId: string;
+  authorityId: string;
+  eligibleAgentIds: string[];
+  proposedOwnerAgentId?: string;
+  participantAgentIds?: string[];
+  dependencies?: string[];
+  expectedArtifacts?: string[];
+  objectiveChecks?: string[];
+  objective: string;
+  baseRevision: string;
+  commandId: string;
+};
+const MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES = 65_536;
+const MAXIMUM_LIFECYCLE_HANDOFF_BYTES = 65_536;
 type StoredAuthority = {
   workspaceRoots: string[];
   sourcePaths: string[];
@@ -118,6 +275,14 @@ function rowOrNotFound(value: unknown, label: string): Row {
   return value;
 }
 
+function assertActiveMcpSeatGeneration(row: Row): void {
+  const generation = row.mcp_seat_generation;
+  if (generation === null || generation === undefined) return;
+  if (typeof generation !== "string" || row.active_mcp_seat_generation !== generation) {
+    throw new FabricError("AUTHENTICATION_FAILED", "capability belongs to an inactive MCP seat generation");
+  }
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
     return JSON.stringify(value);
@@ -136,6 +301,10 @@ function canonicalJson(value: unknown): string {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function sha256Digest(value: string): string {
+  return `sha256:${sha256(value)}`;
 }
 
 function canonicalPath(path: string): string {
@@ -209,24 +378,6 @@ function canonicalAuthorityPath(workspaceRoot: string, path: string): string {
   return rel === "" ? "." : normalize(rel).replaceAll(sep, "/");
 }
 
-function canonicalStoredAuthorityPath(path: string): string {
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    isAbsoluteOnAnyPlatform(path) ||
-    path.split(/[\\/]/u).includes("..") ||
-    /[*?[\]{}]/u.test(path)
-  ) {
-    throw new FabricError("AUTHORITY_WIDENING", `unsafe stored workspace-relative path: ${path}`);
-  }
-  const slashPath = path.replaceAll("\\", "/");
-  const normalised = posix.normalize(slashPath);
-  if (normalised !== slashPath) {
-    throw new FabricError("AUTHORITY_WIDENING", `stored workspace-relative path is not canonical: ${path}`);
-  }
-  return normalised;
-}
-
 const DISCLOSURE_TARGETS = ["local", "approved-provider", "external"] as const satisfies readonly DisclosureTarget[];
 const disclosureTargets = new Set<string>(DISCLOSURE_TARGETS);
 
@@ -235,15 +386,6 @@ function isDisclosureTarget(value: string): value is DisclosureTarget {
 }
 
 function normaliseDisclosure(value: AuthorityInput["disclosure"]): DisclosurePolicy {
-  if (Array.isArray(value)) {
-    const scopes = [...new Set(value)];
-    if (scopes.some((scope) => !isDisclosureTarget(scope))) {
-      throw new FabricError("AUTHORITY_WIDENING", "authority disclosure contains an unknown scope");
-    }
-    if (scopes.length === 0) return { level: "forbidden" };
-    if (scopes.length === DISCLOSURE_TARGETS.length) return { level: "allowed" };
-    return { level: "scoped", scopes: scopes.filter(isDisclosureTarget).sort() };
-  }
   if (!isRow(value)) throw new FabricError("AUTHORITY_WIDENING", "authority disclosure policy is invalid");
   if (value.level === "allowed" && !("scopes" in value)) return { level: "allowed" };
   if (value.level === "forbidden" && !("scopes" in value)) return { level: "forbidden" };
@@ -280,11 +422,10 @@ function validateBudgetUnitKeys(budget: Record<string, unknown>): void {
   if (invalid !== undefined) throw new FabricError("BUDGET_EXCEEDED", `budget unit key is invalid: ${invalid}`);
 }
 
-function normaliseAuthority(
+export function normaliseAuthority(
   authority: AuthorityInput,
   workspaceRoot: string,
   parent?: StoredAuthority,
-  pathSource: "filesystem" | "stored" = "filesystem",
 ): StoredAuthority {
   validateIntegerBudget(authority.budget);
   const expires = Date.parse(authority.expiresAt);
@@ -299,9 +440,7 @@ function normaliseAuthority(
   if (!deniedActionExpansion.ok) {
     throw new FabricError("AUTHORITY_WIDENING", `unknown denied authority actions: ${deniedActionExpansion.unknownActions.join(", ")}`);
   }
-  const canonicalisePath = (path: string): string => pathSource === "stored"
-    ? canonicalStoredAuthorityPath(path)
-    : canonicalAuthorityPath(workspaceRoot, path);
+  const canonicalisePath = (path: string): string => canonicalAuthorityPath(workspaceRoot, path);
   const workspaceRoots = [...new Set(authority.workspaceRoots.map(canonicalisePath))].sort();
   const sourcePaths = [...new Set(authority.sourcePaths.map(canonicalisePath))].sort();
   const artifactPaths = [...new Set(authority.artifactPaths.map(canonicalisePath))].sort();
@@ -338,9 +477,9 @@ function isStoredAuthority(value: unknown): value is StoredAuthority {
     isStringArray(value.workspaceRoots) &&
     isStringArray(value.sourcePaths) &&
     isStringArray(value.artifactPaths) &&
-    isStringArray(value.actions) && value.actions.every(isFabricOperation) &&
+    isStringArray(value.actions) && value.actions.every(isAgentAuthorityOperation) &&
     isStringArray(value.deniedPaths) &&
-    isStringArray(value.deniedActions) && value.deniedActions.every(isFabricOperation) &&
+    isStringArray(value.deniedActions) && value.deniedActions.every(isAgentAuthorityOperation) &&
     isRow(value.disclosure) &&
     (value.disclosure.level === "allowed" || value.disclosure.level === "forbidden" || (value.disclosure.level === "scoped" && isStringArray(value.disclosure.scopes))) &&
     typeof value.expiresAt === "string" &&
@@ -354,99 +493,6 @@ function parseAuthority(serialised: string): StoredAuthority {
     throw new Error("stored authority is invalid");
   }
   return value;
-}
-
-function storedAuthorityInput(value: unknown): AuthorityInput {
-  if (
-    !isRow(value) ||
-    !isStringArray(value.workspaceRoots) ||
-    !isStringArray(value.sourcePaths) ||
-    !isStringArray(value.artifactPaths) ||
-    !isStringArray(value.actions) ||
-    (value.deniedPaths !== undefined && !isStringArray(value.deniedPaths)) ||
-    (value.deniedActions !== undefined && !isStringArray(value.deniedActions)) ||
-    !(isStringArray(value.disclosure) || (isRow(value.disclosure) && typeof value.disclosure.level === "string")) ||
-    typeof value.expiresAt !== "string" ||
-    !isNumberRecord(value.budget)
-  ) {
-    throw new Error("stored authority is invalid");
-  }
-  return {
-    workspaceRoots: value.workspaceRoots,
-    sourcePaths: value.sourcePaths,
-    artifactPaths: value.artifactPaths,
-    actions: value.actions,
-    ...(value.deniedPaths === undefined ? {} : { deniedPaths: value.deniedPaths }),
-    ...(value.deniedActions === undefined ? {} : { deniedActions: value.deniedActions }),
-    disclosure: value.disclosure as AuthorityInput["disclosure"],
-    expiresAt: value.expiresAt,
-    budget: value.budget,
-  };
-}
-
-function upgradeStoredAuthorities(database: Database.Database, configuredWorkspaceRoots: readonly string[]): void {
-  const rows = database.prepare(`
-    SELECT a.authority_id, a.parent_authority_id, a.authority_json, a.authority_hash, r.workspace_root
-      FROM authorities a JOIN runs r ON r.run_id = a.run_id
-     ORDER BY a.created_at, a.authority_id
-  `).all();
-  const pending = new Map<string, {
-    parentAuthorityId: string | null;
-    authority: StoredAuthority | AuthorityInput;
-    canonical: boolean;
-    workspaceRoot: string;
-  }>();
-  for (const value of rows) {
-    const row = rowOrNotFound(value, "stored authority");
-    const workspaceRoot = stringField(row, "workspace_root");
-    if (!configuredWorkspaceRoots.some((configuredRoot) => pathContains(configuredRoot, workspaceRoot))) {
-      throw new FabricError("AUTHORITY_WIDENING", `stored run workspace root is not configured: ${workspaceRoot}`);
-    }
-    const parsed: unknown = JSON.parse(stringField(row, "authority_json"));
-    const canonical = isStoredAuthority(parsed);
-    if (canonical) {
-      validateIntegerBudget(parsed.budget);
-      if (!Number.isFinite(Date.parse(parsed.expiresAt))) throw new Error("stored authority expiry is invalid");
-      if (canonicalJson(normaliseDisclosure(parsed.disclosure)) !== canonicalJson(parsed.disclosure)) {
-        throw new Error("stored authority disclosure is not canonical");
-      }
-      if (sha256(canonicalJson(parsed)) !== stringField(row, "authority_hash")) {
-        throw new Error("stored authority hash is invalid");
-      }
-    }
-    pending.set(stringField(row, "authority_id"), {
-      parentAuthorityId: row.parent_authority_id === null ? null : stringField(row, "parent_authority_id"),
-      authority: canonical ? parsed : storedAuthorityInput(parsed),
-      canonical,
-      workspaceRoot,
-    });
-  }
-
-  const upgraded = new Map<string, StoredAuthority>();
-  database.transaction(() => {
-    while (pending.size > 0) {
-      let progress = false;
-      for (const [authorityId, value] of pending) {
-        const parent = value.parentAuthorityId === null ? undefined : upgraded.get(value.parentAuthorityId);
-        if (value.parentAuthorityId !== null && parent === undefined) continue;
-        const authority = value.canonical
-          ? value.authority as StoredAuthority
-          : normaliseAuthority(value.authority as AuthorityInput, value.workspaceRoot, parent, "stored");
-        if (parent !== undefined && !authorityContained(authority, parent)) {
-          throw new FabricError("AUTHORITY_WIDENING", "stored delegated authority exceeds its parent");
-        }
-        if (!value.canonical) {
-          const serialised = canonicalJson(authority);
-          database.prepare("UPDATE authorities SET authority_json = ?, authority_hash = ? WHERE authority_id = ?")
-            .run(serialised, sha256(serialised), authorityId);
-        }
-        upgraded.set(authorityId, authority);
-        pending.delete(authorityId);
-        progress = true;
-      }
-      if (!progress) throw new Error("stored authority ancestry is invalid");
-    }
-  })();
 }
 
 function authorityContained(child: StoredAuthority, parent: StoredAuthority): boolean {
@@ -582,6 +628,15 @@ function isArtifactResult(value: unknown): value is ArtifactResult {
   );
 }
 
+function isEvidenceArtifactRegistration(value: unknown): value is EvidenceArtifactRegistration {
+  try {
+    parseEvidenceArtifactRegistration(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isBarrierResult(value: unknown): value is BarrierResult {
   return (
     isRow(value) &&
@@ -615,11 +670,65 @@ function isLifecycleResult(value: unknown): value is LifecycleResult {
   );
 }
 
+function lifecycleHandoffPrompt(input: {
+  agentId: string;
+  taskId: string;
+  taskRevision: number;
+  checkpoint: LifecycleCheckpoint;
+  nextProviderSessionGeneration: number;
+}): string {
+  const handoff = canonicalJson({
+    schemaVersion: 1,
+    kind: "agent-fabric-verified-lifecycle-checkpoint",
+    agentId: input.agentId,
+    taskId: input.taskId,
+    taskRevision: input.taskRevision,
+    checkpointSha256: input.checkpoint.sha256,
+    mailboxWatermark: input.checkpoint.mailboxWatermark,
+    acknowledgedAboveWatermark: input.checkpoint.acknowledgedAboveWatermark,
+    inFlightChildren: input.checkpoint.inFlightChildren,
+    openWork: input.checkpoint.openWork,
+    nextAction: input.checkpoint.nextAction,
+    priorResumeReference: input.checkpoint.providerResumeReference,
+    nextProviderSessionGeneration: input.nextProviderSessionGeneration,
+  });
+  const prompt = [
+    "Resume from this bounded Agent Fabric checkpoint. Treat it as the verified recovery handoff; do not infer newer task, mailbox, child, provider-session, or write-custody state.",
+    handoff,
+    "Consume the handoff in this provider turn and continue with nextAction only after checking current Fabric state.",
+  ].join("\n");
+  if (Buffer.byteLength(prompt, "utf8") > MAXIMUM_LIFECYCLE_HANDOFF_BYTES) {
+    throw new FabricError("CHECKPOINT_INCOMPLETE", "lifecycle checkpoint handoff exceeds the provider prompt bound");
+  }
+  return prompt;
+}
+
 function isProviderActionStatus(value: unknown): value is ProviderActionResult["status"] {
   return ["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"].includes(String(value));
 }
 
-function providerActionResult(value: unknown): ProviderActionResult {
+const MAXIMUM_PROVIDER_ANSWER_BYTES = 262_144;
+
+function providerAnswerFromAdapterResult(value: unknown): string {
+  if (!isRow(value) || typeof value.result !== "string") {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "answer-bearing provider spawn returned no validated answer");
+  }
+  const answer = value.result.trim();
+  if (answer.length === 0 || Buffer.byteLength(answer, "utf8") > MAXIMUM_PROVIDER_ANSWER_BYTES) {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "answer-bearing provider spawn returned an empty or oversized answer");
+  }
+  return answer;
+}
+
+function isTaskBoundEphemeralProviderPayload(value: unknown): value is Record<string, unknown> {
+  return isRow(value) &&
+    typeof value.taskId === "string" &&
+    typeof value.model === "string" &&
+    typeof value.modelFamily === "string" &&
+    typeof value.prompt === "string";
+}
+
+function providerActionResult(value: unknown, expectedActionId?: string): ProviderActionResult {
   if (
     !isRow(value) ||
     typeof value.actionId !== "string" ||
@@ -630,6 +739,9 @@ function providerActionResult(value: unknown): ProviderActionResult {
   ) {
     throw new Error("provider returned an invalid action result");
   }
+  if (expectedActionId !== undefined && value.actionId !== expectedActionId) {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider action evidence belongs to another action");
+  }
   return {
     actionId: value.actionId,
     status: value.status,
@@ -637,16 +749,47 @@ function providerActionResult(value: unknown): ProviderActionResult {
     executionCount: value.executionCount,
     effectCount: value.effectCount,
     ...(value.result === undefined ? {} : { result: value.result }),
+    ...(typeof value.providerAnswer === "string" ? { providerAnswer: value.providerAnswer } : {}),
+  };
+}
+
+function providerActionResultWithRequiredAnswer(
+  value: unknown,
+  answerBearing: boolean,
+  expectedActionId?: string,
+): ProviderActionResult {
+  const result = providerActionResult(value, expectedActionId);
+  if (!answerBearing || result.status !== "terminal") return result;
+  return {
+    ...result,
+    providerAnswer: providerAnswerFromAdapterResult(result.result),
   };
 }
 
 function isProviderActionResult(value: unknown): value is ProviderActionResult {
   try {
     providerActionResult(value);
-    return true;
+    return !isRow(value) || value.providerAnswer === undefined || (
+      typeof value.providerAnswer === "string" &&
+      value.providerAnswer.trim().length > 0 &&
+      Buffer.byteLength(value.providerAnswer, "utf8") <= MAXIMUM_PROVIDER_ANSWER_BYTES
+    );
   } catch {
     return false;
   }
+}
+
+function quarantinedProviderAction(candidate: ProviderActionResult): ProviderActionResult {
+  const quarantined: ProviderActionResult = {
+    ...candidate,
+    status: "quarantined",
+    history: candidate.history.at(-1) === "quarantined"
+      ? candidate.history
+      : [...candidate.history, "quarantined"],
+  };
+  delete quarantined.result;
+  delete quarantined.providerAnswer;
+  return quarantined;
 }
 
 function assertAdapterOperation(capabilities: unknown, operation: string): void {
@@ -679,6 +822,10 @@ function isTeamResult(value: unknown): value is TeamResult {
     (value.state === "active" || value.state === "frozen" || value.state === "barrier-closed") &&
     typeof value.generation === "number" &&
     (typeof value.successorAgentId === "string" || value.successorAgentId === null) &&
+    (value.initialMembers === undefined || (
+      Array.isArray(value.initialMembers) && value.initialMembers.every((member) =>
+        isRow(member) && typeof member.agentId === "string" && typeof member.authorityId === "string")
+    )) &&
     Array.isArray(value.discussionGroups) &&
     isNumberRecord(value.reservedBudget)
   );
@@ -695,6 +842,15 @@ function isBudgetResult(value: unknown): value is BudgetResult {
   );
 }
 
+type ProviderActionDispatchRequest = {
+  adapterId: string;
+  actionId: string;
+  operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
+  authorityId?: string;
+  payload: Record<string, unknown>;
+  commandId: string;
+};
+
 export class Fabric {
   readonly #database: Database.Database;
   readonly #workspaceRoots: string[];
@@ -703,85 +859,492 @@ export class Fabric {
   readonly #readPolicy: FabricReadPolicy;
   readonly #commandJournal: CommandJournal;
   readonly #capabilityKey: string;
-  readonly #executionProfile: string;
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
+  readonly #maximumConcurrentProviderTurns: number;
+  readonly #ownedProviderActions = new Map<string, Promise<void>>();
+  readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
+  readonly #lifecycleProviderActions = new Map<string, Promise<ProviderActionResult>>();
+  readonly #activeProviderOperations = new Set<Promise<void>>();
+  readonly #deferredProviderActions: Array<{
+    key: string;
+    runId: string;
+    actionId: string;
+    execute: () => Promise<ProviderActionResult>;
+    settle: () => void;
+  }> = [];
+  #pumpingDeferredProviderActions = false;
+  #deferredProviderPumpTimer: ReturnType<typeof setTimeout> | undefined;
+  #closing = false;
+  readonly #operatorStore: OperatorStore;
+  readonly #operatorProjections: OperatorProjectionStore;
+  readonly #gitRepositoryReads: GitRepositoryReadService;
+  readonly #artifactContentReads: ArtifactContentReadService;
+  readonly #operatorActions: OperatorActionStore;
+  readonly #launchCustody: LaunchCustodyService | undefined;
+  readonly #projectSessions: ProjectSessionStore;
+  readonly #memberships: ProjectSessionMembershipStore;
+  readonly #intakes: IntakeStore;
+  readonly #gates: ScopedGateStore;
+  readonly #resources: HierarchicalAdmissionStore;
+  readonly #workstreams: CoordinatedWorkstreamStore;
+  readonly #results: AtomicDeliveryStore;
+  readonly #notifications: NotificationOutbox;
+  readonly #notificationWorker: NativeNotificationWorker;
+  readonly #artifactRegistry: ArtifactRegistry;
+  readonly #externalEffects: ExternalEffectService | undefined;
+  readonly #herdr: HerdrDaemonIntegration;
+  readonly #herdrConfigured: boolean;
+  readonly #typedGit: TypedGitService;
+  readonly #trustedGitRegistry: TrustedGitRegistry;
+  readonly #trustedRunGitAllowlists: readonly TrustedRunGitAllowlist[];
+  readonly #fault: (label: string) => void;
 
-  constructor(options: FabricOpenOptions) {
+  constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
     this.#clock = () => {
       const value = clock();
       return value instanceof Date ? value.getTime() : value;
     };
+    this.#fault = options.fault ?? (() => undefined);
     this.#workspaceRoots = [...new Set(options.workspaceRoots.map(canonicalWorkspaceRoot))].sort();
     if (this.#workspaceRoots.length === 0) {
       throw new FabricError("AUTHORITY_WIDENING", "fabric requires at least one configured workspace root");
     }
     this.#database = openFabricDatabase(options.databasePath);
-    upgradeStoredAuthorities(this.#database, this.#workspaceRoots);
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
+    this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
+    this.#maximumConcurrentProviderTurns = options.maximumConcurrentProviderTurns ?? 8;
     this.#providerSessions = new ProviderSessionCoordinator({
       database: this.#database,
       clock: this.#clock,
-      maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
+      maximumConcurrentTurns: this.#maximumConcurrentProviderTurns,
     });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
-    this.#executionProfile = options.executionProfile ?? "headless";
+    this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
+    this.#gates = new ScopedGateStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    this.#externalEffects = options.externalEffects === undefined
+      ? undefined
+      : new ExternalEffectService({
+          database: this.#database,
+          registry: options.externalEffects.registry,
+          evidence: options.externalEffects.evidence,
+          gates: this.#gates,
+          clock: this.#clock,
+        });
+    this.#operatorProjections = new OperatorProjectionStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    this.#gitRepositoryReads = new GitRepositoryReadService({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      privateStateRoot: dirname(realpathSync(options.databasePath)),
+      clock: this.#clock,
+      ...(options.gitHostedChecks === undefined ? {} : { hostedChecks: options.gitHostedChecks }),
+      artifactRegistry: this.#artifactRegistry,
+    });
+    this.#artifactContentReads = new ArtifactContentReadService({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      privateStateRoot: dirname(realpathSync(options.databasePath)),
+    });
+    const privateStateRoot = dirname(realpathSync(options.databasePath));
+    this.#trustedGitRegistry = new TrustedGitRegistry(this.#database, this.#clock);
+    this.#trustedRunGitAllowlists = options.trustedGitConfiguration?.runAllowlists ?? [];
+    if (options.trustedGitConfiguration !== undefined) {
+      this.#trustedGitRegistry.materialize({
+        ...(options.trustedGitConfiguration.executionProfiles === undefined
+          ? {}
+          : { executionProfiles: options.trustedGitConfiguration.executionProfiles }),
+        ...(options.trustedGitConfiguration.remoteRegistrations === undefined
+          ? {}
+          : { remoteRegistrations: options.trustedGitConfiguration.remoteRegistrations }),
+      });
+    }
+    const gitMutationPort = options.gitMutationPort ?? new FixedGitMutationPort({
+      privateStateRoot,
+      clock: this.#clock,
+    });
+    this.#typedGit = new TypedGitService({
+      database: this.#database,
+      gitPort: gitMutationPort,
+      ...(options.gitConflictInspector === undefined ? {} : { conflictInspector: options.gitConflictInspector }),
+      materializeTrustedRunAllowlist: (identity) => {
+        const matching = this.#trustedRunGitAllowlists.filter((allowlist) =>
+          allowlist.projectSessionId === identity.projectSessionId &&
+          allowlist.coordinationRunId === identity.coordinationRunId);
+        if (matching.length > 0) this.#trustedGitRegistry.materialize({ runAllowlists: matching });
+      },
+      clock: this.#clock,
+      daemonInstanceId: `git-owner-${randomBytes(16).toString("hex")}`,
+    });
+    const productionOperatorPorts = createProductionOperatorActionPorts({
+      database: this.#database,
+      clock: this.#clock,
+      adapter: {
+        capabilities: async (adapterId) => await this.#adapterSupervisor.request(adapterId, "capabilities", {}),
+        dispatch: async (adapterId, input) => await this.#adapterSupervisor.request(adapterId, "dispatch", input),
+        lookup: async (adapterId, actionId) => await this.#adapterSupervisor.request(adapterId, "lookup_action", { actionId }),
+      },
+      ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
+      ...(this.#externalEffects === undefined ? {} : { externalEffects: this.#externalEffects }),
+      typedGit: this.#typedGit,
+      retireVolatileProjectSession: (projectSessionId) => {
+        this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
+      },
+    });
+    this.#launchCustody = options.fabricSocketPath === undefined
+      ? undefined
+      : new LaunchCustodyService({
+          database: this.#database,
+          clock: this.#clock,
+          randomCapability: () => `afc_${randomBytes(32).toString("base64url")}`,
+          fabricSocketPath: options.fabricSocketPath,
+          adapterContracts: {
+            inspect: async (adapterId) => await this.#inspectLaunchAdapterContract(adapterId),
+          },
+          adapterEffects: {
+            dispatch: async (handle) => await this.#dispatchLaunchAdapter(handle),
+            lookup: async (input) => await this.#lookupLaunchAdapter(input),
+            hasRetainedChairBridge: (entry) => this.#adapterSupervisor.hasRetainedChairBridge(entry),
+            recoverChair: async (handle) => await this.#dispatchChairRecoveryAdapter(handle),
+            lookupChairRecovery: async (input) => await this.#requestAdapter(
+              input.adapterId,
+              "lookup_action",
+              { actionId: input.actionId },
+            ),
+            lookupRetainedSuccessorBridge: async (input) => (
+              await this.#adapterSupervisor.lookupRetainedSuccessorBridge(input)
+            ),
+            promoteRetainedSuccessorBridge: async (input) => (
+              await this.#adapterSupervisor.promoteRetainedChildBridgeToChair(input)
+            ),
+          },
+          agentEffects: {
+            dispatch: async (handle) => await this.#dispatchAgentAdapter(handle),
+            attachWithoutBridge: async (handle) => await this.#attachWithoutBridge(handle),
+            lookup: async (input) => await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId }),
+            hasRetainedBridge: (result, handle) => this.#adapterSupervisor.hasRetainedChildBridge({
+              runId: handle.runId,
+              agentId: result.agentId,
+              adapterId: result.adapterId,
+              actionId: result.actionId,
+              providerSessionRef: result.providerSessionRef,
+              providerSessionGeneration: result.providerSessionGeneration,
+              bridgeGeneration: result.bridgeGeneration,
+            }),
+          },
+          retireVolatileProjectSession: (projectSessionId) => {
+            this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
+          },
+          retireVolatileChairBridge: (entry) => {
+            this.#adapterSupervisor.retireChairBridge(entry);
+          },
+          daemonInstanceGeneration: () => this.#currentDaemonInstanceGeneration(),
+        });
+    if (this.#launchCustody !== undefined) {
+      this.#adapterSupervisor.setChairBridgeLossHandler((entry, reason) => {
+        this.#launchCustody?.observeChairBridgeLoss({ ...entry, reason });
+      });
+      this.#adapterSupervisor.setChildBridgeLossHandler((entry, reason) => {
+        this.#launchCustody?.observeChildBridgeLoss({ ...entry, reason });
+      });
+    }
+    this.#operatorActions = new OperatorActionStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      statePort: options.operatorActionPorts?.statePort ?? productionOperatorPorts.statePort,
+      effectPort: options.operatorActionPorts?.effectPort ?? productionOperatorPorts.effectPort,
+      ...(this.#launchCustody === undefined ? {} : { launchCustody: this.#launchCustody }),
+      ...(this.#launchCustody === undefined ? {} : { chairRecoveryCustody: this.#launchCustody }),
+      ...(this.#launchCustody === undefined ? {} : { chairLiveHandoffCustody: this.#launchCustody }),
+      clock: this.#clock,
+    });
+    this.#projectSessions = new ProjectSessionStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      commandJournal: this.#commandJournal,
+      clock: this.#clock,
+      retireVolatileProjectSession: (projectSessionId) => {
+        this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
+      },
+    });
+    this.#memberships = new ProjectSessionMembershipStore({
+      database: this.#database,
+      clock: this.#clock,
+    });
+    this.#results = new AtomicDeliveryStore({
+      database: this.#database,
+      clock: this.#clock,
+      artifactRegistry: this.#artifactRegistry,
+      memberships: this.#memberships,
+    });
+    this.#intakes = new IntakeStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+      requestCommitter: {
+        commitTaskRequest: (request) => {
+          const run = rowOrNotFound(this.#database.prepare(`
+            SELECT chair_agent_id FROM runs
+             WHERE run_id=? AND project_session_id=?
+          `).get(request.coordinationRunId, request.projectSessionId), "intake coordination run");
+          return this.#results.request(
+            this.#agentContext(request.coordinationRunId, stringField(run, "chair_agent_id")),
+            request,
+          );
+        },
+      },
+    });
+    this.#resources = new HierarchicalAdmissionStore({ database: this.#database, clock: this.#clock });
+    this.#workstreams = new CoordinatedWorkstreamStore({
+      database: this.#database,
+      clock: this.#clock,
+      commandJournal: this.#commandJournal,
+      resources: this.#resources,
+      createTeam: (runId, actorAgentId, input) => this.createTeam(runId, actorAgentId, input),
+    });
+    this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
+    this.#notificationWorker = new NativeNotificationWorker({
+      outbox: this.#notifications,
+      adapter: new MacOsNativeDesktopAdapter(),
+      workerInstanceId: `native-notification-${randomBytes(16).toString("hex")}`,
+      integrationId: "native-desktop",
+      clock: this.#clock,
+    });
+    this.#herdr = new HerdrDaemonIntegration({
+      database: this.#database,
+      configuration: options.herdr ?? { mode: "disabled" },
+      clock: this.#clock,
+    });
+    this.#herdrConfigured = options.herdr !== undefined;
   }
 
-  #selectWorkspaceRoot(
-    projectRunDirectory: string | undefined,
-    requestedWorkspaceRoot: string | undefined,
-  ): { workspaceRoot: string; projectRunDirectory: string | null } {
-    if (requestedWorkspaceRoot !== undefined) {
-      if (!isAbsoluteOnAnyPlatform(requestedWorkspaceRoot)) {
-        throw new FabricError("AUTHORITY_WIDENING", "requested workspace root must be absolute");
-      }
-      const workspaceRoot = canonicalPath(requestedWorkspaceRoot);
-      const trusted = this.#workspaceRoots.some((root) => {
-        const rel = relative(root, workspaceRoot);
-        return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-      });
-      if (!trusted) {
-        throw new FabricError("AUTHORITY_WIDENING", "requested workspace root is outside configured workspace roots");
-      }
-      if (projectRunDirectory === undefined) return { workspaceRoot, projectRunDirectory: null };
-      if (!isAbsoluteOnAnyPlatform(projectRunDirectory)) {
-        throw new FabricError("AUTHORITY_WIDENING", "project run directory must be absolute");
-      }
-      const canonicalDirectory = canonicalPath(projectRunDirectory);
-      const rel = relative(workspaceRoot, canonicalDirectory);
-      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-        throw new FabricError("AUTHORITY_WIDENING", "project run directory is outside the requested workspace root");
-      }
-      return { workspaceRoot, projectRunDirectory: canonicalDirectory };
-    }
-    if (projectRunDirectory === undefined) {
-      if (this.#workspaceRoots.length !== 1) {
-        throw new FabricError("AUTHORITY_WIDENING", "run workspace root is ambiguous without a project run directory");
-      }
-      const workspaceRoot = this.#workspaceRoots[0];
-      if (workspaceRoot === undefined) throw new Error("configured workspace root is unavailable");
-      return { workspaceRoot, projectRunDirectory: null };
-    }
-    if (!isAbsoluteOnAnyPlatform(projectRunDirectory)) {
-      throw new FabricError("AUTHORITY_WIDENING", "project run directory must be absolute");
-    }
-    const canonicalDirectory = canonicalPath(projectRunDirectory);
-    const candidates = this.#workspaceRoots.filter((root) => {
-      const rel = relative(root, canonicalDirectory);
-      return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  /** Trusted in-process daemon composition only; no protocol operation dispatches here. */
+  materializeTrustedGitConfiguration(configuration: TrustedGitConfiguration): {
+    profiles: number;
+    remotes: number;
+    runAllowlists: number;
+  } {
+    return this.#trustedGitRegistry.materialize(configuration);
+  }
+
+  async executeHerdrAction(request: HerdrDaemonActionRequest): Promise<HerdrDaemonActionResult> {
+    return await this.#herdr.executeAction(request);
+  }
+
+  async executeHerdrDirectSteer(request: HerdrDirectSteerRequest): Promise<HerdrDaemonActionResult> {
+    return await this.#herdr.executeDirectSteer(request);
+  }
+
+  async runHerdrPresencePass(): Promise<import("../integrations/herdr-daemon-integration.js").HerdrPresencePassResult> {
+    return await this.#herdr.runPresencePass();
+  }
+
+  recoverDaemonRuntimeEpoch(input: {
+    instanceGeneration: number;
+    instanceId: string;
+  }): ReturnType<typeof recoverRuntimeEpoch> {
+    return recoverRuntimeEpoch(this.#database, {
+      ...input,
+      now: this.#clock(),
     });
-    if (candidates.length === 0) {
-      throw new FabricError("AUTHORITY_WIDENING", "project run directory is outside configured workspace roots");
-    }
-    candidates.sort((left, right) => right.length - left.length);
-    const workspaceRoot = candidates[0];
-    if (workspaceRoot === undefined) throw new Error("selected workspace root is unavailable");
-    return { workspaceRoot, projectRunDirectory: canonicalDirectory };
+  }
+
+  markDaemonRuntimeRunning(instanceGeneration: number): ReturnType<typeof markRuntimeEpochRunning> {
+    return markRuntimeEpochRunning(this.#database, {
+      instanceGeneration,
+      now: this.#clock(),
+    });
+  }
+
+  async attemptIdleStop(input: {
+    actionId: string;
+    daemonInstanceGeneration: number;
+    election: IdleElectionPort;
+    closeSocket(): Promise<void>;
+    reopenSocket(): Promise<void>;
+  }): Promise<IdleStopResult> {
+    return await attemptRuntimeIdleStop({
+      ...input,
+      database: this.#database,
+      clock: this.#clock,
+    });
+  }
+
+  async runNativeNotificationPass(): Promise<NotificationWorkerPassResult> {
+    return await this.#notificationWorker.runOnce();
+  }
+
+  runResultDeadlinePass(input: ResultDeadlinePassInput): ResultDeadlinePassResult {
+    return this.#results.sweepDeadlines(input);
+  }
+
+  async attemptDrainedStop(input: {
+    actionId: string;
+    token: QuiesceToken;
+    excludeOperatorEffectCustodyId?: string;
+    election: IdleElectionPort;
+    closeSocket(): Promise<void>;
+    reopenSocket(): Promise<void>;
+  }): Promise<IdleStopResult> {
+    return await attemptRuntimeDrainedStop({
+      ...input,
+      database: this.#database,
+      clock: this.#clock,
+    });
+  }
+
+  recordDaemonStopCustodyResult(input: {
+    custodyId: string;
+    resultCorrelationDigest: string;
+    operatorId: string;
+    projectId: string;
+    projectSessionId: string;
+    principalGeneration: number;
+    commandId: string;
+    daemonInstanceGeneration: number;
+    state: "stopped" | "failed" | "rejected";
+    result: unknown;
+  }): void {
+    const persist = this.#database.transaction(() => {
+      const resultJson = canonicalJson(input.result);
+      const changed = this.#database.prepare(`
+        UPDATE operator_daemon_stop_custody SET state=?, result_json=?, updated_at=?
+         WHERE custody_id=? AND result_correlation_digest=?
+           AND operator_id=? AND project_id=? AND project_session_id=? AND command_id=?
+           AND principal_generation=? AND daemon_instance_generation=? AND operation='daemon-stop'
+           AND state IN ('prepared','scheduled')
+      `).run(
+        input.state,
+        resultJson,
+        this.#clock(),
+        input.custodyId,
+        input.resultCorrelationDigest,
+        input.operatorId,
+        input.projectId,
+        input.projectSessionId,
+        input.commandId,
+        input.principalGeneration,
+        input.daemonInstanceGeneration,
+      );
+      if (changed.changes !== 1) {
+        const existing = this.#database.prepare(`
+          SELECT state, result_json FROM operator_daemon_stop_custody
+           WHERE custody_id=? AND result_correlation_digest=?
+             AND operator_id=? AND project_id=? AND project_session_id=?
+             AND principal_generation=? AND command_id=?
+             AND daemon_instance_generation=? AND operation='daemon-stop'
+        `).get(
+          input.custodyId,
+          input.resultCorrelationDigest,
+          input.operatorId,
+          input.projectId,
+          input.projectSessionId,
+          input.principalGeneration,
+          input.commandId,
+          input.daemonInstanceGeneration,
+        );
+        if (!isRow(existing) || existing.state !== input.state || existing.result_json !== resultJson) {
+          throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop custody result correlation changed");
+        }
+      }
+
+      const terminalOutcome = input.state === "stopped"
+        ? canonicalJson({ status: "committed", afterState: { lifecycleState: "stopped" } })
+        : input.state === "rejected"
+          ? canonicalJson({ status: "rejected", code: "state-changed", evidenceRefs: [] })
+          : null;
+      const effectState = input.state === "stopped"
+        ? "terminal"
+        : input.state;
+      const effectChanged = terminalOutcome === null
+        ? this.#database.prepare(`
+            UPDATE operator_effect_custody SET state='failed', updated_at=?
+             WHERE custody_id=? AND operator_id=? AND project_id=? AND project_session_id=?
+               AND principal_generation=? AND command_id=? AND operation='stop' AND state='dispatching'
+          `).run(
+            this.#clock(),
+            input.custodyId,
+            input.operatorId,
+            input.projectId,
+            input.projectSessionId,
+            input.principalGeneration,
+            input.commandId,
+          )
+        : this.#database.prepare(`
+            UPDATE operator_effect_custody SET state=?, outcome_json=?, updated_at=?
+             WHERE custody_id=? AND operator_id=? AND project_id=? AND project_session_id=?
+               AND principal_generation=? AND command_id=? AND operation='stop' AND state='dispatching'
+          `).run(
+            effectState,
+            terminalOutcome,
+            this.#clock(),
+            input.custodyId,
+            input.operatorId,
+            input.projectId,
+            input.projectSessionId,
+            input.principalGeneration,
+            input.commandId,
+          );
+      if (effectChanged.changes === 1) return;
+      const existingEffect = this.#database.prepare(`
+        SELECT state, outcome_json FROM operator_effect_custody
+         WHERE custody_id=? AND operator_id=? AND project_id=? AND project_session_id=?
+           AND principal_generation=? AND command_id=? AND operation='stop'
+      `).get(
+        input.custodyId,
+        input.operatorId,
+        input.projectId,
+        input.projectSessionId,
+        input.principalGeneration,
+        input.commandId,
+      );
+      if (
+        !isRow(existingEffect) || existingEffect.state !== effectState ||
+        (terminalOutcome !== null && existingEffect.outcome_json !== terminalOutcome)
+      ) {
+        throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop effect custody finalization changed");
+      }
+    });
+    persist();
+  }
+
+  provisionLocalOperator(input: LocalOperatorProvisioningInput): LocalOperatorProvisioningResult {
+    return this.#operatorStore.provisionLocalOperator(input);
+  }
+
+  openLocalOperatorConsoleCapability(
+    input: LocalOperatorConsoleCapabilityInput,
+  ): LocalOperatorConsoleCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleCapability(input);
+  }
+
+  issueLocalOperatorSessionCapability(
+    input: LocalOperatorSessionCapabilityInput,
+  ): LocalOperatorSessionCapabilityResult {
+    return this.#operatorStore.issueLocalOperatorSessionCapability(input);
+  }
+
+  openLocalOperatorConsoleSessionCapability(
+    input: Omit<LocalOperatorSessionCapabilityInput, "fresh">,
+  ): LocalOperatorConsoleSessionCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleSessionCapability(input);
+  }
+
+  rotateLocalOperatorPrincipal(
+    input: LocalOperatorPrincipalRotationInput,
+  ): LocalOperatorPrincipalRotationResult {
+    return this.#operatorStore.rotatePrincipal(input);
   }
 
   #workspaceRootForRun(runId: string): string {
@@ -789,7 +1352,40 @@ export class Fabric {
     return stringField(run, "workspace_root");
   }
 
+  #agentContext(runId: string, agentId: string): AuthenticatedAgentContext {
+    const identity = rowOrNotFound(this.#database.prepare(`
+      SELECT r.project_session_id, c.principal_generation
+        FROM runs r
+        JOIN capabilities c ON c.run_id=r.run_id AND c.agent_id=?
+       WHERE r.run_id=? AND c.revoked_at IS NULL
+       ORDER BY c.principal_generation DESC
+       LIMIT 1
+    `).get(agentId, runId), "authenticated agent context");
+    return {
+      agentId: agentId as never,
+      projectSessionId: stringField(identity, "project_session_id") as never,
+      coordinationRunId: runId as never,
+      principalGeneration: numberField(identity, "principal_generation"),
+    };
+  }
+
   async close(): Promise<void> {
+    this.#closing = true;
+    if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
+    this.#deferredProviderPumpTimer = undefined;
+    this.#abandonDeferredProviderActions();
+    while (
+      this.#activeProviderOperations.size > 0 ||
+      this.#ownedProviderActions.size > 0 ||
+      this.#lifecycleProviderActions.size > 0
+    ) {
+      await Promise.allSettled([
+        ...this.#activeProviderOperations,
+        ...this.#ownedProviderActions.values(),
+        ...this.#lifecycleProviderActions.values(),
+      ]);
+      this.#abandonDeferredProviderActions();
+    }
     await this.#adapterSupervisor.close();
     if (this.#database.open) {
       this.#database.pragma("wal_checkpoint(TRUNCATE)");
@@ -802,6 +1398,426 @@ export class Fabric {
     return await this.#adapterSupervisor.request(adapterId, method, params);
   }
 
+  async #trackProviderOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#closing) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider operation cannot start while Fabric is closing");
+    }
+    let settle = (): void => undefined;
+    const tracked = new Promise<void>((resolvePromise) => {
+      settle = resolvePromise;
+    });
+    this.#activeProviderOperations.add(tracked);
+    try {
+      return await operation();
+    } finally {
+      this.#activeProviderOperations.delete(tracked);
+      settle();
+    }
+  }
+
+  #providerActionOwnershipKey(runId: string, actionId: string): string {
+    return `${runId}\u0000${actionId}`;
+  }
+
+  #enqueueDeferredProviderAction(input: {
+    runId: string;
+    actionId: string;
+    execute: () => Promise<ProviderActionResult>;
+  }): void {
+    if (this.#closing) return;
+    const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
+    if (this.#ownedProviderActions.has(key)) return;
+    let settle = (): void => undefined;
+    const tracked = new Promise<void>((resolvePromise) => {
+      settle = resolvePromise;
+    });
+    this.#ownedProviderActions.set(key, tracked);
+    this.#deferredProviderActions.push({ key, ...input, settle });
+    this.#pumpDeferredProviderActions();
+  }
+
+  #abandonDeferredProviderActions(): void {
+    let work = this.#deferredProviderActions.shift();
+    while (work !== undefined) {
+      this.#ownedProviderActions.delete(work.key);
+      work.settle();
+      work = this.#deferredProviderActions.shift();
+    }
+  }
+
+  #claimDeferredProviderAction(runId: string, actionId: string): "claimed" | "blocked" | "stale" {
+    return this.#database.transaction(() => {
+      const action = this.#database.prepare(`
+        SELECT status FROM provider_actions WHERE run_id=? AND action_id=?
+      `).get(runId, actionId);
+      if (!isRow(action) || action.status !== "prepared") return "stale";
+      const active = rowOrNotFound(this.#database.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM provider_session_turn_leases
+            WHERE status IN ('active','quarantined')) +
+          (SELECT COUNT(*) FROM provider_actions
+            WHERE budget_authority_id IS NOT NULL
+              AND status IN ('dispatched','ambiguous','quarantined')) AS count
+      `).get(), "active provider turn count");
+      if (numberField(active, "count") >= this.#maximumConcurrentProviderTurns) return "blocked";
+      const claimed = this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='dispatched',history_json='["prepared","dispatched"]',
+               execution_count=1,updated_at=?
+         WHERE run_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), runId, actionId);
+      return claimed.changes === 1 ? "claimed" : "stale";
+    })();
+  }
+
+  #pumpDeferredProviderActions(): void {
+    if (this.#closing || this.#pumpingDeferredProviderActions) return;
+    this.#pumpingDeferredProviderActions = true;
+    try {
+      while (this.#deferredProviderActions.length > 0) {
+        const work = this.#deferredProviderActions[0];
+        if (work === undefined) return;
+        const claim = this.#claimDeferredProviderAction(work.runId, work.actionId);
+        if (claim === "blocked") return;
+        this.#deferredProviderActions.shift();
+        if (claim === "stale") {
+          this.#ownedProviderActions.delete(work.key);
+          work.settle();
+          continue;
+        }
+        void work.execute()
+          .catch(() => undefined)
+          .finally(() => {
+            this.#ownedProviderActions.delete(work.key);
+            work.settle();
+            this.#pumpDeferredProviderActions();
+          });
+      }
+    } finally {
+      this.#pumpingDeferredProviderActions = false;
+      this.#scheduleDeferredProviderPump();
+    }
+  }
+
+  #scheduleDeferredProviderPump(): void {
+    if (this.#closing || this.#deferredProviderActions.length === 0) {
+      if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
+      this.#deferredProviderPumpTimer = undefined;
+      return;
+    }
+    if (this.#deferredProviderPumpTimer !== undefined) return;
+    this.#deferredProviderPumpTimer = setTimeout(() => {
+      this.#deferredProviderPumpTimer = undefined;
+      this.#pumpDeferredProviderActions();
+    }, 100);
+    this.#deferredProviderPumpTimer.unref();
+  }
+
+  #settleProviderTurnAndPump(
+    runId: string,
+    actionId: string,
+    status: "terminal" | "ambiguous" | "quarantined",
+  ): void {
+    this.#providerSessions.settleTurn(runId, actionId, status);
+    this.#pumpDeferredProviderActions();
+  }
+
+  #assertGenericProviderAction(runId: string, actionId: string): void {
+    if (this.#database.prepare(`
+      SELECT 1
+        FROM provider_actions p
+        JOIN project_session_launch_custody c
+          ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+       WHERE p.run_id=? AND p.action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "launch provider actions mutate only through launch custody");
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM provider_agent_custody WHERE run_id=? AND action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM lifecycle_rotation_custody WHERE run_id=? AND action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "lifecycle provider actions mutate only through lifecycle custody");
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM provider_actions
+       WHERE run_id=? AND action_id=? AND adapter_id=?
+    `).get(runId, actionId, HERDR_CONTROL_ADAPTER_ID) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "Herdr actions mutate only through Herdr integration custody");
+    }
+    if (this.#database.prepare(`
+      SELECT 1
+        FROM provider_actions p
+        JOIN chair_bridge_recovery_custody c
+          ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+       WHERE p.run_id=? AND p.action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "chair recovery provider actions mutate only through chair recovery custody");
+    }
+  }
+
+  async #inspectLaunchAdapterContract(adapterId: string): Promise<LaunchAdapterContract> {
+    const capabilities = await this.#requestAdapter(adapterId, "capabilities", {});
+    assertAdapterOperation(capabilities, "launch_chair");
+    if (!isRow(capabilities) || !Object.hasOwn(capabilities, "chairLaunch")) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "adapter does not advertise a chair launch contract");
+    }
+    return parseLaunchAdapterContract(capabilities.chairLaunch);
+  }
+
+  async #inspectAgentBridgeContract(
+    adapterId: string,
+    operation: "spawn" | "attach",
+  ): Promise<AgentBridgeCapability | undefined> {
+    const capabilities = await this.#requestAdapter(adapterId, "capabilities", {});
+    assertAdapterOperation(capabilities, operation);
+    if (!isRow(capabilities) || capabilities.agentBridge === undefined) return undefined;
+    return parseAgentBridgeCapability(capabilities.agentBridge);
+  }
+
+  async #dispatchAgentAdapter(handle: AgentDispatchHandle): Promise<unknown> {
+    if (handle.capability === undefined || handle.socketPath === undefined || handle.expectedPrincipal === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "agent bridge private handoff is unavailable");
+    }
+    return await this.#adapterSupervisor.provisionAgent(
+      handle.adapterId,
+      {
+        schemaVersion: 1,
+        runId: handle.runId,
+        operation: handle.operation,
+        actionId: handle.actionId,
+        targetAgentId: handle.targetAgentId,
+        authorityId: handle.authorityId,
+        bridgeGeneration: handle.bridgeGeneration,
+        bridgeContractDigest: handle.bridgeContractDigest,
+        payload: handle.publicPayload,
+        ...(handle.requestedProviderSessionRef === undefined
+          ? {}
+          : { providerSessionRef: handle.requestedProviderSessionRef }),
+      },
+      {
+        capability: handle.capability,
+        socketPath: handle.socketPath,
+        expectedPrincipal: handle.expectedPrincipal,
+      },
+    );
+  }
+
+  async #attachWithoutBridge(handle: AgentDispatchHandle): Promise<unknown> {
+    if (handle.operation !== "attach" || handle.requestedProviderSessionRef === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "bridge-less custody is attach-only");
+    }
+    const result = await this.#requestAdapter(handle.adapterId, "attach", {
+      actionId: handle.actionId,
+      resumeReference: handle.requestedProviderSessionRef,
+      ...handle.publicPayload,
+    });
+    if (!isRow(result)) throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter attach returned no typed result");
+    return {
+      providerSessionRef: typeof result.resumeReference === "string"
+        ? result.resumeReference
+        : handle.requestedProviderSessionRef,
+      providerSessionGeneration: typeof result.providerSessionGeneration === "number"
+        ? result.providerSessionGeneration
+        : 1,
+    };
+  }
+
+  #currentDaemonInstanceGeneration(): number {
+    const current = this.#database.prepare(`
+      SELECT instance_generation FROM daemon_runtime_epochs
+       WHERE state IN ('starting','running','quiescing')
+       ORDER BY instance_generation DESC LIMIT 1
+    `).get();
+    return isRow(current) && typeof current.instance_generation === "number"
+      ? current.instance_generation
+      : 1;
+  }
+
+  #launchResourceUsage(providerAdapterId: string, providerActionId: string): Record<string, "unknown"> {
+    const reservation = rowOrNotFound(this.#database.prepare(`
+      SELECT r.amounts_json
+        FROM project_session_launch_custody c
+        JOIN resource_reservations r ON r.reservation_id=c.reservation_id
+       WHERE c.provider_adapter_id=? AND c.provider_action_id=?
+    `).get(providerAdapterId, providerActionId), "launch resource reservation");
+    const amounts: unknown = JSON.parse(stringField(reservation, "amounts_json"));
+    if (!isRow(amounts) || Object.values(amounts).some((value) => !Number.isSafeInteger(value) || Number(value) < 0)) {
+      throw new Error("launch reservation amounts are invalid");
+    }
+    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [unit, "unknown"]));
+  }
+
+  #terminalLaunchOutcome(
+    handle: Pick<LaunchDispatchHandle, "providerAdapterId" | "providerActionId" | "providerContractDigest" | "attestationChallengeDigest">,
+    raw: unknown,
+    observationKind: "dispatch-return" | "lookup",
+  ): unknown {
+    const result = parseChairLaunchProviderResult(raw, {
+      providerAdapterId: handle.providerAdapterId,
+      providerActionId: handle.providerActionId,
+      providerContractDigest: handle.providerContractDigest,
+      challengeDigest: handle.attestationChallengeDigest,
+    });
+    const effectEvidence = {
+      schemaVersion: 1,
+      providerAdapterId: handle.providerAdapterId,
+      providerActionId: handle.providerActionId,
+      providerContractDigest: handle.providerContractDigest,
+      resumeReference: result.resumeReference,
+      providerSessionGeneration: result.providerSessionGeneration,
+      fabricContinuity: result.fabricContinuity,
+    };
+    return {
+      schemaVersion: 1,
+      providerAdapterId: handle.providerAdapterId,
+      providerActionId: handle.providerActionId,
+      providerContractDigest: handle.providerContractDigest,
+      observationKind,
+      observedAt: new Date(this.#clock()).toISOString(),
+      outcome: {
+        kind: "terminal-success",
+        providerSessionRef: result.resumeReference,
+        providerSessionGeneration: result.providerSessionGeneration,
+        effectDigest: sha256Digest(canonicalJson(effectEvidence)),
+        resourceUsage: this.#launchResourceUsage(handle.providerAdapterId, handle.providerActionId),
+      },
+    };
+  }
+
+  #ambiguousLaunchOutcome(
+    input: Pick<LaunchDispatchHandle, "providerAdapterId" | "providerActionId" | "providerContractDigest">,
+    reasonCode: "absent" | "transport-error" | "adapter-error" | "malformed" | "incomplete" | "conflict" | "missing-resume-reference",
+    evidence: unknown,
+  ): unknown {
+    return {
+      schemaVersion: 1,
+      providerAdapterId: input.providerAdapterId,
+      providerActionId: input.providerActionId,
+      providerContractDigest: input.providerContractDigest,
+      observationKind: "lookup",
+      observedAt: new Date(this.#clock()).toISOString(),
+      outcome: {
+        kind: "ambiguous",
+        reasonCode,
+        evidenceDigest: evidence === null ? null : sha256Digest(canonicalJson(evidence)),
+      },
+    };
+  }
+
+  async #dispatchLaunchAdapter(handle: LaunchDispatchHandle): Promise<unknown> {
+    const result = await this.#adapterSupervisor.launchChair(
+      handle.providerAdapterId,
+      {
+        schemaVersion: 1,
+        actionId: handle.providerActionId,
+        providerContractDigest: handle.providerContractDigest,
+        payload: handle.publicPayload,
+      },
+      {
+        capability: handle.capability,
+        socketPath: handle.socketPath,
+        attestationChallenge: handle.attestationChallenge,
+        expectedPrincipal: handle.expectedPrincipal,
+      },
+    );
+    if (!this.#adapterSupervisor.hasRetainedChairBridge({
+      ...handle.expectedPrincipal,
+      adapterId: handle.providerAdapterId,
+      actionId: handle.providerActionId,
+      providerSessionRef: result.resumeReference,
+      providerSessionGeneration: result.providerSessionGeneration,
+      bridgeGeneration: 1,
+    })) {
+      throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", "chair bridge closed before launch activation");
+    }
+    return this.#terminalLaunchOutcome(handle, result, "dispatch-return");
+  }
+
+  async #dispatchChairRecoveryAdapter(handle: ChairRecoveryDispatchHandle): Promise<unknown> {
+    if (
+      handle.intent.path !== "rebind" || handle.capability === undefined ||
+      handle.attestationChallenge === undefined || handle.socketPath === undefined
+    ) throw new FabricError("CAPABILITY_UNAVAILABLE", "chair recovery private handoff is unavailable");
+    const loss = rowOrNotFound(this.#database.prepare(`
+      SELECT loss.*, action.payload_json
+        FROM chair_bridge_losses loss
+        JOIN provider_actions action
+          ON action.adapter_id=loss.provider_adapter_id AND action.action_id=loss.provider_action_id
+       WHERE loss.loss_id=?
+    `).get(handle.intent.lossId), "chair recovery loss");
+    const oldPayload: unknown = JSON.parse(stringField(loss, "payload_json"));
+    const providerPayload = isRow(oldPayload) && isRow(oldPayload.input) ? oldPayload.input : {};
+    const result = await this.#adapterSupervisor.recoverChair(
+      handle.intent.providerAdapterId,
+      {
+        schemaVersion: 1,
+        recoveryId: handle.recoveryId,
+        lossId: handle.intent.lossId,
+        actionId: handle.intent.providerActionId,
+        providerContractDigest: handle.intent.providerContractDigest,
+        resumeReference: stringField(loss, "provider_session_ref"),
+        expectedProviderSessionGeneration: handle.intent.expectedProviderSessionGeneration,
+        nextProviderSessionGeneration: handle.intent.expectedProviderSessionGeneration + 1,
+        bridgeGeneration: handle.intent.expectedLostBridgeGeneration + 1,
+        payload: providerPayload,
+      },
+      {
+        capability: handle.capability,
+        socketPath: handle.socketPath,
+        attestationChallenge: handle.attestationChallenge,
+        expectedPrincipal: {
+          agentId: stringField(loss, "chair_agent_id"),
+          projectSessionId: handle.intent.projectSessionId,
+          runId: handle.intent.coordinationRunId,
+          principalGeneration: handle.intent.expectedPrincipalGeneration + 1,
+        },
+      },
+    );
+    return {
+      schemaVersion: 1,
+      recoveryId: handle.recoveryId,
+      providerAdapterId: handle.intent.providerAdapterId,
+      providerActionId: handle.intent.providerActionId,
+      providerContractDigest: handle.intent.providerContractDigest,
+      providerSessionRef: result.resumeReference,
+      providerSessionGeneration: result.providerSessionGeneration,
+      activationEvidenceDigest: sha256Digest(canonicalJson(result.fabricContinuity)),
+    };
+  }
+
+  async #lookupLaunchAdapter(input: Pick<
+    LaunchDispatchHandle,
+    "providerAdapterId" | "providerActionId" | "providerContractDigest" | "attestationChallengeDigest"
+  >): Promise<unknown> {
+    let record: unknown;
+    try {
+      record = await this.#requestAdapter(input.providerAdapterId, "lookup_action", {
+        actionId: input.providerActionId,
+      });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === "ACTION_NOT_FOUND") {
+        return this.#ambiguousLaunchOutcome(input, "absent", null);
+      }
+      throw error;
+    }
+    if (!isRow(record)) return this.#ambiguousLaunchOutcome(input, "malformed", record);
+    if (record.status === "terminal") {
+      try {
+        return this.#terminalLaunchOutcome(input, record.result, "lookup");
+      } catch {
+        return this.#ambiguousLaunchOutcome(input, "malformed", record);
+      }
+    }
+    if (record.status === "ambiguous" || record.status === "accepted" || record.status === "dispatched" || record.status === "prepared") {
+      return this.#ambiguousLaunchOutcome(input, "incomplete", record);
+    }
+    return this.#ambiguousLaunchOutcome(input, "conflict", record);
+  }
+
   async recoverStartupState(): Promise<{
     actionsReconciled: number;
     actionsQuarantined: number;
@@ -809,6 +1825,13 @@ export class Fabric {
     sessionsDegraded: number;
     deliveriesReleased: number;
   }> {
+    this.#results.recover();
+    this.#notifications.recover();
+    await this.#launchCustody?.recover();
+    await this.#externalEffects?.recover();
+    await this.#herdr.recover();
+    if (this.#herdrConfigured) await this.#herdr.runPresencePass();
+    await this.#typedGit.recover();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")
@@ -827,10 +1850,24 @@ export class Fabric {
     let actionsQuarantined = 0;
     const pendingActions = this.#database.prepare(`
       SELECT p.run_id, p.action_id, p.adapter_id, p.status, p.updated_at, r.chair_agent_id
-        FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
+       FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
        WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
+         AND p.adapter_id<>?
+         AND json_type(p.payload_json, '$.operatorCommandId') IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM project_session_launch_custody c
+            WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM provider_agent_custody c
+            WHERE c.adapter_id=p.adapter_id AND c.action_id=p.action_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM chair_bridge_recovery_custody c
+            WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+         )
        ORDER BY p.updated_at, p.action_id
-    `).all();
+    `).all(HERDR_CONTROL_ADAPTER_ID);
     for (const value of pendingActions) {
       const action = rowOrNotFound(value, "startup provider action");
       const runId = stringField(action, "run_id");
@@ -848,27 +1885,15 @@ export class Fabric {
         actionsQuarantined += 1;
       }
     }
-    for (const intent of this.#providerSessions.recoverableLifecycleIntents()) {
-      try {
-        this.registerAgent(intent.runId, intent.actorAgentId, {
-          agentId: intent.targetAgentId,
-          authorityId: intent.authorityId,
-          providerSessionRef: intent.providerResumeReference,
-          adapterId: intent.adapterId,
-        });
-        this.#providerSessions.finalizeLifecycleIntent(intent.runId, intent.actionId);
-      } catch (error: unknown) {
-        this.#event(intent.runId, "startup-lifecycle-intent-quarantined", intent.actorAgentId, {
-          actionId: intent.actionId,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
     let sessionsDegraded = 0;
     const sessions = this.#database.prepare(`
       SELECT a.run_id, a.agent_id, a.provider_session_ref, b.adapter_id
         FROM agents a JOIN agent_adapter_bindings b ON b.run_id = a.run_id AND b.agent_id = a.agent_id
        WHERE a.provider_session_ref IS NOT NULL AND a.lifecycle NOT IN ('archived', 'suspended')
+         AND NOT EXISTS (
+           SELECT 1 FROM project_session_launch_custody launch
+            WHERE launch.coordination_run_id=a.run_id AND launch.chair_agent_id=a.agent_id
+         )
     `).all();
     for (const value of sessions) {
       const session = rowOrNotFound(value, "startup provider session");
@@ -896,87 +1921,970 @@ export class Fabric {
     return { actionsReconciled, actionsQuarantined, leasesQuarantined: expiredLeases.length, sessionsDegraded, deliveriesReleased };
   }
 
-  async createRun(input: RunCreation): Promise<{
-    runId: string;
-    chairAuthorityId: string;
-    chairCapability: string;
-  }> {
-    const location = this.#selectWorkspaceRoot(input.projectRunDirectory, input.workspaceRoot);
-    const authority = normaliseAuthority(input.chair.authority, location.workspaceRoot);
-    const existing = this.#database.prepare(`
-      SELECT r.chair_agent_id, r.workspace_root, r.project_run_directory, g.authority_id, a.authority_hash,
-             c.principal_generation, c.revoked_at
-        FROM runs r JOIN agents g ON g.run_id = r.run_id AND g.agent_id = r.chair_agent_id
-        JOIN authorities a ON a.authority_id = g.authority_id
-        JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
-       WHERE r.run_id = ? ORDER BY c.principal_generation DESC LIMIT 1
-    `).get(input.runId);
-    if (isRow(existing)) {
-      if (existing.chair_agent_id !== input.chair.agentId || existing.workspace_root !== location.workspaceRoot || existing.project_run_directory !== location.projectRunDirectory || existing.authority_hash !== sha256(canonicalJson(authority))) {
-        throw new FabricError("DEDUPE_CONFLICT", "run ID was reused with changed creation input");
-      }
-      if (existing.revoked_at !== null) throw new FabricError("AUTHENTICATION_FAILED", "chair capability was revoked");
-      const generation = numberField(existing, "principal_generation");
-      return { runId: input.runId, chairAuthorityId: stringField(existing, "authority_id"), chairCapability: capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, generation) };
+  bindCurrentMcpSeats(input: CurrentMcpSeatBindingInput): CurrentMcpSeatBindingResult {
+    const canonicalRoot = canonicalWorkspaceRoot(input.canonicalRoot);
+    if (canonicalRoot !== input.canonicalRoot) {
+      throw new FabricError("AUTHORITY_WIDENING", "MCP binding requires the exact canonical project root");
     }
-    const authorityId = uuidv7();
-    const token = capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, 1);
-    const now = this.#clock();
-    this.#database.transaction(() => {
-      this.#database.prepare("INSERT INTO runs(run_id, chair_agent_id, workspace_root, project_run_directory, created_at) VALUES (?, ?, ?, ?, ?)").run(
-        input.runId,
-        input.chair.agentId,
-        location.workspaceRoot,
-        location.projectRunDirectory,
-        now,
-      );
-      this.#database
-        .prepare(
-          "INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at) VALUES (?, ?, NULL, ?, ?, ?)",
-        )
-        .run(authorityId, input.runId, canonicalJson(authority), sha256(canonicalJson(authority)), now);
-      for (const [unitKey, granted] of Object.entries(authority.budget)) {
-        this.#database
-          .prepare("INSERT INTO authority_budget(authority_id, unit_key, granted) VALUES (?, ?, ?)")
-          .run(authorityId, unitKey, granted);
+    if (!this.#workspaceRoots.some((root) => pathContains(root, canonicalRoot))) {
+      throw new FabricError("AUTHORITY_WIDENING", "MCP binding project root is not configured");
+    }
+    const expiresAt = Date.parse(input.expiresAt);
+    if (!Number.isFinite(expiresAt) || new Date(expiresAt).toISOString() !== input.expiresAt || expiresAt <= this.#clock()) {
+      throw new FabricError("AUTHENTICATION_FAILED", "MCP seat credential expiry is invalid or elapsed");
+    }
+    if (input.bindings.length === 0) throw new FabricError("DEDUPE_CONFLICT", "MCP seat binding roster is empty");
+    const seatIds = input.bindings.map(({ seat }) => seat);
+    const agentIds = input.bindings.map(({ agentId }) => agentId);
+    if (new Set(seatIds).size !== seatIds.length || new Set(agentIds).size !== agentIds.length) {
+      throw new FabricError("DEDUPE_CONFLICT", "MCP seat bindings must name distinct seats and agents");
+    }
+    const chairBinding = input.bindings.find(({ agentId }) => agentId === input.chairAgentId);
+    if (chairBinding === undefined) {
+      throw new FabricError("DEDUPE_CONFLICT", "MCP seat bindings do not contain the exact current chair");
+    }
+    const derivedGeneration = currentMcpSeatGeneration({
+      canonicalRoot,
+      projectSessionId: input.projectSessionId,
+      sessionRevision: input.expectedSessionRevision,
+      sessionGeneration: input.expectedSessionGeneration,
+      runId: input.runId,
+      runRevision: input.expectedRunRevision,
+      chairAgentId: input.chairAgentId,
+      chairGeneration: input.expectedChairGeneration,
+      chairLeaseId: input.chairLeaseId,
+      expiresAt: input.expiresAt,
+      bindings: input.bindings,
+    });
+    if (input.generation !== derivedGeneration.generation) {
+      throw new FabricError("DEDUPE_CONFLICT", "MCP seat generation does not match its immutable binding");
+    }
+
+    return this.#database.transaction((): CurrentMcpSeatBindingResult => {
+      const identity = rowOrNotFound(this.#database.prepare(`
+        SELECT project.project_id, project.canonical_root, session.state AS session_state,
+               session.revision AS session_revision, session.generation AS session_generation,
+               session.origin_kind, session.origin_operator_id,
+               run.lifecycle_state AS run_state, run.revision AS run_revision,
+               run.chair_agent_id, run.chair_generation, run.chair_lease_id,
+               lease.holder_agent_id, lease.generation AS lease_generation, lease.status AS lease_status
+          FROM project_sessions session
+          JOIN projects project ON project.project_id=session.project_id
+          JOIN runs run ON run.project_session_id=session.project_session_id
+          JOIN run_chair_leases lease
+            ON lease.project_session_id=run.project_session_id
+           AND lease.run_id=run.run_id
+           AND lease.lease_id=run.chair_lease_id
+         WHERE session.project_session_id=? AND run.run_id=?
+      `).get(input.projectSessionId, input.runId), "current MCP project-session/run identity");
+      const currentStates = new Set(["active", "visibility_degraded"]);
+      if (
+        stringField(identity, "canonical_root") !== canonicalRoot ||
+        numberField(identity, "session_revision") !== input.expectedSessionRevision ||
+        numberField(identity, "session_generation") !== input.expectedSessionGeneration ||
+        numberField(identity, "run_revision") !== input.expectedRunRevision ||
+        stringField(identity, "chair_agent_id") !== input.chairAgentId ||
+        numberField(identity, "chair_generation") !== input.expectedChairGeneration ||
+        stringField(identity, "chair_lease_id") !== input.chairLeaseId ||
+        stringField(identity, "holder_agent_id") !== input.chairAgentId ||
+        numberField(identity, "lease_generation") !== input.expectedChairGeneration
+      ) {
+        throw new FabricError("DEDUPE_CONFLICT", "MCP binding identity is stale or crossed");
       }
-      this.#database
-        .prepare("INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id) VALUES (?, ?, NULL, ?)")
-        .run(input.runId, input.chair.agentId, authorityId);
-      this.#database
-        .prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
-        .run(input.runId, input.chair.agentId);
-      this.#database.prepare("INSERT INTO run_metadata(run_id, execution_profile) VALUES (?, ?)").run(input.runId, this.#executionProfile);
-      this.#database
-        .prepare(
-          "INSERT INTO capabilities(token_hash, run_id, agent_id, expires_at) VALUES (?, ?, ?, ?)",
-        )
-        .run(sha256(token), input.runId, input.chair.agentId, Date.parse(authority.expiresAt));
-      this.#event(input.runId, "run-created", input.chair.agentId, { authorityId });
+      if (
+        stringField(identity, "origin_kind") !== "operator-launch" ||
+        typeof identity.origin_operator_id !== "string" ||
+        !currentStates.has(stringField(identity, "session_state")) ||
+        !currentStates.has(stringField(identity, "run_state")) ||
+        stringField(identity, "lease_status") !== "active"
+      ) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "MCP binding target is not a current active operator-launched run");
+      }
+
+      const projectId = stringField(identity, "project_id");
+      const activeValue = this.#database.prepare(`
+        SELECT generation FROM mcp_active_seat_generations WHERE project_id=?
+      `).get(projectId);
+      const activeGeneration = activeValue === undefined
+        ? null
+        : stringField(rowOrNotFound(activeValue, "active MCP seat generation"), "generation");
+      const storedValue = this.#database.prepare(`
+        SELECT project_id,project_session_id,session_revision,session_generation,
+               run_id,run_revision,chair_agent_id,chair_generation,chair_lease_id,
+               previous_generation,binding_json,expires_at
+          FROM mcp_seat_generations WHERE generation=?
+      `).get(input.generation);
+      const replay = storedValue !== undefined;
+      if (replay) {
+        const stored = rowOrNotFound(storedValue, "stored MCP seat generation");
+        if (
+          activeGeneration !== input.generation ||
+          stored.project_id !== projectId ||
+          stored.project_session_id !== input.projectSessionId ||
+          stored.session_revision !== input.expectedSessionRevision ||
+          stored.session_generation !== input.expectedSessionGeneration ||
+          stored.run_id !== input.runId ||
+          stored.run_revision !== input.expectedRunRevision ||
+          stored.chair_agent_id !== input.chairAgentId ||
+          stored.chair_generation !== input.expectedChairGeneration ||
+          stored.chair_lease_id !== input.chairLeaseId ||
+          stored.previous_generation !== input.expectedPreviousGeneration ||
+          stored.binding_json !== derivedGeneration.bindingJson ||
+          stored.expires_at !== expiresAt
+        ) {
+          throw new FabricError("DEDUPE_CONFLICT", "MCP seat generation replay is stale, crossed or changed");
+        }
+      } else {
+        if (activeGeneration !== input.expectedPreviousGeneration) {
+          throw new FabricError("DEDUPE_CONFLICT", "active MCP seat generation changed");
+        }
+        if (input.expectedPreviousGeneration === input.generation) {
+          throw new FabricError("DEDUPE_CONFLICT", "MCP seat generation cannot replace itself");
+        }
+        this.#database.prepare(`
+          INSERT INTO mcp_seat_generations(
+            generation,project_id,project_session_id,session_revision,session_generation,
+            run_id,run_revision,chair_agent_id,chair_generation,chair_lease_id,previous_generation,
+            binding_json,binding_digest,expires_at,created_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(
+          input.generation,
+          projectId,
+          input.projectSessionId,
+          input.expectedSessionRevision,
+          input.expectedSessionGeneration,
+          input.runId,
+          input.expectedRunRevision,
+          input.chairAgentId,
+          input.expectedChairGeneration,
+          input.chairLeaseId,
+          input.expectedPreviousGeneration,
+          derivedGeneration.bindingJson,
+          `sha256:${input.generation}`,
+          expiresAt,
+          this.#clock(),
+        );
+      }
+
+      const credentials = input.bindings
+        .slice()
+        .sort((left, right) => left.seat.localeCompare(right.seat))
+        .map((binding) => {
+          const agent = rowOrNotFound(this.#database.prepare(`
+            SELECT agent.lifecycle, authority.authority_json,
+                   MAX(capability.principal_generation) AS principal_generation
+              FROM agents agent
+              JOIN authorities authority ON authority.authority_id=agent.authority_id
+              JOIN capabilities capability
+                ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
+             WHERE agent.run_id=? AND agent.agent_id=?
+               AND capability.revoked_at IS NULL AND capability.expires_at>?
+             GROUP BY agent.lifecycle, authority.authority_json
+          `).get(input.runId, binding.agentId, this.#clock()), `current MCP agent ${binding.agentId}`);
+          if (agent.lifecycle === "archived" || agent.lifecycle === "suspended") {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `MCP agent ${binding.agentId} is not active`);
+          }
+          const principalGeneration = numberField(agent, "principal_generation");
+          if (principalGeneration !== binding.expectedPrincipalGeneration) {
+            throw new FabricError("STALE_PRINCIPAL_GENERATION", `MCP agent ${binding.agentId} principal generation changed`);
+          }
+          const authority = parseAuthority(stringField(agent, "authority_json"));
+          if (Date.parse(authority.expiresAt) < expiresAt) {
+            throw new FabricError("AUTHORITY_WIDENING", `MCP credential for ${binding.agentId} outlives its authority`);
+          }
+          const capability = `afc_${createHmac("sha256", this.#capabilityKey)
+            .update(canonicalJson({
+              kind: "current-mcp-seat",
+              canonicalRoot,
+              projectSessionId: input.projectSessionId,
+              sessionRevision: input.expectedSessionRevision,
+              sessionGeneration: input.expectedSessionGeneration,
+              runId: input.runId,
+              runRevision: input.expectedRunRevision,
+              chairAgentId: input.chairAgentId,
+              chairGeneration: input.expectedChairGeneration,
+              chairLeaseId: input.chairLeaseId,
+              generation: input.generation,
+              expiresAt: input.expiresAt,
+              ...binding,
+            }))
+            .digest("base64url")}`;
+          const tokenHash = sha256(capability);
+          const existing = this.#database.prepare(`
+            SELECT run_id, agent_id, principal_generation, expires_at, revoked_at
+              FROM capabilities WHERE token_hash=?
+          `).get(tokenHash);
+          if (existing === undefined) {
+            if (replay) {
+              throw new FabricError("DEDUPE_CONFLICT", `MCP credential replay is missing for ${binding.agentId}`);
+            }
+            this.#database.prepare(`
+              INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+              VALUES (?, ?, ?, ?, ?)
+            `).run(tokenHash, input.runId, binding.agentId, principalGeneration, expiresAt);
+          } else if (
+            !isRow(existing) ||
+            existing.run_id !== input.runId ||
+            existing.agent_id !== binding.agentId ||
+            existing.principal_generation !== principalGeneration ||
+            existing.expires_at !== expiresAt ||
+            existing.revoked_at !== null
+          ) {
+            throw new FabricError("DEDUPE_CONFLICT", `MCP credential replay changed for ${binding.agentId}`);
+          }
+          const member = this.#database.prepare(`
+            SELECT run_id,agent_id,principal_generation,token_hash,expires_at
+              FROM mcp_seat_generation_members WHERE generation=? AND seat=?
+          `).get(input.generation, binding.seat);
+          if (replay) {
+            if (
+              !isRow(member) ||
+              member.run_id !== input.runId ||
+              member.agent_id !== binding.agentId ||
+              member.principal_generation !== principalGeneration ||
+              member.token_hash !== tokenHash ||
+              member.expires_at !== expiresAt
+            ) {
+              throw new FabricError("DEDUPE_CONFLICT", `MCP seat generation replay changed for ${binding.seat}`);
+            }
+          } else {
+            this.#database.prepare(`
+              INSERT INTO mcp_seat_generation_members(
+                generation,seat,run_id,agent_id,principal_generation,token_hash,expires_at
+              ) VALUES (?,?,?,?,?,?,?)
+            `).run(
+              input.generation,
+              binding.seat,
+              input.runId,
+              binding.agentId,
+              principalGeneration,
+              tokenHash,
+              expiresAt,
+            );
+          }
+          return { ...binding, capability };
+        });
+      if (!replay) {
+        if (input.expectedPreviousGeneration !== null) {
+          this.#database.prepare(`
+            UPDATE capabilities SET revoked_at=?
+             WHERE revoked_at IS NULL AND token_hash IN (
+               SELECT token_hash FROM mcp_seat_generation_members WHERE generation=?
+             )
+          `).run(this.#clock(), input.expectedPreviousGeneration);
+          const updated = this.#database.prepare(`
+            UPDATE mcp_active_seat_generations
+               SET generation=?,activated_at=?
+             WHERE project_id=? AND generation=?
+          `).run(input.generation, this.#clock(), projectId, input.expectedPreviousGeneration);
+          if (updated.changes !== 1) {
+            throw new FabricError("DEDUPE_CONFLICT", "active MCP seat generation changed during rotation");
+          }
+        } else {
+          this.#database.prepare(`
+            INSERT INTO mcp_active_seat_generations(project_id,generation,activated_at)
+            VALUES (?,?,?)
+          `).run(projectId, input.generation, this.#clock());
+        }
+      }
+      return {
+        expectedPreviousGeneration: input.expectedPreviousGeneration,
+        generation: input.generation,
+        projectSessionId: input.projectSessionId,
+        sessionRevision: input.expectedSessionRevision,
+        sessionGeneration: input.expectedSessionGeneration,
+        runId: input.runId,
+        runRevision: input.expectedRunRevision,
+        chairAgentId: input.chairAgentId,
+        chairGeneration: input.expectedChairGeneration,
+        chairLeaseId: input.chairLeaseId,
+        expiresAt: input.expiresAt,
+        credentials,
+      };
     })();
-    return { runId: input.runId, chairAuthorityId: authorityId, chairCapability: token };
   }
 
   connect(token: string): FabricClient {
     const row = rowOrNotFound(
       this.#database
-        .prepare(
-          "SELECT run_id, agent_id, expires_at, revoked_at FROM capabilities WHERE token_hash = ?",
-        )
+        .prepare(`
+          SELECT capability.run_id,capability.agent_id,capability.expires_at,capability.revoked_at,
+                 member.generation AS mcp_seat_generation,
+                 active.generation AS active_mcp_seat_generation
+            FROM capabilities capability
+            LEFT JOIN mcp_seat_generation_members member ON member.token_hash=capability.token_hash
+            LEFT JOIN current_mcp_seat_generation_members active ON active.token_hash=capability.token_hash
+           WHERE capability.token_hash=?
+        `)
         .get(sha256(token)),
       "capability",
     );
     if (row.revoked_at !== null || numberField(row, "expires_at") <= this.#clock()) {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired or revoked");
     }
+    assertActiveMcpSeatGeneration(row);
     return new FabricClient(this, stringField(row, "run_id"), stringField(row, "agent_id"), sha256(token));
+  }
+
+  verifyProtocolCredential(token: string): VerifiedProtocolCredential {
+    const authenticated = this.#database.prepare(`
+      SELECT c.run_id, c.agent_id, c.principal_generation, c.expires_at, c.revoked_at,
+             a.authority_json, r.project_session_id,
+             member.generation AS mcp_seat_generation,
+             active.generation AS active_mcp_seat_generation
+        FROM capabilities c
+        JOIN agents g ON g.run_id=c.run_id AND g.agent_id=c.agent_id
+        JOIN authorities a ON a.authority_id=g.authority_id
+        JOIN runs r ON r.run_id=c.run_id
+        LEFT JOIN mcp_seat_generation_members member ON member.token_hash=c.token_hash
+        LEFT JOIN current_mcp_seat_generation_members active ON active.token_hash=c.token_hash
+       WHERE c.token_hash=?
+    `).get(sha256(token));
+    if (!isRow(authenticated)) {
+      const operator = this.#operatorStore.authenticateCredential(token);
+      return {
+        principal: {
+          kind: "operator",
+          operatorId: operator.context.operatorId,
+          projectId: operator.context.projectId,
+          projectAuthorityGeneration: operator.context.projectAuthorityGeneration,
+          principalGeneration: operator.context.principalGeneration,
+        },
+        grantedOperations: operatorOperationsForActions(operator.actions),
+      };
+    }
+    if (authenticated.revoked_at !== null || numberField(authenticated, "expires_at") <= this.#clock()) {
+      throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired or revoked");
+    }
+    assertActiveMcpSeatGeneration(authenticated);
+    const authority = parseAuthority(stringField(authenticated, "authority_json"));
+    const denied = new Set(authority.deniedActions);
+    return {
+      principal: {
+        kind: "agent",
+        agentId: stringField(authenticated, "agent_id") as never,
+        projectSessionId: stringField(authenticated, "project_session_id") as never,
+        runId: stringField(authenticated, "run_id"),
+        principalGeneration: numberField(authenticated, "principal_generation"),
+      },
+      grantedOperations: authority.actions.filter((operation) => !denied.has(operation)),
+    };
+  }
+
+  async dispatchPublicProtocol(
+    context: PublicProtocolContext,
+    operation: ProtocolOperation,
+    input: OperationInputMap[ProtocolOperation],
+  ): Promise<unknown> {
+    if (!context.allowedOperations.has(operation)) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", `connection does not permit ${operation}`);
+    }
+    if (context.principal.kind === "agent") {
+      const definition = OPERATION_REGISTRY[operation];
+      if (!definition.principals.includes("agent")) {
+        throw new FabricError("CAPABILITY_FORBIDDEN", "operation is not available to agent principals");
+      }
+      this.assertCapability(
+        context.principal.runId,
+        context.principal.agentId,
+        context.credentialHash,
+        operation,
+      );
+      if (definition.gateOwner !== "scoped-gate") {
+        assertScopedOperationAllowed(
+          this.#database,
+          context.principal.runId,
+          operation,
+          this.#agentOperationGateTarget(
+            context.principal.runId,
+            context.principal.agentId,
+            operation,
+            input,
+          ),
+        );
+      }
+      if (definition.kind === "baseline") {
+        return dispatchAgentProtocol(
+          new FabricClient(
+            this,
+            context.principal.runId,
+            context.principal.agentId,
+            context.credentialHash,
+          ),
+          operation as never,
+          input as never,
+        );
+      }
+      const agent = {
+        agentId: context.principal.agentId,
+        projectSessionId: context.principal.projectSessionId,
+        coordinationRunId: context.principal.runId as never,
+        principalGeneration: context.principal.principalGeneration,
+      };
+      switch (operation) {
+        case FABRIC_OPERATIONS.membershipBind: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
+          if (request.origin !== "chair") {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding requires chair origin");
+          }
+          return this.#projectSessions.bindMembership(agent, request);
+        }
+        case FABRIC_OPERATIONS.intakeRevise: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRevise];
+          if (request.origin !== "chair") {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "agent intake revision requires chair origin");
+          }
+          return this.#intakes.revise(agent, request);
+        }
+        case FABRIC_OPERATIONS.scopedGateCreate: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
+          if (request.origin !== "chair") {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "agent gate creation requires chair origin");
+          }
+          const existing = this.#gates.getGateByDedupe(
+            agent,
+            request.intent.projectSessionId,
+            request.intent.coordinationRunId,
+            request.intent.dedupeKey,
+          );
+          if (existing?.status === "superseded" && existing.resolution.kind === "system-supersession" &&
+            !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+            throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
+          }
+          return this.#gates.createGate(agent, request);
+        }
+        case FABRIC_OPERATIONS.scopedGateCheck:
+          return this.#gates.check(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCheck],
+          );
+        case FABRIC_OPERATIONS.resourceReserve:
+          return this.#resources.reserve(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceReserve],
+          );
+        case FABRIC_OPERATIONS.resourceRelease:
+          return this.#resources.release(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceRelease],
+          );
+        case FABRIC_OPERATIONS.resourceReconcile:
+          return this.#resources.reconcile(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceReconcile],
+          );
+        case FABRIC_OPERATIONS.workstreamCreate:
+          return this.#workstreams.create(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.workstreamCreate],
+          );
+        case FABRIC_OPERATIONS.workstreamSettle:
+          return this.#workstreams.settle(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.workstreamSettle],
+          );
+        case FABRIC_OPERATIONS.taskRequest:
+          return this.#results.request(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.taskRequest],
+          );
+        case FABRIC_OPERATIONS.taskCompleteWithReply:
+          return this.#results.completeWithReply(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.taskCompleteWithReply],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryClaim:
+          return this.#results.claim(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryClaim],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryConsume:
+          return this.#results.consume(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryConsume],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryRetry:
+          return this.#results.retry(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryRetry],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryReassign:
+          return this.#results.reassign(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryReassign],
+          );
+        case FABRIC_OPERATIONS.resultDeliveryAbandon:
+          return this.#results.abandon(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.resultDeliveryAbandon],
+          );
+        case FABRIC_OPERATIONS.evidencePublish:
+          return this.publishEvidence(
+            context.principal.runId,
+            context.principal.agentId,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.evidencePublish],
+          );
+        default:
+          throw Object.assign(new Error(`agent protocol operation is not wired: ${operation}`), {
+            code: "PROTOCOL_UNSUPPORTED",
+          });
+      }
+    }
+    const operatorCredential = (): AuthenticatedOperatorCredential => {
+      if (context.principal.kind !== "operator") {
+        throw new FabricError("CAPABILITY_FORBIDDEN", "operation requires an operator principal");
+      }
+      const credential = this.#operatorStore.authenticateCredentialHash(context.credentialHash);
+      if (
+        credential.context.operatorId !== context.principal.operatorId ||
+        credential.context.projectId !== context.principal.projectId ||
+        credential.context.projectAuthorityGeneration !== context.principal.projectAuthorityGeneration ||
+        credential.context.principalGeneration !== context.principal.principalGeneration
+      ) {
+        throw new FabricError("AUTHENTICATION_FAILED", "operator connection principal changed");
+      }
+      return credential;
+    };
+    const operatorCommand = (
+      credential: AuthenticatedOperatorCredential,
+      command: { credential: { capabilityId: string; token: string } },
+    ): void => {
+      if (
+        command.credential.capabilityId !== credential.capabilityId ||
+        sha256(command.credential.token) !== context.credentialHash
+      ) {
+        throw new FabricError("AUTHENTICATION_FAILED", "operator command credential differs from its connection");
+      }
+    };
+
+    switch (operation) {
+      case FABRIC_OPERATIONS.projectSessionCreate: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionCreate];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        if (request.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "session is outside the operator project");
+        return this.#projectSessions.createProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.projectSessionGet: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionGet];
+        const credential = operatorCredential();
+        if (request.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "session is outside the operator project");
+        return this.#projectSessions.getProjectSession(request);
+      }
+      case FABRIC_OPERATIONS.projectSessionTransition: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionTransition];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.transitionProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.projectSessionClose: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionClose];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.closeProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.membershipBind: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
+        if (request.origin !== "operator") throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding uses the chair dispatcher");
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.bindMembership(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorAttach: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorAttach];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorStore.attach(credential.context, request, context.daemonInstanceGeneration);
+      }
+      case FABRIC_OPERATIONS.operatorDetach: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorDetach];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorStore.detach(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorHeartbeat: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorHeartbeat];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#operatorStore.heartbeat(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.intakeDraftCreate: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeDraftCreate];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#intakes.createDraft(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.intakeRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRead];
+        const credential = operatorCredential();
+        if (
+          request.credential.capabilityId !== credential.capabilityId ||
+          sha256(request.credential.token) !== context.credentialHash
+        ) throw new FabricError("AUTHENTICATION_FAILED", "intake read credential differs from its connection");
+        const intake = this.#intakes.get(request.intakeId);
+        if (intake.projectId !== credential.context.projectId) throw new ProjectFabricCoreError("WRONG_PROJECT", "intake is outside the operator project");
+        return intake;
+      }
+      case FABRIC_OPERATIONS.intakeSubmit: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeSubmit];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#intakes.submit(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.intakeRevise: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.intakeRevise];
+        if (request.origin !== "operator") {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "agent intake revision uses the chair dispatcher");
+        }
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#intakes.revise(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.scopedGateCreate: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
+        if (request.origin !== "operator") {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "operator gate creation requires operator origin");
+        }
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        const existing = this.#gates.getGateByDedupe(
+          credential.context,
+          request.intent.projectSessionId,
+          request.intent.coordinationRunId,
+          request.intent.dedupeKey,
+        );
+        if (existing?.status === "superseded" && existing.resolution.kind === "system-supersession" &&
+          !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+          throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
+        }
+        const gate = this.#gates.createGate(credential.context, request);
+        if (gate.status === "superseded" && gate.resolution.kind === "system-supersession" &&
+          !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+          throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
+        }
+        return gate;
+      }
+      case FABRIC_OPERATIONS.scopedGateResolve: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateResolve];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#gates.resolveGate(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.scopedGateRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateRead];
+        const credential = operatorCredential();
+        if (
+          request.credential.capabilityId !== credential.capabilityId ||
+          sha256(request.credential.token) !== context.credentialHash
+        ) {
+          throw new FabricError("AUTHENTICATION_FAILED", "gate read credential differs from its connection");
+        }
+        if (request.projectId !== credential.context.projectId) {
+          throw new ProjectFabricCoreError("WRONG_PROJECT", "gate is outside the operator project");
+        }
+        const gate = this.#gates.getGate(request.gateId);
+        if (gate.projectSessionId !== request.projectSessionId) {
+          throw new ProjectFabricCoreError("WRONG_PROJECT", "gate is outside the requested session");
+        }
+        if (gate.status === "superseded" && gate.resolution.kind === "system-supersession" &&
+          !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+          throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
+        }
+        const stateDigest = sha256Digest(canonicalJson(gate)) as never;
+        const readTransactionId = `read_${sha256(`${context.connectionNonce}\0${gate.gateId}\0${String(gate.revision)}`).slice(0, 24)}`;
+        if (request.expectedRevision !== undefined && request.expectedRevision !== gate.revision) {
+          return {
+            status: "changed",
+            expectedRevision: request.expectedRevision,
+            gate,
+            readTransactionId,
+            stateDigest,
+          };
+        }
+        return { status: "current", gate, readTransactionId, stateDigest };
+      }
+      case FABRIC_OPERATIONS.projectDiscover: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectDiscover];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.discover(request);
+      }
+      case FABRIC_OPERATIONS.projectionSnapshot: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionSnapshot];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.snapshot(
+          request,
+          context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
+      }
+      case FABRIC_OPERATIONS.projectionPage: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionPage];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.page(
+          request,
+          context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
+      }
+      case FABRIC_OPERATIONS.projectionEvents: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionEvents];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.events(request);
+      }
+      case FABRIC_OPERATIONS.projectionViewPage: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionViewPage];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.viewPage(
+          request,
+          context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
+      }
+      case FABRIC_OPERATIONS.projectionDetailRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionDetailRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.detail(
+          request,
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
+      }
+      case FABRIC_OPERATIONS.messageBodyRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.messageBodyRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#operatorProjections.messageBody(request);
+      }
+      case FABRIC_OPERATIONS.operatorRepositoryRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorRepositoryRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#gitRepositoryReads.read(request);
+      }
+      case FABRIC_OPERATIONS.operatorArtifactContentRead: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorArtifactContentRead];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        return this.#artifactContentReads.read(request);
+      }
+      case FABRIC_OPERATIONS.operatorActionPreview: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        this.#assertChairLiveHandoffFeature(context, operation, request);
+        return this.#operatorActions.preview(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorActionCommit: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionCommit];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        this.#assertChairLiveHandoffFeature(context, operation, request);
+        return this.#operatorActions.commit(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.operatorActionStatus: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionStatus];
+        const credential = operatorCredential();
+        operatorCommand(credential, { credential: request.credential });
+        this.#assertChairLiveHandoffFeature(context, operation, request);
+        return this.#operatorActions.status(request);
+      }
+      case FABRIC_OPERATIONS.operatorActionReconcile: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionReconcile];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        this.#assertChairLiveHandoffFeature(context, operation, request);
+        return this.#operatorActions.reconcile(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.chairTakeover: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.chairTakeover];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#projectSessions.takeoverChair(credential.context, request);
+      }
+      default:
+        throw Object.assign(new Error(`public protocol operation is not wired: ${operation}`), {
+          code: "PROTOCOL_UNSUPPORTED",
+        });
+    }
+  }
+
+  #assertChairLiveHandoffFeature(
+    context: PublicProtocolContext,
+    operation: ProtocolOperation,
+    input: unknown,
+  ): void {
+    if (!this.#operatorActionTargetsChairLiveHandoff(operation, input)) return;
+    if (!context.features.includes("chair-live-handoff.v1")) {
+      throw new ProjectFabricCoreError(
+        "FEATURE_UNAVAILABLE",
+        "chair live handoff requires chair-live-handoff.v1 negotiation",
+      );
+    }
+  }
+
+  #operatorActionTargetsChairLiveHandoff(operation: ProtocolOperation, input: unknown): boolean {
+    if (!isRow(input)) return false;
+    if (operation === FABRIC_OPERATIONS.operatorActionPreview) {
+      return isRow(input.intent) && input.intent.kind === "chair-live-handoff";
+    }
+    let preview: unknown;
+    if (operation === FABRIC_OPERATIONS.operatorActionCommit && typeof input.previewId === "string") {
+      preview = this.#database.prepare("SELECT preview_json FROM operator_previews WHERE preview_id=?")
+        .get(input.previewId);
+    } else {
+      const commandId = operation === FABRIC_OPERATIONS.operatorActionStatus
+        ? input.commandId
+        : operation === FABRIC_OPERATIONS.operatorActionReconcile
+          ? input.targetCommandId
+          : undefined;
+      if (typeof commandId !== "string") return false;
+      preview = this.#database.prepare(`
+        SELECT preview_json FROM operator_previews WHERE confirmed_command_id=?
+      `).get(commandId);
+    }
+    if (!isRow(preview) || typeof preview.preview_json !== "string") return false;
+    try {
+      const envelope: unknown = JSON.parse(preview.preview_json);
+      return isRow(envelope) && isRow(envelope.preview) &&
+        isRow(envelope.preview.intent) && envelope.preview.intent.kind === "chair-live-handoff";
+    } catch {
+      return false;
+    }
+  }
+
+  #agentOperationGateTarget(
+    runId: string,
+    actorAgentId: string,
+    operation: FabricOperation,
+    input: unknown,
+  ): GateOperationTarget {
+    const request = rowOrNotFound(input, "gate operation input");
+    const directTaskOperations = new Set<FabricOperation>([
+      FABRIC_OPERATIONS.claimTask,
+      FABRIC_OPERATIONS.refreshTaskReadiness,
+      FABRIC_OPERATIONS.recordObjectiveCheck,
+      FABRIC_OPERATIONS.acknowledgeTaskHandoff,
+      FABRIC_OPERATIONS.getTask,
+      FABRIC_OPERATIONS.updateTask,
+      FABRIC_OPERATIONS.recordTaskOwnerRecoveryProof,
+      FABRIC_OPERATIONS.recoverTaskOwner,
+      FABRIC_OPERATIONS.requestLifecycle,
+      FABRIC_OPERATIONS.taskCompleteWithReply,
+    ]);
+    if (directTaskOperations.has(operation)) {
+      const taskId = request.taskId;
+      if (typeof taskId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "task-owned operation lacks an exact task ID");
+      return { kind: "task", taskId: taskId as never };
+    }
+    if (operation === FABRIC_OPERATIONS.sendMessage) {
+      const audience = request.audience;
+      if (isRow(audience) && audience.kind === "task") {
+        if (typeof audience.taskId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "task audience lacks an exact task ID");
+        return { kind: "task", taskId: audience.taskId as never };
+      }
+      return { kind: "run" };
+    }
+    if (
+      operation === FABRIC_OPERATIONS.acquireWriteLease ||
+      operation === FABRIC_OPERATIONS.publishArtifact ||
+      operation === FABRIC_OPERATIONS.evidencePublish ||
+      operation === FABRIC_OPERATIONS.resourceReserve
+    ) {
+      const requestedTaskId = request.taskId;
+      if (requestedTaskId !== undefined && typeof requestedTaskId !== "string") {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "optional task target is invalid");
+      }
+      const taskId = resolveTaskBindingForActiveWork(
+        this.#database,
+        runId,
+        actorAgentId,
+        requestedTaskId,
+      );
+      return taskId === undefined ? { kind: "run" } : { kind: "task", taskId: taskId as never };
+    }
+    if (operation === FABRIC_OPERATIONS.dispatchProviderAction) {
+      const providerOperation = request.operation;
+      if (providerOperation !== "send_turn" && providerOperation !== "steer") return { kind: "run" };
+      const payload = rowOrNotFound(request.payload, "provider action payload");
+      const requestedTaskId = payload.taskId;
+      if (requestedTaskId !== undefined && typeof requestedTaskId !== "string") {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "provider task target is invalid");
+      }
+      const targetAgentId = typeof payload.agentId === "string" ? payload.agentId : actorAgentId;
+      const taskId = resolveTaskBindingForActiveWork(
+        this.#database,
+        runId,
+        targetAgentId,
+        requestedTaskId,
+      );
+      if (taskId === undefined) throw new ProjectFabricCoreError("PROTOCOL_INVALID", "task-owned provider action lacks an exact task target");
+      return { kind: "task", taskId: taskId as never };
+    }
+    if (
+      operation === FABRIC_OPERATIONS.recoverWriteLease ||
+      operation === FABRIC_OPERATIONS.renewWriteLease ||
+      operation === FABRIC_OPERATIONS.getWriteLease ||
+      operation === FABRIC_OPERATIONS.releaseWriteLease
+    ) {
+      const leaseId = request.leaseId;
+      if (typeof leaseId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "write-lease operation lacks a lease ID");
+      const binding = this.#database.prepare(`
+        SELECT task_id FROM task_obligation_bindings
+         WHERE coordination_run_id=? AND obligation_kind='write-lease' AND obligation_id=?
+      `).get(runId, leaseId);
+      return isRow(binding) && typeof binding.task_id === "string"
+        ? { kind: "task", taskId: binding.task_id as never }
+        : { kind: "run" };
+    }
+    if (
+      operation === FABRIC_OPERATIONS.resultDeliveryClaim ||
+      operation === FABRIC_OPERATIONS.resultDeliveryConsume ||
+      operation === FABRIC_OPERATIONS.resultDeliveryRetry ||
+      operation === FABRIC_OPERATIONS.resultDeliveryReassign ||
+      operation === FABRIC_OPERATIONS.resultDeliveryAbandon
+    ) {
+      const resultDeliveryId = request.resultDeliveryId;
+      if (typeof resultDeliveryId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "result operation lacks a delivery ID");
+      const delivery = rowOrNotFound(this.#database.prepare(`
+        SELECT task_id FROM result_deliveries WHERE run_id=? AND result_delivery_id=?
+      `).get(runId, resultDeliveryId), "result delivery gate target");
+      return { kind: "task", taskId: stringField(delivery, "task_id") as never };
+    }
+    if (operation === FABRIC_OPERATIONS.resourceRelease || operation === FABRIC_OPERATIONS.resourceReconcile) {
+      const reservationId = request.reservationId;
+      if (typeof reservationId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "resource operation lacks a reservation ID");
+      const reservation = rowOrNotFound(this.#database.prepare(`
+        SELECT operation_id FROM resource_reservations
+         WHERE coordination_run_id=? AND reservation_id=?
+      `).get(runId, reservationId), "resource reservation gate target");
+      const taskId = reservation.operation_id;
+      return typeof taskId === "string" && this.#database.prepare(`
+        SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
+      `).get(runId, taskId) !== undefined
+        ? { kind: "task", taskId: taskId as never }
+        : { kind: "run" };
+    }
+    return { kind: "run" };
   }
 
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {
     const row = this.#database
-      .prepare(
-        "SELECT c.expires_at, c.revoked_at, a.authority_json, g.lifecycle FROM capabilities c JOIN agents g ON g.run_id = c.run_id AND g.agent_id = c.agent_id JOIN authorities a ON a.authority_id = g.authority_id WHERE c.token_hash = ? AND c.run_id = ? AND c.agent_id = ?",
-      )
+      .prepare(`
+        SELECT c.expires_at,c.revoked_at,a.authority_json,g.lifecycle,
+               member.generation AS mcp_seat_generation,
+               active.generation AS active_mcp_seat_generation
+          FROM capabilities c
+          JOIN agents g ON g.run_id=c.run_id AND g.agent_id=c.agent_id
+          JOIN authorities a ON a.authority_id=g.authority_id
+          LEFT JOIN mcp_seat_generation_members member ON member.token_hash=c.token_hash
+          LEFT JOIN current_mcp_seat_generation_members active ON active.token_hash=c.token_hash
+         WHERE c.token_hash=? AND c.run_id=? AND c.agent_id=?
+      `)
       .get(tokenHash, runId, agentId);
     if (
       !isRow(row) ||
@@ -985,12 +2893,23 @@ export class Fabric {
     ) {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired, revoked or unknown");
     }
+    assertActiveMcpSeatGeneration(row);
     const authority = parseAuthority(stringField(row, "authority_json"));
     if (authority.deniedActions.includes(requiredOperation) || !authority.actions.includes(requiredOperation)) {
       throw new FabricError("CAPABILITY_FORBIDDEN", `authority does not permit ${requiredOperation}`);
     }
-    if (!allowSuspended && stringField(row, "lifecycle") === "suspended" && !isReadFabricOperation(requiredOperation)) {
-      throw new FabricError("CONTEXT_UNRECONCILED", "suspended agent may only read until explicit lifecycle recovery");
+    if (stringField(row, "lifecycle") === "archived") {
+      throw new FabricError("AUTHENTICATION_FAILED", "archived agent capability is no longer active");
+    }
+    const lifecycle = stringField(row, "lifecycle");
+    const lifecycleRecovery = requiredOperation === FABRIC_OPERATIONS.requestLifecycle;
+    if (
+      !allowSuspended &&
+      (lifecycle === "suspended" || lifecycle === "context-unreconciled") &&
+      !isReadFabricOperation(requiredOperation) &&
+      !lifecycleRecovery
+    ) {
+      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled agent may only read until explicit lifecycle recovery");
     }
   }
 
@@ -1045,6 +2964,7 @@ export class Fabric {
   ): AuthorityResult {
     const commandId = input.commandId ?? `authority:${uuidv7()}`;
     return this.#commandJournal.execute(runId, actorAgentId, commandId, input, isAuthorityResult, () => {
+      assertRunAcceptingWork(this.#database, runId);
       const parentRow = rowOrNotFound(
         this.#database
           .prepare("SELECT authority_json FROM authorities WHERE authority_id = ? AND run_id = ?")
@@ -1066,11 +2986,14 @@ export class Fabric {
       for (const [unitKey, requested] of Object.entries(child.budget)) {
         const row = rowOrNotFound(
           this.#database
-            .prepare("SELECT granted, reserved, usage_unknown FROM authority_budget WHERE authority_id = ? AND unit_key = ?")
+            .prepare("SELECT granted, reserved, consumed, usage_unknown FROM authority_budget WHERE authority_id = ? AND unit_key = ?")
             .get(input.parentAuthorityId, unitKey),
           `budget ${unitKey}`,
         );
-        if (numberField(row, "usage_unknown") !== 0 || numberField(row, "granted") - numberField(row, "reserved") < requested) {
+        if (
+          numberField(row, "usage_unknown") !== 0 ||
+          numberField(row, "granted") - numberField(row, "reserved") - numberField(row, "consumed") < requested
+        ) {
           throw new FabricError("BUDGET_EXCEEDED", `insufficient available budget for ${unitKey}`);
         }
       }
@@ -1099,6 +3022,7 @@ export class Fabric {
     actorAgentId: string,
     input: { agentId: string; authorityId: string; providerSessionRef?: string; adapterId?: string },
   ): { capability: string } {
+    assertRunAcceptingWork(this.#database, runId);
     const authorityRow = rowOrNotFound(
       this.#database
         .prepare("SELECT authority_json, parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?")
@@ -1115,13 +3039,21 @@ export class Fabric {
     const authority = parseAuthority(stringField(authorityRow, "authority_json"));
     const existing = this.#database.prepare(`
       SELECT g.parent_agent_id, g.authority_id, g.provider_session_ref, c.principal_generation, c.revoked_at, b.adapter_id
-        FROM agents g JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
+        FROM agents g LEFT JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
         LEFT JOIN agent_adapter_bindings b ON b.run_id = g.run_id AND b.agent_id = g.agent_id
        WHERE g.run_id = ? AND g.agent_id = ? ORDER BY c.principal_generation DESC LIMIT 1
     `).get(runId, input.agentId);
     if (isRow(existing)) {
       const same = existing.parent_agent_id === actorAgentId && existing.authority_id === input.authorityId && existing.provider_session_ref === (input.providerSessionRef ?? null) && existing.adapter_id === (input.adapterId ?? null);
       if (!same) throw new FabricError("DEDUPE_CONFLICT", "agent ID was reused with changed registration input");
+      if (existing.principal_generation === null) {
+        const token = capabilityToken(this.#capabilityKey, runId, input.agentId, 1);
+        this.#database.prepare(
+          "INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at) VALUES (?, ?, ?, 1, ?)",
+        ).run(sha256(token), runId, input.agentId, Date.parse(authority.expiresAt));
+        this.#event(runId, "agent-capability-issued", actorAgentId, { agentId: input.agentId, principalGeneration: 1 });
+        return { capability: token };
+      }
       if (existing.revoked_at !== null) throw new FabricError("AUTHENTICATION_FAILED", "agent capability was revoked");
       return { capability: capabilityToken(this.#capabilityKey, runId, input.agentId, numberField(existing, "principal_generation")) };
     }
@@ -1149,6 +3081,46 @@ export class Fabric {
     return { capability: token };
   }
 
+  #registerAgentIdentity(
+    runId: string,
+    actorAgentId: string,
+    input: { agentId: string; authorityId: string },
+  ): void {
+    assertRunAcceptingWork(this.#database, runId);
+    const authority = rowOrNotFound(
+      this.#database.prepare(
+        "SELECT parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?",
+      ).get(input.authorityId, runId),
+      "authority",
+    );
+    const actor = rowOrNotFound(
+      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?")
+        .get(runId, actorAgentId),
+      "agent",
+    );
+    if (authority.parent_authority_id !== stringField(actor, "authority_id")) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "actor cannot register an identity for this authority");
+    }
+    const existing = this.#database.prepare(`
+      SELECT parent_agent_id, authority_id, provider_session_ref
+        FROM agents WHERE run_id=? AND agent_id=?
+    `).get(runId, input.agentId);
+    if (isRow(existing)) {
+      if (
+        existing.parent_agent_id !== actorAgentId ||
+        existing.authority_id !== input.authorityId ||
+        existing.provider_session_ref !== null
+      ) throw new FabricError("DEDUPE_CONFLICT", "agent identity was reused with changed registration input");
+      return;
+    }
+    this.#database.prepare(
+      "INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref) VALUES (?, ?, ?, ?, NULL)",
+    ).run(runId, input.agentId, actorAgentId, input.authorityId);
+    this.#database.prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
+      .run(runId, input.agentId);
+    this.#event(runId, "agent-identity-registered", actorAgentId, { agentId: input.agentId });
+  }
+
   async spawnAgent(
     runId: string,
     actorAgentId: string,
@@ -1159,7 +3131,8 @@ export class Fabric {
       actionId: string;
       payload: Record<string, unknown>;
     },
-  ): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  ): Promise<AgentCustodyResult> {
+    assertRunAcceptingWork(this.#database, runId);
     this.#adapter(input.adapterId);
     this.#providerSessions.preflightRegistration({
       runId,
@@ -1170,38 +3143,21 @@ export class Fabric {
     });
     const providerPayload = this.#admitProviderPayload(runId, input.authorityId, input.payload);
     this.#assertAdapterModel(input.adapterId, providerPayload);
-    const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
-    assertAdapterOperation(capabilities, "spawn");
-    this.#providerSessions.prepareLifecycleIntent({
-      runId,
-      actionId: input.actionId,
-      operation: "spawn",
-      actorAgentId,
-      targetAgentId: input.agentId,
-      authorityId: input.authorityId,
-      adapterId: input.adapterId,
-      intentHash: sha256(canonicalJson(input)),
-    });
-    const action = await this.#executeAdapterOperation({
-      runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-      operation: "spawn",
-      method: "spawn",
-      payload: { ...providerPayload, agentId: input.agentId },
-    });
-    if (!isRow(action.result) || typeof action.result.resumeReference !== "string") {
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter spawn returned no resume reference");
+    const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "spawn");
+    if (this.#launchCustody === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "agent custody requires an elected daemon socket");
     }
-    this.#providerSessions.markLifecycleProviderTerminal(runId, input.actionId, action.result.resumeReference);
-    const registered = this.registerAgent(runId, actorAgentId, {
+    return await this.#launchCustody.provisionAgent({
+      runId,
+      actorAgentId,
+      operation: "spawn",
       agentId: input.agentId,
       authorityId: input.authorityId,
-      providerSessionRef: action.result.resumeReference,
       adapterId: input.adapterId,
+      actionId: input.actionId,
+      payload: { ...providerPayload, agentId: input.agentId },
+      ...(bridgeContract === undefined ? {} : { bridgeContract: bridgeContract as AgentBridgeContract }),
     });
-    this.#providerSessions.finalizeLifecycleIntent(runId, input.actionId);
-    return { ...registered, providerSessionRef: action.result.resumeReference, adapterId: input.adapterId, actionId: input.actionId };
   }
 
   async attachAgent(
@@ -1214,7 +3170,8 @@ export class Fabric {
       actionId: string;
       providerSessionRef: string;
     },
-  ): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  ): Promise<AgentCustodyResult> {
+    assertRunAcceptingWork(this.#database, runId);
     this.#adapter(input.adapterId);
     this.#providerSessions.preflightRegistration({
       runId,
@@ -1225,39 +3182,22 @@ export class Fabric {
       providerSessionRef: input.providerSessionRef,
     });
     const providerPayload = this.#admitProviderPayload(runId, input.authorityId, {});
-    const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
-    assertAdapterOperation(capabilities, "attach");
-    this.#providerSessions.prepareLifecycleIntent({
+    const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "attach");
+    if (this.#launchCustody === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "agent custody requires an elected daemon socket");
+    }
+    return await this.#launchCustody.provisionAgent({
       runId,
-      actionId: input.actionId,
-      operation: "attach",
       actorAgentId,
-      targetAgentId: input.agentId,
-      authorityId: input.authorityId,
-      adapterId: input.adapterId,
-      requestedResumeReference: input.providerSessionRef,
-      intentHash: sha256(canonicalJson(input)),
-    });
-    const action = await this.#executeAdapterOperation({
-      runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
       operation: "attach",
-      method: "attach",
-      payload: { ...providerPayload, agentId: input.agentId, resumeReference: input.providerSessionRef },
-    });
-    const attachedReference = isRow(action.result) && typeof action.result.resumeReference === "string"
-      ? action.result.resumeReference
-      : input.providerSessionRef;
-    this.#providerSessions.markLifecycleProviderTerminal(runId, input.actionId, attachedReference);
-    const registered = this.registerAgent(runId, actorAgentId, {
       agentId: input.agentId,
       authorityId: input.authorityId,
-      providerSessionRef: attachedReference,
       adapterId: input.adapterId,
+      actionId: input.actionId,
+      payload: { ...providerPayload, agentId: input.agentId },
+      providerSessionRef: input.providerSessionRef,
+      ...(bridgeContract === undefined ? {} : { bridgeContract: bridgeContract as AgentBridgeContract }),
     });
-    this.#providerSessions.finalizeLifecycleIntent(runId, input.actionId);
-    return { ...registered, providerSessionRef: attachedReference, adapterId: input.adapterId, actionId: input.actionId };
   }
 
   sendMessage(runId: string, senderId: string, input: MessageInput): { messageId: string } {
@@ -1282,6 +3222,8 @@ export class Fabric {
       }
       return { messageId: stringField(existing, "message_id") };
     }
+    assertRunAcceptingWork(this.#database, runId);
+    if (input.audience.kind === "task") assertTaskOperationAdmitted(this.#database, runId, input.audience.taskId);
     const messageId = uuidv7();
     const conversationId = input.conversationId ?? messageId;
     this.#database.transaction(() => {
@@ -1346,6 +3288,9 @@ export class Fabric {
         this.#database
           .prepare("UPDATE mailbox_state SET next_sequence = next_sequence + 1 WHERE run_id = ? AND recipient_id = ?")
           .run(runId, recipientId);
+      }
+      if (input.requiresAck) {
+        this.#memberships.bindRequired(runId, [{ kind: "required-message", memberId: messageId }]);
       }
       this.#event(runId, "message-persisted", senderId, { messageId, recipients });
     })();
@@ -1504,8 +3449,29 @@ export class Fabric {
   }> {
     const now = this.#clock();
     return this.#database.transaction(() => {
+      const freeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(runId, recipientId);
+      if (isRow(freeze)) {
+        throw new FabricError("CONTEXT_UNRECONCILED", "message delivery is frozen until lifecycle reconciliation");
+      }
+      const expiringRequiredMessageIds = this.#database.prepare(`
+        SELECT DISTINCT delivery.message_id
+          FROM deliveries delivery JOIN messages message USING(message_id)
+         WHERE delivery.run_id=? AND delivery.recipient_id=?
+           AND delivery.state IN ('ready','claimed')
+           AND message.requires_ack=1 AND message.expires_at IS NOT NULL
+           AND message.expires_at<=?
+      `).all(runId, recipientId, now).map((value) =>
+        stringField(rowOrNotFound(value, "expiring required message"), "message_id")
+      );
       const expired = this.#database.prepare("UPDATE deliveries SET state = 'expired', claim_deadline = NULL, resolution_reason = 'message-expired-by-policy', resolved_at = ? WHERE run_id = ? AND recipient_id = ? AND state IN ('ready', 'claimed') AND message_id IN (SELECT message_id FROM messages WHERE run_id = ? AND expires_at IS NOT NULL AND expires_at <= ?)").run(now, runId, recipientId, runId, now);
-      if (expired.changes > 0) this.#advanceMailboxWatermark(runId, recipientId);
+      if (expired.changes > 0) {
+        this.#advanceMailboxWatermark(runId, recipientId);
+        for (const messageId of expiringRequiredMessageIds) {
+          this.#memberships.reconcileRequiredMessageIfSettled(runId, messageId);
+        }
+      }
       this.#database
         .prepare(
           "UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE run_id = ? AND recipient_id = ? AND state = 'claimed' AND claim_deadline <= ?",
@@ -1542,7 +3508,7 @@ export class Fabric {
     this.#database.transaction(() => {
       const delivery = rowOrNotFound(
         this.#database
-          .prepare("SELECT mailbox_sequence, state FROM deliveries WHERE delivery_id = ? AND run_id = ? AND recipient_id = ?")
+          .prepare("SELECT mailbox_sequence, state, message_id FROM deliveries WHERE delivery_id = ? AND run_id = ? AND recipient_id = ?")
           .get(deliveryId, runId, recipientId),
         "delivery",
       );
@@ -1552,6 +3518,10 @@ export class Fabric {
           .run(this.#clock(), deliveryId);
       }
       this.#advanceMailboxWatermark(runId, recipientId);
+      this.#memberships.reconcileRequiredMessageIfSettled(
+        runId,
+        stringField(delivery, "message_id"),
+      );
       this.#event(runId, "delivery-acknowledged", recipientId, {
         deliveryId,
         sequence: numberField(delivery, "mailbox_sequence"),
@@ -1572,7 +3542,7 @@ export class Fabric {
       this.#assertChair(runId, actorAgentId);
       const delivery = rowOrNotFound(
         this.#database
-          .prepare("SELECT recipient_id, state FROM deliveries WHERE run_id = ? AND delivery_id = ?")
+          .prepare("SELECT recipient_id, state, message_id FROM deliveries WHERE run_id = ? AND delivery_id = ?")
           .get(runId, input.deliveryId),
         "delivery",
       );
@@ -1587,6 +3557,10 @@ export class Fabric {
         .run(input.reason.trim(), this.#clock(), runId, input.deliveryId);
       const recipientId = stringField(delivery, "recipient_id");
       this.#advanceMailboxWatermark(runId, recipientId);
+      this.#memberships.reconcileRequiredMessageIfSettled(
+        runId,
+        stringField(delivery, "message_id"),
+      );
       const result = { deliveryId: input.deliveryId, status: "abandoned" as const, reason: input.reason.trim() };
       this.#event(runId, "delivery-abandoned", actorAgentId, { ...result, recipientId });
       return result;
@@ -1636,22 +3610,31 @@ export class Fabric {
   createTask(
     runId: string,
     actorAgentId: string,
-    input: {
-      taskId: string;
-      authorityId: string;
-      eligibleAgentIds: string[];
-      proposedOwnerAgentId?: string;
-      participantAgentIds?: string[];
-      dependencies?: string[];
-      expectedArtifacts?: string[];
-      objectiveChecks?: string[];
-      humanGates?: string[];
-      objective: string;
-      baseRevision: string;
-      commandId: string;
-    },
+    input: TaskCreateInput,
   ): TaskResult {
-    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+    return this.#createTask(runId, actorAgentId, input, true);
+  }
+
+  #createTask(
+    runId: string,
+    actorAgentId: string,
+    input: TaskCreateInput,
+    bindToLedTeam: boolean,
+  ): TaskResult {
+    const journalPayload = {
+      ...input,
+      teamOwnershipBinding: bindToLedTeam ? "active-led-team" : "atomic-team-root",
+    } as const;
+    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, journalPayload, isTaskResult, () => {
+      assertRunAcceptingWork(this.#database, runId);
+      const agentContext = this.#agentContext(runId, actorAgentId);
+      const dependencyRevision = numberField(
+        rowOrNotFound(
+          this.#database.prepare("SELECT dependency_revision FROM runs WHERE run_id=?").get(runId),
+          "coordination run",
+        ),
+        "dependency_revision",
+      );
       const actor = rowOrNotFound(
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
         "agent",
@@ -1716,11 +3699,6 @@ export class Fabric {
           agentId,
         );
       }
-      for (const dependencyTaskId of dependencies) {
-        this.#database
-          .prepare("INSERT INTO task_dependencies(run_id, task_id, dependency_task_id) VALUES (?, ?, ?)")
-          .run(runId, input.taskId, dependencyTaskId);
-      }
       for (const relativePath of [...new Set(input.expectedArtifacts ?? [])].sort()) {
         if (relativePath.length === 0 || isAbsolute(relativePath) || relativePath.split(/[\\/]/u).includes("..")) {
           throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "expected artifact path must be relative and traversal-free");
@@ -1734,11 +3712,31 @@ export class Fabric {
           .prepare("INSERT INTO task_objective_checks(run_id, task_id, check_id) VALUES (?, ?, ?)")
           .run(runId, input.taskId, checkId);
       }
-      for (const gateId of [...new Set(input.humanGates ?? [])].sort()) {
-        this.#database
-          .prepare("INSERT INTO task_human_gates(run_id, task_id, gate_id) VALUES (?, ?, ?)")
-          .run(runId, input.taskId, gateId);
+      if (dependencies.length > 0) {
+        this.#gates.setTaskDependencies(agentContext, {
+            commandId: `${input.commandId}:dependencies`,
+            expectedRevision: dependencyRevision,
+            taskId: input.taskId,
+            dependencyTaskIds: dependencies,
+          });
       }
+      if (bindToLedTeam) {
+        const ledTeam = this.#database.prepare(`
+          SELECT team_id FROM teams
+           WHERE run_id=? AND leader_agent_id=? AND state='active'
+           ORDER BY depth DESC, team_id
+        `).all(runId, actorAgentId) as Array<{ team_id: string }>;
+        if (ledTeam.length > 1) {
+          throw new FabricError("TASK_SUBTREE_CONFLICT", "task creator leads more than one active team");
+        }
+        const ownedTeam = ledTeam[0];
+        if (ownedTeam !== undefined) {
+          this.#database.prepare(
+            "INSERT INTO team_owned_tasks(run_id, team_id, task_id) VALUES (?, ?, ?)",
+          ).run(runId, ownedTeam.team_id, input.taskId);
+        }
+      }
+      this.#memberships.bindRequired(runId, [{ kind: "task", memberId: input.taskId }]);
       const result = this.getTask(runId, input.taskId);
       this.#event(runId, "task-created", actorAgentId, result);
       return result;
@@ -1751,12 +3749,21 @@ export class Fabric {
     input: { taskId: string; expectedRevision: number; commandId: string },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertRunAcceptingWork(this.#database, runId);
       const eligible = this.#database
         .prepare("SELECT 1 FROM task_eligible_agents WHERE run_id = ? AND task_id = ? AND agent_id = ?")
         .get(runId, input.taskId, actorAgentId);
       if (!isRow(eligible)) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "agent is not eligible to claim the task");
       }
+      assertScopedTaskReadinessAllowed(this.#database, runId, input.taskId);
+      assertScopedOperationAllowed(
+        this.#database,
+        runId,
+        FABRIC_OPERATIONS.claimTask,
+        { kind: "task", taskId: input.taskId as never },
+      );
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = rowOrNotFound(
         this.#database
           .prepare("SELECT state, revision FROM tasks WHERE run_id = ? AND task_id = ?")
@@ -1808,6 +3815,14 @@ export class Fabric {
     input: { taskId: string; expectedRevision: number; commandId: string },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertScopedTaskReadinessAllowed(this.#database, runId, input.taskId);
+      assertScopedOperationAllowed(
+        this.#database,
+        runId,
+        FABRIC_OPERATIONS.refreshTaskReadiness,
+        { kind: "task", taskId: input.taskId as never },
+      );
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = this.getTask(runId, input.taskId);
       if (task.revision !== input.expectedRevision) {
         throw new FabricError("TASK_REVISION_CONFLICT", "task revision changed");
@@ -1838,28 +3853,12 @@ export class Fabric {
     const parse = (value: unknown): value is { taskId: string; checkId: string; status: "pass" | "fail" } =>
       isRow(value) && typeof value.taskId === "string" && typeof value.checkId === "string" && (value.status === "pass" || value.status === "fail");
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const changed = this.#database
         .prepare("UPDATE task_objective_checks SET status = ?, evidence = ? WHERE run_id = ? AND task_id = ? AND check_id = ?")
         .run(input.status, input.evidence, runId, input.taskId, input.checkId);
       if (changed.changes !== 1) throw new FabricError("NOT_FOUND", "objective check is not declared for the task");
       return { taskId: input.taskId, checkId: input.checkId, status: input.status };
-    });
-  }
-
-  resolveHumanGate(
-    runId: string,
-    actorAgentId: string,
-    input: { taskId: string; gateId: string; status: "approved" | "rejected"; evidence: string; commandId: string },
-  ): { taskId: string; gateId: string; status: "approved" | "rejected" } {
-    const parse = (value: unknown): value is { taskId: string; gateId: string; status: "approved" | "rejected" } =>
-      isRow(value) && typeof value.taskId === "string" && typeof value.gateId === "string" && (value.status === "approved" || value.status === "rejected");
-    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
-      this.#assertChair(runId, actorAgentId);
-      const changed = this.#database
-        .prepare("UPDATE task_human_gates SET status = ?, evidence = ? WHERE run_id = ? AND task_id = ? AND gate_id = ?")
-        .run(input.status, input.evidence, runId, input.taskId, input.gateId);
-      if (changed.changes !== 1) throw new FabricError("NOT_FOUND", "human gate is not declared for the task");
-      return { taskId: input.taskId, gateId: input.gateId, status: input.status };
     });
   }
 
@@ -1870,6 +3869,7 @@ export class Fabric {
   ): { acknowledged: true } {
     const parse = (value: unknown): value is { acknowledged: true } => isRow(value) && value.acknowledged === true;
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = this.getTask(runId, input.taskId);
       if (task.revision !== input.taskRevision || task.ownerLeaseGeneration !== input.ownerLeaseGeneration) {
         throw new FabricError("TASK_REVISION_CONFLICT", "handoff revision or generation changed");
@@ -1910,6 +3910,7 @@ export class Fabric {
     },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = rowOrNotFound(
         this.#database
           .prepare("SELECT owner_agent_id, revision, state FROM tasks WHERE run_id = ? AND task_id = ?")
@@ -1922,9 +3923,18 @@ export class Fabric {
       if (task.owner_agent_id !== actorAgentId) {
         throw new FabricError("TASK_NOT_OWNER", "only the current owner may complete the task");
       }
+      if (isRow(this.#database.prepare(`
+        SELECT 1 FROM provider_actions
+         WHERE run_id=? AND task_id=?
+           AND status IN ('prepared','dispatched','accepted','ambiguous')
+         LIMIT 1
+      `).get(runId, input.taskId))) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "task has an unresolved provider action");
+      }
       this.#database
         .prepare("UPDATE tasks SET state = ?, revision = revision + 1 WHERE run_id = ? AND task_id = ? AND revision = ?")
         .run(input.state, runId, input.taskId, input.expectedRevision);
+      this.#memberships.reconcile(runId, [{ kind: "task", memberId: input.taskId }]);
       const result = this.getTask(runId, input.taskId);
       this.#event(runId, "task-updated", actorAgentId, result);
       return result;
@@ -1943,6 +3953,7 @@ export class Fabric {
     },
   ): ProofResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isProofResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       this.#assertChair(runId, actorAgentId);
       const task = this.getTask(runId, input.taskId);
       if (task.state !== "active" || task.ownerAgentId === null || task.ownerLeaseGeneration !== input.ownerLeaseGeneration) {
@@ -1988,6 +3999,7 @@ export class Fabric {
     },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       this.#assertChair(runId, actorAgentId);
       const task = this.getTask(runId, input.taskId);
       if (
@@ -2138,12 +4150,8 @@ export class Fabric {
   acquireWriteLease(
     runId: string,
     actorAgentId: string,
-    input: { scope: string[]; ttlMs: number; commandId: string },
+    input: { scope: string[]; ttlMs: number; commandId: string; taskId?: string },
   ): LeaseResult {
-    const lifecycle = this.getAgentLifecycle(runId, actorAgentId).lifecycle;
-    if (lifecycle === "context-unreconciled") {
-      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context cannot acquire a write lease");
-    }
     const workspaceRoot = this.#workspaceRootForRun(runId);
     const scopes = [...new Set(input.scope.map((path) => canonicalAuthorityPath(workspaceRoot, path)))].sort();
     const actor = rowOrNotFound(
@@ -2165,7 +4173,38 @@ export class Fabric {
     ) {
       throw new FabricError("AUTHORITY_WIDENING", "write scope exceeds the actor authority");
     }
-    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, { operation: "acquire-write", scopes, ttlMs: input.ttlMs }, isLeaseResult, () => {
+    const commandPayload = {
+      operation: "acquire-write",
+      scopes,
+      ttlMs: input.ttlMs,
+      taskId: input.taskId ?? null,
+    };
+    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, commandPayload, isLeaseResult);
+    if (replay !== undefined) return replay;
+    const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+    assertScopedOperationAllowed(
+      this.#database,
+      runId,
+      FABRIC_OPERATIONS.acquireWriteLease,
+      taskId === undefined ? { kind: "run" } : { kind: "task", taskId: taskId as never },
+    );
+    if (taskId !== undefined) {
+      assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
+      const bound = this.#database.prepare(`
+        SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
+          AND (owner_agent_id=? OR EXISTS (
+            SELECT 1 FROM task_participants participant
+             WHERE participant.run_id=tasks.run_id AND participant.task_id=tasks.task_id
+               AND participant.agent_id=?
+          ))
+      `).get(runId, taskId, actorAgentId, actorAgentId);
+      if (!isRow(bound)) throw new FabricError("CAPABILITY_FORBIDDEN", "write lease task is outside the actor task scope");
+    }
+    const lifecycle = this.getAgentLifecycle(runId, actorAgentId).lifecycle;
+    if (lifecycle === "context-unreconciled") {
+      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context cannot acquire a write lease");
+    }
+    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, commandPayload, isLeaseResult, () => {
       const conflicts = this.#writeLeaseConflicts(runId, scopes);
       if (conflicts.some((item) => item.status === "quarantined")) {
         throw new FabricError("WRITE_SCOPE_QUARANTINED", "write scope overlaps a quarantined lease");
@@ -2190,6 +4229,14 @@ export class Fabric {
       for (const scope of scopes) {
         this.#database.prepare("INSERT INTO write_scope_entries(lease_id, canonical_path) VALUES (?, ?)").run(leaseId, scope);
       }
+      if (taskId !== undefined) {
+        this.#database.prepare(`
+          INSERT INTO task_obligation_bindings(
+            coordination_run_id, task_id, obligation_kind, obligation_id, state, created_at, updated_at
+          ) VALUES (?, ?, 'write-lease', ?, 'active', ?, ?)
+        `).run(runId, taskId, leaseId, now, now);
+      }
+      this.#memberships.bindRequired(runId, [{ kind: "lease", memberId: leaseId }]);
       const result: LeaseResult = { leaseId, holderAgentId: actorAgentId, generation: 1, status: "active", scope: scopes };
       this.#event(runId, "write-lease-acquired", actorAgentId, result);
       return result;
@@ -2386,6 +4433,7 @@ export class Fabric {
         this.#clock(),
         input.leaseId,
       );
+      this.#memberships.reconcile(runId, [{ kind: "lease", memberId: input.leaseId }]);
       this.#event(runId, "write-lease-released", actorAgentId, { leaseId: input.leaseId, generation });
       return { leaseId: input.leaseId, status: "released", generation };
     });
@@ -2427,22 +4475,43 @@ export class Fabric {
       const previous = this.#database
         .prepare("SELECT provider_session_generation, context_revision FROM provider_state WHERE run_id = ? AND agent_id = ?")
         .get(runId, input.agentId);
-      const changedWithoutCheckpoint =
-        isRow(previous) &&
+      const providerContextChanged = isRow(previous) &&
         (numberField(previous, "provider_session_generation") !== input.providerSessionGeneration ||
-          previous.context_revision !== input.contextRevision) &&
-        input.checkpointSha256 === undefined;
+          previous.context_revision !== input.contextRevision);
+      const checkpointValidated = input.checkpointSha256 !== undefined &&
+        this.#hasCurrentValidatedCheckpoint(runId, input.agentId, input.checkpointSha256);
+      const changedWithoutCheckpoint = providerContextChanged && !checkpointValidated;
       const lifecycle = changedWithoutCheckpoint ? "context-unreconciled" : this.getAgentLifecycle(runId, input.agentId).lifecycle;
       this.#database
         .prepare(
           "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, ?, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = excluded.context_revision, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
         )
-        .run(runId, input.agentId, input.providerSessionGeneration, input.contextRevision, input.checkpointSha256 ?? null);
+        .run(
+          runId,
+          input.agentId,
+          input.providerSessionGeneration,
+          input.contextRevision,
+          checkpointValidated ? input.checkpointSha256 : null,
+        );
       if (changedWithoutCheckpoint) {
         this.#database.prepare("UPDATE agents SET lifecycle = 'context-unreconciled' WHERE run_id = ? AND agent_id = ?").run(
           runId,
           input.agentId,
         );
+        this.#database.prepare(`
+          INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
+          VALUES (?, ?, 'context-unreconciled', ?)
+          ON CONFLICT(run_id, agent_id)
+          DO UPDATE SET reason=excluded.reason, created_at=excluded.created_at
+        `).run(runId, input.agentId, this.#clock());
+        this.#database.prepare(`
+          UPDATE leases SET status='quarantined', updated_at=?
+           WHERE run_id=? AND holder_agent_id=? AND status='active'
+        `).run(this.#clock(), runId, input.agentId);
+        this.#database.prepare(`
+          UPDATE provider_session_turn_leases SET status='quarantined', updated_at=?
+           WHERE run_id=? AND agent_id=? AND status='active'
+        `).run(this.#clock(), runId, input.agentId);
       }
       const result = { agentId: input.agentId, lifecycle, providerSessionGeneration: input.providerSessionGeneration };
       this.#event(runId, "provider-state-reported", actorAgentId, result);
@@ -2462,14 +4531,35 @@ export class Fabric {
       commandId: string;
     },
   ): Promise<LifecycleResult> {
+    return await this.#trackProviderOperation(
+      async () => await this.#requestLifecycle(runId, actorAgentId, input),
+    );
+  }
+
+  async #requestLifecycle(
+    runId: string,
+    actorAgentId: string,
+    input: {
+      action: "compact" | "rotate" | "completion-ready" | "release";
+      agentId: string;
+      taskId: string;
+      taskRevision: number;
+      checkpoint: LifecycleCheckpoint;
+      commandId: string;
+    },
+  ): Promise<LifecycleResult> {
+    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isLifecycleResult);
+    if (replay !== undefined) return replay;
+    assertTaskOperationAdmitted(this.#database, runId, input.taskId);
     if (actorAgentId !== input.agentId) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agents may request lifecycle changes only for themselves");
     }
     if (!isLifecycleCheckpoint(input.checkpoint)) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "lifecycle checkpoint lacks a portable recovery field");
     }
-    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isLifecycleResult);
-    if (replay !== undefined) return replay;
+    if (this.getAgentLifecycle(runId, input.agentId).lifecycle === "context-unreconciled" && input.action !== "rotate") {
+      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context requires explicit rotation");
+    }
     this.#verifyCheckpoint(runId, input.agentId, input.taskId, input.taskRevision, input.checkpoint);
 
     if (input.action === "completion-ready") {
@@ -2501,19 +4591,41 @@ export class Fabric {
         actionId: `${input.commandId}:release`,
         operation: "release",
         method: "release",
-        payload: { resumeReference, generation: state.providerSessionGeneration },
+        payload: { agentId: actorAgentId, resumeReference, generation: state.providerSessionGeneration },
       });
       if (!isRow(action.result) || action.result.released !== true || action.result.deleted === true) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter did not prove non-destructive release");
       }
-      this.#database.prepare("UPDATE agents SET lifecycle = 'archived' WHERE run_id = ? AND agent_id = ?").run(
-        runId,
-        actorAgentId,
-      );
-      const result = this.getAgentLifecycle(runId, actorAgentId);
-      this.#recordLifecycleOperation(runId, input, resumeReference, null);
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
+      return this.#database.transaction(() => {
+        this.#database.prepare(`
+          UPDATE capabilities SET revoked_at=COALESCE(revoked_at,?) WHERE run_id=? AND agent_id=?
+        `).run(this.#clock(), runId, actorAgentId);
+        this.#database.prepare("UPDATE agents SET lifecycle = 'archived' WHERE run_id = ? AND agent_id = ?").run(
+          runId,
+          actorAgentId,
+        );
+        const bridgeState = this.#database.prepare(`
+          SELECT bridge_state FROM agent_bridge_state WHERE run_id=? AND agent_id=?
+        `).get(runId, actorAgentId);
+        if (isRow(bridgeState) && bridgeState.bridge_state === "active") {
+          const bridge = this.#database.prepare(`
+            UPDATE agent_bridge_state
+               SET bridge_state='none',provider_session_ref=NULL,provider_session_generation=NULL,
+                   capability_hash=NULL,activation_evidence_digest=NULL,
+                   revision=revision+1,updated_at=?
+             WHERE run_id=? AND agent_id=? AND bridge_state='active'
+          `).run(this.#clock(), runId, actorAgentId);
+          if (bridge.changes !== 1) {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "retained child bridge changed during release");
+          }
+        } else if (isRow(bridgeState) && bridgeState.bridge_state !== "none") {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider release requires recovered child bridge custody");
+        }
+        const result = this.getAgentLifecycle(runId, actorAgentId);
+        this.#recordLifecycleOperation(runId, input, resumeReference, null);
+        this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+        return result;
+      })();
     }
 
     const agent = rowOrNotFound(
@@ -2524,49 +4636,143 @@ export class Fabric {
     const current = this.getAgentLifecycle(runId, actorAgentId);
     const generation = current.providerSessionGeneration + 1;
     const adapterId = this.#adapterIdForAgent(runId, actorAgentId);
-    const capabilities = await this.#requestAdapter(adapterId, "capabilities", {});
-    const inPlace = input.action === "compact" && isRow(capabilities) && capabilities.compactInPlace === true;
-    let replacementReference = priorReference;
-    if (!inPlace) {
-      const spawnAction = await this.#executeAdapterOperation({
+    const actionId = `${input.commandId}:spawn`;
+    const prompt = lifecycleHandoffPrompt({
+      agentId: actorAgentId,
+      taskId: input.taskId,
+      taskRevision: input.taskRevision,
+      checkpoint: input.checkpoint,
+      nextProviderSessionGeneration: generation,
+    });
+    const payload = {
+      agentId: actorAgentId,
+      priorResumeReference: priorReference,
+      generation,
+      prompt,
+    };
+    this.#prepareLifecycleRotation({
+      runId,
+      agentId: actorAgentId,
+      commandId: input.commandId,
+      actionId,
+      adapterId,
+      taskId: input.taskId,
+      taskRevision: input.taskRevision,
+      checkpointSha256: input.checkpoint.sha256,
+      priorResumeReference: priorReference,
+      nextProviderSessionGeneration: generation,
+    });
+    this.#fault("lifecycle-rotation:prepared");
+    let spawnAction: ProviderActionResult;
+    try {
+      spawnAction = await this.#executeOrReconcileLifecycleRotationAction({
         runId,
         adapterId,
-        actionId: `${input.commandId}:spawn`,
-        operation: "spawn",
-        method: "spawn",
-        payload: { priorResumeReference: priorReference, generation },
+        actionId,
+        payload,
       });
-      if (!isRow(spawnAction.result) || typeof spawnAction.result.resumeReference !== "string") {
-        throw new Error("adapter returned an invalid replacement session");
-      }
-      replacementReference = spawnAction.result.resumeReference;
-    } else {
-      await this.#executeAdapterOperation({
-        runId,
-        adapterId,
-        actionId: `${input.commandId}:compact`,
-        operation: "compact",
-        method: "compact",
-        payload: { resumeReference: priorReference, generation },
-      });
+    } catch (error: unknown) {
+      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
+      throw error;
     }
-    this.#database
-      .prepare("UPDATE agents SET lifecycle = 'ready', provider_session_ref = ? WHERE run_id = ? AND agent_id = ?")
-      .run(replacementReference, runId, actorAgentId);
-    this.#database.prepare("DELETE FROM delivery_freezes WHERE run_id = ? AND agent_id = ?").run(runId, actorAgentId);
-    this.#database
-      .prepare(
-        "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, NULL, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = NULL, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
-      )
-      .run(runId, actorAgentId, generation, input.checkpoint.sha256);
+    if (
+      spawnAction.status !== "terminal" || spawnAction.effectCount !== 1 ||
+      !isRow(spawnAction.result) || typeof spawnAction.result.resumeReference !== "string"
+    ) {
+      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "replacement provider action is not terminal and proved");
+    }
+    const replacementReference = spawnAction.result.resumeReference;
+    this.#database.prepare(`
+      UPDATE lifecycle_rotation_custody
+         SET state='provider-terminal',replacement_resume_reference=?,updated_at=?
+       WHERE run_id=? AND agent_id=? AND command_id=?
+         AND state IN ('prepared','unreconciled')
+    `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
     const result: LifecycleResult = {
       agentId: actorAgentId,
       lifecycle: "ready",
       providerSessionGeneration: generation,
-      rotation: { kind: inPlace ? "in-place" : "replacement-session", priorResumeReference: priorReference },
+      rotation: { kind: "replacement-session", priorResumeReference: priorReference },
     };
-    this.#recordLifecycleOperation(runId, input, priorReference, replacementReference);
-    this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+    const finalized = this.#database.transaction(() => {
+      const live = rowOrNotFound(this.#database.prepare(`
+        SELECT state,precondition_digest,freeze_reason,action_id,adapter_id,
+               task_id,task_revision,checkpoint_sha256,prior_resume_reference,
+               next_provider_session_generation
+          FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id=? AND command_id=?
+      `).get(runId, actorAgentId, input.commandId), "lifecycle rotation custody");
+      if (
+        live.action_id !== actionId || live.adapter_id !== adapterId ||
+        live.task_id !== input.taskId || live.task_revision !== input.taskRevision ||
+        live.checkpoint_sha256 !== input.checkpoint.sha256 ||
+        live.prior_resume_reference !== priorReference ||
+        live.next_provider_session_generation !== generation ||
+        (live.state !== "prepared" && live.state !== "provider-terminal" && live.state !== "unreconciled") ||
+        live.precondition_digest !== this.#lifecycleRotationPreconditionDigest(runId, actorAgentId, input.taskId)
+      ) return false;
+      const action = rowOrNotFound(this.#database.prepare(`
+        SELECT status,effect_count,result_json FROM provider_actions
+         WHERE run_id=? AND action_id=? AND adapter_id=?
+      `).get(runId, actionId, adapterId), "lifecycle provider action");
+      if (
+        action.status !== "terminal" || action.effect_count !== 1 ||
+        typeof action.result_json !== "string" ||
+        canonicalJson(JSON.parse(action.result_json)) !== canonicalJson(spawnAction.result)
+      ) return false;
+      const principal = rowOrNotFound(this.#database.prepare(`
+        SELECT expires_at,revoked_at FROM capabilities
+         WHERE run_id=? AND agent_id=?
+         ORDER BY principal_generation DESC LIMIT 1
+      `).get(runId, actorAgentId), "lifecycle rotation principal");
+      if (principal.revoked_at !== null || numberField(principal, "expires_at") <= this.#clock()) return false;
+      const agentState = rowOrNotFound(this.#database.prepare(`
+        SELECT lifecycle,provider_session_ref FROM agents WHERE run_id=? AND agent_id=?
+      `).get(runId, actorAgentId), "lifecycle rotation agent");
+      if (
+        (agentState.lifecycle !== "suspended" && agentState.lifecycle !== "context-unreconciled") ||
+        agentState.provider_session_ref !== priorReference
+      ) return false;
+      const ownedFreeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(runId, actorAgentId);
+      if (!isRow(ownedFreeze) || ownedFreeze.reason !== live.freeze_reason) return false;
+      const agentUpdated = this.#database.prepare(`
+        UPDATE agents SET lifecycle='ready',provider_session_ref=?
+         WHERE run_id=? AND agent_id=? AND lifecycle IN ('suspended','context-unreconciled')
+           AND provider_session_ref=?
+      `).run(replacementReference, runId, actorAgentId, priorReference);
+      if (agentUpdated.changes !== 1) return false;
+      const freeze = this.#database.prepare(`
+        DELETE FROM delivery_freezes
+         WHERE run_id=? AND agent_id=? AND reason=?
+      `).run(runId, actorAgentId, stringField(live, "freeze_reason"));
+      if (freeze.changes !== 1) return false;
+      this.#database.prepare(
+        "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, NULL, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = NULL, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
+      ).run(runId, actorAgentId, generation, input.checkpoint.sha256);
+      this.#database.prepare(`
+        UPDATE lifecycle_rotation_custody
+           SET state='finalized',replacement_resume_reference=?,updated_at=?
+         WHERE run_id=? AND agent_id=? AND command_id=?
+      `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
+      this.#recordLifecycleOperation(runId, input, priorReference, replacementReference);
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+      return true;
+    })();
+    if (!finalized) {
+      const concurrentReplay = this.#commandJournal.read(
+        runId,
+        actorAgentId,
+        input.commandId,
+        input,
+        isLifecycleResult,
+      );
+      if (concurrentReplay !== undefined) return concurrentReplay;
+      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle custody changed while the provider effect was in flight");
+    }
     return result;
   }
 
@@ -2627,38 +4833,163 @@ export class Fabric {
   async dispatchProviderAction(
     runId: string,
     actorAgentId: string,
-    input: {
-      adapterId: string;
-      actionId: string;
-      operation: "send_turn" | "wakeup" | "release" | "steer";
-      payload: Record<string, unknown>;
-      commandId: string;
-    },
+    input: ProviderActionDispatchRequest,
+  ): Promise<ProviderActionResult> {
+    return await this.#trackProviderOperation(
+      async () => await this.#dispatchProviderAction(runId, actorAgentId, input),
+    );
+  }
+
+  async #dispatchProviderAction(
+    runId: string,
+    actorAgentId: string,
+    input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
+    this.#assertGenericProviderAction(runId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
-    const target = this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
+    const existingAction = this.#database.prepare(`
+      SELECT payload_json FROM provider_actions WHERE run_id=? AND action_id=?
+    `).get(runId, input.actionId);
+    let existingPayload: Record<string, unknown> | undefined;
+    if (isRow(existingAction)) {
+      const value: unknown = JSON.parse(stringField(existingAction, "payload_json"));
+      if (!isRow(value)) throw new Error("stored provider action payload is invalid");
+      existingPayload = value;
+    }
+    const ephemeralSpawn = input.operation === "spawn";
+    let ephemeralMaxTurns: number | undefined;
+    let ephemeralProviderAuthorityId: string | undefined;
+    const target = ephemeralSpawn
+      ? undefined
+      : this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
     if (input.operation === "send_turn" && target === undefined) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "send_turn requires a bound provider session target");
     }
-    let admittedInputPayload = input.payload;
+    const taskValue = input.payload.taskId;
+    if (taskValue !== undefined && typeof taskValue !== "string") {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "provider task ID must be text");
+    }
+    if (ephemeralSpawn && taskValue === undefined) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn requires an exact task ID");
+    }
+    if (ephemeralSpawn) {
+      if (input.authorityId === undefined) {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn requires delegated authority");
+      }
+      const reservedTurns = input.payload.maxTurns === undefined ? 1 : input.payload.maxTurns;
+      if (
+        typeof reservedTurns !== "number" ||
+        !Number.isSafeInteger(reservedTurns) ||
+        reservedTurns < 1
+      ) {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn maxTurns must be a positive safe integer");
+      }
+      ephemeralMaxTurns = reservedTurns;
+      if (
+        typeof input.payload.model !== "string" || input.payload.model.trim().length === 0 ||
+        typeof input.payload.modelFamily !== "string" || input.payload.modelFamily.trim().length === 0 ||
+        typeof input.payload.prompt !== "string" || input.payload.prompt.trim().length === 0 ||
+        Buffer.byteLength(input.payload.prompt, "utf8") > MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES
+      ) {
+        throw new ProjectFabricCoreError(
+          "PROTOCOL_INVALID",
+          "ephemeral provider spawn requires a bounded prompt and explicit model family",
+        );
+      }
+    } else if (input.authorityId !== undefined) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "delegated provider authority is spawn-only");
+    }
+    const existingTaskValue = existingPayload?.taskId;
+    const replayTaskId = typeof taskValue === "string"
+      ? taskValue
+      : typeof existingTaskValue === "string" ? existingTaskValue : undefined;
+    const taskId = input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer"
+      ? existingPayload === undefined
+        ? resolveTaskBindingForActiveWork(
+          this.#database,
+          runId,
+          target?.agentId ?? actorAgentId,
+          taskValue,
+        )
+        : replayTaskId
+      : undefined;
+    const operationTarget = taskId === undefined
+      ? { kind: "run" as const }
+      : { kind: "task" as const, taskId: taskId as never };
+    if (existingPayload === undefined) {
+      assertScopedOperationAllowed(
+        this.#database,
+        runId,
+        FABRIC_OPERATIONS.dispatchProviderAction,
+        operationTarget,
+      );
+      if (taskId !== undefined) assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
+      if (input.operation !== "send_turn" && input.operation !== "steer") {
+        assertRunAcceptingWork(this.#database, runId);
+      }
+    }
+    const taskBoundPayload = taskId === undefined
+      ? input.payload
+      : {
+          ...input.payload,
+          taskId,
+          ...(ephemeralMaxTurns === undefined ? {} : { maxTurns: ephemeralMaxTurns }),
+        };
+    let admittedInputPayload = taskBoundPayload;
     if (target !== undefined) {
       this.#assertProviderPrincipalActive(runId, target.agentId);
+      if (taskId !== undefined) {
+        const taskMember = this.#database.prepare(`
+          SELECT 1 FROM tasks task
+           WHERE task.run_id=? AND task.task_id=? AND (
+             task.owner_agent_id=? OR EXISTS (
+               SELECT 1 FROM task_participants participant
+                WHERE participant.run_id=task.run_id AND participant.task_id=task.task_id
+                  AND participant.agent_id=?
+             )
+           )
+        `).get(runId, taskId, target.agentId, target.agentId);
+        if (!isRow(taskMember)) {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "provider target is outside the exact task scope");
+        }
+      }
       const targetAgent = rowOrNotFound(
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, target.agentId),
         "provider target agent",
       );
-      admittedInputPayload = this.#admitProviderPayload(runId, stringField(targetAgent, "authority_id"), input.payload);
+      admittedInputPayload = this.#admitProviderPayload(runId, stringField(targetAgent, "authority_id"), taskBoundPayload);
     } else {
       this.#adapter(input.adapterId);
+      if (taskId !== undefined) {
+        const taskMember = this.#database.prepare(`
+          SELECT 1 FROM tasks task
+           WHERE task.run_id=? AND task.task_id=? AND (
+             task.owner_agent_id=? OR EXISTS (
+               SELECT 1 FROM task_participants participant
+                WHERE participant.run_id=task.run_id AND participant.task_id=task.task_id
+                  AND participant.agent_id=?
+             )
+           )
+        `).get(runId, taskId, actorAgentId, actorAgentId);
+        if (!isRow(taskMember)) {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "provider actor is outside the exact task scope");
+        }
+      }
       const actor = rowOrNotFound(
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
         "provider actor",
       );
-      admittedInputPayload = this.#admitProviderPayload(runId, stringField(actor, "authority_id"), input.payload);
+      let providerAuthorityId = stringField(actor, "authority_id");
+      if (ephemeralSpawn) {
+        this.#assertEphemeralProviderAuthority(runId, actorAgentId, input.authorityId as string);
+        providerAuthorityId = input.authorityId as string;
+        ephemeralProviderAuthorityId = providerAuthorityId;
+      }
+      admittedInputPayload = this.#admitProviderPayload(runId, providerAuthorityId, taskBoundPayload);
     }
-    if (input.operation === "send_turn" || input.operation === "steer") {
+    if (input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer") {
       this.#assertAdapterModel(input.adapterId, admittedInputPayload);
     }
     const identityHash = sha256(canonicalJson({
@@ -2666,6 +4997,7 @@ export class Fabric {
       operation: input.operation,
       targetAgentId: target?.agentId ?? null,
       providerSessionGeneration: target?.providerSessionGeneration ?? null,
+      ...(ephemeralSpawn ? { authorityId: input.authorityId } : {}),
       payload: admittedInputPayload,
     }));
     const existing = this.#providerSessions.assertActionIdentity({
@@ -2681,7 +5013,10 @@ export class Fabric {
     });
     if (existing) {
       const result = this.getProviderAction(runId, input.actionId);
-      if (result.status === "terminal" || result.status === "quarantined") {
+      if (
+        result.status === "terminal" || result.status === "quarantined" ||
+        (ephemeralSpawn && ["prepared", "dispatched", "accepted"].includes(result.status))
+      ) {
         this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
         return result;
       }
@@ -2689,6 +5024,98 @@ export class Fabric {
         actionId: input.actionId,
         commandId: `${input.commandId}:reconcile`,
       });
+    }
+    if (ephemeralSpawn) {
+      if (ephemeralProviderAuthorityId === undefined || ephemeralMaxTurns === undefined || taskId === undefined) {
+        throw new Error("validated ephemeral provider budget is unavailable");
+      }
+      const ephemeralAuthorityBudget = {
+        authorityId: ephemeralProviderAuthorityId,
+        reservation: this.#providerBudgetReservation(
+          ephemeralProviderAuthorityId,
+          stringField(admittedInputPayload, "modelFamily"),
+          ephemeralMaxTurns,
+        ),
+      };
+      const task = rowOrNotFound(
+        this.#database.prepare("SELECT state FROM tasks WHERE run_id=? AND task_id=?").get(runId, taskId),
+        "ephemeral provider task",
+      );
+      if (["complete", "cancelled", "degraded"].includes(stringField(task, "state"))) {
+        throw new ProjectFabricCoreError(
+          "LIFECYCLE_PRECONDITION_FAILED",
+          "terminal task cannot admit an ephemeral provider spawn",
+        );
+      }
+      const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
+      assertAdapterOperation(capabilities, "spawn");
+      if (
+        !isRow(capabilities) ||
+        capabilities.ephemeralWorker !== true ||
+        capabilities.answerBearingSpawn !== true
+      ) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise answer-bearing ephemeral spawn");
+      }
+      if (
+        capabilities.answerBearingSpawnTurns !== "payload-max-turns" &&
+        capabilities.answerBearingSpawnTurns !== "one-shot"
+      ) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise a bounded answer-bearing turn contract");
+      }
+      if (capabilities.answerBearingSpawnTurns === "one-shot" && ephemeralMaxTurns !== 1) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "one-shot answer-bearing adapter accepts exactly one turn");
+      }
+      if (
+        capabilities.answerBearingUsageUnits !== undefined &&
+        (!isStringArray(capabilities.answerBearingUsageUnits) ||
+          capabilities.answerBearingUsageUnits.some((unit) => !Object.hasOwn(ephemeralAuthorityBudget.reservation, unit)))
+      ) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "delegated authority omits an adapter-mandatory usage dimension");
+      }
+      const result = await this.#executeAdapterOperation({
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        operation: "spawn",
+        method: "spawn",
+        payload: admittedInputPayload,
+        requireProviderAnswer: true,
+        authorityBudget: ephemeralAuthorityBudget,
+        taskId,
+        deferCompletion: true,
+        deferredCommand: {
+          actorAgentId,
+          commandId: input.commandId,
+          payload: input,
+        },
+        revalidateAdmission: () => {
+          if (this.#closing) {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider admission changed while Fabric was closing");
+          }
+          this.#assertChair(runId, actorAgentId);
+          this.#assertProviderPrincipalActive(runId, actorAgentId);
+          const reboundTaskId = resolveTaskBindingForActiveWork(
+            this.#database,
+            runId,
+            actorAgentId,
+            taskValue,
+          );
+          if (reboundTaskId !== taskId) {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "provider task binding changed before dispatch");
+          }
+          assertScopedOperationAllowed(
+            this.#database,
+            runId,
+            FABRIC_OPERATIONS.dispatchProviderAction,
+            operationTarget,
+          );
+          assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
+          assertRunAcceptingWork(this.#database, runId);
+          this.#assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
+          this.#admitProviderPayload(runId, ephemeralProviderAuthorityId as string, taskBoundPayload);
+        },
+      });
+      return result;
     }
     let providerPayload = admittedInputPayload;
     let turnLeaseGeneration: number | null = null;
@@ -2748,9 +5175,9 @@ export class Fabric {
       .run(this.#clock(), runId, input.actionId);
     try {
       const response = await this.#requestAdapter(input.adapterId, "dispatch", { actionId: input.actionId, operation: input.operation, payload: providerPayload });
-      const result = providerActionResult(response);
+      const result = providerActionResult(response, input.actionId);
       this.#persistProviderAction(runId, input.actionId, response, result);
-      this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     } catch {
@@ -2762,7 +5189,7 @@ export class Fabric {
         effectCount: 0,
       };
       this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, result);
-      this.#providerSessions.settleTurn(runId, input.actionId, "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.actionId, "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -2773,29 +5200,117 @@ export class Fabric {
     actorAgentId: string,
     input: { actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
+    return await this.#trackProviderOperation(
+      async () => {
+        this.#assertChair(runId, actorAgentId);
+        this.#assertGenericProviderAction(runId, input.actionId);
+        const replay = this.#commandJournal.read(
+          runId,
+          actorAgentId,
+          input.commandId,
+          input,
+          isProviderActionResult,
+        );
+        if (replay !== undefined) return replay;
+        const key = this.#providerActionOwnershipKey(runId, input.actionId);
+        const existing = this.#providerActionReconciliations.get(key);
+        if (existing !== undefined) {
+          await existing;
+          this.#assertChair(runId, actorAgentId);
+          this.#assertGenericProviderAction(runId, input.actionId);
+          const concurrentReplay = this.#commandJournal.read(
+            runId,
+            actorAgentId,
+            input.commandId,
+            input,
+            isProviderActionResult,
+          );
+          if (concurrentReplay !== undefined) return concurrentReplay;
+          const current = this.getProviderAction(runId, input.actionId);
+          if (current.status === "terminal" || current.status === "quarantined") {
+            this.#commandJournal.write(runId, actorAgentId, input.commandId, input, current);
+            return current;
+          }
+          return await this.#reconcileProviderAction(runId, actorAgentId, input);
+        }
+        const owned = this.#reconcileProviderAction(runId, actorAgentId, input);
+        this.#providerActionReconciliations.set(key, owned);
+        try {
+          return await owned;
+        } finally {
+          if (this.#providerActionReconciliations.get(key) === owned) {
+            this.#providerActionReconciliations.delete(key);
+          }
+        }
+      },
+    );
+  }
+
+  async #reconcileProviderAction(
+    runId: string,
+    actorAgentId: string,
+    input: { actionId: string; commandId: string },
+  ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
+    this.#assertGenericProviderAction(runId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const stored = rowOrNotFound(
       this.#database
-        .prepare("SELECT adapter_id, operation, payload_json, status, idempotency_proven, target_agent_id FROM provider_actions WHERE run_id = ? AND action_id = ?")
+        .prepare("SELECT adapter_id, operation, payload_json, status, idempotency_proven, target_agent_id, budget_state FROM provider_actions WHERE run_id = ? AND action_id = ?")
         .get(runId, input.actionId),
       "provider action",
     );
+    const storedPayload: unknown = JSON.parse(stringField(stored, "payload_json"));
+    if (!isRow(storedPayload)) throw new Error("stored provider action payload is invalid");
+    const answerBearing = stored.operation === "spawn" && isTaskBoundEphemeralProviderPayload(storedPayload);
+    const quarantine = (candidate: ProviderActionResult): ProviderActionResult => {
+      const quarantined: ProviderActionResult = {
+        ...candidate,
+        status: "quarantined",
+      };
+      delete quarantined.providerAnswer;
+      if (answerBearing) delete quarantined.result;
+      this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, quarantined);
+      this.#settleProviderTurnAndPump(runId, input.actionId, "quarantined");
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
+      return quarantined;
+    };
     let result = this.getProviderAction(runId, input.actionId);
+    if (this.#ownedProviderActions.has(this.#providerActionOwnershipKey(runId, input.actionId))) {
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+      return result;
+    }
     if (result.status === "prepared") {
+      if (answerBearing) {
+        const adapterId = stringField(stored, "adapter_id");
+        this.#enqueueDeferredProviderAction({
+          runId,
+          actionId: input.actionId,
+          execute: async () => await this.#completeAdapterOperation({
+            runId,
+            adapterId,
+            actionId: input.actionId,
+            operation: "spawn",
+            method: "spawn",
+            payload: storedPayload,
+            requireProviderAnswer: true,
+          }),
+        });
+        result = this.getProviderAction(runId, input.actionId);
+        this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+        return result;
+      }
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
-      const payload: unknown = JSON.parse(stringField(stored, "payload_json"));
-      if (!isRow(payload)) throw new Error("stored provider action payload is invalid");
       const adapterId = stringField(stored, "adapter_id");
       this.#database
         .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND action_id = ?")
         .run(this.#clock(), runId, input.actionId);
       try {
-        const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload });
-        result = providerActionResult(response);
+        const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
+        result = providerActionResultWithRequiredAnswer(response, answerBearing, input.actionId);
         this.#persistProviderAction(runId, input.actionId, response, result);
       } catch {
         result = {
@@ -2807,12 +5322,25 @@ export class Fabric {
         };
         this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, result);
       }
-      this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
-    if (result.status !== "ambiguous" && result.status !== "dispatched") {
-      this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+    const resolvedEffectWithUnknownUsage = answerBearing &&
+      (result.status === "terminal" || result.status === "quarantined") &&
+      stored.budget_state === "usage-unknown";
+    const resolvedEffectResult = result;
+    const preserveResolvedEffect = (): ProviderActionResult => {
+      this.#settleProviderTurnAndPump(
+        runId,
+        input.actionId,
+        resolvedEffectResult.status === "terminal" ? "terminal" : "quarantined",
+      );
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, resolvedEffectResult);
+      return resolvedEffectResult;
+    };
+    if (result.status !== "ambiguous" && result.status !== "dispatched" && !resolvedEffectWithUnknownUsage) {
+      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -2821,36 +5349,47 @@ export class Fabric {
     try {
       lookup = await this.#requestAdapter(adapterId, "lookup_action", { actionId: input.actionId });
     } catch {
-      result = { ...result, status: "quarantined" };
-      this.#database
-        .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.actionId);
-      this.#providerSessions.settleTurn(runId, input.actionId, "quarantined");
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
+      if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
+      return quarantine(result);
     }
-    const lookedUp = providerActionResult(lookup);
+    let lookedUp: ProviderActionResult;
+    try {
+      lookedUp = providerActionResultWithRequiredAnswer(lookup, answerBearing, input.actionId);
+    } catch {
+      if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
+      return quarantine(result);
+    }
     const idempotencyProven = numberField(stored, "idempotency_proven") === 1 ||
       (isRow(lookup) && lookup.idempotencyProven === true);
     if (lookedUp.status === "terminal") {
       result = lookedUp;
-      this.#persistProviderAction(runId, input.actionId, lookup, result);
-    } else if (idempotencyProven) {
+      try {
+        this.#persistProviderAction(runId, input.actionId, lookup, result);
+      } catch {
+        if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
+        return quarantine(this.getProviderAction(runId, input.actionId));
+      }
+    } else if (resolvedEffectWithUnknownUsage) {
+      return preserveResolvedEffect();
+    } else if (idempotencyProven && !answerBearing) {
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
-      const payload: unknown = JSON.parse(stringField(stored, "payload_json"));
-      if (!isRow(payload)) throw new Error("stored provider action payload is invalid");
-      const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload });
-      result = providerActionResult(replayed);
-      this.#persistProviderAction(runId, input.actionId, replayed, result);
+      const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
+      try {
+        result = providerActionResultWithRequiredAnswer(replayed, answerBearing, input.actionId);
+      } catch {
+        return quarantine(result);
+      }
+      try {
+        this.#persistProviderAction(runId, input.actionId, replayed, result);
+      } catch {
+        return quarantine(this.getProviderAction(runId, input.actionId));
+      }
     } else {
-      result = { ...lookedUp, status: "quarantined" };
-      this.#database
-        .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.actionId);
+      return quarantine(lookedUp);
     }
-    this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+    this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
     this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
     return result;
   }
@@ -2858,7 +5397,7 @@ export class Fabric {
   getProviderAction(runId: string, actionId: string): ProviderActionResult {
     const row = rowOrNotFound(
       this.#database
-        .prepare("SELECT status, history_json, execution_count, effect_count, result_json FROM provider_actions WHERE run_id = ? AND action_id = ?")
+        .prepare("SELECT operation, payload_json, status, history_json, execution_count, effect_count, result_json FROM provider_actions WHERE run_id = ? AND action_id = ?")
         .get(runId, actionId),
       "provider action",
     );
@@ -2867,13 +5406,19 @@ export class Fabric {
       throw new Error("stored provider action is invalid");
     }
     const resultJson = row.result_json;
+    const result = typeof resultJson === "string" ? JSON.parse(resultJson) as unknown : undefined;
+    const payload: unknown = JSON.parse(stringField(row, "payload_json"));
+    const providerAnswer = row.operation === "spawn" && isTaskBoundEphemeralProviderPayload(payload) && result !== undefined
+      ? providerAnswerFromAdapterResult(result)
+      : undefined;
     return {
       actionId,
       status: row.status,
       history,
       executionCount: numberField(row, "execution_count"),
       effectCount: numberField(row, "effect_count"),
-      ...(typeof resultJson === "string" ? { result: JSON.parse(resultJson) } : {}),
+      ...(result === undefined ? {} : { result }),
+      ...(providerAnswer === undefined ? {} : { providerAnswer }),
     };
   }
 
@@ -2912,17 +5457,14 @@ export class Fabric {
   createTeam(runId: string, actorAgentId: string, input: TeamCreateInput): TeamResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTeamResult, () => {
       const { depth, parentTeamId } = this.#teamCreationPosition(runId, actorAgentId, input.parentTeamId);
-      if ("leader" in input) {
-        return this.#createAtomicTeam(runId, actorAgentId, input, depth, parentTeamId);
-      }
-      return this.#createExistingTeam(runId, actorAgentId, input, depth, parentTeamId);
+      return this.#createTeam(runId, actorAgentId, input, depth, parentTeamId);
     });
   }
 
-  #createAtomicTeam(
+  #createTeam(
     runId: string,
     actorAgentId: string,
-    input: AtomicTeamCreateInput,
+    input: TeamCreateInput,
     depth: number,
     parentTeamId: string | null,
   ): TeamResult {
@@ -2947,31 +5489,31 @@ export class Fabric {
       authority: input.leader.authority,
       commandId: `${input.commandId}:leader-authority`,
     });
-    const leaderRegistration = this.registerAgent(runId, actorAgentId, {
+    this.#registerAgentIdentity(runId, actorAgentId, {
       agentId: input.leader.agentId,
       authorityId: leaderGrant.authorityId,
     });
-    const memberIds: string[] = [];
+    const initialMembers: Array<{ agentId: string; authorityId: string }> = [];
     for (const member of input.initialMembers) {
       const grant = this.delegateAuthority(runId, input.leader.agentId, {
         parentAuthorityId: leaderGrant.authorityId,
         authority: member.authority,
         commandId: `${input.commandId}:member-authority:${member.agentId}`,
       });
-      this.registerAgent(runId, input.leader.agentId, { agentId: member.agentId, authorityId: grant.authorityId });
-      memberIds.push(member.agentId);
+      this.#registerAgentIdentity(runId, input.leader.agentId, { agentId: member.agentId, authorityId: grant.authorityId });
+      initialMembers.push({ agentId: member.agentId, authorityId: grant.authorityId });
     }
-    const rootTask = this.createTask(runId, actorAgentId, {
+    const rootTask = this.#createTask(runId, actorAgentId, {
       taskId: input.rootTask.taskId,
       authorityId: leaderGrant.authorityId,
       proposedOwnerAgentId: input.leader.agentId,
-      participantAgentIds: [input.leader.agentId, ...memberIds],
+      participantAgentIds: [input.leader.agentId, ...initialMembers.map((member) => member.agentId)],
       eligibleAgentIds: [input.leader.agentId],
       dependencies: [],
       objective: input.rootTask.objective,
       baseRevision: input.rootTask.baseRevision,
       commandId: `${input.commandId}:root-task`,
-    });
+    }, false);
     const budgetId = `${input.teamId}:budget`;
     const initialReserved = Object.fromEntries(
       Object.keys(input.reservedBudget).map((unit) => [
@@ -2986,7 +5528,7 @@ export class Fabric {
       leaderAgentId: input.leader.agentId,
       rootTaskId: rootTask.taskId,
       ownedTaskIds: [rootTask.taskId],
-      memberAgentIds: [input.leader.agentId, ...memberIds],
+      memberAgentIds: [input.leader.agentId, ...initialMembers.map((member) => member.agentId)],
       authorityId: leaderGrant.authorityId,
       budgetId,
       budget: input.reservedBudget,
@@ -2999,78 +5541,26 @@ export class Fabric {
       leader: {
         agentId: input.leader.agentId,
         authorityId: leaderGrant.authorityId,
-        capability: leaderRegistration.capability,
       },
       rootTask,
-      initialMemberAgentIds: memberIds,
+      initialMembers,
     };
-  }
-
-  #createExistingTeam(
-    runId: string,
-    actorAgentId: string,
-    input: ExistingTeamCreateInput,
-    depth: number,
-    parentTeamId: string | null,
-  ): TeamResult {
-    const leader = rowOrNotFound(
-      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, input.leaderAgentId),
-      "team leader",
-    );
-    const authorityId = input.authorityId ?? stringField(leader, "authority_id");
-    if (stringField(leader, "authority_id") !== authorityId) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "team leader does not hold the named authority");
-    }
-    const members = [...new Set([input.leaderAgentId, ...(input.memberAgentIds ?? input.initialMemberAgentIds ?? [])])];
-    if (members.length - 1 > 5) throw new FabricError("BUDGET_EXCEEDED", "team exceeds five workers");
-    for (const agentId of members) {
-      rowOrNotFound(
-        this.#database.prepare("SELECT 1 FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, agentId),
-        `team member ${agentId}`,
-      );
-    }
-    const ownedTaskIds = [...new Set(input.ownedTaskIds ?? [input.rootTaskId])];
-    if (!ownedTaskIds.includes(input.rootTaskId)) throw new FabricError("TASK_SUBTREE_CONFLICT", "owned task set omits root");
-    const budget = input.budget ?? input.reservedBudget ?? {};
-    validateIntegerBudget(budget);
-    const authority = rowOrNotFound(
-      this.#database.prepare("SELECT authority_json FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
-      "team authority",
-    );
-    const authorityBudget = parseAuthority(stringField(authority, "authority_json")).budget;
-    for (const [unit, value] of Object.entries(budget)) {
-      if ((authorityBudget[unit] ?? -1) < value) throw new FabricError("BUDGET_EXCEEDED", `team budget exceeds authority for ${unit}`);
-    }
-    const budgetId = `${input.teamId}:budget`;
-    this.#insertTeamRecords(runId, {
-      teamId: input.teamId,
-      parentTeamId,
-      depth,
-      leaderAgentId: input.leaderAgentId,
-      rootTaskId: input.rootTaskId,
-      ownedTaskIds,
-      memberAgentIds: members,
-      authorityId,
-      budgetId,
-      budget,
-      initialReserved: {},
-      discussionGroups: input.discussionGroups ?? [],
-      actorAgentId,
-    });
-    return this.getTeam(runId, input.teamId);
   }
 
   #teamCreationPosition(runId: string, actorAgentId: string, requestedParentTeamId?: string): {
     depth: number;
     parentTeamId: string | null;
   } {
+    const totalLeaders = numberField(
+      rowOrNotFound(
+        this.#database.prepare("SELECT COUNT(*) AS count FROM teams WHERE run_id = ?").get(runId),
+        "leader count",
+      ),
+      "count",
+    );
+    if (totalLeaders >= 4) throw new FabricError("BUDGET_EXCEEDED", "run already has four team leaders");
     if (requestedParentTeamId === undefined) {
       this.#assertChair(runId, actorAgentId);
-      const count = numberField(
-        rowOrNotFound(this.#database.prepare("SELECT COUNT(*) AS count FROM teams WHERE run_id = ? AND depth = 1").get(runId), "leader count"),
-        "count",
-      );
-      if (count >= 4) throw new FabricError("BUDGET_EXCEEDED", "run already has four top-level leaders");
       return { depth: 1, parentTeamId: null };
     }
     const parent = rowOrNotFound(
@@ -3318,6 +5808,7 @@ export class Fabric {
     const parse = (value: unknown): value is { teamId: string; generation: number; closed: true } =>
       isRow(value) && typeof value.teamId === "string" && typeof value.generation === "number" && value.closed === true;
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertScopedBarrierAllowed(this.#database, runId, input.teamId);
       const team = this.getTeam(runId, input.teamId);
       if (team.leaderAgentId !== actorAgentId) throw new FabricError("CAPABILITY_FORBIDDEN", "only the current team leader may close its barrier");
       if (team.generation !== input.expectedGeneration) throw new FabricError("STALE_TEAM_GENERATION", "team generation changed");
@@ -3594,51 +6085,88 @@ export class Fabric {
       throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path must be relative and traversal-free");
     }
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isArtifactResult, () => {
-      const run = rowOrNotFound(
-        this.#database.prepare("SELECT project_run_directory FROM runs WHERE run_id = ?").get(runId),
-        "run",
-      );
-      const directoryValue = run.project_run_directory;
-      if (typeof directoryValue !== "string") {
-        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "run has no project artifact directory");
+      const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+      if (taskId !== undefined) {
+        const bound = this.#database.prepare(`
+          SELECT 1 FROM tasks task WHERE task.run_id=? AND task.task_id=? AND (
+            task.owner_agent_id=? OR EXISTS (
+              SELECT 1 FROM task_participants participant
+               WHERE participant.run_id=task.run_id AND participant.task_id=task.task_id
+                 AND participant.agent_id=?
+            )
+          )
+        `).get(runId, taskId, actorAgentId, actorAgentId);
+        if (!isRow(bound)) throw new FabricError("CAPABILITY_FORBIDDEN", "artifact task is outside the actor task scope");
       }
-      let target: string;
-      try {
-        target = canonicalPath(resolve(directoryValue, input.relativePath));
-      } catch (error: unknown) {
-        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path cannot be canonicalised", { cause: error });
-      }
-      if (!pathContains(canonicalPath(directoryValue), target)) {
-        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path escapes the run directory");
-      }
-      if (input.taskId !== undefined) {
-        rowOrNotFound(
-          this.#database.prepare("SELECT 1 FROM tasks WHERE run_id = ? AND task_id = ?").get(runId, input.taskId),
-          "artifact task",
-        );
-      }
-      const artifactId = uuidv7();
-      this.#database
-        .prepare(
-          "INSERT INTO artifacts(artifact_id, run_id, task_id, publisher_agent_id, relative_path, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .run(
-          artifactId,
-          runId,
-          input.taskId ?? null,
-          actorAgentId,
-          input.relativePath,
-          input.sha256,
-          this.#clock(),
-        );
+      const registered = this.#artifactRegistry.registerAgentEvidence({
+        runId,
+        agentId: actorAgentId,
+        taskId: taskId ?? null,
+        requestedSourceKind: "run-file",
+        evidenceKind: "artifact",
+        relativePath: input.relativePath,
+        digest: input.sha256,
+        verifyBytes: false,
+        enforcePathAuthority: false,
+      });
       const result: ArtifactResult = {
-        artifactId,
+        artifactId: registered.evidenceId,
         relativePath: input.relativePath,
         sha256: input.sha256,
       };
       this.#event(runId, "artifact-published", actorAgentId, result);
       return result;
     });
+  }
+
+  publishEvidence(
+    runId: string,
+    actorAgentId: string,
+    input: EvidencePublishRequest,
+  ): EvidenceArtifactRegistration {
+    if (input.coordinationRunId !== runId) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "evidence run binding differs from the authenticated run");
+    }
+    const root = resolveRunArtifactRoot(this.#database, runId);
+    if (input.projectSessionId !== root.projectSessionId) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "evidence session binding differs from the authenticated session");
+    }
+    return this.#commandJournal.execute(
+      runId,
+      actorAgentId,
+      input.commandId,
+      input,
+      isEvidenceArtifactRegistration,
+      () => {
+        const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+        const registered = this.#artifactRegistry.registerAgentEvidence({
+          runId,
+          agentId: actorAgentId,
+          taskId: taskId ?? null,
+          requestedSourceKind: input.requestedSourceKind,
+          evidenceKind: input.evidenceKind,
+          relativePath: input.relativePath,
+          digest: input.sourceDigest,
+        });
+        if (registered.projectSessionId === null || registered.coordinationRunId === null) {
+          throw new Error("agent evidence registration lost its session/run binding");
+        }
+        return {
+          evidenceId: registered.evidenceId,
+          evidenceRevision: registered.evidenceRevision,
+          projectId: registered.projectId as never,
+          projectSessionId: registered.projectSessionId as never,
+          coordinationRunId: registered.coordinationRunId as never,
+          taskId: registered.taskId as never,
+          sourceKind: registered.sourceKind as "project-file" | "run-file",
+          evidenceKind: registered.evidenceKind,
+          artifactRef: registered.artifactRef as never,
+          publisherKind: "agent",
+          publisherRef: registered.publisherRef as never,
+          createdAt: new Date(registered.createdAt).toISOString() as never,
+        };
+      },
+    );
   }
 
   closeBarrier(
@@ -3648,6 +6176,8 @@ export class Fabric {
   ): BarrierResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isBarrierResult, () => {
       this.#assertChair(runId, actorAgentId);
+      const stageId = input.scope === "stage" ? input.stageId ?? "default" : "";
+      assertScopedBarrierAllowed(this.#database, runId, `${runId}:${input.scope}:${stageId}`);
       const unreconciled = numberField(
         rowOrNotFound(
           this.#database
@@ -3705,7 +6235,6 @@ export class Fabric {
         .map((value) => stringField(rowOrNotFound(value, "barrier task"), "task_id"));
       this.#assertTaskEvidence(runId, taskIds, input.scope === "stage");
       const receipt = this.exportReceipt(runId, actorAgentId, `${input.commandId}:receipt`);
-      const stageId = input.scope === "stage" ? input.stageId ?? "default" : "";
       this.#database
         .prepare(
           "INSERT INTO barriers(run_id, scope, stage_id, state, closed_at, receipt_sha256) VALUES (?, ?, ?, 'closed', ?, ?) ON CONFLICT(run_id, scope, stage_id) DO UPDATE SET state = 'closed', closed_at = excluded.closed_at, receipt_sha256 = excluded.receipt_sha256",
@@ -3729,7 +6258,11 @@ export class Fabric {
       `SELECT COUNT(*) AS count FROM task_objective_checks WHERE run_id = ? AND task_id IN (${placeholders}) AND status != 'pass'`,
     );
     const unresolvedGates = count(
-      `SELECT COUNT(*) AS count FROM task_human_gates WHERE run_id = ? AND task_id IN (${placeholders}) AND status != 'approved'`,
+      `SELECT COUNT(DISTINCT g.gate_id) AS count
+         FROM scoped_gates g
+         JOIN scoped_gate_tasks t ON t.gate_id=g.gate_id
+        WHERE g.coordination_run_id=? AND t.task_id IN (${placeholders})
+          AND g.status IN ('pending','deferred')`,
     );
     const missingCheckpoints = count(
       `SELECT COUNT(*) AS count FROM tasks t JOIN agents a ON a.run_id = t.run_id AND a.agent_id = t.owner_agent_id WHERE t.run_id = ? AND t.task_id IN (${placeholders}) AND a.provider_session_ref IS NOT NULL AND NOT EXISTS (SELECT 1 FROM lifecycle_checkpoints c WHERE c.run_id = t.run_id AND c.task_id = t.task_id AND c.task_revision = t.revision)`,
@@ -3836,9 +6369,22 @@ export class Fabric {
     return { tasks };
   }
 
-  listAgents(runId: string, requesterId: string): { agents: Array<{ agentId: string; parentAgentId: string | null; lifecycle: string }> } {
+  listAgents(runId: string, requesterId: string): { agents: Array<{
+    agentId: string;
+    parentAgentId: string | null;
+    lifecycle: string;
+    bridgeState: "active" | "none" | "lost";
+    bridgeGeneration: number;
+  }> } {
     const agents = this.#database
-      .prepare("SELECT agent_id, parent_agent_id, lifecycle FROM agents WHERE run_id = ? ORDER BY agent_id")
+      .prepare(`
+        SELECT a.agent_id, a.parent_agent_id, a.lifecycle,
+               COALESCE(b.bridge_state, 'none') AS bridge_state,
+               COALESCE(b.bridge_generation, 1) AS bridge_generation
+          FROM agents a
+          LEFT JOIN agent_bridge_state b ON b.run_id=a.run_id AND b.agent_id=a.agent_id
+         WHERE a.run_id = ? ORDER BY a.agent_id
+      `)
       .all(runId)
       .map((value) => {
         const row = rowOrNotFound(value, "agent");
@@ -3846,10 +6392,16 @@ export class Fabric {
         if (parentValue !== null && typeof parentValue !== "string") {
           throw new Error("stored parent agent is invalid");
         }
+        const bridgeState = stringField(row, "bridge_state");
+        if (bridgeState !== "active" && bridgeState !== "none" && bridgeState !== "lost") {
+          throw new Error("stored agent bridge state is invalid");
+        }
         return {
           agentId: stringField(row, "agent_id"),
           parentAgentId: parentValue,
           lifecycle: stringField(row, "lifecycle"),
+          bridgeState: bridgeState as "active" | "none" | "lost",
+          bridgeGeneration: numberField(row, "bridge_generation"),
         };
       })
       .filter((agent) => this.#readPolicy.canReadAgent(runId, requesterId, agent.agentId));
@@ -3877,14 +6429,15 @@ export class Fabric {
     const replay = this.#commandJournal.read(runId, actorAgentId, commandId, payload, isReceiptResult);
     if (replay !== undefined) return replay;
     const run = rowOrNotFound(
-      this.#database.prepare("SELECT chair_agent_id, project_run_directory FROM runs WHERE run_id = ?").get(runId),
+      this.#database.prepare("SELECT chair_agent_id FROM runs WHERE run_id = ?").get(runId),
       "run",
     );
     if (stringField(run, "chair_agent_id") !== actorAgentId) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "only the chair may export the receipt");
     }
-    const directoryValue = run.project_run_directory;
-    if (typeof directoryValue !== "string") {
+    const artifactRoot = resolveRunArtifactRoot(this.#database, runId);
+    const directoryValue = artifactRoot.artifactRoot;
+    if (directoryValue === null) {
       throw new FabricError("NOT_FOUND", "run has no project receipt directory");
     }
     const receipt = this.#database.transaction(() => projectFabricReceipt(this.#database, runId))();
@@ -3897,11 +6450,24 @@ export class Fabric {
     writeFileSync(join(directoryValue, "fabric-receipt.json"), bytes, { encoding: "utf8", mode: 0o600 });
     const result: ReceiptResult = { relativePath, schemaVersion: 2, sha256: digest };
     this.#database.transaction(() => {
-        this.#database
-          .prepare(
-            "INSERT OR IGNORE INTO receipt_exports(run_id, relative_path, sha256, exported_at) VALUES (?, ?, ?, ?)",
-          )
-          .run(runId, relativePath, digest, this.#clock());
+      this.#database
+        .prepare(
+          "INSERT OR IGNORE INTO receipt_exports(run_id, relative_path, sha256, exported_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(runId, relativePath, digest, this.#clock());
+      this.#artifactRegistry.register({
+        projectId: artifactRoot.projectId,
+        projectSessionId: artifactRoot.projectSessionId,
+        runId,
+        taskId: null,
+        publisherKind: "fabric",
+        publisherRef: "fabric-receipt-export",
+        publisherAgentId: null,
+        sourceKind: artifactRoot.projectRelativeDirectory === "." ? "project-file" : "run-file",
+        evidenceKind: "receipt",
+        relativePath,
+        digest,
+      });
       this.#commandJournal.write(runId, actorAgentId, commandId, payload, result);
     })();
     return result;
@@ -3931,6 +6497,41 @@ export class Fabric {
       throw new FabricError("MODEL_NOT_ALLOWED", `${adapterId} model is outside trusted compatibility patterns`);
     }
     throw new FabricError("ADAPTER_FAMILY_FORBIDDEN", `${adapterId} model family is outside trusted compatibility policy`);
+  }
+
+  #providerBudgetReservation(
+    authorityId: string,
+    modelFamily: string,
+    maximumTurns: number,
+  ): Record<string, number> {
+    const reservation: Record<string, number> = {};
+    for (const value of this.#database.prepare(`
+      SELECT unit_key,granted,reserved,consumed,usage_unknown
+        FROM authority_budget WHERE authority_id=? ORDER BY unit_key
+    `).all(authorityId)) {
+      const row = rowOrNotFound(value, "provider authority budget");
+      const unit = stringField(row, "unit_key");
+      const relevant = unit === "turns" || unit === "provider_calls" ||
+        unit === "concurrent_turns" || unit === "wall_clock_milliseconds" ||
+        unit.startsWith("cost:") || unit === `input_tokens:${modelFamily}` ||
+        unit === `output_tokens:${modelFamily}`;
+      if (!relevant) continue;
+      if (numberField(row, "usage_unknown") === 1) {
+        throw new FabricError("BUDGET_USAGE_UNKNOWN", `delegated provider usage is unknown for ${unit}`);
+      }
+      const available = numberField(row, "granted") - numberField(row, "reserved") - numberField(row, "consumed");
+      const amount = unit === "turns" ? maximumTurns
+        : unit === "provider_calls" || unit === "concurrent_turns" ? 1
+          : available;
+      if (amount < 1 || amount > available) {
+        throw new FabricError("BUDGET_EXCEEDED", `delegated provider budget is exhausted for ${unit}`);
+      }
+      reservation[unit] = amount;
+    }
+    if (reservation.turns !== maximumTurns) {
+      throw new FabricError("BUDGET_EXCEEDED", "delegated provider authority has no positive hard turns ceiling");
+    }
+    return reservation;
   }
 
   #admitProviderPayload(
@@ -3963,6 +6564,7 @@ export class Fabric {
       "baseInstructions",
       "modelProvider",
       "serviceTier",
+      "readOnlyRoot",
     ];
     const forbidden = forbiddenControls.find((field) => Object.hasOwn(payload, field));
     if (forbidden !== undefined) {
@@ -3982,7 +6584,8 @@ export class Fabric {
     return {
       ...payload,
       cwd: resolve(root, relativeCwd),
-      allowedTools: [],
+      readOnlyRoot: resolve(root, relativeCwd),
+      allowedTools: ["Read", "Glob", "Grep"],
       approvalPolicy: "never",
       sandbox: "read-only",
     };
@@ -3990,13 +6593,32 @@ export class Fabric {
 
   #assertProviderPrincipalActive(runId: string, agentId: string): void {
     const principal = rowOrNotFound(this.#database.prepare(`
-      SELECT c.revoked_at, c.expires_at
+      SELECT c.revoked_at, c.expires_at, agent.lifecycle
         FROM capabilities c
+        JOIN agents agent ON agent.run_id=c.run_id AND agent.agent_id=c.agent_id
        WHERE c.run_id = ? AND c.agent_id = ?
        ORDER BY c.principal_generation DESC LIMIT 1
     `).get(runId, agentId), "provider principal");
     if (principal.revoked_at !== null || numberField(principal, "expires_at") <= this.#clock()) {
       throw new FabricError("AUTHENTICATION_FAILED", "provider principal is revoked or expired");
+    }
+    if (principal.lifecycle === "suspended" || principal.lifecycle === "context-unreconciled") {
+      throw new FabricError("CONTEXT_UNRECONCILED", "provider principal requires explicit lifecycle recovery");
+    }
+  }
+
+  #assertEphemeralProviderAuthority(runId: string, actorAgentId: string, authorityId: string): void {
+    const actor = rowOrNotFound(
+      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
+      "provider actor",
+    );
+    const delegated = rowOrNotFound(
+      this.#database.prepare("SELECT parent_authority_id FROM authorities WHERE run_id = ? AND authority_id = ?")
+        .get(runId, authorityId),
+      "ephemeral provider authority",
+    );
+    if (delegated.parent_authority_id !== stringField(actor, "authority_id")) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "ephemeral provider authority is not delegated by the chair");
     }
   }
 
@@ -4015,6 +6637,19 @@ export class Fabric {
     operation: string;
     method: string;
     payload: Record<string, unknown>;
+    requireProviderAnswer?: true;
+    authorityBudget?: Readonly<{
+      authorityId: string;
+      reservation: Readonly<Record<string, number>>;
+    }>;
+    taskId?: string;
+    deferCompletion?: true;
+    deferredCommand?: {
+      actorAgentId: string;
+      commandId: string;
+      payload: unknown;
+    };
+    revalidateAdmission?: () => void;
   }): Promise<ProviderActionResult> {
     const payloadJson = canonicalJson(input.payload);
     const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
@@ -4026,6 +6661,7 @@ export class Fabric {
       operation: input.operation,
       targetAgentId: targetAgentId ?? null,
       providerSessionGeneration: providerSessionGeneration ?? null,
+      ...(input.authorityBudget === undefined ? {} : { authorityId: input.authorityBudget.authorityId }),
       payload: input.payload,
     }));
     const existing = this.#providerSessions.assertActionIdentity({
@@ -4040,24 +6676,116 @@ export class Fabric {
     if (existing) {
       return this.getProviderAction(input.runId, input.actionId);
     }
-    this.#database
-      .prepare(
-        "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'dispatched', '[\"prepared\",\"dispatched\"]', 1, 0, 0, ?)",
-      )
-      .run(
-        input.runId,
-        input.actionId,
-        input.adapterId,
-        input.operation,
-        targetAgentId ?? null,
-        providerSessionGeneration ?? null,
-        identityHash,
-        sha256(payloadJson),
-        payloadJson,
-        this.#clock(),
-      );
+    const deferred = input.deferCompletion === true;
+    if (deferred && input.deferredCommand === undefined) {
+      throw new Error("deferred provider action requires atomic command custody");
+    }
+    const receipt: ProviderActionResult = {
+      actionId: input.actionId,
+      status: deferred ? "prepared" : "dispatched",
+      history: deferred ? ["prepared"] : ["prepared", "dispatched"],
+      executionCount: deferred ? 0 : 1,
+      effectCount: 0,
+    };
     try {
-      const response = await this.#requestAdapter(input.adapterId, input.method, { ...input.payload, actionId: input.actionId, payload: input.payload });
+      this.#database.transaction(() => {
+        input.revalidateAdmission?.();
+        if (input.authorityBudget !== undefined) {
+          if (input.taskId === undefined) throw new Error("provider budget requires an exact task binding");
+          const task = rowOrNotFound(
+            this.#database.prepare("SELECT state FROM tasks WHERE run_id=? AND task_id=?").get(input.runId, input.taskId),
+            "ephemeral provider task",
+          );
+          if (["complete", "cancelled", "degraded"].includes(stringField(task, "state"))) {
+            throw new ProjectFabricCoreError(
+              "LIFECYCLE_PRECONDITION_FAILED",
+              "terminal task cannot admit an ephemeral provider spawn",
+            );
+          }
+        }
+        this.#database
+          .prepare(
+            "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at, task_id, budget_authority_id, budget_reservation_json, budget_settlement_json, budget_state, budget_started_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, NULL, ?, ?)",
+          )
+          .run(
+            input.runId,
+            input.actionId,
+            input.adapterId,
+            input.operation,
+            targetAgentId ?? null,
+            providerSessionGeneration ?? null,
+            identityHash,
+            sha256(payloadJson),
+            payloadJson,
+            receipt.status,
+            canonicalJson(receipt.history),
+            receipt.executionCount,
+            this.#clock(),
+            input.taskId ?? null,
+            input.authorityBudget?.authorityId ?? null,
+            input.authorityBudget === undefined ? null : canonicalJson(input.authorityBudget.reservation),
+            input.authorityBudget === undefined ? null : "reserved",
+            input.authorityBudget === undefined ? null : this.#clock(),
+          );
+        if (input.deferredCommand !== undefined) {
+          this.#commandJournal.write(
+            input.runId,
+            input.deferredCommand.actorAgentId,
+            input.deferredCommand.commandId,
+            input.deferredCommand.payload,
+            receipt,
+          );
+        }
+      })();
+    } catch (error: unknown) {
+      if (
+        input.authorityBudget !== undefined && error instanceof Error &&
+        error.message.includes("INVARIANT_provider_actions_budget_reservation")
+      ) {
+        const unknown = Object.keys(input.authorityBudget.reservation).some((unit) => isRow(
+          this.#database.prepare(`
+            SELECT 1 FROM authority_budget
+             WHERE authority_id=? AND unit_key=? AND usage_unknown=1
+          `).get(input.authorityBudget?.authorityId, unit),
+        ));
+        throw new FabricError(
+          unknown ? "BUDGET_USAGE_UNKNOWN" : "BUDGET_EXCEEDED",
+          unknown ? "delegated provider usage became unknown before admission" : "delegated provider budget was concurrently exhausted",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    const complete = async (): Promise<ProviderActionResult> => await this.#completeAdapterOperation(input);
+    if (deferred) {
+      this.#enqueueDeferredProviderAction({
+        runId: input.runId,
+        actionId: input.actionId,
+        execute: complete,
+      });
+      return receipt;
+    }
+    return await complete();
+  }
+
+  async #completeAdapterOperation(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    operation: string;
+    method: string;
+    payload: Record<string, unknown>;
+    requireProviderAnswer?: true;
+  }): Promise<ProviderActionResult> {
+    try {
+      const response = await this.#requestAdapter(input.adapterId, input.method, {
+        ...input.payload,
+        actionId: input.actionId,
+        payload: input.payload,
+      });
+      const providerAnswer = input.requireProviderAnswer === true
+        ? providerAnswerFromAdapterResult(response)
+        : undefined;
       const result: ProviderActionResult = {
         actionId: input.actionId,
         status: "terminal",
@@ -4065,6 +6793,7 @@ export class Fabric {
         executionCount: 1,
         effectCount: 1,
         result: response,
+        ...(providerAnswer === undefined ? {} : { providerAnswer }),
       };
       this.#persistProviderAction(input.runId, input.actionId, { idempotencyProven: true }, result);
       return result;
@@ -4081,6 +6810,301 @@ export class Fabric {
     }
   }
 
+  #lifecycleRotationPreconditionDigest(runId: string, agentId: string, taskId: string): string {
+    const task = rowOrNotFound(this.#database.prepare(`
+      SELECT task_id,authority_id,state,owner_agent_id,revision,owner_lease_generation
+        FROM tasks WHERE run_id=? AND task_id=?
+    `).get(runId, taskId), "lifecycle task");
+    const mailbox = rowOrNotFound(this.#database.prepare(`
+      SELECT next_sequence,contiguous_watermark
+        FROM mailbox_state WHERE run_id=? AND recipient_id=?
+    `).get(runId, agentId), "lifecycle mailbox");
+    const deliveries = this.#database.prepare(`
+      SELECT delivery_id,message_id,mailbox_sequence,state,attempt_count,claim_deadline,
+             acknowledged_at,resolution_reason,resolved_at
+        FROM deliveries WHERE run_id=? AND recipient_id=?
+       ORDER BY mailbox_sequence,delivery_id
+    `).all(runId, agentId);
+    const children = this.#database.prepare(`
+      SELECT agent_id,lifecycle,provider_session_ref
+        FROM agents WHERE run_id=? AND parent_agent_id=?
+       ORDER BY agent_id
+    `).all(runId, agentId);
+    const childTasks = this.#database.prepare(`
+      SELECT task.task_id,task.state,task.owner_agent_id,task.revision,task.owner_lease_generation
+        FROM tasks task JOIN agents child
+          ON child.run_id=task.run_id AND child.agent_id=task.owner_agent_id
+       WHERE task.run_id=? AND child.parent_agent_id=?
+       ORDER BY task.task_id
+    `).all(runId, agentId);
+    const ownedTasks = this.#database.prepare(`
+      SELECT task_id,state,revision,owner_lease_generation
+        FROM tasks WHERE run_id=? AND owner_agent_id=?
+       ORDER BY task_id
+    `).all(runId, agentId);
+    const provider = rowOrNotFound(this.#database.prepare(`
+      SELECT agent.provider_session_ref,agent.authority_id,binding.adapter_id,binding.contract_version,
+             COALESCE(state.provider_session_generation,1) AS provider_session_generation,
+             state.context_revision,state.reconciled_checkpoint_sha256
+        FROM agents agent LEFT JOIN provider_state state
+          ON state.run_id=agent.run_id AND state.agent_id=agent.agent_id
+        LEFT JOIN agent_adapter_bindings binding
+          ON binding.run_id=agent.run_id AND binding.agent_id=agent.agent_id
+       WHERE agent.run_id=? AND agent.agent_id=?
+    `).get(runId, agentId), "lifecycle provider state");
+    const principals = this.#database.prepare(`
+      SELECT token_hash,principal_generation,expires_at,revoked_at
+        FROM capabilities WHERE run_id=? AND agent_id=?
+       ORDER BY principal_generation,token_hash
+    `).all(runId, agentId);
+    const writeLeases = this.#database.prepare(`
+      SELECT lease_id,kind,generation,status,expires_at,updated_at
+        FROM leases WHERE run_id=? AND holder_agent_id=?
+       ORDER BY lease_id
+    `).all(runId, agentId);
+    const providerTurns = this.#database.prepare(`
+      SELECT provider_session_generation,turn_lease_generation,action_id,status,created_at,updated_at
+        FROM provider_session_turn_leases WHERE run_id=? AND agent_id=?
+       ORDER BY turn_lease_generation
+    `).all(runId, agentId);
+    const bridge = this.#database.prepare(`
+      SELECT bridge_state,provider_session_ref,provider_session_generation,bridge_generation,revision
+        FROM agent_bridge_state WHERE run_id=? AND agent_id=?
+    `).get(runId, agentId) ?? null;
+    return sha256(canonicalJson({
+      task,
+      mailbox,
+      deliveries,
+      children,
+      childTasks,
+      ownedTasks,
+      provider,
+      principals,
+      writeLeases,
+      providerTurns,
+      bridge,
+    }));
+  }
+
+  #prepareLifecycleRotation(input: {
+    runId: string;
+    agentId: string;
+    commandId: string;
+    actionId: string;
+    adapterId: string;
+    taskId: string;
+    taskRevision: number;
+    checkpointSha256: string;
+    priorResumeReference: string;
+    nextProviderSessionGeneration: number;
+  }): void {
+    this.#database.transaction(() => {
+      const sourceAgent = rowOrNotFound(this.#database.prepare(`
+        SELECT lifecycle FROM agents WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId), "lifecycle rotation agent");
+      const sourceLifecycle = stringField(sourceAgent, "lifecycle");
+      const existing = this.#database.prepare(`
+        SELECT action_id,adapter_id,task_id,task_revision,checkpoint_sha256,
+               prior_resume_reference,next_provider_session_generation,
+               precondition_digest,freeze_reason,state
+          FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id=? AND command_id=?
+      `).get(input.runId, input.agentId, input.commandId);
+      if (isRow(existing)) {
+        if (sourceLifecycle !== "suspended" && sourceLifecycle !== "context-unreconciled") {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle rotation has an invalid source state");
+        }
+        if (
+          existing.action_id !== input.actionId || existing.adapter_id !== input.adapterId ||
+          existing.task_id !== input.taskId || existing.task_revision !== input.taskRevision ||
+          existing.checkpoint_sha256 !== input.checkpointSha256 ||
+          existing.prior_resume_reference !== input.priorResumeReference ||
+          existing.next_provider_session_generation !== input.nextProviderSessionGeneration
+        ) throw new FabricError("DEDUPE_CONFLICT", "lifecycle rotation command changed after prepare");
+        const ownedFreeze = this.#database.prepare(`
+          SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+        `).get(input.runId, input.agentId);
+        if (
+          !isRow(ownedFreeze) || ownedFreeze.reason !== existing.freeze_reason ||
+          existing.precondition_digest !== this.#lifecycleRotationPreconditionDigest(
+            input.runId,
+            input.agentId,
+            input.taskId,
+          )
+        ) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle custody changed before replay");
+        }
+        return;
+      }
+      const sourceFreeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId);
+      const sourceFreezeReason = isRow(sourceFreeze) ? stringField(sourceFreeze, "reason") : undefined;
+      const acceptedSource =
+        (sourceLifecycle === "ready" && sourceFreezeReason === undefined) ||
+        (sourceLifecycle === "context-unreconciled" &&
+          (sourceFreezeReason === undefined || sourceFreezeReason === "context-unreconciled")) ||
+        (sourceLifecycle === "suspended" && sourceFreezeReason === "interactive-tui-lost");
+      if (!acceptedSource) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "new lifecycle rotation has an invalid lifecycle or freeze owner");
+      }
+      const active = this.#database.prepare(`
+        SELECT command_id FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id=?
+           AND state IN ('prepared','provider-terminal','unreconciled')
+      `).get(input.runId, input.agentId);
+      if (isRow(active)) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "agent already has an unresolved lifecycle provider action");
+      }
+      const task = rowOrNotFound(this.#database.prepare(`
+        SELECT owner_agent_id,revision FROM tasks WHERE run_id=? AND task_id=?
+      `).get(input.runId, input.taskId), "lifecycle rotation task");
+      if (task.owner_agent_id !== input.agentId || task.revision !== input.taskRevision) {
+        throw new FabricError("TASK_REVISION_CONFLICT", "lifecycle task custody changed before prepare");
+      }
+      const preconditionDigest = this.#lifecycleRotationPreconditionDigest(input.runId, input.agentId, input.taskId);
+      const custodyFreezeReason = `lifecycle-rotation:${sha256(input.actionId).slice(0, 32)}`;
+      if (sourceFreezeReason !== undefined) {
+        this.#database.prepare(`
+          UPDATE delivery_freezes SET reason=?,created_at=? WHERE run_id=? AND agent_id=?
+        `).run(custodyFreezeReason, this.#clock(), input.runId, input.agentId);
+      } else {
+        this.#database.prepare(`
+          INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at) VALUES (?,?,?,?)
+        `).run(input.runId, input.agentId, custodyFreezeReason, this.#clock());
+      }
+      const suspended = this.#database.prepare(`
+        UPDATE agents SET lifecycle='suspended'
+         WHERE run_id=? AND agent_id=? AND lifecycle=?
+      `).run(input.runId, input.agentId, sourceLifecycle);
+      if (suspended.changes !== 1) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle source changed before rotation custody");
+      }
+      const now = this.#clock();
+      this.#database.prepare(`
+        INSERT INTO lifecycle_rotation_custody(
+          run_id,agent_id,command_id,action_id,adapter_id,task_id,task_revision,
+          checkpoint_sha256,prior_resume_reference,next_provider_session_generation,
+          precondition_digest,freeze_reason,state,created_at,updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'prepared',?,?)
+      `).run(
+        input.runId,
+        input.agentId,
+        input.commandId,
+        input.actionId,
+        input.adapterId,
+        input.taskId,
+        input.taskRevision,
+        input.checkpointSha256,
+        input.priorResumeReference,
+        input.nextProviderSessionGeneration,
+        preconditionDigest,
+        custodyFreezeReason,
+        now,
+        now,
+      );
+    })();
+  }
+
+  async #executeOrReconcileLifecycleRotationAction(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    payload: Record<string, unknown>;
+  }): Promise<ProviderActionResult> {
+    const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
+    const existing = this.#lifecycleProviderActions.get(key);
+    if (existing !== undefined) return await existing;
+    const owned = this.#executeOrReconcileLifecycleRotationActionOwned(input);
+    this.#lifecycleProviderActions.set(key, owned);
+    try {
+      return await owned;
+    } finally {
+      if (this.#lifecycleProviderActions.get(key) === owned) this.#lifecycleProviderActions.delete(key);
+    }
+  }
+
+  async #executeOrReconcileLifecycleRotationActionOwned(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    payload: Record<string, unknown>;
+  }): Promise<ProviderActionResult> {
+    const stored = this.#database.prepare(`
+      SELECT status FROM provider_actions WHERE run_id=? AND action_id=?
+    `).get(input.runId, input.actionId);
+    if (!isRow(stored)) {
+      return await this.#executeAdapterOperation({
+        runId: input.runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        operation: "spawn",
+        method: "spawn",
+        payload: input.payload,
+      });
+    }
+    const current = this.getProviderAction(input.runId, input.actionId);
+    if (current.status === "terminal") return current;
+    if (current.status === "quarantined") {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action is quarantined");
+    }
+    if (current.status === "prepared") {
+      const dispatched = this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='dispatched',history_json='["prepared","dispatched"]',
+               execution_count=1,updated_at=?
+         WHERE run_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), input.runId, input.actionId);
+      if (dispatched.changes === 1) {
+        return await this.#completeAdapterOperation({
+          runId: input.runId,
+          adapterId: input.adapterId,
+          actionId: input.actionId,
+          operation: "spawn",
+          method: "spawn",
+          payload: input.payload,
+        });
+      }
+    }
+    let lookup: unknown;
+    try {
+      lookup = await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId });
+    } catch (error: unknown) {
+      this.#persistProviderAction(
+        input.runId,
+        input.actionId,
+        { idempotencyProven: false },
+        quarantinedProviderAction(current),
+      );
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action cannot be reconciled", { cause: error });
+    }
+    const reconciled = providerActionResult(lookup, input.actionId);
+    if (reconciled.status !== "terminal" || reconciled.effectCount !== 1) {
+      this.#persistProviderAction(
+        input.runId,
+        input.actionId,
+        { idempotencyProven: false },
+        quarantinedProviderAction(reconciled),
+      );
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action remains unresolved");
+    }
+    this.#persistProviderAction(input.runId, input.actionId, lookup, reconciled);
+    return reconciled;
+  }
+
+  #markLifecycleRotationUnreconciled(runId: string, agentId: string, commandId: string): void {
+    this.#database.transaction(() => {
+      this.#database.prepare(`
+        UPDATE lifecycle_rotation_custody SET state='unreconciled',updated_at=?
+         WHERE run_id=? AND agent_id=? AND command_id=? AND state<>'finalized'
+      `).run(this.#clock(), runId, agentId, commandId);
+      this.#database.prepare(`
+        UPDATE agents SET lifecycle='context-unreconciled'
+         WHERE run_id=? AND agent_id=? AND lifecycle<>'archived'
+      `).run(runId, agentId);
+    })();
+  }
+
   #verifyCheckpoint(
     runId: string,
     agentId: string,
@@ -4095,14 +7119,11 @@ export class Fabric {
     if (task.revision !== taskRevision || task.ownerAgentId !== agentId) {
       throw new FabricError("TASK_REVISION_CONFLICT", "checkpoint task revision or owner changed");
     }
-    const run = rowOrNotFound(
-      this.#database.prepare("SELECT project_run_directory FROM runs WHERE run_id = ?").get(runId),
-      "run",
-    );
-    if (typeof run.project_run_directory !== "string") {
+    const resolvedRoot = resolveRunArtifactRoot(this.#database, runId);
+    if (resolvedRoot.artifactRoot === null) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "run has no checkpoint directory");
     }
-    const root = canonicalPath(run.project_run_directory);
+    const root = canonicalPath(resolvedRoot.artifactRoot);
     const checkpointPath = canonicalPath(resolve(root, checkpoint.relativePath));
     if (!pathContains(root, checkpointPath) || !existsSync(checkpointPath)) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint path is missing or outside the run directory");
@@ -4124,10 +7145,7 @@ export class Fabric {
     ) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint record does not match its durable document");
     }
-    const mailbox = this.getMailboxState(runId, agentId);
-    if (mailbox.contiguousWatermark !== checkpoint.mailboxWatermark || canonicalJson(mailbox.acknowledgedAboveWatermark) !== canonicalJson(checkpoint.acknowledgedAboveWatermark)) {
-      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint mailbox state is stale");
-    }
+    this.#assertCheckpointMatchesCurrentState(runId, agentId, checkpoint);
     this.#database
       .prepare(
         "INSERT OR IGNORE INTO lifecycle_checkpoints(checkpoint_id, run_id, agent_id, task_id, task_revision, relative_path, sha256, checkpoint_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -4143,6 +7161,63 @@ export class Fabric {
         canonicalJson(checkpoint),
         this.#clock(),
       );
+  }
+
+  #assertCheckpointMatchesCurrentState(
+    runId: string,
+    agentId: string,
+    checkpoint: LifecycleCheckpoint,
+  ): void {
+    const mailbox = this.getMailboxState(runId, agentId);
+    if (mailbox.contiguousWatermark !== checkpoint.mailboxWatermark || canonicalJson(mailbox.acknowledgedAboveWatermark) !== canonicalJson(checkpoint.acknowledgedAboveWatermark)) {
+      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint mailbox state is stale");
+    }
+    const provider = rowOrNotFound(
+      this.#database.prepare("SELECT provider_session_ref FROM agents WHERE run_id=? AND agent_id=?").get(runId, agentId),
+      "checkpoint agent",
+    );
+    if (provider.provider_session_ref !== checkpoint.providerResumeReference) {
+      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint provider session does not match current Fabric state");
+    }
+    const currentChildren = this.#database.prepare(`
+      SELECT agent_id FROM agents
+       WHERE run_id=? AND parent_agent_id=?
+         AND lifecycle NOT IN ('completion-ready','archived')
+       ORDER BY agent_id
+    `).all(runId, agentId).map((value) => stringField(rowOrNotFound(value, "checkpoint child"), "agent_id"));
+    const currentOpenWork = this.#database.prepare(`
+      SELECT task_id FROM tasks
+       WHERE run_id=? AND owner_agent_id=?
+         AND state NOT IN ('complete','cancelled','degraded')
+       ORDER BY task_id
+    `).all(runId, agentId).map((value) => stringField(rowOrNotFound(value, "checkpoint task"), "task_id"));
+    if (
+      canonicalJson(checkpoint.inFlightChildren) !== canonicalJson(currentChildren) ||
+      canonicalJson(checkpoint.openWork) !== canonicalJson(currentOpenWork)
+    ) {
+      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint children or open work do not match current Fabric state");
+    }
+  }
+
+  #hasCurrentValidatedCheckpoint(runId: string, agentId: string, sha256Digest: string): boolean {
+    if (!/^[0-9a-f]{64}$/u.test(sha256Digest)) return false;
+    const stored = this.#database.prepare(`
+      SELECT checkpoint.checkpoint_json
+        FROM lifecycle_checkpoints checkpoint
+        JOIN tasks task
+          ON task.run_id=checkpoint.run_id AND task.task_id=checkpoint.task_id
+         AND task.revision=checkpoint.task_revision AND task.owner_agent_id=checkpoint.agent_id
+       WHERE checkpoint.run_id=? AND checkpoint.agent_id=? AND checkpoint.sha256=?
+    `).get(runId, agentId, sha256Digest);
+    if (!isRow(stored) || typeof stored.checkpoint_json !== "string") return false;
+    try {
+      const checkpoint: unknown = JSON.parse(stored.checkpoint_json);
+      if (!isLifecycleCheckpoint(checkpoint) || checkpoint.sha256 !== sha256Digest) return false;
+      this.#assertCheckpointMatchesCurrentState(runId, agentId, checkpoint);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   #assertReleaseReady(runId: string, agentId: string, taskId: string): void {
@@ -4215,9 +7290,11 @@ export class Fabric {
     result: ProviderActionResult,
   ): void {
     const idempotencyProven = isRow(raw) && raw.idempotencyProven === true ? 1 : 0;
+    const now = this.#clock();
+    const budget = this.#providerBudgetSettlement(runId, actionId, result, now);
     this.#database
       .prepare(
-        "UPDATE provider_actions SET status = ?, history_json = ?, execution_count = ?, effect_count = ?, idempotency_proven = ?, result_json = ?, updated_at = ? WHERE run_id = ? AND action_id = ?",
+        "UPDATE provider_actions SET status = ?, history_json = ?, execution_count = ?, effect_count = ?, idempotency_proven = ?, result_json = ?, updated_at = ?, budget_state = COALESCE(?, budget_state), budget_settlement_json = COALESCE(?, budget_settlement_json) WHERE run_id = ? AND action_id = ?",
       )
       .run(
         result.status,
@@ -4226,10 +7303,99 @@ export class Fabric {
         result.effectCount,
         idempotencyProven,
         result.result === undefined ? null : canonicalJson(result.result),
-        this.#clock(),
+        now,
+        budget?.state ?? null,
+        budget === undefined ? null : canonicalJson(budget.settlement),
         runId,
         actionId,
       );
+  }
+
+  #providerBudgetSettlement(
+    runId: string,
+    actionId: string,
+    result: ProviderActionResult,
+    now: number,
+  ): Readonly<{
+    state: "settled" | "usage-unknown";
+    settlement: Readonly<Record<string, number | "unknown">>;
+  }> | undefined {
+    const binding = this.#database.prepare(`
+      SELECT budget_authority_id,budget_reservation_json,budget_settlement_json,
+             budget_state,budget_started_at
+        FROM provider_actions
+       WHERE run_id=? AND action_id=?
+    `).get(runId, actionId);
+    if (!isRow(binding) || binding.budget_authority_id === null) return undefined;
+    const reservationValue: unknown = JSON.parse(stringField(binding, "budget_reservation_json"));
+    if (!isNumberRecord(reservationValue) || Object.values(reservationValue).some(
+      (amount) => !Number.isSafeInteger(amount) || amount < 1,
+    )) {
+      throw new Error("stored provider action budget reservation is invalid");
+    }
+    const prior: Record<string, number | "unknown"> = {};
+    if (binding.budget_state === "usage-unknown") {
+      const priorValue: unknown = JSON.parse(stringField(binding, "budget_settlement_json"));
+      if (!isRow(priorValue)) throw new Error("stored provider action settlement is invalid");
+      for (const [unit, value] of Object.entries(priorValue)) {
+        if (value !== "unknown" && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) {
+          throw new Error("stored provider action settlement is invalid");
+        }
+        prior[unit] = value;
+      }
+    } else if (binding.budget_state !== "reserved") {
+      return undefined;
+    }
+    const reported: Record<string, number> = {};
+    if (isRow(result.result)) {
+      const usage = result.result.resourceUsage;
+      if (usage !== undefined) {
+        if (!isRow(usage)) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider reported malformed resource usage");
+        }
+        for (const [unit, value] of Object.entries(usage)) {
+          const reserved = reservationValue[unit];
+          if (
+            reserved === undefined || !isBudgetUnitKey(unit) ||
+            typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > reserved
+          ) {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider reported unreserved or invalid resource usage");
+          }
+          reported[unit] = value;
+        }
+      }
+    }
+    if (result.effectCount === 0 && Object.values(reported).some((value) => value !== 0)) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "no-effect provider action reported nonzero resource usage");
+    }
+    const settlement: Record<string, number | "unknown"> = {};
+    for (const [unit, reserved] of Object.entries(reservationValue).sort(([left], [right]) => left.localeCompare(right))) {
+      const previous = prior[unit];
+      if (typeof previous === "number") {
+        settlement[unit] = previous;
+        continue;
+      }
+      if (result.status !== "terminal") {
+        settlement[unit] = "unknown";
+      } else if (result.effectCount === 0) {
+        settlement[unit] = 0;
+      } else if (unit === "turns") {
+        settlement[unit] = reported[unit] ?? (reserved === 1 ? 1 : "unknown");
+      } else if (unit === "provider_calls") {
+        settlement[unit] = 1;
+      } else if (unit === "concurrent_turns") {
+        settlement[unit] = 0;
+      } else if (unit === "wall_clock_milliseconds") {
+        const elapsed = Math.max(0, now - numberField(binding, "budget_started_at"));
+        settlement[unit] = elapsed <= reserved ? elapsed : "unknown";
+      } else {
+        settlement[unit] = reported[unit] ?? "unknown";
+      }
+    }
+    return {
+      state: Object.values(settlement).includes("unknown") ? "usage-unknown" : "settled",
+      settlement,
+    };
   }
 
 }

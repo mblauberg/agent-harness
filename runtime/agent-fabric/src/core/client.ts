@@ -1,4 +1,9 @@
 import { FABRIC_OPERATIONS, type FabricOperation } from "../domain/operations.js";
+import type {
+  AgentCustodyResult,
+  EvidenceArtifactRegistration,
+  EvidencePublishRequest,
+} from "@local/agent-fabric-protocol";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { FabricError } from "../errors.js";
 import type {
@@ -63,7 +68,7 @@ export class FabricClient {
     adapterId: string;
     actionId: string;
     payload: Record<string, unknown>;
-  }): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  }): Promise<AgentCustodyResult> {
     this.#authorise(FABRIC_OPERATIONS.spawnAgent);
     return await this.#fabric.spawnAgent(this.#runId, this.#agentId, input);
   }
@@ -74,7 +79,7 @@ export class FabricClient {
     adapterId: string;
     actionId: string;
     providerSessionRef: string;
-  }): Promise<{ capability: string; providerSessionRef: string; adapterId: string; actionId: string }> {
+  }): Promise<AgentCustodyResult> {
     this.#authorise(FABRIC_OPERATIONS.attachAgent);
     return await this.#fabric.attachAgent(this.#runId, this.#agentId, input);
   }
@@ -143,7 +148,6 @@ export class FabricClient {
     dependencies?: string[];
     expectedArtifacts?: string[];
     objectiveChecks?: string[];
-    humanGates?: string[];
     objective: string;
     baseRevision: string;
     commandId: string;
@@ -175,17 +179,6 @@ export class FabricClient {
   }): Promise<{ taskId: string; checkId: string; status: "pass" | "fail" }> {
     this.#authorise(FABRIC_OPERATIONS.recordObjectiveCheck);
     return this.#fabric.recordObjectiveCheck(this.#runId, this.#agentId, input);
-  }
-
-  async resolveHumanGate(input: {
-    taskId: string;
-    gateId: string;
-    status: "approved" | "rejected";
-    evidence: string;
-    commandId: string;
-  }): Promise<{ taskId: string; gateId: string; status: "approved" | "rejected" }> {
-    this.#authorise(FABRIC_OPERATIONS.resolveHumanGate);
-    return this.#fabric.resolveHumanGate(this.#runId, this.#agentId, input);
   }
 
   async acknowledgeTaskHandoff(input: {
@@ -258,7 +251,7 @@ export class FabricClient {
     return this.#fabric.rotateCapability(this.#runId, this.#agentId, input);
   }
 
-  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string }): Promise<LeaseResult> {
+  async acquireWriteLease(input: { scope: string[]; ttlMs: number; commandId: string; taskId?: string }): Promise<LeaseResult> {
     this.#authorise(FABRIC_OPERATIONS.acquireWriteLease);
     return this.#fabric.acquireWriteLease(this.#runId, this.#agentId, input);
   }
@@ -336,7 +329,8 @@ export class FabricClient {
   async dispatchProviderAction(input: {
     adapterId: string;
     actionId: string;
-    operation: "send_turn" | "wakeup" | "release" | "steer";
+    operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
+    authorityId?: string;
     payload: Record<string, unknown>;
     commandId: string;
   }): Promise<ProviderActionResult> {
@@ -465,6 +459,11 @@ export class FabricClient {
   }): Promise<ArtifactResult> {
     this.#authorise(FABRIC_OPERATIONS.publishArtifact);
     return this.#fabric.publishArtifact(this.#runId, this.#agentId, input);
+  }
+
+  async publishEvidence(input: EvidencePublishRequest): Promise<EvidenceArtifactRegistration> {
+    this.#authorise(FABRIC_OPERATIONS.evidencePublish);
+    return this.#fabric.publishEvidence(this.#runId, this.#agentId, input);
   }
 
   async closeBarrier(input: {

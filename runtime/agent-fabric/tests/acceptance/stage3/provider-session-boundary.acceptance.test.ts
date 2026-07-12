@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
-import { openFabric } from "../../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 import { createLifecycleFixture, reopenLifecycleFabric } from "../../support/lifecycle-testkit.ts";
 
 const lifecycleAdapter = fileURLToPath(
@@ -20,17 +22,28 @@ const turnAdapter = fileURLToPath(
   new URL("../../support/provider-turn-fake-adapter.ts", import.meta.url),
 );
 
-function authority(root: string, actions = ["read", "write", "delegate", "message"]) {
+function authority(root: string) {
   void root;
   return {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run"],
-    actions,
-    disclosure: ["local", "approved-provider"],
+    actions: [...AUTHORITY_ACTION_VOCABULARY],
+    disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
     budget: { turns: 20 },
   };
+}
+
+async function currentRun(
+  directory: string,
+  input: Omit<Parameters<typeof createCurrentSessionRun>[0], "databasePath" | "workspaceRoot">,
+) {
+  return await createCurrentSessionRun({
+    databasePath: join(directory, "fabric.sqlite3"),
+    workspaceRoot: directory,
+    ...input,
+  });
 }
 
 describe("provider session admission", () => {
@@ -48,11 +61,11 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-disclosure", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-disclosure", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), disclosure: ["local"] },
+        authority: { ...authority(directory), disclosure: { level: "scoped", scopes: ["local"] } as const },
       });
       await expect(chair.spawnAgent({
         agentId: "worker",
@@ -78,11 +91,11 @@ describe("provider session admission", () => {
       adapters: { lifecycle: { command: [process.execPath, "--import", "tsx", lifecycleAdapter], environment: { LIFECYCLE_FAKE_JOURNAL: journalPath } } },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-controls", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), deniedPaths: ["src/denied"] },
+        authority: { ...authority(directory), deniedPaths: ["src/denied"] },
       });
       const base = { agentId: "worker", authorityId: workerAuthority.authorityId, adapterId: "lifecycle" };
       await expect(chair.spawnAgent({
@@ -117,11 +130,11 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-turn-controls", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-turn-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), deniedPaths: ["src/denied"] },
+        authority: { ...authority(directory), deniedPaths: ["src/denied"] },
       });
       await chair.registerAgent({
         agentId: "worker",
@@ -170,7 +183,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-preflight",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -187,7 +200,7 @@ describe("provider session admission", () => {
       const childAuthority = await leader.delegateAuthority({
         parentAuthorityId: leaderAuthority.authorityId,
         authority: {
-          ...authority(directory, ["read", "write", "message"]),
+          ...authority(directory),
           sourcePaths: ["src/leader/child"],
           budget: { turns: 5 },
         },
@@ -224,7 +237,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-identity",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -264,7 +277,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-reserved", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-reserved", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await chair.dispatchProviderAction({
         adapterId: "provider",
@@ -295,7 +308,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-targetless-admission", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-targetless-admission", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
         adapterId: "provider",
@@ -325,7 +338,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-model-free-controls", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-model-free-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
         adapterId: "provider", actionId: "provider-control:wakeup", operation: "wakeup", payload: {}, commandId: "provider-control:wakeup",
@@ -353,14 +366,14 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-capability",
         chair: { agentId: "chair", authority: authority(directory) },
       });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), budget: { turns: 5 } },
+        authority: { ...authority(directory), budget: { turns: 5 } },
       });
       await expect(chair.spawnAgent({
         agentId: "worker",
@@ -393,14 +406,14 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-turn",
         chair: { agentId: "chair", authority: authority(directory) },
       });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), budget: { turns: 5 } },
+        authority: { ...authority(directory), budget: { turns: 5 } },
       });
       await chair.registerAgent({
         agentId: "worker",
@@ -467,11 +480,12 @@ describe("provider session admission", () => {
     }
   });
 
-  it("finalises and replays a lifecycle spawn intent exactly once", async () => {
+  it("retires direct lifecycle spawn when no elected daemon owns child custody", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-provider-lifecycle-intent-"));
     const journalPath = join(directory, "provider-journal.json");
+    const databasePath = join(directory, "fabric.sqlite3");
     const fabric = await openFabric({
-      databasePath: join(directory, "fabric.sqlite3"),
+      databasePath,
       workspaceRoots: [directory],
       adapters: {
         lifecycle: {
@@ -481,14 +495,14 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-lifecycle-intent",
         chair: { agentId: "chair", authority: authority(directory) },
       });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), budget: { turns: 5 } },
+        authority: { ...authority(directory), budget: { turns: 5 } },
       });
       const input = {
         agentId: "worker",
@@ -497,8 +511,17 @@ describe("provider session admission", () => {
         actionId: "spawn-worker-once",
         payload: { initialPrompt: "bounded task" },
       };
-      const first = await chair.spawnAgent(input);
-      await expect(chair.spawnAgent(input)).resolves.toEqual(first);
+      await expect(chair.spawnAgent(input)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+      await expect(chair.spawnAgent(input)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+      expect(existsSync(journalPath)).toBe(false);
+      const database = new Database(databasePath, { readonly: true });
+      try {
+        expect(database.prepare("SELECT COUNT(*) AS count FROM provider_lifecycle_intents").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM provider_agent_custody").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM agents WHERE agent_id='worker'").get()).toEqual({ count: 0 });
+      } finally {
+        database.close();
+      }
     } finally {
       await fabric.close();
       await rm(directory, { recursive: true, force: true });
@@ -520,7 +543,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-evidence",
         projectRunDirectory: runDirectory,
         chair: { agentId: "chair", authority: authority(directory) },
@@ -528,7 +551,7 @@ describe("provider session admission", () => {
       const chair = fabric.connect(run.chairCapability);
       const reviewerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory, ["read", "message"]), budget: { turns: 2 } },
+        authority: { ...authority(directory), budget: { turns: 2 } },
       });
       await chair.registerAgent({ agentId: "anthropic-reviewer", authorityId: reviewerAuthority.authorityId });
       const routeBytes = `${JSON.stringify({

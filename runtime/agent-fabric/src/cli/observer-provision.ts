@@ -29,9 +29,21 @@ function seatMetadata(value: unknown): SeatMetadata {
     !("schemaVersion" in value) || value.schemaVersion !== 1 ||
     !("projectKey" in value) || typeof value.projectKey !== "string" ||
     !("projectPath" in value) || typeof value.projectPath !== "string" ||
+    !("generation" in value) || typeof value.generation !== "string" || !/^[0-9a-f]{64}$/u.test(value.generation) ||
+    !("previousGeneration" in value) ||
+      (value.previousGeneration !== null &&
+        (typeof value.previousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(value.previousGeneration))) ||
+    !("projectSessionId" in value) || typeof value.projectSessionId !== "string" ||
+    !("sessionRevision" in value) || typeof value.sessionRevision !== "number" ||
+    !("sessionGeneration" in value) || typeof value.sessionGeneration !== "number" ||
     !("runId" in value) || typeof value.runId !== "string" ||
+    !("runRevision" in value) || typeof value.runRevision !== "number" ||
+    !("chairAgentId" in value) || typeof value.chairAgentId !== "string" ||
+    !("chairGeneration" in value) || typeof value.chairGeneration !== "number" ||
+    !("chairLeaseId" in value) || typeof value.chairLeaseId !== "string" ||
     !("seat" in value) || typeof value.seat !== "string" ||
     !("agentId" in value) || typeof value.agentId !== "string" ||
+    !("principalGeneration" in value) || typeof value.principalGeneration !== "number" ||
     !("role" in value) || (value.role !== "chair" && value.role !== "peer") ||
     !("credentialPath" in value) || typeof value.credentialPath !== "string" ||
     !("expiresAt" in value) || typeof value.expiresAt !== "string"
@@ -72,7 +84,7 @@ export async function provisionObserverCredential(input: { project: string; path
   try {
     const authority: AuthorityInput = {
       workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
-      actions: [FABRIC_OPERATIONS.observeEvents], disclosure: ["local"], expiresAt: chair.expiresAt, budget: {},
+      actions: [FABRIC_OPERATIONS.observeEvents], disclosure: { level: "scoped", scopes: ["local"] } as const, expiresAt: chair.expiresAt, budget: {},
     };
     const delegated = await client.delegateAuthority({
       parentAuthorityId,

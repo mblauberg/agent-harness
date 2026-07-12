@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { createConnection } from "node:net";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -6,12 +9,23 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Ajv2020 } from "ajv/dist/2020.js";
-
-import { FabricRemoteError } from "../daemon/client.js";
-import { DaemonRpc } from "./daemon-rpc.js";
-import { renderToolReceipt } from "./receipt-renderer.js";
-import { FABRIC_MCP_RESOURCE_TEMPLATES, FABRIC_MCP_TOOLS, resolveResourceUri } from "./schemas.js";
+import {
+  AGENT_RESULT_SHAPE_FEATURES,
+  NdjsonRpcTransport,
+  OPERATION_REGISTRY,
+  ProtocolRemoteError,
+  ProtocolTransportError,
+  buildMcpDescriptorSet,
+  isDaemonGrantableOperation,
+  operationsForPrincipal,
+  parseOperationInputForPrincipal,
+  parseOperationResult,
+  renderMcpReceipt,
+  type FabricOperation,
+  type McpResourceDescriptor,
+  type McpToolDescriptor,
+  type ProtocolFeature,
+} from "@local/agent-fabric-protocol";
 
 export type FabricMcpServerOptions = {
   socketPath: string;
@@ -24,104 +38,133 @@ export type FabricMcpServerHandle = {
   close(): Promise<void>;
 };
 
-function errorPayload(error: unknown): { code: string; message: string } {
-  if (error instanceof FabricRemoteError) {
-    return { code: error.code, message: error.message };
-  }
-  if (error instanceof Error) {
-    // Never forward driver or transport internals as the error surface.
-    return { code: "FABRIC_MCP_REQUEST_FAILED", message: error.message };
-  }
-  return { code: "FABRIC_MCP_REQUEST_FAILED", message: String(error) };
-}
+const agentFeatures = Object.freeze([...new Set(
+  [
+    ...[...operationsForPrincipal("agent")]
+      .filter(isDaemonGrantableOperation)
+      .map((operation) => OPERATION_REGISTRY[operation].feature),
+    ...AGENT_RESULT_SHAPE_FEATURES,
+  ],
+)].sort()) as readonly ProtocolFeature[];
 
-function asStructured(result: unknown): Record<string, unknown> {
-  if (Array.isArray(result)) {
-    return { deliveries: result };
+function errorPayload(error: unknown): { code: string; message: string } {
+  if (error instanceof ProtocolRemoteError) return { code: error.code, message: error.message };
+  if (error instanceof ProtocolTransportError) {
+    return { code: error.code, message: "Agent Fabric protocol request failed" };
   }
-  if (isRecord(result)) {
-    return result;
-  }
-  return { result: result ?? null };
+  if (error instanceof TypeError) return { code: "MCP_INPUT_INVALID", message: error.message };
+  return { code: "FABRIC_MCP_REQUEST_FAILED", message: "Agent Fabric MCP request failed" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function resourceCall(
+  uri: string,
+  resources: readonly McpResourceDescriptor[],
+): { descriptor: McpResourceDescriptor; runId: string } {
+  const match = /^fabric:\/\/runs\/([^/]+)\/(status|tasks|agents|receipts)$/u.exec(uri);
+  if (match?.[1] === undefined || match[2] === undefined) throw new TypeError("unknown Fabric resource URI");
+  const template = `fabric://runs/{run_id}/${match[2]}`;
+  const descriptor = resources.find((candidate) => candidate.uriTemplate === template);
+  if (descriptor === undefined) throw new TypeError("Fabric resource is outside the negotiated grant");
+  return { descriptor, runId: decodeURIComponent(match[1]) };
+}
+
+function advertisedTool(descriptor: McpToolDescriptor): {
+  name: string;
+  description: string;
+  inputSchema: McpToolDescriptor["inputSchema"];
+  outputSchema: McpToolDescriptor["outputSchema"];
+} {
+  return {
+    name: descriptor.name,
+    description: descriptor.description,
+    inputSchema: descriptor.inputSchema,
+    outputSchema: descriptor.outputSchema,
+  };
+}
+
 export async function createFabricMcpServer(options: FabricMcpServerOptions): Promise<FabricMcpServerHandle> {
-  const rpc = await DaemonRpc.connect({ socketPath: options.socketPath, capability: options.capability });
-  // One shared server identity: the client label only names the connection in
-  // logs. Serving the label as the server name would fork the surface that
-  // NFR-007 requires to stay identical, so it deliberately does not.
+  if (!/^afc_[A-Za-z0-9_-]{43}$/u.test(options.capability)) {
+    throw new TypeError("MCP requires an Agent Fabric agent capability");
+  }
+  const protocol = await NdjsonRpcTransport.connect(createConnection(options.socketPath), {
+    protocolVersion: 1,
+    client: { name: options.clientLabel ?? "agent-fabric-mcp", version: "1.0.0" },
+    authentication: {
+      scheme: "capability",
+      credential: options.capability,
+      clientNonce: `mcp_${randomUUID()}`,
+    },
+    expectedPrincipalKind: "agent",
+    requiredFeatures: ["fabric-core.v1"],
+    optionalFeatures: agentFeatures.filter((feature) => feature !== "fabric-core.v1"),
+  });
+  if (protocol.principal.kind !== "agent") {
+    await protocol.close();
+    throw new TypeError("MCP protocol credential did not resolve to an agent principal");
+  }
+  const descriptors = buildMcpDescriptorSet(protocol.allowedOperations);
+  const toolsByName = new Map(descriptors.tools.map((descriptor) => [descriptor.name, descriptor]));
   const server = new Server(
-    { name: "agent-fabric", version: "0.1.0" },
+    { name: "agent-fabric", version: "1.0.0" },
     { capabilities: { tools: {}, resources: {} } },
   );
-  const ajv = new Ajv2020({ allErrors: true, strict: true });
-  const inputValidators = new Map(FABRIC_MCP_TOOLS.map((tool) => [tool.name, ajv.compile(tool.inputSchema)]));
-  const outputValidators = new Map(FABRIC_MCP_TOOLS.map((tool) => [tool.name, ajv.compile(tool.outputSchema)]));
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: FABRIC_MCP_TOOLS.map(({ name, description, inputSchema, outputSchema }) => ({ name, description, inputSchema, outputSchema })),
+    tools: descriptors.tools.map(advertisedTool),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = FABRIC_MCP_TOOLS.find((candidate) => candidate.name === request.params.name);
-    if (tool === undefined) {
-      throw new Error(`unknown tool: ${request.params.name}`);
-    }
+    const descriptor = toolsByName.get(request.params.name as `fabric_${string}`);
+    if (descriptor === undefined) throw new Error(`unknown tool: ${request.params.name}`);
     const args = request.params.arguments ?? {};
     try {
-      const validateInput = inputValidators.get(tool.name);
-      if (validateInput === undefined || !validateInput(args)) {
-        throw new FabricRemoteError("MCP_INPUT_INVALID", `arguments do not match the ${tool.name} contract`);
-      }
-      const result = await rpc.call(tool.daemonMethod, args);
-      const structured = asStructured(result);
-      const validate = outputValidators.get(tool.name);
-      if (validate === undefined || !validate(structured)) {
-        throw new Error(`daemon returned output outside the ${tool.name} contract`);
-      }
+      const parsedInput = parseOperationInputForPrincipal(descriptor.operation, "agent", args);
+      const raw = await protocol.call(descriptor.operation as never, parsedInput as never);
+      const result = parseOperationResult(descriptor.operation, raw);
+      if (!isRecord(result)) throw new TypeError("projected Fabric result must be an object");
       return {
-        content: [{ type: "text", text: renderToolReceipt(tool.name, args, structured) }],
-        structuredContent: structured,
+        content: [{ type: "text", text: renderMcpReceipt(descriptor, args, result) }],
+        structuredContent: result,
       };
     } catch (error: unknown) {
       const payload = errorPayload(error);
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
-        structuredContent: payload,
         isError: true,
       };
     }
   });
 
   server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: [] }));
-
   server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({
-    resourceTemplates: FABRIC_MCP_RESOURCE_TEMPLATES,
+    resourceTemplates: descriptors.resources,
   }));
-
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    const { runId, daemonMethod } = resolveResourceUri(request.params.uri);
-    const result = await rpc.call(daemonMethod, { runId });
+    const { descriptor, runId } = resourceCall(request.params.uri, descriptors.resources);
+    const operation = descriptor.operation as FabricOperation;
+    const input = parseOperationInputForPrincipal(operation, "agent", { runId });
+    const raw = await protocol.call(operation as never, input as never);
+    const result = parseOperationResult(operation, raw);
     return {
-      contents: [
-        {
-          uri: request.params.uri,
-          mimeType: "application/json",
-          text: JSON.stringify(result ?? null),
-        },
-      ],
+      contents: [{
+        uri: request.params.uri,
+        mimeType: descriptor.mimeType,
+        text: JSON.stringify(result),
+      }],
     };
   });
 
+  let closed = false;
   return {
     server,
     async close(): Promise<void> {
-      await server.close();
-      await rpc.close();
+      if (closed) return;
+      closed = true;
+      await Promise.allSettled([server.close(), protocol.close()]);
     },
   };
 }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
+import { TimedNdjsonTransport } from "../../src/transport/ndjson-rpc.ts";
 import {
   callTool,
   MCP_ROOT_AUTHORITY,
@@ -12,6 +13,7 @@ import {
   type McpProxy,
 } from "../support/mcp-testkit.ts";
 import { requireRecord, teamCreateInput } from "../support/stage5-team-testkit.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -25,8 +27,9 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
     const stateDirectory = join(directory, "state");
     const runtimeDirectory = join(directory, "runtime");
     const socketPath = join(runtimeDirectory, "fabric.sock");
+    const databasePath = join(stateDirectory, "fabric.sqlite3");
     const daemon = await startFabricDaemon({
-      databasePath: join(stateDirectory, "fabric.sqlite3"),
+      databasePath,
       stateDirectory,
       runtimeDirectory,
       socketPath,
@@ -36,7 +39,9 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       socketPath,
       capability: daemon.bootstrapCapability,
     });
-    const run = await bootstrap.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: directory,
       runId: "run-stage5-daemon-mcp",
       projectRunDirectory: join(directory, "project-run"),
       chair: { agentId: "chair", authority: MCP_ROOT_AUTHORITY },
@@ -50,6 +55,10 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       socketPath,
       capability: run.chairCapability,
     });
+    const chairPrivateProtocol = await TimedNdjsonTransport.connect({
+      socketPath,
+      capability: run.chairCapability,
+    });
     let leaderProxy: McpProxy | undefined;
     let leaderDaemon: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
     cleanup.push(async () => {
@@ -58,6 +67,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
         leaderProxy?.close(),
         leaderDaemon?.close(),
         chairDaemon.close(),
+        chairPrivateProtocol.close(),
         bootstrap.close(),
       ]);
       await daemon.stop();
@@ -73,36 +83,41 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       "fabric_budget_usage_record",
       "fabric_budget_usage_reconcile",
       "fabric_budget_release",
-      "fabric_budget_get",
+      "fabric_budget_read",
       "fabric_task_handoff_acknowledge",
     ];
-    expect(tools.tools.filter((tool) => stage5ToolNames.includes(tool.name)).map((tool) => tool.name)).toEqual(stage5ToolNames);
-    expect(tools.tools.find((tool) => tool.name === "fabric_budget_get")?.outputSchema).toMatchObject({
+    expect(tools.tools.filter((tool) => stage5ToolNames.includes(tool.name)).map((tool) => tool.name).sort())
+      .toEqual([...stage5ToolNames].sort());
+    expect(tools.tools.find((tool) => tool.name === "fabric_budget_read")?.outputSchema).toMatchObject({
       type: "object",
       required: ["budgetId", "parentBudgetId", "state", "dimensions", "returned"],
     });
 
-    const created = await callTool(
-      chairProxy.client,
-      "fabric_team_create",
-      {
-        ...teamCreateInput({
-          teamId: "stage5-mcp-team",
-          memberAuthorities: [],
-          reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
-        }),
-        discussionGroups: [],
-      },
-    );
-    expect(created.isError).toBe(false);
-    const leader = requireRecord(created.structured.leader, "created leader");
-    if (typeof leader.capability !== "string") throw new TypeError("leader capability is missing");
+    // Atomic team creation is identity/topology only. Activate the test leader
+    // explicitly through the current private protocol client, then exercise the
+    // secret-free team operations through the generated MCP surface.
+    const created = requireRecord(await chairPrivateProtocol.call("createTeam", {
+      ...teamCreateInput({
+        teamId: "stage5-mcp-team",
+        memberAuthorities: [],
+        reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
+      }),
+      discussionGroups: [],
+    }), "created team");
+    const leader = requireRecord(created.leader, "created leader");
+    if (typeof leader.agentId !== "string" || typeof leader.authorityId !== "string") {
+      throw new TypeError("leader identity is incomplete");
+    }
+    const registration = await chairDaemon.registerAgent({
+      agentId: leader.agentId,
+      authorityId: leader.authorityId,
+    });
     leaderProxy = await spawnMcpProxy({
       socketPath,
-      capability: leader.capability,
+      capability: registration.capability,
       label: "stage5-leader",
     });
-    leaderDaemon = await connectFabricDaemon({ socketPath, capability: leader.capability });
+    leaderDaemon = await connectFabricDaemon({ socketPath, capability: registration.capability });
 
     await expect(leaderDaemon.freezeSubtree({
       teamId: "stage5-mcp-team",
@@ -201,7 +216,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       isError: false,
       structured: { state: "released", returned: { turns: 6 } },
     });
-    const readBudget = await callTool(chairProxy.client, "fabric_budget_get", {
+    const readBudget = await callTool(chairProxy.client, "fabric_budget_read", {
       budgetId: "stage5-mcp-child-budget",
     });
     expect(readBudget).toMatchObject({
@@ -228,7 +243,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       commandId: "stage5:mcp:root:claim",
     });
     expect(claimed.isError).toBe(false);
-    const completed = await callTool(leaderProxy.client, "fabric_task_complete", {
+    const completed = await callTool(leaderProxy.client, "fabric_task_update", {
       taskId: "stage5-mcp-team-root-task",
       expectedRevision: 2,
       state: "complete",

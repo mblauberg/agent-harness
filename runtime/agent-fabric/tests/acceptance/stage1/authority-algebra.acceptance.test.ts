@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { openFabric } from "../../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 describe("Stage 1 authority algebra", () => {
   it("preserves a canonical delegated path when its filesystem target changes before restart", async () => {
@@ -19,14 +21,20 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
-      actions: ["read", "write", "delegate"],
-      disclosure: ["local"],
+      actions: [
+        FABRIC_OPERATIONS.delegateAuthority,
+        FABRIC_OPERATIONS.registerAgent,
+        FABRIC_OPERATIONS.acquireWriteLease,
+      ],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: { turns: 2 },
     };
     let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
     try {
-      const run = await fabric.createRun({
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot,
         runId: "canonical-path-restart",
         chair: { agentId: "chair", authority: rootAuthority },
       });
@@ -37,7 +45,7 @@ describe("Stage 1 authority algebra", () => {
           ...rootAuthority,
           sourcePaths: ["src"],
           artifactPaths: ["src"],
-          actions: ["write"],
+          actions: [FABRIC_OPERATIONS.acquireWriteLease],
           budget: { turns: 1 },
         },
       });
@@ -58,7 +66,7 @@ describe("Stage 1 authority algebra", () => {
     }
   });
 
-  it("preserves a legacy delegated path while upgrading its stored authority shape", async () => {
+  it("does not upgrade a non-current stored authority shape on reopen", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-legacy-authority-restart-"));
     const databasePath = join(workspaceRoot, "fabric.sqlite3");
     await Promise.all([
@@ -69,14 +77,20 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
-      actions: ["read", "write", "delegate"],
-      disclosure: ["local"],
+      actions: [
+        FABRIC_OPERATIONS.delegateAuthority,
+        FABRIC_OPERATIONS.registerAgent,
+        FABRIC_OPERATIONS.acquireWriteLease,
+      ],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: { turns: 2 },
     };
     let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
     try {
-      const run = await fabric.createRun({
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot,
         runId: "legacy-path-restart",
         chair: { agentId: "chair", authority: rootAuthority },
       });
@@ -87,7 +101,7 @@ describe("Stage 1 authority algebra", () => {
           ...rootAuthority,
           sourcePaths: ["src"],
           artifactPaths: ["src"],
-          actions: ["write"],
+          actions: [FABRIC_OPERATIONS.acquireWriteLease],
           budget: { turns: 1 },
         },
       });
@@ -112,7 +126,7 @@ describe("Stage 1 authority algebra", () => {
         scope: ["src/new"],
         ttlMs: 1_000,
         commandId: "legacy-path-restart:lease",
-      })).rejects.toMatchObject({ code: "AUTHORITY_WIDENING" });
+      })).rejects.toThrow(/stored authority is invalid/u);
     } finally {
       await fabric.close().catch(() => undefined);
       await rm(workspaceRoot, { recursive: true, force: true });
@@ -128,16 +142,17 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
-      actions: ["read"],
-      disclosure: ["local"],
+      actions: [FABRIC_OPERATIONS.getRunStatus],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: {},
     };
     let fabric = await openFabric({ databasePath, workspaceRoots: [configuredRoot] });
     try {
-      const run = await fabric.createRun({
-        runId: "contained-root-restart",
+      const run = await createCurrentSessionRun({
+        databasePath,
         workspaceRoot: projectRoot,
+        runId: "contained-root-restart",
         chair: { agentId: "chair", authority },
       });
       await fabric.close();
@@ -160,7 +175,9 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: [workspaceRoot],
     });
     try {
-      await expect(fabric.createRun({
+      await expect(createCurrentSessionRun({
+        databasePath: join(workspaceRoot, "fabric.sqlite3"),
+        workspaceRoot,
         runId: "absolute-paths",
         projectRunDirectory: runDirectory,
         chair: {
@@ -169,8 +186,8 @@ describe("Stage 1 authority algebra", () => {
             workspaceRoots: [workspaceRoot],
             sourcePaths: [join(workspaceRoot, "src")],
             artifactPaths: [runDirectory],
-            actions: ["read", "write"],
-            disclosure: ["local"],
+            actions: [FABRIC_OPERATIONS.getRunStatus],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2027-07-10T00:00:00.000Z",
             budget: { turns: 1 },
           },
@@ -190,7 +207,9 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: [workspaceRoot],
     });
     try {
-      await expect(fabric.createRun({
+      await expect(createCurrentSessionRun({
+        databasePath: join(workspaceRoot, "fabric.sqlite3"),
+        workspaceRoot,
         runId: "legacy-budget-key",
         chair: {
           agentId: "chair",
@@ -198,7 +217,7 @@ describe("Stage 1 authority algebra", () => {
             workspaceRoots: ["."],
             sourcePaths: ["src"],
             artifactPaths: [".agent-run"],
-            actions: ["read"],
+            actions: [FABRIC_OPERATIONS.getRunStatus],
             disclosure: { level: "forbidden" },
             expiresAt: "2027-07-10T00:00:00.000Z",
             budget: { costUsd: 1 },

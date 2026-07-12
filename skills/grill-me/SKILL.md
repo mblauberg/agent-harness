@@ -8,6 +8,10 @@ decisions one at a time; do not exhaustively interrogate low-value detail. For
 each question, give the evidence already known, 2–3 concrete options when useful,
 and a recommended answer with its trade-off.
 
+Keep the explicit decision context current: intake/revision, constraints,
+evidence, decided branches, parked owner calls and the next unresolved branch.
+Do not start a parallel interview when revising the same request.
+
 Ask one question at a time. Record decided, parked and still-open branches in
 the enclosing `scope` artifact when write authority exists; otherwise keep a
 compact chat register.
@@ -15,4 +19,12 @@ compact chat register.
 If a question can be answered from the workspace or current authoritative
 sources, investigate it instead of spending human attention. Stop when the
 shared decision/acceptance contract is clear, the user asks to stop, or the next
-branch needs unavailable owner authority.
+branch needs unavailable owner authority. Return the resolved register to
+`scope` for a digest-bound handoff; the interview itself is not approval.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records workflow evidence; it never approves the decision context.

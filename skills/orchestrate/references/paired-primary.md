@@ -75,7 +75,9 @@ needs durable peer exchange. Only the chair mutates shared pair state.
 - Peer lost mid-stage: preserve partials, mark `PAIR-DEGRADED`, and reassign only
   if authority and review independence remain valid.
 - Chair loss: persist a handoff. Takeover needs an explicit lease-generation
-  transition; never silently promote the peer.
+  transition; never silently promote the peer. A retained launched chair uses
+  Fabric's typed live-handoff custody and exact provider/session generations;
+  the local orchestration-lease helper is not a substitute.
 
 Use `skills/orchestrate/scripts/lease.py` for atomic acquire/renew/transfer/
 release of the chair or autonomous-loop lease. Transfers require the expected

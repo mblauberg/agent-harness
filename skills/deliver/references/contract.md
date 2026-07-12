@@ -7,6 +7,32 @@ requirements. `status` is the live state and `state_history` is its ordered,
 timestamped proof. Side states (`blocked`, `cancelled`, `degraded`) require a
 reason and recovery instruction and cannot replace a mandatory gate.
 
+## Fabric relationship binding
+
+New receipts declare the optional-in-v1 `fabric_relationships` object. Omission
+is accepted only for backward compatibility with receipts created before this
+extension. A coordinated delivery uses concrete bounded Fabric identifiers and
+binds `delivery_run_id` back to the receipt's exact `run_id`:
+
+```json
+{
+  "mode": "coordinated",
+  "delivery_run_id": "DEL-001",
+  "project_session_id": "ps_01",
+  "coordination_run_id": "run_01",
+  "workstream_id": "workstream_01",
+  "lead_agent_id": "agent_lead_01"
+}
+```
+
+An independent delivery uses the same complete shape with `mode` set to
+`independent`, `delivery_run_id` still equal to `run_id`, and all four parent,
+workstream and lead values set exactly to `not_applicable`. Partial objects,
+unknown fields or modes, invented parents, invalid identifiers and a mismatched
+delivery run fail closed. `lead_agent_id` identifies the bounded workstream
+lead, never a second chair; live Fabric membership and chair authority remain
+daemon-owned rather than being recreated in this receipt.
+
 Artifact digests use `sha256:<64 lowercase hex>`. Local paths are relative to
 the explicit workspace root; validate with `--workspace-root` and
 `--verify-hashes`. External URIs require `digest_unavailable_reason` when bytes

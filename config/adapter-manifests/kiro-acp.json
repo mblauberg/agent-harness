@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "runtime/agent-fabric/dist/adapters/compatibility.js",
-      "sha256": "e7c15a3b6975226e5a3ad050cf4f02e34c762c7f85500e59371835861f82d911"
+      "sha256": "98f9c64cbb807a175462f4b948e0fa5188d0531b7264ab1d15694285d1d8ea12"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/model-selection.js",
@@ -12,11 +12,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "8306e956cc6494562a5426b6018a0989cf159a0d6a65ee17cb829bf6f6c6ef86"
+      "sha256": "248962d60fbc733f74b5d43305c1c93d6cfc571e42ed1b9f856fb11d69dddd97"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
-      "sha256": "fe942144b97c7248b68d00ddc48b9a5bdb159ec3ecb0c4dcf0b5b9db283ce4b2"
+      "sha256": "b6ad4f4a8b90877b995b04ffc9a3f2baa255d3922427d7f3ef5f758c53f73c0a"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/kiro-acp-client.js",
@@ -28,7 +28,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/shared.js",
-      "sha256": "2f60585984f93a6a2898a45866811d23e6ad3e925c7b33dce203896fd4864427"
+      "sha256": "1286dccadd9935b6020e5131b762b7c5b197ce3c433d89e4d3824a9f079f492e"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/server.js",
@@ -36,7 +36,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
-      "sha256": "c8d2768f18013aa7559a525e11b227d5b6a2f1bc50d954923d99a8ebe8c7abac"
+      "sha256": "1fafd60e3fc721fbf9992220c6e0c55a6542a10300fafcc5ccbd4c66a7eb2dc1"
     },
     {
       "path": "runtime/agent-fabric/dist/errors.js",

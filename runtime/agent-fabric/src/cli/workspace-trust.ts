@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
 import { constants } from "node:fs";
 import { chmod, lstat, open, realpath, rename, rm } from "node:fs/promises";
@@ -18,6 +18,12 @@ export type WorkspaceTrustEntry = {
   inode: number;
   expiresAt?: string;
   allowedProfiles: string[];
+};
+
+export type TrustedWorkspaceIdentity = {
+  canonicalRoot: string;
+  trustRecordDigest: `sha256:${string}`;
+  entry: WorkspaceTrustEntry;
 };
 
 type WorkspaceTrustRegistry = { schemaVersion: 1; entries: WorkspaceTrustEntry[] };
@@ -161,6 +167,19 @@ async function identityMatches(entry: WorkspaceTrustEntry): Promise<boolean> {
   }
 }
 
+function trustRecordDigest(entry: WorkspaceTrustEntry): `sha256:${string}` {
+  const normalized = JSON.stringify({
+    allowedProfiles: entry.allowedProfiles,
+    approvedAt: entry.approvedAt,
+    approvedBy: entry.approvedBy,
+    canonicalPath: entry.canonicalPath,
+    device: entry.device,
+    ...(entry.expiresAt === undefined ? {} : { expiresAt: entry.expiresAt }),
+    inode: entry.inode,
+  });
+  return `sha256:${createHash("sha256").update(normalized).digest("hex")}`;
+}
+
 function option(arguments_: string[], name: string): string | undefined {
   const index = arguments_.indexOf(name);
   const value = index === -1 ? undefined : arguments_[index + 1];
@@ -180,6 +199,30 @@ export async function trustedWorkspaceRoots(input: {
     .filter((entry) => entry.expiresAt === undefined || timestamp(entry.expiresAt, "workspace expiry") > now);
   const matches = await Promise.all(candidates.map(identityMatches));
   return candidates.filter((_entry, index) => matches[index] === true).map((entry) => entry.canonicalPath);
+}
+
+export async function trustedWorkspaceIdentity(input: {
+  stateDirectory: string;
+  canonicalRoot: string;
+  executionProfile?: string;
+  now?: Date;
+}): Promise<TrustedWorkspaceIdentity> {
+  const identity = await canonicalWorkspace(input.canonicalRoot);
+  const registry = await readRegistry(join(input.stateDirectory, "trusted-workspaces.json"));
+  const entry = registry.entries.find((candidate) => candidate.canonicalPath === identity.canonicalPath);
+  if (entry === undefined) throw new Error("workspace root is not trusted");
+  if (entry.expiresAt !== undefined && timestamp(entry.expiresAt, "workspace expiry") <= (input.now ?? new Date()).getTime()) {
+    throw new Error("workspace trust record is expired");
+  }
+  if (input.executionProfile !== undefined && !entry.allowedProfiles.includes(input.executionProfile)) {
+    throw new Error("workspace trust record does not allow the requested profile");
+  }
+  if (!await identityMatches(entry)) throw new Error("workspace trust record no longer matches the live root identity");
+  return {
+    canonicalRoot: entry.canonicalPath,
+    trustRecordDigest: trustRecordDigest(entry),
+    entry: { ...entry, allowedProfiles: [...entry.allowedProfiles] },
+  };
 }
 
 export async function runWorkspaceTrust(

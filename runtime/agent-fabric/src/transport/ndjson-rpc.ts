@@ -31,11 +31,13 @@ export type TimedNdjsonTransportDependencies = {
 
 export class FabricRemoteError extends Error {
   readonly code: string;
+  readonly preserved: boolean;
 
-  constructor(code: string, message: string) {
-    super(message);
+  constructor(code: string, message: string, options?: Readonly<{ preserved?: boolean; cause?: unknown }>) {
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "FabricError";
     this.code = code;
+    this.preserved = options?.preserved ?? false;
   }
 }
 
@@ -134,6 +136,10 @@ export class TimedNdjsonTransport {
       throw new FabricRemoteError("DAEMON_NOT_INITIALIZED", "daemon transport is not initialized");
     }
     return this.#initializeResult;
+  }
+
+  get closed(): boolean {
+    return this.#closed;
   }
 
   #disconnect(): void {

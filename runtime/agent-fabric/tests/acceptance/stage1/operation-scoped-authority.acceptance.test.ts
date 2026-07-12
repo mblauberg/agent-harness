@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FABRIC_OPERATIONS, expandAuthorityActions } from "../../../src/domain/operations.js";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.js";
 import { openFabric } from "../../../src/index.ts";
 import { ROOT_AUTHORITY, createStage1Fixture } from "../../support/stage1-fixture.ts";
 
@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 describe("operation-scoped authority", () => {
-  it("stores only versioned operations after expanding legacy authority bundles", async () => {
+  it("stores only exact versioned operations", async () => {
     const fixture = await createStage1Fixture();
     cleanup.push(async () => {
       await fixture.fabric.close();
@@ -45,7 +45,7 @@ describe("operation-scoped authority", () => {
     }
   });
 
-  it("authorises one exact operation without granting its former legacy bundle", async () => {
+  it("authorises one exact operation without granting unrelated operations", async () => {
     const fixture = await createStage1Fixture();
     cleanup.push(async () => {
       await fixture.fabric.close();
@@ -85,7 +85,7 @@ describe("operation-scoped authority", () => {
     await expect(client.getMailboxState()).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
   });
 
-  it("upgrades trusted legacy actions already stored in an existing database", async () => {
+  it("does not rewrite obsolete stored actions while opening current source", async () => {
     const fixture = await createStage1Fixture();
     cleanup.push(async () => {
       await fixture.fabric.close();
@@ -119,9 +119,7 @@ describe("operation-scoped authority", () => {
       if (typeof document !== "object" || document === null || !("actions" in document)) {
         throw new TypeError("upgraded authority document is invalid");
       }
-      const expected = expandAuthorityActions(["read", "message"]);
-      if (!expected.ok) throw new TypeError("legacy authority expansion failed");
-      expect(document.actions).toEqual(expected.operations);
+      expect(document.actions).toEqual(["read", "message"]);
     } finally {
       inspection.close();
     }

@@ -79,6 +79,7 @@ export class AdapterProcessTransport {
   #closing = false;
   #terminalError: AdapterTransportError | undefined;
   #closePromise: Promise<void> | undefined;
+  readonly #closeListeners = new Set<() => void>();
 
   constructor(options: AdapterProcessTransportOptions) {
     const executable = options.command[0];
@@ -151,6 +152,8 @@ export class AdapterProcessTransport {
       } else {
         this.#closed = true;
       }
+      for (const listener of this.#closeListeners) listener();
+      this.#closeListeners.clear();
     });
   }
 
@@ -160,6 +163,15 @@ export class AdapterProcessTransport {
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  onClose(listener: () => void): () => void {
+    if (this.#closed) {
+      queueMicrotask(listener);
+      return () => undefined;
+    }
+    this.#closeListeners.add(listener);
+    return () => this.#closeListeners.delete(listener);
   }
 
   async request(

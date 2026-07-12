@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
 import { createLifecycleFixture, writeLifecycleCheckpoint } from "../support/lifecycle-testkit.ts";
 import {
   advanceOptionalLeg,
@@ -18,7 +19,7 @@ import { createStage5RecoveryFixture } from "../support/stage5-recovery-testkit.
 import {
   createStage5TeamFixture,
   createTeam,
-  requireRecord,
+  issueTeamLeaderCapability,
   teamAuthority,
   teamCreateInput,
 } from "../support/stage5-team-testkit.ts";
@@ -84,8 +85,8 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
           workspaceRoots: [fixture.directory],
           sourcePaths: [join(fixture.directory, "src", "outside-team-a")],
           artifactPaths: [fixture.runDirectory],
-          actions: ["read"],
-          disclosure: ["local"],
+          actions: [FABRIC_OPERATIONS.getRunStatus],
+          disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z",
           budget: { turns: 1, "cost:USD": 1 },
         },
@@ -250,7 +251,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
       const checkpoint = await writeLifecycleCheckpoint(fixture, {
         agentId: "leader",
         inFlightChildren: ["child"],
-        openWork: ["leader-task", "child-task"],
+        openWork: ["leader-task"],
         nextAction: "reconcile owned work before release",
       });
       await fixture.leader.requestLifecycle({
@@ -354,17 +355,15 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
         teamId: "evaluation-level-1",
         memberAuthorities: [],
       }));
-      const levelOneCapability = requireRecord(levelOne.leader, "level-one leader").capability;
-      if (typeof levelOneCapability !== "string") throw new TypeError("level-one capability is missing");
-      const levelTwo = await createTeam(fixture.fabric.connect(levelOneCapability), teamCreateInput({
+      const levelOneClient = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, levelOne));
+      const levelTwo = await createTeam(levelOneClient, teamCreateInput({
         teamId: "evaluation-level-2",
         parentTeamId: "evaluation-level-1",
         sourcePath: "src/evaluation-level-1/evaluation-level-2",
         artifactPath: ".agent-run/evaluation-level-1/evaluation-level-2",
         memberAuthorities: [],
       }));
-      const levelTwoCapability = requireRecord(levelTwo.leader, "level-two leader").capability;
-      if (typeof levelTwoCapability !== "string") throw new TypeError("level-two capability is missing");
+      const levelTwoCapability = await issueTeamLeaderCapability(levelOneClient, levelTwo);
       const beforeDepth = await fixture.chair.getRunStatus({ runId: fixture.run.runId });
       await expect(createTeam(fixture.fabric.connect(levelTwoCapability), teamCreateInput({
         teamId: "evaluation-level-3",
@@ -408,7 +407,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
   it("records the manual review-independence oracle as bounded evidence", () => {
     expect(evaluationCase("review-independence-after-shared-authorship").oracle.kind).toBe("manual");
     const review = readFileSync(
-      new URL("../../../../.agent-run/AFAB-001/reviews/stage5-evaluation-independent.md", import.meta.url),
+      new URL("./fixtures/stage5-evaluation-independent.md", import.meta.url),
       "utf8",
     );
     expect(review).toContain("Verdict: PASS (bounded behavioural evaluation only)");

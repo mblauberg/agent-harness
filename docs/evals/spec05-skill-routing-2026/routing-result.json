@@ -1,0 +1,56 @@
+{
+  "catalogue_sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
+  "classifier_sha256": "sha256:f677ff7f5bb25ef4c16a271ec01b182a6c3dfa33a00917b648ea5f312d7c8dab",
+  "dataset_sha256": "sha256:239c855622f26b3bffbd69ff206de399b52ab0a25fa6a4102c1e6469145361bc",
+  "evaluation_id": "spec05-skill-routing-20260712-v1",
+  "harness_revision": "b5a855c4c810f2ed53d607b2b92b995aa8da0737",
+  "invocations": [
+    {
+      "action_evidence_artifact": "raw/anthropic-action.json",
+      "action_evidence_sha256": "sha256:faf2d18764ae6799b1bbac62064eaa72bf89b082edc507a66fc93f5d2fbe1bcc",
+      "action_id": "spec05-routing-anthropic:spawn",
+      "adapter_id": "claude-agent-sdk",
+      "family": "anthropic",
+      "invocation_id": "fabric-anthropic-01",
+      "model": "opus",
+      "output_artifact": "raw/anthropic-output.json",
+      "output_sha256": "sha256:4fb9f7c782e945c049efcd3ba1b339e7fc269aad4db5d8bde097854cbc685fe5",
+      "task_id": "spec05-routing-anthropic"
+    },
+    {
+      "action_evidence_artifact": "raw/google-action.json",
+      "action_evidence_sha256": "sha256:a7205bd8087d1b4f66345235b4d5a46a9de80970ae36973ad8f58ab955d87e25",
+      "action_id": "spec05-routing-google:spawn",
+      "adapter_id": "agy",
+      "family": "google",
+      "invocation_id": "fabric-google-01",
+      "model": "Gemini 3.1 Pro (High)",
+      "output_artifact": "raw/google-output.json",
+      "output_sha256": "sha256:24fb64747e3282704b2b091a9c8bd7df4574c6660485bdcbe699c43a4be8ff60",
+      "task_id": "spec05-routing-google"
+    },
+    {
+      "action_evidence_artifact": "raw/xai-action.json",
+      "action_evidence_sha256": "sha256:30e423d7b637a5f1dbb4e463df4b6e593ae5b186761e2f17f3f6bf90faf16236",
+      "action_id": "spec05-routing-xai:spawn",
+      "adapter_id": "cursor-agent",
+      "family": "xai",
+      "invocation_id": "fabric-xai-01",
+      "model": "grok-4.5-xhigh",
+      "output_artifact": "raw/xai-output.json",
+      "output_sha256": "sha256:712729a05fc6cf8b606bc0d65b3af92a41cd4111f80122949160adb9fffe162a",
+      "task_id": "spec05-routing-xai"
+    }
+  ],
+  "metrics": {
+    "case_rows": 108,
+    "companion_correct": 101,
+    "companion_fidelity": 0.9351851851851852,
+    "critical_portability_failures": 0,
+    "primary_accuracy": 1.0,
+    "primary_correct": 108
+  },
+  "packet_sha256": "sha256:46ddf8069daf8729709df82824d49b5b0318df5a50689fca06ac80900d6bcc4b",
+  "schema_version": 1,
+  "status": "pass"
+}

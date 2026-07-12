@@ -29,6 +29,7 @@ def make_run(tmp_path):
     spec.loader.exec_module(reference)
     receipt = reference.make_reference_run("research", ROOT)
     receipt["run_id"] = "CLEAN-1"
+    receipt["fabric_relationships"]["delivery_run_id"] = "CLEAN-1"
     receipt["authority"]["allowed_artifact_paths"] = ["run"]
     receipt["intent"]["artifact"] = "run/intent.md"
     receipt["artifacts"][0]["path"] = "run/intent.md"

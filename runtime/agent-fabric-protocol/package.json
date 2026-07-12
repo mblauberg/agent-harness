@@ -1,0 +1,34 @@
+{
+  "name": "@local/agent-fabric-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "files": [
+    "dist",
+    "schemas"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schemas/protocol.schema.json": "./schemas/protocol.schema.json",
+    "./schemas/mcp-agent-tools.json": "./schemas/mcp-agent-tools.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/write-schema.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run build && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

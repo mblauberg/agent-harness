@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,8 +8,34 @@ import { installSeatGeneration, projectKey, resolveSeatPaths } from "../../src/c
 
 const CAPABILITY_A = `afc_${"a".repeat(43)}`;
 const CAPABILITY_B = `afc_${"b".repeat(43)}`;
+const GENERATION_ONE = "1".repeat(64);
+const GENERATION_TWO = "2".repeat(64);
+const GENERATION_THREE = "3".repeat(64);
 
 describe("MCP seat generation store", () => {
+  it("rejects flat seat files when the active generation pointer is absent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-seat-flat-rejection-"));
+    try {
+      const stateDirectory = join(root, "state");
+      const requestedProjectPath = join(root, "project");
+      await mkdir(stateDirectory, { mode: 0o700 });
+      await mkdir(requestedProjectPath);
+      const projectPath = await realpath(requestedProjectPath);
+      const flatDirectory = join(stateDirectory, "seats", projectKey(projectPath));
+      await mkdir(flatDirectory, { recursive: true, mode: 0o700 });
+      await writeFile(join(flatDirectory, "codex.cap"), CAPABILITY_A, { mode: 0o600 });
+      await writeFile(join(flatDirectory, "codex.json"), "{}\n", { mode: 0o600 });
+
+      await expect(resolveSeatPaths({
+        stateDirectory,
+        project: projectPath,
+        seat: "codex",
+      })).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the prior complete generation active when renewal fails before cutover", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-seat-generation-"));
     try {
@@ -23,24 +49,38 @@ describe("MCP seat generation store", () => {
         schemaVersion: 1 as const,
         projectKey: key,
         projectPath,
+        projectSessionId: "session-one",
+        sessionRevision: 1,
+        sessionGeneration: 1,
+        runRevision: 1,
+        chairAgentId: "codex",
+        chairGeneration: 1,
+        chairLeaseId: "chair:run-one:1",
         seat: "codex" as const,
         agentId: "codex",
+        principalGeneration: 1,
         role: "chair" as const,
         expiresAt: "2099-01-01T00:00:00.000Z",
       };
       await installSeatGeneration({
         stateDirectory,
         projectPath,
-        generation: "generation-one",
-        seats: [{ metadata: { ...metadata, runId: "run-one" }, credential: CAPABILITY_A }],
+        generation: GENERATION_ONE,
+        expectedPreviousGeneration: null,
+        seats: [{ metadata: {
+          ...metadata, runId: "run-one", generation: GENERATION_ONE, previousGeneration: null,
+        }, credential: CAPABILITY_A }],
       });
       const before = await resolveSeatPaths({ stateDirectory, project: projectPath, seat: "codex" });
 
       await expect(installSeatGeneration({
         stateDirectory,
         projectPath,
-        generation: "generation-two",
-        seats: [{ metadata: { ...metadata, runId: "run-two" }, credential: CAPABILITY_B }],
+        generation: GENERATION_TWO,
+        expectedPreviousGeneration: GENERATION_ONE,
+        seats: [{ metadata: {
+          ...metadata, runId: "run-two", generation: GENERATION_TWO, previousGeneration: GENERATION_ONE,
+        }, credential: CAPABILITY_B }],
         beforeActivate: () => {
           throw new Error("injected cutover failure");
         },
@@ -54,11 +94,88 @@ describe("MCP seat generation store", () => {
       await expect(installSeatGeneration({
         stateDirectory,
         projectPath,
-        generation: "generation-one",
-        seats: [{ metadata: { ...metadata, runId: "run-one" }, credential: CAPABILITY_B }],
+        generation: GENERATION_ONE,
+        expectedPreviousGeneration: null,
+        seats: [{ metadata: {
+          ...metadata, runId: "run-one", generation: GENERATION_ONE, previousGeneration: null,
+        }, credential: CAPABILITY_B }],
       })).rejects.toThrow(/differs from requested immutable generation/u);
       await expect(readFile(after.credentialPath, "utf8")).resolves.toBe(CAPABILITY_A);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a delayed older writer roll the active generation backward", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-seat-generation-cas-"));
+    let releaseOlder!: () => void;
+    const olderCanActivate = new Promise<void>((resolvePromise) => { releaseOlder = resolvePromise; });
+    let olderStaged!: () => void;
+    const olderIsStaged = new Promise<void>((resolvePromise) => { olderStaged = resolvePromise; });
+    try {
+      const stateDirectory = join(root, "state");
+      const requestedProjectPath = join(root, "project");
+      await mkdir(stateDirectory, { mode: 0o700 });
+      await mkdir(requestedProjectPath);
+      const projectPath = await realpath(requestedProjectPath);
+      const key = projectKey(projectPath);
+      const metadata = {
+        schemaVersion: 1 as const,
+        projectKey: key,
+        projectPath,
+        projectSessionId: "session-one",
+        sessionRevision: 1,
+        sessionGeneration: 1,
+        runRevision: 1,
+        chairAgentId: "codex",
+        chairGeneration: 1,
+        chairLeaseId: "chair:run-one:1",
+        seat: "codex" as const,
+        agentId: "codex",
+        principalGeneration: 1,
+        role: "chair" as const,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      };
+      await installSeatGeneration({
+        stateDirectory,
+        projectPath,
+        generation: GENERATION_ONE,
+        expectedPreviousGeneration: null,
+        seats: [{ metadata: {
+          ...metadata, runId: "run-one", generation: GENERATION_ONE, previousGeneration: null,
+        }, credential: CAPABILITY_A }],
+      });
+
+      const delayedOlder = installSeatGeneration({
+        stateDirectory,
+        projectPath,
+        generation: GENERATION_TWO,
+        expectedPreviousGeneration: GENERATION_ONE,
+        seats: [{ metadata: {
+          ...metadata, runId: "run-two", generation: GENERATION_TWO, previousGeneration: GENERATION_ONE,
+        }, credential: CAPABILITY_B }],
+        beforeActivate: async () => {
+          olderStaged();
+          await olderCanActivate;
+        },
+      });
+      await olderIsStaged;
+      await installSeatGeneration({
+        stateDirectory,
+        projectPath,
+        generation: GENERATION_THREE,
+        expectedPreviousGeneration: GENERATION_ONE,
+        seats: [{ metadata: {
+          ...metadata, runId: "run-three", generation: GENERATION_THREE, previousGeneration: GENERATION_ONE,
+        }, credential: CAPABILITY_A }],
+      });
+      releaseOlder();
+
+      await expect(delayedOlder).rejects.toThrow(/active MCP seat generation changed/u);
+      const active = await resolveSeatPaths({ stateDirectory, project: projectPath, seat: "codex" });
+      await expect(readFile(active.metadataPath, "utf8").then(JSON.parse)).resolves.toMatchObject({ runId: "run-three" });
+    } finally {
+      releaseOlder?.();
       await rm(root, { recursive: true, force: true });
     }
   });

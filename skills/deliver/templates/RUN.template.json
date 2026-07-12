@@ -2,6 +2,14 @@
   "schema_version": 1,
   "contract": "delivery-run",
   "run_id": "DEL-001",
+  "fabric_relationships": {
+    "mode": "independent",
+    "delivery_run_id": "DEL-001",
+    "project_session_id": "not_applicable",
+    "coordination_run_id": "not_applicable",
+    "workstream_id": "not_applicable",
+    "lead_agent_id": "not_applicable"
+  },
   "profile": "research",
   "status": "draft",
   "risk_tier": "substantial",

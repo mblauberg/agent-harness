@@ -10,6 +10,7 @@ import * as publicApi from "../../src/index.ts";
 import { openFabric } from "../../src/index.ts";
 
 import { ROOT_AUTHORITY } from "./stage1-fixture.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export type PublicFunction = (...args: unknown[]) => unknown;
 
@@ -189,8 +190,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function createInterventionFixture() {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-intervention-"));
-  const fabric = await openFabric({ databasePath: join(directory, "fabric.sqlite3"), workspaceRoots: [directory] });
-  const run = await fabric.createRun({
+  const databasePath = join(directory, "fabric.sqlite3");
+  const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId: "run-stage3-intervention",
     projectRunDirectory: directory,
     chair: { agentId: "chair", authority: ROOT_AUTHORITY },

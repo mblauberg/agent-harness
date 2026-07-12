@@ -172,6 +172,32 @@ targets fail for human resolution and link
 mutations roll back if the manifest commit fails.
 Provider bootstraps remain small and share the same precedence sentence.
 
+## Project Fabric Console
+
+The Spec 05 Console remains a projection-only executable over the public
+Fabric protocol. Its terminal layer uses Node 24 with a project-owned
+responsive cell-grid renderer and bounded keyboard/SGR parser, selected through the
+[terminal-runtime decision](research/project-fabric-console-tui-options-2026.md).
+It does not use Ink, blessed or a native UI core. An early PTY gate must prove
+the exact default/reference 80 by 24 frame, dynamic terminal reflow,
+resize-state preservation, mouse selection, hostile-text handling and terminal
+restoration; failure switches the implementation to the documented
+Rust/Ratatui fallback.
+
+The language choice does not move authority into the Console. Fabric remains
+the transaction owner, and keyboard, mouse and typed commands converge on one
+revision-bound action-intent and confirmation path.
+
+The live control path follows `observe external facts -> commit durable facts
+-> derive projection and attention -> typed action`. A snapshot cursor and the
+snapshot are read atomically; live transport is a wake accelerator for durable
+at-least-once cursor catch-up with stable-cursor idempotence, never another
+event truth. Consequential Git actions bind the source and expected destination
+object IDs plus state digests, hold or revalidate local state through the
+effect, and use an atomic destination lease. These and other retained patterns
+are recorded in the
+[open-source harness comparison](research/open-source-agent-harness-patterns-2026.md).
+
 The canonical skill catalogue is also a constrained interface. Every skill has
 balanced positive, negative and boundary routes; descriptions place the trigger
 and nearest exclusion early and the complete rendered catalogue stays inside

@@ -22,6 +22,8 @@ export function createAgyAdapter(options: {
       operations: ["spawn", "attach", "send_turn", "release"],
       modelFamilies: ["google"],
       compactInPlace: false,
+      answerBearingSpawn: true,
+      answerBearingSpawnTurns: "one-shot",
     }),
     boundary: options.boundary,
     journal: options.journal,

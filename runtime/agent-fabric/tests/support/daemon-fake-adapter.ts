@@ -7,6 +7,9 @@ if (journalPath === undefined) {
   throw new Error("FAKE_ADAPTER_JOURNAL is required");
 }
 const requiredJournalPath: string = journalPath;
+const ephemeralSpawnEnabled = process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN === "1";
+const reportLoginIdentity = process.env.FAKE_ADAPTER_REPORT_LOGIN_IDENTITY === "1";
+const ephemeralSpawnDelayMs = Number(process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN_DELAY_MS ?? "0");
 
 type ActionRecord = {
   actionId: string;
@@ -104,9 +107,51 @@ input.on("line", (line) => {
   if (request.method === "capabilities") {
     respond(request.id, {
       protocolVersion: 1,
-      operations: ["capabilities", "dispatch", "lookup_action", "cancel_action", "release"],
+      operations: [
+        "capabilities",
+        ...(ephemeralSpawnEnabled ? ["spawn"] : []),
+        "dispatch",
+        "lookup_action",
+        "cancel_action",
+        "release",
+      ],
       actionJournal: true,
+      ...(ephemeralSpawnEnabled ? {
+        ephemeralWorker: true,
+        answerBearingSpawn: true,
+        answerBearingSpawnTurns: "one-shot",
+      } : {}),
     });
+    return;
+  }
+  if (request.method === "spawn") {
+    if (!ephemeralSpawnEnabled) {
+      fail(request.id, "METHOD_NOT_FOUND", "ephemeral spawn is disabled");
+      return;
+    }
+    if (
+      typeof request.params.actionId !== "string" ||
+      typeof request.params.model !== "string" ||
+      typeof request.params.modelFamily !== "string" ||
+      typeof request.params.prompt !== "string" ||
+      typeof request.params.taskId !== "string" ||
+      request.params.maxTurns !== 1
+    ) {
+      fail(request.id, "INVALID_PARAMS", "task-bound ephemeral spawn fields are required");
+      return;
+    }
+    const loginIdentity = reportLoginIdentity
+      ? `:${process.env.USER ?? "missing"}:${process.env.LOGNAME ?? "missing"}`
+      : "";
+    const complete = (): void => respond(request.id, {
+      result: `review:${request.params.modelFamily}:${request.params.model}${loginIdentity}`,
+      taskId: request.params.taskId,
+    });
+    if (Number.isSafeInteger(ephemeralSpawnDelayMs) && ephemeralSpawnDelayMs > 0) {
+      setTimeout(complete, ephemeralSpawnDelayMs);
+    } else {
+      complete();
+    }
     return;
   }
   if (request.method === "dispatch") {

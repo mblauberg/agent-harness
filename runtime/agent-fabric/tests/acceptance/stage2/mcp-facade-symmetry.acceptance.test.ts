@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { callTool, createMcpFixture, MCP_ROOT_AUTHORITY, recordArray, spawnMcpProxy } from "../../support/mcp-testkit.ts";
+import { callTool, createMcpFixture, recordArray, spawnMcpProxy } from "../../support/mcp-testkit.ts";
 
 // Stage 2 assignment (AFAB-001): FR-001 and NFR-007 — Claude and Codex MCP
 // clients expose the same fabric tool and resource semantics with no
@@ -10,21 +10,20 @@ import { callTool, createMcpFixture, MCP_ROOT_AUTHORITY, recordArray, spawnMcpPr
 const STAGE_2_TOOL_NAMES = [
   "fabric_artifact_publish",
   "fabric_barrier_close",
-  "fabric_message_ack",
+  "fabric_delivery_acknowledge",
   "fabric_message_receive",
   "fabric_message_send",
-  "fabric_run_create",
-  "fabric_run_status",
-  "fabric_task_assign",
+  "fabric_run_status_read",
+  "fabric_task_create",
   "fabric_task_claim",
-  "fabric_task_complete",
+  "fabric_task_update",
 ];
 
 const STAGE_2_RESOURCE_TEMPLATES = [
-  "fabric://runs/{run_id}/status",
-  "fabric://runs/{run_id}/tasks",
   "fabric://runs/{run_id}/agents",
   "fabric://runs/{run_id}/receipts",
+  "fabric://runs/{run_id}/status",
+  "fabric://runs/{run_id}/tasks",
 ];
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -38,7 +37,7 @@ afterEach(async () => {
 });
 
 describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
-  it("exposes the full Stage 2 tool set with identical schemas to both clients", async () => {
+  it("exposes identical generated schemas for the Stage 2 operations granted to both clients", async () => {
     const fixture = await createMcpFixture("run-mcp-symmetry");
     cleanup.push(() => fixture.cleanup());
 
@@ -48,9 +47,11 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
     const names = claudeTools.tools.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(expect.arrayContaining(STAGE_2_TOOL_NAMES));
-    // NFR-007: identical protocol surface — names, descriptions and JSON
-    // schemas byte-equal between the Claude-labelled and Codex-labelled client.
-    expect(codexTools.tools).toEqual(claudeTools.tools);
+    const codexByName = new Map(codexTools.tools.map((tool) => [tool.name, tool]));
+    for (const name of STAGE_2_TOOL_NAMES) {
+      expect(codexByName.get(name)).toStrictEqual(claudeTools.tools.find((tool) => tool.name === name));
+    }
+    expect(names).not.toContain("fabric_run_create");
     for (const tool of claudeTools.tools) {
       expect(tool.inputSchema).toMatchObject({ type: "object" });
       expect(tool.outputSchema).toMatchObject({ type: "object" });
@@ -70,34 +71,15 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
     expect(codex.resourceTemplates).toEqual(claude.resourceTemplates);
   });
 
-  it("creates a run through fabric_run_create under the bootstrap capability only", async () => {
+  it("rejects a bootstrap capability before any tool advertisement", async () => {
     const fixture = await createMcpFixture("run-mcp-create-base");
     cleanup.push(() => fixture.cleanup());
 
-    const bootstrapProxy = await spawnMcpProxy({
+    await expect(spawnMcpProxy({
       socketPath: fixture.socketPath,
       capability: fixture.daemon.bootstrapCapability,
       label: "claude-bootstrap",
-    });
-    cleanup.push(() => bootstrapProxy.close());
-
-    const created = await callTool(bootstrapProxy.client, "fabric_run_create", {
-      runId: "run-mcp-created",
-      chair: { agentId: "chair", authority: MCP_ROOT_AUTHORITY },
-    });
-    expect(created.isError).toBe(false);
-    expect(created.structured).toMatchObject({ runId: "run-mcp-created" });
-    expect(typeof created.structured.chairCapability).toBe("string");
-    expect(typeof created.structured.chairAuthorityId).toBe("string");
-    expect(created.text).toBe("created run run-mcp-created · chair capability issued (redacted)");
-    expect(created.text).not.toContain(String(created.structured.chairCapability));
-
-    // A non-bootstrap capability must not create runs.
-    const forbidden = await callTool(fixture.peerProxy.client, "fabric_run_create", {
-      runId: "run-mcp-forbidden",
-      chair: { agentId: "chair2", authority: MCP_ROOT_AUTHORITY },
-    });
-    expect(forbidden.isError).toBe(true);
+    })).rejects.toThrow();
   });
 
   it("returns typed fabric error codes across the MCP boundary, never raw driver errors", async () => {
@@ -110,10 +92,9 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
       commandId: "mcp:errors:claim-missing",
     });
     expect(missing.isError).toBe(true);
-    // Core checks claim eligibility before task existence, so an unknown task
-    // surfaces as CAPABILITY_FORBIDDEN; the contract here is a typed fabric
-    // code either way.
-    expect(missing.structured).toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    // Unknown task identity is reported as a typed public NOT_FOUND error,
+    // never a raw SQLite/driver failure.
+    expect(missing.structured).toMatchObject({ code: "NOT_FOUND" });
 
     const original = await callTool(fixture.chairProxy.client, "fabric_message_send", {
       audience: { kind: "agents", agentIds: ["peer"] },
@@ -157,14 +138,14 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
     });
     expect(excessiveHop).toMatchObject({
       isError: true,
-      structured: { code: "MCP_INPUT_INVALID" },
+      structured: { code: "MESSAGE_HOP_LIMIT_EXCEEDED" },
     });
   });
 
   it("expands a task audience through the shared MCP and daemon path", async () => {
     const fixture = await createMcpFixture("run-mcp-task-audience");
     cleanup.push(() => fixture.cleanup());
-    const assigned = await callTool(fixture.chairProxy.client, "fabric_task_assign", {
+    const assigned = await callTool(fixture.chairProxy.client, "fabric_task_create", {
       taskId: "task-audience",
       authorityId: fixture.peerAuthorityId,
       eligibleAgentIds: ["peer"],

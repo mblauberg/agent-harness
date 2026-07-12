@@ -3,19 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
-import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
+import { AUTHORITY_ACTION_VOCABULARY } from "../../src/domain/operations.ts";
 import {
   terminateTrackedTestProcess,
   trackTestProcess,
   untrackTestProcess,
 } from "./test-process-registry.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export const DAEMON_ROOT_AUTHORITY = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message", FABRIC_OPERATIONS.observeEvents],
-  disclosure: ["local"],
+  actions: [...AUTHORITY_ACTION_VOCABULARY],
+  disclosure: { level: "scoped", scopes: ["local"] } as const,
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 128, "cost:USD": 128 },
 };
@@ -66,7 +67,9 @@ export async function createDaemonFixture(runId = "run-daemon") {
     socketPath,
     capability: daemon.bootstrapCapability,
   });
-  const run = await bootstrap.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId,
     chair: { agentId: "chair", authority: DAEMON_ROOT_AUTHORITY },
   });
@@ -78,7 +81,7 @@ export async function createDaemonFixture(runId = "run-daemon") {
       ...DAEMON_ROOT_AUTHORITY,
       sourcePaths: ["src/peer"],
       artifactPaths: [".agent-run/peer"],
-      actions: ["read", "write", "message"],
+      actions: [...DAEMON_ROOT_AUTHORITY.actions],
       budget: { turns: 8, "cost:USD": 8 },
     },
   });

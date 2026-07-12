@@ -2,30 +2,30 @@
 
 Local coordination runtime shared by Claude Code, Codex and optional provider adapters. It keeps authority, tasks, leases, mailboxes, provider-action reconciliation, teams, receipts and lifecycle checkpoints in one SQLite/WAL store behind a private Unix socket.
 
-Status: Stages 1–5 and the activation extension are implemented. The daemon is
-active for this checkout and the MCP proxy is registered globally for Agy,
-Claude Code, Codex, Cursor and Kiro. Their provider adapters are enabled behind
-pinned compatibility and runtime activation gates. Pi remains disabled until a
-trusted open-weight provider/model is available.
+Status: the current pre-release runtime, protocol, Console and activation
+extensions are implemented. Final integrated verification, independent review
+and human acceptance remain pending. Read live daemon, adapter, registration
+and seat state from the machine interface; this README does not cache it.
 
 ## Architecture
 
 ```text
-Claude MCP proxy ─┐
-                  ├─ private Unix socket ─ daemon ─ SQLite/WAL
-Codex MCP proxy  ─┘                         │
-                                            ├─ provider adapter processes
-Herdr visibility/inbox integration ─────────┘
+Console/operator client ─┐
+agent MCP proxies       ─┼─ private Unix socket ─ daemon ─ SQLite/WAL
+provider-session bridge ─┘                            │
+                                                   ├─ provider adapters
+Herdr visibility/control adapter ──────────────────┘
 ```
 
 The daemon is authoritative. Herdr provides visible panes and wake-ups, not coordination state. Pi is an optional worker adapter, not the harness or authority store.
 
 Important boundaries:
 
-- `src/core/fabric.ts`: compatibility façade and aggregate coordination
+- `src/core/fabric.ts`: aggregate coordination façade and transaction owner
 - `src/core/client.ts`: capability-bound client façade
 - `src/application/command-journal.ts`: command dedupe and transaction owner
-- `src/persistence/sqlite.ts`: hardened connection and canonical migration startup
+- `src/core/migrations.ts`: current-baseline custody and cutover inspection
+- `src/persistence/sqlite.ts`: hardened current-database connection
 - `src/transport/bounded-ndjson.ts`: shared byte-bounded framing
 - `src/cli/workspace-trust.ts`: exact machine-local workspace admission
 - `src/cli/retention.ts`: report-only retention and non-destructive archive
@@ -34,9 +34,11 @@ Important boundaries:
 - `src/mcp/`: one input/output schema surface for both primary clients
 - `src/adapters/providers/`: isolated, pinned provider adapters
 - `src/exports/`: receipt projection, schema enforcement and link verification
-- `migrations/0001-core.sql`: canonical baseline
-- `migrations/0002-observer-event-sequence.sql`: durable observer cursor
-- `migrations/0003-integrity-and-query-plans.sql`: additive invariants and hot-path indexes
+- `migrations/0001-current-baseline.sql`: complete current schema, triggers and indexes
+- `schemas/database-baseline.v1.json`: pinned SQL and canonical catalogue digests
+- `../agent-fabric-protocol/`: sole public operation, schema and MCP descriptor owner
+- `../agent-fabric-console/`: standalone responsive operator TUI
+- `../agent-fabric-herdr/`: typed Herdr control and degraded-steer boundary
 
 ## Development
 
@@ -45,9 +47,37 @@ npm install
 npm run check
 npm run test:evaluation
 npm run test:load
+npm run schema:check
+
+npm --prefix ../agent-fabric-console run check
+npm --prefix ../agent-fabric-console run test:evaluation
+npm --prefix ../agent-fabric-console run test:load
+npm --prefix ../agent-fabric-herdr run check
 ```
 
-All normal tests use temporary databases and fake provider boundaries. They do not log into providers or register MCP servers.
+Normal tests use temporary databases and fake provider boundaries. They do not
+log into providers, register MCP servers or prove the Console's human
+timed-identification acceptance gate. The Console evaluation reports automated
+interaction evidence separately from that human result.
+
+### Optional GitHub hosted checks
+
+Local typed Git reads are independent of GitHub. `GitRepositoryReadService`
+accepts an optional `GitHostedChecksPort`; omitting it is the default and
+projects `unavailable` hosted facts while keeping local Git `live`.
+
+Trusted daemon composition can call
+`createOptionalGitHubHostedChecksAdapter({ enabled: true, ... })` with one
+canonical repository root, exact `owner/repository`, `github.com`, and a
+canonical SHA-256-pinned `gh` executable. The adapter issues only the fixed
+bounded check-runs request for the observed native HEAD. It accepts no URL,
+ref, arbitrary GitHub endpoint, argument vector, shell or caller environment.
+An outage, authentication failure, malformed response, more than 100 checks or
+oversized output becomes exact-HEAD `stale` (when a same-binding cache exists)
+or `unavailable`; it never fails or rewrites the local Git projection.
+Credentials may be inherited ephemerally by `gh`, but are never accepted in
+configuration, persisted, logged or projected. Retargeting the canonical root,
+repository or HEAD fails before process I/O.
 
 Inspect the live machine without printing capabilities:
 
@@ -66,20 +96,22 @@ Resolved by `src/cli/paths.ts` under the user data/runtime directories:
 - database-identity owner lock: beside the durable database
 - per-project evidence: `.agent-run/<run-id>/`
 
-All five registered clients launch `scripts/agent-fabric-mcp` with the same
-socket and a seat label. The proxy canonicalises its working directory, walks
-ancestor projects for the nearest matching provisioned seat and fails closed
-when none exists. Client labels never change the MCP schema or authority. The
-raw capability is stored only in its private `0600` `.cap` file; registry
+Each configured client launches `scripts/agent-fabric-mcp` with the same socket
+and a seat label. The proxy canonicalises its working directory, walks ancestor
+projects for the nearest matching provisioned seat and fails closed when none
+exists. Client labels never change the MCP schema or authority. The raw
+capability is stored only in its private `0600` `.cap` file; registry
 configuration contains neither the credential nor a fixed project seat path.
-Seat rotation stages a complete immutable generation and atomically switches a
-single private `current.json` pointer. Existing flat seat files remain a
-read-only compatibility fallback until a successful rotation.
+Seat rotation binds one content-addressed generation in the daemon database,
+atomically revokes the prior roster, stages the complete immutable filesystem
+generation and compare-and-swaps a private `current.json` pointer. There is no
+flat-seat fallback or second accepted generation.
 
-The current daemon is a foreground process in Herdr's infrastructure tab, not
-an installed login service. A separate least-privilege `fabric-events` pane
-renders bounded human-readable event summaries. A newly started client session
-loads its MCP registry entry; a session that predates registration may need to
-reconnect or restart.
+Clients use lock-safe on-demand bootstrap: they attach to a compatible
+incumbent before database preflight, or elect one daemon and inspect/publish
+current state on the no-incumbent path. Fabric is not a login service. Herdr
+may host or observe processes, but it does not own daemon truth. A newly
+started client session loads its MCP registry entry; an older provider session
+may need to reconnect or restart after a registry or seat-generation change.
 
 See [the operations runbook](../../docs/runbooks/agent-fabric-operations.md) before any live start or registration.

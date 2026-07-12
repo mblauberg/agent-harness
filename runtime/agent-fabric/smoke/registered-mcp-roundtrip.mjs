@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { currentSeatDirectory } from "./current-seat-generation.mjs";
 
 const projectRoot = resolve(process.argv[2] ?? process.cwd());
 const stateDirectory = process.env.AGENT_FABRIC_STATE_DIRECTORY
@@ -14,9 +15,7 @@ const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH
   ?? join(stateDirectory, "runtime", "fabric-v1.sock");
 const projectKey = process.env.AGENT_FABRIC_PROJECT_KEY;
 if (projectKey === undefined) throw new Error("AGENT_FABRIC_PROJECT_KEY is required");
-const seatRoot = join(stateDirectory, "seats", projectKey);
-const pointer = await readFile(join(seatRoot, "current.json"), "utf8").then(JSON.parse).catch(() => undefined);
-const seatDirectory = pointer?.generation === undefined ? seatRoot : join(seatRoot, "generations", pointer.generation);
+const seatDirectory = await currentSeatDirectory(stateDirectory, projectKey);
 
 async function connect(seat) {
   const transport = new StdioClientTransport({
@@ -39,7 +38,13 @@ async function connect(seat) {
 async function call(client, name, args) {
   const result = await client.callTool({ name, arguments: args });
   if (result.isError === true || result.structuredContent === undefined) {
-    throw new Error(`${name} failed`);
+    const detail = Array.isArray(result.content)
+      ? result.content
+          .filter((item) => item?.type === "text" && typeof item.text === "string")
+          .map((item) => item.text)
+          .join(" ")
+      : "";
+    throw new Error(`${name} failed${detail.length === 0 ? "" : `: ${detail}`}`);
   }
   return result.structuredContent;
 }
@@ -67,7 +72,7 @@ try {
   const nonce = randomUUID();
   const conversationId = `registered-roundtrip:${nonce}`;
   const request = await call(codex, "fabric_message_send", {
-    audience: { kind: "agents", agentIds: ["claude"] },
+    audience: { kind: "agents", agentIds: [claudeMetadata.agentId] },
     context: { kind: "direct" },
     kind: "request",
     body: "Codex registration check: please acknowledge this shared MCP message.",
@@ -77,9 +82,9 @@ try {
     hopCount: 0,
   });
   const receivedByClaude = await receive(claude, request.messageId);
-  await call(claude, "fabric_message_ack", { deliveryId: receivedByClaude.deliveryId });
+  await call(claude, "fabric_delivery_acknowledge", { deliveryId: receivedByClaude.deliveryId });
   const response = await call(claude, "fabric_message_send", {
-    audience: { kind: "agents", agentIds: ["codex"] },
+    audience: { kind: "agents", agentIds: [codexMetadata.agentId] },
     context: { kind: "direct" },
     kind: "response",
     body: "Claude registration check: message received and acknowledged over the shared MCP fabric.",
@@ -90,7 +95,7 @@ try {
     hopCount: 1,
   });
   const receivedByCodex = await receive(codex, response.messageId);
-  await call(codex, "fabric_message_ack", { deliveryId: receivedByCodex.deliveryId });
+  await call(codex, "fabric_delivery_acknowledge", { deliveryId: receivedByCodex.deliveryId });
   process.stdout.write(`${JSON.stringify({
     status: "pass",
     runId: codexMetadata.runId,

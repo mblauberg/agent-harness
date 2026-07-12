@@ -44,7 +44,12 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: runtime/agent-fabric/package-lock.json
+          cache-dependency-path: |
+            runtime/agent-fabric/package-lock.json
+            runtime/agent-fabric-protocol/package-lock.json
+      - name: Assert protocol build starts clean
+        working-directory: runtime/agent-fabric
+        run: test ! -e ../agent-fabric-protocol/dist
       - name: Install locked fabric dependencies
         working-directory: runtime/agent-fabric
         run: npm ci
@@ -53,6 +58,9 @@ jobs:
         env:
           AGENT_FABRIC_PORTABLE_TESTS: "1"
         run: npm run check
+      - name: Verify local protocol dependency was built
+        working-directory: runtime/agent-fabric
+        run: test -f ../agent-fabric-protocol/dist/index.d.ts
       - name: Run fabric evaluation suite
         working-directory: runtime/agent-fabric
         run: npm run test:evaluation
@@ -61,4 +69,65 @@ jobs:
         run: npm run test:load
       - name: Audit production dependencies
         working-directory: runtime/agent-fabric
+        run: npm audit --omit=dev --audit-level=high
+
+  console:
+    name: Agent fabric Console, evaluation, load and audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            runtime/agent-fabric-console/package-lock.json
+            runtime/agent-fabric/package-lock.json
+            runtime/agent-fabric-protocol/package-lock.json
+      - name: Install locked Console dependencies
+        working-directory: runtime/agent-fabric-console
+        run: npm ci
+      - name: Run Console typecheck, build and tests
+        working-directory: runtime/agent-fabric-console
+        run: npm run check
+      - name: Run Console evaluation suite
+        working-directory: runtime/agent-fabric-console
+        run: npm run test:evaluation
+      - name: Run Console load suite
+        working-directory: runtime/agent-fabric-console
+        run: npm run test:load
+      - name: Audit Console production dependencies
+        working-directory: runtime/agent-fabric-console
+        run: npm audit --omit=dev --audit-level=high
+
+  herdr:
+    name: Agent fabric Herdr adapter and audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            runtime/agent-fabric-herdr/package-lock.json
+            runtime/agent-fabric-protocol/package-lock.json
+      - name: Install locked Herdr dependencies
+        working-directory: runtime/agent-fabric-herdr
+        run: npm ci
+      - name: Run Herdr typecheck, build and tests
+        working-directory: runtime/agent-fabric-herdr
+        run: npm run check
+      - name: Audit Herdr production dependencies
+        working-directory: runtime/agent-fabric-herdr
         run: npm audit --omit=dev --audit-level=high

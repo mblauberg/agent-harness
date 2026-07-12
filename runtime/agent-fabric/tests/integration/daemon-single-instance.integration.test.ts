@@ -1,4 +1,4 @@
-import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startFabricDaemon } from "../../src/index.ts";
+import { forceStartFabricDaemonForTests } from "../../src/daemon/client.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 const launcherHelper = fileURLToPath(new URL("../support/daemon-launcher-helper.ts", import.meta.url));
@@ -17,7 +18,7 @@ afterEach(async () => {
 });
 
 describe("daemon single-instance ownership", () => {
-  it("refuses a second daemon for the same Unix socket while preserving the incumbent", async () => {
+  it("attaches a second caller to the same elected Unix-socket owner", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-single-instance-"));
     const options = {
       databasePath: join(directory, "state", "fabric.sqlite3"),
@@ -31,14 +32,18 @@ describe("daemon single-instance ownership", () => {
       await rm(directory, { recursive: true, force: true });
     });
 
-    await expect(startFabricDaemon(options)).rejects.toMatchObject({ code: "DAEMON_ALREADY_RUNNING" });
+    const attached = await startFabricDaemon(options);
+    cleanup.push(async () => await attached.stop());
+    expect(attached.pid).toBe(first.pid);
     expect(first.pid).toBeGreaterThan(0);
+    await attached.stop();
+    expect(() => process.kill(first.pid, 0)).not.toThrow();
   });
 
-  it("refuses a second daemon for the same database through a different socket", async () => {
+  it("retains test-only raw process cleanup coverage for one database through different sockets", async () => {
     const directory = await mkdtemp(join(tmpdir(), "afdb-"));
     const databasePath = join(directory, "state", "fabric.sqlite3");
-    const first = await startFabricDaemon({
+    const first = await forceStartFabricDaemonForTests({
       databasePath,
       stateDirectory: join(directory, "state"),
       runtimeDirectory: join(directory, "a"),
@@ -48,8 +53,9 @@ describe("daemon single-instance ownership", () => {
       await first.stop();
       await rm(directory, { recursive: true, force: true });
     });
+    expect((await stat(`${databasePath}.daemon.lock.sqlite3`)).isFile()).toBe(true);
 
-    await expect(startFabricDaemon({
+    await expect(forceStartFabricDaemonForTests({
       databasePath,
       stateDirectory: join(directory, "state"),
       runtimeDirectory: join(directory, "b"),
@@ -86,7 +92,7 @@ describe("daemon single-instance ownership", () => {
   it("rejects dangling-symlink and hard-link database aliases", async () => {
     const directory = await mkdtemp(join(tmpdir(), "afdb-unsafe-alias-"));
     const stateDirectory = join(directory, "state");
-    await mkdir(stateDirectory);
+    await mkdir(stateDirectory, { mode: 0o700 });
     const danglingTarget = join(stateDirectory, "not-created.sqlite3");
     const danglingAlias = join(directory, "dangling.sqlite3");
     await symlink(danglingTarget, danglingAlias);
@@ -123,9 +129,9 @@ describe("daemon single-instance ownership", () => {
     const directory = await mkdtemp(join(tmpdir(), "afdb-stale-race-"));
     const stateDirectory = join(directory, "state");
     const databasePath = join(stateDirectory, "fabric.sqlite3");
-    await mkdir(stateDirectory, { recursive: true });
+    await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
     await writeFile(`${databasePath}.daemon.lock`, `${JSON.stringify({ pid: 2_147_483_647, token: "stale" })}\n`);
-    const attempts = await Promise.allSettled(Array.from({ length: 12 }, (_, index) => `contender-${index}`).map(async (name) => await startFabricDaemon({
+    const attempts = await Promise.allSettled(Array.from({ length: 12 }, (_, index) => `contender-${index}`).map(async (name) => await forceStartFabricDaemonForTests({
       databasePath,
       stateDirectory,
       runtimeDirectory: join(directory, name),
@@ -175,8 +181,10 @@ describe("daemon single-instance ownership", () => {
     launcher.kill("SIGKILL");
     await new Promise<void>((resolve) => launcher.once("exit", () => resolve()));
     try {
-      await expect(startFabricDaemon({ ...options, runtimeDirectory: join(directory, "second"), socketPath: join(directory, "second", "fabric.sock") }))
-        .rejects.toMatchObject({ code: "DAEMON_ALREADY_RUNNING" });
+      const attached = await startFabricDaemon(options);
+      expect(attached.pid).toBe(daemonPid);
+      await attached.stop();
+      expect(() => process.kill(daemonPid, 0)).not.toThrow();
     } finally {
       try { process.kill(daemonPid, "SIGTERM"); } catch { /* already stopped */ }
       for (let attempt = 0; attempt < 50; attempt += 1) {

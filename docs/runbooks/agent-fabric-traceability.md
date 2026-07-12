@@ -153,7 +153,6 @@ Vitest suite:
 
 | Evidence | Current command/artifact |
 |---|---|
-| Deterministic paired MCP self-test | `node runtime/agent-fabric/smoke/paired-mcp.self-test.mjs` |
 | Registered five-seat health | `node runtime/agent-fabric/smoke/registered-mcp-health.mjs` with `AGENT_FABRIC_PROJECT_KEY` |
 | Registered Codex/Claude round trip | `node runtime/agent-fabric/smoke/registered-mcp-roundtrip.mjs` with `AGENT_FABRIC_PROJECT_KEY` |
 | Provider-backed adapters | Not run while compatibility entries remain disabled/unresolved |

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = ROOT / "skills" / "deliver" / "scripts" / "validate_delivery.py"
 REFERENCE_RUNS_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_runs.py"
 REFERENCE_EVALUATION_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_evaluation.py"
+RUN_TEMPLATE_PATH = ROOT / "skills" / "deliver" / "templates" / "RUN.template.json"
 
 
 def load_validator():
@@ -72,6 +73,140 @@ def test_reference_run_for_every_profile_passes(tmp_path):
             fixture(profile, workspace_root), ROOT,
             workspace_root=workspace_root, verify_hashes=True,
         )
+
+
+def test_delivery_v1_records_typed_fabric_relationships_without_breaking_legacy_receipts():
+    module = load_validator()
+    candidate = fixture()
+    assert candidate["fabric_relationships"] == {
+        "mode": "independent",
+        "delivery_run_id": candidate["run_id"],
+        "project_session_id": "not_applicable",
+        "coordination_run_id": "not_applicable",
+        "workstream_id": "not_applicable",
+        "lead_agent_id": "not_applicable",
+    }
+    module.validate(candidate, ROOT)
+
+    legacy = copy.deepcopy(candidate)
+    del legacy["fabric_relationships"]
+    module.validate(legacy, ROOT)
+
+    coordinated = copy.deepcopy(candidate)
+    coordinated["fabric_relationships"] = {
+        "mode": "coordinated",
+        "delivery_run_id": coordinated["run_id"],
+        "project_session_id": "ps_01",
+        "coordination_run_id": "run_01",
+        "workstream_id": "workstream_01",
+        "lead_agent_id": "agent_lead_01",
+    }
+    module.validate(coordinated, ROOT)
+
+
+def test_run_template_declares_an_explicit_independent_fabric_relationship_state():
+    template = json.loads(RUN_TEMPLATE_PATH.read_text())
+    assert template["fabric_relationships"] == {
+        "mode": "independent",
+        "delivery_run_id": template["run_id"],
+        "project_session_id": "not_applicable",
+        "coordination_run_id": "not_applicable",
+        "workstream_id": "not_applicable",
+        "lead_agent_id": "not_applicable",
+    }
+
+
+@pytest.mark.parametrize(
+    ("relationships", "message"),
+    [
+        (None, "must be an object"),
+        (
+            {
+                "mode": "coordinated",
+                "delivery_run_id": "REF-SOFTWARE",
+                "project_session_id": "ps_01",
+                "coordination_run_id": "run_01",
+                "workstream_id": "workstream_01",
+            },
+            "fields are invalid",
+        ),
+        (
+            {
+                "mode": "coordinated",
+                "delivery_run_id": "REF-SOFTWARE",
+                "project_session_id": "ps_01",
+                "coordination_run_id": "run_01",
+                "workstream_id": "workstream_01",
+                "lead_agent_id": "agent_lead_01",
+                "chair_agent_id": "agent_chair_01",
+            },
+            "fields are invalid",
+        ),
+        (
+            {
+                "mode": "isolated",
+                "delivery_run_id": "REF-SOFTWARE",
+                "project_session_id": "not_applicable",
+                "coordination_run_id": "not_applicable",
+                "workstream_id": "not_applicable",
+                "lead_agent_id": "not_applicable",
+            },
+            "mode is invalid",
+        ),
+        (
+            {
+                "mode": "coordinated",
+                "delivery_run_id": "REF-SOFTWARE",
+                "project_session_id": "ps_01",
+                "coordination_run_id": "run_01",
+                "workstream_id": "not_applicable",
+                "lead_agent_id": "agent_lead_01",
+            },
+            "coordinated relationships require",
+        ),
+        (
+            {
+                "mode": "independent",
+                "delivery_run_id": "REF-SOFTWARE",
+                "project_session_id": "ps_invented",
+                "coordination_run_id": "not_applicable",
+                "workstream_id": "not_applicable",
+                "lead_agent_id": "not_applicable",
+            },
+            "independent relationships must be explicit not_applicable",
+        ),
+        (
+            {
+                "mode": "coordinated",
+                "delivery_run_id": "ANOTHER-DELIVERY",
+                "project_session_id": "ps_01",
+                "coordination_run_id": "run_01",
+                "workstream_id": "workstream_01",
+                "lead_agent_id": "agent_lead_01",
+            },
+            "delivery_run_id must match run_id",
+        ),
+        (
+            {
+                "mode": "coordinated",
+                "delivery_run_id": "REF-SOFTWARE",
+                "project_session_id": "project session with spaces",
+                "coordination_run_id": "run_01",
+                "workstream_id": "workstream_01",
+                "lead_agent_id": "agent_lead_01",
+            },
+            "bounded stable identifier",
+        ),
+    ],
+)
+def test_fabric_relationships_reject_partial_unknown_or_cross_inconsistent_forms(
+    relationships, message,
+):
+    module = load_validator()
+    candidate = fixture()
+    candidate["fabric_relationships"] = relationships
+    with pytest.raises(module.Invalid, match=message):
+        module.validate(candidate, ROOT)
 
 
 def test_approved_intent_requires_bound_artifact_digest_owner_and_evidence():
@@ -492,6 +627,7 @@ def test_required_retrospective_cannot_borrow_another_delivery_cycle(tmp_path):
     retro_dir.mkdir()
     other = fixture("agent-product")
     other["run_id"] = "OTHER-CYCLE"
+    other["fabric_relationships"]["delivery_run_id"] = "OTHER-CYCLE"
     source_path = retro_dir / "OTHER.json"
     source_path.write_text(json.dumps(other))
     retro = json.loads((ROOT / "skills" / "retrospect" / "templates" / "RETROSPECT.template.json").read_text())
@@ -807,6 +943,7 @@ def test_stochastic_evaluation_is_bound_to_the_enclosing_delivery_run(tmp_path):
     workspace_root = tmp_path / "run-id"
     candidate = fixture("agent-product", workspace_root)
     candidate["run_id"] = "FORGED-DELIVERY"
+    candidate["fabric_relationships"]["delivery_run_id"] = "FORGED-DELIVERY"
     with pytest.raises(module.Invalid, match="enclosing_delivery_run_id does not match"):
         module.validate(candidate, ROOT, workspace_root=workspace_root, verify_hashes=True)
 

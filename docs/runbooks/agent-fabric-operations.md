@@ -1,41 +1,56 @@
 # Agent fabric operations
 
-Status: five model-execution adapters and five MCP client registrations active
+Status: current pre-release operations; query live machine state before action
 Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 
 ## Human gates
 
 The following remain separate approvals. One does not imply another:
 
-1. build/install the local runtime;
-2. enable a provider adapter after compatibility verification;
-3. install an auto-start service for the daemon;
-4. log into or consume quota from a provider;
-5. change or remove a client registry entry;
-6. run a smoke that invokes a real provider adapter;
-7. release or publish Git state.
+1. build or install the local runtime outside an active implementation envelope;
+2. trust a project root or provision/rotate its operator and agent seats;
+3. enable a provider adapter after compatibility verification;
+4. install an auto-start/login service for the daemon;
+5. log into or consume quota from a provider;
+6. change or remove a client registry entry;
+7. run a smoke that invokes a real provider adapter;
+8. accept the implementation, release it or publish Git state.
 
-The human authorised the current model-execution daemon, five local MCP
-registrations and bounded provider smokes. Claude, Codex, Agy, Cursor and Kiro
-are enabled; Pi remains disabled until a trusted open-weight provider/model is
-installed. Registration does not authorise provider login changes, release or
-publication.
+Read the active authority before acting. Prior activation evidence does not
+authorise a new root, login, registry mutation, provider call, acceptance,
+release or publication.
 
 ## Preflight
 
 ```sh
+npm --prefix runtime/agent-fabric-protocol ci
+npm --prefix runtime/agent-fabric-protocol run check
+
+npm --prefix runtime/agent-fabric ci
 npm --prefix runtime/agent-fabric run check
 npm --prefix runtime/agent-fabric run test:evaluation
 npm --prefix runtime/agent-fabric run test:load
+npm --prefix runtime/agent-fabric audit --omit=dev --audit-level=high
+
+npm --prefix runtime/agent-fabric-console ci
+npm --prefix runtime/agent-fabric-console run check
+npm --prefix runtime/agent-fabric-console run test:evaluation
+npm --prefix runtime/agent-fabric-console run test:load
+npm --prefix runtime/agent-fabric-console audit --omit=dev --audit-level=high
+
+npm --prefix runtime/agent-fabric-herdr ci
+npm --prefix runtime/agent-fabric-herdr run check
+npm --prefix runtime/agent-fabric-herdr audit --omit=dev --audit-level=high
+
 scripts/check-harness
 git diff --check
 python3 skills/deliver/scripts/validate_delivery.py \
-  .agent-run/AFAB-001/RUN.json --workspace-root "$PWD" --verify-hashes
+  '<canonical-run>/RUN.json' --workspace-root "$PWD" --verify-hashes
 ```
 
 Then verify the selected compatibility entries against the current executable/schema hashes. Unresolved pins, missing artifacts or disabled entries fail closed.
 
-## Current local installation
+## Live discovery and registrations
 
 Read workstation-specific run, roster, expiry, adapter and socket state from
 the machine interface. Do not copy it into this runbook:
@@ -69,8 +84,15 @@ paste capability values into a registry, log or document.
 
 ## Daemon supervision
 
-The current daemon runs in Herdr's infrastructure tab with the five activated
-provider adapters:
+Fabric is on-demand, not a login service. The first current client read or
+command authenticates and attaches to a compatible incumbent before inspecting
+the database. Only the elected no-incumbent path inspects current state,
+rechecks it under the daemon-election lock and starts one owner. A compatible
+busy WAL writer is therefore attachable; incompatible state remains untouched
+and returns `SCHEMA_CUTOVER_REQUIRED`.
+
+Use the following foreground command only for an authorised manual diagnostic
+or supervised activation:
 
 ```sh
 env AGENT_FABRIC_RUNTIME_DIRECTORY="$HOME/.local/state/agent-harness/fabric/runtime" \
@@ -81,14 +103,11 @@ env AGENT_FABRIC_RUNTIME_DIRECTORY="$HOME/.local/state/agent-harness/fabric/runt
   --agents-home "$HOME/.agents"
 ```
 
-There is deliberately no login item or background auto-start service yet. The
-healthy foreground daemon is intentionally quiet, so its dedicated
-`infrastructure` pane normally appears blank. Reuse that one pane; do not open
-another on restart. If it stops, restart the command above in the existing pane
-before reconnecting clients. A second daemon
-for the same socket or the same SQLite database fails closed. The socket lock
-prevents unlink takeover; the database lock prevents two startup-recovery
-owners from serving one durable store through different sockets.
+Do not start this command merely because a pane or PID is absent. Re-run
+`status` and `doctor`; on-demand bootstrap or the existing supervisor owns the
+next step. A second daemon for the same socket or SQLite database fails closed.
+The election, socket and database locks prevent two startup/recovery owners or
+a shutdown/start race from serving one durable store.
 
 ## Shared-client model
 
@@ -101,13 +120,36 @@ AGENT_FABRIC_SEAT=<agy|claude|codex|cursor|kiro>
 scripts/agent-fabric-mcp
 ```
 
-The chair creates the run. Peers receive narrowed authority and their own capability. Swapping Claude and Codex leadership changes only which capability is chair-bound; it does not change the protocol or create a fallback chain.
+Reviewed operator launch custody creates the project session, run and one
+generation-fenced chair. Agents cannot create runs through MCP. Peers receive
+narrowed authority and their own capability. Swapping Claude and Codex
+leadership requires typed handoff/takeover custody; it does not change the
+protocol or create a fallback chain.
 
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 
 Herdr provides pane visibility and process supervision. Fabric events are
 rendered by the explicit least-privilege `fabric-events` observer described
 below; MCP tool responses and the SQLite-backed fabric remain authoritative.
+
+## Project Fabric Console
+
+Build and verify the standalone Console before attaching it to live state:
+
+```sh
+npm --prefix runtime/agent-fabric-console run check
+node runtime/agent-fabric-console/dist/cli.js --help
+node runtime/agent-fabric-console/dist/cli.js --project "$PWD"
+```
+
+Use `--session '<stable project-session ID>'` when more than one attachable
+session exists, `--herdr` when launched through the typed Herdr surface, or
+`--export json|markdown` for a non-interactive snapshot. The interactive
+Console follows the current terminal dimensions. `80x24` is the reference and
+default when dimensions are unavailable, not a fixed size. Resize events
+reflow full, compact and inert layouts while preserving stable selection,
+focus, scroll, drafts and pending commands. `q` detaches the UI; it does not
+stop a project session or daemon.
 
 ## Verify registrations
 
@@ -133,7 +175,14 @@ printing the capability:
 
 ```sh
 scripts/agent-fabric mcp seat-path --project "$PWD" --seat codex
+PROJECT_KEY="$(scripts/agent-fabric mcp seat-path \
+  --project "$PWD" --seat codex | jq -r .projectKey)"
+SEAT_GENERATION="$(scripts/agent-fabric mcp seat-path \
+  --project "$PWD" --seat codex | jq -r .generation)"
 ```
+
+Both values come from the current project-keyed seat pointer. Do not derive a
+project key from status prose, a copied path or an older generation.
 
 The daemon and every MCP proxy derive the same stable private socket at
 `$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Registry entries bind
@@ -145,15 +194,15 @@ Start a least-privilege observer after provisioning or renewal:
 scripts/agent-fabric mcp observer-provision --project "$PWD"
 scripts/agent-fabric observe \
   --socket "$HOME/.local/state/agent-harness/fabric/runtime/fabric-v1.sock" \
-  --capability-file "$HOME/.local/state/agent-harness/fabric/seats/<project-key>/observer.cap" \
+  --capability-file "$HOME/.local/state/agent-harness/fabric/seats/$PROJECT_KEY/observer.cap" \
   --run-id '<current run id>' \
-  --cursor "$HOME/.local/state/agent-harness/fabric/observer/<project-key>.cursor.json"
+  --cursor "$HOME/.local/state/agent-harness/fabric/observer/$PROJECT_KEY.cursor.json"
 ```
 
-Keep the quiet daemon process in a separate Herdr infrastructure tab. The
-`fabric-events` pane is the human surface: it renders terminal-safe one-line
-events in Brisbane time (`AEST`, UTC+10) and 160-character local message
-previews, never bearer credentials.
+When an authorised supervised foreground daemon is intentionally used, keep
+its quiet process separate from the optional `fabric-events` observer. The
+observer renders terminal-safe one-line events in Brisbane time (`AEST`,
+UTC+10) and 160-character local message previews, never bearer credentials.
 The cursor is saved after rendering. Orderly restarts resume at the next event;
 a crash between rendering and cursor persistence can repeat the last event, so
 consumers must treat the stream as at-least-once.
@@ -162,10 +211,10 @@ Run transport-only checks independently of provider execution:
 
 ```sh
 cd runtime/agent-fabric
-AGENT_FABRIC_PROJECT_KEY='<from status --json>' \
-  node smoke/registered-mcp-health.mjs ../..
-AGENT_FABRIC_PROJECT_KEY='<from status --json>' \
-  node smoke/registered-mcp-roundtrip.mjs ../..
+export AGENT_FABRIC_PROJECT_KEY="$(../../scripts/agent-fabric mcp seat-path \
+  --project ../.. --seat codex | jq -r .projectKey)"
+node smoke/registered-mcp-health.mjs ../..
+node smoke/registered-mcp-roundtrip.mjs ../..
 ```
 
 The health smoke checks all five seats, tool/resource discovery and readable
@@ -174,30 +223,47 @@ Claude to Codex mailbox messages through separate MCP proxies.
 
 ## Renew seats
 
-Provision a fresh immutable run before the current expiry. Use a future ISO
-timestamp no more than 31 days away:
+Bind a new immutable seat generation to the exact current operator-launched
+project session and coordination run before the current credentials expire.
+Use the revisions, generations, chair identity and active chair lease reported
+by the current operator projection. The command derives the current active
+roster generation from the locked project pointer and passes it as the expected
+predecessor; there is no caller-selected rollback value. The requested expiry
+must be a future ISO timestamp no more than 31 days away and cannot outlive any
+bound agent's authority:
 
 ```sh
 scripts/agent-fabric mcp provision \
   --project "$HOME/.agents" \
-  --chair codex \
-  --seats agy,claude,codex,cursor,kiro \
+  --project-session-id '<current project-session ID>' \
+  --session-revision '<current session revision>' \
+  --session-generation '<current session generation>' \
+  --run-id '<current coordination-run ID>' \
+  --run-revision '<current run revision>' \
+  --chair-seat codex \
+  --chair-agent-id '<current chair agent ID>' \
+  --chair-generation '<current chair generation>' \
+  --chair-lease-id '<active chair lease ID>' \
+  --seat-bindings 'agy=<agent>@<generation>,claude=<agent>@<generation>,codex=<chair-agent>@<generation>,cursor=<agent>@<generation>,kiro=<agent>@<generation>' \
   --expires-at '<ISO timestamp>'
 ```
 
-Renewal intentionally creates a new immutable run because expiry is part of
-the authority envelope; rotating a capability cannot extend that authority.
-Before renewal, drain and checkpoint the old run, export its receipt, close its
-barriers, and stop old proxies. Provisioning writes the complete roster into an
-immutable `generations/<generation>/` directory, fsyncs every private file, then
-atomically replaces `current.json`. Readers therefore observe either the whole
-old roster or the whole new roster; an interrupted staging pass does not create
-a mixed generation. Legacy flat seat files remain readable until the next
-successful renewal. Restart or reconnect all clients together after cutover and
-rerun both smoke checks.
-Already-connected old proxies remain bound to the old run until stopped or its
-capabilities expire; do not operate old and new generations as one team. Retain
-the old immutable run for audit and reconciliation.
+Provisioning creates only agent capabilities for the supplied existing
+principals. It does not create or select a project, session, run, chair,
+authority, agent or discussion group. Any stale, retired, rolled-back,
+cross-project or crossed identity fails atomically. An exact replay is
+idempotent. The JSON result includes `expectedPreviousGeneration` and the new
+content-addressed `generation`.
+
+The daemon compare-and-swaps the active generation and revokes every prior
+roster token in one transaction. The CLI stages and fsyncs the complete
+`generations/<generation>/` directory, then compare-and-swaps `current.json`
+under the private project lock only if its predecessor still matches. A delayed
+writer cannot replace a newer pointer, and readers never fall back to a flat or
+old pointer shape. Stop old proxies before cutover, restart or reconnect all
+clients together, and rerun both smoke checks. An already-connected old proxy
+is rejected on its next authenticated operation; do not treat two generations
+as one team.
 
 ## Recovery
 

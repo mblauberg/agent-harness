@@ -7,7 +7,8 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { archiveRun, retentionReport } from "../../src/cli/retention.ts";
-import { openFabric } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const cleanup: string[] = [];
 afterEach(async () => Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -20,14 +21,16 @@ async function fixture(runId = "run-terminal"): Promise<{ root: string; database
   await mkdir(runDirectory, { recursive: true });
   const fabric = await openFabric({ databasePath, workspaceRoots: [root] });
   try {
-    await fabric.createRun({
+    await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId,
       projectRunDirectory: runDirectory,
       chair: {
         agentId: "chair",
         authority: {
           workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
-          actions: ["read", "write", "delegate", "message"], disclosure: ["local"],
+          actions: [...AUTHORITY_ACTION_VOCABULARY], disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z", budget: { turns: 10 },
         },
       },

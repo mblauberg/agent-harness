@@ -1,0 +1,45 @@
+{
+  "name": "@local/agent-fabric-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "bin": {
+    "agent-fabric-console": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "evals"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./evals/usability-fixtures.v1.json": "./evals/usability-fixtures.v1.json"
+  },
+  "scripts": {
+    "check:protocol": "npm --prefix ../agent-fabric-protocol ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric-protocol run build",
+    "check:fabric": "npm --prefix ../agent-fabric ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric run build",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:evaluation": "vitest run tests/evaluation.test.ts",
+    "test:load": "vitest run tests/load.test.ts",
+    "check": "npm run check:protocol && npm run check:fabric && npm run typecheck && npm run build && npm run test",
+    "audit": "npm audit --audit-level=high"
+  },
+  "dependencies": {
+    "@local/agent-fabric": "file:../agent-fabric",
+    "@local/agent-fabric-protocol": "file:../agent-fabric-protocol",
+    "string-width": "8.2.2",
+    "unicode-segmenter": "0.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,26 +1,33 @@
 # Agent fabric activation handoff
 
-Status: awaiting final human acceptance
+Status: historical; superseded by the Project Fabric Console handoff
 Effort: agent-fabric-activation
 Leg: 6
 Supersedes: none
-Consumed-at: pending
+Superseded-by: [Project Fabric Console activation and acceptance](HANDOFF-2026-07-12-project-fabric-console.md)
+Consumed-at: 12 July 2026
+
+> Historical activation snapshot only. Do not use the roster, process or test
+> counts below as current machine state; query `agent-fabric status --json` and
+> `agent-fabric doctor --json`, then follow the successor handoff.
 
 ## Goal
 
 Implement and activate all model-execution adapters, a read-only Herdr observer and explicit coordinated seat rotation under the approved [Spec 03](../specs/03-agent-fabric-activation.md).
 
-## Current state
+## Historical snapshot
 
 - Baseline commit: `2e7770f`.
 - Stable-runtime coordination daemon, five renewed MCP seats and the read-only `fabric-events` pane are live.
 - Claude, Codex, Agy, Cursor and Kiro adapters are active and passed provider-backed read-only smokes.
 - Pi is pinned but inactive because no trusted open-weight Pi provider/model is available.
 
-## Ordered remainder
+## Successor route
 
-1. Commit the scoped activation slice; do not push without explicit authority.
-2. Stop at final human acceptance.
+Spec 05 superseded this acceptance route with the current protocol/database
+baseline, on-demand daemon lifecycle, generation-bound seats and standalone
+Console. Follow the linked successor handoff. Push and release still require
+separate explicit authority.
 
 ## Final evidence
 

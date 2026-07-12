@@ -6,6 +6,7 @@ import { createStage5RecoveryFixture, createTeamA } from "../../support/stage5-r
 import {
   createStage5TeamFixture,
   createTeam,
+  issueTeamLeaderCapability,
   requireRecord,
   teamCreateInput,
 } from "../../support/stage5-team-testkit.ts";
@@ -101,8 +102,7 @@ describe("Stage 5 subtree barriers", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 40, "cost:USD": 40, descendants: 6 },
     }));
-    const parentCapability = requireRecord(parent.leader, "parent leader").capability;
-    if (typeof parentCapability !== "string") throw new TypeError("parent leader capability is missing");
+    const parentCapability = await issueTeamLeaderCapability(fixture.chair, parent);
     const parentLeader = fixture.fabric.connect(parentCapability);
     const child = await createTeam(parentLeader, teamCreateInput({
       teamId: "barrier-child",
@@ -112,8 +112,7 @@ describe("Stage 5 subtree barriers", () => {
       memberAuthorities: [],
       reservedBudget: { turns: 20, "cost:USD": 20, descendants: 3 },
     }));
-    const childCapability = requireRecord(child.leader, "child leader").capability;
-    if (typeof childCapability !== "string") throw new TypeError("child leader capability is missing");
+    const childCapability = await issueTeamLeaderCapability(parentLeader, child);
     const childLeader = fixture.fabric.connect(childCapability);
     const parentRoot = requireRecord(parent.rootTask, "parent root task");
     const parentClaimed = await parentLeader.claimTask({

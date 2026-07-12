@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
@@ -26,6 +26,25 @@ type ActionRow = {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function containsPrivateValue(value: unknown, privateValues: readonly string[]): boolean {
+  if (typeof value === "string") return privateValues.some((candidate) => candidate.length > 0 && value.includes(candidate));
+  if (Array.isArray(value)) return value.some((entry) => containsPrivateValue(entry, privateValues));
+  return isRecord(value) && Object.values(value).some((entry) => containsPrivateValue(entry, privateValues));
+}
+
+function sanitisePrivateValues(value: unknown, privateValues: readonly string[]): unknown {
+  if (typeof value === "string") {
+    return privateValues
+      .filter((candidate) => candidate.length > 0)
+      .reduce((sanitised, candidate) => sanitised.split(candidate).join("[REDACTED_PRIVATE]"), value);
+  }
+  if (Array.isArray(value)) return value.map((entry) => sanitisePrivateValues(entry, privateValues));
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sanitisePrivateValues(entry, privateValues)]));
+  }
+  return value;
 }
 
 function isActionStatus(value: unknown): value is AdapterActionStatus {
@@ -95,8 +114,10 @@ function recordFromRow(row: ActionRow): AdapterActionRecord {
 
 export class SqliteAdapterActionJournal {
   readonly #database: Database.Database;
+  readonly #path: string;
 
   constructor(path: string) {
+    this.#path = path;
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.#database = new Database(path);
     chmodSync(path, 0o600);
@@ -116,18 +137,22 @@ export class SqliteAdapterActionJournal {
         updated_at TEXT NOT NULL
       ) STRICT;
     `);
+    this.#hardenFiles();
   }
 
   close(): void {
     this.#database.close();
   }
 
-  prepare(actionId: string, operation: string, payload: Record<string, unknown>): {
+  prepare(actionId: string, operation: string, payload: Record<string, unknown>, privateValues: readonly string[] = []): {
     record: AdapterActionRecord;
     created: boolean;
   } {
+    if (containsPrivateValue({ actionId, operation, payload }, privateValues)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "adapter action input contains private handoff material");
+    }
     const payloadHash = sha256(canonicalJson(payload));
-    return this.#database.transaction(() => {
+    const result = this.#database.transaction(() => {
       const existing = this.#read(actionId);
       if (existing !== undefined) {
         if (existing.operation !== operation || existing.payloadHash !== payloadHash) {
@@ -144,6 +169,8 @@ export class SqliteAdapterActionJournal {
         .run(actionId, operation, payloadHash, new Date().toISOString());
       return { record: this.get(actionId), created: true };
     })();
+    this.#hardenFiles();
+    return result;
   }
 
   get(actionId: string): AdapterActionRecord {
@@ -162,12 +189,24 @@ export class SqliteAdapterActionJournal {
     return this.#transition(actionId, "accepted", { effectDelta: 1 });
   }
 
-  markTerminal(actionId: string, result: unknown, idempotencyProven: boolean): AdapterActionRecord {
+  markTerminal(
+    actionId: string,
+    result: unknown,
+    idempotencyProven: boolean,
+    privateValues: readonly string[] = [],
+  ): AdapterActionRecord {
+    if (containsPrivateValue(result, privateValues)) {
+      throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "adapter terminal result contains private handoff material");
+    }
     return this.#transition(actionId, "terminal", { result, idempotencyProven });
   }
 
-  markAmbiguous(actionId: string): AdapterActionRecord {
-    return this.#transition(actionId, "ambiguous", {});
+  markAmbiguous(actionId: string, result?: unknown, privateValues: readonly string[] = []): AdapterActionRecord {
+    return this.#transition(
+      actionId,
+      "ambiguous",
+      result === undefined ? {} : { result: sanitisePrivateValues(result, privateValues) },
+    );
   }
 
   cancel(actionId: string): AdapterActionRecord {
@@ -196,7 +235,7 @@ export class SqliteAdapterActionJournal {
     status: AdapterActionStatus,
     options: { executionDelta?: number; effectDelta?: number; result?: unknown; idempotencyProven?: boolean },
   ): AdapterActionRecord {
-    return this.#database.transaction(() => {
+    const result = this.#database.transaction(() => {
       const existing = this.get(actionId);
       const history = [...existing.history, status];
       this.#database
@@ -218,5 +257,13 @@ export class SqliteAdapterActionJournal {
         );
       return this.get(actionId);
     })();
+    this.#hardenFiles();
+    return result;
+  }
+
+  #hardenFiles(): void {
+    for (const path of [this.#path, `${this.#path}-wal`, `${this.#path}-shm`]) {
+      if (existsSync(path)) chmodSync(path, 0o600);
+    }
   }
 }

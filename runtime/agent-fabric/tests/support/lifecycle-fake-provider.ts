@@ -7,6 +7,7 @@ if (journalPath === undefined) {
   throw new Error("LIFECYCLE_FAKE_JOURNAL is required");
 }
 const requiredJournalPath: string = journalPath;
+const spawnDelayMs = Number(process.env.LIFECYCLE_FAKE_SPAWN_DELAY_MS ?? "0");
 
 type Action = {
   actionId: string;
@@ -17,12 +18,14 @@ type Action = {
   effectCount: number;
   idempotencyProven: boolean;
   result?: unknown;
+  scenario?: string;
+  lookupCount?: number;
 };
 
 type Journal = {
   schemaVersion: 1;
   actions: Record<string, Action>;
-  sessions: Record<string, { released: boolean; generation: number }>;
+  sessions: Record<string, { released: boolean; generation: number; spawnRequests?: number }>;
 };
 
 type Request = { id: string; method: string; params: Record<string, unknown> };
@@ -75,22 +78,133 @@ input.on("line", (line) => {
   const journal = loadJournal();
 
   if (request.method === "capabilities") {
-    respond(request.id, {
+    const result = {
       protocolVersion: 1,
       operations: ["status", "spawn", "dispatch", "lookup_action", "cancel_action", "release"],
       actionJournal: true,
+      ephemeralWorker: true,
+      answerBearingSpawn: true,
+      answerBearingSpawnTurns: process.env.LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS === "1"
+        ? "payload-max-turns"
+        : "one-shot",
+      ...(process.env.LIFECYCLE_FAKE_MANDATORY_USAGE === "1"
+        ? { answerBearingUsageUnits: ["cost:USD", "input_tokens:fake", "output_tokens:fake"] }
+        : {}),
       compactInPlace: false,
       idempotencyEvidence: "per-action",
-    });
+    };
+    const delay = Number(process.env.LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS ?? "0");
+    if (Number.isSafeInteger(delay) && delay > 0) setTimeout(() => respond(request.id, result), delay);
+    else respond(request.id, result);
     return;
   }
   if (request.method === "spawn") {
+    const taskBoundMaxTurns = request.params.maxTurns;
+    if (
+      typeof request.params.taskId === "string" &&
+      (
+        typeof taskBoundMaxTurns !== "number" ||
+        !Number.isSafeInteger(taskBoundMaxTurns) ||
+        taskBoundMaxTurns < 1 ||
+        (process.env.LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS !== "1" && taskBoundMaxTurns !== 1)
+      )
+    ) {
+      fail(request.id, "INVALID_PARAMS", "task-bound fake spawn requires its advertised turn ceiling");
+      return;
+    }
     const prior = typeof request.params.priorResumeReference === "string" ? request.params.priorResumeReference : "new";
     const generation = typeof request.params.generation === "number" ? request.params.generation : 1;
     const resumeReference = `${prior}:replacement:g${String(generation)}`;
-    journal.sessions[resumeReference] = { released: false, generation };
+    journal.sessions[resumeReference] = {
+      released: false,
+      generation,
+      spawnRequests: (journal.sessions[resumeReference]?.spawnRequests ?? 0) + 1,
+    };
+    const scenario = typeof request.params.scenario === "string" ? request.params.scenario : "terminal";
+    if (scenario.startsWith("ambiguous-review-")) {
+      const actionId = request.params.actionId;
+      if (typeof actionId !== "string") {
+        fail(request.id, "INVALID_PARAMS", "actionId is required");
+        return;
+      }
+      const answer = scenario === "ambiguous-review-valid" ||
+        scenario === "ambiguous-review-wrong-action-id" ||
+        scenario === "ambiguous-review-concurrent-divergent"
+        ? "recovered provider review"
+        : scenario === "ambiguous-review-usage-late"
+          ? "recovered provider review with late usage"
+        : scenario === "ambiguous-review-empty"
+          ? ""
+          : "x".repeat(262_145);
+      journal.actions[actionId] = {
+        actionId,
+        payloadHash: payloadHash(request.params.payload),
+        status: "terminal",
+        history: ["prepared", "dispatched", "accepted", "terminal"],
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: true,
+        result: { resumeReference, generation, result: answer },
+        scenario,
+        lookupCount: 0,
+      };
+      saveJournal(journal);
+      fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the direct response was lost");
+      return;
+    }
+    const result = {
+      resumeReference,
+      generation,
+      result: "fake provider review complete",
+      ...(scenario === "terminal-exact-usage"
+        ? { resourceUsage: { "cost:USD": 5, "input_tokens:fake": 3, "output_tokens:fake": 4 } }
+        : scenario === "terminal-partial-turn-usage"
+          ? { resourceUsage: { turns: 1 } }
+        : scenario === "terminal-malformed-turn-usage"
+          ? { resourceUsage: { turns: -1 } }
+        : scenario === "terminal-over-turn-usage"
+          ? { resourceUsage: { turns: 3 } }
+        : scenario === "terminal-unreserved-usage"
+          ? { resourceUsage: { "output_tokens:other": 1 } }
+          : scenario === "terminal-over-cap-usage"
+            ? { resourceUsage: { "cost:USD": 11 } }
+            : scenario === "terminal-malformed-usage"
+              ? { resourceUsage: "not-a-budget-vector" }
+        : {}),
+    };
+    if (process.env.LIFECYCLE_FAKE_SPAWN_LOOKUP_MISSING === "1") {
+      saveJournal(journal);
+      fail(request.id, "TRANSPORT_RESULT_UNKNOWN", "provider request began but no action lookup record exists");
+      return;
+    }
+    const actionId = request.params.actionId;
+    const unresolved = process.env.LIFECYCLE_FAKE_SPAWN_UNRESOLVED === "1";
+    if (typeof actionId === "string") {
+      journal.actions[actionId] = {
+        actionId,
+        payloadHash: payloadHash(request.params.payload),
+        status: unresolved ? "ambiguous" : "terminal",
+        history: unresolved
+          ? ["prepared", "dispatched", "accepted", "ambiguous"]
+          : ["prepared", "dispatched", "accepted", "terminal"],
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: !unresolved,
+        ...(unresolved ? {} : { result }),
+      };
+    }
     saveJournal(journal);
-    respond(request.id, { resumeReference, generation });
+    if (unresolved) {
+      fail(request.id, "PROVIDER_OUTCOME_AMBIGUOUS", "provider effect cannot be reconciled");
+      return;
+    }
+    if (process.env.LIFECYCLE_FAKE_SPAWN_RESULT_LOST === "1") {
+      fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the lifecycle response was lost");
+      return;
+    }
+    const complete = (): void => respond(request.id, result);
+    if (Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) setTimeout(complete, spawnDelayMs);
+    else complete();
     return;
   }
   if (request.method === "release") {
@@ -153,7 +267,38 @@ input.on("line", (line) => {
     if (action === undefined) {
       fail(request.id, "ACTION_NOT_FOUND", "action does not exist");
     } else {
-      respond(request.id, action);
+      if (action.scenario === "ambiguous-review-concurrent-divergent") {
+        action.lookupCount = (action.lookupCount ?? 0) + 1;
+        const lookupCount = action.lookupCount;
+        const candidate = {
+          ...action,
+          result: {
+            ...(isRecord(action.result) ? action.result : {}),
+            result: lookupCount === 1 ? "recovered provider review" : "divergent provider review",
+            resourceUsage: lookupCount === 1
+              ? { turns: 1 }
+              : { turns: 2, "cost:USD": 2 },
+          },
+        };
+        saveJournal(journal);
+        if (lookupCount === 1) setTimeout(() => respond(request.id, candidate), 100);
+        else respond(request.id, candidate);
+        return;
+      }
+      if (action.scenario === "ambiguous-review-usage-late") {
+        action.lookupCount = (action.lookupCount ?? 0) + 1;
+        if (action.lookupCount >= 2 && isRecord(action.result)) {
+          action.result.resourceUsage = {
+            "cost:USD": 5,
+            "input_tokens:fake": 3,
+            "output_tokens:fake": 4,
+          };
+        }
+        saveJournal(journal);
+      }
+      respond(request.id, action.scenario === "ambiguous-review-wrong-action-id"
+        ? { ...action, actionId: `${action.actionId}:wrong` }
+        : action);
     }
     return;
   }

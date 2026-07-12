@@ -88,6 +88,11 @@ async function resolveProjectSeatFile(
         metadata.projectPath !== candidate ||
         !("projectKey" in metadata) ||
         metadata.projectKey !== projectKey(candidate) ||
+        !("generation" in metadata) ||
+        metadata.generation !== paths.generation ||
+        !("previousGeneration" in metadata) ||
+        (metadata.previousGeneration !== null &&
+          (typeof metadata.previousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(metadata.previousGeneration))) ||
         !("seat" in metadata) ||
         metadata.seat !== seat ||
         !("credentialPath" in metadata) ||
