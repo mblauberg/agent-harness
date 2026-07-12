@@ -2423,9 +2423,10 @@ inference. A peer that cannot negotiate it is explicitly incompatible.
 ### 9.20 Provider-budget custody and Console decision projections
 
 The current baseline gives each task-bound ephemeral provider action an
-immutable authority, task and canonical reservation vector. A normalized
-dimension row names the recognised unit, reserved amount, optional exact
-consumption and closed `reserved | consumed | usage-unknown` state. SQLite
+immutable authority, task and canonical JSON reservation/settlement vector.
+Each vector key is a recognised qualified unit; the settlement value is an
+exact non-negative amount or the closed `unknown` marker, and action custody is
+`reserved | settled | usage-unknown`. SQLite
 triggers validate same-run authority/task ownership, non-terminal task state,
 available `granted - reserved - consumed` capacity and complete vector shape,
 then couple every insert/state transition to `authority_budget`. They reject

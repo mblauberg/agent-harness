@@ -20,11 +20,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/command-boundaries.js",
-      "sha256": "1881824caaca139d3ab29993a4d88bf6d63a4f6103f6a30bdcd37605f4bf389c"
+      "sha256": "c1dbe4bf598694f58315001b20a1b8f9f491fe7f91e94bc00ffb19b4101c8f18"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/cursor-agent.js",
-      "sha256": "0274d38201094258f41ba6a1579073539c68b773af8a3d392e8f74f678a0e467"
+      "sha256": "c8977d0fe88f855b594f23f8e976a45fe74ab8c143dd04426fcae761e6bc4618"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/invocations.js",
@@ -32,7 +32,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/shared.js",
-      "sha256": "9c83fe39b2ee52f1e64630e962c1642edbaba43dc2d6bbdf19457174f0714e3b"
+      "sha256": "1286dccadd9935b6020e5131b762b7c5b197ce3c433d89e4d3824a9f079f492e"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/server.js",

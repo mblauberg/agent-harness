@@ -1,6 +1,6 @@
 # Project Fabric Console activation and acceptance handoff
 
-Status: awaiting final integrated verification, independent review and human acceptance
+Status: automated implementation complete; awaiting final integrated gates, independent review and human acceptance
 Effort: project-fabric-console
 Date: 12 July 2026
 Supersedes: [Agent fabric activation handoff](HANDOFF-2026-07-11-agent-fabric-activation.md)
@@ -9,9 +9,9 @@ Authority boundary: local verification and acceptance preparation only; no push,
 ## Goal
 
 Verify and activate the current pre-release Fabric/Console implementation under
-[Spec 01 v0.25](../specs/01-agent-fabric.md),
-[Spec 04 v1.21](../specs/04-agent-fabric-operational-hardening.md) and binding
-[Spec 05 v1.4](../specs/05-project-fabric-console.md), obtain fresh independent
+[Spec 01 v0.27](../specs/01-agent-fabric.md),
+[Spec 04 v1.23](../specs/04-agent-fabric-operational-hardening.md) and binding
+[Spec 05 v1.5](../specs/05-project-fabric-console.md), obtain fresh independent
 reviews, complete the human usability gate and stop for explicit final
 acceptance.
 
@@ -23,12 +23,21 @@ acceptance.
 - Project/session/run topology, one generation-fenced chair, bounded teams,
   scoped gates, result delivery, operator effects and task-bound answer-bearing
   provider reviews remain daemon-owned.
+- Task-bound provider review reserves one immutable authority-budget vector
+  with adapter-enforced turn ceilings. Exact cost/token/call/time usage settles
+  once; ambiguity or unavailable accounting freezes only the affected units
+  until lookup evidence reconciles them.
 - MCP seats use one daemon-activated, content-addressed roster generation and a
   locked filesystem pointer compare-and-swap. Superseded tokens fail at point
   of use; no flat-seat or old-pointer path exists.
 - The standalone TypeScript Console uses the public protocol and eight
   operator views. It supports keyboard and optional mouse input, safe content
   rendering, exact session selection, snapshot export and terminal restoration.
+- Pause/Resume appears only on an exact state-bound Runs row and always uses
+  daemon Preview then explicit commit. Scoped gates create and retire linked
+  Attention rows atomically. Attention decisions bind the exact gate revision;
+  evidence Discuss/Request changes commits a correlated successor chair request
+  with the revised artifact set.
 - `80x24` is the default/reference viewport. Live `SIGWINCH` handling reflows
   smaller, reference and larger layouts while preserving focus, selected stable
   IDs, scroll, drafts and pending commands. Invalid or extreme dimensions enter
