@@ -114,7 +114,7 @@ describe("daemon public protocol routing", () => {
     })).rejects.toMatchObject({ code: "ARTIFACT_PATH_FORBIDDEN" });
   });
 
-  it("serves an authenticated chair getRunStatus call over the legacy daemon Unix socket", async () => {
+  it("serves an authenticated chair getRunStatus call over the canonical daemon Unix socket", async () => {
     const fixture = await createDaemonFixture("run-public-protocol");
     cleanup.push(fixture.cleanup);
     const stream = createConnection(fixture.socketPath);
@@ -149,7 +149,7 @@ describe("daemon public protocol routing", () => {
     });
   });
 
-  it("rejects a first frame that mixes public and legacy protocol fields", async () => {
+  it("rejects a first frame that mixes public and private-control fields", async () => {
     const fixture = await createDaemonFixture("run-ambiguous-protocol");
     cleanup.push(fixture.cleanup);
     const raw = await rawConnection(fixture.socketPath);

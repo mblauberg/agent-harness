@@ -8,7 +8,7 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const MAXIMUM_DISCOVERY_BYTES = 64 * 1024;
 
-export type LegacyDiscoveryReceipt = {
+export type PrivateDiscoveryCapabilityReceipt = {
   schemaVersion: 1;
   socketPath: string;
   pid: number;
@@ -36,9 +36,9 @@ export type PrivateDiscoveryIdentity = Pick<
 
 export type PrivateDiscoveryState =
   | { status: "absent" }
-  | { status: "active"; receipt: LegacyDiscoveryReceipt; owner: PrivateDiscoveryOwner }
+  | { status: "active"; receipt: PrivateDiscoveryCapabilityReceipt; owner: PrivateDiscoveryOwner }
   | { status: "terminal"; owner: PrivateDiscoveryOwner }
-  | { status: "ambiguous"; message: string; owner?: PrivateDiscoveryOwner; receipt?: LegacyDiscoveryReceipt };
+  | { status: "ambiguous"; message: string; owner?: PrivateDiscoveryOwner; receipt?: PrivateDiscoveryCapabilityReceipt };
 
 export type PrivateDiscoveryPaths = {
   runtimeDirectory: string;
@@ -89,7 +89,7 @@ function positiveInteger(value: unknown, label: string): number {
   return value;
 }
 
-function parseLegacyReceipt(value: unknown, socketPath: string): LegacyDiscoveryReceipt {
+function parseCapabilityReceipt(value: unknown, socketPath: string): PrivateDiscoveryCapabilityReceipt {
   const receipt = record(value, "daemon discovery receipt");
   exactKeys(receipt, ["schemaVersion", "socketPath", "pid", "bootstrapCapability"], "daemon discovery receipt");
   if (receipt.schemaVersion !== 1 || receipt.socketPath !== socketPath) {
@@ -162,7 +162,7 @@ function capabilityHash(capability: string): string {
   return createHash("sha256").update(capability).digest("hex");
 }
 
-function receiptMatchesOwner(receipt: LegacyDiscoveryReceipt, owner: PrivateDiscoveryOwner): boolean {
+function receiptMatchesOwner(receipt: PrivateDiscoveryCapabilityReceipt, owner: PrivateDiscoveryOwner): boolean {
   return receipt.socketPath === owner.socketPath
     && receipt.pid === owner.pid
     && capabilityHash(receipt.bootstrapCapability) === owner.bootstrapCapabilityHash;
@@ -297,7 +297,7 @@ export async function readPrivateDiscovery(paths: PrivateDiscoveryPaths, socketP
     readPrivateJson(paths.receiptPath),
     readPrivateJson(paths.ownerPath),
   ]);
-  const receipt = receiptValue === undefined ? undefined : parseLegacyReceipt(receiptValue, socketPath);
+  const receipt = receiptValue === undefined ? undefined : parseCapabilityReceipt(receiptValue, socketPath);
   const owner = ownerValue === undefined ? undefined : parseOwner(ownerValue, socketPath);
   if (receipt === undefined && owner === undefined) return { status: "absent" };
   if (owner === undefined) {
@@ -364,7 +364,7 @@ export async function publishPrivateDiscovery(input: {
     exitCode: null,
     signal: null,
   };
-  const receipt: LegacyDiscoveryReceipt = {
+  const receipt: PrivateDiscoveryCapabilityReceipt = {
     schemaVersion: 1,
     socketPath: input.socketPath,
     pid: input.pid,
@@ -399,7 +399,7 @@ export async function markPrivateDiscoveryTerminal(input: {
   };
   const receiptValue = await readPrivateJson(input.paths.receiptPath);
   if (receiptValue !== undefined) {
-    const receipt = parseLegacyReceipt(receiptValue, input.expected.socketPath);
+    const receipt = parseCapabilityReceipt(receiptValue, input.expected.socketPath);
     if (!receiptMatchesOwner(receipt, terminal)) {
       throw new PrivateDiscoveryError(
         "DAEMON_DISCOVERY_OWNERSHIP_MISMATCH",

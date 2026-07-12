@@ -2,7 +2,7 @@ import type { Socket } from "node:net";
 
 import { BoundedNdjsonWriter } from "../transport/bounded-ndjson.js";
 
-export type DaemonConnectionProtocol = "legacy-v1" | "public-v1";
+export type DaemonConnectionProtocol = "private-control-v1" | "public-v1";
 
 export type DaemonConnectionRouterOptions = Readonly<{
   maximumFirstFrameBytes: number;
@@ -22,13 +22,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function classifyFirstFrame(value: unknown): DaemonConnectionProtocol | "ambiguous" {
-  if (!isRecord(value)) return "legacy-v1";
+  if (!isRecord(value)) return "private-control-v1";
   const publicMarkers = Object.hasOwn(value, "operation") || Object.hasOwn(value, "input");
-  const legacyMarkers = Object.hasOwn(value, "method") ||
+  const privateControlMarkers = Object.hasOwn(value, "method") ||
     Object.hasOwn(value, "params") ||
     Object.hasOwn(value, "capability");
-  if (publicMarkers && legacyMarkers) return "ambiguous";
-  return publicMarkers ? "public-v1" : "legacy-v1";
+  if (publicMarkers && privateControlMarkers) return "ambiguous";
+  return publicMarkers ? "public-v1" : "private-control-v1";
 }
 
 /**
@@ -143,14 +143,14 @@ export function routeDaemonConnection(
     try {
       decoded = JSON.parse(frame);
     } catch {
-      route("legacy-v1");
+      route("private-control-v1");
       return;
     }
     const protocol = classifyFirstFrame(decoded);
     if (protocol === "ambiguous") {
       reject(
         "DAEMON_PROTOCOL_AMBIGUOUS",
-        "daemon first frame mixes legacy and public protocol fields",
+        "daemon first frame mixes private-control and public protocol fields",
       );
       return;
     }

@@ -32,7 +32,7 @@ import {
   privateDiscoveryPaths,
   publishPrivateDiscovery,
   readPrivateDiscovery,
-  type LegacyDiscoveryReceipt,
+  type PrivateDiscoveryCapabilityReceipt,
   type PrivateDiscoveryIdentity,
   type PrivateDiscoveryOwner,
   type PrivateDiscoveryPaths,
@@ -536,7 +536,7 @@ type ProductionSpawn = {
 };
 
 type PrivateDaemonAttachment = {
-  receipt: LegacyDiscoveryReceipt;
+  receipt: PrivateDiscoveryCapabilityReceipt;
   owner: PrivateDiscoveryOwner;
 };
 

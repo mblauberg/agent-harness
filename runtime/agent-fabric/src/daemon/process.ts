@@ -256,7 +256,7 @@ await fabric.recoverStartupState();
 const sockets = new Set<Socket>();
 let completeQueuedDaemonStop: (commandId: string) => void = () => undefined;
 let totalInFlight = 0;
-const serveLegacyConnection = (socket: Socket): void => {
+const servePrivateControlConnection = (socket: Socket): void => {
   const writer = new BoundedNdjsonWriter(socket, {
     maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
     maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumInFlightPerConnection,
@@ -498,7 +498,7 @@ const server = createServer((socket) => {
     ),
     onRoute: (protocol, routedSocket) => {
       if (protocol === "public-v1") servePublicConnection(routedSocket);
-      else serveLegacyConnection(routedSocket);
+      else servePrivateControlConnection(routedSocket);
     },
   });
 });

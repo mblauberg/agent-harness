@@ -106,4 +106,17 @@ describe("daemon first-frame routing bounds", () => {
     await expect(routed).resolves.toBe("public-v1");
     expect(onRoute).toHaveBeenCalledWith("public-v1", expect.anything());
   });
+
+  it("routes the current private control frame without classifying it as public", async () => {
+    const { socket, onRoute, routed } = await startRouter();
+    socket.write(`${JSON.stringify({
+      id: "private-initialize",
+      method: "initialize",
+      params: {},
+      capability: "afb_current_control_capability",
+    })}\n`);
+
+    await expect(routed).resolves.toBe("private-control-v1");
+    expect(onRoute).toHaveBeenCalledWith("private-control-v1", expect.anything());
+  });
 });
