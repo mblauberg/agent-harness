@@ -307,6 +307,47 @@ function controllerState(review: ActionReview | null = null): ConsoleControllerS
   };
 }
 
+function controllableRunDataset(snapshotRevision = 11): FabricConsoleDataset {
+  const dataset = richDataset(snapshotRevision);
+  const run = dataset.pages.runs.rows[0];
+  if (run === undefined) throw new Error("run fixture unavailable");
+  return {
+    ...dataset,
+    pages: {
+      ...dataset.pages,
+      runs: {
+        ...dataset.pages.runs,
+        rows: [{
+          ...run,
+          detailRef: {
+            kind: "run",
+            projectSessionId: sessionId,
+            coordinationRunId: "AFAB-004" as never,
+            expectedRevision: 7,
+          },
+          actionAvailability: {
+            state: "available",
+            actions: ["resume"],
+            requiresPreview: true,
+          },
+        }],
+      },
+    },
+  };
+}
+
+function runControllerState(): ConsoleControllerState {
+  const state = controllerState();
+  return {
+    ...state,
+    activeView: "runs",
+    selectionByView: {
+      ...state.selectionByView,
+      runs: { stableId: "AFAB-004", revision: revisionFromProtocol(7) },
+    },
+  };
+}
+
 function review(stage: ActionReview["stage"] = "review"): ActionReview {
   const actionPreview: OperatorActionPreview = {
     previewId: "preview-1",
@@ -958,6 +999,16 @@ describe("structured presenter and responsive Fabric renderer", () => {
       const attentionRows = [
         {
           ...first,
+          detailRef: {
+            kind: "run" as const,
+            coordinationRunId: "AFAB-004" as never,
+            expectedRevision: 7,
+          },
+          actionAvailability: {
+            state: "available" as const,
+            actions: ["pause", "resume"] as const,
+            requiresPreview: true as const,
+          },
           summary: { ...first.summary, nativeNotification: notification },
         },
         ...dataset.pages.attention.rows.slice(1),
@@ -994,14 +1045,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
           },
         ]),
       );
-      expect(presentation.actions).toStrictEqual([
-        {
-          id: "action:resume",
-          label: "Resume",
-          enabled: true,
-          availableAction: "resume",
-        },
-      ]);
+      expect(presentation.actions).toStrictEqual([]);
 
       const reference = renderFabricConsoleFrame(
         projected,
@@ -1023,6 +1067,55 @@ describe("structured presenter and responsive Fabric renderer", () => {
       );
       expect(state).toStrictEqual(stateBefore);
       expect(projected).toStrictEqual(datasetBefore);
+    },
+  );
+
+  it.each(FABRIC_VIEWS.filter((view) => view !== "runs"))(
+    "suppresses raw control capability leakage from the %s view",
+    (view) => {
+      const dataset = richDataset();
+      const selected = dataset.pages[view].rows[0];
+      if (selected === undefined) throw new Error(`${view} fixture unavailable`);
+      const leaked = {
+        ...selected,
+        detailRef: {
+          kind: "run" as const,
+          projectSessionId: sessionId,
+          coordinationRunId: "AFAB-004" as never,
+          expectedRevision: 7,
+        },
+        actionAvailability: {
+          state: "available" as const,
+          actions: ["pause", "resume", "cancel", "steer"] as const,
+          requiresPreview: true as const,
+        },
+      };
+      const projected: FabricConsoleDataset = {
+        ...dataset,
+        pages: {
+          ...dataset.pages,
+          [view]: { ...dataset.pages[view], rows: [leaked] },
+        } as FabricConsoleDataset["pages"],
+      };
+      const base = controllerState();
+      const state: ConsoleControllerState = {
+        ...base,
+        activeView: view,
+        selectionByView: {
+          ...base.selectionByView,
+          [view]: { stableId: selected.stableId, revision: selected.revision },
+        },
+      };
+      const presentation = presentFabricConsole(
+        projected,
+        state,
+        createFabricUiState({ draft: "unsafe control draft" }),
+        { columns: 80, rows: 24 },
+      );
+      expect(presentation.actions.filter(({ id }) =>
+        id === "action:pause" || id === "action:resume" ||
+        id === "action:cancel" || id === "action:steer"
+      )).toStrictEqual([]);
     },
   );
 
@@ -1287,23 +1380,23 @@ describe("structured presenter and responsive Fabric renderer", () => {
   });
 
   it("binds row and action hit geometry to item and projection revisions", () => {
-    const dataset = richDataset();
+    const dataset = controllableRunDataset();
     const frame = renderFabricConsoleFrame(
       dataset,
-      controllerState(),
+      runControllerState(),
       createFabricUiState(),
       { columns: 80, rows: 24 },
     );
     const rowRegion = frame.hitRegions.find(
-      ({ id }) => id === "row:attention:attention:safety",
+      ({ id }) => id === "row:runs:AFAB-004",
     );
     const actionRegion = frame.hitRegions.find(({ id }) => id === "action:resume");
 
     expect(rowRegion).toMatchObject({
       enabled: true,
       binding: {
-        view: "attention",
-        itemId: "attention:safety",
+        view: "runs",
+        itemId: "AFAB-004",
         itemRevision: "7",
         projectionRevision: "11",
       },
@@ -1316,10 +1409,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
   });
 
   it("invalidates pointer activation after resize or revision change", () => {
-    const dataset = richDataset();
+    const dataset = controllableRunDataset();
     const frame = renderFabricConsoleFrame(
       dataset,
-      controllerState(),
+      runControllerState(),
       createFabricUiState({ mouseCapture: true }),
       { columns: 80, rows: 24 },
     );
@@ -1337,7 +1430,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
     );
     const resized = renderFabricConsoleFrame(
       dataset,
-      controllerState(),
+      runControllerState(),
       createFabricUiState({ mouseCapture: true }),
       { columns: 120, rows: 30 },
     );
@@ -1366,7 +1459,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
       frame,
       dataset,
     );
-    const changed = richDataset(12);
+    const changed = controllableRunDataset(12);
     const afterRevision = reduceFabricPointer(
       currentPress.state,
       { kind: "mouse", phase: "release", button: "left", x, y, modifiers: { shift: false, alt: false, ctrl: false } },

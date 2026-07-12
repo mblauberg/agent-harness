@@ -196,6 +196,60 @@ class FakeController implements FabricRuntimeController {
   }
 }
 
+function stateBoundControlController(): FakeController {
+  const controller = new FakeController();
+  const run: ConsoleRow<"runs"> = {
+    view: "runs",
+    stableId: "run:control",
+    revision: revisionFromProtocol(7),
+    urgency: "critical-path",
+    freshness: {
+      state: "live",
+      source: "fabric",
+      revision: revisionFromProtocol(7),
+      observedAt: timestamp,
+      ageMs: 0,
+    },
+    summary: {
+      kind: "run",
+      projectSessionId: "session:control" as never,
+      phase: "paused",
+      health: "blocked",
+      nextMilestone: "Resume exact run",
+    },
+    detailRef: {
+      kind: "run",
+      projectSessionId: "session:control" as never,
+      coordinationRunId: "run:control" as never,
+      expectedRevision: 7,
+    },
+    actionAvailability: available,
+  };
+  controller.dataset = {
+    ...controller.dataset,
+    pages: {
+      ...controller.dataset.pages,
+      runs: {
+        view: "runs",
+        rows: [run],
+        nextCursor: 1,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(11),
+        readTransactionId: "runs-control-read",
+      },
+    },
+  };
+  controller.state = {
+    ...controller.state,
+    activeView: "runs",
+    selectionByView: {
+      ...controller.state.selectionByView,
+      runs: { stableId: run.stableId, revision: run.revision },
+    },
+  };
+  return controller;
+}
+
 describe("Fabric Console runtime routing", () => {
   it("uses s to return an exact session to the project selector", async () => {
     const controller = new FakeController();
@@ -458,8 +512,9 @@ describe("Fabric Console runtime routing", () => {
 
   it("uses the same bound activation for keyboard and mouse while preserving selection gesture", async () => {
     const activations: unknown[] = [];
+    const controller = stateBoundControlController();
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller,
       viewport: { columns: 80, rows: 24 },
       ui: createFabricUiState({
         focusId: "action:resume",
@@ -973,8 +1028,9 @@ describe("Fabric Console runtime routing", () => {
   });
 
   it("shows only a bounded failure code when an action callback rejects", async () => {
+    const controller = stateBoundControlController();
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller,
       viewport: { columns: 80, rows: 24 },
       ui: createFabricUiState({ focusId: "action:resume" }),
       draw: () => {},

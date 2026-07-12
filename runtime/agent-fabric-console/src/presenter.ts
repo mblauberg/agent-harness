@@ -579,6 +579,7 @@ function rowActions(
     : new Set<OperatorAvailableAction>(["project-session-launch", "git", "promotion"]);
   return row.actionAvailability.actions
     .filter((action) => guidedServerActions?.has(action) !== true)
+    .filter((action) => !isControlAction(action) || hasExactRunControlState(row))
     .map((action) => {
     const reason = dataset.productionActionPlanning === true
       ? productionActionUnavailableReason(action, row, dataset, ui)
@@ -595,6 +596,14 @@ function rowActions(
     });
 }
 
+function isControlAction(action: OperatorAvailableAction): boolean {
+  return action === "pause" || action === "resume" || action === "cancel" || action === "steer";
+}
+
+function hasExactRunControlState(row: ConsoleRow): boolean {
+  return row.view === "runs" && row.detailRef?.kind === "run";
+}
+
 function productionActionUnavailableReason(
   action: OperatorAvailableAction,
   row: ConsoleRow,
@@ -605,8 +614,8 @@ function productionActionUnavailableReason(
     action === "pause" || action === "resume" || action === "cancel" ||
     action === "steer"
   ) {
-    if (row.detailRef?.kind !== "run" && row.detailRef?.kind !== "session") {
-      return "selected-row-has-no-control-target";
+    if (!hasExactRunControlState(row)) {
+      return "open-runs-for-current-control-state";
     }
     if (action === "pause" || action === "resume") return null;
     if (action === "cancel" && ui.draft.trim().length === 0) {

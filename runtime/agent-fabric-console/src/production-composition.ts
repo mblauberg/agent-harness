@@ -235,6 +235,11 @@ function plannedIntent(
 ): OperatorActionIntent | null {
   const session = selectedSession(dataset);
   if (session === null) return null;
+  const controlAction = action === "pause" || action === "resume" ||
+    action === "cancel" || action === "steer";
+  if (controlAction && (row.view !== "runs" || row.detailRef?.kind !== "run")) {
+    return null;
+  }
   if (action === "project-session-drain") {
     const globalRevision = dataset.snapshotRevision;
     if (globalRevision === null) return null;

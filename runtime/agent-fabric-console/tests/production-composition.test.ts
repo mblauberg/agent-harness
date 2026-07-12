@@ -171,6 +171,80 @@ function activation(action: string, eventId: string): FabricRuntimeActivation {
 }
 
 describe("production Console mutation planner", () => {
+  it("refuses raw Pause and Resume capability leakage outside a state-bound Runs row", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+    const value = dataset();
+    const run = value.pages.runs.rows[0];
+    if (run === undefined) throw new Error("run fixture unavailable");
+    const attentionId = "attention_control_leak";
+    const leaked: FabricConsoleDataset = {
+      ...value,
+      pages: {
+        ...value.pages,
+        attention: {
+          view: "attention",
+          rows: [{
+            ...run,
+            view: "attention",
+            stableId: attentionId,
+            summary: {
+              kind: "attention",
+              label: "Decision",
+              priority: "critical-path",
+              title: "Inspect the run before control",
+              nativeNotification: {
+                kind: "feature-unavailable",
+                status: "unavailable",
+                reason: "feature-not-negotiated",
+              },
+            },
+            actionAvailability: {
+              state: "available",
+              actions: ["pause", "resume"],
+              requiresPreview: true,
+            },
+          } as never],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: revisionFromProtocol(11),
+          readTransactionId: "attention_control_leak",
+        },
+      },
+    };
+    const controller = state();
+    const attentionState: ConsoleControllerState = {
+      ...controller,
+      activeView: "attention",
+      selectionByView: {
+        ...controller.selectionByView,
+        attention: { stableId: attentionId, revision: revisionFromProtocol(4) },
+      },
+    };
+
+    for (const action of ["pause", "resume"] as const) {
+      await expect(planner.plan({
+        activation: {
+          regionId: `action:${action}`,
+          provenance: "keyboard",
+          eventId: `input_${action}_attention`,
+          binding: {
+            view: "attention",
+            itemId: attentionId,
+            itemRevision: revisionFromProtocol(4),
+            projectionRevision: revisionFromProtocol(11),
+          },
+        },
+        dataset: leaked,
+        state: attentionState,
+        draft: "",
+      })).resolves.toBeNull();
+    }
+  });
+
   it("binds a typed action to exact row, target revision and direct-input provenance", async () => {
     const planner = createProductionConsoleActionPlanner({
       credential,
