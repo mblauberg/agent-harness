@@ -60,6 +60,8 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
   drain: operatorActionMutations,
   stop: operatorActionMutations,
   git: operatorActionMutations,
+  "git-authorise": operatorActionMutations,
+  "git-custody-resolve": operatorActionMutations,
   "external-effect": operatorActionMutations,
 });
 

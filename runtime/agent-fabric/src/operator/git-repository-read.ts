@@ -19,6 +19,7 @@ import {
   type GitBranchRecord,
   type GitHead,
   type GitHostedChecks,
+  type GitRepositoryBinding,
   type GitLogEntry,
   type GitLogPage,
   type GitOperationState,
@@ -110,6 +111,92 @@ export interface GitHostedChecksPort {
   read(
     binding: GitHostedChecksBinding,
   ): Promise<ProjectionFact<GitHostedChecks | null, "github">>;
+}
+
+/**
+ * The mutation owner uses the same bounded observation algorithm as repository
+ * reads so a reviewed projection is a real compare-and-set fence, not a second
+ * approximation of Git state.
+ */
+export async function observeGitRepositoryForMutation(
+  repositoryRoot: string,
+  worktreePath: string,
+): Promise<GitRepositoryBinding> {
+  const canonicalRepositoryRoot = await realpath(repositoryRoot);
+  const canonicalWorktreePath = await realpath(worktreePath);
+  if (canonicalRepositoryRoot !== repositoryRoot || canonicalWorktreePath !== worktreePath) {
+    throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git mutation target is not canonical");
+  }
+  const identity = await repositoryIdentityAt(worktreePath);
+  const rootIdentity = worktreePath === repositoryRoot ? identity : await repositoryIdentityAt(repositoryRoot);
+  if (identity.commonDirectory !== rootIdentity.commonDirectory) {
+    throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git mutation worktree belongs to another repository");
+  }
+  const status = parseStatus((await runGit(worktreePath, [
+    "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignore-submodules=none",
+  ])).stdout);
+  const index = (await runGit(worktreePath, ["ls-files", "--stage", "-z"])).stdout;
+  const remoteRefs = (await runGit(worktreePath, [
+    "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/remotes",
+  ])).stdout;
+  const remoteConfiguration = (await runGit(worktreePath, [
+    "config", "--null", "--get-regexp", "^remote\\..*\\.(url|pushurl|fetch)$",
+  ], { allowedExitCodes: [1] })).stdout;
+  const localConfiguration = (await runGit(worktreePath, ["config", "--local", "--null", "--list"])).stdout;
+  const changedPaths = uniqueSorted([
+    ...status.staged,
+    ...status.unstaged,
+    ...status.untracked,
+    ...status.conflicted,
+  ]);
+  const contentDigest = await hashChangedWorktreePaths(worktreePath, changedPaths);
+  const head = await gitHead(worktreePath, status);
+  const headDigest = sha256Digest(canonicalJson({ head }));
+  const indexDigest = sha256Buffers([Buffer.from("git-index-v1\0"), index]);
+  const worktreeDigest = sha256Buffers([Buffer.from("git-worktree-v1\0"), status.raw, Buffer.from(contentDigest)]);
+  const remoteStateDigest = sha256Buffers([Buffer.from("git-remotes-v1\0"), remoteRefs, remoteConfiguration]);
+  const repositoryStateDigest = sha256Digest(canonicalJson({
+    headDigest,
+    indexDigest,
+    worktreeDigest,
+    remoteDigest: remoteStateDigest,
+  }));
+  const commonInfo = await lstat(identity.commonDirectory);
+  const worktrees = await readWorktrees(repositoryRoot, worktreePath);
+  return {
+    repositoryRoot,
+    worktreePath,
+    gitCommonDir: identity.commonDirectory,
+    commonDirectoryIdentityDigest: sha256Digest(canonicalJson({
+      path: identity.commonDirectory,
+      device: commonInfo.dev,
+      inode: commonInfo.ino,
+    })),
+    repositoryStateDigest,
+    headDigest,
+    indexDigest,
+    worktreeDigest,
+    remoteStateDigest,
+    configDigest: sha256Buffers([Buffer.from("git-local-config-v1\0"), localConfiguration]),
+    worktreeRegistryDigest: worktrees.fenceDigest,
+  };
+}
+
+/** Resolves an exact full ref and hashes the raw Git object, never an abbreviation. */
+export async function readGitObjectDigest(
+  worktreePath: string,
+  refName: string,
+): Promise<{ nativeObjectId: string; digest: Sha256Digest }> {
+  if (!/^refs\/[A-Za-z0-9._/-]+$/u.test(refName) || refName.includes("..") || refName.endsWith("/")) {
+    throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git ref is not a fully qualified safe ref");
+  }
+  const nativeObjectId = (await runGit(worktreePath, ["rev-parse", "--verify", `${refName}^{object}`])).stdout
+    .toString("utf8").trim();
+  if (!NATIVE_OBJECT_PATTERN.test(nativeObjectId)) {
+    throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "Git ref did not resolve to one exact object");
+  }
+  const digest = requiredObjectDigest(await readObjectDigests(worktreePath, [nativeObjectId]), nativeObjectId);
+  return { nativeObjectId, digest };
 }
 
 export type GitRepositoryReadServiceOptions = CoreServiceOptions & {

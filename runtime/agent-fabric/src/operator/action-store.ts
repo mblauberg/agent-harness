@@ -75,6 +75,7 @@ export type OperatorActionCurrentState =
     }
   | { kind: "chair-bridge-recovery"; revision: number; state: ChairRecoveryCurrentState }
   | { kind: "git"; revision: number; state: GitCurrentState }
+  | { kind: "git-administration"; revision: number; state: JsonValue }
   | { kind: "registered-external-effect"; revision: number; state: RegisteredExternalEffectState }
   | { kind: "promotion"; revision: number; gate: ScopedGate };
 
@@ -1485,6 +1486,16 @@ function validateCurrentState(
     }
     return;
   }
+  if (
+    intent.kind === "git-authorise" ||
+    intent.kind === "git-operation-draft" ||
+    intent.kind === "git-custody-resolve"
+  ) {
+    if (current.kind !== "git-administration") {
+      throw new TypeError("Git administration intent received another current-state family");
+    }
+    return;
+  }
   if (intent.kind === "registered-external-effect") {
     if (current.kind !== "registered-external-effect") {
       throw new TypeError("external-effect intent received another current-state family");
@@ -1593,11 +1604,14 @@ function consequenceClass(intent: OperatorActionIntent): OperatorActionPreview["
     intent.kind === "project-session-stop" ||
     intent.kind === "daemon-stop" ||
     (intent.kind === "control" && intent.action === "cancel") ||
-    (intent.kind === "git" && (
-      intent.operation.effect === "push" ||
-      (intent.operation.effect === "branch" && intent.operation.action === "delete") ||
-      (intent.operation.effect === "worktree" && intent.operation.action === "remove")
-    ))
+    intent.kind === "git-custody-resolve" ||
+    (intent.kind === "git" && [
+      "push-force-with-lease",
+      "branch-delete-force",
+      "worktree-remove-force",
+      "merge-abort",
+      "rebase-abort",
+    ].includes(intent.operation.variant))
   ) return "destructive";
   if (intent.kind === "control" && (intent.action === "pause" || intent.action === "resume" || intent.action === "steer")) {
     return "routine";
@@ -1629,6 +1643,15 @@ function sessionIdForIntent(intent: OperatorActionIntent): string | undefined {
   if (intent.kind === "control") return intent.target.projectSessionId;
   if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop" || intent.kind === "promotion") {
     return intent.projectSessionId;
+  }
+  if (intent.kind === "git") return intent.authorisation.projectSessionId;
+  if (intent.kind === "git-authorise" || intent.kind === "git-custody-resolve") return intent.projectSessionId;
+  if (intent.kind === "git-operation-draft") {
+    return intent.action === "cancel"
+      ? intent.projectSessionId
+      : intent.binding.kind === "mutation"
+        ? intent.binding.authorisation.projectSessionId
+        : intent.binding.projectSessionId;
   }
   return undefined;
 }

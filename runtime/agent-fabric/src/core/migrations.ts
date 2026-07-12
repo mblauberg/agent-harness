@@ -51,6 +51,7 @@ const defaultMigrationFiles = [
   "0009-launched-chair-bridge-loss.sql",
   "0010-artifact-registry.sql",
   "0011-automatic-session-membership.sql",
+  "0012-typed-git-custody.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {
@@ -192,6 +193,7 @@ export function applyMigrations(
   for (const migration of ordered) {
     if (appliedVersions.has(migration.version)) continue;
     const { pragmas, body } = splitConnectionPragmas(migration.sql);
+    const foreignKeysBefore = Number(database.pragma("foreign_keys", { simple: true })) === 1;
     if (pragmas.length > 0) database.exec(pragmas);
     const applyOne = database.transaction(() => {
       migration.preflight?.(database);
@@ -204,7 +206,13 @@ export function applyMigrations(
         `)
         .run(migration.version, migration.name, checksum(migration.sql), new Date().toISOString());
     });
-    applyOne();
+    try {
+      applyOne();
+    } finally {
+      if (foreignKeysBefore && Number(database.pragma("foreign_keys", { simple: true })) !== 1) {
+        database.pragma("foreign_keys = ON");
+      }
+    }
     appliedVersions.add(migration.version);
     applied.push(migration.version);
   }
