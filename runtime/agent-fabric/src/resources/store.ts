@@ -1,4 +1,5 @@
 import {
+  FABRIC_OPERATIONS,
   assertWriterAdmissionCurrent,
   parseResourceReservationRequest,
   type ResourceAmounts,
@@ -11,6 +12,10 @@ import {
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 import { resolveTaskBindingForActiveWork } from "../operator/production-action-ports.js";
+import {
+  assertScopedOperationAllowed,
+  assertScopedTaskReadinessAllowed,
+} from "../gates/store.js";
 
 import {
   ProjectFabricCoreError,
@@ -181,6 +186,15 @@ export class HierarchicalAdmissionStore {
         context.agentId,
         requestedTaskId,
       );
+      assertScopedOperationAllowed(
+        this.#database,
+        context.coordinationRunId,
+        FABRIC_OPERATIONS.resourceReserve,
+        taskId === undefined ? { kind: "run" } : { kind: "task", taskId: taskId as never },
+      );
+      if (taskId !== undefined) {
+        assertScopedTaskReadinessAllowed(this.#database, context.coordinationRunId, taskId);
+      }
       this.#assertPath(request.path);
       const writer = request.writerAdmission === undefined
         ? undefined

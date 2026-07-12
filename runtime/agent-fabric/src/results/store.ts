@@ -1,4 +1,5 @@
 import {
+  FABRIC_OPERATIONS,
   parseResultDelivery,
   parseTaskCompleteWithReply,
   parseTaskRequest,
@@ -36,6 +37,7 @@ import {
 import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
 import { assertRunAcceptingWork, assertTaskOperationAdmitted } from "../operator/production-action-ports.js";
 import { NotificationOutbox } from "../attention/outbox.js";
+import { assertScopedOperationAllowed } from "../gates/store.js";
 
 export type AuthenticatedIntegrationContext = Readonly<{
   integrationId: string;
@@ -134,6 +136,12 @@ export class AtomicDeliveryStore {
     this.#assertAgentContext(context, request.projectSessionId, request.coordinationRunId);
     return this.#executeAgentCommand(context, request.commandId, request, () => {
       assertRunAcceptingWork(this.#database, context.coordinationRunId);
+      assertScopedOperationAllowed(
+        this.#database,
+        context.coordinationRunId,
+        FABRIC_OPERATIONS.taskRequest,
+        { kind: "run" },
+      );
       if (request.task.taskRevision !== 1 || request.request.requestRevision !== 1) {
         throw new ProjectFabricCoreError("PROTOCOL_INVALID", "new task and request revisions must start at one");
       }
@@ -267,6 +275,12 @@ export class AtomicDeliveryStore {
     const request = parseTaskCompleteWithReply(value);
     this.#assertAgentContext(context, context.projectSessionId, context.coordinationRunId);
     return this.#executeAgentCommand(context, request.commandId, request, () => {
+      assertScopedOperationAllowed(
+        this.#database,
+        context.coordinationRunId,
+        FABRIC_OPERATIONS.taskCompleteWithReply,
+        { kind: "task", taskId: request.taskId },
+      );
       assertTaskOperationAdmitted(this.#database, context.coordinationRunId, request.taskId);
       const pending = row(this.#database.prepare(`
         SELECT * FROM task_requests WHERE request_message_id=?

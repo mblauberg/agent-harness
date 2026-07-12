@@ -15,6 +15,154 @@ afterEach(async () => {
 });
 
 describe("operator task admission", () => {
+  it("blocks only the exact scoped barrier bound to an unresolved gate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-scoped-barrier-admission-"));
+    roots.push(root);
+    const databasePath = join(root, "fabric.sqlite3");
+    const fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey: "scoped-barrier-key" });
+    try {
+      const run = await fabric.createRun({ runId: "run_barrier_gate", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+      const chair = fabric.connect(run.chairCapability);
+      const database = new Database(databasePath);
+      try {
+        const identity = database.prepare(`
+          SELECT project_session_id, dependency_revision FROM runs WHERE run_id='run_barrier_gate'
+        `).get() as { project_session_id: string; dependency_revision: number };
+        database.prepare(`
+          INSERT INTO scoped_gates(
+            gate_id, project_session_id, coordination_run_id, dedupe_key, scope_kind,
+            scope_task_id, dependency_revision, blocked_operation_ids_json,
+            enforcement_points_json, question, reason, options_json, recommendation,
+            consequences_json, evidence_refs_json, created_by_ref, expected_approver_ref,
+            status, human_required, revision, created_at, updated_at
+          ) VALUES ('gate_stage_barrier', ?, 'run_barrier_gate', 'gate:stage-barrier', 'run',
+                    NULL, ?, '[]', '["scoped-barrier"]', 'Close implementation?',
+                    'Human decision required', '["approve","defer"]', 'defer', '[]', '[]',
+                    'agent:chair', 'authenticated-human-operator', 'pending', 1, 1, 1, 1)
+        `).run(identity.project_session_id, identity.dependency_revision);
+        database.prepare(`
+          INSERT INTO scoped_gate_barriers(gate_id, barrier_id)
+          VALUES ('gate_stage_barrier', 'run_barrier_gate:stage:implementation')
+        `).run();
+      } finally {
+        database.close();
+      }
+
+      await expect(chair.closeBarrier({ scope: "run", commandId: "close_unrelated_run_barrier" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(chair.closeBarrier({
+        scope: "stage",
+        stageId: "implementation",
+        commandId: "close_gated_stage_barrier",
+      })).rejects.toMatchObject({ code: "GATE_BLOCKED" });
+    } finally {
+      await fabric.close();
+    }
+  });
+
+  it("enforces task-readiness and named-operation gates without blocking a sibling", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-scoped-gate-admission-"));
+    roots.push(root);
+    const databasePath = join(root, "fabric.sqlite3");
+    const fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey: "scoped-gate-admission-key" });
+    try {
+      const run = await fabric.createRun({ runId: "run_gate_admission", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+      const chair = fabric.connect(run.chairCapability);
+      const delegated = await chair.delegateAuthority({
+        parentAuthorityId: run.chairAuthorityId,
+        authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/worker"], budget: { turns: 5, "cost:USD": 2 } },
+        commandId: "delegate_gate_worker",
+      });
+      const registration = await chair.registerAgent({
+        agentId: "worker",
+        authorityId: delegated.authorityId,
+        adapterId: "missing",
+        providerSessionRef: "provider_gate_worker",
+      });
+      const worker = fabric.connect(registration.capability);
+      for (const taskId of ["task_gate_claim", "task_gate_operation", "task_gate_sibling"]) {
+        await chair.createTask({
+          taskId,
+          authorityId: delegated.authorityId,
+          eligibleAgentIds: ["worker"],
+          objective: `Exercise ${taskId}`,
+          baseRevision: "base_gate",
+          commandId: `create_${taskId}`,
+        });
+      }
+      await worker.claimTask({ taskId: "task_gate_operation", expectedRevision: 1, commandId: "claim_gate_operation" });
+
+      const database = new Database(databasePath);
+      try {
+        const identity = database.prepare(`
+          SELECT project_session_id, dependency_revision FROM runs WHERE run_id='run_gate_admission'
+        `).get() as { project_session_id: string; dependency_revision: number };
+        const insertGate = database.prepare(`
+          INSERT INTO scoped_gates(
+            gate_id, project_session_id, coordination_run_id, dedupe_key, scope_kind,
+            scope_task_id, dependency_revision, blocked_operation_ids_json,
+            enforcement_points_json, question, reason, options_json, recommendation,
+            consequences_json, evidence_refs_json, created_by_ref, expected_approver_ref,
+            status, human_required, revision, created_at, updated_at
+          ) VALUES (?, ?, 'run_gate_admission', ?, 'task', ?, ?, ?, ?, 'Proceed?',
+                    'Human decision required', '["approve","defer"]', 'defer', '[]', '[]',
+                    'agent:chair', 'authenticated-human-operator', 'pending', 1, 1, 1, 1)
+        `);
+        insertGate.run(
+          "gate_claim",
+          identity.project_session_id,
+          "gate:claim",
+          "task_gate_claim",
+          identity.dependency_revision,
+          "[]",
+          '["task-readiness"]',
+        );
+        insertGate.run(
+          "gate_operation",
+          identity.project_session_id,
+          "gate:operation",
+          "task_gate_operation",
+          identity.dependency_revision,
+          '["fabric.v1.provider-action.dispatch"]',
+          '["operation"]',
+        );
+        const bindTask = database.prepare(`
+          INSERT INTO scoped_gate_tasks(
+            gate_id, project_session_id, run_id, task_id, binding_kind, bound_dependency_revision
+          ) VALUES (?, ?, 'run_gate_admission', ?, 'direct', ?)
+        `);
+        bindTask.run("gate_claim", identity.project_session_id, "task_gate_claim", identity.dependency_revision);
+        bindTask.run("gate_operation", identity.project_session_id, "task_gate_operation", identity.dependency_revision);
+        database.prepare(`
+          INSERT INTO scoped_gate_operations(gate_id, operation_id)
+          VALUES ('gate_operation', 'fabric.v1.provider-action.dispatch')
+        `).run();
+      } finally {
+        database.close();
+      }
+
+      await expect(worker.claimTask({
+        taskId: "task_gate_claim",
+        expectedRevision: 1,
+        commandId: "claim_while_gated",
+      })).rejects.toMatchObject({ code: "GATE_BLOCKED" });
+      await expect(worker.claimTask({
+        taskId: "task_gate_sibling",
+        expectedRevision: 1,
+        commandId: "claim_ungated_sibling",
+      })).resolves.toMatchObject({ state: "active", ownerAgentId: "worker" });
+      await expect(chair.dispatchProviderAction({
+        adapterId: "missing",
+        actionId: "turn_while_gated",
+        operation: "send_turn",
+        payload: { agentId: "worker", taskId: "task_gate_operation", instruction: "bypass" },
+        commandId: "turn_while_gated",
+      })).rejects.toMatchObject({ code: "GATE_BLOCKED" });
+    } finally {
+      await fabric.close();
+    }
+  });
+
   it("blocks owner completion and unbound work turns while a task is paused", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-operator-task-admission-"));
     roots.push(root);

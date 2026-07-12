@@ -9,6 +9,7 @@ import {
   type AgentCustodyResult,
   type EvidenceArtifactRegistration,
   type EvidencePublishRequest,
+  type GateOperationTarget,
   type OperationInputMap,
   type ProtocolOperation,
   type VerifiedProtocolCredential,
@@ -117,7 +118,12 @@ import {
   ProjectFabricCoreError,
   type AuthenticatedAgentContext,
 } from "../project-session/contracts.js";
-import { ScopedGateStore } from "../gates/store.js";
+import {
+  ScopedGateStore,
+  assertScopedBarrierAllowed,
+  assertScopedOperationAllowed,
+  assertScopedTaskReadinessAllowed,
+} from "../gates/store.js";
 import { HierarchicalAdmissionStore } from "../resources/store.js";
 import {
   AtomicDeliveryStore,
@@ -1897,6 +1903,19 @@ export class Fabric {
       if (!definition.principals.includes("agent")) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "operation is not available to agent principals");
       }
+      if (definition.gateOwner !== "scoped-gate") {
+        assertScopedOperationAllowed(
+          this.#database,
+          context.principal.runId,
+          operation,
+          this.#agentOperationGateTarget(
+            context.principal.runId,
+            context.principal.agentId,
+            operation,
+            input,
+          ),
+        );
+      }
       if (definition.kind === "baseline") {
         return dispatchAgentProtocol(
           new FabricClient(
@@ -2262,6 +2281,121 @@ export class Fabric {
           code: "PROTOCOL_UNSUPPORTED",
         });
     }
+  }
+
+  #agentOperationGateTarget(
+    runId: string,
+    actorAgentId: string,
+    operation: FabricOperation,
+    input: unknown,
+  ): GateOperationTarget {
+    const request = rowOrNotFound(input, "gate operation input");
+    const directTaskOperations = new Set<FabricOperation>([
+      FABRIC_OPERATIONS.claimTask,
+      FABRIC_OPERATIONS.refreshTaskReadiness,
+      FABRIC_OPERATIONS.recordObjectiveCheck,
+      FABRIC_OPERATIONS.acknowledgeTaskHandoff,
+      FABRIC_OPERATIONS.getTask,
+      FABRIC_OPERATIONS.updateTask,
+      FABRIC_OPERATIONS.recordTaskOwnerRecoveryProof,
+      FABRIC_OPERATIONS.recoverTaskOwner,
+      FABRIC_OPERATIONS.requestLifecycle,
+      FABRIC_OPERATIONS.taskCompleteWithReply,
+    ]);
+    if (directTaskOperations.has(operation)) {
+      const taskId = request.taskId;
+      if (typeof taskId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "task-owned operation lacks an exact task ID");
+      return { kind: "task", taskId: taskId as never };
+    }
+    if (operation === FABRIC_OPERATIONS.sendMessage) {
+      const audience = request.audience;
+      if (isRow(audience) && audience.kind === "task") {
+        if (typeof audience.taskId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "task audience lacks an exact task ID");
+        return { kind: "task", taskId: audience.taskId as never };
+      }
+      return { kind: "run" };
+    }
+    if (
+      operation === FABRIC_OPERATIONS.acquireWriteLease ||
+      operation === FABRIC_OPERATIONS.publishArtifact ||
+      operation === FABRIC_OPERATIONS.evidencePublish ||
+      operation === FABRIC_OPERATIONS.resourceReserve
+    ) {
+      const requestedTaskId = request.taskId;
+      if (requestedTaskId !== undefined && typeof requestedTaskId !== "string") {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "optional task target is invalid");
+      }
+      const taskId = resolveTaskBindingForActiveWork(
+        this.#database,
+        runId,
+        actorAgentId,
+        requestedTaskId,
+      );
+      return taskId === undefined ? { kind: "run" } : { kind: "task", taskId: taskId as never };
+    }
+    if (operation === FABRIC_OPERATIONS.dispatchProviderAction) {
+      const providerOperation = request.operation;
+      if (providerOperation !== "send_turn" && providerOperation !== "steer") return { kind: "run" };
+      const payload = rowOrNotFound(request.payload, "provider action payload");
+      const requestedTaskId = payload.taskId;
+      if (requestedTaskId !== undefined && typeof requestedTaskId !== "string") {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "provider task target is invalid");
+      }
+      const targetAgentId = typeof payload.agentId === "string" ? payload.agentId : actorAgentId;
+      const taskId = resolveTaskBindingForActiveWork(
+        this.#database,
+        runId,
+        targetAgentId,
+        requestedTaskId,
+      );
+      if (taskId === undefined) throw new ProjectFabricCoreError("PROTOCOL_INVALID", "task-owned provider action lacks an exact task target");
+      return { kind: "task", taskId: taskId as never };
+    }
+    if (
+      operation === FABRIC_OPERATIONS.recoverWriteLease ||
+      operation === FABRIC_OPERATIONS.renewWriteLease ||
+      operation === FABRIC_OPERATIONS.getWriteLease ||
+      operation === FABRIC_OPERATIONS.releaseWriteLease
+    ) {
+      const leaseId = request.leaseId;
+      if (typeof leaseId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "write-lease operation lacks a lease ID");
+      const binding = this.#database.prepare(`
+        SELECT task_id FROM task_obligation_bindings
+         WHERE coordination_run_id=? AND obligation_kind='write-lease' AND obligation_id=?
+      `).get(runId, leaseId);
+      return isRow(binding) && typeof binding.task_id === "string"
+        ? { kind: "task", taskId: binding.task_id as never }
+        : { kind: "run" };
+    }
+    if (
+      operation === FABRIC_OPERATIONS.resultDeliveryClaim ||
+      operation === FABRIC_OPERATIONS.resultDeliveryConsume ||
+      operation === FABRIC_OPERATIONS.resultDeliveryRetry ||
+      operation === FABRIC_OPERATIONS.resultDeliveryReassign ||
+      operation === FABRIC_OPERATIONS.resultDeliveryAbandon
+    ) {
+      const resultDeliveryId = request.resultDeliveryId;
+      if (typeof resultDeliveryId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "result operation lacks a delivery ID");
+      const delivery = rowOrNotFound(this.#database.prepare(`
+        SELECT task_id FROM result_deliveries WHERE run_id=? AND result_delivery_id=?
+      `).get(runId, resultDeliveryId), "result delivery gate target");
+      return { kind: "task", taskId: stringField(delivery, "task_id") as never };
+    }
+    if (operation === FABRIC_OPERATIONS.resourceRelease || operation === FABRIC_OPERATIONS.resourceReconcile) {
+      const reservationId = request.reservationId;
+      if (typeof reservationId !== "string") throw new ProjectFabricCoreError("PROTOCOL_INVALID", "resource operation lacks a reservation ID");
+      const reservation = rowOrNotFound(this.#database.prepare(`
+        SELECT operation_id FROM resource_reservations
+         WHERE coordination_run_id=? AND reservation_id=?
+      `).get(runId, reservationId), "resource reservation gate target");
+      const taskId = reservation.operation_id;
+      return typeof taskId === "string" && this.#database.prepare(`
+        SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
+      `).get(runId, taskId) !== undefined
+        ? { kind: "task", taskId: taskId as never }
+        : { kind: "run" };
+    }
+    return { kind: "run" };
   }
 
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {
@@ -3113,6 +3247,13 @@ export class Fabric {
       if (!isRow(eligible)) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "agent is not eligible to claim the task");
       }
+      assertScopedTaskReadinessAllowed(this.#database, runId, input.taskId);
+      assertScopedOperationAllowed(
+        this.#database,
+        runId,
+        FABRIC_OPERATIONS.claimTask,
+        { kind: "task", taskId: input.taskId as never },
+      );
       assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = rowOrNotFound(
         this.#database
@@ -3165,6 +3306,13 @@ export class Fabric {
     input: { taskId: string; expectedRevision: number; commandId: string },
   ): TaskResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+      assertScopedTaskReadinessAllowed(this.#database, runId, input.taskId);
+      assertScopedOperationAllowed(
+        this.#database,
+        runId,
+        FABRIC_OPERATIONS.refreshTaskReadiness,
+        { kind: "task", taskId: input.taskId as never },
+      );
       assertTaskOperationAdmitted(this.#database, runId, input.taskId);
       const task = this.getTask(runId, input.taskId);
       if (task.revision !== input.expectedRevision) {
@@ -3535,7 +3683,14 @@ export class Fabric {
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, commandPayload, isLeaseResult);
     if (replay !== undefined) return replay;
     const taskId = resolveTaskBindingForActiveWork(this.#database, runId, actorAgentId, input.taskId);
+    assertScopedOperationAllowed(
+      this.#database,
+      runId,
+      FABRIC_OPERATIONS.acquireWriteLease,
+      taskId === undefined ? { kind: "run" } : { kind: "task", taskId: taskId as never },
+    );
     if (taskId !== undefined) {
+      assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
       const bound = this.#database.prepare(`
         SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
           AND (owner_agent_id=? OR EXISTS (
@@ -4050,6 +4205,16 @@ export class Fabric {
         taskValue,
       )
       : undefined;
+    const operationTarget = taskId === undefined
+      ? { kind: "run" as const }
+      : { kind: "task" as const, taskId: taskId as never };
+    assertScopedOperationAllowed(
+      this.#database,
+      runId,
+      FABRIC_OPERATIONS.dispatchProviderAction,
+      operationTarget,
+    );
+    if (taskId !== undefined) assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
     if (input.operation !== "send_turn" && input.operation !== "steer") {
       assertRunAcceptingWork(this.#database, runId);
     }
@@ -4760,6 +4925,7 @@ export class Fabric {
     const parse = (value: unknown): value is { teamId: string; generation: number; closed: true } =>
       isRow(value) && typeof value.teamId === "string" && typeof value.generation === "number" && value.closed === true;
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
+      assertScopedBarrierAllowed(this.#database, runId, input.teamId);
       const team = this.getTeam(runId, input.teamId);
       if (team.leaderAgentId !== actorAgentId) throw new FabricError("CAPABILITY_FORBIDDEN", "only the current team leader may close its barrier");
       if (team.generation !== input.expectedGeneration) throw new FabricError("STALE_TEAM_GENERATION", "team generation changed");
@@ -5127,6 +5293,8 @@ export class Fabric {
   ): BarrierResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isBarrierResult, () => {
       this.#assertChair(runId, actorAgentId);
+      const stageId = input.scope === "stage" ? input.stageId ?? "default" : "";
+      assertScopedBarrierAllowed(this.#database, runId, `${runId}:${input.scope}:${stageId}`);
       const unreconciled = numberField(
         rowOrNotFound(
           this.#database
@@ -5184,7 +5352,6 @@ export class Fabric {
         .map((value) => stringField(rowOrNotFound(value, "barrier task"), "task_id"));
       this.#assertTaskEvidence(runId, taskIds, input.scope === "stage");
       const receipt = this.exportReceipt(runId, actorAgentId, `${input.commandId}:receipt`);
-      const stageId = input.scope === "stage" ? input.stageId ?? "default" : "";
       this.#database
         .prepare(
           "INSERT INTO barriers(run_id, scope, stage_id, state, closed_at, receipt_sha256) VALUES (?, ?, ?, 'closed', ?, ?) ON CONFLICT(run_id, scope, stage_id) DO UPDATE SET state = 'closed', closed_at = excluded.closed_at, receipt_sha256 = excluded.receipt_sha256",

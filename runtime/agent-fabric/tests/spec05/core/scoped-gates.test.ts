@@ -99,7 +99,24 @@ describe("scoped gate service", () => {
       dependencyRevision: 2,
       enforcementPoint: "operation",
       operationId: "fabric.v1.provider-action.dispatch",
+      operationTarget: { kind: "task", taskId: "task_child" },
     })).toMatchObject({ allowed: false, blockingGateIds: [gate.gateId] });
+    expect(check(store, {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 2,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.provider-action.dispatch",
+      operationTarget: { kind: "task", taskId: "task_sibling" },
+    })).toEqual({ allowed: true, checkedGateRevisions: { [gate.gateId]: 1 } });
+    expect(check(store, {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 2,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.provider-action.dispatch",
+      operationTarget: { kind: "run" },
+    })).toEqual({ allowed: true, checkedGateRevisions: { [gate.gateId]: 1 } });
     expect(check(store, {
       projectSessionId: "session_01",
       coordinationRunId: "run_01",
@@ -123,6 +140,14 @@ describe("scoped gate service", () => {
       enforcementPoint: "task-readiness",
       taskId: "task_grandchild",
     })).toMatchObject({ allowed: false });
+    expect(check(store, {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 3,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.provider-action.dispatch",
+      operationTarget: { kind: "task", taskId: "task_grandchild" },
+    })).toMatchObject({ allowed: false });
 
     expect(store.mutateDependencies(chairContext, {
       commandId: "dependencies_3",
@@ -136,6 +161,88 @@ describe("scoped gate service", () => {
       enforcementPoint: "task-readiness",
       taskId: "task_child",
     })).toEqual({ allowed: true, checkedGateRevisions: { [gate.gateId]: 3 } });
+    expect(check(store, {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 4,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.provider-action.dispatch",
+      operationTarget: { kind: "task", taskId: "task_child" },
+    })).toEqual({ allowed: true, checkedGateRevisions: { [gate.gateId]: 3 } });
+  });
+
+  it.each(["run", "release"] as const)(
+    "enforces an operation-scoped %s gate for both run and exact-task targets",
+    (scopeKind) => {
+      const database = open();
+      const store = new ScopedGateStore({ database, clock: () => 1_000 });
+      const gate = store.createGate(chairContext, {
+        origin: "chair",
+        command: {
+          commandId: `command_${scopeKind}_gate`,
+          agentId: "chair_01",
+          projectSessionId: "session_01",
+          coordinationRunId: "run_01",
+          principalGeneration: 1,
+          chairLeaseId: "chair:run_01:1",
+          chairLeaseGeneration: 1,
+          expectedRunRevision: 1,
+          expectedRevision: 1,
+        },
+        intent: {
+          projectSessionId: "session_01",
+          coordinationRunId: "run_01",
+          dedupeKey: `gate:${scopeKind}`,
+          scope: { kind: scopeKind },
+          blockedOperationIds: ["fabric.v1.provider-action.dispatch"],
+          enforcementPoints: ["operation"],
+          question: "Proceed with the operation?",
+          reason: "Human judgement is required.",
+          options: ["approve", "defer"],
+          recommendation: "defer",
+          consequences: ["The named operation remains blocked."],
+          evidenceRefs: [],
+          ...(scopeKind === "release" ? {
+            releaseBinding: {
+              acceptedDeliveryReceiptRef: {
+                path: "receipts/accepted.json",
+                digest: `sha256:${"a".repeat(64)}`,
+              },
+              artifactDigest: `sha256:${"b".repeat(64)}`,
+              promotionAction: "release",
+              target: "local:test",
+            },
+          } : {}),
+        },
+      } as unknown as ScopedGateCreateRequest);
+
+      for (const operationTarget of [
+        { kind: "run" as const },
+        { kind: "task" as const, taskId: "task_sibling" },
+      ]) {
+        expect(check(store, {
+          projectSessionId: "session_01",
+          coordinationRunId: "run_01",
+          dependencyRevision: 1,
+          enforcementPoint: "operation",
+          operationId: "fabric.v1.provider-action.dispatch",
+          operationTarget,
+        })).toMatchObject({ allowed: false, blockingGateIds: [gate.gateId] });
+      }
+    },
+  );
+
+  it("fails closed when an operation target does not belong to the exact run", () => {
+    const database = open();
+    const store = new ScopedGateStore({ database, clock: () => 1_000 });
+    expect(() => check(store, {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      dependencyRevision: 1,
+      enforcementPoint: "operation",
+      operationId: "fabric.v1.provider-action.dispatch",
+      operationTarget: { kind: "task", taskId: "task_from_another_run" },
+    })).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
   });
 
   it("rolls back the dependency graph, revision, and complete gate rebind on a crash", () => {

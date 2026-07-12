@@ -3,6 +3,9 @@ import {
   parseChairMutationContext,
   parseScopedGate,
   type GateId,
+  type GateOperationTarget,
+  type FabricOperation,
+  type BarrierId,
   type ChairMutationContext,
   type ScopedGate,
   type ScopedGateCheckRequest,
@@ -184,12 +187,24 @@ export class ScopedGateStore {
     request: ScopedGateCheckRequest,
   ): ScopedGateCheckResult {
     this.#assertRequestContext(context, request.projectSessionId, request.coordinationRunId);
+    return this.checkAuthoritative(request);
+  }
+
+  checkAuthoritative(request: ScopedGateCheckRequest): ScopedGateCheckResult {
     const identity = this.#runIdentity(request.coordinationRunId);
+    if (identity.projectSessionId !== request.projectSessionId) {
+      throw new ProjectFabricCoreError("WRONG_PROJECT", "run is outside the requested project session");
+    }
     if (identity.dependencyRevision !== request.dependencyRevision) {
       throw new ProjectFabricCoreError("STALE_REVISION", "dependency graph revision changed", {
         expected: request.dependencyRevision,
         actual: identity.dependencyRevision,
       });
+    }
+    if (request.enforcementPoint === "task-readiness") {
+      this.#assertTaskTarget(request.coordinationRunId, request.taskId);
+    } else if (request.enforcementPoint === "operation" && request.operationTarget.kind === "task") {
+      this.#assertTaskTarget(request.coordinationRunId, request.operationTarget.taskId);
     }
     const open = this.#database.prepare(`
       SELECT * FROM scoped_gates
@@ -202,16 +217,25 @@ export class ScopedGateStore {
     for (const gate of open) {
       const gateId = text(gate, "gate_id");
       checkedGateRevisions[gateId] = integer(gate, "revision");
+      if (integer(gate, "dependency_revision") !== request.dependencyRevision) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "gate dependency binding is stale");
+      }
       const points = this.#jsonStrings(gate, "enforcement_points_json");
       if (!points.includes(request.enforcementPoint)) continue;
       const blocked = request.enforcementPoint === "task-readiness"
         ? this.#database.prepare(`
-            SELECT 1 FROM scoped_gate_tasks WHERE gate_id=? AND run_id=? AND task_id=?
-          `).get(gateId, request.coordinationRunId, request.taskId) !== undefined
+            SELECT 1 FROM scoped_gate_tasks
+             WHERE gate_id=? AND project_session_id=? AND run_id=? AND task_id=?
+               AND bound_dependency_revision=?
+          `).get(
+            gateId,
+            request.projectSessionId,
+            request.coordinationRunId,
+            request.taskId,
+            request.dependencyRevision,
+          ) !== undefined
         : request.enforcementPoint === "operation"
-          ? this.#database.prepare(`
-              SELECT 1 FROM scoped_gate_operations WHERE gate_id=? AND operation_id=?
-            `).get(gateId, request.operationId) !== undefined
+          ? this.#operationBlocked(gate, request.operationId, request.operationTarget, request.dependencyRevision)
           : this.#database.prepare(`
               SELECT 1 FROM scoped_gate_barriers WHERE gate_id=? AND barrier_id=?
             `).get(gateId, request.barrierId) !== undefined;
@@ -220,6 +244,42 @@ export class ScopedGateStore {
     return blockingGateIds.length === 0
       ? { allowed: true, checkedGateRevisions }
       : { allowed: false, blockingGateIds, checkedGateRevisions };
+  }
+
+  #operationBlocked(
+    gate: GateRow,
+    operationId: FabricOperation,
+    target: GateOperationTarget,
+    dependencyRevision: number,
+  ): boolean {
+    const gateId = text(gate, "gate_id");
+    if (this.#database.prepare(`
+      SELECT 1 FROM scoped_gate_operations WHERE gate_id=? AND operation_id=?
+    `).get(gateId, operationId) === undefined) return false;
+    const scopeKind = text(gate, "scope_kind");
+    if (scopeKind === "run" || scopeKind === "release") return true;
+    if (target.kind !== "task") return false;
+    return this.#database.prepare(`
+      SELECT 1 FROM scoped_gate_tasks
+       WHERE gate_id=? AND project_session_id=? AND run_id=? AND task_id=?
+         AND bound_dependency_revision=?
+    `).get(
+      gateId,
+      text(gate, "project_session_id"),
+      text(gate, "coordination_run_id"),
+      target.taskId,
+      dependencyRevision,
+    ) !== undefined;
+  }
+
+  #assertTaskTarget(runId: string, taskId: string): void {
+    if (this.#database.prepare(`
+      SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
+    `).get(runId, taskId) !== undefined) return;
+    if (this.#database.prepare("SELECT 1 FROM tasks WHERE task_id=? LIMIT 1").get(taskId) !== undefined) {
+      throw new ProjectFabricCoreError("WRONG_PROJECT", "gate operation task target belongs to another run");
+    }
+    throw new ProjectFabricCoreError("NOT_FOUND", "gate operation task target was not found");
   }
 
   bindBarrier(context: AuthenticatedAgentContext, request: BarrierBindingRequest): void {
@@ -898,4 +958,72 @@ export class ScopedGateStore {
       integrationGeneration: integer(attestation, "integration_generation"),
     };
   }
+}
+
+function gateCheckIdentity(database: Database.Database, runId: string): {
+  projectSessionId: string;
+  dependencyRevision: number;
+} {
+  const value = row(database.prepare(`
+    SELECT project_session_id, dependency_revision FROM runs WHERE run_id=?
+  `).get(runId), "coordination run gate identity");
+  return {
+    projectSessionId: text(value, "project_session_id"),
+    dependencyRevision: integer(value, "dependency_revision"),
+  };
+}
+
+function assertGateCheckAllowed(result: ScopedGateCheckResult): void {
+  if (result.allowed) return;
+  throw new ProjectFabricCoreError(
+    "GATE_BLOCKED",
+    `scoped gate blocks this action: ${result.blockingGateIds.join(",")}`,
+  );
+}
+
+export function assertScopedTaskReadinessAllowed(
+  database: Database.Database,
+  runId: string,
+  taskId: string,
+): void {
+  const identity = gateCheckIdentity(database, runId);
+  assertGateCheckAllowed(new ScopedGateStore({ database }).checkAuthoritative({
+    projectSessionId: identity.projectSessionId as ScopedGateCheckRequest["projectSessionId"],
+    coordinationRunId: runId as ScopedGateCheckRequest["coordinationRunId"],
+    dependencyRevision: identity.dependencyRevision,
+    enforcementPoint: "task-readiness",
+    taskId: taskId as TaskId,
+  }));
+}
+
+export function assertScopedOperationAllowed(
+  database: Database.Database,
+  runId: string,
+  operationId: FabricOperation,
+  operationTarget: GateOperationTarget,
+): void {
+  const identity = gateCheckIdentity(database, runId);
+  assertGateCheckAllowed(new ScopedGateStore({ database }).checkAuthoritative({
+    projectSessionId: identity.projectSessionId as ScopedGateCheckRequest["projectSessionId"],
+    coordinationRunId: runId as ScopedGateCheckRequest["coordinationRunId"],
+    dependencyRevision: identity.dependencyRevision,
+    enforcementPoint: "operation",
+    operationId,
+    operationTarget,
+  }));
+}
+
+export function assertScopedBarrierAllowed(
+  database: Database.Database,
+  runId: string,
+  barrierId: string,
+): void {
+  const identity = gateCheckIdentity(database, runId);
+  assertGateCheckAllowed(new ScopedGateStore({ database }).checkAuthoritative({
+    projectSessionId: identity.projectSessionId as ScopedGateCheckRequest["projectSessionId"],
+    coordinationRunId: runId as ScopedGateCheckRequest["coordinationRunId"],
+    dependencyRevision: identity.dependencyRevision,
+    enforcementPoint: "scoped-barrier",
+    barrierId: barrierId as BarrierId,
+  }));
 }
