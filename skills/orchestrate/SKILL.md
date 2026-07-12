@@ -7,14 +7,13 @@ description: "Use when bounded fan-out, multi-agent research, cross-family revie
 
 ## Overview
 
-Portable doctrine: decompose -> waves -> reduce -> gate -> finish. The chair
-owns synthesis; workers provide isolated, decorrelated coverage.
-One chair owns each coordination run and may dynamically appoint leaders,
-form/retire teams, pair or reroute inside authority.
+Decompose -> waves -> reduce -> gate -> finish. Chair synthesises; workers
+provide decorrelated coverage. One chair per coordination run may appoint
+leaders, form/retire teams, pair or reroute inside authority.
 
 ## Rules
 
-- Once triggered, **default to fan-out** across bounded, independently useful
+- Once triggered, **default to fan-out** across bounded, useful
   slices. If safe decomposition fails, use a read-only audit fan-out or one
   worker.
 - Preflight dependencies, tool density and shared error sources. Keep
@@ -23,6 +22,9 @@ form/retire teams, pair or reroute inside authority.
   worktree authority, writers use isolated repository-owned
   `.worktrees/<task-agent>`; otherwise use read/patch-only workers and one
   serial applier.
+- **Keep topology exact.** Coordinated expansion adds workstreams under
+  the sole run/chair. Independent concurrency uses separate project sessions;
+  never create a second live run inside one session.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
   Pane injection is fire-and-forget steering. Without a tested callback, record
   `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded collection.
@@ -37,8 +39,7 @@ form/retire teams, pair or reroute inside authority.
 
 ## When This Pays
 
-Use for broad, decomposable, low-oracle or high-stakes work. Skip small,
-tightly coupled or unpartitionable tasks.
+Use when decomposition pays; skip tightly coupled or unpartitionable tasks.
 
 ## Adaptive Loop
 
@@ -59,13 +60,13 @@ tightly coupled or unpartitionable tasks.
 
 ## Worker Contract
 
-State identity, objective, authority, inputs, owned/prohibited paths, output,
-checks, stop condition and budget. Validate payloads; never infer permission.
+State identity, objective, authority, owned/prohibited paths, output, checks,
+stop and budget. Validate payloads; never infer permission.
 Forbid source edits unless partitioned and git restore/checkout/stash outside
 scope. Stop at budget or repeated invariant failure and record residual work.
-Handoffs preserve claim, source, confidence, issues, prohibitions and
-validation. Independent certification needs a non-authoring reviewer and
-verified evidence. Best-effort routes scout only.
+Handoffs preserve claim, source, confidence, issues and validation. Independent
+certification needs a non-authoring reviewer and verified evidence. Best-effort
+routes scout only.
 
 ## References
 
