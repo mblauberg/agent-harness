@@ -1,13 +1,16 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle, provider-budget, review-snapshot, route-lineage, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.29
+Version: 1.30
 Date: 13 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.29 persists the shared capability and deployed-route codecs, binds
+Version 1.30 closes capability-body refresh, discovery-manifest, effective-
+configuration, actual review identity, context-pressure and topology-wave
+persistence. It also repairs the authority/cut composite keys and retains one
+daemon owner without a legacy path. Version 1.29 persists the shared capability and deployed-route codecs, binds
 capability currency into admission and the final pre-dispatch CAS, and keeps
 context pressure separate from spend. It reuses the existing lifecycle owner
 and adds no automatic pressure controller or legacy schema. Version 1.28 makes receipt/bundle digest domains, paged finding custody,
@@ -988,8 +991,11 @@ authority and run revisions and revokes every active Git grant under the old
 tuple in one transaction. `runs.dependency_revision` remains the canonical
 dependency owner; no grant-local counter may substitute for either revision.
 The history primary key is `(project_session_id, coordination_run_id,
-authority_revision)`, its full authority tuple is unique, and it has a
-composite foreign key to `runs`. Insert/update triggers require the current
+authority_revision)`. In addition to the full authority/allow-list tuple, the
+exact four-column tuple `(project_session_id, coordination_run_id,
+authority_revision, authority_ref)` is `UNIQUE`, so the existing
+`operator_git_effect_bindings` composite foreign key has a valid parent key.
+The history has a composite foreign key to `runs`. Insert/update triggers require the current
 `runs` authority tuple to have exactly one matching immutable history row.
 Adding, replacing or removing `git_allowlist_v1` appends authority history and
 advances the run's authority revision/ref and allow-list epoch/digest in the
@@ -2817,10 +2823,19 @@ review_terminal_sequence_high_water(
 review_certification_cuts(
   run_id, target_generation, predecessor_binding_generation,
   predecessor_binding_digest, terminal_sequence_high_water,
-  lifecycle_custody_id, lifecycle_adoption_evidence_digest,
+  lifecycle_custody_agent_id, lifecycle_custody_id,
+  lifecycle_custody_revision, lifecycle_adoption_evidence_digest,
   cut_digest, created_at,
-  PRIMARY KEY(run_id, target_generation, predecessor_binding_generation),
-  UNIQUE(cut_digest)
+  PRIMARY KEY(run_id, target_generation, lifecycle_custody_agent_id,
+    lifecycle_custody_id, lifecycle_custody_revision),
+  UNIQUE(cut_digest),
+  UNIQUE(run_id, target_generation, lifecycle_custody_agent_id,
+    lifecycle_custody_id, lifecycle_custody_revision,
+    predecessor_binding_generation, cut_digest),
+  FOREIGN KEY(run_id, lifecycle_custody_agent_id, lifecycle_custody_id,
+      lifecycle_custody_revision)
+    REFERENCES lifecycle_rotation_custody(
+      run_id, agent_id, custody_id, revision)
 )
 
 review_completion_targets(
@@ -2846,20 +2861,37 @@ review_target_chair_bindings(
   predecessor_binding_generation, predecessor_binding_digest,
   predecessor_certification_cut_sequence,
   predecessor_certification_cut_digest,
+  predecessor_certification_cut_custody_agent_id,
+  predecessor_certification_cut_custody_id,
+  predecessor_certification_cut_custody_revision,
   agent_id, principal_generation,
   chair_lease_generation, provider_session_generation, bridge_generation,
   adapter_id, adapter_contract_digest, model_family, model,
   review_subject_digest,
   route_receipt_digest, profile_digest, task_id, reviewed_artifact_id,
   delivery_review_basis_digest, repository_source_state_digest, bundle_digest,
-  lifecycle_custody_id, checkpoint_digest,
+  lifecycle_custody_id, lifecycle_custody_revision, checkpoint_digest,
   lifecycle_adoption_evidence_digest,
   binding_digest, created_at,
   PRIMARY KEY(run_id, target_generation, binding_generation),
   UNIQUE(run_id, target_generation, binding_generation, binding_digest),
   FOREIGN KEY(run_id, target_generation, review_subject_digest)
     REFERENCES review_completion_targets(
-      run_id, target_generation, review_subject_digest)
+      run_id, target_generation, review_subject_digest),
+  FOREIGN KEY(run_id, target_generation,
+      predecessor_certification_cut_custody_agent_id,
+      predecessor_certification_cut_custody_id,
+      predecessor_certification_cut_custody_revision,
+      predecessor_binding_generation,
+      predecessor_certification_cut_digest)
+    REFERENCES review_certification_cuts(
+      run_id, target_generation, lifecycle_custody_agent_id,
+      lifecycle_custody_id, lifecycle_custody_revision,
+      predecessor_binding_generation, cut_digest),
+  FOREIGN KEY(run_id, agent_id, lifecycle_custody_id,
+      lifecycle_custody_revision)
+    REFERENCES lifecycle_rotation_custody(
+      run_id, agent_id, custody_id, revision)
 )
 
 review_target_chair_binding_heads(
@@ -2871,12 +2903,14 @@ review_target_chair_binding_heads(
 )
 
 review_target_rebind_receipts(
-  run_id, target_generation, lifecycle_custody_id, command_id,
+  run_id, target_generation, lifecycle_custody_agent_id,
+  lifecycle_custody_id, lifecycle_custody_revision, command_id,
   review_subject_digest, prior_binding_generation, new_binding_generation,
   prior_binding_digest, new_binding_digest, lifecycle_adoption_digest,
   bundle_digest, profile_digest, slot_head_set_digest,
   open_and_repair_finding_set_digest, rebind_receipt_digest, created_at,
-  PRIMARY KEY(run_id, target_generation, lifecycle_custody_id),
+  PRIMARY KEY(run_id, target_generation, lifecycle_custody_agent_id,
+    lifecycle_custody_id, lifecycle_custody_revision),
   UNIQUE(command_id), UNIQUE(rebind_receipt_digest),
   FOREIGN KEY(run_id, target_generation)
     REFERENCES review_completion_targets(run_id, target_generation),
@@ -2889,6 +2923,10 @@ review_target_rebind_receipts(
   FOREIGN KEY(run_id, target_generation, new_binding_generation)
     REFERENCES review_target_chair_bindings(
       run_id, target_generation, binding_generation),
+  FOREIGN KEY(run_id, lifecycle_custody_agent_id, lifecycle_custody_id,
+      lifecycle_custody_revision)
+    REFERENCES lifecycle_rotation_custody(
+      run_id, agent_id, custody_id, revision),
   CHECK(new_binding_generation = prior_binding_generation + 1)
 )
 
@@ -3108,13 +3146,16 @@ one finalized adopted `lifecycle_rotation_custody` row for the same agent.
 Triggers require contiguous generation and equality of adapter, contract,
 family, model, profile, task, artifact, review basis, repository source and
 bundle. They require the exact predecessor binding digest and certification-cut
-row/digest/sequence. They permit only principal, chair-lease, provider-session, bridge and
+custody/row/digest/sequence; the cut custody must equal the binding's adopting
+`(run_id,agent_id,lifecycle_custody_id,lifecycle_custody_revision)` ref.
+Generation one has all predecessor/cut/custody fields
+null; every successor has all of them nonnull. They permit only principal, chair-lease, provider-session, bridge and
 route-receipt generations to advance. `review_target_chair_binding_heads` is
 the sole active pointer and advances by one CAS. A different agent or any
 non-generation binding change cannot insert and leaves the target stale.
 
-`review_target_rebind_receipts` is insert-only and unique by run/target/
-lifecycle-custody plus command replay. It stores the exact Spec 01 receipt and
+`review_target_rebind_receipts` is insert-only and unique by run/target/exact
+agent/custody/revision ref plus command replay. It stores the exact Spec 01 receipt and
 digest, prior/new binding generations/digests, immutable subject/bundle/profile
 digests and before/after head/open/repair set digests. Both tables equality-copy
 the exact target `review_subject_digest`; triggers reject any receipt or binding
@@ -3131,9 +3172,12 @@ pointer/head, duplicate generation or changed replay changes nothing.
 Every certifying first terminal transaction increments
 `review_terminal_sequence_high_water` and stores that stable sequence in the
 terminal journal/result digest. True-chair lifecycle adoption reads that high-
-water in its own serialization transaction, inserts the exact certification cut
+water in its own serialization transaction, inserts the exact custody-keyed certification cut
 and either appends/activates a same-subject successor binding or leaves the
 target read-derived stale. Review state never rejects or rolls back adoption.
+A later stale adoption may append another cut for the same target/predecessor
+because the exact agent/custody/revision ref, not predecessor generation, is the primary identity; the
+unique cut digest and exact successor foreign key prevent reuse across custody.
 Old-binding prepared/zero-dispatch attempts fail their worker currency check and
 the route-recovery owner terminalises them no-effect once; dispatched/accepted/
 ambiguous attempts recover normally. Evidence certifies through a successor
@@ -3510,7 +3554,12 @@ provider-reported-resolved and daemon-accepted-resolved prior sets, current
 finding set, complete new open set,
 repair-required set, finding-window reservation, terminal sequence,
 certification-basis-at-terminal digest, canonical action pair/result/route/bundle/coverage/profile/
-chair-binding and safe reviewer-family-relation/read-coverage fields. It also stores the exact
+chair-binding, `route_observation_digest`, nullable
+`actual_route_identity_digest` and safe reviewer-family-relation/read-coverage
+fields. The actual digest is nonnull only for a closed proved endpoint-provider/
+family/model object bound to admission and observation. Profile/admission or
+other observed-field inequality retains that digest as mismatch evidence; its
+absence/mismatch blocker and resolution-denial outcome are immutable. It also stores the exact
 task, answer/result safety digests and final-prompt route join required by
 reviewEvidenceReadV1. It contains no currency column.
 
@@ -3807,7 +3856,9 @@ agent_lifecycle_context_high_water(
 provider_context_observation_audit(
   observation_id PRIMARY KEY, source_event_id, run_id, agent_id,
   provider_generation, context_revision, classification, evidence_digest,
-  observed_at, UNIQUE(run_id, agent_id, source_event_id)
+  observed_at, UNIQUE(run_id, agent_id, source_event_id),
+  UNIQUE(run_id, agent_id, source_event_id, provider_generation,
+    context_revision, evidence_digest)
 )
 
 lifecycle_rotation_custody(
@@ -3833,6 +3884,7 @@ lifecycle_rotation_custody(
   staged_capability_hash, launch_attest_challenge_digest,
   precondition_digest, terminal_evidence_digest,
   PRIMARY KEY(run_id, agent_id, custody_id),
+  UNIQUE(run_id, agent_id, custody_id, revision),
   UNIQUE(provider_action_adapter_id, provider_action_id),
   CHECK(terminal_disposition IS NULL OR terminal_disposition IN
     ('adopted','no-effect','quarantined','superseded','abandoned')),
@@ -4168,10 +4220,9 @@ routing policy.
 
 ### 9.23 Capability, route-lineage and context-pressure persistence
 
-Spec 01 section 32.21 owns the closed public
-`adapterCapabilitySnapshotV1`, `deployedRouteAdmissionV1`,
-`deployedRouteObservationV1` and
-`fabricOperationalSpanV1` semantics. The daemon owns their generated codecs,
+Spec 01 section 32.21 owns the closed public capability/discovery/route,
+context-pressure, topology-wave and operational-span semantics; Spec 03 owns
+`adapterEffectiveConfigurationV1` activation semantics. The daemon owns their generated codecs,
 persistence and compare-and-set enforcement. The TypeScript caller and any
 offline Python route resolver validate the same checked-in JSON Schemas; the
 resolver receives capability input explicitly and may not read daemon
@@ -4180,8 +4231,29 @@ activation configuration behind the caller.
 The current generated-contract inventory adds exactly:
 
 - `adapter-capability-snapshot.v1.schema.json`;
+- `capability-snapshot-ref.v1.schema.json`;
+- `capability-snapshot-summary.v1.schema.json`;
+- `discovery-surface-manifest.v1.schema.json`;
+- `discovery-surface-ref.v1.schema.json`;
 - `deployed-route-admission.v1.schema.json`;
+- `deployed-route-dispatch.v1.schema.json`;
 - `deployed-route-observation.v1.schema.json`;
+- `actual-review-route-identity.v1.schema.json`;
+- `adapter-effective-configuration.v1.schema.json`;
+- `adapter-effective-configuration-ref.v1.schema.json`;
+- `provider-context-pressure.v1.schema.json`;
+- `provider-context-pressure-read-request.v1.schema.json`;
+- `provider-context-pressure-read.v1.schema.json`;
+- `topology-wave-plan-ref.v1.schema.json`;
+- `topology-wave-plan.v1.schema.json`;
+- `topology-wave-plan-current.v1.schema.json`;
+- `topology-wave-plan-input.v1.schema.json`;
+- `topology-wave-append-request.v1.schema.json`;
+- `topology-wave-append-receipt.v1.schema.json`;
+- `topology-wave-current-read-request.v1.schema.json`;
+- `topology-wave-current-read.v1.schema.json`;
+- `topology-wave-list-request.v1.schema.json`;
+- `topology-wave-list.v1.schema.json`;
 - `fabric-operational-span.v1.schema.json`;
 - generated TypeScript validators/types; and
 - the same hash-bound schemas as explicit Python validator inputs.
@@ -4195,31 +4267,141 @@ view is retained.
 adapter_capability_snapshots(
   adapter_id, snapshot_generation, snapshot_id,
   adapter_contract_digest, host_id, host_version, source,
-  observed_at, expires_at, snapshot_json, snapshot_digest, created_at,
+  observed_at, expires_at, capability_body_digest,
+  snapshot_json, snapshot_digest, created_at,
   PRIMARY KEY(adapter_id, snapshot_generation),
   UNIQUE(snapshot_id), UNIQUE(snapshot_digest),
-  UNIQUE(adapter_id, snapshot_generation, snapshot_digest)
+  UNIQUE(adapter_id, snapshot_generation, snapshot_digest,
+    capability_body_digest)
 )
 
 adapter_capability_current(
   adapter_id PRIMARY KEY,
-  snapshot_generation, snapshot_digest, revision,
-  FOREIGN KEY(adapter_id, snapshot_generation, snapshot_digest)
+  snapshot_generation, snapshot_digest, capability_body_digest, revision,
+  FOREIGN KEY(adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest)
     REFERENCES adapter_capability_snapshots(
-      adapter_id, snapshot_generation, snapshot_digest)
+      adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest)
 )
 ```
 
 `snapshot_json` byte-equals JCS of the closed Spec 01 object. Insert validates
-the digest, contiguous positive generation, `expires_at > observed_at`, sorted
+the exact stable body preimage/digest, snapshot digest, contiguous positive
+generation, `expires_at > observed_at`, sorted
 unique catalogues and the activated contract. Snapshot rows are insert-only.
 The single current-pointer row advances by generation/digest/revision CAS in the
 activation transaction and additionally equality-checks the referenced row's
 digest. An expired or unavailable snapshot remains immutable audit evidence but
 cannot be selected by admission.
 
+Discovery surfaces and effective configurations are immutable daemon evidence:
+
+```sql
+discovery_surface_manifests(
+  evidence_id, evidence_revision, artifact_path, artifact_digest,
+  host_id, host_version, provider_profile, raw_native_mode,
+  permission_profile_digest, manifest_json, manifest_digest, created_at,
+  PRIMARY KEY(evidence_id, evidence_revision),
+  UNIQUE(evidence_id, evidence_revision, manifest_digest)
+)
+
+adapter_activation_subjects(
+  adapter_id, activation_id, activation_revision,
+  evidence_id, evidence_revision, created_at,
+  PRIMARY KEY(adapter_id, activation_id, activation_revision),
+  UNIQUE(evidence_id, evidence_revision)
+)
+
+adapter_provider_smoke_subjects(
+  adapter_id, smoke_id, action_adapter_id, action_id,
+  evidence_id, evidence_revision, created_at,
+  PRIMARY KEY(adapter_id, smoke_id),
+  UNIQUE(action_adapter_id, action_id),
+  FOREIGN KEY(action_adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(adapter_id, action_id)
+)
+
+adapter_effective_configurations(
+  configuration_id, configuration_revision,
+  adapter_id, adapter_contract_digest, executable_identity_digest,
+  capability_snapshot_generation, capability_snapshot_digest,
+  capability_body_digest, subject_kind, subject_id, subject_ref_digest,
+  subject_activation_id, subject_activation_revision, subject_smoke_id,
+  subject_action_adapter_id, subject_action_id,
+  activation_configuration_id, activation_configuration_revision,
+  activation_configuration_digest, requested_configuration_digest,
+  effective_configuration_digest, permission_profile_digest,
+  discovery_surface_evidence_id, discovery_surface_evidence_revision,
+  evidence_id, evidence_revision,
+  configuration_json, configuration_digest, created_at,
+  PRIMARY KEY(configuration_id, configuration_revision),
+  UNIQUE(configuration_id, configuration_revision, configuration_digest),
+  UNIQUE(adapter_id, subject_kind, subject_id, subject_ref_digest),
+  UNIQUE(evidence_id, evidence_revision),
+  UNIQUE(configuration_digest),
+  FOREIGN KEY(adapter_id, capability_snapshot_generation,
+      capability_snapshot_digest, capability_body_digest)
+    REFERENCES adapter_capability_snapshots(
+      adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest),
+  FOREIGN KEY(discovery_surface_evidence_id,
+      discovery_surface_evidence_revision)
+    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision),
+  FOREIGN KEY(adapter_id, subject_activation_id, subject_activation_revision)
+    REFERENCES adapter_activation_subjects(
+      adapter_id, activation_id, activation_revision),
+  FOREIGN KEY(adapter_id, subject_smoke_id)
+    REFERENCES adapter_provider_smoke_subjects(adapter_id, smoke_id),
+  FOREIGN KEY(subject_action_adapter_id, subject_action_id)
+    REFERENCES provider_action_pair_preflights(adapter_id, action_id),
+  FOREIGN KEY(activation_configuration_id,
+      activation_configuration_revision,
+      activation_configuration_digest)
+    REFERENCES adapter_effective_configurations(
+      configuration_id, configuration_revision, configuration_digest)
+)
+```
+
+Each discovery row composite-foreign-keys the exact existing
+`EvidenceArtifactRegistration` revision. Its `manifest_json` byte-equals RFC
+8785 JCS of the digest-free `discoverySurfaceManifestV1`; `manifest_digest`,
+`artifact_digest` and the registered artifact digest are equal, and the exact
+registered bytes reproduce them. Triggers equality-copy host/version/profile/
+raw-mode and permission fields from the manifest. Only the daemon renderer may
+insert this evidence kind.
+
+The two subject tables are immutable identity/evidence registries, not new
+activation or action state machines; their evidence tuples foreign-key exact
+daemon registrations. A provider-smoke/action pair preflight exists before its
+subject/config row, so the later route-to-configuration FK creates no cycle.
+
+Effective-configuration insert validates the closed Spec 03 object and its
+digest. A closed discriminator CHECK requires exactly the activation columns,
+smoke column, or provider-action pair columns for its `subject_kind`; every
+other subject column is null. The selected columns reproduce `subjectRef` and
+`subject_ref_digest` and must satisfy the displayed foreign key. The nullable
+activation-configuration triple is all null only for an activation
+subject; smoke/action subjects require a same-adapter activation parent and
+cannot update it. Subject arm/ref digest, executable, snapshot instance/body,
+permission and discovery-surface tuples must reproduce the JSON. Each row is
+also registered through the existing daemon-owned evidence registration path;
+no public publisher may forge its evidence kind. There is no host-global config
+mutation, compatibility decoder or update path.
+
+Certifying-review availability/admission/dispatch additionally require the
+referenced capability body to state `safety.enforcedReadOnly=true` and the
+effective permission profile to be the exact enforced read-only profile.
+Generic routes instead enforce their own matched profile and may be write-
+capable inside task authority; no store trigger globally rewrites them to read-
+only.
+
 The existing `provider_action_routes` row gains non-null
 `capability_snapshot_generation`, `capability_snapshot_digest`,
+`capability_body_digest`,
+`effective_configuration_id`, `effective_configuration_revision`,
+`effective_configuration_ref_digest`,
+`requested_configuration_digest`, `effective_route_configuration_digest`,
 `deployed_route_admission_json`, `deployed_route_admission_digest`,
 `route_policy_revision`, `harness_revision`, `harness_digest`,
 `context_policy_revision`, `context_policy_digest`,
@@ -4232,11 +4414,20 @@ answer-bearing action. Foreign keys bind the exact adapter/generation/digest.
 provider_action_routes(
   ...existing columns...,
   capability_snapshot_generation, capability_snapshot_digest,
+  capability_body_digest,
+  effective_configuration_id, effective_configuration_revision,
+  effective_configuration_ref_digest,
+  requested_configuration_digest, effective_route_configuration_digest,
   ...new admission columns...,
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
-    capability_snapshot_digest)
+    capability_snapshot_digest, capability_body_digest)
     REFERENCES adapter_capability_snapshots(
-      adapter_id, snapshot_generation, snapshot_digest)
+      adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest),
+  FOREIGN KEY(effective_configuration_id, effective_configuration_revision,
+      effective_configuration_ref_digest)
+    REFERENCES adapter_effective_configurations(
+      configuration_id, configuration_revision, configuration_digest)
 )
 ```
 
@@ -4244,12 +4435,54 @@ The explicit composite foreign key means a digest cannot cross another
 adapter/generation. Historical routes reference immutable snapshots, never the
 mutable current pointer.
 The route-admission action pair equals the row primary key; its admitted
-adapter, contract and snapshot equal the foreign row. Its discovery-surface ref
-foreign-keys the exact existing `EvidenceArtifactRegistration` revision and
-artifact digest, and the row must have evidence kind `discovery-surface.v1`,
-`publisherKind=fabric`, `producer=fabric-daemon` and the exact renderer/input
-digests from the route.
+adapter, contract and snapshot instance/body equal the foreign row. Its
+discovery-surface ref foreign-keys `discovery_surface_manifests` and the exact
+existing `EvidenceArtifactRegistration` revision/artifact digest. Host/version/
+profile/raw-mode, permission and manifest digest must equality-bind route,
+snapshot, launch and registration; evidence kind is `discovery-surface.v1`,
+`publisherKind=fabric` and `producer=fabric-daemon`.
+The effective-configuration foreign row must have `subject_kind='provider-action'`
+and its exact subject ref must equal the route action pair; adapter/contract,
+snapshot body, permission and surface fields reproduce admission.
 Requested and admitted arms are immutable.
+
+Every provider-I/O attempt appends its actual point-of-use snapshot:
+
+```sql
+provider_action_route_dispatches(
+  adapter_id, action_id, dispatch_ordinal, admission_digest,
+  capability_snapshot_generation, capability_snapshot_digest,
+  capability_body_digest,
+  effective_configuration_id, effective_configuration_revision,
+  effective_configuration_ref_digest, permission_profile_digest,
+  discovery_surface_evidence_id, discovery_surface_evidence_revision,
+  dispatched_at, dispatch_json, dispatch_digest,
+  PRIMARY KEY(adapter_id, action_id, dispatch_ordinal),
+  UNIQUE(dispatch_digest),
+  FOREIGN KEY(adapter_id, action_id)
+    REFERENCES provider_action_routes(adapter_id, action_id),
+  FOREIGN KEY(adapter_id, capability_snapshot_generation,
+      capability_snapshot_digest, capability_body_digest)
+    REFERENCES adapter_capability_snapshots(
+      adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest),
+  FOREIGN KEY(effective_configuration_id, effective_configuration_revision,
+      effective_configuration_ref_digest)
+    REFERENCES adapter_effective_configurations(
+      configuration_id, configuration_revision, configuration_digest),
+  FOREIGN KEY(discovery_surface_evidence_id,
+      discovery_surface_evidence_revision)
+    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision)
+)
+```
+
+Ordinals are contiguous and rows insert immediately before their provider I/O.
+The snapshot must be current and unexpired at insertion, but may be a newer
+instance than admission only when its body digest and adapter/contract/host are
+identical. Effective-configuration, permission and surface tuples remain
+admission-equal and the effective row must still reproduce all of them. The public
+capability summary joins admission and latest dispatch snapshots separately,
+including each one's source and clocks; no clock is copied between arms.
 
 Terminal observation is append-only and separate:
 
@@ -4269,25 +4502,119 @@ unavailable arm rather than admission data. No update, replacement or
 recomputed admission digest is legal. Public reads left-join zero or one
 observation and expose both immutable digests.
 
+Certifying review evidence additionally stores nullable
+`route_observation_digest` and `actual_route_identity_digest`. The latter can be
+nonnull only when observation endpoint provider/family/model are proved by
+provider result or contract-defined adapter attestation; equality is evaluated
+separately against admission and resolved profile requirements. Every other
+observed route arm is also equality-checked against admission; unavailable is
+honest but proved inequality is mismatch. Missing proof and mismatch retain
+safe adverse findings but accept no resolution and persist the respective
+closed blocker. Generic provider actions bypass this certification-only test.
+
 Admission and dispatch use this order:
 
-1. classify exact command/action-pair replay;
+1. classify exact command/action-pair replay and create/attach the canonical pair
+   preflight before any route/config subject;
 2. run the bounded pure resolver against explicit pinned inputs;
 3. in one transaction validate authority/budget plus the current unexpired
-   capability generation/digest, adapter contract, model, raw effort, raw
-   native mode, permission profile, context-policy revision/digest and
+   capability instance/body, adapter contract/host, model, raw effort, raw
+   native mode, per-action effective configuration, permission profile,
+   context-policy revision/digest and
    harness revision/digest plus discovery-surface registration/digest, then insert
-   route/action/reservations;
-4. immediately before initial provider I/O or a permitted no-effect retry,
-   equality-CAS that same capability/contract/model/effort/mode/permission/
-   harness/context/surface vector and route revision; and
-5. on pre-effect drift, terminalise/supersede the zero-effect action and resolve
+   the provider-action effective configuration followed by its route/action/
+   reservations in that order;
+4. immediately before initial provider I/O or a permitted no-effect retry, read
+   the current unexpired snapshot, require admitted body/contract/host/model/
+   effort/mode plus fixed effective-configuration/permission/harness/context/
+   surface/route equality, and
+   append the exact dispatch snapshot row; an instance-only refresh with equal
+   body proceeds;
+5. on body/permission/surface or other pre-effect drift, terminalise/supersede
+   the zero-effect action and resolve
    afresh under a new action pair. After ambiguous effect, retain the original
    route and invoke only its existing pair-keyed recovery owner.
 
 The pure resolver never persists, performs provider/network I/O or becomes the
 route owner. Its existing five-second process-group TERM/KILL boundary remains
 binding. The daemon persistence wrapper is not callable as a resolver.
+
+Topology waves use one append-only store and one current pointer:
+
+```sql
+topology_wave_plans(
+  project_session_id, coordination_run_id, task_id,
+  wave_id, wave_revision,
+  predecessor_wave_id, predecessor_wave_revision, predecessor_plan_digest,
+  chair_agent_id, principal_generation, chair_lease_generation,
+  authority_revision, authority_ref, authority_digest,
+  policy_revision, policy_ref, policy_digest,
+  rationale_evidence_id, rationale_evidence_revision,
+  state, plan_json, plan_digest, created_at,
+  PRIMARY KEY(project_session_id, coordination_run_id, task_id,
+    wave_id, wave_revision),
+  UNIQUE(project_session_id, coordination_run_id, task_id,
+    wave_id, wave_revision, plan_digest),
+  UNIQUE(plan_digest),
+  FOREIGN KEY(project_session_id, coordination_run_id,
+      authority_revision, authority_ref)
+    REFERENCES run_authority_revisions(
+      project_session_id, coordination_run_id,
+      authority_revision, authority_ref),
+  FOREIGN KEY(project_session_id, coordination_run_id, task_id,
+      predecessor_wave_id, predecessor_wave_revision,
+      predecessor_plan_digest)
+    REFERENCES topology_wave_plans(
+      project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+)
+
+topology_wave_current(
+  project_session_id, coordination_run_id, task_id,
+  wave_id, wave_revision, plan_digest, revision,
+  PRIMARY KEY(project_session_id, coordination_run_id, task_id),
+  FOREIGN KEY(project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+    REFERENCES topology_wave_plans(
+      project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+)
+
+topology_wave_append_receipts(
+  command_id PRIMARY KEY, request_digest, actor_principal_digest,
+  project_session_id, coordination_run_id, task_id,
+  prior_wave_id, prior_wave_revision, prior_plan_digest,
+  wave_id, wave_revision, plan_digest, pointer_revision,
+  receipt_json, receipt_digest, created_at,
+  UNIQUE(receipt_digest),
+  FOREIGN KEY(project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+    REFERENCES topology_wave_plans(
+      project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+)
+```
+
+`plan_json` validates the closed Spec 01 object; scalar columns equality-copy it
+and the plan digest is exact JCS. Nested triggers validate canonical order,
+dependency/decomposability, topology, chair, stage owners, write partitions,
+contention, budgets and stop conditions. The rationale tuple foreign-keys the
+exact existing evidence registration. A revision is immutable; any rationale or
+state change appends the next contiguous revision. The current pointer advances
+by exact CAS. Predecessor refs foreign-key the exact earlier plan tuple, and
+authority/policy/chair/dependency currency is checked at append and derived
+again at read. Read currency treats a missing/noncontiguous/digest-invalid
+predecessor chain as stale; it never requires the historical predecessor itself
+to remain the current pointer. `fabric.v1.topology-wave.append` authenticates the current chair,
+derives predecessor as null only for the zero-pointer arm or as the exact
+expected/current plan ref, plus all plan-owned identity/authority/policy/time/
+digest fields, and commits
+plan, pointer and immutable receipt together. Exact command replay by request
+digest returns the receipt before live checks; changed replay conflicts.
+Current/list operations map only the discriminated Spec 01 projection and
+ordinary scoped page envelope; missing pointer is unavailable/null and an
+existing pointed plan is always the nonnull current or stale arm. No row grants authority, automatically chooses a
+topology or creates a second chair/policy state machine.
 
 Context pressure is operational state, not spend or authority budget. Existing
 provider generation/context-revision telemetry remains append-only and
@@ -4296,26 +4623,59 @@ baseline adds a separate truthful projection:
 
 ```sql
 provider_context_pressure_current(
-  run_id, agent_id, provider_generation,
+  run_id, agent_id, adapter_id, provider_generation,
   context_revision, observation_source_event_id,
   pressure, source, confidence,
   window_tokens, used_tokens, remaining_tokens,
   observed_at, expires_at, evidence_digest, revision,
   PRIMARY KEY(run_id, agent_id),
+  FOREIGN KEY(run_id, agent_id, observation_source_event_id,
+      provider_generation, context_revision, evidence_digest)
+    REFERENCES provider_context_observation_audit(
+      run_id, agent_id, source_event_id, provider_generation,
+      context_revision, evidence_digest),
   CHECK(pressure IN ('low','medium','high','unknown')),
   CHECK(source IN ('native-exact','native-estimated','hook-boundary','unavailable')),
-  CHECK(confidence IN ('exact','estimated','unknown'))
+  CHECK(confidence IN ('exact','estimated','unknown')),
+  CHECK(expires_at > observed_at),
+  CHECK(source != 'unavailable' OR
+    (pressure='unknown' AND confidence='unknown' AND window_tokens IS NULL AND
+     used_tokens IS NULL AND remaining_tokens IS NULL)),
+  CHECK(source != 'native-exact' OR
+    (confidence='exact' AND window_tokens IS NOT NULL AND
+     used_tokens IS NOT NULL AND remaining_tokens IS NOT NULL AND
+     used_tokens + remaining_tokens = window_tokens)),
+  CHECK(source != 'native-estimated' OR
+    (confidence='estimated' AND window_tokens IS NOT NULL AND
+     used_tokens IS NOT NULL AND remaining_tokens IS NOT NULL AND
+     used_tokens + remaining_tokens = window_tokens)),
+  CHECK(source != 'hook-boundary' OR
+    (confidence IN ('exact','estimated') AND
+     ((window_tokens IS NULL AND used_tokens IS NULL AND remaining_tokens IS NULL) OR
+      (window_tokens IS NOT NULL AND used_tokens IS NOT NULL AND
+       remaining_tokens IS NOT NULL AND
+       used_tokens + remaining_tokens = window_tokens)))),
+  CHECK(confidence != 'unknown' OR pressure='unknown')
 )
 ```
 
-Token fields are nullable nonnegative integers. They are all null for
-`source='unavailable'`; `pressure='unknown'` whenever the current-window basis
-cannot be proved. Cumulative provider usage cannot populate current-window
+Token fields are nullable nonnegative integers and satisfy the displayed closed
+source/confidence/nullability/arithmetic checks. `pressure='unknown'` whenever
+the current-window basis cannot be proved. Cumulative provider usage cannot populate current-window
 pressure unless the adapter contract defines it as such. No row reserves,
 consumes or releases provider budget. Observation update CASes the same
 provider-generation/context-revision ordering already owned by lifecycle;
 lower/reordered input is audit-only and cannot regress the projection or infer
 principal/bridge generations.
+
+`fabric.v1.provider-context-pressure.read` and the negotiated scoped operator
+System projection map this row exactly to Spec 01
+`providerContextPressureV1`. The row's adapter and composite observation-audit
+foreign key populate the corresponding wire fields. Read snapshot time derives
+the discriminated Spec 01 current/stale nonnull or unavailable-null arm and
+`ageSeconds` from `observed_at/expires_at` without a write; no stored or
+projected percentage exists. Missing row projects unavailable, not zero
+pressure.
 
 Automatic pressure thresholds, hysteresis, maximum compaction counts and
 successor selection are absent. Existing explicit lifecycle custody remains
@@ -4328,9 +4688,15 @@ artifact bytes, private messages, capabilities and absolute paths rather than
 redacting after persistence. Generic span export never satisfies receipt,
 authority, review, disclosure or gate evidence.
 
-Verification adds schema-generation parity; capability current-pointer and
-expiry races; raw/normalised effort and native-mode round-trip; point-of-use
-CAS drift before effect; ambiguous-effect non-rerouting; honest observed
-unknown; context-pressure/budget separation; lower/reordered observation; and
-telemetry content-denial fixtures. Full crash matrices prove there is one route
-owner and that lifecycle recovery remains ahead of generic provider recovery.
+Verification adds schema-generation parity; discovery manifest/artifact digest
+equality; capability current-pointer, expiry and same-body refresh races;
+effective-configuration subject/activation lineage; raw/normalised effort and
+native-mode round-trip; actual review-route proof and every observed route-
+field mismatch; exact cut-custody ref joins; point-of-use body/
+permission/surface drift before effect; ambiguous-effect non-rerouting; honest
+observed unknown; topology append/CAS/stale/authority joins; context-pressure/
+budget separation, composite observation join, discriminated stale read,
+crossed-arm rejection and no percentage;
+lower/reordered observation; and telemetry content-denial fixtures. Full crash
+matrices prove there is one route owner and that lifecycle recovery remains
+ahead of generic provider recovery.
