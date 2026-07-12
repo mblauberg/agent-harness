@@ -13,6 +13,7 @@ const NOTIFIABLE_KINDS = new Set([
   "integrity-failure",
   "completion-ready",
   "acceptance-ready",
+  "blocked",
 ]);
 
 export type NativeNotification = Readonly<{

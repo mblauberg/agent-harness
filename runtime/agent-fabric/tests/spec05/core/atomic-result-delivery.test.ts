@@ -303,9 +303,16 @@ describe("atomic request, result, and callback delivery", () => {
     expect(database.prepare("SELECT state FROM task_request_barriers WHERE request_id='message_request'").get())
       .toEqual({ state: "blocked" });
     expect(database.prepare(`
-      SELECT kind, severity, state FROM attention_items
+      SELECT kind, severity, state,
+             json_extract(payload_json, '$.priority') AS priority
+        FROM attention_items
        WHERE dedupe_key='result-overdue:callback_answer'
-    `).get()).toEqual({ kind: "critical-path-block", severity: "critical-path", state: "open" });
+    `).get()).toEqual({
+      kind: "blocked",
+      severity: "critical",
+      state: "open",
+      priority: "critical-path",
+    });
     expect(database.prepare(`
       SELECT target_integration, state FROM notification_deliveries
     `).all()).toEqual([{ target_integration: "native-desktop", state: "pending" }]);

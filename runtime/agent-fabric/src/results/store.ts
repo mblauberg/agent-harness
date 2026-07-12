@@ -800,9 +800,10 @@ export class AtomicDeliveryStore {
         principalGeneration: producerGeneration,
       }, {
         dedupeKey,
-        kind: "critical-path-block",
-        severity: "critical-path",
+        kind: "blocked",
+        severity: "critical",
         payload: {
+          priority: "critical-path",
           title: "Required result overdue",
           summary: `Result callback ${text(request, "callback_id")} is overdue; its dependent barrier remains blocked.`,
           requestId,
