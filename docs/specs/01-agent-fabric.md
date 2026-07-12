@@ -1,14 +1,19 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.21
+Version: 0.22
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.21 closes the acceptance-review-discovered terminal bridge,
+Version 0.22 establishes the pre-release cutover contract: the unreleased
+Fabric supports one current schema and protocol baseline, preserves an older
+local database without modifying it, and rejects that database explicitly
+rather than importing or emulating legacy state. Current optional-feature
+negotiation, provider capability discovery and adapter artifact pinning remain
+required hardening; they are not backward-compatibility promises. Version 0.21 closes the acceptance-review-discovered terminal bridge,
 recovery-abandon, coordinated-workstream and multi-session projection gaps.
 Version 0.20 closes the acceptance-review-discovered lifecycle split-brain,
 legacy membership, acceptance-cycle exit and independent-topology contract
@@ -49,6 +54,23 @@ data and documentation. It does not authorise daemon installation or startup,
 provider login, MCP registration, external messaging, deployment, release,
 provider-session deletion, or Git staging and commits. Those actions retain
 their separate gates.
+
+### 1.1 Pre-release baseline and cutover
+
+Until the first human-accepted release, source HEAD owns one canonical database
+schema epoch and one current public protocol contract. Fresh state is created
+directly from that baseline. The runtime shall not carry old-schema repair,
+implicit legacy-run import, vintage-daemon fixtures, old-client/new-daemon
+result shims or an old-protocol Console retry. A database bearing an earlier or
+unknown schema fingerprint fails closed with a typed cutover-required error;
+the runtime never rewrites, deletes or silently adopts it. Any operator-chosen
+export, archive or replacement of that state is a separate explicit action.
+
+This rule does not remove current extensibility. Closed codecs, bounded feature
+negotiation for independently optional current capabilities, provider
+capability handshakes, adapter/model allowlists and pinned compatibility
+artifacts remain mandatory. They protect the current system and future
+extension; they do not promise execution of an obsolete binary or schema.
 
 ## 2. Problem
 

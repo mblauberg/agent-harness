@@ -1,13 +1,17 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.17
+Version: 1.18
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.17 owns terminal bridge retirement, settled recovery-abandon,
+Version 1.18 owns the pre-release schema/protocol cutover: one canonical fresh
+baseline, explicit non-destructive rejection of earlier database epochs and no
+vintage Console/daemon or implicit legacy-import path. Current adapter pins,
+provider capability checks and optional-feature negotiation remain security
+controls, not legacy support. Version 1.17 owns terminal bridge retirement, settled recovery-abandon,
 live launched-chair handoff, coordinated-workstream creation and exact
 multi-session projection. Version 1.16 owns atomic acceptance exits, run-coupled exceptional lifecycle
 transitions, forward-only legacy membership repair and the binding one-live-run
@@ -57,6 +61,19 @@ Turn the activated local fabric into a bounded, versioned, migratable and
 reproducibly tested shared system that can be safely admitted to exact project
 roots. Preserve one daemon, one SQLite transaction owner, provider-neutral MCP
 access and Herdr's non-authoritative visibility role.
+
+Because the system has not reached its first accepted release, hardening
+targets the current baseline rather than historical installation compatibility.
+The checked-in schema is squashed to one fresh-state migration. Startup against
+any earlier migration registry or unknown schema fingerprint returns a typed
+cutover-required failure before mutation. It leaves the database and filesystem
+evidence untouched. Preflight/backfill code, fixtures and fallback branches
+whose only purpose is importing those earlier shapes shall be removed.
+
+Protocol initialization still rejects mismatched peers, but it does not retry
+an old profile or translate old result shapes. Independently optional current
+features continue to use exact negotiation, and adapter compatibility manifests
+continue to pin executable, wrapper and schema artifacts.
 
 ## 3. Required behaviour
 

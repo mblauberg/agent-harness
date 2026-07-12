@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.2
+Version: 1.3
 Date: 11 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,6 +10,11 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
+Version 1.3 records the human's pre-release simplification direction: Spec 05
+ships only the current Console/protocol/schema epoch. Old-daemon retry,
+vintage-wire presentation and implicit legacy-state import are not product
+requirements; incompatible state is preserved and rejected explicitly. This
+does not weaken current optional-feature negotiation or adapter verification.
 Version 1.2 closes the implementation-review finding that bounded evidence
 content, continuation, safety disclosure and acceptance behaviour must remain
 owned by this Console specification rather than Spec 04. Version 1.1 records
@@ -42,6 +47,14 @@ another task orchestrator or authority store.
 Specs 01 and 04 shall be amended and accepted before implementation can claim
 this spec complete. Product requirements remain here; transaction, schema and
 daemon invariants remain with their existing canonical owners.
+
+This is a pre-release implementation. The Console requires its exact current
+project/run/session projection and evidence-review features. It presents a
+typed protocol/schema cutover-required state for an obsolete daemon or
+database; it shall not retry a vintage profile, translate legacy projection
+shapes or infer/import a session from an old run. The runtime leaves rejected
+state untouched. Current independently optional integrations remain negotiated
+and visibly unavailable when absent.
 
 The Console is local and project-scoped. GitHub is an optional project adapter,
 not a prerequisite or authority store. No browser application is included in
@@ -445,9 +458,11 @@ Provider identity and actual model/session references must reconcile before an
 agent becomes ready.
 
 Prompts shall normally travel through Fabric to a managed provider adapter.
-Direct terminal text injection is a compatibility fallback and remains
-`dispatched-unconfirmed`; only Fabric mailbox/request-result paths use delivery
-states or acknowledgements.
+Direct terminal text injection is not a protocol-compatibility path. If kept as
+an explicit degraded steering helper, it remains `dispatched-unconfirmed`,
+requires an already tracked no-answer task/message reference and cannot satisfy
+delivery, result or barrier state; only Fabric mailbox/request-result paths use
+delivery states or acknowledgements.
 
 ### 9.1 Reliable paired request/reply
 
