@@ -4613,13 +4613,16 @@ export class Fabric {
     depth: number;
     parentTeamId: string | null;
   } {
+    const totalLeaders = numberField(
+      rowOrNotFound(
+        this.#database.prepare("SELECT COUNT(*) AS count FROM teams WHERE run_id = ?").get(runId),
+        "leader count",
+      ),
+      "count",
+    );
+    if (totalLeaders >= 4) throw new FabricError("BUDGET_EXCEEDED", "run already has four team leaders");
     if (requestedParentTeamId === undefined) {
       this.#assertChair(runId, actorAgentId);
-      const count = numberField(
-        rowOrNotFound(this.#database.prepare("SELECT COUNT(*) AS count FROM teams WHERE run_id = ? AND depth = 1").get(runId), "leader count"),
-        "count",
-      );
-      if (count >= 4) throw new FabricError("BUDGET_EXCEEDED", "run already has four top-level leaders");
       return { depth: 1, parentTeamId: null };
     }
     const parent = rowOrNotFound(

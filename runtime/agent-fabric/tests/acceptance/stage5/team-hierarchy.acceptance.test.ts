@@ -281,6 +281,47 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
     }
   });
 
+  it("enforces four total leaders across top-level and nested teams", async () => {
+    const fixture = await createStage5TeamFixture("run-stage5-total-leader-cap");
+    try {
+      const parent = await createTeam(fixture.chair, teamCreateInput({
+        teamId: "team-leader-cap-parent",
+        memberAuthorities: [],
+        reservedBudget: {},
+      }));
+      const parentLeader = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, parent));
+      const childInput = (suffix: string) => teamCreateInput({
+        teamId: `team-leader-cap-child-${suffix}`,
+        parentTeamId: "team-leader-cap-parent",
+        sourcePath: `src/team-leader-cap-parent/child-${suffix}`,
+        artifactPath: `.agent-run/team-leader-cap-parent/child-${suffix}`,
+        leaderAuthority: teamAuthority({
+          sourcePath: `src/team-leader-cap-parent/child-${suffix}`,
+          artifactPath: `.agent-run/team-leader-cap-parent/child-${suffix}`,
+          turns: 0,
+          costUsd: 0,
+          descendants: 0,
+        }),
+        memberAuthorities: [],
+        reservedBudget: {},
+      });
+      for (const suffix of ["a", "b", "c"]) {
+        await createTeam(parentLeader, childInput(suffix));
+      }
+      const before = await fixture.chair.getRunStatus({ runId: fixture.run.runId });
+
+      await expect(createTeam(parentLeader, childInput("d"))).rejects.toMatchObject({
+        code: "BUDGET_EXCEEDED",
+      });
+      expect(await fixture.chair.getRunStatus({ runId: fixture.run.runId })).toEqual(before);
+      await expect(fixture.chair.getTeam({ teamId: "team-leader-cap-child-d" })).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    } finally {
+      await fixture.fabric.close();
+    }
+  });
+
   it("exposes the same atomic fabric_team_create operation through MCP", async () => {
     const fixture = await createMcpFixture("run-stage5-team-mcp");
     try {

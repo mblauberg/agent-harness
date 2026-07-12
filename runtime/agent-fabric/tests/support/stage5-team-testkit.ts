@@ -51,13 +51,14 @@ export function teamCreateInput(options: {
   sourcePath?: string;
   artifactPath?: string;
   leaderId?: string;
+  leaderAuthority?: AuthorityInput;
   memberAuthorities?: TeamMemberInput[];
   reservedBudget?: Record<string, number>;
 }): TeamCreateInput {
   const leaderId = options.leaderId ?? `${options.teamId}-leader`;
   const sourcePath = options.sourcePath ?? `src/${options.teamId}`;
   const artifactPath = options.artifactPath ?? `.agent-run/${options.teamId}`;
-  const leaderAuthority = teamAuthority({
+  const leaderAuthority = options.leaderAuthority ?? teamAuthority({
     sourcePath,
     artifactPath,
     turns: 40,
