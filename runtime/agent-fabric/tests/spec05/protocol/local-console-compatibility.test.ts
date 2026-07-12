@@ -7,8 +7,6 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:net";
 
 import {
-  FABRIC_OPERATIONS,
-  NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   PROTOCOL_FEATURES,
   parseIdentifier,
   type OperatorCapabilityCredential,
@@ -16,7 +14,6 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  STRICT_V1_OPTIONAL_FEATURES,
   connectLocalOperatorConsoleClient,
 } from "../../../src/operator/local-console-session.ts";
 import { servePublicProtocolConnection } from "../../../src/daemon/public-protocol.ts";
@@ -79,83 +76,29 @@ const credential: OperatorCapabilityCredential = {
 };
 
 describe("local Console protocol compatibility", () => {
-  it("retries the genuine af548f8 daemon once on a fresh connection with the pinned strict-v1 profile", async () => {
-    expect(STRICT_V1_OPTIONAL_FEATURES).toStrictEqual([
-      "project-sessions.v1",
-      "operator-projection.v2",
-      "scoped-gate-read.v1",
-      "scoped-gates.v1",
-      "intakes.v1",
-      "operator-actions.v1",
-      "message-body-read.v1",
-      "operator-repository-read.v1",
-      "lifecycle-control.v1",
-      "launch-custody.v1",
-    ]);
-    const fixture = await startVintageFixture("af548f8");
-    const connected = await connectLocalOperatorConsoleClient({
-      socketPath: fixture.socketPath,
-      credential,
-      surface: "standalone",
-    });
-    try {
-      expect(connected.compatibility).toMatchObject({
-        mode: "legacy-compatibility",
+  it.each(["af548f8", "466e5c7"] as const)(
+    "rejects the genuine %s daemon after one current-protocol attempt",
+    async (commit) => {
+      const fixture = await startVintageFixture(commit);
+      let failure: unknown;
+      try {
+        await connectLocalOperatorConsoleClient({
+          socketPath: fixture.socketPath,
+          credential,
+          surface: commit === "af548f8" ? "standalone" : "herdr",
+        });
+      } catch (error: unknown) {
+        failure = error;
+      }
+      expect(failure).toMatchObject({
+        code: "CONSOLE_PROTOCOL_INCOMPATIBLE",
         primary: { code: "PROTOCOL_INVALID" },
-        retry: { status: "succeeded", profile: "strict-v1" },
       });
-      expect(connected.client.features).not.toContain(NATIVE_NOTIFICATION_PROJECTION_FEATURE);
-      const snapshot = await connected.client.operations[FABRIC_OPERATIONS.projectionSnapshot]?.({
-        credential,
-        projectId: "project_fixture_01" as never,
-      });
-      expect(snapshot).toMatchObject({ attention: { value: [{ itemId: "attention_fixture_01" }] } });
-      expect(snapshot).not.toHaveProperty("attention.value.0.nativeNotification");
-
-      const initialize = fixture.events.filter((event) => event.type === "initialize");
-      expect(initialize).toHaveLength(2);
-      expect(initialize[0]?.requiredFeatures).toEqual(initialize[1]?.requiredFeatures);
-      expect(initialize[1]?.optionalFeatures).toEqual(STRICT_V1_OPTIONAL_FEATURES);
-      expect(initialize[0]?.clientNonce).not.toBe(initialize[1]?.clientNonce);
-      expect(fixture.events.findIndex((event) => event.type === "dispatch"))
-        .toBeGreaterThan(fixture.events.findLastIndex((event) => event.type === "initialize"));
-    } finally {
-      await connected.client.close();
-    }
-  });
-
-  it("fails closed against the genuine 466e5c7 unnegotiated-extra result", async () => {
-    const fixture = await startVintageFixture("466e5c7");
-    const connected = await connectLocalOperatorConsoleClient({
-      socketPath: fixture.socketPath,
-      credential,
-      surface: "herdr",
-    });
-    try {
-      expect(connected.compatibility.mode).toBe("legacy-compatibility");
-      await expect(connected.client.operations[FABRIC_OPERATIONS.projectionSnapshot]?.({
-        credential,
-        projectId: "project_fixture_01" as never,
-      })).rejects.toMatchObject({ code: "PROTOCOL_INCOMPATIBLE" });
-    } finally {
-      await connected.client.close();
-    }
-  });
-
-  it("keeps the original structured incompatibility primary when the one retry fails", async () => {
-    const fixture = await startVintageFixture("af548f8");
-    await expect(connectLocalOperatorConsoleClient({
-      socketPath: fixture.socketPath,
-      credential: { capabilityId: credential.capabilityId, token: "wrong-fixture-secret" },
-      surface: "standalone",
-    })).rejects.toMatchObject({
-      code: "CONSOLE_PROTOCOL_INCOMPATIBLE",
-      primary: { code: "PROTOCOL_INVALID" },
-      retry: { status: "failed", profile: "strict-v1", failure: { code: "AUTHENTICATION_FAILED" } },
-    });
-    expect(fixture.events.filter((event) => event.type === "initialize")).toHaveLength(2);
-    expect(fixture.events.some((event) => event.type === "dispatch")).toBe(false);
-  });
+      expect(failure).toHaveProperty("retry", undefined);
+      expect(fixture.events.filter((event) => event.type === "initialize")).toHaveLength(1);
+      expect(fixture.events.some((event) => event.type === "dispatch")).toBe(false);
+    },
+  );
 
   it("does not retry a structured authentication failure from an amended daemon", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-current-auth-failure-"));

@@ -4,6 +4,7 @@ import type {
   OperatorCapabilityCredential,
   OperatorMutationContext,
   ProjectId,
+  ProjectSessionDiscovery,
   ProjectSessionId,
 } from "@local/agent-fabric-protocol";
 
@@ -44,6 +45,13 @@ import type { ConsoleWorkflowPlanner } from "./workflow.js";
 export type ConsoleBootstrapRequest = Readonly<{
   projectRoot: string;
   surface: "standalone" | "herdr";
+  projectSessionId?: ProjectSessionId;
+}>;
+
+export type ConsoleSessionSelection = Readonly<{
+  choices: readonly ProjectSessionDiscovery[];
+  selectProjectSession(projectSessionId: ProjectSessionId): Promise<ConsoleBootstrapConnection>;
+  selectProject(): Promise<ConsoleBootstrapConnection>;
 }>;
 
 export type ConsoleBootstrapConnection = Readonly<{
@@ -54,6 +62,7 @@ export type ConsoleBootstrapConnection = Readonly<{
   projectSessionId?: ProjectSessionId;
   actionPlanner?: ConsoleActionPlanner;
   workflowPlanner?: ConsoleWorkflowPlanner;
+  sessionSelection?: ConsoleSessionSelection;
   detach(input: Readonly<{ reason: FabricDetachReason }>): Promise<void>;
   close(): Promise<void>;
 }>;
@@ -112,6 +121,7 @@ export type ConsoleApplicationOptions = Readonly<{
   bootstrap: ConsoleBootstrapPort;
   projectRoot: string;
   surface: "standalone" | "herdr";
+  projectSessionId?: ProjectSessionId;
   viewport: FabricViewport;
   draw: FabricConsoleRuntimeOptions["draw"];
   eventId: () => string;
@@ -270,6 +280,7 @@ type ConsoleApplicationConnection = Readonly<{
   mutationController: ConsoleController | null;
   plannerEnablesMutation: boolean;
   connected: ConsoleBootstrapConnection | null;
+  selectSession: ((projectSessionId: ProjectSessionId | null) => Promise<ConsoleApplicationConnection>) | null;
 }>;
 
 export class FabricConsoleApplication {
@@ -282,6 +293,7 @@ export class FabricConsoleApplication {
   #mutationController: ConsoleController | null;
   #plannerEnablesMutation: boolean;
   #connected: ConsoleBootstrapConnection | null;
+  #selectSession: ConsoleApplicationConnection["selectSession"];
 
   constructor(input: Readonly<{
     runtime: FabricConsoleRuntime;
@@ -298,6 +310,7 @@ export class FabricConsoleApplication {
     this.#mutationController = input.connection.mutationController;
     this.#plannerEnablesMutation = input.connection.plannerEnablesMutation;
     this.#connected = input.connection.connected;
+    this.#selectSession = input.connection.selectSession;
   }
 
   get controller(): FabricRuntimeController {
@@ -343,6 +356,9 @@ export class FabricConsoleApplication {
       ...(this.dataset.productionActionPlanning === true
         ? { productionActionPlanning: true as const }
         : {}),
+      ...(this.dataset.projectSessions === undefined
+        ? {}
+        : { projectSessions: this.dataset.projectSessions }),
     };
     const mutationVisible = this.#plannerEnablesMutation
       ? { ...next, ...localCapabilities }
@@ -397,6 +413,7 @@ export class FabricConsoleApplication {
     this.#mutationController = next.mutationController;
     this.#plannerEnablesMutation = next.plannerEnablesMutation;
     this.#connected = next.connected;
+    this.#selectSession = next.selectSession;
     this.#runtime.updateDataset(next.controller.dataset);
     if (previous !== null) {
       try {
@@ -408,11 +425,29 @@ export class FabricConsoleApplication {
   }
 
   async handleActivation(activation: FabricRuntimeActivation): Promise<void> {
+    if (activation.regionId === "session:switch-project") {
+      await this.#switchProjectSession(null);
+      return;
+    }
     if (
       activation.regionId.startsWith("row:") &&
       activation.binding !== null &&
       this.#adapter !== null
     ) {
+      const selected = this.dataset.pages[activation.binding.view].rows.find(
+        (candidate) =>
+          candidate.stableId === activation.binding?.itemId &&
+          candidate.revision === activation.binding.itemRevision,
+      );
+      if (
+        this.#connected?.projectSessionId === undefined &&
+        activation.binding.view === "runs" &&
+        selected?.detailRef?.kind === "run" &&
+        selected.detailRef.projectSessionId !== undefined
+      ) {
+        await this.#switchProjectSession(selected.detailRef.projectSessionId);
+        return;
+      }
       const inspection = await this.#adapter.inspect(activation.binding);
       if (inspection !== null) {
         this.#runtime.updateDataset({ ...this.dataset, inspection });
@@ -621,14 +656,37 @@ export class FabricConsoleApplication {
     }
     await controller.beginAction(request);
   }
+
+  async #switchProjectSession(projectSessionId: ProjectSessionId | null): Promise<void> {
+    const selectSession = this.#selectSession;
+    if (selectSession === null) {
+      throw Object.assign(new Error("project-session selection is unavailable"), {
+        code: "SESSION_SELECTION_UNAVAILABLE",
+      });
+    }
+    const next = await selectSession(projectSessionId);
+    this.#controller.swap(next.controller);
+    this.#adapter = next.adapter;
+    this.#planner = next.planner;
+    this.#workflowPlanner = next.workflowPlanner;
+    this.#mutationController = next.mutationController;
+    this.#plannerEnablesMutation = next.plannerEnablesMutation;
+    this.#connected = next.connected;
+    this.#selectSession = next.selectSession;
+    this.#runtime.updateDataset(next.controller.dataset);
+  }
 }
 
 async function openConsoleApplicationConnection(
   options: ConsoleApplicationOptions,
+  suppliedBootstrap?: ConsoleBootstrapResult,
 ): Promise<ConsoleApplicationConnection> {
-  const bootstrap = await options.bootstrap.startOrAttach({
+  const bootstrap = suppliedBootstrap ?? await options.bootstrap.startOrAttach({
     projectRoot: options.projectRoot,
     surface: options.surface,
+    ...(options.projectSessionId === undefined
+      ? {}
+      : { projectSessionId: options.projectSessionId }),
   });
   let adapter: ConsoleProtocolAdapter | null = null;
   let mutationController: ConsoleController | null = null;
@@ -661,6 +719,14 @@ async function openConsoleApplicationConnection(
       workflowPlanner = bootstrap.workflowPlanner;
       dataset = {
         ...dataset,
+        ...(bootstrap.sessionSelection === undefined
+          ? {}
+          : {
+              projectSessions: {
+                choices: bootstrap.sessionSelection.choices,
+                selectedProjectSessionId: bootstrap.projectSessionId ?? null,
+              },
+            }),
         ...(workflowPlanner === undefined
           ? {}
           : { workflowCapabilities: workflowPlanner.capabilities }),
@@ -694,6 +760,18 @@ async function openConsoleApplicationConnection(
     }
   }
 
+  const selectSession = connected?.sessionSelection === undefined
+    ? null
+    : async (projectSessionId: ProjectSessionId | null): Promise<ConsoleApplicationConnection> => {
+        const selected = projectSessionId === null
+          ? await connected.sessionSelection?.selectProject()
+          : await connected.sessionSelection?.selectProjectSession(projectSessionId);
+        if (selected === undefined) {
+          throw new Error("project-session selection is unavailable");
+        }
+        return await openConsoleApplicationConnection(options, selected);
+      };
+
   return {
     controller,
     adapter,
@@ -702,6 +780,7 @@ async function openConsoleApplicationConnection(
     mutationController,
     plannerEnablesMutation,
     connected,
+    selectSession,
   };
 }
 

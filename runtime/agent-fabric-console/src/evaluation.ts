@@ -46,6 +46,7 @@ export type UsabilityExpectedAnswers = Readonly<{
 
 export type UsabilityRun = Readonly<{
   id: string;
+  session: string;
   phase: string;
   owner: string;
   nextMilestone: string;
@@ -248,6 +249,7 @@ function parseRun(value: unknown, path: string): UsabilityRun {
   const item = record(value, path);
   return {
     id: string(item.id, `${path}.id`),
+    session: string(item.session, `${path}.session`),
     phase: string(item.phase, `${path}.phase`),
     owner: string(item.owner, `${path}.owner`),
     nextMilestone: string(item.nextMilestone, `${path}.nextMilestone`),
@@ -591,6 +593,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     origin: { kind: "operator-launch", operatorId: "fixture-operator" as never },
   };
   const runs: RunProjection[] = fixture.runs.map((run) => ({
+    projectSessionId: run.session as ProjectSessionId,
     runId: run.id as never,
     phase: run.phase,
     chairAgentId: run.owner as AgentId,
@@ -664,12 +667,14 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
     freshness: freshness("live", 100),
     summary: {
       kind: "run",
+      projectSessionId: run.projectSessionId,
       phase: run.phase,
       health: run.health,
       nextMilestone: run.nextMilestone,
     },
     detailRef: {
       kind: "run",
+      projectSessionId: run.projectSessionId,
       coordinationRunId: run.runId,
       expectedRevision: revision,
     },

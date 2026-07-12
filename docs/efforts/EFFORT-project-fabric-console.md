@@ -1,6 +1,6 @@
 # EFFORT: project fabric console
 
-Updated: 11 July 2026
+Updated: 12 July 2026
 Status: active
 
 ## Destination
@@ -40,3 +40,4 @@ Stop at explicit human acceptance; push and release remain separate gates.
 - 11 July 2026 Codex: created AFAB-004, amended the protocol/daemon owners before code, resolved all amendment review findings, froze the usability evaluation and isolated work from a concurrent skill-portfolio writer. Protocol TDD began; harness 421/421 and runtime 363/363 are green after a clean-worktree portability repair.
 - 11 July 2026 Codex: compared current TypeScript, Rust, Go and C++ TUI stacks and open-source operator interfaces. Selected a small Node cell-grid terminal layer because it preserves one typed protocol/toolchain, with a mandatory responsive-render/PTY spike and automatic Rust/Ratatui fallback. Spec 05 v1.1 records 80x24 as the default/reference acceptance viewport and requires dynamic reflow with terminal resizing.
 - 11 July 2026 Codex: compared 18 current open-source agent harnesses. Retained Fabric's one-chair, one-transaction-owner architecture; adopted gap-free durable projection catch-up and immutable Git-object binding as non-normative implementation hardening, while parking browser, external-ledger and merge-automation scope.
+- 12 July 2026 Codex: completed the Console multi-session correction. The project client remains attached, exactly one attachable session auto-selects, multiple sessions require a stable run/session choice, `s` returns to the project selector, `--session` supports explicit/headless selection, and responsive/evidence state remains preserved across resize. Current Console clients require exact run/session projection instead of adding another legacy shim.

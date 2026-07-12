@@ -342,9 +342,14 @@ function presentHeader(dataset: FabricConsoleDataset): PresentedHeader {
   const session = factValue(dataset.snapshot?.session);
   const runs = factValue(dataset.snapshot?.runs) ?? [];
   const activeRun = runs[0];
+  const sessionChoices = dataset.projectSessions?.choices ?? [];
   return {
     project: project?.projectId ?? "unavailable",
-    session: session?.projectSessionId ?? "none",
+    session: session?.projectSessionId ?? (
+      sessionChoices.length === 0
+        ? "none"
+        : `choose:${String(sessionChoices.length)}`
+    ),
     run: activeRun?.runId ?? "none",
     revision: dataset.snapshotRevision,
     freshness: headerFreshness(dataset),
@@ -412,7 +417,12 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
           : `scope ${summary.acceptedScopeRef.path}@${summary.acceptedScopeRef.digest} | repository ${summary.repositoryRevision}`,
       ];
     case "run":
-      return [summary.phase, `${summary.health} | next ${summary.nextMilestone}`];
+      return [
+        summary.projectSessionId === undefined
+          ? summary.phase
+          : `${summary.projectSessionId} | ${summary.phase}`,
+        `${summary.health} | next ${summary.nextMilestone}`,
+      ];
     case "work":
       return [summary.state, `checks ${summary.checkState}`];
     case "agent":
@@ -500,6 +510,12 @@ function detailLines(row: ConsoleRow): PresentedDetail {
       value: row.summary.acceptedScopeRef === null
         ? "unaccepted"
         : `${row.summary.acceptedScopeRef.path}@${row.summary.acceptedScopeRef.digest}`,
+    });
+  }
+  if (row.summary?.kind === "run") {
+    lines.push({
+      label: "Project session",
+      value: row.summary.projectSessionId ?? "unavailable on this peer",
     });
   }
   return { stableId: row.stableId, revision: row.revision, lines };

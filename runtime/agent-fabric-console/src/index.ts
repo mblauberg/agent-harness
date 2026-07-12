@@ -1675,7 +1675,7 @@ function renderFabricFooter(
             ? `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}${presentation.review === null ? "" : ` REVIEW+${String(presentation.reviewScrollOffset)}`}`
             : `Action failed: ${presentation.failureCode}`)),
   );
-  const help = "? help | [ ] views | e draft | : advanced | PgUp/PgDn | Alt-M mouse | q detach";
+  const help = "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll | q detach";
   setFabricRow(rows, helpRow, columns, help);
   const detachIndex = help.indexOf("q detach");
   if (detachIndex >= 0 && detachIndex + 8 <= columns) {

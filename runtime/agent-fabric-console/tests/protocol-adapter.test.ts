@@ -132,6 +132,7 @@ function binding(port: ConsoleProtocolPort): ConsoleProtocolBinding {
     readOnly: true,
     actions: null,
     nativeNotificationProjection: "daemon-journal",
+    runSessionProjection: "exact",
     compatibility: { mode: "current" },
   };
 }
@@ -180,6 +181,7 @@ describe("public protocol adapter", () => {
         readOnly: true,
         actions: null,
         nativeNotificationProjection: "legacy-fallback",
+        runSessionProjection: "exact",
         compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
       },
       credential,
@@ -348,6 +350,7 @@ describe("public protocol adapter", () => {
         readOnly: false,
         actions: {} as never,
         nativeNotificationProjection: "daemon-journal",
+        runSessionProjection: "exact",
         compatibility: { mode: "current" },
       },
       credential,
@@ -541,6 +544,7 @@ describe("public protocol adapter", () => {
       missingFeatures: [
         "operator-projection.v2",
         "scoped-gate-read.v1",
+        "run-session-projection.v1",
       ],
     });
 
@@ -556,6 +560,7 @@ describe("public protocol adapter", () => {
         missingFeatures: [
           "operator-projection.v2",
           "scoped-gate-read.v1",
+          "run-session-projection.v1",
         ],
       },
       snapshot: null,
@@ -572,6 +577,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v1",
         "operator-projection.v2",
         "scoped-gate-read.v1",
+        "run-session-projection.v1",
         "message-body-read.v1",
         "operator-repository-read.v1",
       ],
@@ -599,6 +605,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v1",
         "operator-projection.v2",
         "scoped-gate-read.v1",
+        "run-session-projection.v1",
       ],
       projection: {},
       console: {

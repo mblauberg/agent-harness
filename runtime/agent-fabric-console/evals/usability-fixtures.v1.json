@@ -13,6 +13,7 @@
       "runs": [
         {
           "id": "run-empty",
+          "session": "session-empty",
           "phase": "observe",
           "owner": "chair-empty",
           "nextMilestone": "Await new work",
@@ -40,12 +41,13 @@
     },
     {
       "id": "concurrent-multi-run",
-      "description": "Two concurrent runs with grouped critical and advisory attention.",
+      "description": "Two independent sessions with grouped critical and advisory attention.",
       "project": "proj-concurrent",
-      "session": "session-concurrent",
+      "session": "session-concurrent-primary",
       "runs": [
         {
           "id": "run-primary",
+          "session": "session-concurrent-primary",
           "phase": "implement",
           "owner": "chair-primary",
           "nextMilestone": "Merge isolated worktrees",
@@ -53,6 +55,7 @@
         },
         {
           "id": "run-evaluation",
+          "session": "session-concurrent-evaluation",
           "phase": "evaluate",
           "owner": "chair-evaluation",
           "nextMilestone": "Complete three repetitions",
@@ -115,6 +118,7 @@
       "runs": [
         {
           "id": "run-gated",
+          "session": "session-gated",
           "phase": "awaiting_acceptance",
           "owner": "chair-gated",
           "nextMilestone": "Resolve release-bound gate",
@@ -201,6 +205,7 @@
       "runs": [
         {
           "id": "run-legacy",
+          "session": "session-legacy",
           "phase": "observe",
           "owner": "chair-legacy",
           "nextMilestone": "Upgrade daemon",

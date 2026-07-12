@@ -4,6 +4,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  parseIdentifier,
+  type ProjectSessionId,
+} from "@local/agent-fabric-protocol";
+
+import {
   startFabricConsoleApplication,
   type ConsoleBootstrapPort,
 } from "./application.js";
@@ -26,7 +31,7 @@ import {
 } from "./terminal.js";
 
 export const CONSOLE_CLI_USAGE =
-  "usage: agent-fabric-console [--project ABSOLUTE_ROOT] [--herdr] [--export json|markdown]\n" +
+  "usage: agent-fabric-console [--project ABSOLUTE_ROOT] [--session STABLE_ID] [--herdr] [--export json|markdown]\n" +
   "Starts or attaches through the lock-safe local Fabric bootstrap. If configuration, startup, or authority is unavailable, the explicit unavailable state remains read-only.\n";
 
 function option(arguments_: readonly string[], name: string): string | undefined {
@@ -40,13 +45,13 @@ function option(arguments_: readonly string[], name: string): string | undefined
 }
 
 function validateArguments(arguments_: readonly string[]): void {
-  const known = new Set(["--help", "-h", "--project", "--herdr", "--export"]);
+  const known = new Set(["--help", "-h", "--project", "--session", "--herdr", "--export"]);
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === undefined || !known.has(argument)) {
       throw new Error(`unknown Console argument: ${argument ?? ""}`);
     }
-    if (argument === "--project" || argument === "--export") index += 1;
+    if (argument === "--project" || argument === "--session" || argument === "--export") index += 1;
   }
 }
 
@@ -171,6 +176,13 @@ export async function runConsoleCli(
     return;
   }
   const projectRoot = resolve(option(arguments_, "--project") ?? process.cwd());
+  const sessionOption = option(arguments_, "--session");
+  const projectSessionId = sessionOption === undefined
+    ? undefined
+    : parseIdentifier<"ProjectSessionId">(
+        sessionOption,
+        "consoleCli.projectSessionId",
+      ) as ProjectSessionId;
   const exportValue = option(arguments_, "--export");
   if (
     exportValue !== undefined &&
@@ -185,6 +197,7 @@ export async function runConsoleCli(
       bootstrap: dependencies.bootstrap ?? createConsoleCliBootstrap(),
       projectRoot,
       surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
+      ...(projectSessionId === undefined ? {} : { projectSessionId }),
       viewport: {
         columns: output.columns ?? 80,
         rows: output.rows ?? 24,
@@ -241,6 +254,7 @@ export async function runConsoleCli(
       bootstrap: dependencies.bootstrap ?? createConsoleCliBootstrap(),
       projectRoot,
       surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
+      ...(projectSessionId === undefined ? {} : { projectSessionId }),
       viewport: {
         ...(output.columns === undefined ? {} : { columns: output.columns }),
         ...(output.rows === undefined ? {} : { rows: output.rows }),

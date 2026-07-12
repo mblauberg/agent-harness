@@ -2375,7 +2375,7 @@
         },
         "features": {
           "type": "array",
-          "maxItems": 22,
+          "maxItems": 23,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2400,7 +2400,8 @@
               "artifact-content-read.v1",
               "lifecycle-control.v1",
               "native-notification-projection.v1",
-              "gate-system-supersession.v1"
+              "gate-system-supersession.v1",
+              "run-session-projection.v1"
             ]
           }
         },
@@ -2824,7 +2825,7 @@
             },
             "features": {
               "type": "array",
-              "maxItems": 22,
+              "maxItems": 23,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2849,7 +2850,8 @@
                   "artifact-content-read.v1",
                   "lifecycle-control.v1",
                   "native-notification-projection.v1",
-                  "gate-system-supersession.v1"
+                  "gate-system-supersession.v1",
+                  "run-session-projection.v1"
                 ]
               }
             },
@@ -19023,6 +19025,14 @@
                         "expectedRevision": {
                           "type": "integer",
                           "minimum": 1
+                        },
+                        "projectSessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
                       }
                     },
@@ -62667,6 +62677,14 @@
                                   "quarantined",
                                   "unknown"
                                 ]
+                              },
+                              "projectSessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-minUtf8Bytes": 1,
+                                "x-maxUtf8Bytes": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                               }
                             }
                           },
@@ -62804,6 +62822,14 @@
                                     "quarantined",
                                     "unknown"
                                   ]
+                                },
+                                "projectSessionId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                 }
                               }
                             },
@@ -64765,6 +64791,14 @@
                                           "quarantined",
                                           "unknown"
                                         ]
+                                      },
+                                      "projectSessionId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "x-minUtf8Bytes": 1,
+                                        "x-maxUtf8Bytes": 128,
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                       }
                                     }
                                   },
@@ -64920,6 +64954,14 @@
                                             "quarantined",
                                             "unknown"
                                           ]
+                                        },
+                                        "projectSessionId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                         }
                                       }
                                     },
@@ -68037,6 +68079,14 @@
                                               "expectedRevision": {
                                                 "type": "integer",
                                                 "minimum": 1
+                                              },
+                                              "projectSessionId": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "x-minUtf8Bytes": 1,
+                                                "x-maxUtf8Bytes": 128,
+                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                               }
                                             }
                                           },
@@ -68519,6 +68569,14 @@
                                                 "expectedRevision": {
                                                   "type": "integer",
                                                   "minimum": 1
+                                                },
+                                                "projectSessionId": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 128,
+                                                  "x-minUtf8Bytes": 1,
+                                                  "x-maxUtf8Bytes": 128,
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                                 }
                                               }
                                             },
@@ -70172,6 +70230,14 @@
                                             "maxLength": 4096,
                                             "x-minUtf8Bytes": 1,
                                             "x-maxUtf8Bytes": 4096
+                                          },
+                                          "projectSessionId": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                           }
                                         }
                                       },
@@ -70198,6 +70264,14 @@
                                           "expectedRevision": {
                                             "type": "integer",
                                             "minimum": 1
+                                          },
+                                          "projectSessionId": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                           }
                                         }
                                       },
@@ -70393,6 +70467,14 @@
                                               "maxLength": 4096,
                                               "x-minUtf8Bytes": 1,
                                               "x-maxUtf8Bytes": 4096
+                                            },
+                                            "projectSessionId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "x-minUtf8Bytes": 1,
+                                              "x-maxUtf8Bytes": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                             }
                                           }
                                         },
@@ -70419,6 +70501,14 @@
                                             "expectedRevision": {
                                               "type": "integer",
                                               "minimum": 1
+                                            },
+                                            "projectSessionId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "x-minUtf8Bytes": 1,
+                                              "x-maxUtf8Bytes": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                             }
                                           }
                                         },
@@ -73304,6 +73394,14 @@
                             "expectedRevision": {
                               "type": "integer",
                               "minimum": 1
+                            },
+                            "projectSessionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "x-minUtf8Bytes": 1,
+                              "x-maxUtf8Bytes": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                             }
                           }
                         },
@@ -74623,6 +74721,14 @@
                                         "quarantined",
                                         "unknown"
                                       ]
+                                    },
+                                    "projectSessionId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "x-minUtf8Bytes": 1,
+                                      "x-maxUtf8Bytes": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                     }
                                   }
                                 },
@@ -76270,6 +76376,14 @@
                                           "quarantined",
                                           "unknown"
                                         ]
+                                      },
+                                      "projectSessionId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "x-minUtf8Bytes": 1,
+                                        "x-maxUtf8Bytes": 128,
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                       }
                                     }
                                   },

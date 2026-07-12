@@ -38,6 +38,7 @@ describe("responsive semantic cell grid", () => {
     expect(frame.rows.every((row) => cellWidth(row) === 80)).toBe(true);
     expect(frame.rows[0]).toContain("P: .agents");
     expect(frame.rows[3]).toContain("Attention");
+    expect(frame.rows.at(-1)).toContain("q detach");
   });
 
   it("renders exact current dimensions and recomputes regions without clearing operator state", () => {

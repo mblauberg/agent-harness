@@ -7,6 +7,7 @@ import { v7 as uuidv7 } from "uuid";
 import {
   GATE_SYSTEM_SUPERSESSION_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  RUN_SESSION_PROJECTION_FEATURE,
   type AgentCustodyResult,
   type EvidenceArtifactRegistration,
   type EvidencePublishRequest,
@@ -2296,6 +2297,7 @@ export class Fabric {
         return this.#operatorProjections.snapshot(
           request,
           context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.projectionPage: {
@@ -2305,6 +2307,7 @@ export class Fabric {
         return this.#operatorProjections.page(
           request,
           context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.projectionEvents: {
@@ -2320,13 +2323,17 @@ export class Fabric {
         return this.#operatorProjections.viewPage(
           request,
           context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.projectionDetailRead: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectionDetailRead];
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
-        return this.#operatorProjections.detail(request);
+        return this.#operatorProjections.detail(
+          request,
+          context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+        );
       }
       case FABRIC_OPERATIONS.messageBodyRead: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.messageBodyRead];

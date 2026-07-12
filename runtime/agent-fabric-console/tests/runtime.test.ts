@@ -197,6 +197,44 @@ class FakeController implements FabricRuntimeController {
 }
 
 describe("Fabric Console runtime routing", () => {
+  it("uses s to return an exact session to the project selector", async () => {
+    const controller = new FakeController();
+    controller.dataset = {
+      ...controller.dataset,
+      projectSessions: {
+        choices: [{
+          projectSessionId: "session_switch_01" as never,
+          mode: "independent",
+          state: "active",
+          revision: 1,
+          generation: 1,
+          lastEventAt: timestamp,
+        }],
+        selectedProjectSessionId: "session_switch_01" as never,
+      },
+    };
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "switch-session-event",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "s" });
+
+    expect(activate).toHaveBeenCalledWith({
+      regionId: "session:switch-project",
+      binding: null,
+      provenance: "keyboard",
+      eventId: "switch-session-event",
+    });
+  });
+
   it("routes all eight views and paging without stealing editor digits", async () => {
     const controller = new FakeController();
     const setEditorActive = vi.fn();

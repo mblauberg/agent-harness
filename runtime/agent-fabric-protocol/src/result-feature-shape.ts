@@ -3,6 +3,9 @@ import type { ScopedGate } from "./gates.js";
 import { FABRIC_OPERATIONS } from "./operations.js";
 import type {
   AttentionItem,
+  OperatorDetail,
+  OperatorDetailRef,
+  OperatorDetailReadResult,
   OperatorProjectionSnapshot,
   OperatorViewPageResult,
   OperatorViewSummaryMap,
@@ -13,6 +16,7 @@ import type { OperationResultMap, ProtocolOperation } from "./rpc-contract.js";
 
 export const NATIVE_NOTIFICATION_PROJECTION_FEATURE =
   "native-notification-projection.v1" as const;
+export const RUN_SESSION_PROJECTION_FEATURE = "run-session-projection.v1" as const;
 
 export type ProtocolResultShapeFailureReason =
   | "missing-negotiated-field"
@@ -85,6 +89,79 @@ function notificationPresence(
   return [];
 }
 
+function runReferencePresence(reference: OperatorDetailRef): boolean[] {
+  return reference.kind === "run"
+    ? [reference.projectSessionId !== undefined]
+    : [];
+}
+
+function runDetailPresence(detail: OperatorDetail): boolean[] {
+  return detail.kind === "run"
+    ? [detail.projectSessionId !== undefined]
+    : [];
+}
+
+function runSessionPresence(
+  operation: ProtocolOperation,
+  result: OperationResultMap[ProtocolOperation],
+): readonly boolean[] {
+  if (operation === FABRIC_OPERATIONS.projectionSnapshot) {
+    return factValues(
+      (result as OperatorProjectionSnapshot).runs,
+    ).flatMap((runs) => runs.map((run) => run.projectSessionId !== undefined));
+  }
+  if (operation === FABRIC_OPERATIONS.projectionPage) {
+    const page = result as ProjectionPageResult;
+    if (page.view !== "runs") return [];
+    return factValues((page as ProjectionPageResult<"runs">).page)
+      .flatMap((value) => value.items.map((run) => run.projectSessionId !== undefined));
+  }
+  if (operation === FABRIC_OPERATIONS.projectionViewPage) {
+    const page = result as OperatorViewPageResult;
+    if (page.status !== "page") return [];
+    if (page.view === "runs") {
+      const runs = page as Extract<OperatorViewPageResult<"runs">, { status: "page" }>;
+      return runs.rows.flatMap((row) => factValues(row.fact).flatMap((value) => [
+        value.detailRef.projectSessionId !== undefined,
+        value.summary.projectSessionId !== undefined,
+      ]));
+    }
+    if (page.view === "attention") {
+      const attention = page as Extract<OperatorViewPageResult<"attention">, { status: "page" }>;
+      return attention.rows.flatMap((row) => factValues(row.fact)
+        .flatMap((value) => runReferencePresence(value.detailRef)));
+    }
+    return [];
+  }
+  if (operation === FABRIC_OPERATIONS.projectionDetailRead) {
+    const read = result as OperatorDetailReadResult;
+    if (read.status !== "current") return [];
+    return [
+      ...runReferencePresence(read.detailRef),
+      ...factValues(read.detail).flatMap(runDetailPresence),
+    ];
+  }
+  return [];
+}
+
+function assertUniformFeaturePresence(
+  operation: ProtocolOperation,
+  featureNegotiated: boolean,
+  presence: readonly boolean[],
+): void {
+  if (presence.length === 0) return;
+  const presentCount = presence.filter(Boolean).length;
+  if (presentCount !== 0 && presentCount !== presence.length) {
+    throw new ProtocolResultShapeError(operation, "mixed-presence");
+  }
+  if (featureNegotiated && presentCount === 0) {
+    throw new ProtocolResultShapeError(operation, "missing-negotiated-field");
+  }
+  if (!featureNegotiated && presentCount > 0) {
+    throw new ProtocolResultShapeError(operation, "unnegotiated-field");
+  }
+}
+
 function gateResult(
   operation: ProtocolOperation,
   result: OperationResultMap[ProtocolOperation],
@@ -116,19 +193,15 @@ export function assertOperationResultFeatureShape<Operation extends ProtocolOper
     operation,
     result as OperationResultMap[ProtocolOperation],
   );
-  if (presence.length === 0) return result;
-  const includesNotification = features.includes(
-    NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  assertUniformFeaturePresence(
+    operation,
+    features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE),
+    presence,
   );
-  const presentCount = presence.filter(Boolean).length;
-  if (presentCount !== 0 && presentCount !== presence.length) {
-    throw new ProtocolResultShapeError(operation, "mixed-presence");
-  }
-  if (includesNotification && presentCount === 0) {
-    throw new ProtocolResultShapeError(operation, "missing-negotiated-field");
-  }
-  if (!includesNotification && presentCount > 0) {
-    throw new ProtocolResultShapeError(operation, "unnegotiated-field");
-  }
+  assertUniformFeaturePresence(
+    operation,
+    features.includes(RUN_SESSION_PROJECTION_FEATURE),
+    runSessionPresence(operation, result as OperationResultMap[ProtocolOperation]),
+  );
   return result;
 }

@@ -26,6 +26,7 @@ import {
   type OperatorViewPageRequest,
   type OperatorViewPageResult,
   type ProjectId,
+  type ProjectSessionDiscovery,
   type ProjectSessionId,
   type ProjectionEventsRequest,
   type ProjectionEventsResult,
@@ -117,6 +118,7 @@ export type ConsoleProtocolBinding =
       readOnly: boolean;
       actions: OperatorActionClient | null;
       nativeNotificationProjection: "daemon-journal" | "legacy-fallback";
+      runSessionProjection: "exact";
       compatibility: ConsoleProtocolCompatibility;
     }>
   | Readonly<{
@@ -149,6 +151,7 @@ export function bindConsoleProtocolClient(
     const missingFeatures = [
       "operator-projection.v2",
       "scoped-gate-read.v1",
+      "run-session-projection.v1",
     ].filter((feature) => !available.has(feature));
     return {
       ok: false,
@@ -191,6 +194,7 @@ export function bindConsoleProtocolClient(
     readOnly: consoleClient.readOnly,
     actions: consoleClient.readOnly ? null : consoleClient.actions,
     nativeNotificationProjection,
+    runSessionProjection: "exact",
     compatibility,
     port: {
       snapshot: (request) => projection.snapshot(request),
@@ -395,6 +399,10 @@ export type FabricConsoleDataset = Readonly<{
   pages: ConsoleViewPages;
   loadedAtMs: number;
   canMutate: boolean;
+  projectSessions?: Readonly<{
+    choices: readonly ProjectSessionDiscovery[];
+    selectedProjectSessionId: ProjectSessionId | null;
+  }>;
   workflowCapabilities?: ConsoleWorkflowCapabilities;
   productionActionPlanning?: true;
   inspection?: ConsoleReadInspection;

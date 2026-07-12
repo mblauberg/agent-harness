@@ -2,7 +2,7 @@
 
 Status: Approved; implementation in progress
 Version: 1.3
-Date: 11 July 2026
+Date: 12 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
 Design chairs: Codex with Claude Code adversarial review
@@ -15,7 +15,11 @@ ships only the current Console/protocol/schema epoch. Old-daemon retry,
 vintage-wire presentation and implicit legacy-state import are not product
 requirements; incompatible state is preserved and rejected explicitly. This
 does not weaken current optional-feature negotiation or adapter verification.
-Version 1.2 closes the implementation-review finding that bounded evidence
+The project-scoped Console retains its project client, auto-selects only one
+attachable session, and otherwise uses exact session-labelled run projections
+plus an explicit selector. `run-session-projection.v1` is required; a peer
+without exact run/session identity is incompatible. Version 1.2 closes the
+implementation-review finding that bounded evidence
 content, continuation, safety disclosure and acceptance behaviour must remain
 owned by this Console specification rather than Spec 04. Version 1.1 records
 the human's implementation clarification of 11 July 2026:
@@ -146,6 +150,14 @@ A Console project view may contain either topology:
    lead and a bounded team, but it is not another chair authority.
 2. **Independent sessions:** unrelated or deliberately isolated runs each have
    one chair and separate fabric session authority.
+
+The project-scoped Console connection remains open in both topologies. When
+exactly one attachable project session exists it may open a secondary session
+client automatically. With zero or multiple attachable sessions it remains on
+the project projection until the operator selects a stable session ID. Every
+run projection, row summary, detail reference and detail carries that exact
+session ID. Selecting a run opens only its secondary session client; returning
+to the project selector closes only that secondary client.
 
 The Console is a projection-only client. The project-session lifecycle is a
 Fabric-owned protocol entity persisted by the daemon before its first run is
@@ -722,7 +734,8 @@ Implementation is accepted only when objective tests demonstrate:
     selected IDs, scroll, drafts and pending commands. Mouse activation or a
     resize cannot duplicate a command or bypass review. A
     versioned usability-fixture manifest covers: empty/healthy work; concurrent
-    multi-run work; and consequential-gate plus degraded/stale/conflict state.
+    independent sessions or coordinated workstreams; and consequential-gate
+    plus degraded/stale/conflict state.
     Each fixture declares the expected top attention item and correct
     project/run/phase/owner/next-milestone/health answers. Across three timed
     repetitions per fixture, the top item is always correct and at least 95% of
@@ -776,6 +789,12 @@ Implementation is accepted only when objective tests demonstrate:
     `Implement...`; terminal-neutralised complete content requires a distinct
     transformation/source-digest confirmation. Raw PTY output contains no
     terminal-control or credential canary.
+35. A project with multiple attachable independent sessions does not
+    auto-select one. Project-scoped run snapshots, pages, row summaries, detail
+    references and details bind the exact `projectSessionId`; Enter on a run
+    selects its secondary client, `s` returns to the retained project selector,
+    and `--session` selects an exact stable ID for interactive or export use.
+    A peer without `run-session-projection.v1` is explicitly incompatible.
 
 ## 16. Implementation gate
 
@@ -784,5 +803,6 @@ instruction of 11 July 2026 launched canonical run AFAB-004 from a fresh
 context, authorised the local implementation and later clarified dynamic
 terminal resizing in v1.1. Version 1.2 records the review-required Console
 evidence UX needed to implement that approved artifact-review outcome without
-changing effect authority. Final human acceptance remains pending; Git push,
+changing effect authority. Version 1.3 records exact multi-session selection
+without changing the one-live-run-per-session topology. Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.

@@ -55,6 +55,7 @@ function currentBinding(
     readOnly,
     actions,
     nativeNotificationProjection: "daemon-journal",
+    runSessionProjection: "exact",
     compatibility: { mode: "current" },
   };
 }
@@ -412,6 +413,173 @@ describe("typed Console application bootstrap boundary", () => {
       expect(close).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("opens an exact run session from the project selector and returns with s", async () => {
+    const projectSessionId = "session-application-independent" as ProjectSessionId;
+    const runId = "run-application-independent" as never;
+    const choice = {
+      projectSessionId,
+      mode: "independent" as const,
+      state: "active" as const,
+      revision: 2,
+      generation: 1,
+      lastEventAt: timestamp,
+    };
+    const projectSnapshot: OperatorProjectionSnapshot = {
+      ...snapshot(),
+      runs: {
+        freshness: "live",
+        source: "fabric",
+        revision: 2,
+        observedAt: timestamp,
+        value: [{
+          projectSessionId,
+          runId,
+          phase: "active",
+          chairAgentId: "chair-application" as never,
+          nextMilestone: "verification",
+          health: "healthy",
+        }],
+      },
+    };
+    const basePort = protocolPort();
+    const port: ConsoleProtocolPort = {
+      ...basePort,
+      snapshot: vi.fn(async () => projectSnapshot),
+      viewPage: vi.fn(async (request): Promise<OperatorViewPageResult> => {
+      if (request.view !== "runs") {
+        return {
+          status: "page",
+          view: request.view,
+          rows: [],
+          nextCursor: 0,
+          hasMore: false,
+          snapshotRevision: request.snapshotRevision,
+          readTransactionId: `page-${request.view}`,
+        } as OperatorViewPageResult;
+      }
+      return {
+        status: "page",
+        view: "runs",
+        rows: [{
+          itemId: runId,
+          itemRevision: 2,
+          fact: {
+            freshness: "live",
+            source: "fabric",
+            revision: 2,
+            observedAt: timestamp,
+            value: {
+              summary: {
+                kind: "run",
+                projectSessionId,
+                phase: "active",
+                health: "healthy",
+                nextMilestone: "verification",
+              },
+              detailRef: {
+                kind: "run",
+                projectSessionId,
+                coordinationRunId: runId,
+                expectedRevision: 2,
+              },
+              actionAvailability: { state: "read-only", reason: "authority-insufficient" },
+            },
+          },
+        }],
+        nextCursor: 1,
+        hasMore: false,
+        snapshotRevision: request.snapshotRevision,
+        readTransactionId: "page-runs-selector",
+      };
+      }),
+    };
+    const actions = {
+      preview: vi.fn(async () => { throw new Error("unused"); }),
+      commit: vi.fn(async () => { throw new Error("unused"); }),
+      status: vi.fn(async () => { throw new Error("unused"); }),
+      reconcile: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const actionPlanner = {
+      plan: vi.fn(async () => null),
+      confirmation: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const selectProjectSession = vi.fn<(
+      projectSessionId: ProjectSessionId,
+    ) => Promise<Extract<ConsoleBootstrapResult, { status: "connected" }>>>();
+    const selectProject = vi.fn<() => Promise<Extract<
+      ConsoleBootstrapResult,
+      { status: "connected" }
+    >>>();
+    const sessionSelection = { choices: [choice], selectProjectSession, selectProject };
+    const close = vi.fn(async () => {});
+    const detach = vi.fn(async () => {});
+    const projectConnection = {
+      status: "connected" as const,
+      binding: currentBinding(port, true, null),
+      credential,
+      projectId,
+      sessionSelection,
+      detach,
+      close,
+    };
+    const selectedConnection = {
+      status: "connected" as const,
+      binding: currentBinding(port, false, actions),
+      credential,
+      projectId,
+      projectSessionId,
+      actionPlanner,
+      sessionSelection,
+      detach,
+      close,
+    };
+    selectProjectSession.mockResolvedValue(selectedConnection);
+    selectProject.mockResolvedValue(projectConnection);
+    const application = await startFabricConsoleApplication({
+      bootstrap: { startOrAttach: async () => projectConnection },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => "session-switch-input",
+      confirmationId: () => "session-switch-confirmation",
+      ...runtimeDependencies,
+    });
+    expect(application.dataset).toMatchObject({
+      canMutate: false,
+      projectSessions: { selectedProjectSessionId: null },
+    });
+    await application.handleInput({ kind: "key", key: "text", text: "3" });
+    expect(application.frame.rows.join("\n")).toContain(projectSessionId);
+
+    await application.handleActivation({
+      regionId: `row:runs:${String(runId)}`,
+      binding: {
+        view: "runs",
+        itemId: runId,
+        itemRevision: revisionFromProtocol(2),
+        projectionRevision: revisionFromProtocol(1),
+      },
+      provenance: "keyboard",
+      eventId: "open-exact-session",
+    });
+    expect(selectProjectSession).toHaveBeenCalledWith(projectSessionId);
+    expect(application.dataset).toMatchObject({
+      canMutate: true,
+      projectSessions: { selectedProjectSessionId: projectSessionId },
+    });
+    expect(application.frame.rows.at(-1)).toContain("s sessions");
+    expect(application.frame.rows.at(-1)).toContain("q detach");
+
+    await application.handleInput({ kind: "key", key: "text", text: "s" });
+    expect(selectProject).toHaveBeenCalledOnce();
+    expect(application.dataset).toMatchObject({
+      canMutate: false,
+      projectSessions: { selectedProjectSessionId: null },
+    });
+    await application.close("operator");
+  });
 
   it("enables mutations from the production planner returned by bootstrap", async () => {
     const port = protocolPort();

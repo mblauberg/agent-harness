@@ -131,6 +131,55 @@ describe("standalone Console executable", () => {
     },
   );
 
+  it("passes an explicit stable session selection to the application", async () => {
+    const dataset = createBootstrapUnavailableDataset("start-failed", 1_000);
+    const startApplication = vi.fn(async () => ({
+      dataset,
+      controller: {
+        state: {
+          activeView: "system",
+          selectionByView: Object.fromEntries(FABRIC_VIEWS.map((view) => [view, null])),
+          scrollAnchorByView: Object.fromEntries(FABRIC_VIEWS.map((view) => [view, null])),
+          review: null,
+          pendingCommandIds: [],
+          lastActionStatus: null,
+          lastReceipt: null,
+          lastFailure: null,
+        },
+      },
+      close: async () => {},
+    }));
+
+    await runConsoleCli([
+      "--session",
+      "session_explicit_01",
+      "--export",
+      "json",
+    ], {
+      input: {
+        isTTY: false,
+        isRaw: false,
+        readableFlowing: false,
+        setRawMode: () => {},
+        resume: () => {},
+        pause: () => {},
+        on: () => {},
+        off: () => {},
+      },
+      output: {
+        isTTY: false,
+        write: () => true,
+        on: () => {},
+        removeListener: () => {},
+      },
+      startApplication: startApplication as never,
+    });
+
+    expect(startApplication).toHaveBeenCalledWith(expect.objectContaining({
+      projectSessionId: "session_explicit_01",
+    }));
+  });
+
   it("closes and detaches an attached application when terminal construction fails", async () => {
     const close = vi.fn(async () => {});
     const application = {

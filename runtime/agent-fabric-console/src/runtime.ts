@@ -452,6 +452,25 @@ export class FabricConsoleRuntime {
         await this.close("operator");
         return;
       }
+      if (
+        event.text === "s" &&
+        this.#controller.dataset.projectSessions?.selectedProjectSessionId !== null &&
+        this.#controller.dataset.projectSessions?.selectedProjectSessionId !== undefined
+      ) {
+        try {
+          await this.#activate({
+            regionId: "session:switch-project",
+            binding: null,
+            provenance: "keyboard",
+            eventId: this.#eventId(),
+          });
+        } catch (error: unknown) {
+          const failure = consoleFailureFromUnknown(error);
+          this.#ui = { ...this.#ui, notice: `Session switch failed: ${failure.code}` };
+          this.repaint();
+        }
+        return;
+      }
       if (event.text === "e") {
         const echoInput =
           this.#frame.presentation.review?.confirmationMode === "echo";
@@ -509,7 +528,7 @@ export class FabricConsoleRuntime {
       if (event.text === "?") {
         this.#ui = {
           ...this.#ui,
-          notice: "Help: Alt-1..8 views; [ ] cycle; e draft; : advanced workflow; PgUp/PgDn; Alt-M mouse; q detach",
+          notice: "Help: Alt-1..8 views; [ ] cycle; Enter open; s sessions; e draft; : workflow; PgUp/PgDn; Alt-M mouse; q detach",
         };
         this.repaint();
       }

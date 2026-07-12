@@ -223,12 +223,60 @@ describe("operator projection store", () => {
       snapshotRevision: globalRevision.revision,
       project: { freshness: "live", revision: 3 },
       session: { freshness: "live", value: { projectSessionId: "session_01", revision: 2 } },
-      runs: { freshness: "live", value: [{ runId: "run_01", chairAgentId: "chair_01" }] },
+      runs: {
+        freshness: "live",
+        value: [{
+          projectSessionId: "session_01",
+          runId: "run_01",
+          chairAgentId: "chair_01",
+        }],
+      },
       attention: { freshness: "live", value: [{ itemId: "attention_01", revision: 2 }] },
       cursor: 1,
     });
     expect(snapshot.readTransactionId).toMatch(/^projection:/u);
     expect(snapshot.stateDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+
+    const runPage = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    }, "include");
+    expect(runPage).toMatchObject({
+      status: "page",
+      rows: [{
+        fact: {
+          value: {
+            summary: { kind: "run", projectSessionId: "session_01" },
+            detailRef: {
+              kind: "run",
+              projectSessionId: "session_01",
+              coordinationRunId: "run_01",
+            },
+          },
+        },
+      }],
+    });
+    if (runPage.status !== "page") throw new Error("run page unavailable");
+    const detailRef = runPage.rows[0]?.fact.freshness === "live"
+      ? runPage.rows[0].fact.value.detailRef
+      : undefined;
+    if (detailRef?.kind !== "run") throw new Error("run detail reference unavailable");
+    expect(fixture.projections.detail({
+      credential: fixture.credential,
+      projectId,
+      snapshotRevision: snapshot.snapshotRevision,
+      detailRef,
+    })).toMatchObject({
+      status: "current",
+      detailRef: { kind: "run", projectSessionId: "session_01" },
+      detail: {
+        value: { kind: "run", projectSessionId: "session_01" },
+      },
+    });
   });
 
   it("projects persisted Herdr presence without treating pane identity as Fabric authority", () => {

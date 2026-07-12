@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import {
   GATE_SYSTEM_SUPERSESSION_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  RUN_SESSION_PROJECTION_FEATURE,
   NdjsonRpcTransport,
   ProtocolRemoteError,
   ProtocolResultShapeError,
@@ -52,6 +53,7 @@ const NON_ATTACHABLE_SESSION_STATES = new Set(["closed", "cancelled", "launch_fa
 const REQUIRED_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "operator-control.v1",
   "operator-projection.v1",
+  RUN_SESSION_PROJECTION_FEATURE,
 ] as const satisfies readonly ProtocolFeature[]);
 export const STRICT_V1_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "project-sessions.v1",
@@ -142,6 +144,7 @@ export class LocalOperatorConsoleProtocolIncompatibleError extends Error {
 export type LocalOperatorConsoleSessionOptions = Readonly<{
   projectRoot: string;
   surface: "standalone" | "herdr";
+  projectSessionId?: ProjectSessionId;
   paths?: FabricPaths;
   agentsHome?: string;
   daemon?: Pick<
@@ -163,11 +166,18 @@ export type LocalOperatorConsoleSession = Readonly<{
   client: NegotiatedOperatorClient;
   compatibility: LocalOperatorConsoleCompatibility;
   credential: OperatorCapabilityCredential;
+  projectClient: NegotiatedOperatorClient;
+  projectCompatibility: LocalOperatorConsoleCompatibility;
+  projectCredential: OperatorCapabilityCredential;
+  attachableProjectSessions: readonly ProjectSessionDiscovery[];
   projectId: ProjectId;
   operatorId: OperatorId;
-  projectSessionId?: ProjectSessionId;
+  projectSessionId: ProjectSessionId | undefined;
   clientId: OperatorClientId;
   daemonPid: number;
+  refreshProjectSessions(): Promise<readonly ProjectSessionDiscovery[]>;
+  selectProjectSession(projectSessionId: ProjectSessionId): Promise<void>;
+  selectProject(): Promise<void>;
   detach(input: Readonly<{ reason: "operator" | "safety" | "signal" }>): Promise<void>;
   close(): Promise<void>;
 }>;
@@ -316,27 +326,10 @@ export async function connectLocalOperatorConsoleClient(input: Readonly<{
     return { client: await connect(OPTIONAL_FEATURES), compatibility: { mode: "current" } };
   } catch (primary: unknown) {
     if (!(primary instanceof ProtocolRemoteError) || primary.code !== "PROTOCOL_INVALID") throw primary;
-    try {
-      return {
-        client: await connect(STRICT_V1_OPTIONAL_FEATURES),
-        compatibility: {
-          mode: "legacy-compatibility",
-          primary: protocolFailureAnnotation(primary),
-          retry: { status: "succeeded", profile: "strict-v1" },
-        },
-      };
-    } catch (retry: unknown) {
-      const retryError = retry instanceof Error ? retry : new Error(String(retry));
-      throw new LocalOperatorConsoleProtocolIncompatibleError({
-        primary: protocolFailureAnnotation(primary),
-        retry: {
-          status: "failed",
-          profile: "strict-v1",
-          failure: protocolFailureAnnotation(retryError),
-        },
-        cause: primary,
-      });
-    }
+    throw new LocalOperatorConsoleProtocolIncompatibleError({
+      primary: protocolFailureAnnotation(primary),
+      cause: primary,
+    });
   }
 }
 
@@ -359,22 +352,18 @@ function resultProtocolIncompatible(
   });
 }
 
-function selectedSession(
-  items: readonly ProjectSessionDiscovery[],
-): ProjectSessionDiscovery | undefined {
-  return items.find((session) => !NON_ATTACHABLE_SESSION_STATES.has(session.state));
-}
-
-async function discoverSelectedSession(input: {
+async function discoverAttachableSessions(input: {
   client: NegotiatedOperatorClient;
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
   canonicalRoot: string;
-}): Promise<ProjectSessionDiscovery | undefined> {
+}): Promise<readonly ProjectSessionDiscovery[]> {
   const projection = input.client.projection;
   if (projection === undefined) {
     throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
   }
+  const discovered: ProjectSessionDiscovery[] = [];
+  const ids = new Set<ProjectSessionId>();
   let after = 0;
   for (;;) {
     const discovery = await projection.discover({
@@ -391,8 +380,14 @@ async function discoverSelectedSession(input: {
     ) {
       throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
     }
-    const selected = selectedSession(discovery.sessions.value.items);
-    if (selected !== undefined || !discovery.sessions.value.hasMore) return selected;
+    for (const session of discovery.sessions.value.items) {
+      if (ids.has(session.projectSessionId)) {
+        throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+      }
+      ids.add(session.projectSessionId);
+      if (!NON_ATTACHABLE_SESSION_STATES.has(session.state)) discovered.push(session);
+    }
+    if (!discovery.sessions.value.hasMore) return discovered;
     const next = discovery.sessions.value.nextCursor;
     if (!Number.isSafeInteger(next) || next <= after) {
       throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
@@ -558,7 +553,8 @@ export async function openLocalOperatorConsoleSession(
   }
 
   let privateClient: FabricDaemonClient | undefined;
-  let publicClient: NegotiatedOperatorClient | undefined;
+  let projectClient: NegotiatedOperatorClient | undefined;
+  let sessionClient: NegotiatedOperatorClient | undefined;
   let publicCompatibility: LocalOperatorConsoleCompatibility | undefined;
   try {
     privateClient = await FabricDaemonClient.connect(
@@ -577,16 +573,28 @@ export async function openLocalOperatorConsoleSession(
       credential: project.credential as OperatorCapabilityCredential,
       surface: options.surface,
     });
-    publicClient = projectConnection.client;
-    publicCompatibility = projectConnection.compatibility;
-    const selected = await discoverSelectedSession({
-      client: publicClient,
+    projectClient = projectConnection.client;
+    const projectCompatibility = projectConnection.compatibility;
+    publicCompatibility = projectCompatibility;
+    let attachableProjectSessions = await discoverAttachableSessions({
+      client: projectClient,
       credential: project.credential as OperatorCapabilityCredential,
       projectId: project.projectId as ProjectId,
       canonicalRoot: identity.canonicalRoot,
     });
+    const selected = options.projectSessionId === undefined
+      ? attachableProjectSessions.length === 1
+        ? attachableProjectSessions[0]
+        : undefined
+      : attachableProjectSessions.find(
+          ({ projectSessionId }) => projectSessionId === options.projectSessionId,
+        );
+    if (options.projectSessionId !== undefined && selected === undefined) {
+      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+    }
     let activeCredential = project.credential as OperatorCapabilityCredential;
-    let activeCredentialExpiresAt = project.expiresAt;
+    let activeCompatibility = projectCompatibility;
+    let activeProjectSessionId: ProjectSessionId | undefined;
     if (selected !== undefined) {
       const issued = await sessionCredential(
         privateClient,
@@ -596,47 +604,41 @@ export async function openLocalOperatorConsoleSession(
         now(),
         credentialLifetimeMs,
       );
-      await publicClient.close();
       const sessionConnection = await connectLocalOperatorConsoleClient({
         socketPath: daemon.address.path,
         credential: issued.credential as OperatorCapabilityCredential,
         surface: options.surface,
       });
-      publicClient = sessionConnection.client;
+      sessionClient = sessionConnection.client;
       publicCompatibility = sessionConnection.compatibility;
+      activeCompatibility = sessionConnection.compatibility;
       activeCredential = issued.credential as OperatorCapabilityCredential;
-      activeCredentialExpiresAt = issued.expiresAt;
+      activeProjectSessionId = selected.projectSessionId;
     }
-    if (publicClient.operatorControl === undefined || publicClient.projection === undefined) {
+    const retainedProjectClient = projectClient;
+    const retainedPrivateClient = privateClient;
+    const projectProjection = retainedProjectClient.projection;
+    const projectOperatorControl = retainedProjectClient.operatorControl;
+    if (projectOperatorControl === undefined || projectProjection === undefined) {
       throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
     }
     const projectId = project.projectId as ProjectId;
-    const projectSessionId = selected?.projectSessionId;
-    const scope = {
-      credential: activeCredential,
+    const projectCredentialValue = project.credential as OperatorCapabilityCredential;
+    const projectSnapshot = await projectProjection.snapshot({
+      credential: projectCredentialValue,
       projectId,
-      ...(projectSessionId === undefined ? {} : { projectSessionId }),
-    };
-    const snapshot = await publicClient.projection.snapshot(scope);
-    const expectedRevision = projectSessionId === undefined
-      ? snapshot.project.revision
-      : snapshot.session.freshness === "live" &&
-          snapshot.session.value?.projectSessionId === projectSessionId
-        ? snapshot.session.value.revision
-        : undefined;
-    if (expectedRevision === undefined) {
-      throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
-    }
+    });
+    const expectedRevision = projectSnapshot.project.revision;
     const clientId = (options.clientId ?? `console_${randomUUID()}`) as OperatorClientId;
     const operatorId = project.operatorId as OperatorId;
     const attachExpiry = Math.min(
-      Date.parse(activeCredentialExpiresAt),
+      Date.parse(project.expiresAt),
       now() + attachmentLeaseMs,
     );
     assertFuture(isoTimestamp(attachExpiry), now());
-    const attachment = await publicClient.operatorControl.attach({
+    const attachment = await projectOperatorControl.attach({
       command: mutationContext({
-        credential: activeCredential,
+        credential: projectCredentialValue,
         commandId: `${clientId}:attach`,
         expectedRevision,
         operatorId,
@@ -644,48 +646,157 @@ export async function openLocalOperatorConsoleSession(
         inputEventId: `${clientId}:attach`,
       }),
       projectId,
-      ...(projectSessionId === undefined ? {} : { projectSessionId }),
       requestedExpiresAt: isoTimestamp(attachExpiry),
     });
     if (
       attachment.clientId !== clientId ||
       attachment.projectId !== projectId ||
-      attachment.projectSessionId !== (projectSessionId ?? null)
+      attachment.projectSessionId !== null
     ) {
       throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
     }
-    await privateClient.close();
-    privateClient = undefined;
     daemon.release();
     const owner = attachmentOwner({
-      client: publicClient,
-      credential: activeCredential,
+      client: retainedProjectClient,
+      credential: projectCredentialValue,
       operatorId,
       clientId,
       projectId,
-      ...(projectSessionId === undefined ? {} : { projectSessionId }),
       initial: attachment,
-      capabilityExpiresAt: activeCredentialExpiresAt,
+      capabilityExpiresAt: project.expiresAt,
       now,
       attachmentLeaseMs,
       heartbeatIntervalMs,
     });
-    return {
-      client: publicClient,
-      compatibility: publicCompatibility ?? { mode: "current" },
-      credential: activeCredential,
+    let closed = false;
+    let closePromise: Promise<void> | undefined;
+    let selectionQueue: Promise<void> = Promise.resolve();
+    const refreshProjectSessions = async (): Promise<readonly ProjectSessionDiscovery[]> => {
+      if (closed) throw new Error("local Console session is closed");
+      attachableProjectSessions = await discoverAttachableSessions({
+        client: retainedProjectClient,
+        credential: projectCredentialValue,
+        projectId,
+        canonicalRoot: identity.canonicalRoot,
+      });
+      return attachableProjectSessions;
+    };
+    const selectProjectSession = async (projectSessionId: ProjectSessionId): Promise<void> => {
+      const change = async (): Promise<void> => {
+        if (closed) throw new Error("local Console session is closed");
+        if (activeProjectSessionId === projectSessionId && sessionClient !== undefined) return;
+        let selectedSession = attachableProjectSessions.find(
+          (candidate) => candidate.projectSessionId === projectSessionId,
+        );
+        if (selectedSession === undefined) {
+          await refreshProjectSessions();
+          selectedSession = attachableProjectSessions.find(
+            (candidate) => candidate.projectSessionId === projectSessionId,
+          );
+        }
+        if (selectedSession === undefined) {
+          throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+        }
+        const issued = await sessionCredential(
+          retainedPrivateClient,
+          identity,
+          project,
+          selectedSession,
+          now(),
+          credentialLifetimeMs,
+        );
+        const connection = await connectLocalOperatorConsoleClient({
+          socketPath: daemon.address.path,
+          credential: issued.credential as OperatorCapabilityCredential,
+          surface: options.surface,
+        });
+        try {
+          const snapshot = await connection.client.projection?.snapshot({
+            credential: issued.credential as OperatorCapabilityCredential,
+            projectId,
+            projectSessionId,
+          });
+          if (
+            snapshot?.session.freshness !== "live" ||
+            snapshot.session.value?.projectSessionId !== projectSessionId
+          ) {
+            throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
+          }
+        } catch (error: unknown) {
+          await connection.client.close().catch(() => undefined);
+          throw error;
+        }
+        const previous = sessionClient;
+        sessionClient = connection.client;
+        publicCompatibility = connection.compatibility;
+        activeCompatibility = connection.compatibility;
+        activeCredential = issued.credential as OperatorCapabilityCredential;
+        activeProjectSessionId = projectSessionId;
+        await previous?.close();
+      };
+      const operation = selectionQueue.then(change, change);
+      selectionQueue = operation.catch(() => undefined);
+      await operation;
+    };
+    const selectProject = async (): Promise<void> => {
+      const change = async (): Promise<void> => {
+        if (closed) throw new Error("local Console session is closed");
+        const previous = sessionClient;
+        sessionClient = undefined;
+        activeCredential = projectCredentialValue;
+        activeCompatibility = projectCompatibility;
+        activeProjectSessionId = undefined;
+        await previous?.close();
+      };
+      const operation = selectionQueue.then(change, change);
+      selectionQueue = operation.catch(() => undefined);
+      await operation;
+    };
+    const result: LocalOperatorConsoleSession = {
+      get client() { return sessionClient ?? retainedProjectClient; },
+      get compatibility() { return activeCompatibility; },
+      get credential() { return activeCredential; },
+      projectClient: retainedProjectClient,
+      projectCompatibility,
+      projectCredential: projectCredentialValue,
+      get attachableProjectSessions() { return attachableProjectSessions; },
       projectId,
       operatorId,
-      ...(projectSessionId === undefined ? {} : { projectSessionId }),
+      get projectSessionId() { return activeProjectSessionId; },
       clientId,
       daemonPid: daemon.pid,
-      ...owner,
+      refreshProjectSessions,
+      selectProjectSession,
+      selectProject,
+      detach: owner.detach,
+      close(): Promise<void> {
+        closePromise ??= (async () => {
+          closed = true;
+          await selectionQueue;
+          const secondary = sessionClient;
+          sessionClient = undefined;
+          const closedConnections = await Promise.allSettled([
+            secondary?.close() ?? Promise.resolve(),
+            owner.close(),
+            retainedPrivateClient.close(),
+          ]);
+          const failures = closedConnections
+            .filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")
+            .map((outcome) => outcome.reason);
+          if (failures.length > 0) {
+            throw new AggregateError(failures, "local Console close failed");
+          }
+        })();
+        return closePromise;
+      },
     };
+    return result;
   } catch (error: unknown) {
     daemon.release();
     await Promise.allSettled([
       privateClient?.close() ?? Promise.resolve(),
-      publicClient?.close() ?? Promise.resolve(),
+      sessionClient?.close() ?? Promise.resolve(),
+      projectClient?.close() ?? Promise.resolve(),
     ]);
     if (
       error instanceof LocalOperatorConsoleUnavailableError ||

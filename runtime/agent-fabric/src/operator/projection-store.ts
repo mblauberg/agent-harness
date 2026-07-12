@@ -55,6 +55,7 @@ export type OperatorProjectionStoreOptions = CoreServiceOptions & {
 };
 
 export type NativeNotificationProjection = "include" | "omit";
+export type RunSessionProjection = "include" | "omit";
 
 type LoadedOperatorDetail = {
   revision: number;
@@ -153,6 +154,7 @@ export class OperatorProjectionStore {
   snapshot(
     request: ProjectionSnapshotRequest,
     nativeNotificationProjection: NativeNotificationProjection,
+    runSessionProjection: RunSessionProjection = "include",
   ): OperatorProjectionSnapshot {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -166,7 +168,7 @@ export class OperatorProjectionStore {
             SELECT * FROM project_sessions WHERE project_session_id=? AND project_id=?
           `).get(selectedSessionId, request.projectId), "project session");
       const session = sessionRow === undefined ? null : this.#sessionFromRow(sessionRow);
-      const runs = this.#runs(request.projectId, selectedSessionId);
+      const runs = this.#runs(request.projectId, selectedSessionId, runSessionProjection);
       const attention = this.#attention(request.projectId, selectedSessionId, nativeNotificationProjection);
       const capacity = this.#capacity(request.projectId, selectedSessionId);
       const cursor = this.#eventCursor(request.projectId, selectedSessionId);
@@ -202,19 +204,26 @@ export class OperatorProjectionStore {
   viewPage(
     request: OperatorViewPageRequest,
     nativeNotificationProjection: NativeNotificationProjection,
+    runSessionProjection: RunSessionProjection = "include",
   ): OperatorViewPageResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
     assertPageBounds(request.cursor, request.limit);
     switch (request.view) {
       case "attention": return this.#viewPage(request, "attention", () => (
-        this.#attentionRows(request.projectId, selectedSessionId, authenticated, nativeNotificationProjection)
+        this.#attentionRows(
+          request.projectId,
+          selectedSessionId,
+          authenticated,
+          nativeNotificationProjection,
+          runSessionProjection,
+        )
       ), selectedSessionId);
       case "project": return this.#viewPage(request, "project", () => (
         this.#projectRows(request.projectId, authenticated)
       ), selectedSessionId);
       case "runs": return this.#viewPage(request, "runs", () => (
-        this.#runRows(request.projectId, selectedSessionId, authenticated)
+        this.#runRows(request.projectId, selectedSessionId, authenticated, runSessionProjection)
       ), selectedSessionId);
       case "work": return this.#viewPage(request, "work", () => (
         this.#workRows(request.projectId, selectedSessionId, authenticated)
@@ -238,6 +247,7 @@ export class OperatorProjectionStore {
   page<View extends ConsoleView>(
     request: ProjectionPageRequest<View>,
     nativeNotificationProjection: NativeNotificationProjection,
+    runSessionProjection: RunSessionProjection = "include",
   ): ProjectionPageResult<View> {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -248,6 +258,7 @@ export class OperatorProjectionStore {
         request.projectId,
         selectedSessionId,
         nativeNotificationProjection,
+        runSessionProjection,
       );
       // The closed view switch above preserves the View-to-item correlation that
       // TypeScript cannot retain through an indexed conditional return type.
@@ -299,7 +310,10 @@ export class OperatorProjectionStore {
     return read();
   }
 
-  detail(request: OperatorDetailReadRequest): OperatorDetailReadResult {
+  detail(
+    request: OperatorDetailReadRequest,
+    runSessionProjection: RunSessionProjection = "include",
+  ): OperatorDetailReadResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
     const read = this.#database.transaction((): OperatorDetailReadResult => {
@@ -307,7 +321,12 @@ export class OperatorProjectionStore {
       if (request.snapshotRevision !== currentSnapshotRevision) {
         return { status: "resnapshot-required", reason: "snapshot-mismatch", currentSnapshotRevision };
       }
-      const loaded = this.#loadDetail(request.detailRef, request.projectId, selectedSessionId);
+      const loaded = this.#loadDetail(
+        request.detailRef,
+        request.projectId,
+        selectedSessionId,
+        runSessionProjection,
+      );
       if (request.detailRef.expectedRevision !== loaded.revision) {
         return {
           status: "resnapshot-required",
@@ -315,9 +334,19 @@ export class OperatorProjectionStore {
           currentSnapshotRevision,
         };
       }
+      const detailRef = request.detailRef.kind === "run"
+        ? {
+            kind: "run" as const,
+            coordinationRunId: request.detailRef.coordinationRunId,
+            expectedRevision: request.detailRef.expectedRevision,
+            ...(runSessionProjection === "include" && loaded.detail.kind === "run"
+              ? { projectSessionId: loaded.detail.projectSessionId }
+              : {}),
+          }
+        : request.detailRef;
       return {
         status: "current",
-        detailRef: request.detailRef,
+        detailRef,
         detail: liveFact(loaded.revision, loaded.observedAt, loaded.detail),
         snapshotRevision: currentSnapshotRevision,
         readTransactionId: readTransactionId(request.projectId, selectedSessionId, currentSnapshotRevision),
@@ -525,7 +554,11 @@ export class OperatorProjectionStore {
     });
   }
 
-  #runs(projectId: ProjectId, projectSessionId?: ProjectSessionId): RunProjection[] {
+  #runs(
+    projectId: ProjectId,
+    projectSessionId: ProjectSessionId | undefined,
+    runSessionProjection: RunSessionProjection,
+  ): RunProjection[] {
     const values = projectSessionId === undefined
       ? this.#database.prepare(`
           SELECT r.* FROM runs r JOIN project_sessions s ON s.project_session_id=r.project_session_id
@@ -538,6 +571,14 @@ export class OperatorProjectionStore {
       const run = row(value, "coordination run");
       const phase = text(run, "lifecycle_state");
       return {
+        ...(runSessionProjection === "include"
+          ? {
+              projectSessionId: parseIdentifier<"ProjectSessionId">(
+                text(run, "project_session_id"),
+                "projectionSnapshot.projectSessionId",
+              ),
+            }
+          : {}),
         runId: parseIdentifier<"CoordinationRunId">(text(run, "run_id"), "projectionSnapshot.runId"),
         phase,
         chairAgentId: parseIdentifier<"AgentId">(text(run, "chair_agent_id"), "projectionSnapshot.chairAgentId"),
@@ -589,11 +630,12 @@ export class OperatorProjectionStore {
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
     nativeNotificationProjection: NativeNotificationProjection,
+    runSessionProjection: RunSessionProjection,
   ): readonly ProjectionViewItemMap[ConsoleView][] {
     switch (view) {
       case "attention": return this.#attention(projectId, projectSessionId, nativeNotificationProjection);
       case "project": return this.#projectItems(projectId);
-      case "runs": return this.#runs(projectId, projectSessionId);
+      case "runs": return this.#runs(projectId, projectSessionId, runSessionProjection);
       case "work": return this.#workItems(projectId, projectSessionId);
       case "agents": return this.#agentItems(projectId, projectSessionId);
       case "evidence": return this.#evidenceItems(projectId, projectSessionId);
@@ -990,6 +1032,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     authenticated: AuthenticatedOperatorCredential,
     nativeNotificationProjection: NativeNotificationProjection,
+    runSessionProjection: RunSessionProjection,
   ): OperatorViewRow<"attention">[] {
     const values = projectSessionId === undefined
       ? this.#database.prepare(`
@@ -1016,6 +1059,14 @@ export class OperatorProjectionStore {
       const detailRef = runId !== null && typeof runRevisionValue === "number" && Number.isSafeInteger(runRevisionValue)
         ? {
             kind: "run" as const,
+            ...(runSessionProjection === "include"
+              ? {
+                  projectSessionId: parseIdentifier<"ProjectSessionId">(
+                    text(item, "project_session_id"),
+                    "attention.detailRef.projectSessionId",
+                  ),
+                }
+              : {}),
             coordinationRunId: parseIdentifier<"CoordinationRunId">(runId, "attention.detailRef.runId"),
             expectedRevision: runRevisionValue,
           }
@@ -1133,17 +1184,37 @@ export class OperatorProjectionStore {
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
     authenticated: AuthenticatedOperatorCredential,
+    runSessionProjection: RunSessionProjection,
   ): OperatorViewRow<"runs">[] {
     return this.#rowsForRuns(projectId, projectSessionId).map((run): OperatorViewRow<"runs"> => {
       const phase = text(run, "lifecycle_state");
       const revision = integer(run, "revision");
       const runId = parseIdentifier<"CoordinationRunId">(text(run, "run_id"), "runRow.runId");
+      const runProjectSessionId = parseIdentifier<"ProjectSessionId">(
+        text(run, "project_session_id"),
+        "runRow.projectSessionId",
+      );
       return {
         itemId: runId,
         itemRevision: revision,
         fact: liveFact(revision, toTimestamp(integer(run, "created_at"), "runRow.observedAt"), {
-          summary: { kind: "run", phase, health: runHealth(phase), nextMilestone: nextMilestone(phase) },
-          detailRef: { kind: "run", coordinationRunId: runId, expectedRevision: revision },
+          summary: {
+            kind: "run",
+            ...(runSessionProjection === "include"
+              ? { projectSessionId: runProjectSessionId }
+              : {}),
+            phase,
+            health: runHealth(phase),
+            nextMilestone: nextMilestone(phase),
+          },
+          detailRef: {
+            kind: "run",
+            ...(runSessionProjection === "include"
+              ? { projectSessionId: runProjectSessionId }
+              : {}),
+            coordinationRunId: runId,
+            expectedRevision: revision,
+          },
           actionAvailability: actionAvailability(authenticated),
         }),
       };
@@ -1366,11 +1437,17 @@ export class OperatorProjectionStore {
     detailRef: OperatorDetailRef,
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
+    runSessionProjection: RunSessionProjection,
   ): LoadedOperatorDetail {
     switch (detailRef.kind) {
       case "project": return this.#loadProjectDetail(detailRef, projectId);
       case "session": return this.#loadSessionDetail(detailRef, projectId, projectSessionId);
-      case "run": return this.#loadRunDetail(detailRef, projectId, projectSessionId);
+      case "run": return this.#loadRunDetail(
+        detailRef,
+        projectId,
+        projectSessionId,
+        runSessionProjection,
+      );
       case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId);
       case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId);
       case "evidence": return this.#loadEvidenceDetail(detailRef, projectId, projectSessionId);
@@ -1432,6 +1509,7 @@ export class OperatorProjectionStore {
     detailRef: Extract<OperatorDetailRef, { kind: "run" }>,
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
+    runSessionProjection: RunSessionProjection,
   ): LoadedOperatorDetail {
     const stored = row(this.#database.prepare(`
       SELECT r.* FROM runs r
@@ -1441,11 +1519,27 @@ export class OperatorProjectionStore {
     `).get(detailRef.coordinationRunId, projectId, projectSessionId ?? null, projectSessionId ?? null), "run detail");
     const revision = integer(stored, "revision");
     const phase = text(stored, "lifecycle_state");
+    const runProjectSessionId = parseIdentifier<"ProjectSessionId">(
+      text(stored, "project_session_id"),
+      "runDetail.projectSessionId",
+    );
+    if (
+      detailRef.projectSessionId !== undefined &&
+      detailRef.projectSessionId !== runProjectSessionId
+    ) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "run detail reference belongs to another project session",
+      );
+    }
     return {
       revision,
       observedAt: toTimestamp(integer(stored, "created_at"), "runDetail.observedAt"),
       detail: {
         kind: "run",
+        ...(runSessionProjection === "include"
+          ? { projectSessionId: runProjectSessionId }
+          : {}),
         coordinationRunId: detailRef.coordinationRunId,
         phase,
         chairAgentId: parseIdentifier<"AgentId">(text(stored, "chair_agent_id"), "runDetail.chairAgentId"),

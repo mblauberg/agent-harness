@@ -11,7 +11,9 @@ Version 1.18 owns the pre-release schema/protocol cutover: one canonical fresh
 baseline, explicit non-destructive rejection of earlier database epochs and no
 vintage Console/daemon or implicit legacy-import path. Current adapter pins,
 provider capability checks and optional-feature negotiation remain security
-controls, not legacy support. Version 1.17 owns terminal bridge retirement, settled recovery-abandon,
+controls, not legacy support. The current baseline requires exact run/session
+result-shape negotiation for the Console. Version 1.17 owns terminal bridge
+retirement, settled recovery-abandon,
 live launched-chair handoff, coordinated-workstream creation and exact
 multi-session projection. Version 1.16 owns atomic acceptance exits, run-coupled exceptional lifecycle
 transitions, forward-only legacy membership repair and the binding one-live-run
@@ -2409,3 +2411,12 @@ detail. The Console retains its project-scoped client, opens a secondary exact
 selected-session client, auto-selects only one attachable session and otherwise
 requires an explicit stable session choice; it never discards project-level
 authority needed to start another independent session.
+
+`run-session-projection.v1` is a closed result-shape feature for operator
+snapshot, projection-page, view-page and detail-read results. When negotiated,
+every returned run projection and every run row summary/reference/detail
+contains the same exact `projectSessionId`; missing or mixed presence rejects
+the whole result before the client consumes it. When unnegotiated those fields
+are omitted from the generic protocol shape. The pre-release Console requires
+the feature during initialise and performs no legacy retry or identity
+inference. A peer that cannot negotiate it is explicitly incompatible.

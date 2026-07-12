@@ -706,7 +706,7 @@ const runProjectionCodec = objectCodec({
   chairAgentId: identifier,
   nextMilestone: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-});
+}, { projectSessionId: identifier });
 const nativeNotificationDeliverySummaryCodec = objectCodec({
   targetIntegration: literal("native-desktop"),
   status: enumeration(["available", "unavailable", "stale"]),
@@ -2109,7 +2109,10 @@ const operatorActionAvailabilityCodec = unionOf([
 const operatorDetailRefCodec = unionOf([
   objectCodec({ kind: literal("project"), projectId: identifier, expectedRevision: positiveInteger }),
   objectCodec({ kind: literal("session"), projectSessionId: identifier, expectedRevision: positiveInteger }),
-  objectCodec({ kind: literal("run"), coordinationRunId: identifier, expectedRevision: positiveInteger }),
+  objectCodec(
+    { kind: literal("run"), coordinationRunId: identifier, expectedRevision: positiveInteger },
+    { projectSessionId: identifier },
+  ),
   objectCodec({ kind: literal("task"), taskId: identifier, expectedRevision: positiveInteger }),
   objectCodec({ kind: literal("agent"), agentId: identifier, expectedRevision: positiveInteger }),
   objectCodec({ kind: literal("evidence"), evidenceId: identifier, expectedRevision: positiveInteger }),
@@ -2125,7 +2128,7 @@ const runDetailRefCodec = objectCodec({
   kind: literal("run"),
   coordinationRunId: identifier,
   expectedRevision: positiveInteger,
-});
+}, { projectSessionId: identifier });
 const taskDetailRefCodec = objectCodec({ kind: literal("task"), taskId: identifier, expectedRevision: positiveInteger });
 const agentDetailRefCodec = objectCodec({ kind: literal("agent"), agentId: identifier, expectedRevision: positiveInteger });
 const evidenceDetailRefCodec = objectCodec({
@@ -2164,7 +2167,7 @@ const runSummaryCodec = objectCodec({
   phase: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
   nextMilestone: text,
-});
+}, { projectSessionId: identifier });
 const workSummaryCodec = objectCodec({
   kind: literal("work"),
   state: text,
@@ -2305,7 +2308,7 @@ const operatorDetailCodec = unionOf([
     chairAgentId: identifier,
     chairGeneration: positiveInteger,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-  }),
+  }, { projectSessionId: identifier }),
   objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
   objectCodec({
     kind: literal("agent"),

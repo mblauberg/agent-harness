@@ -14,6 +14,7 @@ import type {
   OperatorViewPageResult,
   ProjectId,
   ProjectSession,
+  ProjectSessionDiscovery,
   ProjectSessionId,
 } from "@local/agent-fabric-protocol";
 
@@ -292,6 +293,9 @@ type PublicLocalOperatorConsoleSession = Readonly<{
   operatorId: OperatorId;
   projectSessionId?: ProjectSessionId;
   clientId: OperatorClientId;
+  attachableProjectSessions?: readonly ProjectSessionDiscovery[];
+  selectProjectSession?(projectSessionId: ProjectSessionId): Promise<void>;
+  selectProject?(): Promise<void>;
   detach(input: Readonly<{ reason: "operator" | "safety" | "signal" }>): Promise<void>;
   close(): Promise<void>;
 }>;
@@ -300,6 +304,7 @@ type PublicFabricModule = Readonly<{
   openLocalOperatorConsoleSession(input: Readonly<{
     projectRoot: string;
     surface: "standalone" | "herdr";
+    projectSessionId?: ProjectSessionId;
   }>): Promise<PublicLocalOperatorConsoleSession>;
 }>;
 
@@ -345,6 +350,21 @@ function publicSession(value: unknown): PublicLocalOperatorConsoleSession {
     value.compatibility.mode !== "legacy-compatibility"
   ) {
     throw new TypeError("public agent-fabric Console compatibility state is invalid");
+  }
+  const selectionFields = [
+    value.attachableProjectSessions,
+    value.selectProjectSession,
+    value.selectProject,
+  ];
+  if (
+    selectionFields.some((field) => field !== undefined) &&
+    (
+      !Array.isArray(value.attachableProjectSessions) ||
+      typeof value.selectProjectSession !== "function" ||
+      typeof value.selectProject !== "function"
+    )
+  ) {
+    throw new TypeError("public agent-fabric Console session selection is invalid");
   }
   return value as PublicLocalOperatorConsoleSession;
 }
@@ -427,6 +447,61 @@ export function createProductionConsoleBootstrap(
     throw new TypeError("Console bootstrap accepts one typed-entry planner source");
   }
   const loadFabric = options.loadFabric ?? loadInstalledFabric;
+  const connectedSession = (
+    session: PublicLocalOperatorConsoleSession,
+  ): Extract<ConsoleBootstrapResult, { status: "connected" }> => {
+    const typedEntryPlanner = options.typedEntryPlanner ??
+      options.typedEntryPlannerFactory?.({
+        client: session.client,
+        credential: session.credential,
+        projectId: session.projectId,
+      });
+    const selection =
+      session.attachableProjectSessions !== undefined &&
+      session.selectProjectSession !== undefined &&
+      session.selectProject !== undefined
+        ? {
+            choices: session.attachableProjectSessions,
+            async selectProjectSession(projectSessionId: ProjectSessionId) {
+              await session.selectProjectSession?.(projectSessionId);
+              return connectedSession(session);
+            },
+            async selectProject() {
+              await session.selectProject?.();
+              return connectedSession(session);
+            },
+          }
+        : undefined;
+    return {
+      status: "connected",
+      binding: restrictProductionActions(
+        bindConsoleProtocolClient(session.client, session.compatibility),
+      ),
+      credential: session.credential,
+      projectId: session.projectId,
+      ...(session.projectSessionId === undefined
+        ? {}
+        : { projectSessionId: session.projectSessionId }),
+      actionPlanner: createProductionConsoleActionPlanner({
+        credential: session.credential,
+        operatorId: session.operatorId,
+        clientId: session.clientId,
+      }),
+      workflowPlanner: createProductionConsoleWorkflowPlanner({
+        client: session.client,
+        credential: session.credential,
+        operatorId: session.operatorId,
+        clientId: session.clientId,
+        projectId: session.projectId,
+        ...(typedEntryPlanner === undefined
+          ? {}
+          : { typedEntryPlanner }),
+      }),
+      ...(selection === undefined ? {} : { sessionSelection: selection }),
+      detach: (input) => session.detach(input),
+      close: () => session.close(),
+    };
+  };
   return {
     async startOrAttach(request) {
       let openedSession: unknown;
@@ -436,40 +511,7 @@ export function createProductionConsoleBootstrap(
         const session = publicSession(
           openedSession,
         );
-        const typedEntryPlanner = options.typedEntryPlanner ??
-          options.typedEntryPlannerFactory?.({
-            client: session.client,
-            credential: session.credential,
-            projectId: session.projectId,
-          });
-        return {
-          status: "connected",
-          binding: restrictProductionActions(
-            bindConsoleProtocolClient(session.client, session.compatibility),
-          ),
-          credential: session.credential,
-          projectId: session.projectId,
-          ...(session.projectSessionId === undefined
-            ? {}
-            : { projectSessionId: session.projectSessionId }),
-          actionPlanner: createProductionConsoleActionPlanner({
-            credential: session.credential,
-            operatorId: session.operatorId,
-            clientId: session.clientId,
-          }),
-          workflowPlanner: createProductionConsoleWorkflowPlanner({
-            client: session.client,
-            credential: session.credential,
-            operatorId: session.operatorId,
-            clientId: session.clientId,
-            projectId: session.projectId,
-            ...(typedEntryPlanner === undefined
-              ? {}
-              : { typedEntryPlanner }),
-          }),
-          detach: (input) => session.detach(input),
-          close: () => session.close(),
-        };
+        return connectedSession(session);
       } catch (error: unknown) {
         if (
           isRecord(openedSession) &&

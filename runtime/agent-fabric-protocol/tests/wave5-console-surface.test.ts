@@ -389,6 +389,135 @@ describe("negotiated notification result shape", () => {
   });
 });
 
+describe("negotiated run-session result shape", () => {
+  const legacyFeatures = ["operator-projection.v1", "operator-projection.v2"] as const;
+  const extendedFeatures = [...legacyFeatures, "run-session-projection.v1"] as const;
+  const legacyRun = {
+    runId: "run_01",
+    phase: "active",
+    chairAgentId: "chair_01",
+    nextMilestone: "verification",
+    health: "healthy",
+  } as const;
+  const extendedRun = { ...legacyRun, projectSessionId: "ps_01" } as const;
+  const fact = (value: unknown) => ({
+    freshness: "live",
+    source: "fabric",
+    revision: 1,
+    observedAt,
+    value,
+  });
+
+  it("requires exact project-session identity on snapshot, page, row and detail results", () => {
+    const snapshotBase = OPERATION_CONTRACT_FIXTURES[
+      FABRIC_OPERATIONS.projectionSnapshot
+    ].result as Record<string, unknown>;
+    const legacySummary = {
+      kind: "run",
+      phase: "active",
+      health: "healthy",
+      nextMilestone: "verification",
+    } as const;
+    const extendedSummary = { ...legacySummary, projectSessionId: "ps_01" } as const;
+    const legacyRef = {
+      kind: "run",
+      coordinationRunId: "run_01",
+      expectedRevision: 1,
+    } as const;
+    const extendedRef = { ...legacyRef, projectSessionId: "ps_01" } as const;
+    const legacyDetail = {
+      kind: "run",
+      coordinationRunId: "run_01",
+      phase: "active",
+      chairAgentId: "chair_01",
+      chairGeneration: 1,
+      health: "healthy",
+    } as const;
+    const extendedDetail = { ...legacyDetail, projectSessionId: "ps_01" } as const;
+    const fixtures = [
+      {
+        operation: FABRIC_OPERATIONS.projectionSnapshot,
+        legacy: { ...snapshotBase, runs: fact([legacyRun]) },
+        extended: { ...snapshotBase, runs: fact([extendedRun]) },
+      },
+      {
+        operation: FABRIC_OPERATIONS.projectionPage,
+        legacy: {
+          view: "runs",
+          page: fact({ items: [legacyRun], nextCursor: 1, hasMore: false }),
+        },
+        extended: {
+          view: "runs",
+          page: fact({ items: [extendedRun], nextCursor: 1, hasMore: false }),
+        },
+      },
+      {
+        operation: FABRIC_OPERATIONS.projectionViewPage,
+        legacy: {
+          status: "page",
+          view: "runs",
+          rows: [row(legacySummary, legacyRef)],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: 1,
+          readTransactionId: "read_run_legacy",
+        },
+        extended: {
+          status: "page",
+          view: "runs",
+          rows: [row(extendedSummary, extendedRef)],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: 1,
+          readTransactionId: "read_run_extended",
+        },
+      },
+      {
+        operation: FABRIC_OPERATIONS.projectionDetailRead,
+        legacy: {
+          status: "current",
+          detailRef: legacyRef,
+          detail: fact(legacyDetail),
+          snapshotRevision: 1,
+          readTransactionId: "read_detail_legacy",
+        },
+        extended: {
+          status: "current",
+          detailRef: extendedRef,
+          detail: fact(extendedDetail),
+          snapshotRevision: 1,
+          readTransactionId: "read_detail_extended",
+        },
+      },
+    ] as const;
+
+    for (const fixture of fixtures) {
+      const legacy = parseOperationResult(fixture.operation, fixture.legacy);
+      const extended = parseOperationResult(fixture.operation, fixture.extended);
+      expect(assertOperationResultFeatureShape(
+        fixture.operation,
+        legacyFeatures,
+        legacy,
+      )).toBe(legacy);
+      expect(assertOperationResultFeatureShape(
+        fixture.operation,
+        extendedFeatures,
+        extended,
+      )).toBe(extended);
+      expect(() => assertOperationResultFeatureShape(
+        fixture.operation,
+        extendedFeatures,
+        legacy,
+      )).toThrow(expect.objectContaining({ reason: "missing-negotiated-field" }));
+      expect(() => assertOperationResultFeatureShape(
+        fixture.operation,
+        legacyFeatures,
+        extended,
+      )).toThrow(expect.objectContaining({ reason: "unnegotiated-field" }));
+    }
+  });
+});
+
 describe("negotiated gate supersession result shape", () => {
   it("rejects a system-supersession arm on every gate result when the feature was not negotiated", () => {
     const base = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateCreate].result as Record<string, unknown>;

@@ -305,6 +305,98 @@ describe("public local operator Console session", () => {
     );
   });
 
+  it("keeps the project client while explicitly switching between multiple independent sessions", async () => {
+    const { paths, projectA, projectB } = await fixture();
+    const seed = await openLocalOperatorConsoleSession({
+      projectRoot: projectA,
+      surface: "standalone",
+      paths,
+      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+      clientId: "console_multi_seed",
+    });
+    const createProjectSession = seed.client.operations[FABRIC_OPERATIONS.projectSessionCreate];
+    const snapshot = await seed.client.projection?.snapshot({
+      credential: seed.credential,
+      projectId: seed.projectId,
+    });
+    if (createProjectSession === undefined || snapshot === undefined) {
+      throw new Error("project session creation unavailable");
+    }
+    for (const [index, projectSessionId] of [
+      "session_independent_a",
+      "session_independent_b",
+    ].entries()) {
+      await createProjectSession({
+        command: {
+          credential: seed.credential,
+          commandId: `console_multi_create_${String(index)}` as never,
+          expectedRevision: snapshot.project.revision + index,
+          actor: seed.operatorId,
+          provenance: {
+            kind: "console-direct-input",
+            clientId: seed.clientId,
+            inputEventId: `console_multi_create_input_${String(index)}`,
+          },
+          evidenceRefs: [],
+        },
+        projectSessionId: projectSessionId as never,
+        projectId: seed.projectId,
+        mode: "independent",
+        generation: 1,
+        authorityRef: `sha256:${"a".repeat(64)}` as never,
+        budgetRef: `budget_${projectSessionId}`,
+        launchPacketRef: {
+          path: `launch/${projectSessionId}.json` as never,
+          digest: `sha256:${"b".repeat(64)}` as never,
+        },
+      });
+    }
+    await seed.close();
+
+    const consoleSession = await openLocalOperatorConsoleSession({
+      projectRoot: projectA,
+      surface: "standalone",
+      paths,
+      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+      clientId: "console_multi_selector",
+    });
+    try {
+      expect(consoleSession.projectSessionId).toBeUndefined();
+      expect(consoleSession.client).toBe(consoleSession.projectClient);
+      expect(consoleSession.client.console?.readOnly).toBe(true);
+      expect(consoleSession.attachableProjectSessions.map(({ projectSessionId }) =>
+        projectSessionId).sort()).toStrictEqual([
+        "session_independent_a",
+        "session_independent_b",
+      ]);
+
+      await consoleSession.selectProjectSession("session_independent_b" as never);
+      expect(consoleSession.projectSessionId).toBe("session_independent_b");
+      expect(consoleSession.client).not.toBe(consoleSession.projectClient);
+      expect(consoleSession.client.console?.readOnly).toBe(false);
+      await expect(consoleSession.projectClient.projection?.discover({
+        credential: consoleSession.projectCredential,
+        projectId: consoleSession.projectId,
+        after: 0,
+        limit: 10,
+      })).resolves.toMatchObject({
+        sessions: { value: { items: expect.arrayContaining([
+          expect.objectContaining({ projectSessionId: "session_independent_a" }),
+          expect.objectContaining({ projectSessionId: "session_independent_b" }),
+        ]) } },
+      });
+
+      await consoleSession.selectProject();
+      expect(consoleSession.projectSessionId).toBeUndefined();
+      expect(consoleSession.client).toBe(consoleSession.projectClient);
+
+      await consoleSession.selectProjectSession("session_independent_a" as never);
+      expect(consoleSession.projectSessionId).toBe("session_independent_a");
+    } finally {
+      await consoleSession.close();
+    }
+  });
+
   it("rotates an expired principal generation, revokes prior capabilities and reopens concurrently", async () => {
     const { paths, projectA, projectB } = await fixture();
     const expired = await openLocalOperatorConsoleSession({

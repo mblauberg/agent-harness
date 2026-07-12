@@ -64,6 +64,7 @@ export type AttentionItem = {
 };
 
 export type RunProjection = {
+  projectSessionId?: ProjectSessionId;
   runId: CoordinationRunId;
   phase: string;
   chairAgentId: AgentId;
@@ -418,7 +419,12 @@ export type ProjectionPageResult<View extends ConsoleView = ConsoleView> = View 
 export type OperatorDetailRef =
   | { kind: "project"; projectId: ProjectId; expectedRevision: number }
   | { kind: "session"; projectSessionId: ProjectSessionId; expectedRevision: number }
-  | { kind: "run"; coordinationRunId: CoordinationRunId; expectedRevision: number }
+  | {
+      kind: "run";
+      projectSessionId?: ProjectSessionId;
+      coordinationRunId: CoordinationRunId;
+      expectedRevision: number;
+    }
   | { kind: "task"; taskId: TaskId; expectedRevision: number }
   | { kind: "agent"; agentId: AgentId; expectedRevision: number }
   | { kind: "evidence"; evidenceId: string; expectedRevision: number }
@@ -440,7 +446,13 @@ export type OperatorViewSummaryMap = {
     repositoryRevision: string;
     repository?: GitRepositorySummary;
   };
-  runs: { kind: "run"; phase: string; health: RunProjection["health"]; nextMilestone: string };
+  runs: {
+    kind: "run";
+    projectSessionId?: ProjectSessionId;
+    phase: string;
+    health: RunProjection["health"];
+    nextMilestone: string;
+  };
   work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
   agents: {
     kind: "agent";
@@ -531,6 +543,7 @@ export type OperatorDetail =
     }
   | {
       kind: "run";
+      projectSessionId?: ProjectSessionId;
       coordinationRunId: CoordinationRunId;
       phase: string;
       chairAgentId: AgentId;

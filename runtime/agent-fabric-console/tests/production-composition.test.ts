@@ -425,6 +425,7 @@ describe("production Console package-root bootstrap", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "native-notification-projection.v1",
+        "run-session-projection.v1",
       ],
       projection: {
         snapshot: async () => dataset().snapshot,
@@ -522,6 +523,7 @@ describe("production Console package-root bootstrap", () => {
               "operator-projection.v2",
               "scoped-gate-read.v1",
               "native-notification-projection.v1",
+              "run-session-projection.v1",
             ],
             projection: {
               snapshot: async () => dataset().snapshot,
@@ -626,6 +628,123 @@ describe("production Console package-root bootstrap", () => {
       requiresPreview: true,
     });
     await connected.close();
+  });
+
+  it("rebinds the same connector between the project selector and an exact session", async () => {
+    const projectCredential = {
+      capabilityId: "capability_project_selector",
+      token: "project-selector-secret",
+    } as OperatorCapabilityCredential;
+    const sessionCredential = {
+      capabilityId: "capability_session_selector",
+      token: "session-selector-secret",
+    } as OperatorCapabilityCredential;
+    const baseClient = (readOnly: boolean) => ({
+      kind: "operator" as const,
+      features: [
+        "operator-projection.v1",
+        "operator-projection.v2",
+        "scoped-gate-read.v1",
+        "native-notification-projection.v1",
+        "run-session-projection.v1",
+      ],
+      projection: {
+        snapshot: async () => dataset().snapshot,
+        events: async () => { throw new Error("unused"); },
+      },
+      console: {
+        readOnly,
+        launchAvailable: true,
+        ...(readOnly ? {} : {
+          actions: {
+            preview: async () => { throw new Error("unused"); },
+            commit: async () => { throw new Error("unused"); },
+            status: async () => { throw new Error("unused"); },
+            reconcile: async () => { throw new Error("unused"); },
+          },
+        }),
+        gates: { read: async () => { throw new Error("unused"); } },
+        projection: {
+          viewPage: async () => { throw new Error("unused"); },
+          readDetail: async () => { throw new Error("unused"); },
+        },
+      },
+      operations: {},
+      close: async () => {},
+    });
+    const projectClient = baseClient(true);
+    const selectedClient = baseClient(false);
+    let activeClient = projectClient;
+    let activeCredential = projectCredential;
+    let selectedProjectSessionId: ProjectSessionId | undefined;
+    const connector = {
+      get client() { return activeClient; },
+      compatibility: { mode: "current" as const },
+      get credential() { return activeCredential; },
+      projectClient,
+      projectCompatibility: { mode: "current" as const },
+      projectCredential,
+      attachableProjectSessions: [{
+        projectSessionId,
+        mode: "independent" as const,
+        state: "active" as const,
+        revision: 4,
+        generation: 1,
+        lastEventAt: observedAt,
+      }],
+      projectId,
+      operatorId: "operator_console_production",
+      get projectSessionId() { return selectedProjectSessionId; },
+      clientId: "console_client_production",
+      async selectProjectSession(next: ProjectSessionId) {
+        expect(next).toBe(projectSessionId);
+        activeClient = selectedClient;
+        activeCredential = sessionCredential;
+        selectedProjectSessionId = next;
+      },
+      async selectProject() {
+        activeClient = projectClient;
+        activeCredential = projectCredential;
+        selectedProjectSessionId = undefined;
+      },
+      refreshProjectSessions: async () => connector.attachableProjectSessions,
+      detach: async () => {},
+      close: async () => {},
+    };
+    const bootstrap = createProductionConsoleBootstrap({
+      loadFabric: async () => ({
+        openLocalOperatorConsoleSession: async () => connector,
+      }),
+    });
+
+    const projectConnection = await bootstrap.startOrAttach({
+      projectRoot: "/repo",
+      surface: "standalone",
+    });
+    if (projectConnection.status !== "connected") throw new Error("project selector unavailable");
+    expect(projectConnection).not.toHaveProperty("projectSessionId");
+    expect(projectConnection.binding).toMatchObject({ ok: true, readOnly: true });
+    expect(projectConnection.sessionSelection?.choices).toMatchObject([{
+      projectSessionId,
+    }]);
+
+    const selected = await projectConnection.sessionSelection?.selectProjectSession(
+      projectSessionId,
+    );
+    expect(selected).toMatchObject({
+      status: "connected",
+      credential: sessionCredential,
+      projectSessionId,
+      binding: { ok: true, readOnly: false },
+    });
+    if (selected?.status !== "connected") throw new Error("exact session unavailable");
+    const returned = await selected.sessionSelection?.selectProject();
+    expect(returned).toMatchObject({
+      status: "connected",
+      credential: projectCredential,
+      binding: { ok: true, readOnly: true },
+    });
+    expect(returned).not.toHaveProperty("projectSessionId");
   });
 
   it.each([
