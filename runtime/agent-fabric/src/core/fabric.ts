@@ -86,6 +86,8 @@ import {
   type ExternalEffectEvidencePort,
   type RegisteredEffectPort,
 } from "../operator/external-effect-service.js";
+import { FixedGitMutationPort, type GitMutationPort } from "../operator/fixed-git-mutation-port.js";
+import { TypedGitService, type GitConflictInspectorPort } from "../operator/typed-git-service.js";
 import {
   OperatorActionStore,
   type OperatorActionEffectPort,
@@ -190,6 +192,8 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
     evidence: ExternalEffectEvidencePort;
   }>;
   herdr?: HerdrDaemonIntegrationConfiguration;
+  gitMutationPort?: GitMutationPort;
+  gitConflictInspector?: GitConflictInspectorPort;
 };
 
 type Row = Record<string, unknown>;
@@ -910,6 +914,7 @@ export class Fabric {
   readonly #externalEffects: ExternalEffectService | undefined;
   readonly #herdr: HerdrDaemonIntegration;
   readonly #herdrConfigured: boolean;
+  readonly #typedGit: TypedGitService;
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -968,6 +973,18 @@ export class Fabric {
       operatorStore: this.#operatorStore,
       privateStateRoot: dirname(realpathSync(options.databasePath)),
     });
+    const privateStateRoot = dirname(realpathSync(options.databasePath));
+    const gitMutationPort = options.gitMutationPort ?? new FixedGitMutationPort({
+      privateStateRoot,
+      clock: this.#clock,
+    });
+    this.#typedGit = new TypedGitService({
+      database: this.#database,
+      gitPort: gitMutationPort,
+      ...(options.gitConflictInspector === undefined ? {} : { conflictInspector: options.gitConflictInspector }),
+      clock: this.#clock,
+      daemonInstanceId: `git-owner-${randomBytes(16).toString("hex")}`,
+    });
     const productionOperatorPorts = createProductionOperatorActionPorts({
       database: this.#database,
       clock: this.#clock,
@@ -978,6 +995,7 @@ export class Fabric {
       },
       ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
       ...(this.#externalEffects === undefined ? {} : { externalEffects: this.#externalEffects }),
+      typedGit: this.#typedGit,
     });
     this.#launchCustody = options.fabricSocketPath === undefined
       ? undefined
@@ -1624,6 +1642,7 @@ export class Fabric {
     await this.#externalEffects?.recover();
     await this.#herdr.recover();
     if (this.#herdrConfigured) await this.#herdr.runPresencePass();
+    await this.#typedGit.recover();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")

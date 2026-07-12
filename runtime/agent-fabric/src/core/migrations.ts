@@ -10,6 +10,7 @@ import { preflightProviderBridgeCustody } from "../persistence/provider-bridge-c
 import { preflightExternalEffectCustody } from "../persistence/external-effect-custody-preflight.js";
 import { preflightLaunchedChairBridgeLoss } from "../persistence/launched-chair-bridge-loss-preflight.js";
 import { preflightArtifactRegistry } from "../persistence/artifact-registry-preflight.js";
+import { preflightTypedGitCustody } from "../persistence/typed-git-preflight.js";
 
 export type Migration = {
   version: number;
@@ -81,7 +82,9 @@ function loadDefaultMigrations(): Migration[] {
                 : index === 8
                   ? { preflight: preflightLaunchedChairBridgeLoss }
                   : index === 9
-                    ? { preflight: preflightArtifactRegistry }
+                  ? { preflight: preflightArtifactRegistry }
+                  : index === 11
+                    ? { preflight: preflightTypedGitCustody }
             : {}),
     };
   });

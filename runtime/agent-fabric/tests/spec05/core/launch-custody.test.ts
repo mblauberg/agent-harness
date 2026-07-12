@@ -19,7 +19,7 @@ import {
   type Sha256Digest,
 } from "@local/agent-fabric-protocol";
 
-import { applyMigrations } from "../../../src/core/migrations.ts";
+import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
 import { openFabric } from "../../../src/index.ts";
 import { OperatorActionStore } from "../../../src/operator/action-store.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
@@ -92,6 +92,26 @@ const contract = {
 } as const;
 const contractDigest = digest(canonicalJson(contract));
 const recoveryAdapter = fileURLToPath(new URL("../../support/launch-custody-recovery-adapter.ts", import.meta.url));
+
+function migrationsThroughLaunchedChairBridgeLoss(): Migration[] {
+  const filenames = [
+    "0001-core.sql",
+    "0002-observer-event-sequence.sql",
+    "0003-integrity-and-query-plans.sql",
+    "0004-project-session-operations.sql",
+    "0005-launch-custody.sql",
+    "0006-operator-lifecycle.sql",
+    "0007-provider-bridge-custody.sql",
+    "0008-external-effect-custody.sql",
+    "0009-launched-chair-bridge-loss.sql",
+  ];
+  return filenames.map((filename, index) => ({
+    version: index + 1,
+    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
+    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
+    ...(index === 8 ? { preflight: preflightLaunchedChairBridgeLoss } : {}),
+  }));
+}
 
 function databaseContains(database: Database.Database, needle: string): boolean {
   const tables = database.prepare(`
@@ -449,15 +469,11 @@ describe("launch custody", () => {
       DROP TABLE chair_bridge_recovery_custody;
       DROP TABLE chair_bridge_losses;
       DROP TABLE launched_chair_bridge_state;
+      DELETE FROM schema_migrations WHERE version>=9;
     `);
-    const migrationNine = readFileSync(
-      new URL("../../../migrations/0009-launched-chair-bridge-loss.sql", import.meta.url),
-      "utf8",
-    ).replace(/^\s*PRAGMA\s+foreign_keys\s*=\s*ON;\s*/iu, "");
-    fixture.database.transaction(() => {
-      preflightLaunchedChairBridgeLoss(fixture.database);
-      fixture.database.exec(migrationNine);
-    })();
+
+    expect(applyMigrations(fixture.database, migrationsThroughLaunchedChairBridgeLoss()))
+      .toEqual({ applied: [9], currentVersion: 9 });
     expect(fixture.database.prepare(`
       SELECT chair_agent_id, provider_adapter_id, provider_action_id,
              provider_contract_digest, provider_session_ref,

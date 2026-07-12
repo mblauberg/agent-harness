@@ -86,6 +86,68 @@ CREATE TABLE git_remote_registrations(
 CREATE UNIQUE INDEX one_active_git_remote_name
   ON git_remote_registrations(project_id,remote_name) WHERE state='active';
 
+CREATE TABLE run_git_allowlists(
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  authority_revision INTEGER NOT NULL CHECK(authority_revision>=1),
+  git_allowlist_epoch INTEGER NOT NULL CHECK(git_allowlist_epoch>=1),
+  git_allowlist_digest TEXT NOT NULL,
+  allow_worktree_creation INTEGER NOT NULL CHECK(allow_worktree_creation IN (0,1)),
+  maximum_expiry INTEGER NOT NULL,
+  constraints_json TEXT NOT NULL CHECK(json_valid(constraints_json)),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch),
+  UNIQUE(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,git_allowlist_digest),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision)
+    REFERENCES run_authority_revisions(project_session_id,coordination_run_id,authority_revision),
+  CHECK(length(git_allowlist_digest)=71 AND substr(git_allowlist_digest,1,7)='sha256:')
+);
+CREATE TABLE run_git_allowlist_variants(
+  project_session_id TEXT NOT NULL,coordination_run_id TEXT NOT NULL,authority_revision INTEGER NOT NULL,
+  git_allowlist_epoch INTEGER NOT NULL,operation_variant TEXT NOT NULL,
+  PRIMARY KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,operation_variant),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+    REFERENCES run_git_allowlists(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch),
+  CHECK(operation_variant IN (
+    'fetch','pull-fast-forward-only','stage','unstage','commit','push-fast-forward-only',
+    'branch-create','branch-rename','branch-delete-merged-only','worktree-create-detached',
+    'worktree-create-new-branch','worktree-create-existing-branch','worktree-move','worktree-remove-clean',
+    'upstream-set','upstream-unset'
+  ))
+);
+CREATE TABLE run_git_allowlist_profiles(
+  project_session_id TEXT NOT NULL,coordination_run_id TEXT NOT NULL,authority_revision INTEGER NOT NULL,
+  git_allowlist_epoch INTEGER NOT NULL,profile_id TEXT NOT NULL,profile_revision INTEGER NOT NULL,profile_digest TEXT NOT NULL,
+  PRIMARY KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,profile_id,profile_revision),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+    REFERENCES run_git_allowlists(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch),
+  FOREIGN KEY(profile_id,profile_revision) REFERENCES git_execution_profiles(profile_id,revision)
+);
+CREATE TABLE run_git_allowlist_remotes(
+  project_session_id TEXT NOT NULL,coordination_run_id TEXT NOT NULL,authority_revision INTEGER NOT NULL,
+  git_allowlist_epoch INTEGER NOT NULL,registration_id TEXT NOT NULL,registration_revision INTEGER NOT NULL,
+  generation INTEGER NOT NULL,target_digest TEXT NOT NULL,
+  PRIMARY KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,registration_id,registration_revision),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+    REFERENCES run_git_allowlists(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch),
+  FOREIGN KEY(registration_id,registration_revision,generation,target_digest)
+    REFERENCES git_remote_registrations(registration_id,revision,generation,target_digest)
+);
+CREATE TABLE run_git_allowlist_refs(
+  project_session_id TEXT NOT NULL,coordination_run_id TEXT NOT NULL,authority_revision INTEGER NOT NULL,
+  git_allowlist_epoch INTEGER NOT NULL,ref_name TEXT NOT NULL CHECK(substr(ref_name,1,5)='refs/'),
+  PRIMARY KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,ref_name),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+    REFERENCES run_git_allowlists(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+);
+CREATE TABLE run_git_allowlist_paths(
+  project_session_id TEXT NOT NULL,coordination_run_id TEXT NOT NULL,authority_revision INTEGER NOT NULL,
+  git_allowlist_epoch INTEGER NOT NULL,repository_root TEXT NOT NULL,worktree_path TEXT NOT NULL,canonical_prefix TEXT NOT NULL,
+  PRIMARY KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,repository_root,worktree_path,canonical_prefix),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+    REFERENCES run_git_allowlists(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
+);
+
 CREATE TABLE operator_git_grants(
   grant_id TEXT NOT NULL,
   revision INTEGER NOT NULL CHECK(revision>=1),
@@ -116,6 +178,10 @@ CREATE TABLE operator_git_grants(
   revoked_at INTEGER,
   PRIMARY KEY(grant_id,revision),
   FOREIGN KEY(project_session_id,coordination_run_id) REFERENCES runs(project_session_id,run_id),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,authority_ref,
+              git_allowlist_epoch,git_allowlist_digest)
+    REFERENCES run_authority_revisions(project_session_id,coordination_run_id,authority_revision,
+                                       authority_ref,git_allowlist_epoch,git_allowlist_digest),
   FOREIGN KEY(execution_profile_id,execution_profile_revision)
     REFERENCES git_execution_profiles(profile_id,revision),
   CHECK(length(authority_ref)=71 AND substr(authority_ref,1,7)='sha256:'),
@@ -433,28 +499,53 @@ CREATE TABLE operator_git_effect_bindings(
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY(project_session_id,coordination_run_id) REFERENCES runs(project_session_id,run_id),
+  FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,authority_ref,
+              git_allowlist_epoch,git_allowlist_digest)
+    REFERENCES run_authority_revisions(project_session_id,coordination_run_id,authority_revision,
+                                       authority_ref,git_allowlist_epoch,git_allowlist_digest),
   FOREIGN KEY(grant_id,grant_revision) REFERENCES operator_git_grants(grant_id,revision),
   FOREIGN KEY(draft_id,operation_id) REFERENCES git_operation_drafts(draft_id,operation_id),
   FOREIGN KEY(gate_id,operation_id) REFERENCES scoped_gate_operations(gate_id,operation_id),
   FOREIGN KEY(operation_id) REFERENCES operation_admissions(operation_id),
   FOREIGN KEY(execution_profile_id,execution_profile_revision) REFERENCES git_execution_profiles(profile_id,revision),
   FOREIGN KEY(remote_registration_id,remote_registration_revision) REFERENCES git_remote_registrations(registration_id,revision),
+  FOREIGN KEY(predecessor_custody_id) REFERENCES operator_git_effect_bindings(custody_id),
   FOREIGN KEY(custody_id,mutation_reservation_generation) REFERENCES git_mutation_reservations(custody_id,generation),
   CHECK((grant_id IS NULL)=(grant_revision IS NULL)),
   CHECK((draft_id IS NULL)=(draft_revision IS NULL)),
   CHECK((gate_id IS NULL)=(gate_revision IS NULL)),
   CHECK((draft_id IS NULL)=(gate_id IS NULL)),
   CHECK((grant_id IS NULL)<>(gate_id IS NULL)),
+  CHECK((remote_registration_id IS NULL)=(remote_registration_revision IS NULL)),
+  CHECK((remote_registration_id IS NULL)=(remote_generation IS NULL)),
+  CHECK((remote_registration_id IS NULL)=(remote_target_digest IS NULL)),
   CHECK((predecessor_custody_id IS NULL)=(predecessor_conflict_generation IS NULL)),
   CHECK((lookup_generation=0)=(lookup_evidence_digest IS NULL)),
   CHECK((lookup_generation=0)=(lookup_outcome IS NULL)),
   CHECK((lookup_generation=0)=(lookup_observed_at IS NULL)),
+  CHECK(
+    (lookup_outcome IN ('incomplete','unavailable','inconsistent','inspector-unavailable',
+      'remote-proof-permanently-unavailable','mixed-local-remote-evidence','evidence-integrity-failure')
+      AND lookup_failure_signature_digest IS NOT NULL)
+    OR
+    ((lookup_outcome IS NULL OR lookup_outcome NOT IN ('incomplete','unavailable','inconsistent','inspector-unavailable',
+      'remote-proof-permanently-unavailable','mixed-local-remote-evidence','evidence-integrity-failure'))
+      AND lookup_failure_signature_digest IS NULL)
+  ),
+  CHECK(state<>'conflict' OR owned_conflict_generation IS NOT NULL),
   CHECK((resolution_eligible=0)=(resolution_eligible_lookup_generation IS NULL)),
   CHECK((resolution_eligible=0)=(resolution_eligible_evidence_digest IS NULL)),
   CHECK((resolution_eligible=0)=(resolution_eligibility_reason IS NULL)),
   CHECK(resolution_eligible=0 OR resolution_eligible_lookup_generation=lookup_generation),
   CHECK(resolution_eligible=0 OR resolution_eligible_evidence_digest=lookup_evidence_digest),
-  CHECK(resolution_eligible=0 OR resolution_eligibility_reason=lookup_outcome)
+  CHECK(resolution_eligible=0 OR resolution_eligibility_reason=lookup_outcome),
+  CHECK(resolution_eligible=0 OR state IN ('ambiguous','quarantined')),
+  CHECK(resolution_eligibility_reason IS NULL OR resolution_eligibility_reason IN (
+    'inspector-unavailable','remote-proof-permanently-unavailable','mixed-local-remote-evidence',
+    'evidence-integrity-failure','conflict-state-unverifiable'
+  )),
+  CHECK(resolution_eligibility_reason<>'conflict-state-unverifiable' OR
+        (state='quarantined' AND (owned_conflict_generation IS NOT NULL OR predecessor_conflict_generation IS NOT NULL)))
 );
 CREATE INDEX operator_git_effect_recovery
   ON operator_git_effect_bindings(state,lookup_generation,custody_id);
@@ -496,6 +587,15 @@ BEFORE UPDATE OF draft_id,draft_request_id,request_digest,operator_id,project_id
   git_allowlist_digest,draft_kind,operation_id,operation_kind,payload_digest,binding_json,
   draft_digest,expires_at,created_at ON git_operation_drafts
 BEGIN SELECT RAISE(ABORT,'INVARIANT_git_draft_identity_immutable'); END;
+CREATE TRIGGER git_grant_identity_immutable
+BEFORE UPDATE OF grant_id,revision,project_id,project_session_id,session_generation,issuing_session_revision,
+  coordination_run_id,issuing_run_revision,issuing_dependency_revision,authority_ref,authority_revision,
+  git_allowlist_epoch,git_allowlist_digest,repository_root,worktree_path,execution_profile_id,
+  execution_profile_revision,execution_profile_digest,allow_worktree_creation,source_kind,source_digest,
+  constraints_json,grant_digest,expires_at,created_at ON operator_git_grants
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_grant_identity_immutable'); END;
+CREATE TRIGGER git_grant_delete_forbidden BEFORE DELETE ON operator_git_grants
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_grant_delete_forbidden'); END;
 CREATE TRIGGER git_binding_identity_immutable
 BEFORE UPDATE OF custody_id,project_id,project_session_id,prepared_session_revision,session_generation,
   coordination_run_id,prepared_run_revision,prepared_dependency_revision,authority_ref,
@@ -513,6 +613,68 @@ BEGIN SELECT RAISE(ABORT,'INVARIANT_git_resolution_immutable'); END;
 CREATE TRIGGER git_resolution_delete_forbidden
 BEFORE DELETE ON git_custody_resolutions
 BEGIN SELECT RAISE(ABORT,'INVARIANT_git_resolution_immutable'); END;
+
+CREATE TRIGGER operator_effect_git_nonterminal_requires_four_owner_map
+BEFORE UPDATE OF state ON operator_effect_custody
+WHEN NEW.state IN ('conflict','quarantined')
+BEGIN
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM operator_git_effect_bindings binding
+    JOIN operation_admissions admission ON admission.operation_id=binding.operation_id
+    JOIN git_mutation_reservations reservation
+      ON reservation.custody_id=binding.custody_id
+     AND reservation.generation=binding.mutation_reservation_generation
+    WHERE binding.custody_id=NEW.custody_id
+      AND binding.state=NEW.state
+      AND admission.state=NEW.state
+      AND reservation.state=NEW.state
+  ) THEN RAISE(ABORT,'INVARIANT_git_four_owner_map') END;
+END;
+
+CREATE TRIGGER git_draft_gate_association_guard
+BEFORE INSERT ON scoped_gate_operations
+WHEN EXISTS (SELECT 1 FROM git_operation_drafts WHERE operation_id=NEW.operation_id)
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM scoped_gate_operations WHERE operation_id=NEW.operation_id
+  ) THEN RAISE(ABORT,'INVARIANT_git_draft_has_one_gate') END;
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM git_operation_drafts draft JOIN scoped_gates gate ON gate.gate_id=NEW.gate_id
+     WHERE draft.operation_id=NEW.operation_id
+       AND gate.project_session_id=draft.project_session_id
+       AND gate.coordination_run_id=draft.coordination_run_id
+       AND gate.dependency_revision=draft.observed_dependency_revision
+       AND instr(gate.enforcement_points_json,'operation')>0
+  ) THEN RAISE(ABORT,'INVARIANT_git_draft_gate_scope') END;
+END;
+
+CREATE TRIGGER git_draft_gate_association
+AFTER INSERT ON scoped_gate_operations
+WHEN EXISTS (
+  SELECT 1 FROM git_operation_drafts draft
+   WHERE draft.operation_id=NEW.operation_id AND draft.state='open'
+)
+BEGIN
+  UPDATE git_operation_drafts
+     SET state='gate-bound',revision=revision+1,updated_at=(
+       SELECT updated_at FROM scoped_gates WHERE gate_id=NEW.gate_id
+     )
+   WHERE operation_id=NEW.operation_id AND state='open';
+END;
+
+CREATE TRIGGER git_draft_terminal_gate
+AFTER UPDATE OF status ON scoped_gates
+WHEN NEW.status IN ('rejected','cancelled','superseded')
+BEGIN
+  UPDATE git_operation_drafts
+     SET state='cancelled',revision=revision+1,terminal_reason='gate-' || NEW.status,updated_at=NEW.updated_at
+   WHERE operation_id IN (SELECT operation_id FROM scoped_gate_operations WHERE gate_id=NEW.gate_id)
+     AND state IN ('open','gate-bound');
+  UPDATE operation_admissions
+     SET state='cancelled',revision=revision+1
+   WHERE operation_id IN (SELECT operation_id FROM scoped_gate_operations WHERE gate_id=NEW.gate_id)
+     AND state='prepared';
+END;
 
 CREATE TRIGGER global_revision_git_grant_insert AFTER INSERT ON operator_git_grants
 BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;

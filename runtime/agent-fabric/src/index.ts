@@ -27,6 +27,26 @@ export type {
   GitHostedChecksBinding,
   GitHostedChecksPort,
 } from "./operator/git-repository-read.js";
+export { FixedGitMutationPort } from "./operator/fixed-git-mutation-port.js";
+export type {
+  GitMutationDispatchContext,
+  GitMutationInspection,
+  GitMutationPort,
+} from "./operator/fixed-git-mutation-port.js";
+export {
+  TypedGitService,
+  deriveGitEffectBindingDigest,
+  deriveGitGrantDigest,
+  deriveGitResultRecipeDigest,
+  derivePreauthorisedGitOperationId,
+} from "./operator/typed-git-service.js";
+export type {
+  GitConflictInspectorPort,
+  TypedGitAdministrativeIntent,
+  TypedGitAdministrativeRequest,
+  TypedGitEffectRequest,
+  TypedGitServiceOptions,
+} from "./operator/typed-git-service.js";
 export type {
   ExternalEffectEvidencePort,
   RegisteredEffectPort,

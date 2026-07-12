@@ -25,6 +25,11 @@ import {
   touchProjectSessionMembershipRevisionForRun,
 } from "../project-session/membership-store.js";
 import { readGlobalLiveness, type QuiesceToken } from "../daemon/global-liveness.js";
+import {
+  TypedGitService,
+  type TypedGitAdministrativeRequest,
+  type TypedGitEffectRequest,
+} from "./typed-git-service.js";
 
 type Row = Record<string, unknown>;
 
@@ -226,6 +231,12 @@ function unsupported(): never {
   throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator action runtime is unavailable for this intent");
 }
 
+function isTypedGitAdministration(
+  intent: OperatorActionIntent,
+): intent is Extract<OperatorActionIntent, { kind: "git-authorise" | "git-operation-draft" | "git-custody-resolve" }> {
+  return intent.kind === "git-authorise" || intent.kind === "git-operation-draft" || intent.kind === "git-custody-resolve";
+}
+
 function digestValue(value: unknown, path: string): Sha256Digest {
   return parseSha256Digest(`sha256:${sha256(canonicalJson(value))}`, path);
 }
@@ -236,6 +247,7 @@ class ProductionOperatorActions {
   readonly #adapter: ProductionOperatorAdapterPort;
   readonly #daemonStop: ProductionDaemonStopPort | undefined;
   readonly #externalEffects: ExternalEffectService | undefined;
+  readonly #typedGit: TypedGitService | undefined;
   readonly #externalEffectHandles = new Map<string, ExternalEffectDispatchHandle>();
   readonly #fault: (label: string) => void;
 
@@ -245,6 +257,7 @@ class ProductionOperatorActions {
     adapter: ProductionOperatorAdapterPort;
     daemonStop?: ProductionDaemonStopPort;
     externalEffects?: ExternalEffectService;
+    typedGit?: TypedGitService;
     fault?: (label: string) => void;
   }) {
     this.#database = options.database;
@@ -252,6 +265,7 @@ class ProductionOperatorActions {
     this.#adapter = options.adapter;
     this.#daemonStop = options.daemonStop;
     this.#externalEffects = options.externalEffects;
+    this.#typedGit = options.typedGit;
     this.#fault = options.fault ?? (() => undefined);
   }
 
@@ -263,9 +277,29 @@ class ProductionOperatorActions {
     prepare: (request) => this.#prepareEffect(request),
     dispatch: async (request) => await this.#dispatch(request),
     observe: async (request) => await this.#observe(request),
+    status: (commandId, intentDigest) => this.#typedGit?.status(commandId, intentDigest) ?? null,
+    reconcileGit: async (input) => {
+      if (this.#typedGit === undefined || input.request.gitConflict === undefined) unsupported();
+      return await this.#typedGit.reconcileConflict({
+        reconciliationCommandId: input.request.command.commandId,
+        targetCommandId: input.request.targetCommandId,
+        intentDigest: input.intentDigest,
+        nextAttemptGeneration: input.nextAttemptGeneration,
+        binding: input.request.gitConflict,
+      });
+    },
   };
 
   #read(intent: OperatorActionIntent): Promise<Awaited<ReturnType<OperatorActionStatePort["read"]>>> {
+    if (intent.kind === "git") {
+      if (this.#typedGit === undefined) unsupported();
+      return this.#typedGit.readCurrentState(intent).then((state) => ({ kind: "git", revision: state.revision, state }));
+    }
+    if (isTypedGitAdministration(intent)) {
+      if (this.#typedGit === undefined) unsupported();
+      const current = this.#typedGit.readAdministrativeCurrentState(intent);
+      return Promise.resolve({ kind: "git-administration", ...current });
+    }
     if (intent.kind === "registered-external-effect" || intent.kind === "promotion") {
       if (this.#externalEffects === undefined) unsupported();
       return this.#externalEffects.readCurrentState(intent);
@@ -396,15 +430,23 @@ class ProductionOperatorActions {
   }
 
   #prepareEffect(request: OperatorEffectRequest): void {
+    if (isTypedGitAdministration(request.intent)) {
+      if (this.#typedGit === undefined) unsupported();
+      this.#typedGit.prepareAdministrative(this.#typedGitAdministrativeRequest(request));
+      return;
+    }
     const scope = this.#effectScope(request);
     const custodyId = this.#custodyId(scope, request.commandId);
     const intentJson = canonicalJson(request.intent);
     const external = request.intent.kind === "registered-external-effect" || request.intent.kind === "promotion";
+    const git = request.intent.kind === "git";
     if (external && this.#externalEffects === undefined) unsupported();
+    if (git && this.#typedGit === undefined) unsupported();
     const externalHandle = this.#database.transaction((): ExternalEffectDispatchHandle | undefined => {
       const existing = this.#effectCustody(scope, request.commandId);
       if (existing !== null) {
         this.#assertCustodyIdentity(existing, scope, request);
+        if (git) this.#typedGit?.prepare(this.#typedGitRequest(request, scope));
         return external ? this.#externalEffects?.prepareInTransaction(request) : undefined;
       }
       this.#database.prepare(`
@@ -430,6 +472,7 @@ class ProductionOperatorActions {
       const preparedExternal = external
         ? this.#externalEffects?.prepareInTransaction(request)
         : undefined;
+      if (git) this.#typedGit?.prepare(this.#typedGitRequest(request, scope));
       if (request.intent.kind === "daemon-stop") {
         const correlationDigest = `sha256:${sha256(canonicalJson({
           custodyId,
@@ -520,6 +563,16 @@ class ProductionOperatorActions {
   }
 
   async #dispatch(request: OperatorEffectRequest): Promise<OperatorEffectOutcome> {
+    if (isTypedGitAdministration(request.intent)) {
+      if (this.#typedGit === undefined) unsupported();
+      return this.#typedGit.administrativeOutcome(request.intent);
+    }
+    if (request.intent.kind === "git") {
+      if (this.#typedGit === undefined) unsupported();
+      const scope = this.#effectScope(request);
+      if (this.#effectCustody(scope, request.commandId) === null) this.#prepareEffect(request);
+      return await this.#typedGit.dispatch(this.#typedGitRequest(request, scope));
+    }
     let effective = request;
     let scope = this.#effectScope(effective);
     let custody = this.#effectCustody(scope, effective.commandId);
@@ -574,6 +627,14 @@ class ProductionOperatorActions {
   async #observe(
     request: OperatorEffectRequest & { effectRef: ArtifactRef | null },
   ): Promise<OperatorEffectOutcome> {
+    if (isTypedGitAdministration(request.intent)) {
+      if (this.#typedGit === undefined) unsupported();
+      return this.#typedGit.administrativeOutcome(request.intent);
+    }
+    if (request.intent.kind === "git") {
+      if (this.#typedGit === undefined) unsupported();
+      return await this.#typedGit.observe(this.#typedGitRequest(request, this.#effectScope(request)));
+    }
     const scope = this.#effectScope(request);
     const custody = this.#effectCustody(scope, request.commandId);
     if (custody === null) return { status: "rejected", code: "state-changed", evidenceRefs: [] };
@@ -648,6 +709,42 @@ class ProductionOperatorActions {
       return await this.#dispatchExternalControl(request, activeTurns, "steer");
     }
     unsupported();
+  }
+
+  #typedGitRequest(request: OperatorEffectRequest, scope: EffectScope): TypedGitEffectRequest {
+    if (request.intent.kind !== "git") throw new TypeError("typed Git request requires a Git intent");
+    return {
+      commandId: request.commandId,
+      previewId: request.previewId ?? request.commandId,
+      operatorId: scope.operatorId,
+      projectId: scope.projectId,
+      projectSessionId: scope.projectSessionId,
+      principalGeneration: scope.principalGeneration,
+      operation: scope.operation,
+      intent: request.intent,
+      intentDigest: request.intentDigest,
+      beforeStateDigest: request.beforeStateDigest,
+      attemptGeneration: request.attemptGeneration,
+    };
+  }
+
+  #typedGitAdministrativeRequest(request: OperatorEffectRequest): TypedGitAdministrativeRequest {
+    if (!isTypedGitAdministration(request.intent)) throw new TypeError("typed Git administration requires its closed intent");
+    const scope = this.#effectScope(request);
+    return {
+      commandId: request.commandId,
+      previewId: request.previewId ?? request.commandId,
+      operatorId: scope.operatorId,
+      projectId: scope.projectId,
+      projectSessionId: scope.projectSessionId,
+      principalGeneration: scope.principalGeneration,
+      operation: scope.operation,
+      intent: request.intent,
+      intentDigest: request.intentDigest,
+      beforeStateDigest: request.beforeStateDigest,
+      attemptGeneration: request.attemptGeneration,
+      operatorInputRecordDigest: request.operatorInputRecordDigest ?? request.intentDigest,
+    };
   }
 
   async #observeOwned(
@@ -2209,6 +2306,7 @@ export function createProductionOperatorActionPorts(options: {
   adapter: ProductionOperatorAdapterPort;
   daemonStop?: ProductionDaemonStopPort;
   externalEffects?: ExternalEffectService;
+  typedGit?: TypedGitService;
   fault?: (label: string) => void;
 }): ProductionOperatorActionPorts {
   const owner = new ProductionOperatorActions({
@@ -2217,6 +2315,7 @@ export function createProductionOperatorActionPorts(options: {
     adapter: options.adapter,
     ...(options.daemonStop === undefined ? {} : { daemonStop: options.daemonStop }),
     ...(options.externalEffects === undefined ? {} : { externalEffects: options.externalEffects }),
+    ...(options.typedGit === undefined ? {} : { typedGit: options.typedGit }),
     ...(options.fault === undefined ? {} : { fault: options.fault }),
   });
   return { statePort: owner.statePort, effectPort: owner.effectPort };

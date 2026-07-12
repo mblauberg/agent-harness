@@ -23,7 +23,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
       wrapper_entrypoint_sha256: "56cc851b9c1a936d459ffe6533b8885de780b907181d49ed260a9c44f8fc3c38"
       wrapper_manifest: "config/adapter-manifests/claude-agent-sdk.json"
-      wrapper_manifest_sha256: "d129fb1eaf609a05c453da422ad611c6e0f37eee2638143375af7f315b48b383"
+      wrapper_manifest_sha256: "e8867aec3561ea336f194d7808c280e4dab2b41ce7e7bb5275fd9b7937392e95"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
@@ -62,7 +62,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js"
       wrapper_entrypoint_sha256: "3947b730aba5491888952fa921fecaaa0be4ff9bb9f65262b61e771a3f3789bb"
       wrapper_manifest: "config/adapter-manifests/codex-app-server.json"
-      wrapper_manifest_sha256: "66ada3734ba8ee80334b9b593a2ed5012043cdf1b601439ae91e91a7511ebc1b"
+      wrapper_manifest_sha256: "50a323f7a079b18f4f65afa0cb1933bdff58951ab8278a4f7803aebd88b905af"
     contract:
       adapter_version: 1
       protocol: codex-app-server

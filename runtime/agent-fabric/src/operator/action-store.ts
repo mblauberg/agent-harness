@@ -95,6 +95,7 @@ export type OperatorEffectOutcome =
 
 export type OperatorEffectRequest = {
   commandId: string;
+  previewId?: string;
   operatorId?: string;
   projectId?: string;
   projectSessionId?: string;
@@ -104,12 +105,20 @@ export type OperatorEffectRequest = {
   intentDigest: Sha256Digest;
   beforeStateDigest: Sha256Digest;
   attemptGeneration: number;
+  operatorInputRecordDigest?: Sha256Digest;
 };
 
 export interface OperatorActionEffectPort {
   prepare?(request: OperatorEffectRequest): void;
   dispatch(request: OperatorEffectRequest): Promise<OperatorEffectOutcome>;
   observe(request: OperatorEffectRequest & { effectRef: ArtifactRef | null }): Promise<OperatorEffectOutcome>;
+  status?(commandId: string, intentDigest: Sha256Digest): OperatorActionStatus | null;
+  reconcileGit?(input: Readonly<{
+    request: OperatorActionReconcileRequest;
+    targetIntent: Extract<OperatorActionIntent, { kind: "git" }>;
+    intentDigest: Sha256Digest;
+    nextAttemptGeneration: number;
+  }>): Promise<OperatorActionStatus>;
 }
 
 export interface OperatorLaunchCustodyPort {
@@ -329,6 +338,12 @@ export class OperatorActionStore {
       commandId: request.command.commandId,
       phase: "prepared" as const,
       attemptGeneration: 1,
+      operatorInputRecordDigest: digestValue({
+        actor: request.command.actor,
+        provenance: request.command.provenance,
+        evidenceRefs: request.command.evidenceRefs,
+        confirmation: request.confirmation,
+      }, "operatorActionCommit.operatorInputRecordDigest"),
     };
     const preparedReceipt: OperatorActionReceipt = {
       commandId: request.command.commandId,
@@ -342,6 +357,7 @@ export class OperatorActionStore {
     };
     const effectRequest: OperatorEffectRequest = {
       commandId: request.command.commandId,
+      previewId: envelope.preview.previewId,
       operatorId: context.operatorId,
       projectId: request.projectId,
       projectSessionId: actionSessionId(authenticated, envelope.preview.intent),
@@ -610,7 +626,7 @@ export class OperatorActionStore {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator status credential is not authorised");
     }
     const command = this.#database.prepare(`
-      SELECT status, result_json FROM operator_commands
+      SELECT status, result_json, operation FROM operator_commands
        WHERE operator_id=? AND command_id=? AND project_id=?
          AND (? IS NULL OR project_session_id=?)
     `).get(
@@ -628,6 +644,12 @@ export class OperatorActionStore {
       SELECT preview_json FROM operator_previews WHERE confirmed_command_id=? AND operator_id=?
     `).get(request.commandId, authenticated.context.operatorId);
     if (!isRow(previewValue)) {
+      if (text(command, "operation") === "git-custody-resolve") {
+        return parseOperationResult(
+          FABRIC_OPERATIONS.operatorActionReconcile,
+          JSON.parse(text(command, "result_json")),
+        );
+      }
       return {
         status: "committed",
         commandId: request.commandId,
@@ -649,6 +671,10 @@ export class OperatorActionStore {
         request.commandId,
         envelope,
       );
+    }
+    if (envelope.preview.intent.kind === "git") {
+      const gitStatus = this.#effectPort.status?.(request.commandId, envelope.preview.intentDigest);
+      if (gitStatus !== undefined && gitStatus !== null) return gitStatus;
     }
     return statusFromAction(envelope.action, envelope.preview.intentDigest);
   }
@@ -747,6 +773,9 @@ export class OperatorActionStore {
     if (envelope.preview.intent.kind === "chair-bridge-recovery") {
       return await this.#reconcileChairRecovery(context, request, stored, envelope);
     }
+    if (request.gitConflict !== undefined) {
+      return await this.#reconcileGitConflict(context, request, stored, envelope);
+    }
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
     this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
@@ -816,6 +845,7 @@ export class OperatorActionStore {
     try {
       outcome = await this.#effectPort.observe({
         commandId: request.targetCommandId,
+        previewId: envelope.preview.previewId,
         operatorId: context.operatorId,
         projectId: request.projectId,
         projectSessionId: actionSessionId(authenticated, envelope.preview.intent),
@@ -853,6 +883,106 @@ export class OperatorActionStore {
       projectId: request.projectId,
       commandId: request.targetCommandId,
     });
+    this.#updateReconcileCommand(context.operatorId, request.command.commandId, result);
+    return result;
+  }
+
+  async #reconcileGitConflict(
+    context: AuthenticatedOperatorContext,
+    request: OperatorActionReconcileRequest,
+    stored: Row,
+    envelope: StoredPreviewEnvelope,
+  ): Promise<OperatorActionStatus> {
+    if (envelope.preview.intent.kind !== "git" || request.gitConflict === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git conflict reconciliation requires typed Git custody");
+    }
+    const reconcileGit = this.#effectPort.reconcileGit;
+    const status = this.#effectPort.status?.(request.targetCommandId, envelope.preview.intentDigest);
+    if (reconcileGit === undefined || status === undefined || status === null) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git custody reconciliation is unavailable");
+    }
+    const authenticated = this.#authenticateCommand(
+      context,
+      request.command,
+      request.projectId,
+      envelope.preview.intent,
+      "git-custody-resolve",
+    );
+    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    if (
+      status.status !== request.expectedStatus ||
+      !("attemptGeneration" in status) ||
+      status.attemptGeneration !== request.expectedAttemptGeneration
+    ) throw new ProjectFabricCoreError("STALE_REVISION", "typed Git reconciliation target changed");
+    const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
+    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+    if (replay !== null) return replay;
+    if (request.command.commandId === request.targetCommandId) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
+    }
+    const targetCommand = row(this.#database.prepare(`
+      SELECT expected_revision FROM operator_commands WHERE operator_id=? AND command_id=?
+    `).get(context.operatorId, request.targetCommandId), "typed Git target command");
+    if (request.command.expectedRevision !== integer(targetCommand, "expected_revision")) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "typed Git reconciliation target revision changed");
+    }
+    const action = envelope.action;
+    if (action === null || action.status === "terminal" || action.status === "rejected") {
+      throw new ProjectFabricCoreError("CONFLICT", "typed Git target is not reconcilable");
+    }
+    const nextAttemptGeneration = status.attemptGeneration + 1;
+    const observing: StoredPendingAction = {
+      status: "pending",
+      commandId: request.targetCommandId,
+      phase: "observing",
+      attemptGeneration: nextAttemptGeneration,
+      receipt: action.receipt,
+    };
+    const observingStatus = statusFromAction(observing, envelope.preview.intentDigest);
+    this.#database.transaction(() => {
+      const concurrentReplay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+      if (concurrentReplay !== null) return;
+      const latest = this.#effectPort.status?.(request.targetCommandId, envelope.preview.intentDigest);
+      if (
+        latest === undefined || latest === null || latest.status !== request.expectedStatus ||
+        !("attemptGeneration" in latest) || latest.attemptGeneration !== request.expectedAttemptGeneration
+      ) throw new ProjectFabricCoreError("STALE_REVISION", "typed Git reconciliation target changed");
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, observing);
+      this.#insertCommand(
+        context,
+        request.command,
+        request.projectId,
+        actionSessionId(authenticated, envelope.preview.intent),
+        "git-custody-resolve",
+        payloadHash,
+        status,
+        observing,
+        observingStatus,
+        "committed",
+      );
+    })();
+    let result: OperatorActionStatus;
+    try {
+      result = await reconcileGit({
+        request,
+        targetIntent: envelope.preview.intent,
+        intentDigest: envelope.preview.intentDigest,
+        nextAttemptGeneration,
+      });
+    } catch (error: unknown) {
+      if (error instanceof ProjectFabricCoreError) {
+        const rejected: OperatorActionStatus = {
+          status: "rejected",
+          commandId: request.command.commandId,
+          intentDigest: envelope.preview.intentDigest,
+          code: error.code === "STALE_GENERATION" ? "generation-stale" : "state-changed",
+          evidenceRefs: envelope.preview.evidenceRefs,
+        };
+        this.#updateReconcileCommand(context.operatorId, request.command.commandId, rejected);
+        return rejected;
+      }
+      return observingStatus;
+    }
     this.#updateReconcileCommand(context.operatorId, request.command.commandId, result);
     return result;
   }
@@ -956,6 +1086,7 @@ export class OperatorActionStore {
     command: OperatorActionPreviewRequest["command"],
     projectId: OperatorActionPreviewRequest["projectId"],
     intent: OperatorActionIntent,
+    requiredActionOverride?: "git-custody-resolve",
   ): AuthenticatedOperatorCredential {
     const authenticated = this.#operatorStore.authenticateCredential(command.credential.token);
     if (
@@ -969,7 +1100,7 @@ export class OperatorActionStore {
     ) {
       throw new ProjectFabricCoreError("WRONG_PROJECT", "operator command does not match its authenticated context");
     }
-    const requiredAction = requiredOperatorActionForIntent(intent);
+    const requiredAction = requiredActionOverride ?? requiredOperatorActionForIntent(intent);
     if (!authenticated.actions.includes(requiredAction)) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", `operator capability lacks ${requiredAction}`);
     }
@@ -1556,6 +1687,7 @@ function sanitisedReconcileRequest(request: OperatorActionReconcileRequest): unk
     expectedStatus: request.expectedStatus,
     expectedAttemptGeneration: request.expectedAttemptGeneration,
     mode: request.mode,
+    ...(request.gitConflict === undefined ? {} : { gitConflict: request.gitConflict }),
   };
 }
 

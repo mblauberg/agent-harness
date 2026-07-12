@@ -122,8 +122,8 @@ describe("ordered migration runner", () => {
   it("applies the checked-in migrations and treats a second run as a no-op", () => {
     const database = openDatabase();
 
-    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], currentVersion: 11 });
-    expect(applyMigrations(database)).toEqual({ applied: [], currentVersion: 11 });
+    expect(applyMigrations(database)).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], currentVersion: 12 });
+    expect(applyMigrations(database)).toEqual({ applied: [], currentVersion: 12 });
     expect(database.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([
       { version: 1 },
       { version: 2 },
@@ -136,6 +136,7 @@ describe("ordered migration runner", () => {
       { version: 9 },
       { version: 10 },
       { version: 11 },
+      { version: 12 },
     ]);
     for (const table of [
       "lifecycle_checkpoints",

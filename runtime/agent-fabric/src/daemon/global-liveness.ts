@@ -14,8 +14,12 @@ const CONTRIBUTING_STATES = [
 
 const PROVIDER_STATES = ["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"] as const;
 const CONTRIBUTING_PROVIDER_STATES = ["prepared", "dispatched", "accepted", "ambiguous", "quarantined"] as const;
-const OPERATOR_EFFECT_STATES = ["prepared", "dispatching", "terminal", "no-effect", "rejected", "ambiguous", "failed"] as const;
-const CONTRIBUTING_OPERATOR_EFFECT_STATES = ["prepared", "dispatching", "ambiguous", "failed"] as const;
+const OPERATOR_EFFECT_STATES = [
+  "prepared", "dispatching", "conflict", "ambiguous", "quarantined", "terminal", "no-effect", "rejected", "failed",
+] as const;
+const CONTRIBUTING_OPERATOR_EFFECT_STATES = [
+  "prepared", "dispatching", "conflict", "ambiguous", "quarantined", "failed",
+] as const;
 const RESULT_STATES = ["pending", "claimed", "provider-accepted", "consumed", "overdue", "abandoned"] as const;
 const CONTRIBUTING_RESULT_STATES = ["pending", "claimed", "provider-accepted", "overdue"] as const;
 

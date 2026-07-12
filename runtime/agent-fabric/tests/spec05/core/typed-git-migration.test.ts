@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { preflightTypedGitCustody } from "../../../src/persistence/typed-git-preflight.ts";
 
 const databases: Database.Database[] = [];
 
@@ -23,6 +24,12 @@ describe("typed Git custody migration 0012", () => {
       "run_authority_revisions",
       "git_execution_profiles",
       "git_remote_registrations",
+      "run_git_allowlists",
+      "run_git_allowlist_variants",
+      "run_git_allowlist_profiles",
+      "run_git_allowlist_remotes",
+      "run_git_allowlist_refs",
+      "run_git_allowlist_paths",
       "operator_git_grants",
       "operator_git_grant_variants",
       "operator_git_grant_remotes",
@@ -67,5 +74,19 @@ describe("typed Git custody migration 0012", () => {
     ).get() as { sql: string };
     expect(custodySql.sql).toMatch(/'conflict'.*'quarantined'/su);
     expect(admissionSql.sql).toMatch(/'conflict'.*'ambiguous'.*'quarantined'/su);
+  });
+
+  it("fails closed instead of inferring legacy coarse Git custody", () => {
+    const database = migrated();
+    database.pragma("foreign_keys = OFF");
+    const digest = `sha256:${"a".repeat(64)}`;
+    database.prepare(`
+      INSERT INTO operator_effect_custody(
+        custody_id,operator_id,project_id,project_session_id,principal_generation,command_id,operation,
+        intent_digest,before_state_digest,intent_json,state,created_at,updated_at
+      ) VALUES('legacy_git','operator_legacy','project_legacy','session_legacy',1,'command_legacy','git',
+        ?,?,'{"kind":"git","operation":{"effect":"push"}}','prepared',1,1)
+    `).run(digest, digest);
+    expect(() => preflightTypedGitCustody(database)).toThrow(/legacy Git custody cannot be inferred/iu);
   });
 });
