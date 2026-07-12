@@ -1,45 +1,24 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.22
+Version: 0.23
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.22 establishes the pre-release cutover contract: the unreleased
-Fabric supports one current schema and protocol baseline, preserves an older
-local database without modifying it, and rejects that database explicitly
-rather than importing or emulating legacy state. Current optional-feature
-negotiation, provider capability discovery and adapter artifact pinning remain
-required hardening; they are not backward-compatibility promises. Version 0.21 closes the acceptance-review-discovered terminal bridge,
-recovery-abandon, coordinated-workstream and multi-session projection gaps.
-Version 0.20 closes the acceptance-review-discovered lifecycle split-brain,
-legacy membership, acceptance-cycle exit and independent-topology contract
-gaps. Version 0.19 closes the acceptance-review-discovered unbound final-acceptance,
-chair-lease membership rotation and historical-run closure gaps. Version 0.18 closes the acceptance-review-discovered unreachable integration-
-principal and unbound conversational-attestation gap. Version 0.17 closes the implementation-discovered scoped-operation target,
-generic operator-effect custody and optional Herdr composition gaps. Version
-0.16 closes the implementation-discovered notification-projection
-wire-compatibility gap. Version 0.15 closes the implementation-discovered evidence-registration,
-accepted-scope and bounded artifact-content read gaps required for truthful
-Console review. Version 0.14 closes the review-discovered destroyed-conflict
-recovery dead end.
-Version 0.13 closes the implementation-discovered typed Git authority and
-operation-semantics gap. Version 0.12 closes the review-discovered retained-
-child-bridge and attestation descriptor gaps. Version 0.11 closes the review-discovered MCP bootstrap,
-secret-result and descriptor-ownership gaps. Version 0.10 closes the review-discovered
-chair-bridge recovery, provider-native attestation evidence, MCP resource parity
-and duplicate lifecycle-surface gaps.
-Version 0.9 closed the implementation-discovered current-agent MCP parity and
-launched-chair tool-surface gap. Version 0.8 closes the provider-session continuity
-attestation and live-bridge gap. Version 0.7 closed launch-custody, artifact,
-secret-handoff and provider-action identity gaps. Version 0.6 closed the typed
-Git-read and Activity message-body binding gaps. Version 0.5 closed local
-operator provisioning and reviewed chair launch. None of these amendments
-changes Spec 05 product scope or authorises provider login, push, release or
-unattended daemon operation.
+Version 0.23 is the normative pre-release consolidation. Fabric supports one
+current database baseline and public protocol, preserves incompatible local
+state without mutation, and rejects it explicitly rather than importing or
+emulating it. It also owns exact project/session/run topology, coordinated
+workstreams, generation-bound live chair handoff and typed operator effects.
+Any later reference to an incremental migration number, vintage daemon/client,
+implicit run import, retired decoder, coarse authority bundle or compatibility
+retry is superseded. Current optional-feature negotiation, provider capability
+discovery and pinned adapter artifacts remain required hardening, not
+backward-compatibility promises. No amendment authorises provider login, push,
+release or unattended daemon operation.
 
 ## 1. Decision requested
 
@@ -718,9 +697,8 @@ release-only lifecycle action are not additional descriptors. A future variant
 projection must replace the whole-operation descriptor with a registry-declared
 exhaustive, non-overlapping set and cannot silently omit an admitted enum member.
 
-Run creation is not an agent operation. Legacy `createRun` remains a private
-bootstrap compatibility method, while production run creation belongs to
-operator launch custody. `fabric_run_create` is never an MCP descriptor. The
+Run creation belongs only to reviewed operator launch custody. There is no
+private or agent `createRun` method, and `fabric_run_create` is never an MCP descriptor. The
 proxy accepts only an `afc_` agent capability, initialises with
 `expectedPrincipalKind: agent` and rejects a bootstrap credential before
 advertising tools.
@@ -1457,9 +1435,7 @@ project_session:
   launch_packet_ref: path-and-sha256
   membership_revision: compare-and-set-integer
   origin:
-    kind: operator-launch-or-legacy-migration
-    operator_id: required-only-for-operator-launch
-    migration_manifest_ref: required-only-for-legacy-migration
+    operator_id: required-current-operator
 
 coordination_run:
   run_id: stable-id
@@ -1767,10 +1743,10 @@ An approved/rejected human-resolved gate and its later superseded audit row
 remain reconciled history. A cancelled gate, or a pending/deferred gate ended
 by `system-supersession`, is abandoned with an explicit durable reason.
 
-Existing identifier-only task gates migrate to `task`-scoped gates with
-`task-readiness` and `scoped-barrier` enforcement. Migration shall not infer a
-run or release scope. After migration there is one gate owner and no parallel
-legacy gate truth. Approver-less gate creation and resolution fail closed.
+Identifier-only task gates do not exist in the current baseline. Only scoped
+gates with explicit enforcement bindings are admitted; no run or release scope
+is inferred. There is one gate owner. Approver-less gate creation and
+resolution fail closed.
 
 ### 32.4 Hierarchical resource admission
 
@@ -2339,12 +2315,9 @@ Acceptance adds:
   retry, reassignment, abandonment and late reply preserve the dependent
   barrier and never use pane state as delivery evidence.
 
-Migration-created sessions use `origin.kind: legacy-migration`, one stable
-independent session per legacy run, and a digest-bound migration manifest.
-Their launch packet, authority and root budget are derived without widening
-from the existing run/root authority and budget records. The migration never
-fabricates a human operator or approval; anything not provably closed enters
-`recovery_required` for explicit reconciliation.
+No session or run is imported from an earlier database epoch. Every current
+session has an explicit current operator origin and every run enters through
+reviewed launch custody.
 
 ### 32.11 Current-agent MCP parity and launched-chair surface
 
@@ -2940,7 +2913,7 @@ semantics:
   `ambiguous -> ambiguous` or `quarantined -> quarantined`. An
   `owned-conflict` request instead requires `conflict -> conflict`, positive
   owned generation and the exact nullable predecessor generation. The existing
-  legacy `pending`/`ambiguous` request rejects `git_conflict`; `quarantined` is
+  generic `pending`/`ambiguous` request rejects `git_conflict`; `quarantined` is
   accepted only for the inherited-successor form. Both Git forms reject their
   absence, crossed lineage fields, an existing eligibility marker or any
   unknown field. The nullable expected evidence
@@ -3321,11 +3294,10 @@ requested source kind, evidence kind, canonical relative path and source
 digest; it accepts no root or locator. The daemon derives the effective source:
 a requested `run-file` is admitted only below a dedicated strict-descendant run
 root; for root `.` it becomes an authority-proved `project-file` or is rejected.
-No active `run-file` registration may resolve to `.`. Legacy
-`fabric.v1.artifact.publish` remains a
-compatibility form: it registers `run-file` beneath a strict-descendant run
-root, or an authority-proved `project-file` when the legacy run root is the
-project root. The fixed Git-read service alone registers
+No active `run-file` registration may resolve to `.`. Base
+`fabric.v1.artifact.publish` registers `run-file` only beneath a
+strict-descendant current run root, or an authority-proved `project-file` when
+the current run root is the project root. The fixed Git-read service alone registers
 `git-private-diff`; receipt export and result completion use their existing
 daemon/agent owners. Exact identity replay returns one evidence ID. Changed
 scope, source, path, digest, publisher or kind conflicts.
@@ -3499,43 +3471,17 @@ state and revision/generation, integration availability and observation time;
 its Console label is only `available`, `unavailable` or `stale`.
 
 The server derives the result shape from the authenticated connection's
-negotiated feature set and must omit the extension for a client that did not
-request it. A new client accepts the legacy shape only when the feature was not
-negotiated, then renders an explicit client-side `unavailable` fallback; it
-must not imply a delivery journal observation. When the feature was negotiated,
-a missing or malformed extension fails closed as a protocol result error. An
-extension received without negotiation likewise fails closed in the new
-client. The presence invariant is structural: every Attention-typed node
-reachable from one result root, including every `ProjectionFact` value and
-conflict candidate, uses the same mode. Mixed presence invalidates the whole
-result. A presence, absence or malformed-shape violation terminates that attach;
-the client consumes no partial projection and never converts a protocol-
-violating daemon into the benign legacy fallback. The operator receives a
-typed `protocol-incompatible` connection failure with the rejected operation
-and closed reason, not a fabricated Attention row.
-
-The Console first attempts the richer optional feature. Because a
-pre-extension daemon rejects an unknown optional feature before negotiation,
-the local connector may make exactly one fresh-connection retry after the first
-locally valid initialise request receives the structured remote code
-`PROTOCOL_INVALID`. Authentication, transport, timeout, required-feature and
-all other failures never retry. The retry keeps every required feature and
-narrows optional features to an immutable
-`strict-v1` compatibility profile captured from the last daemon whose parser
-rejected unknown names while still emitting the true pre-extension result
-shape; it does not guess one rejected name or progressively downgrade. The
-retry uses a fresh nonce and performs no attach or other mutation before
-initialise succeeds. If it fails, the original incompatibility remains visible.
-The client retains the original failure as primary and records the retry result
-as an annotation. A successful fallback marks the connection
-`legacy-compatibility` and exposes that downgrade in System state/export; it is
-never silent.
-
-An intermediate daemon that emits `nativeNotification` without negotiating the
-feature is intentionally incompatible and fails closed; the client never
-accepts its extra field as legacy. Thus new-client/compatible-old-daemon and
-old-client/new-daemon pairs keep the legacy wire contract, while new peers
-obtain the richer shape.
+negotiated current feature set and omits the extension when the independently
+optional native-notification feature is unavailable. The Console then renders
+`feature-unavailable` without implying a delivery-journal observation. When
+the feature is negotiated, a missing or malformed extension fails closed as a
+protocol result error; an extension received without negotiation also fails.
+Every Attention-typed node reachable from one result root, including conflict
+candidates, uses the same mode. Mixed presence invalidates the whole result.
+The client consumes no partial projection and the operator receives a typed
+`protocol-incompatible` connection failure with the rejected operation and
+closed reason. There is one connection attempt and no alternate-profile retry or
+result-shape translation.
 
 For future additive features, the amended daemon accepts bounded, unique,
 well-formed feature names in initialise requests. An unknown required name
@@ -3544,20 +3490,18 @@ Names use the closed lowercase dotted-version grammar, are at most 64 bytes and
 the required and optional arrays contain at most 64 names combined. The exact
 ASCII grammar is
 `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*\.v[1-9][0-9]*$`.
-No exact name may repeat within or across the two arrays. Initialise results
-still carry
+No exact name may repeat within or across the two arrays. Initialise results still carry
 only features known to and negotiated by both peers. This forward-tolerance
 does not grant an unknown operation or relax result validation. A count,
 duplicate, ASCII-byte-length or grammar violation rejects the entire initialise
 request as `PROTOCOL_INVALID` before required/optional classification. Parsing
 uses exact ASCII byte equality without truncation, case folding or Unicode
-normalisation. The pinned compatibility profile satisfies the same checks.
+normalisation.
 
-The Console's valid legacy presentation contains only `unavailable` and
-`feature-not-negotiated`. It has no timestamp, count, empty journal state or
-synthetic zero. Notification aggregates exclude that branch rather than
-treating unavailable as zero; Markdown/JSON exports preserve the explicit
-unknown state.
+The Console's feature-unavailable presentation has no timestamp, count, empty
+journal state or synthetic zero. Notification aggregates exclude that branch
+rather than treating unavailable as zero; Markdown/JSON exports preserve the
+explicit unknown state.
 
 Every insert, update or delete that can change the projected native delivery
 summary advances `daemon_global_state.revision` in the same SQLite transaction.
@@ -3636,7 +3580,7 @@ operationTarget:
   taskId: exact-task-in-coordination-run
 ```
 
-No legacy target-less operation check is accepted. This is an enforcement
+No target-less operation check is accepted. This is an enforcement
 target, not authority: the daemon still derives identity, reauthorises the
 operation and checks the current dependency graph. The stored gate operation
 kind and the exact current affected-task bindings form one predicate; neither

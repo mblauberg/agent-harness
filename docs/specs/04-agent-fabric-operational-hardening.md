@@ -1,43 +1,22 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.18
+Version: 1.19
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.18 owns the pre-release schema/protocol cutover: one canonical fresh
-baseline, explicit non-destructive rejection of earlier database epochs and no
-vintage Console/daemon or implicit legacy-import path. Current adapter pins,
-provider capability checks and optional-feature negotiation remain security
-controls, not legacy support. The current baseline requires exact run/session
-result-shape negotiation for the Console. Version 1.17 owns terminal bridge
-retirement, settled recovery-abandon,
-live launched-chair handoff, coordinated-workstream creation and exact
-multi-session projection. Version 1.16 owns atomic acceptance exits, run-coupled exceptional lifecycle
-transitions, forward-only legacy membership repair and the binding one-live-run
-independent topology. Version 1.15 owns authoritative final-acceptance lookup and atomic chair-lease
-membership rotation across takeover/recovery. Version 1.14 owns integration-principal persistence, public input-attestation
-dispatch and provider-native provenance conformance. Version 1.13 owns exact scoped-operation target enforcement, unresolved
-operator-effect custody in closure/liveness/recovery and composition of the
-optional Herdr action/presence seam. Version 1.12 owns negotiated native-notification projection compatibility and
-revision invalidation. Version 1.11 owns the evidence-registry migration, accepted-scope persistence,
-root/digest compatibility and bounded no-follow artifact-content read required
-by Spec 01 v0.15. Version 1.10 closes the review-discovered destroyed-conflict
-recovery dead end.
-Version 1.9 closes the implementation-discovered typed Git grant, effect-custody
-and recovery gap. Version 1.8 closes the review-discovered retained-child-
-bridge and attestation descriptor gaps. Version 1.7 closes the review-discovered MCP bootstrap,
-secret-result and descriptor-ownership gaps. Version 1.6 closes the review-discovered bridge
-recovery, provider-native attestation evidence, resource projection and
-lifecycle-surface gaps. Version
-1.5 closed the implementation-discovered current-agent MCP parity and
-retained provider-session tool-projection gap. Version 1.4 closes the provider-session continuity
-attestation and live-bridge gap. Version 1.3 closed atomic launch-custody,
-recovery, secret-handoff and global provider-action identity gaps. Version 1.2
-closed the private operator bootstrap and generation-bound chair-launch
-boundary required by Spec 05.
+Version 1.19 is the normative pre-release consolidation. It owns one current
+database baseline and manifest, one current public protocol, the current
+private-control wire, exact project/session/run topology, coordinated
+workstreams, generation-bound live chair handoff and typed operator effects.
+Earlier amendment requirements remain only where they describe current
+behaviour. Any later reference to an incremental migration number, vintage
+daemon/client, implicit run import, retired decoder, coarse authority bundle or
+compatibility retry is superseded and is not an implementation requirement.
+Current optional-feature negotiation, provider capability checks and pinned
+adapter artifacts remain security controls, not backward-compatibility paths.
 
 ## 1. Decision and relationship to existing specs
 
@@ -106,10 +85,10 @@ continue to pin executable, wrapper and schema artifacts.
    commands fail closed.
 4. Response writes respect stream backpressure. Overload returns typed errors;
    it does not start more work and hope the process survives.
-5. Bootstrap authority remains limited after initialisation to legacy
-   create-run compatibility and exact-root local operator provisioning as
-   defined in section 9.7. It is never accepted on the public operator
-   protocol and cannot perform project-session, gate, Git or provider actions.
+5. Bootstrap authority remains limited after initialisation to exact-root local
+   operator provisioning and current private-control discovery. It cannot
+   create a run, is never accepted on the public operator protocol and cannot
+   perform project-session, gate, Git or provider actions.
 
 ### 3.3 Exact workspace trust
 
@@ -126,13 +105,15 @@ continue to pin executable, wrapper and schema artifacts.
 
 ### 3.4 Database integrity and maintenance
 
-1. Migration `0003` preflights existing state, adds operational indexes and
-   enforces critical enumerations, booleans, generations and same-run
-   relationships using additive SQLite triggers where table rebuilding would
-   create unnecessary cutover risk.
-2. Migration failure is transactional. There is no destructive down migration;
-   recovery is a forward repair or verified backup restore.
-3. Startup runs bounded integrity/foreign-key checks after an unclean marker.
+1. `0001-current-baseline.sql` creates the complete current schema from an
+   absent database path. A checked-in manifest binds its file digest and
+   canonical SQLite catalogue digest.
+2. Any pre-existing path is inspected read-only first. Empty, non-SQLite,
+   earlier, future, missing-metadata or catalogue-mismatched state returns
+   `SCHEMA_CUTOVER_REQUIRED` before permission, WAL, marker, socket or sidecar
+   mutation.
+3. Exact current state may reopen read/write. Startup runs bounded
+   integrity/foreign-key checks after an unclean marker.
    Long-lived connections run documented `PRAGMA optimize` maintenance.
 4. Query-plan tests prove the mailbox, task-owner/state, lease-expiry,
    event-cursor and unresolved-provider-action paths use intended indexes.
@@ -175,7 +156,7 @@ continue to pin executable, wrapper and schema artifacts.
 
 ### 3.8 Incremental modularity and testing
 
-1. `Fabric` remains the compatibility façade and sole cross-domain transaction
+1. `Fabric` remains the current coordination façade and sole cross-domain transaction
    owner. This programme extracts only stable seams created by the changes:
    wire framing/negotiation, workspace trust, retention/archive, database
    maintenance and receipt snapshot projection.
@@ -183,8 +164,8 @@ continue to pin executable, wrapper and schema artifacts.
    store are introduced.
 3. Deterministic tests cover oversized frames, connection/in-flight overload,
    pre-handshake methods, mixed versions, backpressure, trust symlink/expiry,
-   invalid legacy rows, migration rollback, query plans, repeated receipt
-   export, archive integrity and daemon restart.
+   invalid current rows, baseline atomicity and preservation, query plans,
+   repeated receipt export, archive integrity and daemon restart.
 4. Fresh native and other-primary reviews must report no unresolved P0–P2
    findings before human acceptance.
 
@@ -209,7 +190,7 @@ continue to pin executable, wrapper and schema artifacts.
 | --- | --- | --- | --- |
 | WP1 CI and repository policy | CI worker | Spec | `.github/`, CI policy tests |
 | WP2 bounded wire protocol | Protocol worker | Spec limits | transport, daemon/adapter server, protocol tests |
-| WP3 SQLite integrity | Persistence worker | Spec invariants | migration 0003, persistence, migration/query-plan tests |
+| WP3 SQLite integrity | Persistence worker | Spec invariants | current baseline, persistence, catalogue/query-plan tests |
 | WP4 trust/status/retention | Operations worker | wire status contract | CLI/application modules and focused tests |
 | WP5 receipt v2 | Receipt worker | event watermark | exports/schemas and focused tests |
 | WP6 serial integration | Chair | WP1–WP5 | shared configuration, façade wiring, docs, receipts |
@@ -237,21 +218,21 @@ protocol:
 These are operational safety bounds, not throughput targets. Load evidence may
 support a later human-approved change.
 
-## 7. Rollback and migration
+## 7. Cutover and rollback
 
-1. Backup/checkpoint the live database before migration verification.
-2. Preflight every trigger invariant against existing rows before installing
-   enforcement.
-3. Create indexes and triggers transactionally, then run
-   `foreign_key_check`, `quick_check` and query-plan assertions.
-4. A failure rolls back migration 0003 and leaves the prior binary/schema
-   usable. After successful cutover, rollback is forward repair or verified
-   restore, not trigger/table deletion in production.
-5. Protocol clients and daemon are deployed together locally. Version mismatch
-   fails closed; there is no silent legacy downgrade.
-6. Workspace trust and archive metadata are independent private files and can
+1. There is no in-place pre-release database migration. A pre-existing path is
+   evidence and is inspected read-only against the exact current manifest.
+2. Fresh initialization writes a private temporary database, installs the
+   complete baseline transactionally, runs `foreign_key_check`, `quick_check`
+   and catalogue assertions, fsyncs, then publishes without overwrite.
+3. Failure leaves either no final path or one complete current database.
+   Existing incompatible state and its sidecars, mode, timestamps and directory
+   entries remain unchanged.
+4. Protocol clients and daemon are deployed together locally. Version mismatch
+   fails closed; there is no downgrade or translation path.
+5. Workspace trust and archive metadata are independent private files and can
    be revoked without database mutation.
-7. Receipt v1 remains archival; consumers must opt into v2 before treating new
+6. Receipt v1 remains archival; consumers must opt into v2 before treating new
    fields as enforcement claims.
 
 ## 8. Acceptance
@@ -352,10 +333,9 @@ project launch or recovered active member cancels the quiesce or advances the
 revision so the stop fails closed. Project close and client detach are
 idempotent and cannot stop another project's work.
 
-### 9.3 Additive migration and invariants
+### 9.3 Current baseline and invariants
 
-Migration `0004-project-session-operations.sql` shall add, without rewriting historical
-tables:
+The single current baseline shall create:
 
 - project sessions and explicit membership;
 - coordination-run project/session links, lifecycle revision and chair
@@ -366,19 +346,17 @@ tables:
 - hierarchical resource scopes and reservations;
 - request-result delivery and transactional outbox state;
 - attention items and notification delivery journal;
-- daemon runtime epochs and imported bootstrap audit receipts; and
+- daemon runtime epochs and current bootstrap audit receipts; and
 - schema-versioned operator projection cursors.
 
-The migration shall preflight legacy rows, install same-project/run foreign-key
-and enumeration/generation triggers, and add indexes for active membership,
-gate enforcement, intake revision, callback deadline/claim, resource
-admission, notification dedupe and global-idle queries. It runs in one
-transaction after a verified backup. Failure leaves schema 0003 usable; after
-successful cutover recovery remains forward repair or verified restore, not a
-destructive down migration.
+The baseline installs same-project/run foreign-key and
+enumeration/generation triggers plus indexes for active membership, gate
+enforcement, intake revision, callback deadline/claim, resource admission,
+notification dedupe and global-idle queries. It is created only for an absent
+database path and is verified before atomic publication.
 
-Migration `0005-launch-custody.sql` shall add the append-only launch-attempt
-owner after schema 0004. Its closed logical shape is:
+The baseline includes the append-only launch-attempt owner. Its closed logical
+shape is:
 
 ```sql
 CREATE TABLE project_session_launch_custody (
@@ -430,11 +408,11 @@ CREATE TABLE project_session_launch_custody (
 );
 ```
 
-The migration also adds positive `journal_revision` and nullable
+The baseline also adds positive `journal_revision` and nullable
 `outcome_digest` columns to `provider_actions`. Every state or outcome CAS
 increments the revision; a non-null digest hashes the canonical closed outcome.
 This is the source of `provider_action_ref_v1`, not an artifact projection.
-The migration creates the parent unique index before the custody table and a
+The baseline creates the parent unique index before the custody table and a
 trigger that also requires the referenced provider action's `run_id` to equal
 the custody `run_id`. It preflights and enforces daemon-global
 `provider_actions(adapter_id, action_id)` uniqueness across runs; the core and
@@ -442,18 +420,8 @@ every adapter journal key the same pair. Duplicate existing pairs fail
 preflight before mutation. Attempt generations are contiguous per session, and
 a retry must reference that session's immediately prior proved-failed attempt.
 Update and delete triggers make custody rows immutable; provider-action and
-lifecycle rows own outcome. The migration is transactional and forward-only
-under the existing backup and recovery rules.
-
-Existing schema-v3 runs shall receive one deterministic independent imported
-project session per run without combining authority. Its stable ID, generation
-and launch-packet digest derive from a synthetic migration manifest bound to the
-legacy run ID, canonical root, authority and budget rows. The project-session
-origin is `legacy-migration`, never a human operator or approval. Its authority
-and root budget can only equal or narrow the legacy records. A run with a
-proven closed final barrier may import as closed; every other legacy run imports
-as `recovery_required` until explicitly reconciled. Uncanonical roots, identity
-collisions or inconsistent legacy state fail preflight before mutation.
+lifecycle rows own outcome. No run or session is imported from an earlier
+database epoch.
 
 ### 9.4 Restart and ambiguous-effect recovery
 
@@ -547,16 +515,15 @@ existing 32-agent/1,000-operation coordination mix.
 
 ### 9.7 Private project/operator provisioning and launch custody
 
-The daemon's private legacy/control connection owns one additional bootstrap
+The daemon's current private-control connection owns the bootstrap
 method, `provisionLocalOperator`. It is available only after the normal daemon
 initialisation handshake with the current private bootstrap capability. The
 method rechecks an exact canonical root and trust-record digest, derives the
 local subject binding, and transactionally creates or revalidates the project,
 operator principal and bounded project capability described by Spec 01
-section 32.9. `projects.canonical_root` plus a nullable
-`projects.trust_record_digest` own that binding; legacy-migration projects may
-remain null, but operator provisioning requires an exact current digest. It
-cannot widen an existing project/root binding. Exact replay is idempotent;
+section 32.9. `projects.canonical_root` plus non-null
+`projects.trust_record_digest` own that current binding. It cannot widen an
+existing project/root binding. Exact replay is idempotent;
 changed input or stale generation fails closed. `OperatorStore.rotatePrincipal`
 is the only rotation surface: it compare-and-sets and increments
 `principal_generation` and revokes every older capability in the same
@@ -759,13 +726,12 @@ codecs. The registry is the only membership/name owner; documentation and
 provider projections consume its generated artifact. Startup negotiates the
 current feature and operation grant before `tools/list`; a stale descriptor, missing
 feature or revoked generation is removed or rejected before daemon mutation.
-The legacy private method vocabulary may remain for bootstrap compatibility,
-but it cannot be the owner of the current MCP tool list or bypass public
-principal/generation checks.
+The current private-control method vocabulary cannot own the MCP tool list or
+bypass public principal/generation checks.
 
 The standalone proxy accepts only an `afc_` agent capability and requests an
 agent principal. A bootstrap `afb_` credential is rejected before `tools/list`;
-private legacy `createRun` is never an MCP descriptor. Every active agent
+there is no private run-creation descriptor. Every active agent
 operation is classified `tool` or `none`, and the build fails for an absent or
 stale classification. V1 projects exactly one complete descriptor per operation
 and permits no constant-bound aliases. Secret-bearing `registerAgent` and
@@ -1374,7 +1340,7 @@ latest-generation eligibility tuple. Any different outcome/signature resets
 the derived streak.
 
 The public reconciliation codec is the exhaustive three-variant union in Spec
-01: the legacy `pending|ambiguous` form rejects `git_conflict`; the
+01: the generic `pending|ambiguous` form rejects `git_conflict`; the
 `owned-conflict` form requires `conflict -> conflict`; and the
 `inherited-successor` form requires one of the three exact outer/binding-state
 mappings above. Each Git form requires every custody, lineage, binding-state,
@@ -1408,7 +1374,7 @@ reads the current binding/generic-custody/admission/reservation join and rejects
 an impossible combination. Only an inherited successor with binding
 `prepared`, positive predecessor lineage, null owned generation and no
 eligibility may use the `pending` status with `phase=prepared`; generic pending
-effects retain the legacy status without `git_custody`. A
+effects retain the generic status without `git_custody`. A
 reconciliation-command query returns
 `pending/observing` while its bounded read has no terminal command result, then returns
 the immutable stored status snapshot or closed stale rejection;
@@ -1544,8 +1510,8 @@ operation membership. The preauthorised variant has no draft or gate
 association but still owns one admission. No draft association is inferred
 from operation kind or payload similarity.
 
-The migration shall drop and replace the legacy `operation_gate_block` trigger
-after preflight. The replacement joins on `NEW.operation_id`, never
+The current baseline installs an `operation_gate_block` trigger that joins on
+`NEW.operation_id`, never
 `NEW.operation_kind`, and rejects any admission/gate/binding mismatch before
 custody becomes prepared. Direct SQL and public-protocol paths use the same
 triggers. Missing grant/draft/gate, admission, binding or required resolution
@@ -1738,10 +1704,8 @@ historical data.
 Authority/allow-list history, profile, remote, normalised grant-child, draft,
 reservation, binding, custody-resolution, operation-admission and exact
 `(gate_id, operation_id)` foreign keys, indexes and triggers install in one
-transaction. The migration rebuilds the generic custody/admission state checks
-without changing existing valid rows. Preflight explicitly locates
-the legacy operation-kind-based `operation_gate_block` trigger; migration drops
-and replaces it with the operation-ID join or rolls back. Binding/reservation
+transaction in the fresh baseline. The operation-ID join is the only
+`operation_gate_block` trigger. Binding/reservation
 immutability, mapped state-transition, digest, positive-containment, live-
 authority, same-run and global-revision triggers become live before the schema
 version advances. Recovery is forward repair or verified restore under
@@ -1961,16 +1925,10 @@ shapes and producer-owned namespaces. Evidence projection reads only active
 rows and takes kind, revision, ref and provenance from this registry rather
 than hard-coding them.
 
-The migration normalises every valid bare 64-hex legacy artifact digest to the
-wire `sha256:` form. Legacy `artifact.publish` still accepts/returns bare hex
-but normalises before database comparison. A historical row below a strict-
-descendant run root backfills as `run-file`. When the normalised run root is
-`.` instead, it backfills as `project-file` only if the publishing agent's
-persisted artifact-path authority covered the canonical, non-sensitive path or
-the fixed receipt exporter supplies its exact daemon-created source record;
-otherwise it is quarantined. New compatibility publication applies the same
-closed classification; result completion must prove the replying agent's
-persisted path authority and rejects an unprovable root-equal registration.
+The current baseline stores only the wire `sha256:` artifact digest form.
+Publication applies the closed source classification; result completion must
+prove the replying agent's persisted path authority and rejects an unprovable
+root-equal registration.
 `fabric.v1.evidence.publish` and every other registry producer apply that same
 derive/reclassify-or-reject rule regardless of the requested source kind. A
 database invariant/postflight query rejects every active `run-file` whose
@@ -1983,18 +1941,14 @@ path/digest equal one active same-scope registry row.
 
 `intakes` and `intake_revisions` gain an accepted-scope registry ID and closed
 state. New accepted revisions require the one explicit registered
-`acceptedScopeRef`; other states forbid one. A legacy accepted intake binds only
-when exactly one active registered candidate proves the ref. Zero, multiple or
-quarantined candidates enter `recovery-required`, project no accepted scope and
-create one deduplicated Attention item; migration never chooses the first ref.
+`acceptedScopeRef`; other states forbid one. Zero, multiple or quarantined
+candidates are rejected; the runtime never chooses the first ref.
 Changing accepted scope increments the project revision in the same transaction
 so Project row/detail references cannot remain current.
 
-Migration 0010 also adds an explicit run-directory basis. Operator-launched
-relative roots resolve only beneath joined `projects.canonical_root`; legacy
-absolute roots must re-canonicalise, prove containment beneath that same root
-and convert losslessly to project-relative form (with `.` as the root sentinel).
-Outside, ambiguous or symlinked roots fail preflight before schema change. One
+The baseline has an explicit run-directory basis. Operator-launched relative
+roots resolve only beneath joined `projects.canonical_root`; absolute run roots
+are not admitted. Outside, ambiguous or symlinked roots fail before state. One
 shared `resolveRunArtifactRoot` replaces direct/cwd-relative use in publish,
 results, receipts, checkpoints, provider evidence, retention and content reads.
 
@@ -2032,9 +1986,9 @@ Deterministic verification additionally covers:
   does not starve a valid read;
 - a second connection committing a relevant change between the two short
   transactions, and a writer completing during slow filesystem I/O;
-- migration of operator-relative and legacy-absolute roots, bare/prefixed
-  digests, receipts/intake bindings and accepted scope; invalid/ambiguous roots
-  roll back, while unrepresentable artifacts quarantine without parser crash;
+- operator-relative roots, prefixed digests, receipts/intake bindings and
+  accepted scope; invalid/ambiguous roots fail, while unrepresentable artifacts
+  quarantine without parser crash;
 - idempotent authorised project/run publication, result/receipt registration,
   private Git-diff registration and exact intake/gate/acceptance binding, with
   cross-scope/unregistered refs rejected atomically; root-equal requests from
@@ -2078,35 +2032,19 @@ projection from that result may enter the Console.
 
 Console protocol binding records whether the feature was negotiated. A
 Console-local discriminated presentation value separates a real
-`daemon-journal` summary from `legacy-fallback`; the fallback is never
-inserted into the wire `NativeNotificationDeliverySummary`. In valid legacy
-mode its presenter, evaluation and export say `notification status unavailable
+`daemon-journal` summary from `feature-unavailable`; the latter is never
+inserted into the wire `NativeNotificationDeliverySummary`. When the optional
+feature is unavailable its presenter, evaluation and export say `notification status unavailable
 (feature not negotiated)` and do not fabricate a journal state, delivery
 revision, claim generation, integration observation or observation time.
 It contributes neither zero nor an empty bucket to notification aggregates,
 and exports retain explicit unknown/unavailable state. Protocol incompatibility
-is a connection failure, never a per-row delivery summary or legacy fallback.
+is a connection failure, never a per-row delivery summary or unavailable value.
 
-The local Console connector owns one bounded legacy retry because a daemon
-predating this amendment rejects the new optional feature while parsing the
-first initialise request. It opens a fresh connection with a fresh client nonce
-and retains all required features while narrowing optional features to a
-checked-in immutable `strict-v1` profile and built-daemon fixture captured from
-commit `af548f8`, the last strict-name parser with the genuine pre-notification
-result shape. This one retry removes every later optional extension together;
-it never guesses from error text, loops per feature or silently drops a required
-feature. It occurs only after the locally validated first request receives
-the structured remote code `PROTOCOL_INVALID`, before any attach or other
-operation. Authentication, transport, timeout, required-feature and other
-failure codes never retry. A second failure is final and preserves the original
-failure as primary with the retry failure as an annotation. A successful retry
-marks System/connection state `legacy-compatibility` with the pinned profile;
-the downgrade is not silent. The intermediate `466e5c7` daemon already emitted
-the required field without negotiation, so a separate fixture must prove that
-it fails the
-unnegotiated-extra check after retry; it is not a compatibility target. These
-are vintage built daemon fixtures, not current parsers with mocked offers. The
-amended request parser separately admits no more than 64 unique well-formed
+The local Console makes one current-protocol connection attempt. It requires
+the exact current project/run/session projection and artifact-read features;
+it does not retry an alternate optional profile or translate another result shape.
+The request parser admits no more than 64 unique well-formed
 feature names combined across required and optional arrays, each at most 64
 bytes, ignores unknown optional names during negotiation and reports unknown
 required names as unavailable. Unknown names
@@ -2118,14 +2056,14 @@ folding or Unicode normalisation. The exact grammar is
 `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*\.v[1-9][0-9]*$`;
 duplicates within or across the two arrays reject.
 
-Migration 0010 adds `AFTER INSERT`, `AFTER UPDATE` and `AFTER DELETE` triggers
+The current baseline adds `AFTER INSERT`, `AFTER UPDATE` and `AFTER DELETE` triggers
 on `notification_deliveries` that increment `daemon_global_state.revision` in
 the mutating transaction. They follow the existing projection-trigger policy,
-compose with the evidence-registry work in the same ordered migration and do
+compose with the evidence-registry constraints in the same schema and do
 not create events, Attention mutations or delivery retries. Existing
 `integration_availability` triggers remain mandatory and are verified rather
-than duplicated. Migration preflight/postflight rejects missing trigger
-coverage before the new result-shape feature is advertised.
+than duplicated. Baseline catalogue verification rejects missing trigger
+coverage before the result-shape feature is advertised.
 
 Multiple row-trigger increments in one SQLite transaction are valid. The
 Console preserves stable IDs, focus, scroll, drafts and pending actions when an
@@ -2143,21 +2081,17 @@ Deterministic verification additionally covers:
 - negotiated and unnegotiated server responses for snapshot, projection-page
   Attention and view-page, including closed unknown/missing/malformed, mixed-
   presence and conflict-candidate negatives at both mandatory choke points;
-- independently versioned client/server fixtures proving legacy peers receive
-  byte-shape-compatible results and new peers require the extension, including
-  one real pre-feature initialise rejection followed by a fresh-nonce retry
-  with the exact `af548f8` optional profile and unchanged required features,
-  plus fail-closed whole-result/attach rejection of the `466e5c7`
-  unnegotiated-extra shape and no partial/fallback projection;
-- forward-compatible bounded unknown-feature parsing, client-side legacy
-  fallback honesty, explicit successful downgrade, original-error retention,
-  non-retry error classes, combined-count/cross-list duplicate and exact-
-  grammar rejection and zero fabricated or aggregate journal/freshness claims;
+- current client/server fixtures proving required-feature rejection, honest
+  optional notification unavailability, whole-result/attach rejection of an
+  unnegotiated extra field and no partial projection;
+- forward-compatible bounded unknown-feature parsing, combined-count,
+  cross-list duplicate and exact-grammar rejection, one connection attempt and
+  zero fabricated or aggregate journal/freshness claims;
 - delivery insert/update/delete plus availability changes advancing revision,
   invalidating a stale page/read transaction and refreshing Console polling
   while resize/resnapshot preserves UI state under bounded churn;
   and
-- migration restart/checksum behavior and absence of any notification-caused
+- baseline reopen/catalogue behavior and absence of any notification-caused
   Attention acknowledgement, approval, focus or other authority effect.
 
 ### 9.16 Scoped-operation enforcement, operator-effect custody and Herdr seam
@@ -2418,5 +2352,5 @@ every returned run projection and every run row summary/reference/detail
 contains the same exact `projectSessionId`; missing or mixed presence rejects
 the whole result before the client consumes it. When unnegotiated those fields
 are omitted from the generic protocol shape. The pre-release Console requires
-the feature during initialise and performs no legacy retry or identity
+the feature during initialise and performs no retry or identity
 inference. A peer that cannot negotiate it is explicitly incompatible.
