@@ -4478,6 +4478,18 @@ export class Fabric {
     const operationTarget = taskId === undefined
       ? { kind: "run" as const }
       : { kind: "task" as const, taskId: taskId as never };
+    if (existingPayload === undefined) {
+      assertScopedOperationAllowed(
+        this.#database,
+        runId,
+        FABRIC_OPERATIONS.dispatchProviderAction,
+        operationTarget,
+      );
+      if (taskId !== undefined) assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
+      if (input.operation !== "send_turn" && input.operation !== "steer") {
+        assertRunAcceptingWork(this.#database, runId);
+      }
+    }
     const taskBoundPayload = taskId === undefined
       ? input.payload
       : {
@@ -4576,16 +4588,6 @@ export class Fabric {
         actionId: input.actionId,
         commandId: `${input.commandId}:reconcile`,
       });
-    }
-    assertScopedOperationAllowed(
-      this.#database,
-      runId,
-      FABRIC_OPERATIONS.dispatchProviderAction,
-      operationTarget,
-    );
-    if (taskId !== undefined) assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
-    if (input.operation !== "send_turn" && input.operation !== "steer") {
-      assertRunAcceptingWork(this.#database, runId);
     }
     if (ephemeralSpawn) {
       if (ephemeralProviderAuthorityId === undefined || ephemeralMaxTurns === undefined || taskId === undefined) {
