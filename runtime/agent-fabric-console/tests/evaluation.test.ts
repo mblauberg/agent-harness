@@ -443,6 +443,38 @@ describe("versioned Console usability evaluation", () => {
     )).toBe(true);
   });
 
+  it("fails dynamic resize safety when a non-inert frame has no enabled visible focus", async () => {
+    const manifest = parseUsabilityManifest(await manifestValue());
+    const report = await evaluateUsabilityManifest(manifest, {
+      ...dependencies,
+      render: (dataset, controller, ui, viewport) => {
+        const frame = renderFabricConsoleFrame(dataset, controller, ui, viewport);
+        if (frame.columns !== 44 || frame.presentation.focusId === null) return frame;
+        const focused = frame.hitRegions.find(
+          ({ enabled, id }) => enabled && id === frame.presentation.focusId,
+        );
+        if (focused === undefined) return frame;
+        const rows = [...frame.rows];
+        for (let y = focused.rect.y1 - 1; y < focused.rect.y2; y += 1) {
+          const row = rows[y];
+          if (row === undefined) continue;
+          const start = focused.rect.x1 - 1;
+          const end = focused.rect.x2;
+          const segment = row.slice(start, end).replaceAll(">", " ");
+          rows[y] = `${row.slice(0, start)}${segment}${row.slice(end)}`;
+        }
+        return {
+          ...frame,
+          rows,
+        };
+      },
+    });
+
+    expect(report.observations.every(({ dynamicResizeSafe }) => !dynamicResizeSafe))
+      .toBe(true);
+    expect(report.interactionPassed).toBe(false);
+  });
+
   it("proves ordering, duplicate grouping and optional GitHub degradation", async () => {
     const manifest = parseUsabilityManifest(await manifestValue());
     const report = await evaluateUsabilityManifest(manifest, dependencies);

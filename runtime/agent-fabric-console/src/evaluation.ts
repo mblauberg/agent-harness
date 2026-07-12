@@ -1,4 +1,5 @@
 import stringWidth from "string-width";
+import { splitGraphemes } from "unicode-segmenter/grapheme";
 
 import type {
   AgentId,
@@ -1251,6 +1252,31 @@ async function exerciseInteractionCoverage(
   };
 }
 
+function cellSlice(value: string, start: number, end: number): string {
+  let column = 0;
+  let output = "";
+  for (const grapheme of splitGraphemes(value)) {
+    const nextColumn = column + stringWidth(grapheme);
+    if (nextColumn > start && column < end) output += grapheme;
+    column = nextColumn;
+    if (column >= end) break;
+  }
+  return output;
+}
+
+function frameHasEnabledVisibleFocus(frame: FabricConsoleFrame): boolean {
+  if (frame.mode === "inert") return false;
+  const focusId = frame.presentation.focusId;
+  if (focusId === null) return false;
+  const region = frame.hitRegions.find(
+    ({ enabled, id }) => enabled && id === focusId,
+  );
+  if (region === undefined) return false;
+  const firstRow = frame.rows[region.rect.y1 - 1];
+  return firstRow !== undefined &&
+    cellSlice(firstRow, region.rect.x1 - 1, region.rect.x1) === ">";
+}
+
 async function observe(
   fixture: UsabilityFixture,
   manifest: UsabilityManifest,
@@ -1298,15 +1324,20 @@ async function observe(
   const focusedId = runtime.ui.focusId;
   const focusVisible = focusedId !== null &&
     runtime.frame.presentation.focusId === focusedId &&
-    runtime.frame.hitRegions.some(
-      (region) => region.id === focusedId && region.enabled,
-    );
+    frameHasEnabledVisibleFocus(runtime.frame);
 
   await runtime.handleInput({ kind: "key", key: "text", text: "e" });
   keyboardEventCount += 1;
   const preservedDraft = `fixture=${fixture.id};repetition=${String(repetition)}`;
   await runtime.handleInput({ kind: "paste", text: preservedDraft });
+  await runtime.handleInput({ kind: "key", key: "escape" });
+  keyboardEventCount += 1;
   const selectionBeforeResize = controller.state.selectionByView.attention?.stableId ?? null;
+  const splitterFocusId = "splitter:master-detail";
+  const splitterAvailable = runtime.frame.hitRegions.some(
+    ({ enabled, id }) => enabled && id === splitterFocusId,
+  );
+  if (splitterAvailable) runtime.setFocus(splitterFocusId);
   const resizeFrames = [
     runtime.resize({ columns: 44, rows: 15 }),
     runtime.resize(manifest.referenceViewport),
@@ -1324,14 +1355,11 @@ async function observe(
     controller.state.activeView === "attention" &&
     (controller.state.selectionByView.attention?.stableId ?? null) === selectionBeforeResize &&
     runtime.ui.draft === preservedDraft &&
-    (runtime.ui.focusId === focusedId ||
-      (focusedId?.startsWith("splitter:") === true &&
-        runtime.ui.focusId !== null &&
-        resizeFrames[2]?.hitRegions.some(
-          ({ enabled, id }) => enabled && id === runtime.ui.focusId,
-        ) === true));
-  await runtime.handleInput({ kind: "key", key: "escape" });
-  keyboardEventCount += 1;
+    splitterAvailable &&
+    resizeFrames[0]?.presentation.focusId !== splitterFocusId &&
+    resizeFrames[1]?.presentation.focusId === splitterFocusId &&
+    resizeFrames[2]?.presentation.focusId === splitterFocusId &&
+    resizeFrames.every((candidate) => frameHasEnabledVisibleFocus(candidate));
 
   await runtime.handleInput({ kind: "key", key: "alt-m" });
   keyboardEventCount += 1;

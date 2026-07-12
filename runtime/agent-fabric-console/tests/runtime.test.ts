@@ -8,7 +8,11 @@ import type {
   Sha256Digest,
   Timestamp,
 } from "@local/agent-fabric-protocol";
-import type { ConsoleControllerState } from "../src/controller.js";
+import type {
+  ActionReview,
+  ActionReviewStage,
+  ConsoleControllerState,
+} from "../src/controller.js";
 import {
   FabricConsoleRuntime,
   type FabricRuntimeController,
@@ -71,6 +75,77 @@ function longBoundReview(
     result: null,
     failure: null,
   };
+}
+
+function directReview(stage: ActionReviewStage): ActionReview {
+  return {
+    stage,
+    binding: {
+      view: "runs",
+      itemId: "run:control",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(11),
+    },
+    availableAction: "resume",
+    preview: {
+      previewId: "preview-focus-restoration",
+      previewRevision: 3,
+      previewDigest: digest,
+      intent: {
+        kind: "control",
+        action: "resume",
+        target: {
+          kind: "task",
+          projectSessionId: "session:control" as never,
+          coordinationRunId: "run:control" as never,
+          taskId: "task:control" as never,
+          expectedRevision: 7,
+        },
+      },
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "consequential",
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit",
+      expiresAt: "2099-07-11T13:00:00.000Z" as Timestamp,
+    },
+    gates: [],
+    openedByEventId: "direct-open",
+    armedByEventId: stage === "review" ? null : "direct-arm",
+    changes: [],
+    status: null,
+  };
+}
+
+function shortWorkflowReview(
+  stage: ConsoleWorkflowReview["stage"],
+): ConsoleWorkflowReview {
+  return {
+    ...longBoundReview("Git", digest, stage === "confirm" ? "confirm" : "review"),
+    stage,
+    details: [],
+    result: stage === "committed" ? "committed exact workflow" : null,
+  };
+}
+
+function expectEnabledVisibleFocus(
+  runtime: FabricConsoleRuntime,
+  expectedId?: string,
+): void {
+  const focusId = runtime.ui.focusId;
+  if (expectedId !== undefined) expect(focusId).toBe(expectedId);
+  expect(focusId).not.toBeNull();
+  const region = runtime.frame.hitRegions.find(
+    ({ enabled, id }) => enabled && id === focusId,
+  );
+  expect(region).toBeDefined();
+  if (region === undefined) return;
+  const focusedText = runtime.frame.rows
+    .slice(region.rect.y1 - 1, region.rect.y2)
+    .map((line) => line.slice(region.rect.x1 - 1, region.rect.x2))
+    .join("\n");
+  expect(focusedText).toContain(">");
 }
 
 function fixtureDataset(revision = 11): FabricConsoleDataset {
@@ -470,12 +545,15 @@ describe("Fabric Console runtime routing", () => {
 
   it("collects an echo confirmation as inert editor text before activation", async () => {
     const setEditorActive = vi.fn();
+    const activate = vi.fn(async () => {});
+    const opener = "row:attention:attention:1";
     const runtime = new FabricConsoleRuntime({
       controller: new FakeController(),
       viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: opener }),
       draw: () => {},
       detach: async () => {},
-      activate: async () => {},
+      activate,
       eventId: () => "echo-event",
       render: renderFabricConsoleFrame,
       reducePointer: reduceFabricPointer,
@@ -501,11 +579,166 @@ describe("Fabric Console runtime routing", () => {
 
     expect(runtime.ui.inputMode).toBe("editor");
     expect(runtime.ui.draft).toBe("");
+    expectEnabledVisibleFocus(runtime, "detach");
     await runtime.handleInput({ kind: "paste", text: digest });
     expect(runtime.ui.draft).toBe(digest);
+    expect(activate).not.toHaveBeenCalled();
     await runtime.handleInput({ kind: "key", key: "escape" });
     expect(runtime.ui.inputMode).toBe("browse");
+    expectEnabledVisibleFocus(runtime, "review:confirm");
+    runtime.setWorkflowReview({
+      ...shortWorkflowReview("committed"),
+      confirmationMode: "echo",
+    });
+    expectEnabledVisibleFocus(runtime, "review:close");
+    runtime.setWorkflowReview(null);
+    expectEnabledVisibleFocus(runtime, opener);
     expect(setEditorActive).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([
+    ["cancel", "review"],
+    ["close", "committed"],
+  ] as const)(
+    "restores workflow Review opener focus after %s",
+    (_exit, stage) => {
+      const opener = "row:attention:attention:1";
+      const runtime = new FabricConsoleRuntime({
+        controller: new FakeController(),
+        viewport: { columns: 80, rows: 24 },
+        ui: createFabricUiState({ focusId: opener }),
+        draw: () => {},
+        detach: async () => {},
+        activate: async () => {},
+        eventId: () => "workflow-focus-restoration",
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+
+      runtime.setWorkflowReview(shortWorkflowReview(stage));
+      expectEnabledVisibleFocus(
+        runtime,
+        stage === "review" ? "review:continue" : "review:close",
+      );
+      runtime.setWorkflowReview(null);
+
+      expectEnabledVisibleFocus(runtime, opener);
+    },
+  );
+
+  it("keeps workflow commit focus enabled, then restores its opener on close", () => {
+    const opener = "row:attention:attention:1";
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: opener }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "workflow-commit-focus-restoration",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    runtime.setWorkflowReview(shortWorkflowReview("confirm"));
+    expectEnabledVisibleFocus(runtime, "review:confirm");
+    runtime.setWorkflowReview(shortWorkflowReview("committed"));
+    expectEnabledVisibleFocus(runtime, "review:close");
+    runtime.setWorkflowReview(null);
+
+    expectEnabledVisibleFocus(runtime, opener);
+  });
+
+  it("carries a guided workflow opener through Review and restores it on cancel", () => {
+    const opener = "row:attention:attention:1";
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: opener }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "guided-review-focus-restoration",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    runtime.beginGuidedWorkflow({
+      action: "discuss",
+      binding: {
+        view: "attention",
+        itemId: "attention:1",
+        itemRevision: revisionFromProtocol(7),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      prompt: "Discuss exact item",
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("review"));
+    runtime.setWorkflowReview(null);
+
+    expectEnabledVisibleFocus(runtime, opener);
+  });
+
+  it.each([
+    ["cancel", "review"],
+    ["close", "committed"],
+  ] as const)(
+    "restores direct Review opener focus after %s",
+    (_exit, stage) => {
+      const controller = stateBoundControlController();
+      const opener = "action:resume";
+      const runtime = new FabricConsoleRuntime({
+        controller,
+        viewport: { columns: 80, rows: 24 },
+        ui: createFabricUiState({ focusId: opener }),
+        draw: () => {},
+        detach: async () => {},
+        activate: async () => {},
+        eventId: () => "direct-focus-restoration",
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+
+      controller.state = { ...controller.state, review: directReview(stage) };
+      runtime.repaint();
+      expectEnabledVisibleFocus(
+        runtime,
+        stage === "review" ? "review:continue" : "review:close",
+      );
+      controller.state = { ...controller.state, review: null };
+      runtime.repaint();
+
+      expectEnabledVisibleFocus(runtime, opener);
+    },
+  );
+
+  it("keeps direct commit focus enabled and falls back safely when its opener vanished", () => {
+    const controller = stateBoundControlController();
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "action:resume" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "direct-commit-focus-restoration",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    controller.state = { ...controller.state, review: directReview("confirm") };
+    runtime.repaint();
+    expectEnabledVisibleFocus(runtime, "review:confirm");
+    controller.state = { ...controller.state, review: directReview("committed") };
+    runtime.repaint();
+    expectEnabledVisibleFocus(runtime, "review:close");
+
+    controller.dataset = { ...controller.dataset, canMutate: false };
+    controller.state = { ...controller.state, review: null };
+    runtime.repaint();
+
+    expect(runtime.ui.focusId).not.toBe("action:resume");
+    expectEnabledVisibleFocus(runtime);
   });
 
   it.each([
