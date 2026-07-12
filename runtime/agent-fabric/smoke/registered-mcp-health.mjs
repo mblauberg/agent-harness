@@ -16,7 +16,7 @@ const projectKey = process.env.AGENT_FABRIC_PROJECT_KEY;
 if (projectKey === undefined) throw new Error("AGENT_FABRIC_PROJECT_KEY is required");
 
 const seats = ["agy", "claude", "codex", "cursor", "kiro"];
-const requiredTools = ["fabric_message_send", "fabric_message_receive", "fabric_message_ack", "fabric_run_status"];
+const requiredTools = ["fabric_message_send", "fabric_message_receive", "fabric_delivery_acknowledge", "fabric_run_status_read"];
 
 const results = [];
 const seatDirectory = await currentSeatDirectory(stateDirectory, projectKey);
@@ -40,7 +40,7 @@ for (const seat of seats) {
     const [tools, templates, status] = await Promise.all([
       client.listTools(),
       client.listResourceTemplates(),
-      client.callTool({ name: "fabric_run_status", arguments: { runId: metadata.runId } }),
+      client.callTool({ name: "fabric_run_status_read", arguments: { runId: metadata.runId } }),
     ]);
     const names = new Set(tools.tools.map((tool) => tool.name));
     for (const name of requiredTools) {

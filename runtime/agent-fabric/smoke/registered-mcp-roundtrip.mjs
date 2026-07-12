@@ -38,7 +38,13 @@ async function connect(seat) {
 async function call(client, name, args) {
   const result = await client.callTool({ name, arguments: args });
   if (result.isError === true || result.structuredContent === undefined) {
-    throw new Error(`${name} failed`);
+    const detail = Array.isArray(result.content)
+      ? result.content
+          .filter((item) => item?.type === "text" && typeof item.text === "string")
+          .map((item) => item.text)
+          .join(" ")
+      : "";
+    throw new Error(`${name} failed${detail.length === 0 ? "" : `: ${detail}`}`);
   }
   return result.structuredContent;
 }
@@ -66,7 +72,7 @@ try {
   const nonce = randomUUID();
   const conversationId = `registered-roundtrip:${nonce}`;
   const request = await call(codex, "fabric_message_send", {
-    audience: { kind: "agents", agentIds: ["claude"] },
+    audience: { kind: "agents", agentIds: [claudeMetadata.agentId] },
     context: { kind: "direct" },
     kind: "request",
     body: "Codex registration check: please acknowledge this shared MCP message.",
@@ -76,9 +82,9 @@ try {
     hopCount: 0,
   });
   const receivedByClaude = await receive(claude, request.messageId);
-  await call(claude, "fabric_message_ack", { deliveryId: receivedByClaude.deliveryId });
+  await call(claude, "fabric_delivery_acknowledge", { deliveryId: receivedByClaude.deliveryId });
   const response = await call(claude, "fabric_message_send", {
-    audience: { kind: "agents", agentIds: ["codex"] },
+    audience: { kind: "agents", agentIds: [codexMetadata.agentId] },
     context: { kind: "direct" },
     kind: "response",
     body: "Claude registration check: message received and acknowledged over the shared MCP fabric.",
@@ -89,7 +95,7 @@ try {
     hopCount: 1,
   });
   const receivedByCodex = await receive(codex, response.messageId);
-  await call(codex, "fabric_message_ack", { deliveryId: receivedByCodex.deliveryId });
+  await call(codex, "fabric_delivery_acknowledge", { deliveryId: receivedByCodex.deliveryId });
   process.stdout.write(`${JSON.stringify({
     status: "pass",
     runId: codexMetadata.runId,
