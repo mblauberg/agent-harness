@@ -29,6 +29,7 @@ import {
 } from "../adapters/providers/types.js";
 import { ProjectFabricCoreError } from "./contracts.js";
 import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
+import { retireProjectSessionBridges } from "./bridge-retirement.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
 
 type Digest = Sha256Digest;
@@ -356,6 +357,7 @@ type LaunchCustodyServiceOptions = Readonly<{
     hasRetainedBridge(result: AgentCustodyResult, handle: AgentDispatchHandle): boolean;
   };
   daemonInstanceGeneration?: () => number;
+  retireVolatileProjectSession?: (projectSessionId: string) => void;
 }>;
 
 export type AgentBridgeContract = Readonly<{
@@ -752,6 +754,7 @@ export class LaunchCustodyService {
   readonly #adapterContracts: LaunchCustodyServiceOptions["adapterContracts"];
   readonly #adapterEffects: LaunchCustodyServiceOptions["adapterEffects"];
   readonly #agentEffects: LaunchCustodyServiceOptions["agentEffects"];
+  readonly #retireVolatileProjectSession: ((projectSessionId: string) => void) | undefined;
   readonly #daemonInstanceGeneration: () => number;
   readonly #consumedHandles = new Set<string>();
   readonly #consumedAgentHandles = new Set<string>();
@@ -767,6 +770,7 @@ export class LaunchCustodyService {
     this.#adapterContracts = options.adapterContracts;
     this.#adapterEffects = options.adapterEffects;
     this.#agentEffects = options.agentEffects;
+    this.#retireVolatileProjectSession = options.retireVolatileProjectSession;
     this.#daemonInstanceGeneration = options.daemonInstanceGeneration ?? (() => 1);
     if (!isAbsolute(this.#fabricSocketPath)) throw new TypeError("Fabric socket path must be absolute");
   }
@@ -1008,6 +1012,9 @@ export class LaunchCustodyService {
     if (text(custody, "state") === "terminal") {
       const stored: unknown = JSON.parse(text(custody, "result_json"));
       if (!isRow(stored) || stored.status !== "committed") throw new Error("terminal chair recovery result is invalid");
+      if (handle.intent.path === "abandon") {
+        try { this.#retireVolatileProjectSession?.(handle.intent.projectSessionId); } catch { /* durable fencing exists */ }
+      }
       return stored as ChairRecoveryCommit;
     }
     if (text(custody, "state") !== "prepared") {
@@ -1022,6 +1029,7 @@ export class LaunchCustodyService {
     const abandonIntent = handle.intent;
     const now = this.#clock();
     const result = this.#database.transaction((): ChairRecoveryCommit => {
+      this.#assertChairAbandonReady(abandonIntent);
       const changed = this.#database.prepare(`
         UPDATE chair_bridge_recovery_custody
            SET state='committing', revision=revision+1, updated_at=?
@@ -1073,9 +1081,35 @@ export class LaunchCustodyService {
          WHERE run_id=? AND lifecycle_state='recovery_required' AND revision=?
       `).run(abandonIntent.coordinationRunId, abandonIntent.expectedRunRevision);
       if (cancelledRun.changes !== 1) stale("run recovery revision changed before abandon");
+      const abandonmentReason = `chair-recovery-abandon:${handle.recoveryId}`;
+      const memberships = this.#database.prepare(`
+        UPDATE project_session_memberships
+           SET state='abandoned',abandoned_reason=?,revision=revision+1,updated_at=?
+         WHERE project_session_id=? AND coordination_run_id=? AND required=1 AND state='active'
+           AND (
+             (member_kind='coordination-run' AND member_id=coordination_run_id) OR
+             (member_kind='lease' AND member_id=(
+               SELECT chair_lease_id FROM runs WHERE run_id=coordination_run_id
+             ))
+           )
+      `).run(
+        abandonmentReason,
+        now,
+        abandonIntent.projectSessionId,
+        abandonIntent.coordinationRunId,
+      );
+      if (memberships.changes !== 2) stale("chair abandon membership set changed");
+      this.#database.prepare(`
+        UPDATE capabilities SET revoked_at=COALESCE(revoked_at,?)
+         WHERE run_id=?
+      `).run(now, abandonIntent.coordinationRunId);
+      this.#database.prepare(`
+        UPDATE agents SET lifecycle='archived' WHERE run_id=?
+      `).run(abandonIntent.coordinationRunId);
       const cancelledSession = this.#database.prepare(`
         UPDATE project_sessions
-           SET state='cancelled', revision=revision+1, terminal_path_json=?, updated_at=?
+           SET state='cancelled',membership_revision=membership_revision+1,
+               revision=revision+1,terminal_path_json=?,updated_at=?
          WHERE project_session_id=? AND state='recovery_required' AND revision=? AND generation=?
       `).run(
         terminalPath,
@@ -1085,6 +1119,16 @@ export class LaunchCustodyService {
         abandonIntent.expectedSessionGeneration,
       );
       if (cancelledSession.changes !== 1) stale("project session recovery revision changed before abandon");
+      retireProjectSessionBridges(this.#database, {
+        projectSessionId: abandonIntent.projectSessionId,
+        sourceKind: "chair-recovery-abandon",
+        terminalKind: "cancelled",
+        terminalRef: terminalPath,
+        ownerOperatorId: handle.operatorId,
+        ownerRef: handle.recoveryId,
+        now,
+      });
+      this.#fault("chair-recovery:abandon:after-bridges");
       const commit: ChairRecoveryCommit = {
         status: "committed",
         recoveryId: handle.recoveryId,
@@ -1099,7 +1143,67 @@ export class LaunchCustodyService {
       if (terminal.changes !== 1) stale("chair abandon custody changed before terminal commit");
       return commit;
     })();
+    try { this.#retireVolatileProjectSession?.(abandonIntent.projectSessionId); } catch { /* durable fencing already committed */ }
     return result;
+  }
+
+  #assertChairAbandonReady(intent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>): void {
+    const current = row(this.#database.prepare(`
+      SELECT chair_lease_id FROM runs
+       WHERE project_session_id=? AND run_id=? AND lifecycle_state='recovery_required'
+    `).get(intent.projectSessionId, intent.coordinationRunId), "chair abandon run");
+    const currentLeaseId = text(current, "chair_lease_id");
+    const allowedMemberships = this.#database.prepare(`
+      SELECT member_kind,member_id FROM project_session_memberships
+       WHERE project_session_id=? AND coordination_run_id=? AND required=1 AND state='active'
+         AND NOT (
+           (member_kind='coordination-run' AND member_id=coordination_run_id) OR
+           (member_kind='lease' AND member_id=?)
+         )
+       LIMIT 1
+    `).get(intent.projectSessionId, intent.coordinationRunId, currentLeaseId);
+    if (allowedMemberships !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unrelated active membership blocks chair abandon");
+    }
+    const exactTerminalMemberships = this.#database.prepare(`
+      SELECT COUNT(*) AS count FROM project_session_memberships
+       WHERE project_session_id=? AND coordination_run_id=? AND required=1 AND state='active'
+         AND (
+           (member_kind='coordination-run' AND member_id=coordination_run_id) OR
+           (member_kind='lease' AND member_id=?)
+         )
+    `).get(intent.projectSessionId, intent.coordinationRunId, currentLeaseId);
+    if (integer(row(exactTerminalMemberships, "chair abandon membership set"), "count") !== 2) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "chair abandon requires exact run and current-chair membership");
+    }
+    const blockers: ReadonlyArray<readonly [string, string]> = [
+      ["task", `SELECT 1 FROM tasks WHERE run_id=? AND state NOT IN ('complete','cancelled','degraded') LIMIT 1`],
+      ["workstream", `SELECT 1 FROM workstreams WHERE coordination_run_id=? AND state NOT IN ('complete','cancelled','degraded','abandoned') LIMIT 1`],
+      ["write lease", `SELECT 1 FROM leases WHERE run_id=? AND status IN ('active','quarantined') LIMIT 1`],
+      ["task-owner lease", `SELECT 1 FROM task_owner_leases WHERE run_id=? AND status IN ('active','frozen') LIMIT 1`],
+      ["provider action", `SELECT 1 FROM provider_actions WHERE run_id=? AND status IN ('prepared','dispatched','accepted','ambiguous','quarantined') LIMIT 1`],
+      ["required message", `SELECT 1 FROM deliveries delivery
+        JOIN messages message ON message.message_id=delivery.message_id AND message.run_id=delivery.run_id
+        WHERE delivery.run_id=? AND message.requires_ack=1
+          AND delivery.state NOT IN ('acknowledged','abandoned','expired') LIMIT 1`],
+      ["required result", `SELECT 1 FROM result_deliveries WHERE run_id=? AND required=1 AND state NOT IN ('consumed','abandoned') LIMIT 1`],
+      ["gate", `SELECT 1 FROM scoped_gates WHERE coordination_run_id=? AND status IN ('pending','deferred') LIMIT 1`],
+      ["barrier", `SELECT 1 FROM barriers WHERE run_id=? AND state<>'closed' LIMIT 1`],
+      ["child bridge", `SELECT 1 FROM agent_bridge_state WHERE run_id=? AND bridge_state IN ('pending','lost') LIMIT 1`],
+      ["resource reservation", `SELECT 1 FROM resource_reservations WHERE coordination_run_id=? AND state IN ('reserved','partially-consumed','ambiguous') LIMIT 1`],
+    ];
+    for (const [label, sql] of blockers) {
+      if (this.#database.prepare(sql).get(intent.coordinationRunId) !== undefined) {
+        throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", `${label} remains unresolved before chair abandon`);
+      }
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM operator_effect_custody
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','conflict','quarantined','failed')
+       LIMIT 1
+    `).get(intent.projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "operator effect remains unresolved before chair abandon");
+    }
   }
 
   chairRecoveryStatus(operatorId: string, operatorCommandId: string): ChairRecoveryCommit {
@@ -1780,6 +1884,9 @@ export class LaunchCustodyService {
       integer(run, "revision") !== intent.expectedRunRevision ||
       integer(run, "chair_generation") !== intent.expectedChairGeneration
     ) throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery binding is stale");
+    if (this.#hasValidBridgeRetirement(intent.projectSessionId, intent.coordinationRunId)) {
+      throw new ProjectFabricCoreError("CONFLICT", "retired chair bridge cannot enter recovery");
+    }
     if (this.#database.prepare(`
       SELECT 1 FROM chair_bridge_loss_resolutions WHERE loss_id=?
     `).get(intent.lossId) !== undefined) {
@@ -1844,6 +1951,7 @@ export class LaunchCustodyService {
        WHERE project_session_id=? AND coordination_run_id=?
     `).get(input.projectSessionId, input.runId);
     if (!isRow(stateValue)) return false;
+    if (this.#hasValidBridgeRetirement(input.projectSessionId, input.runId)) return false;
     const state = stateValue;
     const exact =
       text(state, "chair_agent_id") === input.agentId &&
@@ -2020,13 +2128,19 @@ export class LaunchCustodyService {
     return jsonEvidenceDigest(manifest);
   }
 
-  #auditRetainedChairBridges(result: { recoveryRequired: number }): void {
+  #auditRetainedChairBridges(
+    result: { recoveryRequired: number; ambiguous: number },
+    errors: unknown[],
+  ): void {
     const hasRetainedBridge = this.#adapterEffects.hasRetainedChairBridge;
     if (hasRetainedBridge === undefined) return;
     const active = this.#database.prepare(`
-      SELECT * FROM launched_chair_bridge_state WHERE state='active'
+      SELECT * FROM launched_chair_bridge_state bridge WHERE state='active'
        ORDER BY project_session_id, coordination_run_id
-    `).all().filter(isRow);
+    `).all().filter(isRow).filter((state) => !this.#hasValidBridgeRetirement(
+      text(state, "project_session_id"),
+      text(state, "coordination_run_id"),
+    ));
     for (const state of active) {
       const entry: RetainedChairBridge = {
         projectSessionId: text(state, "project_session_id"),
@@ -2039,11 +2153,95 @@ export class LaunchCustodyService {
         providerSessionGeneration: integer(state, "provider_session_generation"),
         bridgeGeneration: integer(state, "bridge_generation"),
       };
-      if (!hasRetainedBridge(entry) && this.#persistChairBridgeLoss({
-        ...entry,
-        reason: "daemon startup found no exact retained chair bridge",
-      })) result.recoveryRequired += 1;
+      let retained = false;
+      let reason = "daemon startup found no exact retained chair bridge";
+      try {
+        retained = hasRetainedBridge(entry);
+      } catch (error: unknown) {
+        reason = `daemon startup chair bridge audit failed: ${error instanceof Error ? error.name : "unknown error"}`;
+      }
+      if (retained) continue;
+      try {
+        const persisted = this.#database.transaction(() => this.#persistChairBridgeLoss({
+          ...entry,
+          reason,
+        }))();
+        if (persisted) result.recoveryRequired += 1;
+      } catch (error: unknown) {
+        // Keep auditing sibling sessions. The unchanged row remains visible on the next recovery pass.
+        result.ambiguous += 1;
+        errors.push(error);
+      }
     }
+  }
+
+  #hasValidBridgeRetirement(projectSessionId: string, coordinationRunId: string): boolean {
+    return this.#database.prepare(`
+      SELECT 1
+        FROM launched_chair_bridge_retirements retirement
+        JOIN launched_chair_bridge_state bridge
+          ON bridge.project_session_id=retirement.project_session_id
+         AND bridge.coordination_run_id=retirement.coordination_run_id
+        JOIN runs run ON run.project_session_id=bridge.project_session_id
+                     AND run.run_id=bridge.coordination_run_id
+        JOIN project_sessions session ON session.project_session_id=bridge.project_session_id
+        JOIN run_chair_leases lease
+          ON lease.project_session_id=run.project_session_id
+         AND lease.run_id=run.run_id
+         AND lease.lease_id=run.chair_lease_id
+         AND lease.generation=run.chair_generation
+        JOIN capabilities capability ON capability.token_hash=bridge.capability_hash
+        JOIN agents agent ON agent.run_id=bridge.coordination_run_id
+                         AND agent.agent_id=bridge.chair_agent_id
+       WHERE retirement.project_session_id=? AND retirement.coordination_run_id=?
+         AND bridge.state IN ('active','abandoned')
+         AND run.lifecycle_state IN ('closed','cancelled','launch_failed')
+         AND session.state IN ('closed','cancelled')
+         AND session.terminal_path_json=retirement.terminal_ref
+         AND json_valid(session.terminal_path_json)=1
+         AND json_extract(session.terminal_path_json,'$.kind')=retirement.terminal_kind
+         AND run.chair_agent_id=bridge.chair_agent_id
+         AND lease.holder_agent_id=bridge.chair_agent_id
+         AND lease.status='revoked'
+         AND capability.revoked_at IS NOT NULL
+         AND agent.lifecycle='archived'
+         AND (
+           (retirement.source_kind='project-session-close' AND EXISTS (
+             SELECT 1 FROM operator_commands command
+              WHERE command.project_session_id=retirement.project_session_id
+                AND command.command_id=retirement.owner_ref
+                AND command.operator_id=retirement.owner_operator_id
+                AND command.operation='decide' AND command.status='committed'
+                AND json_valid(command.result_json)=1
+                AND json_extract(command.result_json,'$.projectSessionId')=retirement.project_session_id
+                AND json_extract(command.result_json,'$.terminalPath.kind')=retirement.terminal_kind
+           )) OR
+           (retirement.source_kind='project-session-stop' AND EXISTS (
+             SELECT 1 FROM operator_effect_custody custody
+              WHERE custody.project_session_id=retirement.project_session_id
+                AND custody.command_id=retirement.owner_ref
+                AND custody.operator_id=retirement.owner_operator_id
+                AND custody.operation='project-session-stop'
+                AND custody.state IN ('dispatching','terminal')
+                AND json_valid(custody.intent_json)=1
+                AND json_extract(custody.intent_json,'$.kind')='project-session-stop'
+                AND json_extract(custody.intent_json,'$.projectSessionId')=retirement.project_session_id
+           )) OR
+           (retirement.source_kind='chair-recovery-abandon' AND EXISTS (
+             SELECT 1 FROM chair_bridge_recovery_custody recovery
+              JOIN chair_bridge_losses loss ON loss.loss_id=recovery.loss_id
+              WHERE recovery.recovery_id=retirement.owner_ref AND recovery.path='abandon'
+                AND recovery.operator_id=retirement.owner_operator_id
+                AND recovery.state='terminal'
+                AND loss.project_session_id=retirement.project_session_id
+                AND loss.coordination_run_id=retirement.coordination_run_id
+           )) OR
+           (retirement.source_kind='migration-backfill'
+             AND retirement.owner_ref='migration-0013'
+             AND EXISTS (SELECT 1 FROM schema_migrations WHERE version=13))
+         )
+       LIMIT 1
+    `).get(projectSessionId, coordinationRunId) !== undefined;
   }
 
   async provisionAgent(input: AgentCustodyInput): Promise<AgentCustodyResult> {
@@ -3249,7 +3447,7 @@ export class LaunchCustodyService {
     failed: number;
     ambiguous: number;
     recoveryRequired: number;
-  }): Promise<void> {
+  }, errors: unknown[]): Promise<void> {
     const prepared = this.#database.prepare(`
       SELECT c.*, p.payload_json, b.bridge_generation
         FROM provider_agent_custody c
@@ -3259,9 +3457,14 @@ export class LaunchCustodyService {
        ORDER BY c.created_at, c.action_id
     `).all().filter(isRow);
     for (const custody of prepared) {
-      this.#database.transaction(() => this.#failPreparedAgent(custody))();
-      result.preparedFailed += 1;
-      result.failed += 1;
+      try {
+        this.#database.transaction(() => this.#failPreparedAgent(custody))();
+        result.preparedFailed += 1;
+        result.failed += 1;
+      } catch (error: unknown) {
+        errors.push(error);
+        result.ambiguous += 1;
+      }
     }
 
     if (this.#agentEffects !== undefined) {
@@ -3274,20 +3477,22 @@ export class LaunchCustodyService {
          ORDER BY c.created_at, c.action_id
       `).all().filter(isRow);
       for (const custody of observable) {
-        const handle = this.#agentDispatchHandle(custody);
+        let handle: AgentDispatchHandle | undefined;
         let raw: unknown;
         try {
-          raw = await this.#agentEffects.lookup({ adapterId: handle.adapterId, actionId: handle.actionId });
+          const currentHandle = this.#agentDispatchHandle(custody);
+          handle = currentHandle;
+          raw = await this.#agentEffects.lookup({ adapterId: currentHandle.adapterId, actionId: currentHandle.actionId });
           result.lookedUp += 1;
-          const custodyResult = this.#agentLookupResult(handle, raw);
+          const custodyResult = this.#agentLookupResult(currentHandle, raw);
           this.#database.transaction(() => {
-            this.#activateAgent(handle, custodyResult);
+            this.#activateAgent(currentHandle, custodyResult);
             if (
-              handle.bridgeCapable &&
-              !this.#agentEffects?.hasRetainedBridge(custodyResult, handle)
+              currentHandle.bridgeCapable &&
+              !this.#agentEffects?.hasRetainedBridge(custodyResult, currentHandle)
             ) {
               this.#persistChildBridgeLoss({
-                runId: handle.runId,
+                runId: currentHandle.runId,
                 agentId: custodyResult.agentId,
                 adapterId: custodyResult.adapterId,
                 actionId: custodyResult.actionId,
@@ -3298,16 +3503,26 @@ export class LaunchCustodyService {
               });
             }
           })();
-          if (handle.bridgeCapable) result.recoveryRequired += 1;
+          if (currentHandle.bridgeCapable) result.recoveryRequired += 1;
           else result.activated += 1;
         } catch (error: unknown) {
+          if (handle === undefined) {
+            errors.push(error);
+            result.ambiguous += 1;
+            continue;
+          }
+          const failedHandle = handle;
           const evidence = jsonEvidenceDigest({
             kind: "agent-custody-lookup-incomplete",
-            adapterId: handle.adapterId,
-            actionId: handle.actionId,
+            adapterId: failedHandle.adapterId,
+            actionId: failedHandle.actionId,
             error: error instanceof Error ? error.name : "lookup-error",
           });
-          this.#database.transaction(() => this.#fenceUnprovenAgent(handle, evidence))();
+          try {
+            this.#database.transaction(() => this.#fenceUnprovenAgent(failedHandle, evidence))();
+          } catch (fenceError: unknown) {
+            errors.push(fenceError);
+          }
           result.ambiguous += 1;
         }
       }
@@ -3323,33 +3538,38 @@ export class LaunchCustodyService {
        ORDER BY c.created_at, c.action_id
     `).all().filter(isRow);
     for (const custody of active) {
-      const handle = this.#agentDispatchHandle(custody);
-      const storedResult = parseOperationResult(
-        handle.operation === "spawn" ? FABRIC_OPERATIONS.spawnAgent : FABRIC_OPERATIONS.attachAgent,
-        {
-          agentId: handle.targetAgentId,
-          authorityId: handle.authorityId,
-          adapterId: handle.adapterId,
-          actionId: handle.actionId,
-          providerSessionRef: text(custody, "provider_session_ref"),
-          providerSessionGeneration: integer(custody, "provider_session_generation"),
-          bridgeState: "active",
-          bridgeGeneration: handle.bridgeGeneration,
-          evidenceDigest: exactDigest(custody.activation_evidence_digest, "agent activation evidence"),
-        },
-      ) as AgentCustodyResult;
-      if (!this.#agentEffects?.hasRetainedBridge(storedResult, handle)) {
-        this.#database.transaction(() => this.#persistChildBridgeLoss({
-          runId: handle.runId,
-          agentId: storedResult.agentId,
-          adapterId: storedResult.adapterId,
-          actionId: storedResult.actionId,
-          providerSessionRef: storedResult.providerSessionRef,
-          providerSessionGeneration: storedResult.providerSessionGeneration,
-          bridgeGeneration: storedResult.bridgeGeneration,
-          reason: "daemon restart found no retained child bridge",
-        }))();
-        result.recoveryRequired += 1;
+      try {
+        const handle = this.#agentDispatchHandle(custody);
+        const storedResult = parseOperationResult(
+          handle.operation === "spawn" ? FABRIC_OPERATIONS.spawnAgent : FABRIC_OPERATIONS.attachAgent,
+          {
+            agentId: handle.targetAgentId,
+            authorityId: handle.authorityId,
+            adapterId: handle.adapterId,
+            actionId: handle.actionId,
+            providerSessionRef: text(custody, "provider_session_ref"),
+            providerSessionGeneration: integer(custody, "provider_session_generation"),
+            bridgeState: "active",
+            bridgeGeneration: handle.bridgeGeneration,
+            evidenceDigest: exactDigest(custody.activation_evidence_digest, "agent activation evidence"),
+          },
+        ) as AgentCustodyResult;
+        if (!this.#agentEffects?.hasRetainedBridge(storedResult, handle)) {
+          this.#database.transaction(() => this.#persistChildBridgeLoss({
+            runId: handle.runId,
+            agentId: storedResult.agentId,
+            adapterId: storedResult.adapterId,
+            actionId: storedResult.actionId,
+            providerSessionRef: storedResult.providerSessionRef,
+            providerSessionGeneration: storedResult.providerSessionGeneration,
+            bridgeGeneration: storedResult.bridgeGeneration,
+            reason: "daemon restart found no retained child bridge",
+          }))();
+          result.recoveryRequired += 1;
+        }
+      } catch (error: unknown) {
+        errors.push(error);
+        result.ambiguous += 1;
       }
     }
   }
@@ -3370,8 +3590,14 @@ export class LaunchCustodyService {
       ambiguous: 0,
       recoveryRequired: 0,
     };
-    await this.#recoverChairRecoveryCustody(result);
-    await this.#recoverAgentCustody(result);
+    const errors: unknown[] = [];
+    try {
+      await this.#recoverChairRecoveryCustody(result);
+    } catch (error: unknown) {
+      errors.push(error);
+      result.ambiguous += 1;
+    }
+    await this.#recoverAgentCustody(result, errors);
     const prepared = this.#database.prepare(`
       SELECT c.*
         FROM project_session_launch_custody c
@@ -3381,9 +3607,14 @@ export class LaunchCustodyService {
        ORDER BY c.project_session_id, c.custody_attempt_generation
     `).all().filter(isRow);
     for (const custody of prepared) {
-      this.#database.transaction(() => this.#failPrepared(custody))();
-      result.preparedFailed += 1;
-      result.failed += 1;
+      try {
+        this.#database.transaction(() => this.#failPrepared(custody))();
+        result.preparedFailed += 1;
+        result.failed += 1;
+      } catch (error: unknown) {
+        errors.push(error);
+        result.ambiguous += 1;
+      }
     }
 
     const observable = this.#database.prepare(`
@@ -3395,50 +3626,58 @@ export class LaunchCustodyService {
        ORDER BY c.project_session_id, c.custody_attempt_generation
     `).all().filter(isRow);
     for (const custody of observable) {
-      const providerAdapterId = text(custody, "provider_adapter_id");
-      const providerActionId = text(custody, "provider_action_id");
-      const providerContractDigest = exactDigest(custody.provider_contract_digest, "custody provider contract digest");
-      const attestationChallengeDigest = exactDigest(
-        custody.attestation_challenge_digest,
-        "custody attestation challenge digest",
-      );
-      let contract: LaunchAdapterContract;
       try {
-        contract = await this.#adapterContracts.inspect(providerAdapterId);
-        if (`sha256:${sha256(canonicalJson(contract))}` !== providerContractDigest) {
-          throw new Error("launch provider contract changed");
-        }
-      } catch (error: unknown) {
-        const outcome = this.#ambiguousOutcome(
-          custody,
-          "conflict",
-          jsonEvidenceDigest(error instanceof Error ? error.message : error),
+        const providerAdapterId = text(custody, "provider_adapter_id");
+        const providerActionId = text(custody, "provider_action_id");
+        const providerContractDigest = exactDigest(custody.provider_contract_digest, "custody provider contract digest");
+        const attestationChallengeDigest = exactDigest(
+          custody.attestation_challenge_digest,
+          "custody attestation challenge digest",
         );
+        let contract: LaunchAdapterContract;
+        try {
+          contract = await this.#adapterContracts.inspect(providerAdapterId);
+          if (`sha256:${sha256(canonicalJson(contract))}` !== providerContractDigest) {
+            throw new Error("launch provider contract changed");
+          }
+        } catch (error: unknown) {
+          const outcome = this.#ambiguousOutcome(
+            custody,
+            "conflict",
+            jsonEvidenceDigest(error instanceof Error ? error.message : error),
+          );
+          const disposition = this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
+          result[disposition] += 1;
+          continue;
+        }
+        let raw: unknown;
+        try {
+          raw = await this.#adapterEffects.lookup({
+            providerAdapterId,
+            providerActionId,
+            providerContractDigest,
+            attestationChallengeDigest,
+          });
+        } catch (error: unknown) {
+          raw = this.#ambiguousOutcome(
+            custody,
+            "adapter-error",
+            jsonEvidenceDigest(error instanceof Error ? error.message : error),
+          );
+        }
+        result.lookedUp += 1;
+        const outcome = this.#normaliseOutcome(custody, raw, "lookup", contract);
         const disposition = this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
         result[disposition] += 1;
-        continue;
-      }
-      let raw: unknown;
-      try {
-        raw = await this.#adapterEffects.lookup({
-          providerAdapterId,
-          providerActionId,
-          providerContractDigest,
-          attestationChallengeDigest,
-        });
       } catch (error: unknown) {
-        raw = this.#ambiguousOutcome(
-          custody,
-          "adapter-error",
-          jsonEvidenceDigest(error instanceof Error ? error.message : error),
-        );
+        errors.push(error);
+        result.ambiguous += 1;
       }
-      result.lookedUp += 1;
-      const outcome = this.#normaliseOutcome(custody, raw, "lookup", contract);
-      const disposition = this.#database.transaction(() => this.#applyOutcome(custody, outcome))();
-      result[disposition] += 1;
     }
-    this.#database.transaction(() => this.#auditRetainedChairBridges(result))();
+    this.#auditRetainedChairBridges(result, errors);
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "launch custody recovery left one or more sessions unfenced");
+    }
     return result;
   }
 
@@ -3671,6 +3910,16 @@ export class LaunchCustodyService {
       actionId,
     );
     if (settlement === "overrun") {
+      const frozen = this.#database.prepare(`
+        UPDATE run_chair_leases SET status='frozen',updated_at=?
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND status='active'
+      `).run(
+        now,
+        text(custody, "project_session_id"),
+        text(custody, "coordination_run_id"),
+        text(custody, "chair_lease_id"),
+      );
+      if (frozen.changes !== 1) stale("launch overrun chair lease changed");
       this.#database.prepare(`
         UPDATE project_sessions SET state='recovery_required', revision=revision+1, updated_at=?
          WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')

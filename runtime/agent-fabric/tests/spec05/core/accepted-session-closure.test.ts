@@ -116,6 +116,46 @@ describe("accepted project-session closure", () => {
       INSERT INTO run_chair_leases(
         project_session_id, run_id, lease_id, holder_agent_id, generation, status, updated_at
       ) VALUES ('session_01', 'run_history', 'chair:run_history:1', 'chair_history', 1, 'revoked', ${now});
+      INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at,revoked_at)
+      VALUES
+        ('cap_chair_bridge','run_01','chair_01',1,${now + 100_000},NULL),
+        ('cap_child_bridge','run_01','agent_completion',1,${now + 100_000},NULL);
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
+        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
+        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision
+      ) VALUES
+        ('run_01','launch_chair','adapter_test','spawn','chair_01',1,NULL,
+         'identity-chair','payload-chair','{}','terminal','[]',1,1,1,
+         '{"outcome":{"kind":"terminal-success","providerSessionRef":"provider_session_01"}}',${now},1),
+        ('run_01','spawn_child','adapter_test','spawn','agent_completion',1,NULL,
+         'identity-child','payload-child','{}','terminal','[]',1,1,1,
+         '{"outcome":{"kind":"terminal-success","providerSessionRef":"provider_session_02"}}',${now},1);
+      INSERT INTO provider_agent_custody(
+        run_id,action_id,operation,actor_agent_id,target_agent_id,authority_id,adapter_id,
+        bridge_contract_digest,bridge_capable,capability_hash,capability_expires_at,
+        principal_generation,requested_provider_session_ref,intent_digest,created_at
+      ) VALUES (
+        'run_01','spawn_child','spawn','chair_01','agent_completion','authority_01','adapter_test',
+        '${digest}',1,'cap_child_bridge',${now + 100_000},1,NULL,'${digest}',${now}
+      );
+      INSERT INTO launched_chair_bridge_state(
+        project_session_id,coordination_run_id,chair_agent_id,provider_adapter_id,
+        provider_action_id,provider_contract_digest,provider_session_ref,
+        provider_session_generation,principal_generation,bridge_generation,
+        capability_hash,activation_evidence_digest,state,revision,created_at,updated_at
+      ) VALUES (
+        'session_01','run_01','chair_01','adapter_test','launch_chair','${digest}',
+        'provider_session_01',1,1,1,'cap_chair_bridge','${digest}','active',1,${now},${now}
+      );
+      INSERT INTO agent_bridge_state(
+        run_id,agent_id,adapter_id,action_id,provider_session_ref,
+        provider_session_generation,bridge_state,bridge_generation,capability_hash,
+        activation_evidence_digest,revision,created_at,updated_at
+      ) VALUES (
+        'run_01','agent_completion','adapter_test','spawn_child','provider_session_02',
+        1,'active',1,'cap_child_bridge','${digest}',1,${now},${now}
+      );
       INSERT INTO project_session_memberships(
         project_session_id, coordination_run_id, member_kind, member_id,
         required, state, revision, abandoned_reason, created_at, updated_at
@@ -206,6 +246,40 @@ describe("accepted project-session closure", () => {
     ports.effectPort.prepare?.(drainRequest);
     const draining = await ports.effectPort.dispatch(drainRequest);
     expect(draining).toEqual({ status: "pending", phase: "accepted" });
+
+    database.prepare(`
+      INSERT INTO operator_effect_custody(
+        custody_id,operator_id,project_id,project_session_id,principal_generation,
+        command_id,operation,intent_digest,before_state_digest,intent_json,state,
+        created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "git-quarantine-acceptance",
+      "operator_01",
+      "project_01",
+      "session_01",
+      1,
+      "git-quarantine-command",
+      "git-mutation",
+      digest,
+      digest,
+      JSON.stringify({ kind: "git-mutation" }),
+      "quarantined",
+      now,
+      now,
+    );
+    expect(() => gates.resolveGate(operatorContext(), {
+      command: command("reject_quarantined_git", 1),
+      gateId: "gate_final_acceptance",
+      status: "approved",
+      decisionEvidence: { kind: "typed-console", confirmationCommandId: "reject_quarantined_git" },
+    } as never)).toThrowError(expect.objectContaining({ code: "BARRIER_PRECONDITION_FAILED" }));
+    await expect(ports.effectPort.observe({ ...drainRequest, effectRef: null }))
+      .resolves.toEqual({ status: "pending", phase: "observing" });
+    database.prepare(`
+      UPDATE operator_effect_custody SET state='no-effect',updated_at=?
+       WHERE custody_id='git-quarantine-acceptance' AND state='quarantined'
+    `).run(now + 1);
 
     const acceptedGate = gates.resolveGate(operatorContext(), {
       command: command("confirm_final_acceptance", 1),
@@ -493,6 +567,37 @@ describe("accepted project-session closure", () => {
     } as unknown as ProjectSessionCloseRequest)).toThrowError(
       expect.objectContaining({ code: "CAPABILITY_FORBIDDEN" }),
     );
+    const crashingClose = new ProjectSessionStore({
+      database,
+      operatorStore: restartedOperatorStore,
+      clock: () => now + 2,
+      fault: (label) => {
+        if (label === "session:close:after-bridges") throw new Error("bridge retirement crash");
+      },
+    });
+    expect(() => crashingClose.closeProjectSession(operatorContext(), {
+      command: command("accept_session_crash", 10),
+      projectSessionId: "session_01",
+      expectedGeneration: 1,
+      terminalPath: { kind: "accepted", acceptanceRef: freshAcceptanceRef },
+    } as unknown as ProjectSessionCloseRequest)).toThrow("bridge retirement crash");
+    expect(database.prepare(`
+      SELECT state,revision FROM project_sessions WHERE project_session_id='session_01'
+    `).get()).toEqual({ state: "awaiting_acceptance", revision: 10 });
+    expect(database.prepare(`
+      SELECT lifecycle_state,revision FROM runs WHERE run_id='run_01'
+    `).get()).toEqual({ lifecycle_state: "awaiting_acceptance", revision: 9 });
+    expect(database.prepare(`
+      SELECT state FROM launched_chair_bridge_state
+       WHERE project_session_id='session_01' AND coordination_run_id='run_01'
+    `).get()).toEqual({ state: "active" });
+    expect(database.prepare(`
+      SELECT bridge_state FROM agent_bridge_state WHERE run_id='run_01' AND agent_id='agent_completion'
+    `).get()).toEqual({ bridge_state: "active" });
+    expect(database.prepare(`
+      SELECT 1 FROM launched_chair_bridge_retirements
+       WHERE project_session_id='session_01' AND coordination_run_id='run_01'
+    `).get()).toBeUndefined();
     const closed = sessions.closeProjectSession(operatorContext(), {
       command: command("accept_session", 10),
       projectSessionId: "session_01",
@@ -508,5 +613,37 @@ describe("accepted project-session closure", () => {
       .toEqual({ status: "revoked" });
     expect(database.prepare("SELECT lifecycle FROM agents WHERE run_id='run_01' AND agent_id='chair_01'").get())
       .toEqual({ lifecycle: "archived" });
+    expect(database.prepare(`
+      SELECT source_kind,terminal_kind,terminal_ref,owner_ref
+        FROM launched_chair_bridge_retirements
+       WHERE project_session_id='session_01' AND coordination_run_id='run_01'
+    `).get()).toEqual({
+      source_kind: "project-session-close",
+      terminal_kind: "accepted",
+      terminal_ref: canonicalJson({ kind: "accepted", acceptanceRef: freshAcceptanceRef }),
+      owner_ref: "accept_session",
+    });
+    expect(database.prepare(`
+      SELECT bridge_state,provider_session_ref,provider_session_generation,
+             capability_hash,activation_evidence_digest,revision
+        FROM agent_bridge_state WHERE run_id='run_01' AND agent_id='agent_completion'
+    `).get()).toEqual({
+      bridge_state: "none",
+      provider_session_ref: null,
+      provider_session_generation: null,
+      capability_hash: null,
+      activation_evidence_digest: null,
+      revision: 2,
+    });
+
+    database.close();
+    database = new Database(databasePath);
+    expect(database.prepare(`
+      SELECT source_kind,terminal_kind FROM launched_chair_bridge_retirements
+       WHERE project_session_id='session_01' AND coordination_run_id='run_01'
+    `).get()).toEqual({ source_kind: "project-session-close", terminal_kind: "accepted" });
+    expect(database.prepare(`
+      SELECT bridge_state FROM agent_bridge_state WHERE run_id='run_01' AND agent_id='agent_completion'
+    `).get()).toEqual({ bridge_state: "none" });
   });
 });

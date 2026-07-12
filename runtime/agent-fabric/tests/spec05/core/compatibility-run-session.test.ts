@@ -97,12 +97,20 @@ describe("schema-v4 compatibility run creation", () => {
           SELECT member_kind, member_id, required, state
             FROM project_session_memberships
            WHERE coordination_run_id=?
-        `).all(input.runId)).toEqual([{
-          member_kind: "coordination-run",
-          member_id: input.runId,
-          required: 1,
-          state: "active",
-        }]);
+        `).all(input.runId)).toEqual([
+          {
+            member_kind: "coordination-run",
+            member_id: input.runId,
+            required: 1,
+            state: "active",
+          },
+          {
+            member_kind: "lease",
+            member_id: `chair:${input.runId}:1`,
+            required: 1,
+            state: "active",
+          },
+        ]);
         expect(database.prepare(`
           SELECT scope_kind, count(*) AS count
             FROM resource_scopes

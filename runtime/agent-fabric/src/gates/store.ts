@@ -1042,7 +1042,7 @@ export class ScopedGateStore {
     }
     if (this.#database.prepare(`
       SELECT 1 FROM operator_effect_custody
-       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','conflict','ambiguous','quarantined','failed')
          AND operation<>'project-session-drain'
        LIMIT 1
     `).get(gate.projectSessionId) !== undefined) {

@@ -1,13 +1,15 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.16
+Version: 1.17
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.16 owns atomic acceptance exits, run-coupled exceptional lifecycle
+Version 1.17 owns terminal bridge retirement, settled recovery-abandon,
+live launched-chair handoff, coordinated-workstream creation and exact
+multi-session projection. Version 1.16 owns atomic acceptance exits, run-coupled exceptional lifecycle
 transitions, forward-only legacy membership repair and the binding one-live-run
 independent topology. Version 1.15 owns authoritative final-acceptance lookup and atomic chair-lease
 membership rotation across takeover/recovery. Version 1.14 owns integration-principal persistence, public input-attestation
@@ -2331,3 +2333,62 @@ confirmation arms, multi-run terminal history, close/reopen preservation,
 post-reopen work with old-reference rejection and fresh-gate acceptance,
 takeover and bridge-recovery crash rollback, and released/revoked membership
 validation for all three lease owners.
+
+### 9.19 Terminal bridges, singleton topology and multi-session operation
+
+Migration 0013 is forward-only. Its preflight rejects more than one
+non-terminal run per project session, a missing/ambiguous current chair, or a
+terminal lost/pending bridge; it never edits migrations 0001–0012. It installs
+an all-mode partial unique run index and a partial unique active-chair-lease
+index. It re-derives run/current-and-predecessor chair lease, task,
+required-message, write/task-owner lease, workstream and provider-action
+membership from source truth, updates each changed membership, and advances
+each affected session membership/session revision exactly once. Upgrade and
+restart fixtures cover zero-delivery messages, expired/abandoned delivery,
+cancelled/degraded tasks, missing current chair membership and superseded
+predecessor leases.
+
+Clean accepted/cancelled/failed close, typed project stop and chair-recovery
+abandon persist immutable bridge-retirement evidence in their transaction.
+The retirement binding names the session/run, terminal kind/reference, exact
+owner command or recovery and timestamp. It is admitted only after terminal
+run/session state, revoked current chair lease/capability and archived agent
+are rechecked. Child bridge rows move from `active` to `none` with provider and
+capability fields cleared. Existing terminal rows are backfilled only under the
+same proof; otherwise migration fails for explicit recovery. Startup excludes
+retired launched bridges and `none` child bridges. After commit, supervision
+best-effort closes and removes volatile transport/action/generation mappings;
+process crash already closes those transports and cannot undo durable fences.
+
+Cancelled or failed close owns only `draft`, `awaiting_launch`,
+`launch_failed` and `awaiting_acceptance`. The last source supersedes all final-
+close gates before the closure predicate; pending/deferred memberships become
+abandoned and human-resolved history stays reconciled. Active/quiescing stop,
+launch ambiguity, lost-chair recovery and quarantine remain with their typed
+owners. Recovery-abandon rejects any unrelated active membership or durable
+source obligation, then abandons exactly the current run/lease memberships,
+revokes all run capabilities, archives agents, retires bridges and increments
+membership revision once with crash rollback.
+
+Launched-chair graceful replacement has a distinct live-handoff custody. Its
+prepare/dispatch/observe/commit state is generation-bound and promotes only an
+already retained successor child bridge under the same provider contract.
+Generic chair takeover rejects both active and lost launched-chair rows; lost
+rows use recovery custody. No path can leave the durable launched bridge naming
+the predecessor while the run names the successor.
+
+The recovery supervisor enumerates retained bridge keys globally but fences
+each exact project-session/run/revision in its own SQLite transaction. One
+corrupt or unavailable session reports typed recovery evidence without rolling
+back a sibling session already fenced. Retries are idempotent per stable loss
+ID.
+
+`workstreams.v1` owns the chair-authenticated coordinated-workstream create and
+terminal-state operations described by Spec 01. The daemon transaction binds
+the root task/team, narrowed authority/budget, resource scope, workstream and
+membership and proves that no second chair/run was created. Operator
+projection includes `projectSessionId` in every run reference, summary and
+detail. The Console retains its project-scoped client, opens a secondary exact
+selected-session client, auto-selects only one attachable session and otherwise
+requires an explicit stable session choice; it never discards project-level
+authority needed to start another independent session.

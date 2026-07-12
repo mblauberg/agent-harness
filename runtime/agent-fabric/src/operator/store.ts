@@ -1321,6 +1321,7 @@ export class OperatorStore {
     target: OperatorCommandTarget,
     load: () => { revision: number; value: JsonValue },
     mutate: () => Result,
+    afterJournal?: (result: Result) => void,
   ): Result {
     const execute = this.database.transaction((): Result => {
       const payload = {
@@ -1342,7 +1343,9 @@ export class OperatorStore {
           throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "command ID was reused with changed input");
         }
         this.#authenticate(context, command, target, true);
-        return JSON.parse(text(existing, "result_json")) as Result;
+        const result = JSON.parse(text(existing, "result_json")) as Result;
+        afterJournal?.(result);
+        return result;
       }
 
       const capability = this.#authenticate(context, command, target, false);
@@ -1378,6 +1381,7 @@ export class OperatorStore {
         canonicalJson(result),
         this.#clock(),
       );
+      afterJournal?.(result);
       return result;
     });
     return execute();

@@ -11,6 +11,7 @@ import { preflightExternalEffectCustody } from "../persistence/external-effect-c
 import { preflightLaunchedChairBridgeLoss } from "../persistence/launched-chair-bridge-loss-preflight.js";
 import { preflightArtifactRegistry } from "../persistence/artifact-registry-preflight.js";
 import { preflightTypedGitCustody } from "../persistence/typed-git-preflight.js";
+import { preflightSessionLifecycleRepair } from "../persistence/session-lifecycle-repair-preflight.js";
 
 export type Migration = {
   version: number;
@@ -53,6 +54,7 @@ const defaultMigrationFiles = [
   "0010-artifact-registry.sql",
   "0011-automatic-session-membership.sql",
   "0012-typed-git-custody.sql",
+  "0013-session-lifecycle-repair.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {
@@ -85,6 +87,8 @@ function loadDefaultMigrations(): Migration[] {
                   ? { preflight: preflightArtifactRegistry }
                   : index === 11
                     ? { preflight: preflightTypedGitCustody }
+                    : index === 12
+                      ? { preflight: preflightSessionLifecycleRepair }
             : {}),
     };
   });

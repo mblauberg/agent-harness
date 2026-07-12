@@ -29,6 +29,7 @@ import type Database from "better-sqlite3";
 import { CommandJournal } from "../application/command-journal.js";
 import { OperatorStore } from "../operator/store.js";
 import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
+import { retireProjectSessionBridges } from "./bridge-retirement.js";
 import { membershipSourceDisposition } from "./membership-disposition.js";
 import {
   ProjectFabricCoreError,
@@ -39,19 +40,19 @@ import {
 import { canonicalJson, integer, nullableText, row, sha256, text, type Row } from "./store-support.js";
 
 const legalTransitions: Readonly<Record<ProjectSessionState, readonly ProjectSessionState[]>> = {
-  draft: ["awaiting_launch", "cancelled"],
-  awaiting_launch: ["launching", "launch_failed", "cancelled"],
-  launching: ["active", "launch_failed", "launch_ambiguous", "cancelled"],
-  active: ["quiescing", "visibility_degraded", "reconciling", "recovery_required", "quarantined", "cancelled"],
-  quiescing: ["awaiting_acceptance", "active", "reconciling", "recovery_required", "quarantined", "cancelled"],
-  awaiting_acceptance: ["active", "reconciling", "cancelled"],
+  draft: ["awaiting_launch"],
+  awaiting_launch: ["launching", "launch_failed"],
+  launching: ["active", "launch_failed", "launch_ambiguous"],
+  active: ["quiescing", "visibility_degraded", "reconciling", "recovery_required", "quarantined"],
+  quiescing: ["awaiting_acceptance", "active", "reconciling", "recovery_required", "quarantined"],
+  awaiting_acceptance: ["active", "reconciling"],
   closed: [],
-  launch_failed: ["awaiting_launch", "cancelled"],
-  launch_ambiguous: ["launching", "active", "reconciling", "recovery_required", "cancelled"],
-  reconciling: ["active", "recovery_required", "quarantined", "cancelled"],
-  visibility_degraded: ["active", "quiescing", "reconciling", "cancelled"],
-  recovery_required: ["reconciling", "active", "quarantined", "cancelled"],
-  quarantined: ["reconciling", "recovery_required", "cancelled"],
+  launch_failed: ["awaiting_launch"],
+  launch_ambiguous: ["launching", "active", "reconciling", "recovery_required"],
+  reconciling: ["active", "recovery_required", "quarantined"],
+  visibility_degraded: ["active", "quiescing", "reconciling"],
+  recovery_required: ["reconciling", "active", "quarantined"],
+  quarantined: ["reconciling", "recovery_required"],
   cancelled: [],
 };
 
@@ -69,15 +70,18 @@ export class ProjectSessionStore {
   readonly #commandJournal: CommandJournal;
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
+  readonly #retireVolatileProjectSession: ((projectSessionId: string) => void) | undefined;
 
   constructor(options: CoreServiceOptions & {
     operatorStore: OperatorStore;
     commandJournal?: CommandJournal;
+    retireVolatileProjectSession?: (projectSessionId: string) => void;
   }) {
     this.#database = options.database;
     this.#operatorStore = options.operatorStore;
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
+    this.#retireVolatileProjectSession = options.retireVolatileProjectSession;
     this.#commandJournal = options.commandJournal ?? new CommandJournal(this.#database, this.#clock);
   }
 
@@ -335,7 +339,8 @@ export class ProjectSessionStore {
     request: ProjectSessionCloseRequest,
   ): ProjectSession {
     const identity = this.#sessionIdentity(request.projectSessionId);
-    return this.#operatorStore.executeCommand(
+    const terminalPath = canonicalJson(request.terminalPath);
+    const result = this.#operatorStore.executeCommand(
       context,
       request.command,
       {
@@ -352,31 +357,42 @@ export class ProjectSessionStore {
       () => this.#sessionRevision(request.projectSessionId),
       () => {
         const current = this.#sessionIdentity(request.projectSessionId);
-        if (current.state !== "awaiting_acceptance" && request.terminalPath.kind === "accepted") {
-          throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "accepted close requires awaiting acceptance");
+        const accepted = request.terminalPath.kind === "accepted";
+        if (accepted && current.state !== "awaiting_acceptance") {
+          throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "accepted project close requires awaiting acceptance");
         }
+        if (!accepted && !["draft", "awaiting_launch", "launch_failed", "awaiting_acceptance"].includes(current.state)) {
+          throw new ProjectFabricCoreError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "cancelled or failed project close requires a prelaunch, launch-failed or awaiting-acceptance session",
+          );
+        }
+        const superseded = accepted || current.state !== "awaiting_acceptance"
+          ? { gateChanges: 0, membershipChanges: 0 }
+          : supersedeFinalAcceptanceGates({
+              database: this.#database,
+              projectSessionId: request.projectSessionId,
+              cause: { kind: "operator-command", ref: request.command.commandId },
+              reason: `project session closed through ${request.terminalPath.kind} terminal path`,
+              now: this.#clock(),
+            });
         this.#assertClosure(request.projectSessionId);
         const runs = this.#database.prepare(`
           SELECT run_id, revision, lifecycle_state FROM runs
            WHERE project_session_id=? ORDER BY run_id
         `).all(request.projectSessionId) as Row[];
+        const awaitingRuns = runs.filter((run) => text(run, "lifecycle_state") === "awaiting_acceptance");
+        for (const run of runs) {
+          if (!["awaiting_acceptance", "closed", "cancelled", "launch_failed"].includes(text(run, "lifecycle_state"))) {
+            throw new ProjectFabricCoreError(
+              "LIFECYCLE_PRECONDITION_FAILED",
+              "project close found a nonterminal coordination run outside acceptance",
+            );
+          }
+        }
         if (request.terminalPath.kind === "accepted") {
-          const awaitingRuns = runs.filter((run) => text(run, "lifecycle_state") === "awaiting_acceptance");
           if (awaitingRuns.length === 0) {
             throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "accepted close requires a coordination run");
-          }
-          for (const run of runs) {
-            if (![
-              "awaiting_acceptance",
-              "closed",
-              "cancelled",
-              "launch_failed",
-            ].includes(text(run, "lifecycle_state"))) {
-              throw new ProjectFabricCoreError(
-                "LIFECYCLE_PRECONDITION_FAILED",
-                "accepted close found a nonterminal coordination run outside acceptance",
-              );
-            }
           }
           this.#assertFinalAcceptance(context, current.projectId, request.projectSessionId, request.terminalPath.acceptanceRef, awaitingRuns);
         }
@@ -405,24 +421,44 @@ export class ProjectSessionStore {
           UPDATE agents SET lifecycle='archived'
            WHERE run_id IN (SELECT run_id FROM runs WHERE project_session_id=?)
         `).run(request.projectSessionId);
-        this.#database.prepare(`
+        const changedSession = this.#database.prepare(`
           UPDATE project_sessions
-             SET state='closed', terminal_path_json=?, revision=revision+1, updated_at=?
+             SET state='closed', terminal_path_json=?,
+                 membership_revision=membership_revision+?,
+                 revision=revision+1, updated_at=?
            WHERE project_session_id=? AND revision=? AND generation=?
         `).run(
-          canonicalJson(request.terminalPath),
+          terminalPath,
+          superseded.gateChanges + superseded.membershipChanges > 0 ? 1 : 0,
           this.#clock(),
           request.projectSessionId,
           current.revision,
           request.expectedGeneration,
         );
+        if (changedSession.changes !== 1) {
+          throw new ProjectFabricCoreError("STALE_REVISION", "project close raced another transition");
+        }
         return this.getProjectSession({
           projectId: current.projectId as ProjectId,
           projectSessionId: request.projectSessionId,
           expectedGeneration: request.expectedGeneration,
         });
       },
+      () => {
+        retireProjectSessionBridges(this.#database, {
+          projectSessionId: request.projectSessionId,
+          sourceKind: "project-session-close",
+          terminalKind: request.terminalPath.kind,
+          terminalRef: terminalPath,
+          ownerOperatorId: context.operatorId,
+          ownerRef: request.command.commandId,
+          now: this.#clock(),
+        });
+        this.#fault("session:close:after-bridges");
+      },
     );
+    try { this.#retireVolatileProjectSession?.(request.projectSessionId); } catch { /* durable fencing already committed */ }
+    return result;
   }
 
   bindMembership(
@@ -1189,7 +1225,7 @@ export class ProjectSessionStore {
     }
     if (this.#database.prepare(`
       SELECT 1 FROM operator_effect_custody
-       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','conflict','ambiguous','quarantined','failed')
        LIMIT 1
     `).get(projectSessionId) !== undefined) {
       throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unresolved operator-effect custody remains active");
@@ -1540,7 +1576,7 @@ export class ProjectSessionStore {
     }
     if (this.#database.prepare(`
       SELECT 1 FROM operator_effect_custody
-       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','conflict','ambiguous','quarantined','failed')
        LIMIT 1
     `).get(projectSessionId) !== undefined) {
       throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unresolved operator-effect custody remains active");

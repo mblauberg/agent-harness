@@ -211,6 +211,7 @@ export class AdapterSupervisor {
   readonly #knownChairSessions = new Map<string, number>();
   readonly #chairSessionByAction = new Map<string, string>();
   readonly #chairEntryBySession = new Map<string, RetainedChairBridge>();
+  readonly #chairProjectBySession = new Map<string, string>();
   readonly #consumedChairHandoffHashes = new Set<string>();
   readonly #childTransports = new Map<string, AdapterProcessTransport>();
   readonly #knownChildSessions = new Map<string, number>();
@@ -288,29 +289,40 @@ export class AdapterSupervisor {
     if (this.#bridgeHealthAuditInFlight) return;
     this.#bridgeHealthAuditInFlight = true;
     try {
-      for (const [key, entry] of [...this.#chairEntryBySession.entries()]) {
-        if (this.#bridgeTransitions.has(key)) continue;
+      const chairAudits = [...this.#chairEntryBySession.entries()].map(async ([key, entry]) => {
+        if (this.#bridgeTransitions.has(key)) return;
         const transport = this.#chairTransports.get(key);
-        if (transport === undefined) continue;
+        if (transport === undefined) return;
         let live = false;
         try { live = await this.#probeChairBridge(transport, entry); } catch { live = false; }
         if (!live && !this.#bridgeTransitions.has(key) && this.#chairTransports.get(key) === transport) {
-          this.#loseChairBridge(key, "inner retained chair bridge is unavailable");
-          await transport.close().catch(() => undefined);
+          try {
+            this.#loseChairBridge(key, "inner retained chair bridge is unavailable");
+          } catch {
+            // Preserve the retained maps so a later audit retries durable loss fencing.
+          } finally {
+            await transport.close().catch(() => undefined);
+          }
         }
-      }
-      for (const [key, entry] of [...this.#childEntryBySession.entries()]) {
-        if (this.#bridgeTransitions.has(key)) continue;
+      });
+      const childAudits = [...this.#childEntryBySession.entries()].map(async ([key, entry]) => {
+        if (this.#bridgeTransitions.has(key)) return;
         const transport = this.#childTransports.get(key);
         const principal = this.#childPrincipalBySession.get(key);
-        if (transport === undefined || principal === undefined) continue;
+        if (transport === undefined || principal === undefined) return;
         let live = false;
         try { live = await this.#probeChildBridge(transport, entry, principal); } catch { live = false; }
         if (!live && !this.#bridgeTransitions.has(key) && this.#childTransports.get(key) === transport) {
-          this.#loseChildBridge(key, "inner retained child bridge is unavailable");
-          await transport.close().catch(() => undefined);
+          try {
+            this.#loseChildBridge(key, "inner retained child bridge is unavailable");
+          } catch {
+            // Preserve the retained maps so a later audit retries durable loss fencing.
+          } finally {
+            await transport.close().catch(() => undefined);
+          }
         }
-      }
+      });
+      await Promise.allSettled([...chairAudits, ...childAudits]);
     } finally {
       this.#bridgeHealthAuditInFlight = false;
     }
@@ -418,20 +430,31 @@ export class AdapterSupervisor {
       }
       if (retainedChildTransport !== undefined && childKey !== undefined && isReleaseRequest(method, params)) {
         this.#removeChildBridge(childKey);
+        this.#lostChildSessions.add(childKey);
         await transport.close().catch(() => undefined);
       }
       return result;
     } catch (error: unknown) {
+      let fencingError: unknown;
       if (retainedChairTransport !== undefined && chairKey !== undefined) {
         if (!isRetainedChairLoss(error, transport)) throw error;
-        this.#loseChairBridge(chairKey, error instanceof Error ? error.message : "retained chair bridge lost");
+        try {
+          this.#loseChairBridge(chairKey, error instanceof Error ? error.message : "retained chair bridge lost");
+        } catch (failure: unknown) {
+          fencingError = failure;
+        }
       } else if (retainedChildTransport !== undefined && childKey !== undefined) {
         if (!isRetainedChildLoss(error, transport)) throw error;
-        this.#loseChildBridge(childKey, error instanceof Error ? error.message : "retained child bridge lost");
+        try {
+          this.#loseChildBridge(childKey, error instanceof Error ? error.message : "retained child bridge lost");
+        } catch (failure: unknown) {
+          fencingError = failure;
+        }
       } else {
         this.#transports.delete(adapterId);
       }
       await transport.close().catch(() => undefined);
+      if (fencingError !== undefined) throw fencingError;
       if (retainedChairTransport !== undefined) {
         throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} retained chair bridge was lost`);
       }
@@ -530,7 +553,9 @@ export class AdapterSupervisor {
       this.#childEntryBySession.set(key, entry);
       this.#childPrincipalBySession.set(key, handoff.expectedPrincipal);
       transport.onClose(() => {
-        if (this.#childTransports.get(key) === transport) this.#loseChildBridge(key, "retained adapter transport closed");
+        if (this.#childTransports.get(key) === transport) {
+          try { this.#loseChildBridge(key, "retained adapter transport closed"); } catch { /* periodic audit retries */ }
+        }
       });
       return result;
     } catch (error: unknown) {
@@ -550,20 +575,26 @@ export class AdapterSupervisor {
   }
 
   #removeChildBridge(key: string): void {
-    const entry = this.#childEntryBySession.get(key);
     this.#childTransports.delete(key);
-    this.#knownChildSessions.delete(key);
     this.#childEntryBySession.delete(key);
     this.#childPrincipalBySession.delete(key);
-    if (entry !== undefined) this.#childSessionByAction.delete(chairActionKey(entry.adapterId, entry.actionId));
+  }
+
+  #purgeChildBridge(key: string): void {
+    this.#removeChildBridge(key);
+    this.#knownChildSessions.delete(key);
+    this.#lostChildSessions.delete(key);
+    for (const [actionKey, sessionKey] of [...this.#childSessionByAction.entries()]) {
+      if (sessionKey === key) this.#childSessionByAction.delete(actionKey);
+    }
   }
 
   #loseChildBridge(key: string, reason: string): void {
     const entry = this.#childEntryBySession.get(key);
-    this.#removeChildBridge(key);
     if (entry !== undefined) {
-      this.#lostChildSessions.add(key);
       this.#childLossHandler?.(entry, reason);
+      this.#removeChildBridge(key);
+      this.#lostChildSessions.add(key);
     }
   }
 
@@ -572,11 +603,48 @@ export class AdapterSupervisor {
     this.#chairEntryBySession.delete(key);
   }
 
+  #purgeChairBridge(key: string): void {
+    this.#removeChairBridge(key);
+    this.#knownChairSessions.delete(key);
+    this.#chairProjectBySession.delete(key);
+    for (const [actionKey, sessionKey] of [...this.#chairSessionByAction.entries()]) {
+      if (sessionKey === key) this.#chairSessionByAction.delete(actionKey);
+    }
+  }
+
   #loseChairBridge(key: string, reason: string): void {
     const entry = this.#chairEntryBySession.get(key);
-    this.#chairTransports.delete(key);
-    this.#chairEntryBySession.delete(key);
-    if (entry !== undefined) this.#chairLossHandler?.(entry, reason);
+    if (entry !== undefined) {
+      this.#chairLossHandler?.(entry, reason);
+      this.#chairTransports.delete(key);
+      this.#chairEntryBySession.delete(key);
+    }
+  }
+
+  /** Removes cleanly retired bridges without emitting a fabricated loss. */
+  retireProjectSessionBridges(projectSessionId: string): void {
+    const transports = new Set<AdapterProcessTransport>();
+    const transitionKeys: string[] = [];
+    for (const [key, ownerProjectSessionId] of [...this.#chairProjectBySession.entries()]) {
+      if (ownerProjectSessionId !== projectSessionId) continue;
+      this.#bridgeTransitions.add(key);
+      transitionKeys.push(key);
+      const transport = this.#chairTransports.get(key);
+      if (transport !== undefined) transports.add(transport);
+      this.#purgeChairBridge(key);
+    }
+    for (const [key] of [...this.#childEntryBySession.entries()]) {
+      if (this.#childPrincipalBySession.get(key)?.projectSessionId !== projectSessionId) continue;
+      this.#bridgeTransitions.add(key);
+      transitionKeys.push(key);
+      const transport = this.#childTransports.get(key);
+      if (transport !== undefined) transports.add(transport);
+      this.#purgeChildBridge(key);
+    }
+    void Promise.allSettled([...transports].map(async (transport) => await transport.close()))
+      .finally(() => {
+        for (const key of transitionKeys) this.#bridgeTransitions.delete(key);
+      });
   }
 
   async launchChair(
@@ -655,9 +723,10 @@ export class AdapterSupervisor {
       this.#knownChairSessions.set(key, result.providerSessionGeneration);
       this.#chairSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
       this.#chairEntryBySession.set(key, entry);
+      this.#chairProjectBySession.set(key, entry.projectSessionId);
       transport.onClose(() => {
         if (this.#chairTransports.get(key) === transport) {
-          this.#loseChairBridge(key, "retained adapter transport closed");
+          try { this.#loseChairBridge(key, "retained adapter transport closed"); } catch { /* periodic audit retries */ }
         }
       });
       return result;
@@ -736,8 +805,11 @@ export class AdapterSupervisor {
       this.#knownChairSessions.set(key, result.providerSessionGeneration);
       this.#chairSessionByAction.set(chairActionKey(adapterId, request.actionId), key);
       this.#chairEntryBySession.set(key, entry);
+      this.#chairProjectBySession.set(key, entry.projectSessionId);
       transport.onClose(() => {
-        if (this.#chairTransports.get(key) === transport) this.#loseChairBridge(key, "retained recovered chair transport closed");
+        if (this.#chairTransports.get(key) === transport) {
+          try { this.#loseChairBridge(key, "retained recovered chair transport closed"); } catch { /* periodic audit retries */ }
+        }
       });
       return result;
     } catch (error: unknown) {
@@ -801,7 +873,7 @@ export class AdapterSupervisor {
       typeof promoted !== "object" || promoted === null ||
       Reflect.get(promoted, "schemaVersion") !== 1 || Reflect.get(promoted, "promoted") !== true
     ) return false;
-    this.#removeChildBridge(key);
+    this.#purgeChildBridge(key);
     const chairEntry: RetainedChairBridge = Object.freeze({
       projectSessionId: input.projectSessionId,
       runId: input.runId,
@@ -817,6 +889,7 @@ export class AdapterSupervisor {
     this.#knownChairSessions.set(key, input.providerSessionGeneration);
     this.#chairSessionByAction.set(chairActionKey(input.adapterId, input.actionId), key);
     this.#chairEntryBySession.set(key, chairEntry);
+    this.#chairProjectBySession.set(key, chairEntry.projectSessionId);
     return await this.#probeChairBridge(transport, chairEntry);
     } finally {
       this.#bridgeTransitions.delete(key);
@@ -873,11 +946,12 @@ export class AdapterSupervisor {
         bridgeGeneration: input.chairBridgeGeneration,
       });
       if (!await this.#probeChairBridge(childTransport, recoveredChairEntry)) return "missing";
-      this.#removeChildBridge(key);
+      this.#purgeChildBridge(key);
       this.#chairTransports.set(key, childTransport);
       this.#knownChairSessions.set(key, input.providerSessionGeneration);
       this.#chairSessionByAction.set(chairActionKey(input.adapterId, input.actionId), key);
       this.#chairEntryBySession.set(key, recoveredChairEntry);
+      this.#chairProjectBySession.set(key, recoveredChairEntry.projectSessionId);
       return "chair";
     } catch {
       return "missing";
@@ -903,9 +977,13 @@ export class AdapterSupervisor {
     this.#knownChairSessions.clear();
     this.#chairSessionByAction.clear();
     this.#chairEntryBySession.clear();
+    this.#chairProjectBySession.clear();
     this.#lostChildSessions.clear();
+    this.#knownChildSessions.clear();
+    this.#childSessionByAction.clear();
+    this.#childEntryBySession.clear();
     this.#childPrincipalBySession.clear();
-    for (const key of [...this.#childTransports.keys()]) this.#removeChildBridge(key);
+    this.#childTransports.clear();
     await Promise.allSettled(transports.map((transport) => transport.close()));
   }
 }

@@ -298,6 +298,56 @@ describe("persistent adapter supervision", () => {
     }
   });
 
+  it("tombstones a released retained child instead of reconstructing its provider session", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-child-release-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      fake: {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: { SUPERVISOR_COUNT_PATH: countPath },
+      },
+    });
+    const principal = { agentId: "child", projectSessionId: "session-1", runId: "run-1", principalGeneration: 2 } as const;
+    try {
+      await supervisor.provisionAgent("fake", {
+        schemaVersion: 1,
+        runId: principal.runId,
+        operation: "spawn",
+        actionId: "child-release-spawn",
+        targetAgentId: principal.agentId,
+        authorityId: "child-authority",
+        bridgeGeneration: 1,
+        bridgeContractDigest: `sha256:${"9".repeat(64)}`,
+        payload: {},
+      }, {
+        capability: "child-release-capability",
+        socketPath: "/private/child-release.sock",
+        expectedPrincipal: principal,
+      });
+      await expect(supervisor.request("fake", "release", {
+        actionId: "child-release-action",
+        resumeReference: "fixture-child-session",
+        providerSessionGeneration: 1,
+      })).resolves.toMatchObject({ method: "release" });
+      await expect(supervisor.request("fake", "dispatch", {
+        actionId: "child-turn-after-release",
+        operation: "send_turn",
+        payload: {
+          resumeReference: "fixture-child-session",
+          providerSessionGeneration: 1,
+          prompt: "must not reconstruct",
+        },
+      })).rejects.toMatchObject({ code: "AGENT_BRIDGE_LOST" });
+      await expect(supervisor.request("fake", "lookup_action", {
+        actionId: "child-release-spawn",
+      })).rejects.toMatchObject({ code: "AGENT_BRIDGE_LOST" });
+      expect(await readFile(countPath, "utf8")).toBe("1");
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("refuses terminal success when the dedicated chair adapter tears down immediately", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-teardown-"));
     const countPath = join(directory, "starts.txt");

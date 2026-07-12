@@ -916,6 +916,20 @@ describe("launch custody", () => {
     const bridge = fixture.database.prepare(`SELECT * FROM launched_chair_bridge_state`).get() as Record<string, unknown>;
     const session = fixture.database.prepare(`SELECT revision, generation FROM project_sessions`).get() as Record<string, number>;
     const run = fixture.database.prepare(`SELECT revision, chair_generation FROM runs`).get() as Record<string, number>;
+    fixture.database.exec(`
+      INSERT INTO messages(
+        message_id,run_id,sender_id,dedupe_key,payload_hash,audience_json,kind,body,
+        requires_ack,conversation_id,hop_count,created_at
+      ) VALUES (
+        'informational_message','run_launch_01','chair_launch_01','informational-abandon',
+        'informational-hash','{}','event','informational only',0,'informational-conversation',0,${now}
+      );
+      INSERT INTO deliveries(
+        delivery_id,message_id,run_id,recipient_id,mailbox_sequence,state,attempt_count
+      ) VALUES (
+        'informational_delivery','informational_message','run_launch_01','chair_launch_01',999,'ready',0
+      );
+    `);
     const intent: ChairBridgeRecoveryIntent = {
       kind: "chair-bridge-recovery",
       schemaVersion: 1,
@@ -1035,6 +1049,8 @@ describe("launch custody", () => {
     expect(fixture.database.prepare(`SELECT state FROM project_sessions`).get()).toEqual({ state: "cancelled" });
     expect(fixture.database.prepare(`SELECT lifecycle_state FROM runs`).get()).toEqual({ lifecycle_state: "cancelled" });
     expect(fixture.database.prepare(`SELECT path FROM chair_bridge_loss_resolutions`).get()).toEqual({ path: "abandon" });
+    expect(fixture.database.prepare(`SELECT state FROM deliveries WHERE delivery_id='informational_delivery'`).get())
+      .toEqual({ state: "ready" });
   });
 
   it("rebinds a lost chair with fresh secret custody, native evidence and duplicate-safe settlement", async () => {
@@ -1885,6 +1901,9 @@ describe("launch custody", () => {
       SELECT state FROM resource_reservations
        WHERE reservation_id=(SELECT reservation_id FROM project_session_launch_custody)
     `).get()).toEqual({ state: "reserved" });
+    expect(fixture.database.prepare(`
+      SELECT status FROM run_chair_leases WHERE project_session_id='session_launch_01'
+    `).get()).toEqual({ status: "frozen" });
     expect(fixture.database.prepare(`
       SELECT reserved, used FROM resource_dimensions
        WHERE scope_id='scope_run_launch_01' AND unit_key='provider_calls'

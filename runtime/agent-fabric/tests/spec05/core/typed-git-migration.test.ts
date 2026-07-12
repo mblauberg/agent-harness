@@ -13,7 +13,7 @@ afterEach(() => {
 function migrated(): Database.Database {
   const database = new Database(":memory:");
   databases.push(database);
-  expect(applyMigrations(database).currentVersion).toBe(12);
+  expect(applyMigrations(database).currentVersion).toBe(13);
   return database;
 }
 

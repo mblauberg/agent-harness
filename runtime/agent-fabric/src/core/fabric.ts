@@ -996,6 +996,9 @@ export class Fabric {
       ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
       ...(this.#externalEffects === undefined ? {} : { externalEffects: this.#externalEffects }),
       typedGit: this.#typedGit,
+      retireVolatileProjectSession: (projectSessionId) => {
+        this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
+      },
     });
     this.#launchCustody = options.fabricSocketPath === undefined
       ? undefined
@@ -1038,6 +1041,9 @@ export class Fabric {
               bridgeGeneration: result.bridgeGeneration,
             }),
           },
+          retireVolatileProjectSession: (projectSessionId) => {
+            this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
+          },
           daemonInstanceGeneration: () => this.#currentDaemonInstanceGeneration(),
         });
     if (this.#launchCustody !== undefined) {
@@ -1062,6 +1068,9 @@ export class Fabric {
       operatorStore: this.#operatorStore,
       commandJournal: this.#commandJournal,
       clock: this.#clock,
+      retireVolatileProjectSession: (projectSessionId) => {
+        this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
+      },
     });
     this.#memberships = new ProjectSessionMembershipStore({
       database: this.#database,
@@ -2505,6 +2514,9 @@ export class Fabric {
     const authority = parseAuthority(stringField(row, "authority_json"));
     if (authority.deniedActions.includes(requiredOperation) || !authority.actions.includes(requiredOperation)) {
       throw new FabricError("CAPABILITY_FORBIDDEN", `authority does not permit ${requiredOperation}`);
+    }
+    if (stringField(row, "lifecycle") === "archived") {
+      throw new FabricError("AUTHENTICATION_FAILED", "archived agent capability is no longer active");
     }
     if (!allowSuspended && stringField(row, "lifecycle") === "suspended" && !isReadFabricOperation(requiredOperation)) {
       throw new FabricError("CONTEXT_UNRECONCILED", "suspended agent may only read until explicit lifecycle recovery");
@@ -4142,19 +4154,41 @@ export class Fabric {
         actionId: `${input.commandId}:release`,
         operation: "release",
         method: "release",
-        payload: { resumeReference, generation: state.providerSessionGeneration },
+        payload: { agentId: actorAgentId, resumeReference, generation: state.providerSessionGeneration },
       });
       if (!isRow(action.result) || action.result.released !== true || action.result.deleted === true) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter did not prove non-destructive release");
       }
-      this.#database.prepare("UPDATE agents SET lifecycle = 'archived' WHERE run_id = ? AND agent_id = ?").run(
-        runId,
-        actorAgentId,
-      );
-      const result = this.getAgentLifecycle(runId, actorAgentId);
-      this.#recordLifecycleOperation(runId, input, resumeReference, null);
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
+      return this.#database.transaction(() => {
+        this.#database.prepare(`
+          UPDATE capabilities SET revoked_at=COALESCE(revoked_at,?) WHERE run_id=? AND agent_id=?
+        `).run(this.#clock(), runId, actorAgentId);
+        this.#database.prepare("UPDATE agents SET lifecycle = 'archived' WHERE run_id = ? AND agent_id = ?").run(
+          runId,
+          actorAgentId,
+        );
+        const bridgeState = this.#database.prepare(`
+          SELECT bridge_state FROM agent_bridge_state WHERE run_id=? AND agent_id=?
+        `).get(runId, actorAgentId);
+        if (isRow(bridgeState) && bridgeState.bridge_state === "active") {
+          const bridge = this.#database.prepare(`
+            UPDATE agent_bridge_state
+               SET bridge_state='none',provider_session_ref=NULL,provider_session_generation=NULL,
+                   capability_hash=NULL,activation_evidence_digest=NULL,
+                   revision=revision+1,updated_at=?
+             WHERE run_id=? AND agent_id=? AND bridge_state='active'
+          `).run(this.#clock(), runId, actorAgentId);
+          if (bridge.changes !== 1) {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "retained child bridge changed during release");
+          }
+        } else if (isRow(bridgeState) && bridgeState.bridge_state !== "none") {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider release requires recovered child bridge custody");
+        }
+        const result = this.getAgentLifecycle(runId, actorAgentId);
+        this.#recordLifecycleOperation(runId, input, resumeReference, null);
+        this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+        return result;
+      })();
     }
 
     const agent = rowOrNotFound(

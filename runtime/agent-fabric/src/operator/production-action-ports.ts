@@ -19,6 +19,7 @@ import type {
 import { ExternalEffectService } from "./external-effect-service.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
 import { supersedeFinalAcceptanceGates } from "../project-session/acceptance-cycle.js";
+import { retireProjectSessionBridges } from "../project-session/bridge-retirement.js";
 import { canonicalJson, sha256 } from "../project-session/store-support.js";
 import {
   touchProjectSessionMembershipRevision,
@@ -248,6 +249,7 @@ class ProductionOperatorActions {
   readonly #daemonStop: ProductionDaemonStopPort | undefined;
   readonly #externalEffects: ExternalEffectService | undefined;
   readonly #typedGit: TypedGitService | undefined;
+  readonly #retireVolatileProjectSession: ((projectSessionId: string) => void) | undefined;
   readonly #externalEffectHandles = new Map<string, ExternalEffectDispatchHandle>();
   readonly #fault: (label: string) => void;
 
@@ -258,6 +260,7 @@ class ProductionOperatorActions {
     daemonStop?: ProductionDaemonStopPort;
     externalEffects?: ExternalEffectService;
     typedGit?: TypedGitService;
+    retireVolatileProjectSession?: (projectSessionId: string) => void;
     fault?: (label: string) => void;
   }) {
     this.#database = options.database;
@@ -266,6 +269,7 @@ class ProductionOperatorActions {
     this.#daemonStop = options.daemonStop;
     this.#externalEffects = options.externalEffects;
     this.#typedGit = options.typedGit;
+    this.#retireVolatileProjectSession = options.retireVolatileProjectSession;
     this.#fault = options.fault ?? (() => undefined);
   }
 
@@ -616,10 +620,18 @@ class ProductionOperatorActions {
       this.#storeCustodyOutcome(scope, effective.commandId, outcome);
       return outcome;
     } catch (error: unknown) {
-      this.#database.prepare(`
-        UPDATE operator_effect_custody SET state='failed', updated_at=?
-         WHERE custody_id=? AND state='dispatching'
-      `).run(this.#clock(), text(custody, "custody_id"));
+      if (effective.intent.kind === "project-session-drain" || effective.intent.kind === "project-session-stop") {
+        const rejected: OperatorEffectOutcome = { status: "rejected", code: "state-changed", evidenceRefs: [] };
+        this.#database.prepare(`
+          UPDATE operator_effect_custody SET state='no-effect',outcome_json=?,updated_at=?
+           WHERE custody_id=? AND state='dispatching'
+        `).run(canonicalJson(rejected), this.#clock(), text(custody, "custody_id"));
+      } else {
+        this.#database.prepare(`
+          UPDATE operator_effect_custody SET state='failed', updated_at=?
+           WHERE custody_id=? AND state='dispatching'
+        `).run(this.#clock(), text(custody, "custody_id"));
+      }
       throw error;
     }
   }
@@ -761,7 +773,10 @@ class ProductionOperatorActions {
       if (text(session, "state") !== "quiescing") {
         return { status: "rejected", code: "state-changed", evidenceRefs: [] };
       }
-      const obligations = this.#projectObligations(request.intent.projectSessionId);
+      const obligations = this.#projectObligations(
+        request.intent.projectSessionId,
+        this.#custodyId(this.#effectScope(request), request.commandId),
+      );
       if (!obligations.settled) return { status: "pending", phase: "observing" };
       const receipt = this.#persistLifecycleReceipt({
         scope: this.#effectScope(request),
@@ -1859,7 +1874,10 @@ class ProductionOperatorActions {
     const session = row(this.#database.prepare(`
       SELECT revision, generation FROM project_sessions WHERE project_session_id=?
     `).get(intent.projectSessionId), "drained project session");
-    const obligations = this.#projectObligations(intent.projectSessionId);
+    const obligations = this.#projectObligations(
+      intent.projectSessionId,
+      this.#custodyId(this.#effectScope(request), request.commandId),
+    );
     if (!obligations.settled) return { status: "pending", phase: "accepted" };
     const receipt = this.#persistLifecycleReceipt({
       scope: this.#effectScope(request),
@@ -1892,7 +1910,10 @@ class ProductionOperatorActions {
     ) {
       throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "project stop drain receipt does not bind current state");
     }
-    const obligations = this.#projectObligations(intent.projectSessionId);
+    const obligations = this.#projectObligations(
+      intent.projectSessionId,
+      this.#custodyId(this.#effectScope(request), request.commandId),
+    );
     if (!obligations.settled || this.#globalRevision() !== intent.expectedGlobalStateRevision) {
       throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "project stop obligations changed after drain");
     }
@@ -1973,11 +1994,22 @@ class ProductionOperatorActions {
         intent.expectedSessionGeneration,
       );
       if (changed.changes !== 1) throw new ProjectFabricCoreError("STALE_REVISION", "project stop raced another transition");
+      retireProjectSessionBridges(this.#database, {
+        projectSessionId: intent.projectSessionId,
+        sourceKind: "project-session-stop",
+        terminalKind: "cancelled",
+        terminalRef: terminalPath,
+        ownerOperatorId: this.#effectScope(request).operatorId,
+        ownerRef: request.commandId,
+        now: this.#clock(),
+      });
+      this.#fault("project-stop:after-bridges");
       this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, {
         status: "committed",
         afterState: { lifecycleState: "cancelled" },
       });
     })();
+    try { this.#retireVolatileProjectSession?.(intent.projectSessionId); } catch { /* durable fencing already committed */ }
     return { status: "committed", afterState: { lifecycleState: "cancelled" } };
   }
 
@@ -2143,11 +2175,12 @@ class ProductionOperatorActions {
     return { status: "rejected", code: "state-changed", evidenceRefs: [intent.drainReceiptRef] };
   }
 
-  #projectObligations(projectSessionId: string): {
+  #projectObligations(projectSessionId: string, excludeOperatorEffectCustodyId?: string): {
     settled: boolean;
     tasks: number;
     leases: number;
     providerActions: number;
+    operatorEffects: number;
     memberships: number;
     requiredDeliveries: number;
     gates: number;
@@ -2172,6 +2205,16 @@ class ProductionOperatorActions {
         FROM project_sessions session WHERE session.project_session_id=?`),
       providerActions: count(`SELECT COUNT(*) AS count FROM provider_actions action JOIN runs run ON run.run_id=action.run_id
         WHERE run.project_session_id=? AND action.status IN ('prepared','dispatched','accepted','ambiguous','quarantined')`),
+      operatorEffects: integer(row(this.#database.prepare(`
+        SELECT COUNT(*) AS count FROM operator_effect_custody
+         WHERE project_session_id=?
+           AND state IN ('prepared','dispatching','conflict','ambiguous','quarantined','failed')
+           AND (? IS NULL OR custody_id<>?)
+      `).get(
+        projectSessionId,
+        excludeOperatorEffectCustodyId ?? null,
+        excludeOperatorEffectCustodyId ?? null,
+      ), "project operator-effect obligation"), "count"),
       memberships: count(`SELECT COUNT(*) AS count FROM project_session_memberships membership
         WHERE membership.project_session_id=? AND membership.required=1 AND membership.state='active'
           AND NOT (
@@ -2307,6 +2350,7 @@ export function createProductionOperatorActionPorts(options: {
   daemonStop?: ProductionDaemonStopPort;
   externalEffects?: ExternalEffectService;
   typedGit?: TypedGitService;
+  retireVolatileProjectSession?: (projectSessionId: string) => void;
   fault?: (label: string) => void;
 }): ProductionOperatorActionPorts {
   const owner = new ProductionOperatorActions({
@@ -2316,6 +2360,9 @@ export function createProductionOperatorActionPorts(options: {
     ...(options.daemonStop === undefined ? {} : { daemonStop: options.daemonStop }),
     ...(options.externalEffects === undefined ? {} : { externalEffects: options.externalEffects }),
     ...(options.typedGit === undefined ? {} : { typedGit: options.typedGit }),
+    ...(options.retireVolatileProjectSession === undefined
+      ? {}
+      : { retireVolatileProjectSession: options.retireVolatileProjectSession }),
     ...(options.fault === undefined ? {} : { fault: options.fault }),
   });
   return { statePort: owner.statePort, effectPort: owner.effectPort };

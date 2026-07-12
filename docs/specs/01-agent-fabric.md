@@ -1,13 +1,15 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.20
+Version: 0.21
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
+Version 0.21 closes the acceptance-review-discovered terminal bridge,
+recovery-abandon, coordinated-workstream and multi-session projection gaps.
 Version 0.20 closes the acceptance-review-discovered lifecycle split-brain,
 legacy membership, acceptance-cycle exit and independent-topology contract
 gaps. Version 0.19 closes the acceptance-review-discovered unbound final-acceptance,
@@ -1543,6 +1545,47 @@ project view represents concurrent unrelated runs as separate independent
 project sessions, each with its own chair and session authority. Historical
 terminal run rows may remain in either mode without becoming live authority.
 A project session never implies cross-run authority.
+
+SQLite enforces at most one non-terminal coordination run per project session
+in either mode and at most one `active` chair lease per run. Frozen predecessor
+leases may coexist only inside a bounded takeover/recovery transaction; a
+forward migration deterministically revokes non-current predecessors and
+repairs their membership, but refuses ambiguous duplicate current runs. A
+cancelled or failed project close is valid only from `draft`,
+`awaiting_launch`, terminal `launch_failed`, or `awaiting_acceptance`; the last
+case first supersedes the whole acceptance cycle. Accepted close still requires
+`awaiting_acceptance`. Unsafe live, ambiguous, recovery or quarantine states
+must use their typed lifecycle owner instead of generic close.
+
+Clean close, stop and recovery-abandon commit an immutable launched-chair
+bridge-retirement record only after the exact run/session is terminal, its
+current chair lease and bridge capability are revoked and its agents are
+archived. Active child bridges atomically become `none` with their provider and
+capability binding cleared. Startup and live supervision ignore only a valid
+retirement record; a lost/pending bridge remains recovery-owned. Durable
+retirement commits before best-effort volatile transport removal, so crash can
+leak neither authority nor a fabricated loss. Recovery-abandon additionally
+requires every unrelated task, workstream, lease, provider action, result,
+message, gate, barrier, resource and external effect settled, abandons the
+exact run/current-chair memberships with reason, revokes remaining
+capabilities, archives agents and advances membership revision once.
+
+A retained launched-chair handoff is not the generic database-only takeover.
+It uses typed live-handoff custody bound to the current bridge generation,
+handoff artifact, successor retained child bridge, provider contract and
+successor promotion observation. It revokes the predecessor capability/lease,
+promotes and rebinds the exact provider bridge, installs one successor chair
+lease/membership and advances session/run generations atomically. Missing or
+ambiguous promotion remains fenced; loss recovery never fabricates a graceful
+handoff.
+
+In coordinated mode `fabric.v1.workstream.create` is a chair-only
+`workstreams.v1` operation. One transaction creates or reuses the root Fabric
+task/team, narrowed lead authority and budget, hierarchical resource scope,
+workstream row and required project-session membership. It creates no run,
+chair or cross-session authority. Terminal workstream state derives from its
+root task/team sources. Independent concurrency instead creates another
+project session.
 
 Exceptional project-session states are `launch_failed`, `launch_ambiguous`,
 `reconciling`, `visibility_degraded`, `recovery_required`, `quarantined` and
