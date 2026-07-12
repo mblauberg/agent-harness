@@ -428,7 +428,14 @@ export function createBootstrapUnavailableDataset(
               ageMs: 0,
               reason,
             },
-            summary: null,
+            summary: reason === "schema-cutover-required"
+              ? {
+                  kind: "system",
+                  systemKind: "daemon",
+                  state: "unavailable",
+                  detail: "CUTOVER REQUIRED — existing database preserved",
+                }
+              : null,
             detailRef: null,
             actionAvailability: {
               state: "read-only",

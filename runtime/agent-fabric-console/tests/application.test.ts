@@ -338,6 +338,36 @@ describe("typed Console application bootstrap boundary", () => {
     await application.close("operator");
   });
 
+  it("renders schema cutover as an explicit preserved-state human gate", async () => {
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: vi.fn(async (): Promise<ConsoleBootstrapResult> => ({
+          status: "unavailable",
+          reason: "schema-cutover-required",
+        })),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => "event-cutover",
+      confirmationId: () => "confirmation-cutover",
+      ...runtimeDependencies,
+    });
+
+    expect(application.dataset.pages.system.rows[0]?.summary).toMatchObject({
+      kind: "system",
+      systemKind: "daemon",
+      state: "unavailable",
+      detail: "CUTOVER REQUIRED — existing database preserved",
+    });
+    expect(application.frame.rows.join("\n")).toContain(
+      "CUTOVER REQUIRED — existing database preserved",
+    );
+    expect(application.dataset.canMutate).toBe(false);
+    await application.close("operator");
+  });
+
   it("renders protocol incompatibility as an empty connection failure rather than a fallback row", async () => {
     const bootstrap: ConsoleBootstrapPort = {
       startOrAttach: vi.fn(async (): Promise<ConsoleBootstrapResult> => ({
