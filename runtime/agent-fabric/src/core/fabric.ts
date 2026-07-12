@@ -102,6 +102,7 @@ import {
 } from "../daemon/global-liveness.js";
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
+import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
 import {
   LaunchCustodyService,
   parseLaunchAdapterContract,
@@ -118,7 +119,11 @@ import {
 } from "../project-session/contracts.js";
 import { ScopedGateStore } from "../gates/store.js";
 import { HierarchicalAdmissionStore } from "../resources/store.js";
-import { AtomicDeliveryStore } from "../results/store.js";
+import {
+  AtomicDeliveryStore,
+  type ResultDeadlinePassInput,
+  type ResultDeadlinePassResult,
+} from "../results/store.js";
 import { NotificationOutbox } from "../attention/outbox.js";
 import { MacOsNativeDesktopAdapter } from "../attention/native-desktop.js";
 import {
@@ -879,6 +884,7 @@ export class Fabric {
   readonly #operatorActions: OperatorActionStore;
   readonly #launchCustody: LaunchCustodyService | undefined;
   readonly #projectSessions: ProjectSessionStore;
+  readonly #memberships: ProjectSessionMembershipStore;
   readonly #intakes: IntakeStore;
   readonly #gates: ScopedGateStore;
   readonly #resources: HierarchicalAdmissionStore;
@@ -1022,10 +1028,15 @@ export class Fabric {
       commandJournal: this.#commandJournal,
       clock: this.#clock,
     });
+    this.#memberships = new ProjectSessionMembershipStore({
+      database: this.#database,
+      clock: this.#clock,
+    });
     this.#results = new AtomicDeliveryStore({
       database: this.#database,
       clock: this.#clock,
       artifactRegistry: this.#artifactRegistry,
+      memberships: this.#memberships,
     });
     this.#intakes = new IntakeStore({
       database: this.#database,
@@ -1087,6 +1098,10 @@ export class Fabric {
 
   async runNativeNotificationPass(): Promise<NotificationWorkerPassResult> {
     return await this.#notificationWorker.runOnce();
+  }
+
+  runResultDeadlinePass(input: ResultDeadlinePassInput): ResultDeadlinePassResult {
+    return this.#results.sweepDeadlines(input);
   }
 
   async attemptDrainedStop(input: {
@@ -2644,6 +2659,9 @@ export class Fabric {
           .prepare("UPDATE mailbox_state SET next_sequence = next_sequence + 1 WHERE run_id = ? AND recipient_id = ?")
           .run(runId, recipientId);
       }
+      if (input.requiresAck) {
+        this.#memberships.bindRequired(runId, [{ kind: "required-message", memberId: messageId }]);
+      }
       this.#event(runId, "message-persisted", senderId, { messageId, recipients });
     })();
     return { messageId };
@@ -2801,8 +2819,23 @@ export class Fabric {
   }> {
     const now = this.#clock();
     return this.#database.transaction(() => {
+      const expiringRequiredMessageIds = this.#database.prepare(`
+        SELECT DISTINCT delivery.message_id
+          FROM deliveries delivery JOIN messages message USING(message_id)
+         WHERE delivery.run_id=? AND delivery.recipient_id=?
+           AND delivery.state IN ('ready','claimed')
+           AND message.requires_ack=1 AND message.expires_at IS NOT NULL
+           AND message.expires_at<=?
+      `).all(runId, recipientId, now).map((value) =>
+        stringField(rowOrNotFound(value, "expiring required message"), "message_id")
+      );
       const expired = this.#database.prepare("UPDATE deliveries SET state = 'expired', claim_deadline = NULL, resolution_reason = 'message-expired-by-policy', resolved_at = ? WHERE run_id = ? AND recipient_id = ? AND state IN ('ready', 'claimed') AND message_id IN (SELECT message_id FROM messages WHERE run_id = ? AND expires_at IS NOT NULL AND expires_at <= ?)").run(now, runId, recipientId, runId, now);
-      if (expired.changes > 0) this.#advanceMailboxWatermark(runId, recipientId);
+      if (expired.changes > 0) {
+        this.#advanceMailboxWatermark(runId, recipientId);
+        for (const messageId of expiringRequiredMessageIds) {
+          this.#memberships.reconcileRequiredMessageIfSettled(runId, messageId);
+        }
+      }
       this.#database
         .prepare(
           "UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE run_id = ? AND recipient_id = ? AND state = 'claimed' AND claim_deadline <= ?",
@@ -2839,7 +2872,7 @@ export class Fabric {
     this.#database.transaction(() => {
       const delivery = rowOrNotFound(
         this.#database
-          .prepare("SELECT mailbox_sequence, state FROM deliveries WHERE delivery_id = ? AND run_id = ? AND recipient_id = ?")
+          .prepare("SELECT mailbox_sequence, state, message_id FROM deliveries WHERE delivery_id = ? AND run_id = ? AND recipient_id = ?")
           .get(deliveryId, runId, recipientId),
         "delivery",
       );
@@ -2849,6 +2882,10 @@ export class Fabric {
           .run(this.#clock(), deliveryId);
       }
       this.#advanceMailboxWatermark(runId, recipientId);
+      this.#memberships.reconcileRequiredMessageIfSettled(
+        runId,
+        stringField(delivery, "message_id"),
+      );
       this.#event(runId, "delivery-acknowledged", recipientId, {
         deliveryId,
         sequence: numberField(delivery, "mailbox_sequence"),
@@ -2869,7 +2906,7 @@ export class Fabric {
       this.#assertChair(runId, actorAgentId);
       const delivery = rowOrNotFound(
         this.#database
-          .prepare("SELECT recipient_id, state FROM deliveries WHERE run_id = ? AND delivery_id = ?")
+          .prepare("SELECT recipient_id, state, message_id FROM deliveries WHERE run_id = ? AND delivery_id = ?")
           .get(runId, input.deliveryId),
         "delivery",
       );
@@ -2884,6 +2921,10 @@ export class Fabric {
         .run(input.reason.trim(), this.#clock(), runId, input.deliveryId);
       const recipientId = stringField(delivery, "recipient_id");
       this.#advanceMailboxWatermark(runId, recipientId);
+      this.#memberships.reconcileRequiredMessageIfSettled(
+        runId,
+        stringField(delivery, "message_id"),
+      );
       const result = { deliveryId: input.deliveryId, status: "abandoned" as const, reason: input.reason.trim() };
       this.#event(runId, "delivery-abandoned", actorAgentId, { ...result, recipientId });
       return result;
@@ -3052,6 +3093,7 @@ export class Fabric {
           humanGateIds: humanGates,
         });
       }
+      this.#memberships.bindRequired(runId, [{ kind: "task", memberId: input.taskId }]);
       const result = this.getTask(runId, input.taskId);
       this.#event(runId, "task-created", actorAgentId, result);
       return result;
@@ -3245,6 +3287,7 @@ export class Fabric {
       this.#database
         .prepare("UPDATE tasks SET state = ?, revision = revision + 1 WHERE run_id = ? AND task_id = ? AND revision = ?")
         .run(input.state, runId, input.taskId, input.expectedRevision);
+      this.#memberships.reconcile(runId, [{ kind: "task", memberId: input.taskId }]);
       const result = this.getTask(runId, input.taskId);
       this.#event(runId, "task-updated", actorAgentId, result);
       return result;
@@ -3539,6 +3582,7 @@ export class Fabric {
           ) VALUES (?, ?, 'write-lease', ?, 'active', ?, ?)
         `).run(runId, taskId, leaseId, now, now);
       }
+      this.#memberships.bindRequired(runId, [{ kind: "lease", memberId: leaseId }]);
       const result: LeaseResult = { leaseId, holderAgentId: actorAgentId, generation: 1, status: "active", scope: scopes };
       this.#event(runId, "write-lease-acquired", actorAgentId, result);
       return result;
@@ -3735,6 +3779,7 @@ export class Fabric {
         this.#clock(),
         input.leaseId,
       );
+      this.#memberships.reconcile(runId, [{ kind: "lease", memberId: input.leaseId }]);
       this.#event(runId, "write-lease-released", actorAgentId, { leaseId: input.leaseId, generation });
       return { leaseId: input.leaseId, status: "released", generation };
     });

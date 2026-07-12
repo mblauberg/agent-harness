@@ -92,8 +92,8 @@ describe("artifact registry migration 0010", () => {
     databases.push(database);
 
     expect(applyMigrations(database)).toEqual({
-      applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-      currentVersion: 10,
+      applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      currentVersion: 11,
     });
 
     const artifactColumns = database.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>;

@@ -28,6 +28,7 @@ import { parseDaemonAdapters } from "./composition.js";
 import { BootstrapElection } from "./bootstrap-election.js";
 import { GuardedIdleStopController, type QuiesceToken } from "./global-liveness.js";
 import { IdleShutdownScheduler } from "./idle-shutdown-scheduler.js";
+import { ResultDeadlineScheduler } from "./result-deadline-scheduler.js";
 import { finalizeDaemonShutdown } from "./shutdown-finalizer.js";
 import { acquireDaemonLocks, releaseDaemonLocks, writeDaemonLockReceipt } from "./client.js";
 import {
@@ -582,6 +583,12 @@ const idleScheduler = new IdleShutdownScheduler({
   },
 });
 idleScheduler.start();
+const resultDeadlineScheduler = new ResultDeadlineScheduler({
+  intervalMs: 500,
+  daemonInstanceGeneration,
+  pass: (input) => { fabric.runResultDeadlinePass(input); },
+});
+resultDeadlineScheduler.start();
 const notificationTimer = setInterval(() => {
   void fabric.runNativeNotificationPass().catch(() => undefined);
 }, 1_000);
@@ -590,6 +597,7 @@ void fabric.runNativeNotificationPass().catch(() => undefined);
 scheduleIdleStop = () => idleScheduler.schedule("operator-detach");
 closeBackgroundWorkers = () => {
   idleScheduler.close();
+  resultDeadlineScheduler.close();
   clearInterval(notificationTimer);
 };
 

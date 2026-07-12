@@ -50,6 +50,7 @@ const defaultMigrationFiles = [
   "0008-external-effect-custody.sql",
   "0009-launched-chair-bridge-loss.sql",
   "0010-artifact-registry.sql",
+  "0011-automatic-session-membership.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {

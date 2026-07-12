@@ -33,7 +33,9 @@ import {
   timestampToMillis,
   type Row,
 } from "../project-session/store-support.js";
+import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
 import { assertRunAcceptingWork, assertTaskOperationAdmitted } from "../operator/production-action-ports.js";
+import { NotificationOutbox } from "../attention/outbox.js";
 
 export type AuthenticatedIntegrationContext = Readonly<{
   integrationId: string;
@@ -49,6 +51,20 @@ export type DeliveryRecoveryResult = Readonly<{
   returnedClaims: number;
   overdueDeliveries: number;
   overdueRequests: number;
+}>;
+
+export type ResultDeadlinePassInput = Readonly<{
+  daemonInstanceGeneration: number;
+  passGeneration: number;
+}>;
+
+export type ResultDeadlinePassResult = Readonly<{
+  daemonInstanceGeneration: number;
+  passGeneration: number;
+  overdueDeliveries: number;
+  overdueRequests: number;
+  attentionItems: number;
+  notificationsEnqueued: number;
 }>;
 
 export type ResultDeliveryProviderActionBinding = Readonly<{
@@ -91,12 +107,26 @@ export class AtomicDeliveryStore {
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
   readonly #artifactRegistry: ArtifactRegistry;
+  readonly #memberships: ProjectSessionMembershipStore;
+  readonly #notifications: NotificationOutbox;
 
-  constructor(options: CoreServiceOptions & { artifactRegistry?: ArtifactRegistry }) {
+  constructor(options: CoreServiceOptions & {
+    artifactRegistry?: ArtifactRegistry;
+    memberships?: ProjectSessionMembershipStore;
+    notifications?: NotificationOutbox;
+  }) {
     this.#database = options.database;
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
     this.#artifactRegistry = options.artifactRegistry ?? new ArtifactRegistry(this.#database, this.#clock);
+    this.#memberships = options.memberships ?? new ProjectSessionMembershipStore({
+      database: this.#database,
+      clock: this.#clock,
+    });
+    this.#notifications = options.notifications ?? new NotificationOutbox({
+      database: this.#database,
+      clock: this.#clock,
+    });
   }
 
   request(context: AuthenticatedAgentContext, value: TaskRequest): TaskRequestCommit {
@@ -360,12 +390,9 @@ export class AtomicDeliveryStore {
       this.#database.prepare(`
         UPDATE task_requests SET state='answered', updated_at=? WHERE request_id=?
       `).run(now, text(pending, "request_id"));
-      this.#database.prepare(`
-        UPDATE project_session_memberships
-           SET state='reconciled', revision=revision+1, updated_at=?
-         WHERE project_session_id=? AND coordination_run_id=?
-           AND member_kind='task' AND member_id=? AND state='active'
-      `).run(now, context.projectSessionId, context.coordinationRunId, request.taskId);
+      this.#memberships.reconcile(context.coordinationRunId, [
+        { kind: "task", memberId: request.taskId },
+      ]);
       this.#fault("results:complete:after-terminal-task");
       return {
         taskRevision: request.expectedTaskRevision + 1,
@@ -560,57 +587,268 @@ export class AtomicDeliveryStore {
     });
   }
 
+  sweepDeadlines(input: ResultDeadlinePassInput): ResultDeadlinePassResult {
+    if (
+      !Number.isSafeInteger(input.daemonInstanceGeneration) ||
+      input.daemonInstanceGeneration < 1 ||
+      !Number.isSafeInteger(input.passGeneration) ||
+      input.passGeneration < 1
+    ) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "deadline sweep generations must be positive integers");
+    }
+    return this.#database.transaction(() => {
+      const epochValue = this.#database.prepare(`
+        SELECT instance_generation, state FROM daemon_runtime_epochs
+         ORDER BY instance_generation DESC LIMIT 1
+      `).get();
+      if (
+        !isRow(epochValue) ||
+        integer(epochValue, "instance_generation") !== input.daemonInstanceGeneration ||
+        text(epochValue, "state") !== "running"
+      ) {
+        throw new ProjectFabricCoreError("STALE_GENERATION", "deadline sweep daemon generation is not current");
+      }
+      const previous = this.#database.prepare(`
+        SELECT daemon_instance_generation, pass_generation, result_json
+          FROM result_deadline_sweep_state WHERE singleton=1
+      `).get();
+      if (isRow(previous)) {
+        const daemonGeneration = integer(previous, "daemon_instance_generation");
+        const passGeneration = integer(previous, "pass_generation");
+        if (
+          daemonGeneration === input.daemonInstanceGeneration &&
+          passGeneration === input.passGeneration
+        ) {
+          return this.#parseDeadlinePassResult(JSON.parse(text(previous, "result_json")));
+        }
+        if (
+          input.daemonInstanceGeneration < daemonGeneration ||
+          (input.daemonInstanceGeneration === daemonGeneration && input.passGeneration !== passGeneration + 1) ||
+          (input.daemonInstanceGeneration > daemonGeneration && input.passGeneration !== 1)
+        ) {
+          throw new ProjectFabricCoreError("STALE_GENERATION", "deadline sweep pass generation is stale or discontinuous");
+        }
+      } else if (input.passGeneration !== 1) {
+        throw new ProjectFabricCoreError("STALE_GENERATION", "first deadline sweep pass must start at generation one");
+      }
+
+      const counts = this.#applyDeadlineTransitions(
+        this.#clock(),
+        input.daemonInstanceGeneration,
+      );
+      const result = { ...input, ...counts };
+      this.#database.prepare(`
+        INSERT INTO result_deadline_sweep_state(
+          singleton, daemon_instance_generation, pass_generation, result_json, completed_at
+        ) VALUES (1, ?, ?, ?, ?)
+        ON CONFLICT(singleton) DO UPDATE SET
+          daemon_instance_generation=excluded.daemon_instance_generation,
+          pass_generation=excluded.pass_generation,
+          result_json=excluded.result_json,
+          completed_at=excluded.completed_at
+      `).run(
+        input.daemonInstanceGeneration,
+        input.passGeneration,
+        canonicalJson(result),
+        this.#clock(),
+      );
+      this.#fault("results:deadlines:after-pass");
+      return result;
+    })();
+  }
+
   recover(): DeliveryRecoveryResult {
     const execute = this.#database.transaction((): DeliveryRecoveryResult => {
       const now = this.#clock();
+      const latestEpoch = this.#database.prepare(`
+        SELECT instance_generation FROM daemon_runtime_epochs
+         ORDER BY instance_generation DESC LIMIT 1
+      `).get();
+      const deadlineCounts = this.#applyDeadlineTransitions(
+        now,
+        isRow(latestEpoch) ? integer(latestEpoch, "instance_generation") : 1,
+      );
       const expiredClaims = this.#database.prepare(`
-        SELECT result_delivery_id, response_deadline FROM result_deliveries
+        SELECT result_delivery_id FROM result_deliveries
          WHERE state='claimed' AND claim_deadline IS NOT NULL AND claim_deadline<=?
       `).all(now).filter(isRow);
       let returnedClaims = 0;
-      let overdueDeliveries = 0;
       for (const delivery of expiredClaims) {
-        const overdue = integer(delivery, "response_deadline") <= now;
         this.#database.prepare(`
           UPDATE result_deliveries
-             SET state=?, revision=revision+1, claim_generation=claim_generation+1,
+             SET state='pending', revision=revision+1, claim_generation=claim_generation+1,
                  claimed_by=NULL, claim_deadline=NULL,
-                 overdue_at=CASE WHEN ?=1 THEN ? ELSE NULL END, updated_at=?
+                 overdue_at=NULL, updated_at=?
            WHERE result_delivery_id=? AND state='claimed'
         `).run(
-          overdue ? "overdue" : "pending",
-          overdue ? 1 : 0,
-          now,
           now,
           text(delivery, "result_delivery_id"),
         );
         returnedClaims += 1;
-        if (overdue) overdueDeliveries += 1;
       }
-      const due = this.#database.prepare(`
-        SELECT result_delivery_id FROM result_deliveries
-         WHERE state='pending' AND response_deadline<=?
-      `).all(now).filter(isRow);
-      for (const delivery of due) {
-        this.#database.prepare(`
-          UPDATE result_deliveries
-             SET state='overdue', revision=revision+1, overdue_at=?, updated_at=?
-           WHERE result_delivery_id=? AND state='pending'
-        `).run(now, now, text(delivery, "result_delivery_id"));
-        overdueDeliveries += 1;
-      }
-      const requests = this.#database.prepare(`
-        UPDATE task_requests SET state='overdue', updated_at=?
-         WHERE state='pending' AND response_deadline<=?
-      `).run(now, now);
       this.#fault("results:recover:after-deadlines");
       return {
         returnedClaims,
-        overdueDeliveries,
-        overdueRequests: requests.changes,
+        overdueDeliveries: deadlineCounts.overdueDeliveries,
+        overdueRequests: deadlineCounts.overdueRequests,
       };
     });
     return execute();
+  }
+
+  #applyDeadlineTransitions(
+    now: number,
+    producerGeneration: number,
+  ): Omit<ResultDeadlinePassResult, "daemonInstanceGeneration" | "passGeneration"> {
+    const touchedRequestIds = new Set<string>();
+    const dueDeliveries = this.#database.prepare(`
+      SELECT result_delivery_id, request_id, state, claim_generation
+        FROM result_deliveries
+       WHERE state IN ('pending','claimed') AND response_deadline<=?
+       ORDER BY result_delivery_id
+    `).all(now).filter(isRow);
+    let overdueDeliveries = 0;
+    for (const delivery of dueDeliveries) {
+      const state = text(delivery, "state");
+      const changed = state === "claimed"
+        ? this.#database.prepare(`
+            UPDATE result_deliveries
+               SET state='overdue', revision=revision+1,
+                   claim_generation=claim_generation+1,
+                   claimed_by=NULL, claim_deadline=NULL,
+                   overdue_at=?, updated_at=?
+             WHERE result_delivery_id=? AND state='claimed'
+               AND claim_generation=? AND response_deadline<=?
+          `).run(
+            now,
+            now,
+            text(delivery, "result_delivery_id"),
+            integer(delivery, "claim_generation"),
+            now,
+          )
+        : this.#database.prepare(`
+            UPDATE result_deliveries
+               SET state='overdue', revision=revision+1, overdue_at=?, updated_at=?
+             WHERE result_delivery_id=? AND state='pending' AND response_deadline<=?
+          `).run(now, now, text(delivery, "result_delivery_id"), now);
+      if (changed.changes === 1) {
+        overdueDeliveries += 1;
+        touchedRequestIds.add(text(delivery, "request_id"));
+      }
+    }
+
+    const dueRequests = this.#database.prepare(`
+      SELECT request_id FROM task_requests
+       WHERE state='pending' AND response_deadline<=?
+       ORDER BY request_id
+    `).all(now).filter(isRow);
+    let overdueRequests = 0;
+    for (const request of dueRequests) {
+      const requestId = text(request, "request_id");
+      const changed = this.#database.prepare(`
+        UPDATE task_requests SET state='overdue', updated_at=?
+         WHERE request_id=? AND state='pending' AND response_deadline<=?
+      `).run(now, requestId, now);
+      if (changed.changes === 1) {
+        overdueRequests += 1;
+        touchedRequestIds.add(requestId);
+      }
+    }
+
+    const unalertedOverdueRequests = this.#database.prepare(`
+      SELECT task_request.request_id
+        FROM task_requests task_request
+       WHERE task_request.response_deadline<=?
+         AND (
+           task_request.state='overdue' OR EXISTS (
+             SELECT 1 FROM result_deliveries delivery
+              WHERE delivery.request_id=task_request.request_id
+                AND delivery.state='overdue'
+           )
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM attention_items item
+            WHERE item.project_session_id=task_request.project_session_id
+              AND item.dedupe_key='result-overdue:' || task_request.callback_id
+         )
+       ORDER BY task_request.request_id
+    `).all(now).filter(isRow);
+    for (const request of unalertedOverdueRequests) {
+      touchedRequestIds.add(text(request, "request_id"));
+    }
+
+    let attentionItems = 0;
+    let notificationsEnqueued = 0;
+    for (const requestId of [...touchedRequestIds].sort()) {
+      const request = row(this.#database.prepare(`
+        SELECT task_request.*, session.project_id
+          FROM task_requests task_request
+          JOIN project_sessions session
+            ON session.project_session_id=task_request.project_session_id
+         WHERE task_request.request_id=?
+      `).get(requestId), "overdue task request");
+      const dedupeKey = `result-overdue:${text(request, "callback_id")}`;
+      const existingAttention = this.#database.prepare(`
+        SELECT item_id FROM attention_items
+         WHERE project_session_id=? AND dedupe_key=?
+      `).get(text(request, "project_session_id"), dedupeKey);
+      const item = this.#notifications.upsertAttention({
+        producerId: "daemon-result-deadline",
+        projectId: text(request, "project_id"),
+        projectSessionId: text(request, "project_session_id"),
+        coordinationRunId: text(request, "run_id"),
+        principalGeneration: producerGeneration,
+      }, {
+        dedupeKey,
+        kind: "critical-path-block",
+        severity: "critical-path",
+        payload: {
+          title: "Required result overdue",
+          summary: `Result callback ${text(request, "callback_id")} is overdue; its dependent barrier remains blocked.`,
+          requestId,
+          callbackId: text(request, "callback_id"),
+          taskId: text(request, "task_id"),
+          responseDeadline: new Date(integer(request, "response_deadline")).toISOString(),
+          dependentBarrierId: text(request, "dependent_barrier_id"),
+        },
+      });
+      if (!isRow(existingAttention)) attentionItems += 1;
+      const existingNotification = this.#database.prepare(`
+        SELECT notification_id FROM notification_deliveries
+         WHERE item_id=? AND item_revision=? AND target_integration='native-desktop'
+      `).get(item.itemId, item.revision);
+      this.#notifications.enqueue({
+        producerId: "daemon-result-deadline",
+        projectId: text(request, "project_id"),
+        projectSessionId: text(request, "project_session_id"),
+        coordinationRunId: text(request, "run_id"),
+        principalGeneration: producerGeneration,
+      }, {
+        itemId: item.itemId,
+        expectedItemRevision: item.revision,
+        targetIntegration: "native-desktop",
+      });
+      if (!isRow(existingNotification)) notificationsEnqueued += 1;
+    }
+    this.#fault("results:deadlines:after-transitions");
+    return { overdueDeliveries, overdueRequests, attentionItems, notificationsEnqueued };
+  }
+
+  #parseDeadlinePassResult(value: unknown): ResultDeadlinePassResult {
+    if (!isRow(value)) throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "stored deadline pass is invalid");
+    for (const field of [
+      "daemonInstanceGeneration",
+      "passGeneration",
+      "overdueDeliveries",
+      "overdueRequests",
+      "attentionItems",
+      "notificationsEnqueued",
+    ] as const) {
+      if (!Number.isSafeInteger(value[field]) || (value[field] as number) < 0) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "stored deadline pass is invalid");
+      }
+    }
+    return value as ResultDeadlinePassResult;
   }
 
   get(resultDeliveryId: string): ResultDelivery {
@@ -797,22 +1035,11 @@ export class AtomicDeliveryStore {
   }
 
   #bindMemberships(context: AuthenticatedAgentContext, request: TaskRequest): void {
-    const now = this.#clock();
-    const insert = this.#database.prepare(`
-      INSERT INTO project_session_memberships(
-        project_session_id, coordination_run_id, member_kind, member_id,
-        required, state, revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 1, 'active', 1, ?, ?)
-      ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id) DO NOTHING
-    `);
-    insert.run(context.projectSessionId, context.coordinationRunId, "task", request.task.taskId, now, now);
-    insert.run(context.projectSessionId, context.coordinationRunId, "required-message", request.request.messageId, now, now);
-    insert.run(context.projectSessionId, context.coordinationRunId, "scoped-barrier", request.request.dependentBarrierId, now, now);
-    this.#database.prepare(`
-      UPDATE project_sessions
-         SET membership_revision=membership_revision+1, revision=revision+1, updated_at=?
-       WHERE project_session_id=?
-    `).run(now, context.projectSessionId);
+    this.#memberships.bindRequired(context.coordinationRunId, [
+      { kind: "task", memberId: request.task.taskId },
+      { kind: "required-message", memberId: request.request.messageId },
+      { kind: "scoped-barrier", memberId: request.request.dependentBarrierId },
+    ]);
   }
 
   #bindCompletionMemberships(
@@ -820,38 +1047,14 @@ export class AtomicDeliveryStore {
     replyMessageId: string,
     artifactIds: readonly string[],
   ): void {
-    const now = this.#clock();
-    const insert = this.#database.prepare(`
-      INSERT INTO project_session_memberships(
-        project_session_id, coordination_run_id, member_kind, member_id,
-        required, state, revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 1, ?, 1, ?, ?)
-    `);
-    insert.run(
-      context.projectSessionId,
+    this.#memberships.bindRequired(context.coordinationRunId, [
+      { kind: "required-message", memberId: replyMessageId },
+      ...artifactIds.map((memberId) => ({ kind: "artifact-obligation" as const, memberId })),
+    ]);
+    this.#memberships.reconcile(
       context.coordinationRunId,
-      "required-message",
-      replyMessageId,
-      "active",
-      now,
-      now,
+      artifactIds.map((memberId) => ({ kind: "artifact-obligation" as const, memberId })),
     );
-    for (const artifactId of artifactIds) {
-      insert.run(
-        context.projectSessionId,
-        context.coordinationRunId,
-        "artifact-obligation",
-        artifactId,
-        "reconciled",
-        now,
-        now,
-      );
-    }
-    this.#database.prepare(`
-      UPDATE project_sessions
-         SET membership_revision=membership_revision+1, revision=revision+1, updated_at=?
-       WHERE project_session_id=?
-    `).run(now, context.projectSessionId);
   }
 
   #deliverMessage(runId: string, messageId: string, recipientId: string): string {

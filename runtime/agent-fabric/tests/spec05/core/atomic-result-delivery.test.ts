@@ -85,6 +85,14 @@ function completion(): TaskCompleteWithReply {
   } as unknown as TaskCompleteWithReply;
 }
 
+function requestWithDeadline(responseDeadline: string): TaskRequest {
+  const value = request();
+  return {
+    ...value,
+    request: { ...value.request, responseDeadline },
+  } as TaskRequest;
+}
+
 const integrationContext: AuthenticatedIntegrationContext = {
   integrationId: "integration_provider",
   projectId: "project_01",
@@ -247,5 +255,131 @@ describe("atomic request, result, and callback delivery", () => {
     expect(consumed).toMatchObject({ state: "consumed", revision: 4 });
     expect(database.prepare("SELECT state FROM task_request_barriers WHERE request_id='message_request'").get())
       .toEqual({ state: "released" });
+  });
+
+  it("fences a claimed callback at its response deadline and emits one deduplicated native alert", () => {
+    let now = Date.parse("2026-07-11T00:00:00.000Z");
+    const database = open();
+    database.prepare(`
+      INSERT INTO daemon_runtime_epochs(
+        instance_generation, instance_id, state, started_at, heartbeat_at
+      ) VALUES (7, 'daemon-deadline-7', 'running', ?, ?)
+    `).run(now, now);
+    const store = new AtomicDeliveryStore({ database, clock: () => now });
+    store.request(chairContext, requestWithDeadline("2026-07-11T00:00:01.000Z"));
+    const completed = store.completeWithReply(workerContext, completion());
+    const claimed = store.claim(chairContext, {
+      commandId: "deadline_claim_command",
+      resultDeliveryId: completed.resultDelivery.resultDeliveryId,
+      expectedRevision: 1,
+      expectedClaimGeneration: 0,
+      claimantAgentId: "chair_01",
+      claimDeadline: "2026-07-11T00:10:00.000Z",
+    } as unknown as ResultDeliveryClaimRequest);
+    expect(claimed).toMatchObject({ state: "claimed", claimGeneration: 1, revision: 2 });
+
+    now = Date.parse("2026-07-11T00:00:02.000Z");
+    const first = store.sweepDeadlines({ daemonInstanceGeneration: 7, passGeneration: 1 });
+    expect(first).toEqual({
+      daemonInstanceGeneration: 7,
+      passGeneration: 1,
+      overdueDeliveries: 1,
+      overdueRequests: 0,
+      attentionItems: 1,
+      notificationsEnqueued: 1,
+    });
+    expect(store.get(completed.resultDelivery.resultDeliveryId)).toMatchObject({
+      state: "overdue",
+      revision: 3,
+      claimGeneration: 2,
+    });
+    expect(database.prepare(`
+      SELECT claimed_by, claim_deadline FROM result_deliveries
+       WHERE result_delivery_id=?
+    `).get(completed.resultDelivery.resultDeliveryId)).toEqual({
+      claimed_by: null,
+      claim_deadline: null,
+    });
+    expect(database.prepare("SELECT state FROM task_request_barriers WHERE request_id='message_request'").get())
+      .toEqual({ state: "blocked" });
+    expect(database.prepare(`
+      SELECT kind, severity, state FROM attention_items
+       WHERE dedupe_key='result-overdue:callback_answer'
+    `).get()).toEqual({ kind: "critical-path-block", severity: "critical-path", state: "open" });
+    expect(database.prepare(`
+      SELECT target_integration, state FROM notification_deliveries
+    `).all()).toEqual([{ target_integration: "native-desktop", state: "pending" }]);
+
+    expect(store.sweepDeadlines({ daemonInstanceGeneration: 7, passGeneration: 1 })).toEqual(first);
+    expect(store.sweepDeadlines({ daemonInstanceGeneration: 7, passGeneration: 2 })).toEqual({
+      daemonInstanceGeneration: 7,
+      passGeneration: 2,
+      overdueDeliveries: 0,
+      overdueRequests: 0,
+      attentionItems: 0,
+      notificationsEnqueued: 0,
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM attention_items").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM notification_deliveries").get()).toEqual({ count: 1 });
+  });
+
+  it("marks an unanswered request overdue live and a late result cannot duplicate its alert or release its barrier", () => {
+    let now = Date.parse("2026-07-11T00:00:00.000Z");
+    const database = open();
+    database.prepare(`
+      INSERT INTO daemon_runtime_epochs(
+        instance_generation, instance_id, state, started_at, heartbeat_at
+      ) VALUES (8, 'daemon-deadline-8', 'running', ?, ?)
+    `).run(now, now);
+    const store = new AtomicDeliveryStore({ database, clock: () => now });
+    store.request(chairContext, requestWithDeadline("2026-07-11T00:00:01.000Z"));
+    now = Date.parse("2026-07-11T00:00:02.000Z");
+
+    expect(store.sweepDeadlines({ daemonInstanceGeneration: 8, passGeneration: 1 })).toMatchObject({
+      overdueDeliveries: 0,
+      overdueRequests: 1,
+      attentionItems: 1,
+      notificationsEnqueued: 1,
+    });
+    expect(database.prepare("SELECT state FROM task_requests WHERE request_id='message_request'").get())
+      .toEqual({ state: "overdue" });
+    const late = store.completeWithReply(workerContext, completion());
+    expect(late.resultDelivery).toMatchObject({ state: "overdue" });
+    expect(store.sweepDeadlines({ daemonInstanceGeneration: 8, passGeneration: 2 })).toMatchObject({
+      overdueDeliveries: 0,
+      overdueRequests: 0,
+      attentionItems: 0,
+      notificationsEnqueued: 0,
+    });
+    expect(database.prepare("SELECT state FROM task_request_barriers WHERE request_id='message_request'").get())
+      .toEqual({ state: "blocked" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM attention_items").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM notification_deliveries").get()).toEqual({ count: 1 });
+  });
+
+  it("alerts when a late reply creates an overdue delivery before the first live sweep", () => {
+    let now = Date.parse("2026-07-11T00:00:00.000Z");
+    const database = open();
+    database.prepare(`
+      INSERT INTO daemon_runtime_epochs(
+        instance_generation, instance_id, state, started_at, heartbeat_at
+      ) VALUES (9, 'daemon-deadline-9', 'running', ?, ?)
+    `).run(now, now);
+    const store = new AtomicDeliveryStore({ database, clock: () => now });
+    store.request(chairContext, requestWithDeadline("2026-07-11T00:00:01.000Z"));
+    now = Date.parse("2026-07-11T00:00:02.000Z");
+    const late = store.completeWithReply(workerContext, completion());
+    expect(late.resultDelivery).toMatchObject({ state: "overdue" });
+
+    expect(store.sweepDeadlines({ daemonInstanceGeneration: 9, passGeneration: 1 })).toMatchObject({
+      overdueDeliveries: 0,
+      overdueRequests: 0,
+      attentionItems: 1,
+      notificationsEnqueued: 1,
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM attention_items").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM notification_deliveries").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT state FROM task_request_barriers WHERE request_id='message_request'").get())
+      .toEqual({ state: "blocked" });
   });
 });
