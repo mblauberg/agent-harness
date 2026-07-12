@@ -39,7 +39,7 @@ import {
   parseHerdrDaemonProcessConfiguration,
 } from "./herdr-composition.js";
 import { BootstrapElection } from "./bootstrap-election.js";
-import { GuardedIdleStopController, type QuiesceToken } from "./global-liveness.js";
+import { GuardedIdleStopController, type IdleStopResult, type QuiesceToken } from "./global-liveness.js";
 import { IdleShutdownScheduler } from "./idle-shutdown-scheduler.js";
 import { ResultDeadlineScheduler } from "./result-deadline-scheduler.js";
 import { finalizeDaemonShutdown } from "./shutdown-finalizer.js";
@@ -59,6 +59,10 @@ import {
 } from "../operator/github-hosted-checks.js";
 import type { TrustedGitConfiguration } from "../operator/trusted-git-registry.js";
 import { inspectFabricDatabase } from "../core/migrations.js";
+import {
+  closeRecoverableUnixListener,
+  openRecoverableUnixListener,
+} from "./recoverable-serving-socket.js";
 
 class DaemonProtocolError extends Error {
   readonly code: string;
@@ -579,14 +583,10 @@ const server = createServer((socket) => {
   });
 });
 
-await new Promise<void>((resolve, reject) => {
-  server.once("error", reject);
-  server.listen(socketPath, () => {
-    server.off("error", reject);
-    chmodSync(socketPath, 0o600);
-    resolve();
-  });
-});
+const openServingSocket = async (): Promise<void> =>
+  await openRecoverableUnixListener(server, socketPath);
+
+await openServingSocket();
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 
 let shuttingDown = false;
@@ -630,11 +630,8 @@ const markProductionTerminal = async (
 };
 
 const stopElection = new BootstrapElection({ runtimeDirectory });
-const closeServingSocket = async (): Promise<void> => {
-  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-  for (const active of sockets) active.end();
-  await Promise.all([closed, waitForInFlight()]);
-};
+const closeServingSocket = async (): Promise<void> =>
+  await closeRecoverableUnixListener({ server, sockets, waitForInFlight });
 
 const finishProcess = async (input: {
   signal: NodeJS.Signals | null;
@@ -658,14 +655,38 @@ const finishProcess = async (input: {
   });
 };
 
+const attemptIdleStopWithServingRecovery = async (input: {
+  actionId: string;
+  signal: NodeJS.Signals | null;
+}): Promise<IdleStopResult> => {
+  let socketClosed = false;
+  try {
+    return await fabric.attemptIdleStop({
+      actionId: input.actionId,
+      daemonInstanceGeneration,
+      election: stopElection,
+      closeSocket: async () => {
+        socketClosed = true;
+        await closeServingSocket();
+      },
+      reopenSocket: async () => {
+        await openServingSocket();
+        socketClosed = false;
+      },
+    });
+  } catch (error: unknown) {
+    if (!socketClosed) throw error;
+    shuttingDown = true;
+    return await finishProcess({ signal: input.signal, state: "crashed", exitCode: 1 });
+  }
+};
+
 const idleScheduler = new IdleShutdownScheduler({
   graceMs: 250,
   sweepMs: 30_000,
-  attempt: async ({ actionId }) => await fabric.attemptIdleStop({
+  attempt: async ({ actionId }) => await attemptIdleStopWithServingRecovery({
     actionId: `${actionId}:${String(daemonInstanceGeneration)}`,
-    daemonInstanceGeneration,
-    election: stopElection,
-    closeSocket: closeServingSocket,
+    signal: null,
   }),
   onStopped: async () => {
     shuttingDown = true;
@@ -709,8 +730,12 @@ completeQueuedDaemonStop = (custodyId: string): void => {
       token: pending.token,
       election: stopElection,
       closeSocket: async () => {
-        await closeServingSocket();
         socketClosed = true;
+        await closeServingSocket();
+      },
+      reopenSocket: async () => {
+        await openServingSocket();
+        socketClosed = false;
       },
     }).then(async (result) => {
       if (result.state !== "stopped") {
@@ -751,11 +776,9 @@ completeQueuedDaemonStop = (custodyId: string): void => {
 };
 
 const signalStop = new GuardedIdleStopController(async (signal) => {
-  const result = await fabric.attemptIdleStop({
+  const result = await attemptIdleStopWithServingRecovery({
     actionId: `signal-idle-stop:${signal}:${String(daemonInstanceGeneration)}`,
-    daemonInstanceGeneration,
-    election: stopElection,
-    closeSocket: closeServingSocket,
+    signal,
   });
   if (result.state === "stopped") {
     shuttingDown = true;

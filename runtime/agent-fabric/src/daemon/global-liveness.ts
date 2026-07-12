@@ -293,20 +293,57 @@ export function recheckIdle(
 function completeIdleStop(
   database: Database.Database,
   options: { now: number; token: QuiesceToken },
-): void {
-  database.transaction(() => {
+): boolean {
+  return database.transaction(() => {
     const updated = database.prepare(`
       UPDATE daemon_runtime_epochs
       SET state = 'stopped', stopped_at = ?, heartbeat_at = ?
       WHERE instance_generation = ? AND state = 'quiescing' AND observed_global_revision = ?
+        AND EXISTS (
+          SELECT 1 FROM daemon_global_state
+          WHERE singleton = 1 AND revision = ?
+        )
     `).run(
       options.now,
       options.now,
       options.token.daemonInstanceGeneration,
       options.token.observedGlobalStateRevision,
+      options.token.observedGlobalStateRevision,
     );
-    if (updated.changes !== 1) throw new Error("daemon epoch changed before stop completion");
+    return updated.changes === 1;
   })();
+}
+
+async function completeDrainedIdleStop(options: {
+  database: Database.Database;
+  token: QuiesceToken;
+  clock: () => number;
+  beforeStopCommit?: () => Promise<void>;
+  reopenSocket(): Promise<void>;
+}): Promise<IdleStopResult> {
+  const postDrain = recheckIdle(options.database, { now: options.clock(), token: options.token });
+  if (postDrain.state === "busy") {
+    await options.reopenSocket();
+    return postDrain;
+  }
+  if (options.beforeStopCommit !== undefined) await options.beforeStopCommit();
+  try {
+    if (!completeIdleStop(options.database, { now: options.clock(), token: options.token })) {
+      const changed = recheckIdle(options.database, { now: options.clock(), token: options.token });
+      await options.reopenSocket();
+      return changed.state === "busy"
+        ? changed
+        : { state: "busy", reason: "state-changed", snapshot: changed.snapshot };
+    }
+  } catch (error: unknown) {
+    await options.reopenSocket();
+    throw error;
+  }
+  return {
+    state: "stopped",
+    daemonInstanceGeneration: options.token.daemonInstanceGeneration,
+    globalStateRevision: options.token.observedGlobalStateRevision,
+  };
 }
 
 export async function attemptIdleStop(options: {
@@ -316,7 +353,9 @@ export async function attemptIdleStop(options: {
   daemonInstanceGeneration: number;
   clock?: () => number;
   beforeFinalRecheck?: () => Promise<void>;
+  beforeStopCommit?: () => Promise<void>;
   closeSocket(): Promise<void>;
+  reopenSocket(): Promise<void>;
 }): Promise<IdleStopResult> {
   const clock = options.clock ?? Date.now;
   const elected = await options.election.withExclusiveLock(options.actionId, async () => {
@@ -329,12 +368,13 @@ export async function attemptIdleStop(options: {
     const final = recheckIdle(options.database, { now: clock(), token: started.token });
     if (final.state === "busy") return final;
     await options.closeSocket();
-    completeIdleStop(options.database, { now: clock(), token: started.token });
-    return {
-      state: "stopped" as const,
-      daemonInstanceGeneration: options.daemonInstanceGeneration,
-      globalStateRevision: started.token.observedGlobalStateRevision,
-    };
+    return await completeDrainedIdleStop({
+      database: options.database,
+      token: started.token,
+      clock,
+      ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
+      reopenSocket: options.reopenSocket,
+    });
   });
   if (elected.role === "observer") return { state: "busy", reason: "election-active" };
   return elected.value;
@@ -347,7 +387,9 @@ export async function attemptDrainedStop(options: {
   database: Database.Database;
   clock?: () => number;
   beforeFinalRecheck?: () => Promise<void>;
+  beforeStopCommit?: () => Promise<void>;
   closeSocket(): Promise<void>;
+  reopenSocket(): Promise<void>;
 }): Promise<IdleStopResult> {
   const clock = options.clock ?? Date.now;
   const elected = await options.election.withExclusiveLock(options.actionId, async () => {
@@ -355,12 +397,13 @@ export async function attemptDrainedStop(options: {
     const final = recheckIdle(options.database, { now: clock(), token: options.token });
     if (final.state === "busy") return final;
     await options.closeSocket();
-    completeIdleStop(options.database, { now: clock(), token: options.token });
-    return {
-      state: "stopped" as const,
-      daemonInstanceGeneration: options.token.daemonInstanceGeneration,
-      globalStateRevision: options.token.observedGlobalStateRevision,
-    };
+    return await completeDrainedIdleStop({
+      database: options.database,
+      token: options.token,
+      clock,
+      ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
+      reopenSocket: options.reopenSocket,
+    });
   });
   if (elected.role === "observer") return { state: "busy", reason: "election-active" };
   return elected.value;

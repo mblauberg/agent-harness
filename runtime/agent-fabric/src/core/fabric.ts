@@ -1121,6 +1121,7 @@ export class Fabric {
     daemonInstanceGeneration: number;
     election: IdleElectionPort;
     closeSocket(): Promise<void>;
+    reopenSocket(): Promise<void>;
   }): Promise<IdleStopResult> {
     return await attemptRuntimeIdleStop({
       ...input,
@@ -1142,6 +1143,7 @@ export class Fabric {
     token: QuiesceToken;
     election: IdleElectionPort;
     closeSocket(): Promise<void>;
+    reopenSocket(): Promise<void>;
   }): Promise<IdleStopResult> {
     return await attemptRuntimeDrainedStop({
       ...input,
