@@ -990,7 +990,6 @@ function attachedHandle(
 export async function startFabricDaemon(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
   const normalized = normalizedStartOptions(options);
   normalized.databasePath = safeDatabasePath(normalized.databasePath);
-  inspectFabricDatabase(normalized.databasePath);
   const stateDirectoryWasAbsent = !existsSync(normalized.stateDirectory);
   const runtimeDirectoryWasAbsent = !existsSync(normalized.runtimeDirectory);
   const paths = privateDiscoveryPaths(normalized.runtimeDirectory);
@@ -1005,11 +1004,8 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
     paths.ownerPath,
   ];
   const absentBootstrapArtifacts = bootstrapArtifactPaths.filter((path) => !existsSync(path));
-  await Promise.all([
-    ensurePrivateDirectory(normalized.stateDirectory),
-    ensurePrivateDirectory(normalized.runtimeDirectory),
-  ]);
   const actionId = stableBootstrapActionId(normalized);
+  let bootstrapDirectoriesPrepared = false;
   let provisional: PrivateDiscoveryIdentity | undefined;
   let spawned: ProductionSpawn | undefined;
   let attached;
@@ -1020,7 +1016,24 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
       requiredProtocolVersion: FABRIC_PROTOCOL_VERSION,
       requiredFeatures: ["rpc"],
       election,
-      handshake: async () => await privateDaemonHandshake(paths, election, normalized.socketPath, provisional),
+      handshake: async () => {
+        if (!bootstrapDirectoriesPrepared && !existsSync(normalized.runtimeDirectory)) {
+          return {
+            status: "unavailable" as const,
+            reason: "absent" as const,
+            message: "private daemon discovery is absent",
+          };
+        }
+        return await privateDaemonHandshake(paths, election, normalized.socketPath, provisional);
+      },
+      preBootstrap: async () => {
+        inspectFabricDatabase(normalized.databasePath);
+        await Promise.all([
+          ensurePrivateDirectory(normalized.stateDirectory),
+          ensurePrivateDirectory(normalized.runtimeDirectory),
+        ]);
+        bootstrapDirectoriesPrepared = true;
+      },
       reconcile: async (unavailable) => {
         if (!await reconcileUnreachablePrivateDaemon(paths, normalized.socketPath)) {
           return unavailable;

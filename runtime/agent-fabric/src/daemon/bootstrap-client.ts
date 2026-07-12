@@ -77,6 +77,7 @@ export type AttachOrStartOptions<Client> = {
   requiredFeatures: readonly string[];
   election: BootstrapElection;
   handshake(): Promise<DaemonHandshakeResult<Client>>;
+  preBootstrap?(): Promise<void>;
   reconcile?(result: Extract<DaemonHandshakeResult<Client>, {
     status: "unavailable";
   }>): Promise<DaemonHandshakeResult<Client>>;
@@ -214,6 +215,15 @@ function typedFailureCode(error: unknown): string | undefined {
 export async function attachOrStartDaemon<Client>(options: AttachOrStartOptions<Client>): Promise<AttachedDaemon<Client>> {
   const initial = await options.handshake();
   if (initial.status === "compatible") return compatibleDaemon(initial, options, null, false);
+  let preBootstrapComplete = false;
+  const preBootstrap = async (): Promise<void> => {
+    if (preBootstrapComplete) return;
+    await options.preBootstrap?.();
+    preBootstrapComplete = true;
+  };
+  if (initial.status === "unavailable" && initial.reconciliationRequired !== true) {
+    await preBootstrap();
+  }
   const elected = await options.election.withExclusiveLock(options.actionId, async (held) => {
     let recheck = await options.handshake();
     if (
@@ -232,6 +242,7 @@ export async function attachOrStartDaemon<Client>(options: AttachOrStartOptions<
     if (recheck.reconciliationRequired === true) {
       throw new BootstrapClientError("BOOTSTRAP_RECONCILIATION_REQUIRED", recheck.message);
     }
+    await preBootstrap();
 
     const priorOutcome = await held.readCurrentOutcome();
     if (priorOutcome?.kind === "ready") {

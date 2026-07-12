@@ -90,6 +90,67 @@ async function waitForOwnerState(
   }
 }
 
+async function startBusyWalWriter(databasePath: string): Promise<ReturnType<typeof spawn>> {
+  const script = `
+    import Database from "better-sqlite3";
+    const database = new Database(process.argv[1]);
+    database.pragma("journal_mode = WAL");
+    database.pragma("wal_autocheckpoint = 0");
+    database.pragma("busy_timeout = 5000");
+    const heartbeat = database.prepare(\`
+      UPDATE daemon_runtime_epochs
+      SET heartbeat_at = heartbeat_at + 1
+      WHERE state = 'running'
+    \`);
+    let stopping = false;
+    const stop = () => {
+      if (stopping) return;
+      stopping = true;
+      database.close();
+      process.exit(0);
+    };
+    process.once("SIGTERM", stop);
+    process.once("SIGINT", stop);
+    process.stdout.write("ready\\n");
+    const write = () => {
+      if (stopping) return;
+      for (let attempt = 0; attempt < 64; attempt += 1) heartbeat.run();
+      setImmediate(write);
+    };
+    write();
+  `;
+  const writer = spawn(
+    process.execPath,
+    ["--input-type=module", "-e", script, databasePath],
+    {
+      cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (writer.stdout === null || writer.stderr === null) {
+    throw new Error("busy WAL writer pipes are unavailable");
+  }
+  let stderr = "";
+  writer.stderr.setEncoding("utf8");
+  writer.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  const lines = createInterface({ input: writer.stdout, crlfDelay: Infinity });
+  await new Promise<void>((resolvePromise, reject) => {
+    const timeout = setTimeout(() => reject(new Error("busy WAL writer did not become ready")), 10_000);
+    lines.once("line", (line) => {
+      clearTimeout(timeout);
+      if (line === "ready") resolvePromise();
+      else reject(new Error(`busy WAL writer returned an invalid readiness line: ${line}`));
+    });
+    writer.once("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`busy WAL writer exited before readiness: ${String(code)} ${stderr}`));
+    });
+    writer.once("error", reject);
+  });
+  lines.close();
+  return writer;
+}
+
 afterEach(async () => {
   await Promise.allSettled(handles.splice(0).reverse().map(async (handle) => handle.stop()));
   await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
@@ -427,6 +488,42 @@ describe("production daemon bootstrap wiring", () => {
       ...await readdir(stateDirectory),
       ...await readdir(runtimeDirectory),
     ].filter((name) => name.endsWith(".lock.sqlite3"))).toEqual([]);
+  });
+
+  it("attaches to the elected daemon while its WAL is busy without inventing a schema cutover", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-production-busy-wal-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "state", "fabric.sqlite3"),
+      stateDirectory: join(root, "state"),
+      runtimeDirectory: join(root, "runtime"),
+      socketPath: join(root, "runtime", "fabric.sock"),
+      workspaceRoots: [root],
+    };
+    const owner = await startFabricDaemon(options);
+    handles.push(owner);
+    const writer = await startBusyWalWriter(options.databasePath);
+    try {
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 48 }, async () => await startFabricDaemon(options)),
+      );
+      const rejectedCodes = outcomes.flatMap((outcome) => outcome.status === "rejected"
+        ? [typeof outcome.reason === "object" && outcome.reason !== null && "code" in outcome.reason
+          ? outcome.reason.code
+          : undefined]
+        : []);
+      expect(rejectedCodes).not.toContain("SCHEMA_CUTOVER_REQUIRED");
+      expect(outcomes.every((outcome) => outcome.status === "fulfilled")).toBe(true);
+      const attached = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
+      handles.push(...attached);
+      expect(new Set(attached.map((handle) => handle.pid))).toEqual(new Set([owner.pid]));
+      expect(attached.every((handle) => !handle.ownsProcess)).toBe(true);
+    } finally {
+      if (writer.exitCode === null && writer.signalCode === null) {
+        writer.kill("SIGTERM");
+        await new Promise<void>((resolvePromise) => writer.once("exit", () => resolvePromise()));
+      }
+    }
   });
 
   it("releases a bootstrap owner's local process handles without stopping the daemon", async () => {
