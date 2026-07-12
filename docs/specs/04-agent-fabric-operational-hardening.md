@@ -2047,6 +2047,13 @@ shapes and producer-owned namespaces. Evidence projection reads only active
 rows and takes kind, revision, ref and provenance from this registry rather
 than hard-coding them.
 
+The squashed baseline `artifacts` table declares exact
+`UNIQUE(artifact_id, revision)` in addition to its `artifact_id` primary key.
+That apparently redundant composite key is mandatory: every immutable evidence
+child in section 9.23 uses the exact two-column registration revision as a
+SQLite foreign-key parent. A child can never cite a revision value merely
+because the artifact ID exists.
+
 The current baseline stores only the wire `sha256:` artifact digest form.
 Publication applies the closed source classification; result completion must
 prove the replying agent's persisted path authority and rejects an unprovable
@@ -4303,14 +4310,18 @@ discovery_surface_manifests(
   host_id, host_version, provider_profile, raw_native_mode,
   permission_profile_digest, manifest_json, manifest_digest, created_at,
   PRIMARY KEY(evidence_id, evidence_revision),
-  UNIQUE(evidence_id, evidence_revision, manifest_digest)
+  UNIQUE(evidence_id, evidence_revision, manifest_digest),
+  FOREIGN KEY(evidence_id, evidence_revision)
+    REFERENCES artifacts(artifact_id, revision)
 )
 
 adapter_activation_subjects(
   adapter_id, activation_id, activation_revision,
   evidence_id, evidence_revision, created_at,
   PRIMARY KEY(adapter_id, activation_id, activation_revision),
-  UNIQUE(evidence_id, evidence_revision)
+  UNIQUE(evidence_id, evidence_revision),
+  FOREIGN KEY(evidence_id, evidence_revision)
+    REFERENCES artifacts(artifact_id, revision)
 )
 
 adapter_provider_smoke_subjects(
@@ -4318,6 +4329,9 @@ adapter_provider_smoke_subjects(
   evidence_id, evidence_revision, created_at,
   PRIMARY KEY(adapter_id, smoke_id),
   UNIQUE(action_adapter_id, action_id),
+  UNIQUE(evidence_id, evidence_revision),
+  FOREIGN KEY(evidence_id, evidence_revision)
+    REFERENCES artifacts(artifact_id, revision),
   FOREIGN KEY(action_adapter_id, action_id)
     REFERENCES provider_action_pair_preflights(adapter_id, action_id)
 )
@@ -4340,6 +4354,8 @@ adapter_effective_configurations(
   UNIQUE(adapter_id, subject_kind, subject_id, subject_ref_digest),
   UNIQUE(evidence_id, evidence_revision),
   UNIQUE(configuration_digest),
+  FOREIGN KEY(evidence_id, evidence_revision)
+    REFERENCES artifacts(artifact_id, revision),
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
       capability_snapshot_digest, capability_body_digest)
     REFERENCES adapter_capability_snapshots(
@@ -4418,6 +4434,8 @@ provider_action_routes(
   effective_configuration_id, effective_configuration_revision,
   effective_configuration_ref_digest,
   requested_configuration_digest, effective_route_configuration_digest,
+  discovery_surface_evidence_id, discovery_surface_evidence_revision,
+  discovery_surface_digest,
   ...new admission columns...,
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
     capability_snapshot_digest, capability_body_digest)
@@ -4427,7 +4445,11 @@ provider_action_routes(
   FOREIGN KEY(effective_configuration_id, effective_configuration_revision,
       effective_configuration_ref_digest)
     REFERENCES adapter_effective_configurations(
-      configuration_id, configuration_revision, configuration_digest)
+      configuration_id, configuration_revision, configuration_digest),
+  FOREIGN KEY(discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest)
+    REFERENCES discovery_surface_manifests(
+      evidence_id, evidence_revision, manifest_digest)
 )
 ```
 
@@ -4541,6 +4563,10 @@ binding. The daemon persistence wrapper is not callable as a resolver.
 
 Topology waves use one append-only store and one current pointer:
 
+The authority foreign key below depends on the exact four-column parent
+`UNIQUE(project_session_id, coordination_run_id, authority_revision,
+authority_ref)` already declared by section 9.13 for the squashed baseline.
+
 ```sql
 topology_wave_plans(
   project_session_id, coordination_run_id, task_id,
@@ -4556,6 +4582,12 @@ topology_wave_plans(
   UNIQUE(project_session_id, coordination_run_id, task_id,
     wave_id, wave_revision, plan_digest),
   UNIQUE(plan_digest),
+  FOREIGN KEY(rationale_evidence_id, rationale_evidence_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY(coordination_run_id, task_id)
+    REFERENCES tasks(run_id, task_id),
+  FOREIGN KEY(coordination_run_id, chair_agent_id)
+    REFERENCES agents(run_id, agent_id),
   FOREIGN KEY(project_session_id, coordination_run_id,
       authority_revision, authority_ref)
     REFERENCES run_authority_revisions(
@@ -4619,7 +4651,10 @@ topology or creates a second chair/policy state machine.
 Context pressure is operational state, not spend or authority budget. Existing
 provider generation/context-revision telemetry remains append-only and
 lifecycle-owned as specified in sections 9.22 and Spec 01 section 32.20. The
-baseline adds a separate truthful projection:
+baseline `agent_adapter_bindings` relation adds exact
+`UNIQUE(run_id, agent_id, adapter_id)` beside its existing `(run_id,agent_id)`
+primary key. The separate truthful projection foreign-keys that exact active
+agent/adapter identity:
 
 ```sql
 provider_context_pressure_current(
@@ -4629,6 +4664,8 @@ provider_context_pressure_current(
   window_tokens, used_tokens, remaining_tokens,
   observed_at, expires_at, evidence_digest, revision,
   PRIMARY KEY(run_id, agent_id),
+  FOREIGN KEY(run_id, agent_id, adapter_id)
+    REFERENCES agent_adapter_bindings(run_id, agent_id, adapter_id),
   FOREIGN KEY(run_id, agent_id, observation_source_event_id,
       provider_generation, context_revision, evidence_digest)
     REFERENCES provider_context_observation_audit(
@@ -4689,7 +4726,8 @@ redacting after persistence. Generic span export never satisfies receipt,
 authority, review, disclosure or gate evidence.
 
 Verification adds schema-generation parity; discovery manifest/artifact digest
-equality; capability current-pointer, expiry and same-body refresh races;
+equality and exact registration-revision foreign keys; capability current-
+pointer, expiry and same-body refresh races;
 effective-configuration subject/activation lineage; raw/normalised effort and
 native-mode round-trip; actual review-route proof and every observed route-
 field mismatch; exact cut-custody ref joins; point-of-use body/
@@ -4700,3 +4738,10 @@ crossed-arm rejection and no percentage;
 lower/reordered observation; and telemetry content-denial fixtures. Full crash
 matrices prove there is one route owner and that lifecycle recovery remains
 ahead of generic provider recovery.
+
+The generated baseline schema audit prepares every relation under
+`PRAGMA foreign_keys=ON`, runs `PRAGMA foreign_key_check`, and inserts negative
+fixtures for crossed artifact revision, agent adapter, topology task/chair,
+rationale registration and route discovery-surface identities. No child relies
+on trigger prose where the displayed composite foreign key can enforce the
+relationship.
