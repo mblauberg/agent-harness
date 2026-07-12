@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ProjectSessionStore } from "../../../src/project-session/store.ts";
+import { NotificationOutbox } from "../../../src/attention/outbox.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 const now = Date.parse("2027-01-01T00:00:00Z");
@@ -106,6 +107,36 @@ async function setup(state: "draft" | "awaiting_acceptance") {
       INSERT INTO scoped_gate_operations(gate_id,operation_id)
       VALUES ('gate_final','fabric.v1.project-session.close');
     `);
+    const notifications = new NotificationOutbox({ database, clock: () => now });
+    const attention = notifications.upsertAttention({
+      producerId: "operator:operator_01",
+      projectId: "project_01",
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      principalGeneration: 1,
+    }, {
+      dedupeKey: "scoped-gate:gate_final",
+      kind: "consequential-gate",
+      severity: "critical",
+      payload: {
+        gateId: "gate_final",
+        title: "Accept?",
+        summary: "Final close",
+        priority: "critical-path",
+        duplicateCount: 1,
+      },
+    });
+    notifications.enqueue({
+      producerId: "operator:operator_01",
+      projectId: "project_01",
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      principalGeneration: 1,
+    }, {
+      itemId: attention.itemId,
+      expectedItemRevision: attention.revision,
+      targetIntegration: "native-desktop",
+    });
     database.prepare(`
       UPDATE scoped_gates
          SET status='approved',resolved_by_operator_id='operator_01',

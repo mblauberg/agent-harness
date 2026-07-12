@@ -16,6 +16,7 @@ import { OperatorActionStore } from "../../../src/operator/action-store.ts";
 import type { GitMutationDispatchContext, GitMutationInspection, GitMutationPort } from "../../../src/operator/fixed-git-mutation-port.ts";
 import { createProductionOperatorActionPorts } from "../../../src/operator/production-action-ports.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
+import { NotificationOutbox } from "../../../src/attention/outbox.ts";
 import {
   TypedGitService,
   deriveGitEffectBindingDigest,
@@ -27,6 +28,33 @@ import {
 const databases: Database.Database[] = [];
 const now = Date.parse("2026-07-12T10:00:00.000Z");
 const sha = (value: string): Sha256Digest => `sha256:${value.repeat(64).slice(0, 64)}` as Sha256Digest;
+
+function seedGateAttention(
+  database: Database.Database,
+  gateId: string,
+  title: string,
+  summary: string,
+): void {
+  const outbox = new NotificationOutbox({ database, clock: () => now });
+  const producer = {
+    producerId: "operator:operator_01",
+    projectId: "project_01",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    principalGeneration: 1,
+  } as const;
+  const attention = outbox.upsertAttention(producer, {
+    dedupeKey: `scoped-gate:${gateId}`,
+    kind: "consequential-gate",
+    severity: "critical",
+    payload: { gateId, title, summary, priority: "critical-path", duplicateCount: 1 },
+  });
+  outbox.enqueue(producer, {
+    itemId: attention.itemId,
+    expectedItemRevision: attention.revision,
+    targetIntegration: "native-desktop",
+  });
+}
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close();
@@ -899,6 +927,7 @@ describe("typed Git effect custody", () => {
         '[]','[]','operator_01','operator_01','pending',1,1,1,1);
       INSERT INTO scoped_gate_operations VALUES('gate_git_01','${draft.operation_id}');
     `);
+    seedGateAttention(value.database, "gate_git_01", "Approve?", "Exact Git effect");
     expect(value.database.prepare("SELECT revision,state FROM git_operation_drafts WHERE draft_id=?").get(draft.draft_id))
       .toEqual({ revision: 2, state: "gate-bound" });
     value.database.prepare(`
@@ -1057,6 +1086,9 @@ describe("typed Git effect custody", () => {
         '["${draft.operation_id}"]','["operation"]','Adjudicate?','Permanent proof loss','["approve"]','approve',
         '[]','[]','operator_01','operator_01','pending',1,1,1,1);
       INSERT INTO scoped_gate_operations VALUES('gate_resolution_01','${draft.operation_id}');
+    `);
+    seedGateAttention(value.database, "gate_resolution_01", "Adjudicate?", "Permanent proof loss");
+    value.database.exec(`
       UPDATE scoped_gates
          SET status='approved',resolved_by_operator_id='operator_01',resolution_json='{"decision":"approve"}',
              revision=2,updated_at=2
