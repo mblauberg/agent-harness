@@ -14,6 +14,8 @@ const CONTRIBUTING_STATES = [
 
 const PROVIDER_STATES = ["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"] as const;
 const CONTRIBUTING_PROVIDER_STATES = ["prepared", "dispatched", "accepted", "ambiguous", "quarantined"] as const;
+const OPERATOR_EFFECT_STATES = ["prepared", "dispatching", "terminal", "no-effect", "rejected", "ambiguous", "failed"] as const;
+const CONTRIBUTING_OPERATOR_EFFECT_STATES = ["prepared", "dispatching", "ambiguous", "failed"] as const;
 const RESULT_STATES = ["pending", "claimed", "provider-accepted", "consumed", "overdue", "abandoned"] as const;
 const CONTRIBUTING_RESULT_STATES = ["pending", "claimed", "provider-accepted", "overdue"] as const;
 
@@ -27,6 +29,7 @@ export type GlobalLivenessSnapshot = {
     coordinationRuns: number;
     leases: number;
     providerActions: number;
+    operatorEffects: number;
     operatorAttachments: number;
     requiredResults: number;
     total: number;
@@ -57,6 +60,7 @@ function failClosed(failure: GlobalLivenessSnapshot["failure"]): GlobalLivenessS
       coordinationRuns: 0,
       leases: 0,
       providerActions: 0,
+      operatorEffects: 0,
       operatorAttachments: 0,
       requiredResults: 0,
       total: 0,
@@ -66,7 +70,11 @@ function failClosed(failure: GlobalLivenessSnapshot["failure"]): GlobalLivenessS
 
 function readWithinTransaction(
   database: Database.Database,
-  options: { now: number; daemonInstanceGeneration: number },
+  options: {
+    now: number;
+    daemonInstanceGeneration: number;
+    excludeOperatorEffectCustodyId?: string;
+  },
 ): GlobalLivenessSnapshot {
   const revision = database.prepare("SELECT revision FROM daemon_global_state WHERE singleton = 1").get() as RevisionRow | undefined;
   if (revision === undefined || !Number.isSafeInteger(revision.revision) || revision.revision < 1) return failClosed("query-failed");
@@ -76,6 +84,7 @@ function readWithinTransaction(
     count(database, `SELECT COUNT(*) AS count FROM runs WHERE lifecycle_state NOT IN (${placeholders(SESSION_STATES)})`, SESSION_STATES) +
     count(database, "SELECT COUNT(*) AS count FROM leases WHERE status NOT IN ('active','quarantined','released')") +
     count(database, `SELECT COUNT(*) AS count FROM provider_actions WHERE status NOT IN (${placeholders(PROVIDER_STATES)})`, PROVIDER_STATES) +
+    count(database, `SELECT COUNT(*) AS count FROM operator_effect_custody WHERE state NOT IN (${placeholders(OPERATOR_EFFECT_STATES)})`, OPERATOR_EFFECT_STATES) +
     count(database, "SELECT COUNT(*) AS count FROM operator_client_attachments WHERE state NOT IN ('active','detached','expired')") +
     count(database, `SELECT COUNT(*) AS count FROM result_deliveries WHERE state NOT IN (${placeholders(RESULT_STATES)})`, RESULT_STATES) +
     count(database, "SELECT COUNT(*) AS count FROM projects WHERE authority_generation < 1") +
@@ -127,6 +136,18 @@ function readWithinTransaction(
     `SELECT COUNT(*) AS count FROM provider_actions WHERE status IN (${placeholders(CONTRIBUTING_PROVIDER_STATES)})`,
     CONTRIBUTING_PROVIDER_STATES,
   );
+  const operatorEffects = options.excludeOperatorEffectCustodyId === undefined
+    ? count(
+        database,
+        `SELECT COUNT(*) AS count FROM operator_effect_custody WHERE state IN (${placeholders(CONTRIBUTING_OPERATOR_EFFECT_STATES)})`,
+        CONTRIBUTING_OPERATOR_EFFECT_STATES,
+      )
+    : count(
+        database,
+        `SELECT COUNT(*) AS count FROM operator_effect_custody
+          WHERE state IN (${placeholders(CONTRIBUTING_OPERATOR_EFFECT_STATES)}) AND custody_id<>?`,
+        [...CONTRIBUTING_OPERATOR_EFFECT_STATES, options.excludeOperatorEffectCustodyId],
+      );
   const operatorAttachments = count(database, `
     SELECT COUNT(*) AS count
     FROM operator_client_attachments AS attachment
@@ -150,21 +171,29 @@ function readWithinTransaction(
     `SELECT COUNT(*) AS count FROM result_deliveries WHERE required = 1 AND state IN (${placeholders(CONTRIBUTING_RESULT_STATES)})`,
     CONTRIBUTING_RESULT_STATES,
   );
-  const total = projectSessions + coordinationRuns + leases + providerActions + operatorAttachments + requiredResults;
+  const total = projectSessions + coordinationRuns + leases + providerActions + operatorEffects + operatorAttachments + requiredResults;
   return {
     idle: total === 0,
     failClosed: false,
     failure: null,
     globalStateRevision: revision.revision,
-    contributors: { projectSessions, coordinationRuns, leases, providerActions, operatorAttachments, requiredResults, total },
+    contributors: { projectSessions, coordinationRuns, leases, providerActions, operatorEffects, operatorAttachments, requiredResults, total },
   };
 }
 
 export function readGlobalLiveness(
   database: Database.Database,
-  options: { now: number; daemonInstanceGeneration: number },
+  options: {
+    now: number;
+    daemonInstanceGeneration: number;
+    excludeOperatorEffectCustodyId?: string;
+  },
 ): GlobalLivenessSnapshot {
-  if (!Number.isSafeInteger(options.now) || options.now < 0 || !Number.isSafeInteger(options.daemonInstanceGeneration) || options.daemonInstanceGeneration < 1) {
+  if (
+    !Number.isSafeInteger(options.now) || options.now < 0 ||
+    !Number.isSafeInteger(options.daemonInstanceGeneration) || options.daemonInstanceGeneration < 1 ||
+    (options.excludeOperatorEffectCustodyId !== undefined && options.excludeOperatorEffectCustodyId.length === 0)
+  ) {
     return failClosed("query-failed");
   }
   try {

@@ -73,6 +73,11 @@ import {
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 import { ArtifactContentReadService } from "../operator/artifact-content-read.js";
 import {
+  ExternalEffectService,
+  type ExternalEffectEvidencePort,
+  type RegisteredEffectPort,
+} from "../operator/external-effect-service.js";
+import {
   OperatorActionStore,
   type OperatorActionEffectPort,
   type OperatorActionStatePort,
@@ -161,6 +166,10 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   daemonStopPort?: ProductionDaemonStopPort;
   fabricSocketPath?: string;
   gitHostedChecks?: GitHostedChecksPort;
+  externalEffects?: Readonly<{
+    registry: readonly RegisteredEffectPort[];
+    evidence: ExternalEffectEvidencePort;
+  }>;
 };
 
 type Row = Record<string, unknown>;
@@ -877,6 +886,7 @@ export class Fabric {
   readonly #notifications: NotificationOutbox;
   readonly #notificationWorker: NativeNotificationWorker;
   readonly #artifactRegistry: ArtifactRegistry;
+  readonly #externalEffects: ExternalEffectService | undefined;
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -903,6 +913,20 @@ export class Fabric {
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
     this.#executionProfile = options.executionProfile ?? "headless";
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
+    this.#gates = new ScopedGateStore({
+      database: this.#database,
+      operatorStore: this.#operatorStore,
+      clock: this.#clock,
+    });
+    this.#externalEffects = options.externalEffects === undefined
+      ? undefined
+      : new ExternalEffectService({
+          database: this.#database,
+          registry: options.externalEffects.registry,
+          evidence: options.externalEffects.evidence,
+          gates: this.#gates,
+          clock: this.#clock,
+        });
     this.#operatorProjections = new OperatorProjectionStore({
       database: this.#database,
       operatorStore: this.#operatorStore,
@@ -930,6 +954,7 @@ export class Fabric {
         lookup: async (adapterId, actionId) => await this.#adapterSupervisor.request(adapterId, "lookup_action", { actionId }),
       },
       ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
+      ...(this.#externalEffects === undefined ? {} : { externalEffects: this.#externalEffects }),
     });
     this.#launchCustody = options.fabricSocketPath === undefined
       ? undefined
@@ -1018,11 +1043,6 @@ export class Fabric {
           );
         },
       },
-    });
-    this.#gates = new ScopedGateStore({
-      database: this.#database,
-      operatorStore: this.#operatorStore,
-      clock: this.#clock,
     });
     this.#resources = new HierarchicalAdmissionStore({ database: this.#database, clock: this.#clock });
     this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
@@ -1551,6 +1571,7 @@ export class Fabric {
     this.#results.recover();
     this.#notifications.recover();
     await this.#launchCustody?.recover();
+    await this.#externalEffects?.recover();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")

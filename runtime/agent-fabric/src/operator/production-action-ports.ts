@@ -13,6 +13,10 @@ import type {
   OperatorEffectOutcome,
   OperatorEffectRequest,
 } from "./action-store.js";
+import type {
+  ExternalEffectDispatchHandle,
+} from "./external-effect-service.js";
+import { ExternalEffectService } from "./external-effect-service.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
 import { canonicalJson, sha256 } from "../project-session/store-support.js";
 import { readGlobalLiveness, type QuiesceToken } from "../daemon/global-liveness.js";
@@ -226,6 +230,8 @@ class ProductionOperatorActions {
   readonly #clock: () => number;
   readonly #adapter: ProductionOperatorAdapterPort;
   readonly #daemonStop: ProductionDaemonStopPort | undefined;
+  readonly #externalEffects: ExternalEffectService | undefined;
+  readonly #externalEffectHandles = new Map<string, ExternalEffectDispatchHandle>();
   readonly #fault: (label: string) => void;
 
   constructor(options: {
@@ -233,12 +239,14 @@ class ProductionOperatorActions {
     clock: () => number;
     adapter: ProductionOperatorAdapterPort;
     daemonStop?: ProductionDaemonStopPort;
+    externalEffects?: ExternalEffectService;
     fault?: (label: string) => void;
   }) {
     this.#database = options.database;
     this.#clock = options.clock;
     this.#adapter = options.adapter;
     this.#daemonStop = options.daemonStop;
+    this.#externalEffects = options.externalEffects;
     this.#fault = options.fault ?? (() => undefined);
   }
 
@@ -253,6 +261,10 @@ class ProductionOperatorActions {
   };
 
   #read(intent: OperatorActionIntent): Promise<Awaited<ReturnType<OperatorActionStatePort["read"]>>> {
+    if (intent.kind === "registered-external-effect" || intent.kind === "promotion") {
+      if (this.#externalEffects === undefined) unsupported();
+      return this.#externalEffects.readCurrentState(intent);
+    }
     if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop") {
       const session = row(this.#database.prepare(`
         SELECT revision, generation, state FROM project_sessions WHERE project_session_id=?
@@ -382,11 +394,13 @@ class ProductionOperatorActions {
     const scope = this.#effectScope(request);
     const custodyId = this.#custodyId(scope, request.commandId);
     const intentJson = canonicalJson(request.intent);
-    this.#database.transaction(() => {
+    const external = request.intent.kind === "registered-external-effect" || request.intent.kind === "promotion";
+    if (external && this.#externalEffects === undefined) unsupported();
+    const externalHandle = this.#database.transaction((): ExternalEffectDispatchHandle | undefined => {
       const existing = this.#effectCustody(scope, request.commandId);
       if (existing !== null) {
         this.#assertCustodyIdentity(existing, scope, request);
-        return;
+        return external ? this.#externalEffects?.prepareInTransaction(request) : undefined;
       }
       this.#database.prepare(`
         INSERT INTO operator_effect_custody(
@@ -408,6 +422,9 @@ class ProductionOperatorActions {
         this.#clock(),
         this.#clock(),
       );
+      const preparedExternal = external
+        ? this.#externalEffects?.prepareInTransaction(request)
+        : undefined;
       if (request.intent.kind === "daemon-stop") {
         const correlationDigest = `sha256:${sha256(canonicalJson({
           custodyId,
@@ -445,7 +462,9 @@ class ProductionOperatorActions {
           throw error;
         }
       }
+      return preparedExternal;
     })();
+    if (externalHandle !== undefined) this.#externalEffectHandles.set(custodyId, externalHandle);
   }
 
   #custodyEffectRef(custody: Row): ArtifactRef {
@@ -583,6 +602,16 @@ class ProductionOperatorActions {
   }
 
   async #dispatchOwned(request: OperatorEffectRequest): Promise<OperatorEffectOutcome> {
+    if (request.intent.kind === "registered-external-effect" || request.intent.kind === "promotion") {
+      if (this.#externalEffects === undefined) unsupported();
+      const custodyId = this.#custodyId(this.#effectScope(request), request.commandId);
+      const handle = this.#externalEffectHandles.get(custodyId);
+      if (handle === undefined) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "external-effect dispatch handle is unavailable");
+      }
+      this.#externalEffectHandles.delete(custodyId);
+      return await this.#externalEffects.dispatchPrepared(handle);
+    }
     if (request.intent.kind === "project-session-drain") return this.#drainProject({ ...request, intent: request.intent });
     if (request.intent.kind === "project-session-stop") return this.#stopProject({ ...request, intent: request.intent });
     if (request.intent.kind === "daemon-drain") return this.#drainDaemon({ ...request, intent: request.intent });
@@ -619,6 +648,10 @@ class ProductionOperatorActions {
   async #observeOwned(
     request: OperatorEffectRequest & { effectRef: ArtifactRef | null },
   ): Promise<OperatorEffectOutcome> {
+    if (request.intent.kind === "registered-external-effect" || request.intent.kind === "promotion") {
+      if (this.#externalEffects === undefined) unsupported();
+      return await this.#externalEffects.observe(request);
+    }
     if (request.intent.kind === "project-session-drain") {
       const session = row(this.#database.prepare(`
         SELECT revision, generation, state FROM project_sessions WHERE project_session_id=?
@@ -1859,6 +1892,7 @@ class ProductionOperatorActions {
     const liveness = readGlobalLiveness(this.#database, {
       now: this.#clock(),
       daemonInstanceGeneration,
+      excludeOperatorEffectCustodyId: this.#custodyId(scope, commandId),
     });
     if (liveness.failClosed || !liveness.idle || liveness.globalStateRevision === null) {
       return { status: "pending", phase: "observing" };
@@ -1901,9 +1935,11 @@ class ProductionOperatorActions {
     if (text(epoch, "state") !== "quiescing" || integer(epoch, "observed_global_revision") !== intent.expectedGlobalStateRevision) {
       throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop epoch changed");
     }
+    const scope = this.#effectScope(request);
     const liveness = readGlobalLiveness(this.#database, {
       now: this.#clock(),
       daemonInstanceGeneration: intent.expectedDaemonGeneration,
+      excludeOperatorEffectCustodyId: this.#custodyId(scope, request.commandId),
     });
     if (!liveness.idle || liveness.failClosed || liveness.globalStateRevision !== intent.expectedGlobalStateRevision) {
       throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "daemon stop is busy or global state changed");
@@ -1912,7 +1948,6 @@ class ProductionOperatorActions {
     if (port === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "guarded daemon stop owner is unavailable");
     }
-    const scope = this.#effectScope(request);
     const custodyId = this.#custodyId(scope, request.commandId);
     const stopCustody = row(this.#database.prepare(`
       SELECT result_correlation_digest, state FROM operator_daemon_stop_custody
@@ -2146,6 +2181,7 @@ export function createProductionOperatorActionPorts(options: {
   clock?: () => number;
   adapter: ProductionOperatorAdapterPort;
   daemonStop?: ProductionDaemonStopPort;
+  externalEffects?: ExternalEffectService;
   fault?: (label: string) => void;
 }): ProductionOperatorActionPorts {
   const owner = new ProductionOperatorActions({
@@ -2153,6 +2189,7 @@ export function createProductionOperatorActionPorts(options: {
     clock: options.clock ?? Date.now,
     adapter: options.adapter,
     ...(options.daemonStop === undefined ? {} : { daemonStop: options.daemonStop }),
+    ...(options.externalEffects === undefined ? {} : { externalEffects: options.externalEffects }),
     ...(options.fault === undefined ? {} : { fault: options.fault }),
   });
   return { statePort: owner.statePort, effectPort: owner.effectPort };

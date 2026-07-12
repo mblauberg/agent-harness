@@ -68,7 +68,7 @@ export type ExternalEffectDispatchHandle = Readonly<{
 
 export type ExternalEffectRecoveryResult = Readonly<{
   custodyId: string;
-  priorState: "prepared" | "dispatching" | "ambiguous";
+  priorState: "prepared" | "dispatching" | "ambiguous" | "failed";
   outcome: OperatorEffectOutcome;
 }>;
 
@@ -271,7 +271,7 @@ export class ExternalEffectService {
         binding.effectKind === "promotion" ? "release-binding-mismatch" : "external-contract-stale",
       );
     }
-    if (state === "dispatching" || state === "ambiguous") return await this.#lookup(binding);
+    if (state === "dispatching" || state === "ambiguous" || state === "failed") return await this.#lookup(binding);
     const stored = nullableText(parent, "outcome_json");
     if (stored === null) throw new ProjectFabricCoreError("CONFLICT", "terminal external-effect custody has no outcome");
     return parseStoredOutcome(stored);
@@ -282,7 +282,7 @@ export class ExternalEffectService {
       SELECT binding.custody_id, custody.state
         FROM operator_external_effect_bindings binding
         JOIN operator_effect_custody custody ON custody.custody_id=binding.custody_id
-       WHERE custody.state IN ('prepared','dispatching','ambiguous')
+       WHERE custody.state IN ('prepared','dispatching','ambiguous','failed')
        ORDER BY custody.created_at, binding.custody_id
     `).all().filter(isRow);
     const results: ExternalEffectRecoveryResult[] = [];
@@ -299,7 +299,7 @@ export class ExternalEffectService {
             binding.effectKind === "promotion" ? "release-binding-mismatch" : "external-contract-stale",
           ),
         });
-      } else if (state === "dispatching" || state === "ambiguous") {
+      } else if (state === "dispatching" || state === "ambiguous" || state === "failed") {
         results.push({ custodyId, priorState: state, outcome: await this.#lookup(binding) });
       }
     }
@@ -592,7 +592,7 @@ export class ExternalEffectService {
     const changed = this.#database.prepare(`
       UPDATE operator_effect_custody
          SET state=?, effect_path=?, effect_digest=?, outcome_json=?, updated_at=?
-       WHERE custody_id=? AND state IN ('prepared','dispatching','ambiguous')
+       WHERE custody_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
     `).run(
       state,
       effectRef?.path ?? null,

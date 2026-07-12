@@ -87,6 +87,70 @@ describe("global daemon liveness", () => {
     expect(readGlobalLiveness(database, { now: 1_000, daemonInstanceGeneration: 7 })).toMatchObject({ idle: true });
   });
 
+  it("counts every unresolved generic operator-effect custody state and rejects unknown states", () => {
+    const database = createLivenessDatabase();
+    databases.push(database);
+    seedProject(database);
+    const insert = database.prepare(`
+      INSERT OR REPLACE INTO operator_effect_custody(custody_id, project_session_id, state)
+      VALUES('effect_01', 'session_01', ?)
+    `);
+    for (const state of ["prepared", "dispatching", "ambiguous", "failed"]) {
+      insert.run(state);
+      expect(readGlobalLiveness(database, { now: 1_000, daemonInstanceGeneration: 7 })).toMatchObject({
+        idle: false,
+        failClosed: false,
+        contributors: { operatorEffects: 1 },
+      });
+    }
+    for (const state of ["terminal", "no-effect", "rejected"]) {
+      insert.run(state);
+      expect(readGlobalLiveness(database, { now: 1_000, daemonInstanceGeneration: 7 })).toMatchObject({
+        idle: true,
+        failClosed: false,
+        contributors: { operatorEffects: 0 },
+      });
+    }
+    insert.run("invented-state");
+    expect(readGlobalLiveness(database, { now: 1_000, daemonInstanceGeneration: 7 })).toMatchObject({
+      idle: false,
+      failClosed: true,
+      failure: "unknown-state",
+    });
+  });
+
+  it("excludes only the daemon lifecycle command currently proving quiescence", () => {
+    const database = createLivenessDatabase();
+    databases.push(database);
+    seedProject(database);
+    database.exec(`
+      INSERT INTO operator_effect_custody(custody_id, project_session_id, state)
+      VALUES
+        ('daemon_drain_effect', 'session_01', 'dispatching'),
+        ('unrelated_effect', 'session_01', 'ambiguous');
+    `);
+
+    expect(readGlobalLiveness(database, {
+      now: 1_000,
+      daemonInstanceGeneration: 7,
+      excludeOperatorEffectCustodyId: "daemon_drain_effect",
+    })).toMatchObject({
+      idle: false,
+      failClosed: false,
+      contributors: { operatorEffects: 1 },
+    });
+    database.prepare("UPDATE operator_effect_custody SET state='terminal' WHERE custody_id='unrelated_effect'").run();
+    expect(readGlobalLiveness(database, {
+      now: 1_000,
+      daemonInstanceGeneration: 7,
+      excludeOperatorEffectCustodyId: "daemon_drain_effect",
+    })).toMatchObject({
+      idle: true,
+      failClosed: false,
+      contributors: { operatorEffects: 0 },
+    });
+  });
+
   it("returns busy rather than throwing when authoritative liveness cannot be queried", () => {
     const database = createLivenessDatabase();
     databases.push(database);
@@ -101,6 +165,7 @@ describe("global daemon liveness", () => {
         coordinationRuns: 0,
         leases: 0,
         providerActions: 0,
+        operatorEffects: 0,
         operatorAttachments: 0,
         requiredResults: 0,
         total: 0,

@@ -26,6 +26,10 @@ export type {
   GitHostedChecksBinding,
   GitHostedChecksPort,
 } from "./operator/git-repository-read.js";
+export type {
+  ExternalEffectEvidencePort,
+  RegisteredEffectPort,
+} from "./operator/external-effect-service.js";
 export { HerdrFabricPorts } from "./integrations/herdr-fabric-ports.js";
 export type {
   DirectSteerIntent,

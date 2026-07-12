@@ -16,6 +16,7 @@ import {
   type RegisteredEffectPort,
 } from "../../../src/operator/external-effect-service.ts";
 import type { OperatorEffectRequest } from "../../../src/operator/action-store.ts";
+import { createProductionOperatorActionPorts } from "../../../src/operator/production-action-ports.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 import {
   ExternalEffectCustodyPreflightError,
@@ -288,6 +289,58 @@ describe("registered external-effect and promotion custody", () => {
         targetRevisions: { target_01: 5, "local:test": 8 },
       },
     });
+  });
+
+  it("composes registered effects through the production operator owner with atomic generic and specialised custody", async () => {
+    let dispatches = 0;
+    const port = effectPort({
+      dispatch: async (input) => {
+        dispatches += 1;
+        return {
+          schemaVersion: 1,
+          custodyId: input.custodyId,
+          idempotencyKey: input.idempotencyKey,
+          outcome: "committed",
+          evidenceDigest: digest,
+        };
+      },
+    });
+    const { database, service } = fixture({ registry: [port] });
+    const production = createProductionOperatorActionPorts({
+      database,
+      adapter: {
+        capabilities: async () => { throw new Error("provider adapter is not used"); },
+        dispatch: async () => { throw new Error("provider adapter is not used"); },
+        lookup: async () => { throw new Error("provider adapter is not used"); },
+      },
+      externalEffects: service,
+    });
+    const intent = registeredIntent();
+    const current = await production.statePort.read(intent);
+    const request: OperatorEffectRequest = {
+      ...effectRequest("external_production_01", intent),
+      beforeStateDigest: parseSha256Digest(
+        `sha256:${sha256(canonicalJson(current))}`,
+        "test.beforeStateDigest",
+      ),
+    };
+
+    production.effectPort.prepare?.(request);
+    expect(database.prepare(`
+      SELECT custody.state, binding.effect_kind
+        FROM operator_effect_custody custody
+        JOIN operator_external_effect_bindings binding USING(custody_id)
+       WHERE custody.command_id='external_production_01'
+    `).get()).toStrictEqual({ state: "prepared", effect_kind: "registered-external-effect" });
+
+    await expect(production.effectPort.dispatch(request)).resolves.toMatchObject({
+      status: "committed",
+    });
+    expect(dispatches).toBe(1);
+    await expect(production.effectPort.dispatch(request)).resolves.toMatchObject({
+      status: "committed",
+    });
+    expect(dispatches).toBe(1);
   });
 
   it("re-reads the exact approved release gate for promotion preview", async () => {
@@ -737,6 +790,45 @@ describe("registered external-effect and promotion custody", () => {
       lookup_generation: 1,
       lookup_evidence_digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
     });
+  });
+
+  it("recovers failed post-dispatch custody by lookup only", async () => {
+    let dispatches = 0;
+    let lookups = 0;
+    const port = effectPort({
+      dispatch: async () => { dispatches += 1; throw new Error("must not redispatch"); },
+      lookup: async (input) => {
+        lookups += 1;
+        return {
+          schemaVersion: 1,
+          custodyId: input.custodyId,
+          idempotencyKey: input.idempotencyKey,
+          outcome: "committed",
+          evidenceDigest: digest,
+        };
+      },
+    });
+    const evidence: ExternalEffectEvidencePort = {
+      inspectArtifact: async (ref) => ref,
+      inspectAcceptedDeliveryReceipt: async () => null,
+    };
+    const { database, service } = fixture({ registry: [port], evidence });
+    const request = effectRequest("external_failed_recovery_01", registeredIntent());
+    seedGenericCustody(database, request, "custody_external_failed_recovery_01");
+    service.prepareInTransaction(request);
+    database.prepare(`
+      UPDATE operator_effect_custody SET state='failed' WHERE custody_id='custody_external_failed_recovery_01'
+    `).run();
+
+    await expect(service.recover()).resolves.toMatchObject([{
+      custodyId: "custody_external_failed_recovery_01",
+      priorState: "failed",
+      outcome: { status: "committed" },
+    }]);
+    expect({ dispatches, lookups }).toEqual({ dispatches: 0, lookups: 1 });
+    expect(database.prepare(`
+      SELECT state FROM operator_effect_custody WHERE custody_id='custody_external_failed_recovery_01'
+    `).get()).toEqual({ state: "terminal" });
   });
 
   it("returns a terminal stored effect without dispatch or lookup on replay", async () => {

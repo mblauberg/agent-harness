@@ -615,6 +615,13 @@ export class ProjectSessionStore {
     if (blocker !== undefined) {
       throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "required project-session membership remains active");
     }
+    if (this.#database.prepare(`
+      SELECT 1 FROM operator_effect_custody
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
+       LIMIT 1
+    `).get(projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unresolved operator-effect custody remains active");
+    }
   }
 
   #assertRun(projectSessionId: string, runId: string): void {

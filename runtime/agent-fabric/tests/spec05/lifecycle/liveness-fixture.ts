@@ -42,6 +42,11 @@ export function createLivenessDatabase(): Database.Database {
       state TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     );
+    CREATE TABLE operator_effect_custody(
+      custody_id TEXT PRIMARY KEY,
+      project_session_id TEXT NOT NULL REFERENCES project_sessions(project_session_id),
+      state TEXT NOT NULL
+    );
     CREATE TABLE result_deliveries(
       result_delivery_id TEXT PRIMARY KEY,
       project_session_id TEXT NOT NULL REFERENCES project_sessions(project_session_id),
