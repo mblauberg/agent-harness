@@ -31,11 +31,13 @@ export type TimedNdjsonTransportDependencies = {
 
 export class FabricRemoteError extends Error {
   readonly code: string;
+  readonly preserved: boolean;
 
-  constructor(code: string, message: string) {
-    super(message);
+  constructor(code: string, message: string, options?: Readonly<{ preserved?: boolean; cause?: unknown }>) {
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "FabricError";
     this.code = code;
+    this.preserved = options?.preserved ?? false;
   }
 }
 

@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { lstat, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +7,42 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabricDatabase } from "../../src/persistence/sqlite.ts";
+import { inspectFabricDatabase } from "../../src/core/migrations.ts";
 
 const directories: string[] = [];
+
+async function preservationSnapshot(directory: string): Promise<unknown> {
+  const directoryStat = await lstat(directory);
+  const entries = await Promise.all((await readdir(directory)).sort().map(async (name) => {
+    const path = join(directory, name);
+    const metadata = await lstat(path);
+    return {
+      name,
+      kind: metadata.isFile() ? "file" : metadata.isDirectory() ? "directory" : "other",
+      mode: metadata.mode,
+      uid: metadata.uid,
+      gid: metadata.gid,
+      nlink: metadata.nlink,
+      size: metadata.size,
+      mtimeMs: metadata.mtimeMs,
+      ctimeMs: metadata.ctimeMs,
+      digest: metadata.isFile()
+        ? createHash("sha256").update(await readFile(path)).digest("hex")
+        : null,
+    };
+  }));
+  return {
+    directory: {
+      mode: directoryStat.mode,
+      uid: directoryStat.uid,
+      gid: directoryStat.gid,
+      nlink: directoryStat.nlink,
+      mtimeMs: directoryStat.mtimeMs,
+      ctimeMs: directoryStat.ctimeMs,
+    },
+    entries,
+  };
+}
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -101,6 +136,30 @@ describe("SQLite connection hardening", () => {
     expect((await stat(path)).mode).toBe(beforeStat.mode);
     expect((await stat(path)).mtimeMs).toBe(beforeStat.mtimeMs);
     expect(await readdir(directory)).toEqual(beforeEntries);
+  });
+
+  it("detects catalog drift committed only to WAL through a private clone without touching the source tree", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-cutover-wal-"));
+    directories.push(directory);
+    const path = join(directory, "fabric.sqlite3");
+    openFabricDatabase(path).close();
+    const writer = new Database(path);
+    writer.pragma("journal_mode = WAL");
+    writer.pragma("wal_autocheckpoint = 0");
+    writer.pragma("wal_checkpoint(TRUNCATE)");
+    const checkpointedMain = await readFile(path);
+    writer.exec("DROP INDEX tasks_by_state");
+    expect(await readFile(path)).toEqual(checkpointedMain);
+    expect((await stat(`${path}-wal`)).size).toBeGreaterThan(0);
+    await writeFile(join(directory, "custody-marker"), "preserve every entry\n", { mode: 0o640 });
+    const before = await preservationSnapshot(directory);
+
+    expect(() => inspectFabricDatabase(path)).toThrowError(
+      expect.objectContaining({ code: "SCHEMA_CUTOVER_REQUIRED", preserved: true }),
+    );
+
+    expect(await preservationSnapshot(directory)).toEqual(before);
+    writer.close();
   });
 
   it("runs bounded integrity checks after an unclean marker", async () => {

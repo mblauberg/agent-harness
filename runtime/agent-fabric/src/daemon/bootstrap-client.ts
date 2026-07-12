@@ -33,11 +33,18 @@ export type DaemonTerminalEvidence = {
 
 export class BootstrapClientError extends Error {
   readonly code: string;
+  readonly preserved: boolean;
 
   constructor(code: string, message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "BootstrapClientError";
     this.code = code;
+    this.preserved = code === "SCHEMA_CUTOVER_REQUIRED" || (
+      typeof options?.cause === "object" &&
+      options.cause !== null &&
+      "preserved" in options.cause &&
+      options.cause.preserved === true
+    );
   }
 }
 

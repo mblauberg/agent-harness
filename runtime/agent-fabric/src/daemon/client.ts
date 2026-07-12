@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
-import { chmod, open, readFile, rename, rm } from "node:fs/promises";
-import { basename, dirname, normalize, resolve } from "node:path";
+import { chmod, open, readFile, rename, rm, rmdir } from "node:fs/promises";
+import { basename, dirname, join, normalize, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
@@ -387,6 +387,11 @@ function childEnvironment(
   for (const key of ["HOME", "CODEX_HOME", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE"] as const) {
     const value = process.env[key];
     if (value !== undefined) environment[key] = value;
+  }
+  const cutoverRaceFixture = process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH;
+  if (process.env.NODE_ENV === "test" && cutoverRaceFixture !== undefined) {
+    environment.NODE_ENV = "test";
+    environment.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH = cutoverRaceFixture;
   }
   return environment;
 }
@@ -986,12 +991,24 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
   const normalized = normalizedStartOptions(options);
   normalized.databasePath = safeDatabasePath(normalized.databasePath);
   inspectFabricDatabase(normalized.databasePath);
+  const stateDirectoryWasAbsent = !existsSync(normalized.stateDirectory);
+  const runtimeDirectoryWasAbsent = !existsSync(normalized.runtimeDirectory);
+  const paths = privateDiscoveryPaths(normalized.runtimeDirectory);
+  const election = new BootstrapElection({ runtimeDirectory: normalized.runtimeDirectory });
+  const bootstrapArtifactPaths = [
+    join(normalized.stateDirectory, "capability.key"),
+    election.paths.lockPath,
+    election.paths.leasePath,
+    election.paths.readyPath,
+    election.paths.attemptsPath,
+    paths.receiptPath,
+    paths.ownerPath,
+  ];
+  const absentBootstrapArtifacts = bootstrapArtifactPaths.filter((path) => !existsSync(path));
   await Promise.all([
     ensurePrivateDirectory(normalized.stateDirectory),
     ensurePrivateDirectory(normalized.runtimeDirectory),
   ]);
-  const paths = privateDiscoveryPaths(normalized.runtimeDirectory);
-  const election = new BootstrapElection({ runtimeDirectory: normalized.runtimeDirectory });
   const actionId = stableBootstrapActionId(normalized);
   let provisional: PrivateDiscoveryIdentity | undefined;
   let spawned: ProductionSpawn | undefined;
@@ -1044,6 +1061,18 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
     });
   } catch (error: unknown) {
     await spawned?.stop(false).catch(() => undefined);
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "SCHEMA_CUTOVER_REQUIRED" &&
+      "preserved" in error &&
+      error.preserved === true
+    ) {
+      await Promise.allSettled(absentBootstrapArtifacts.map(async (path) => await rm(path, { force: true })));
+      if (runtimeDirectoryWasAbsent) await rmdir(normalized.runtimeDirectory).catch(() => undefined);
+      if (stateDirectoryWasAbsent) await rmdir(normalized.stateDirectory).catch(() => undefined);
+    }
     throw error;
   }
   if (attached.started) {
@@ -1117,7 +1146,9 @@ async function waitUntilReady(child: ChildProcess, stderr: () => string): Promis
       try {
         const value: unknown = JSON.parse(line);
         if (isRecord(value) && value.ready === false && isRecord(value.error) && typeof value.error.code === "string" && typeof value.error.message === "string") {
-          reject(new FabricRemoteError(value.error.code, value.error.message));
+          reject(new FabricRemoteError(value.error.code, value.error.message, {
+            preserved: value.error.preserved === true,
+          }));
           return;
         }
         if (!isRecord(value) || value.ready !== true) {

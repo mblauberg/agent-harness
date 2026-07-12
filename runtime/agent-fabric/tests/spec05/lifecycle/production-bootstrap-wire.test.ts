@@ -126,6 +126,51 @@ describe("production daemon bootstrap wiring", () => {
     expect(await readdir(root)).toEqual(beforeEntries);
   });
 
+  it("preserves a database published after preflight and rolls back every failed-bootstrap artifact", async () => {
+    const root = await mkdtemp(join(tmpdir(), "afb-race-"));
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "afb-old-"));
+    roots.push(root, fixtureRoot);
+    const fixturePath = join(fixtureRoot, "legacy.sqlite3");
+    const legacy = new Database(fixturePath);
+    legacy.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations(version, applied_at) VALUES (14, '2026-07-12T00:00:00Z');
+      CREATE TABLE legacy_sentinel(value TEXT NOT NULL);
+      INSERT INTO legacy_sentinel(value) VALUES ('preserve-race-winner');
+    `);
+    legacy.close();
+    const fixtureBytes = await readFile(fixturePath);
+    const databasePath = join(root, "fabric.sqlite3");
+    const stateDirectory = join(root, "state");
+    const runtimeDirectory = join(root, "runtime");
+    const previousFixture = process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH;
+    process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH = fixturePath;
+    let outcome: unknown;
+    try {
+      outcome = await startFabricDaemon({
+        databasePath,
+        stateDirectory,
+        runtimeDirectory,
+        socketPath: join(runtimeDirectory, "fabric.sock"),
+        workspaceRoots: [root],
+      }).then((handle) => {
+        handles.push(handle);
+        return handle;
+      }, (error: unknown) => error);
+    } finally {
+      if (previousFixture === undefined) delete process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH;
+      else process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH = previousFixture;
+    }
+
+    expect(outcome).toMatchObject({
+      code: "SCHEMA_CUTOVER_REQUIRED",
+      preserved: true,
+      message: "database does not contain the current schema epoch; existing database preserved",
+    });
+    expect(await readFile(databasePath)).toEqual(fixtureBytes);
+    expect(await readdir(root)).toEqual(["fabric.sqlite3"]);
+  });
+
   it("reports a typed child cutover failure without removing an existing socket path", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-process-cutover-"));
     roots.push(root);

@@ -1,5 +1,13 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  constants as fsConstants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  rmdirSync,
+  rmSync,
+} from "node:fs";
 import { createServer, type Socket } from "node:net";
 
 import {
@@ -59,6 +67,30 @@ class DaemonProtocolError extends Error {
     super(message);
     this.name = "DaemonProtocolError";
     this.code = code;
+  }
+}
+
+async function reportPreReadyFailure(error: unknown, fallbackCode: string): Promise<never> {
+  const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : fallbackCode;
+  const message = error instanceof Error ? error.message : String(error);
+  const preserved = typeof error === "object" && error !== null && "preserved" in error && error.preserved === true;
+  await new Promise<void>((resolve) => process.stdout.write(
+    `${JSON.stringify({ ready: false, error: { code, message, ...(preserved ? { preserved: true } : {}) } })}\n`,
+    () => resolve(),
+  ));
+  process.exit(1);
+}
+
+function removeOwnedEmptyDirectory(path: string, existedBeforeBootstrap: boolean): void {
+  if (existedBeforeBootstrap) return;
+  try {
+    rmdirSync(path);
+  } catch (error: unknown) {
+    if (!(error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTEMPTY"))) {
+      throw error;
+    }
   }
 }
 
@@ -145,17 +177,7 @@ if (
 try {
   inspectFabricDatabase(databasePath);
 } catch (error: unknown) {
-  const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-    ? error.code
-    : "DAEMON_DATABASE_PREFLIGHT_FAILED";
-  const message = error instanceof Error ? error.message : String(error);
-  const preserved = typeof error === "object" && error !== null && "preserved" in error && error.preserved === true;
-  await new Promise<void>((resolve) => process.stdout.write(
-    `${JSON.stringify({ ready: false, error: { code, message, ...(preserved ? { preserved: true } : {}) } })}\n`,
-    () => resolve(),
-  ));
-  process.exit(1);
-  throw error;
+  await reportPreReadyFailure(error, "DAEMON_DATABASE_PREFLIGHT_FAILED");
 }
 
 const localSubjectHash = localAuthenticatedSubjectHash(capabilityKey);
@@ -191,10 +213,18 @@ async function withTrustedLocalSubject<T extends {
   return { ...input, authenticatedSubjectHash: localSubjectHash };
 }
 
+const stateDirectoryExistedBeforeBootstrap = existsSync(stateDirectory);
+const runtimeDirectoryExistedBeforeBootstrap = existsSync(runtimeDirectory);
 mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
 mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 });
 chmodSync(stateDirectory, 0o700);
 chmodSync(runtimeDirectory, 0o700);
+const cutoverRaceFixture = process.env.NODE_ENV === "test"
+  ? process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH
+  : undefined;
+if (cutoverRaceFixture !== undefined) {
+  copyFileSync(cutoverRaceFixture, databasePath, fsConstants.COPYFILE_EXCL);
+}
 let daemonLocks: Awaited<ReturnType<typeof acquireDaemonLocks>> = [];
 if (bootstrapMode === "test-forced-process-locks") {
   try {
@@ -232,42 +262,54 @@ type PendingDaemonStop = Readonly<{
 const pendingDaemonStops = new Map<string, PendingDaemonStop>();
 let scheduleIdleStop: () => void = () => undefined;
 let closeBackgroundWorkers: () => void = () => undefined;
-const fabric = await openFabric({
-  databasePath,
-  fabricSocketPath: socketPath,
-  capabilityKey,
-  executionProfile,
-  maximumConcurrentProviderTurns,
-  workspaceRoots,
-  adapters: daemonAdapters,
-  ...(gitHostedChecks === undefined ? {} : { gitHostedChecks }),
-  trustedGitConfiguration,
-  herdr: herdrIntegration,
-  daemonStopPort: {
-    request: async (request) => {
-      const existing = pendingDaemonStops.get(request.custodyId);
-      if (
-        existing !== undefined &&
-        (existing.resultCorrelationDigest !== request.resultCorrelationDigest ||
-          existing.operatorId !== request.operatorId ||
-          existing.projectId !== request.projectId ||
-          existing.projectSessionId !== request.projectSessionId ||
-          existing.principalGeneration !== request.principalGeneration ||
-          existing.commandId !== request.commandId ||
-          existing.operation !== request.operation ||
-          existing.token.daemonInstanceGeneration !== request.token.daemonInstanceGeneration ||
-          existing.token.observedGlobalStateRevision !== request.token.observedGlobalStateRevision)
-      ) return "busy";
-      pendingDaemonStops.set(request.custodyId, request);
-      return "scheduled";
-    },
-  },
-});
-fabric.recoverDaemonRuntimeEpoch({
-  instanceGeneration: daemonInstanceGeneration,
-  instanceId: `${bootstrapActionId ?? "forced-process"}:${String(process.pid)}`,
-});
-await fabric.recoverStartupState();
+const fabric = await (async () => {
+  let opened: Awaited<ReturnType<typeof openFabric>> | undefined;
+  try {
+    opened = await openFabric({
+      databasePath,
+      fabricSocketPath: socketPath,
+      capabilityKey,
+      executionProfile,
+      maximumConcurrentProviderTurns,
+      workspaceRoots,
+      adapters: daemonAdapters,
+      ...(gitHostedChecks === undefined ? {} : { gitHostedChecks }),
+      trustedGitConfiguration,
+      herdr: herdrIntegration,
+      daemonStopPort: {
+        request: async (request) => {
+          const existing = pendingDaemonStops.get(request.custodyId);
+          if (
+            existing !== undefined &&
+            (existing.resultCorrelationDigest !== request.resultCorrelationDigest ||
+              existing.operatorId !== request.operatorId ||
+              existing.projectId !== request.projectId ||
+              existing.projectSessionId !== request.projectSessionId ||
+              existing.principalGeneration !== request.principalGeneration ||
+              existing.commandId !== request.commandId ||
+              existing.operation !== request.operation ||
+              existing.token.daemonInstanceGeneration !== request.token.daemonInstanceGeneration ||
+              existing.token.observedGlobalStateRevision !== request.token.observedGlobalStateRevision)
+          ) return "busy";
+          pendingDaemonStops.set(request.custodyId, request);
+          return "scheduled";
+        },
+      },
+    });
+    opened.recoverDaemonRuntimeEpoch({
+      instanceGeneration: daemonInstanceGeneration,
+      instanceId: `${bootstrapActionId ?? "forced-process"}:${String(process.pid)}`,
+    });
+    await opened.recoverStartupState();
+    return opened;
+  } catch (error: unknown) {
+    await opened?.close().catch(() => undefined);
+    await releaseDaemonLocks(daemonLocks).catch(() => undefined);
+    removeOwnedEmptyDirectory(runtimeDirectory, runtimeDirectoryExistedBeforeBootstrap);
+    removeOwnedEmptyDirectory(stateDirectory, stateDirectoryExistedBeforeBootstrap);
+    return await reportPreReadyFailure(error, "DAEMON_DATABASE_BOOTSTRAP_FAILED");
+  }
+})();
 rmSync(socketPath, { force: true });
 const sockets = new Set<Socket>();
 let completeQueuedDaemonStop: (commandId: string) => void = () => undefined;
