@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
 
 import {
   parseIdentifier,
@@ -24,7 +23,7 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyMigrations, type Migration } from "../../src/core/migrations.ts";
+import { applyMigrations } from "../../src/core/migrations.ts";
 import {
   OperatorActionStore,
   type OperatorActionCurrentState,
@@ -37,20 +36,10 @@ import {
 import { OperatorProjectionStore } from "../../src/operator/projection-store.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
 import type { AuthenticatedOperatorContext } from "../../src/project-session/contracts.ts";
-import { preflightProjectSessionOperations } from "../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
 const digest = `sha256:${"a".repeat(64)}`;
 const now = Date.parse("2027-01-01T00:00:00Z");
-
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
 
 function identifier<Kind extends string>(value: string): ReturnType<typeof parseIdentifier<Kind>> {
   return parseIdentifier<Kind>(value, "test.identifier");
@@ -65,12 +54,7 @@ function setupProjection(): {
 } {
   const database = new Database(":memory:");
   databases.push(database);
-  applyMigrations(database, [
-    migration(1, "0001-core.sql"),
-    migration(2, "0002-observer-event-sequence.sql"),
-    migration(3, "0003-integrity-and-query-plans.sql"),
-    migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-  ]);
+  applyMigrations(database);
   database.exec(`
     INSERT INTO projects(project_id, canonical_root, trust_record_digest, revision, authority_generation, created_at, updated_at)
     VALUES ('project_01', '/project/one', '${digest}', 3, 1, ${now - 10_000}, ${now - 1_000});
@@ -86,10 +70,10 @@ function setupProjection(): {
     INSERT INTO runs(
       run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
       project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
-      authority_ref, budget_ref, dependency_revision, topology_slot
+      authority_ref, budget_ref, dependency_revision, topology_slot, project_run_directory_basis
     ) VALUES (
       'run_01', 'chair_01', '/project/one', '.agent-run/AFAB-001', ${now - 8_000},
-      'session_01', 'active', 4, 1, 'chair:run_01:1', '${digest}', 'budget_01', 1, 1
+      'session_01', 'active', 4, 1, 'chair:run_01:1', '${digest}', 'budget_01', 1, 1, 'project-relative'
     );
     INSERT INTO authorities(authority_id, run_id, authority_json, authority_hash, created_at)
     VALUES ('authority_01', 'run_01', '{}', '${"b".repeat(64)}', ${now - 8_000});
@@ -104,8 +88,15 @@ function setupProjection(): {
       'run_01', 'task_01', 'authority_01', 'Implement projection', 'base_01', 'active',
       'chair_01', 3, 1, 'chair_01'
     );
-    INSERT INTO artifacts(artifact_id, run_id, task_id, publisher_agent_id, relative_path, sha256, created_at)
-    VALUES ('artifact_01', 'run_01', 'task_01', 'chair_01', 'reports/result.md', '${digest}', ${now - 500});
+    INSERT INTO artifacts(
+      artifact_id,project_id,project_session_id,run_id,task_id,publisher_kind,
+      publisher_ref,publisher_agent_id,source_kind,evidence_kind,relative_path,
+      sha256,registry_state,quarantine_reason,revision,created_at
+    ) VALUES (
+      'artifact_01','project_01','session_01','run_01','task_01','agent',
+      'chair_01','chair_01','run-file','artifact','reports/result.md',
+      '${digest}','active',NULL,1,${now - 500}
+    );
     INSERT INTO attention_items(
       item_id, project_session_id, coordination_run_id, kind, severity, revision,
       state, dedupe_key, payload_json, created_at, updated_at

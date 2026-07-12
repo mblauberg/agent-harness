@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
 
 import {
   parseOperatorCapabilityGrant,
@@ -13,35 +12,20 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
+import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ScopedGateStore } from "../../../src/gates/store.ts";
 import type { AuthenticatedOperatorContext } from "../../../src/project-session/contracts.ts";
-import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
 const digestA = `sha256:${"a".repeat(64)}`;
 const digest = `sha256:${"b".repeat(64)}`;
 const digestC = `sha256:${"c".repeat(64)}`;
 
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
-
 function setup(options: { now?: number; actions?: string[]; expiresAt?: string } = {}) {
   const database = new Database(":memory:");
   databases.push(database);
-  applyMigrations(database, [
-    migration(1, "0001-core.sql"),
-    migration(2, "0002-observer-event-sequence.sql"),
-    migration(3, "0003-integrity-and-query-plans.sql"),
-    migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-  ]);
+  applyMigrations(database);
   database.exec(`
     INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
     VALUES ('project_01', '/project/one', 1, 1, 1, 1);

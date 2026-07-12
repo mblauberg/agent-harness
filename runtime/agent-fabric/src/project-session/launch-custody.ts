@@ -3111,10 +3111,7 @@ export class LaunchCustodyService {
                 AND recovery.state='terminal'
                 AND loss.project_session_id=retirement.project_session_id
                 AND loss.coordination_run_id=retirement.coordination_run_id
-           )) OR
-           (retirement.source_kind='migration-backfill'
-             AND retirement.owner_ref='migration-0013'
-             AND EXISTS (SELECT 1 FROM schema_migrations WHERE version=13))
+           ))
          )
        LIMIT 1
     `).get(projectSessionId, coordinationRunId) !== undefined;

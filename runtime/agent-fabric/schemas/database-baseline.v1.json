@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "epoch": "agent-fabric-pre-release-v1",
+  "baselineFile": "0001-current-baseline.sql",
+  "baselineSha256": "d453a93b8f7689852cee3564ccde68d5f6e4d2671deb9ce38ce7173143b343d0",
+  "catalogSha256": "7a8de2ef45120d7613441fc207ffd3c64c91be586cf0387208b682e791d7bdc5",
+  "objectCount": 443
+}

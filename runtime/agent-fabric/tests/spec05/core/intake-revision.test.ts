@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
 
 import {
   parseIntakeRevisionRequest,
@@ -12,27 +11,17 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
+import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import type { AuthenticatedAgentContext } from "../../../src/project-session/contracts.ts";
 import {
   IntakeStore,
   type IntakeTaskRequestCommitter,
 } from "../../../src/project-session/intake-store.ts";
-import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
 const digestA = `sha256:${"a".repeat(64)}`;
 const digestB = `sha256:${"b".repeat(64)}`;
-
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
 
 function setupStore(options: { requestCommitter?: IntakeTaskRequestCommitter } = {}): {
   database: Database.Database;
@@ -42,15 +31,21 @@ function setupStore(options: { requestCommitter?: IntakeTaskRequestCommitter } =
 } {
   const database = new Database(":memory:");
   databases.push(database);
-  applyMigrations(database, [
-    migration(1, "0001-core.sql"),
-    migration(2, "0002-observer-event-sequence.sql"),
-    migration(3, "0003-integrity-and-query-plans.sql"),
-    migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-  ]);
+  applyMigrations(database);
   database.exec(`
     INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
     VALUES ('project_01', '/project/one', 1, 1, 1, 1);
+    INSERT INTO artifacts(
+      artifact_id,project_id,project_session_id,run_id,task_id,publisher_kind,
+      publisher_ref,publisher_agent_id,source_kind,evidence_kind,relative_path,
+      sha256,registry_state,quarantine_reason,revision,created_at
+    ) VALUES (
+      'artifact_spec_01','project_01',NULL,NULL,NULL,'project','project_01',NULL,
+      'project-file','artifact','docs/spec.md','${digestA}','active',NULL,1,1
+    ), (
+      'artifact_revised_01','project_01',NULL,NULL,NULL,'project','project_01',NULL,
+      'project-file','artifact','plans/revised.md','${digestB}','active',NULL,1,1
+    );
     INSERT INTO project_sessions(
       project_session_id, project_id, mode, state, revision, generation, authority_ref,
       budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
@@ -107,8 +102,8 @@ function setupStore(options: { requestCommitter?: IntakeTaskRequestCommitter } =
     VALUES
       ('intake_01', 1, 'draft', '{}', '${digestA}', 'operator_01', 1),
       ('intake_01', 2, 'awaiting-chair', '{}', '${digestA}', 'operator_01', 1);
-    INSERT INTO intake_artifact_bindings(intake_id, intake_revision, relative_path, sha256)
-    VALUES ('intake_01', 2, 'docs/spec.md', '${digestA}');
+    INSERT INTO intake_artifact_bindings(intake_id, intake_revision, artifact_id, relative_path, sha256)
+    VALUES ('intake_01', 2, 'artifact_spec_01', 'docs/spec.md', '${digestA}');
     INSERT INTO intake_gate_bindings(intake_id, intake_revision, gate_id, gate_revision)
     VALUES ('intake_01', 2, 'gate_01', 3);
     INSERT INTO messages(

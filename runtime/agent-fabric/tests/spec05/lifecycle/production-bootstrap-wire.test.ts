@@ -95,6 +95,99 @@ afterEach(async () => {
 });
 
 describe("production daemon bootstrap wiring", () => {
+  it("rejects a pre-cutover database before creating daemon runtime state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-production-cutover-"));
+    roots.push(root);
+    const databasePath = join(root, "legacy.sqlite3");
+    const legacy = new Database(databasePath);
+    legacy.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations(version, applied_at) VALUES (14, '2026-07-12T00:00:00Z');
+      CREATE TABLE legacy_sentinel(value TEXT NOT NULL);
+      INSERT INTO legacy_sentinel(value) VALUES ('preserve-me');
+    `);
+    legacy.close();
+    const beforeBytes = await readFile(databasePath);
+    const beforeStat = await stat(databasePath);
+    const beforeEntries = await readdir(root);
+
+    await expect(startFabricDaemon({
+      databasePath,
+      stateDirectory: join(root, "state"),
+      runtimeDirectory: join(root, "runtime"),
+      socketPath: join(root, "runtime", "fabric.sock"),
+      workspaceRoots: [root],
+    })).rejects.toMatchObject({ code: "SCHEMA_CUTOVER_REQUIRED", preserved: true });
+
+    expect(await readFile(databasePath)).toEqual(beforeBytes);
+    expect((await stat(databasePath)).mode).toBe(beforeStat.mode);
+    expect((await stat(databasePath)).mtimeMs).toBe(beforeStat.mtimeMs);
+    expect(await readdir(root)).toEqual(beforeEntries);
+  });
+
+  it("reports a typed child cutover failure without removing an existing socket path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-process-cutover-"));
+    roots.push(root);
+    const stateDirectory = join(root, "state");
+    const runtimeDirectory = join(root, "runtime");
+    const databasePath = join(stateDirectory, "legacy.sqlite3");
+    const socketPath = join(runtimeDirectory, "fabric.sock");
+    await Promise.all([
+      mkdir(stateDirectory, { mode: 0o700 }),
+      mkdir(runtimeDirectory, { mode: 0o700 }),
+    ]);
+    const legacy = new Database(databasePath);
+    legacy.exec("CREATE TABLE legacy_sentinel(value TEXT NOT NULL); INSERT INTO legacy_sentinel VALUES ('preserve-me')");
+    legacy.close();
+    await writeFile(socketPath, "preserve-socket\n", { mode: 0o600 });
+    const beforeBytes = await readFile(databasePath);
+    const beforeStat = await stat(databasePath);
+    const beforeRuntimeEntries = await readdir(runtimeDirectory);
+    const processPath = fileURLToPath(new URL("../../../src/daemon/process.ts", import.meta.url));
+    const child = spawn(process.execPath, ["--import", "tsx", processPath], {
+      cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: process.env.HOME ?? root,
+        AGENT_FABRIC_DATABASE_PATH: databasePath,
+        AGENT_FABRIC_SOCKET_PATH: socketPath,
+        AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
+        AGENT_FABRIC_RUNTIME_DIRECTORY: runtimeDirectory,
+        AGENT_FABRIC_BOOTSTRAP_CAPABILITY: `afb_${"a".repeat(43)}`,
+        AGENT_FABRIC_BOOTSTRAP_MODE: "production-election",
+        AGENT_FABRIC_BOOTSTRAP_ACTION_ID: "bootstrap_cutover_child_01",
+        AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION: "1",
+        AGENT_FABRIC_DAEMON_INSTANCE_GENERATION: "1",
+        AGENT_FABRIC_CAPABILITY_KEY: "b".repeat(43),
+        AGENT_FABRIC_EXECUTION_PROFILE: "headless",
+        AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: "1",
+        AGENT_FABRIC_WORKSPACE_ROOTS_JSON: JSON.stringify([root]),
+        AGENT_FABRIC_ADAPTERS_JSON: "{}",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (child.stdout === null) throw new Error("daemon cutover child stdout is unavailable");
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    const firstLine = await new Promise<string>((resolvePromise, reject) => {
+      child.once("error", reject);
+      lines.once("line", resolvePromise);
+    });
+    expect(JSON.parse(firstLine)).toEqual({
+      ready: false,
+      error: {
+        code: "SCHEMA_CUTOVER_REQUIRED",
+        message: "database does not contain the current schema epoch; existing database preserved",
+        preserved: true,
+      },
+    });
+    await expect(new Promise<number | null>((resolvePromise) => child.once("exit", resolvePromise))).resolves.toBe(1);
+    expect(await readFile(databasePath)).toEqual(beforeBytes);
+    expect((await stat(databasePath)).mode).toBe(beforeStat.mode);
+    expect((await stat(databasePath)).mtimeMs).toBe(beforeStat.mtimeMs);
+    expect(await readFile(socketPath, "utf8")).toBe("preserve-socket\n");
+    expect(await readdir(runtimeDirectory)).toEqual(beforeRuntimeEntries);
+  });
+
   it("accepts a production election proof without placeholder process-lock paths", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-production-process-proof-"));
     roots.push(root);

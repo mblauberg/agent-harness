@@ -193,6 +193,17 @@ async function recordKnownFailure(
   throw new BootstrapClientError(code, message, { cause: error });
 }
 
+function typedFailureCode(error: unknown): string | undefined {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("code" in error) ||
+    typeof error.code !== "string" ||
+    error.code.length === 0
+  ) return undefined;
+  return error.code;
+}
+
 export async function attachOrStartDaemon<Client>(options: AttachOrStartOptions<Client>): Promise<AttachedDaemon<Client>> {
   const initial = await options.handshake();
   if (initial.status === "compatible") return compatibleDaemon(initial, options, null, false);
@@ -256,6 +267,10 @@ export async function attachOrStartDaemon<Client>(options: AttachOrStartOptions<
       readyInput = await spawned.ready;
     } catch (error: unknown) {
       const phase = error instanceof BootstrapSpawnPhaseError ? error.phase : "spawn";
+      const code = typedFailureCode(error);
+      if (code !== undefined) {
+        return await recordKnownFailure(generation, code, error, "failed", phase);
+      }
       return await recordKnownFailure(generation, "BOOTSTRAP_READY_AMBIGUOUS", error, "ambiguous", phase);
     }
     try {

@@ -156,6 +156,27 @@ describe("attachOrStartDaemon", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("preserves a typed child startup failure instead of classifying it as ambiguous", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-typed-child-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    const socketPath = join(runtimeDirectory, "fabric.sock");
+
+    await expect(attachOrStartDaemon({
+      actionId: "bootstrap_typed_child_01",
+      socketPath,
+      requiredProtocolVersion: 1,
+      requiredFeatures: ["project-sessions.v1"],
+      election: new BootstrapElection({ runtimeDirectory }),
+      handshake: async () => ({ status: "unavailable", reason: "absent", message: "missing" }),
+      spawn: async () => ({
+        ready: Promise.reject(Object.assign(new Error("existing database preserved"), {
+          code: "SCHEMA_CUTOVER_REQUIRED",
+        })),
+      }),
+    })).rejects.toMatchObject({ code: "SCHEMA_CUTOVER_REQUIRED" });
+  });
+
   it("blocks blind spawn when private discovery makes unreachability ambiguous", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-ambiguous-discovery-"));
     cleanup.push(root);

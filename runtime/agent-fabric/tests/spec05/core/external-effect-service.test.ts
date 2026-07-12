@@ -18,10 +18,6 @@ import {
 import type { OperatorEffectRequest } from "../../../src/operator/action-store.ts";
 import { createProductionOperatorActionPorts } from "../../../src/operator/production-action-ports.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
-import {
-  ExternalEffectCustodyPreflightError,
-  preflightExternalEffectCustody,
-} from "../../../src/persistence/external-effect-custody-preflight.ts";
 
 const databases: Database.Database[] = [];
 const digest = parseSha256Digest(`sha256:${"a".repeat(64)}`, "test.digest");
@@ -860,19 +856,4 @@ describe("registered external-effect and promotion custody", () => {
     expect({ dispatches, lookups }).toStrictEqual({ dispatches: 1, lookups: 0 });
   });
 
-  it("preflight rejects uninferred legacy external custody", () => {
-    const { database } = fixture();
-    const request = effectRequest("external_legacy_01", registeredIntent());
-    seedGenericCustody(database, request, "custody_external_legacy_01");
-
-    expect(() => preflightExternalEffectCustody(database)).toThrowError(
-      expect.objectContaining<Partial<ExternalEffectCustodyPreflightError>>({
-        code: "EXTERNAL_EFFECT_CUSTODY_MIGRATION_PREFLIGHT_FAILED",
-      }),
-    );
-    expect(() => database.prepare(`
-      UPDATE operator_effect_custody SET state='dispatching'
-       WHERE custody_id='custody_external_legacy_01'
-    `).run()).toThrow(/INVARIANT_external_effect_binding_required/u);
-  });
 });

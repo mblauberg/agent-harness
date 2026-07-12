@@ -1,229 +1,288 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 
 import type Database from "better-sqlite3";
+import BetterSqlite3 from "better-sqlite3";
 
-import { preflightAdditiveInvariants } from "../persistence/invariants.js";
-import { preflightLaunchCustody } from "../persistence/launch-custody-preflight.js";
-import { preflightProjectSessionOperations } from "../persistence/project-session-preflight.js";
-import { preflightProviderBridgeCustody } from "../persistence/provider-bridge-custody-preflight.js";
-import { preflightExternalEffectCustody } from "../persistence/external-effect-custody-preflight.js";
-import { preflightLaunchedChairBridgeLoss } from "../persistence/launched-chair-bridge-loss-preflight.js";
-import { preflightArtifactRegistry } from "../persistence/artifact-registry-preflight.js";
-import { preflightTypedGitCustody } from "../persistence/typed-git-preflight.js";
-import { preflightSessionLifecycleRepair } from "../persistence/session-lifecycle-repair-preflight.js";
+export const FABRIC_SCHEMA_EPOCH = "agent-fabric-pre-release-v1" as const;
 
-export type Migration = {
-  version: number;
-  name: string;
+type CurrentSchemaManifest = Readonly<{
+  schemaVersion: 1;
+  epoch: typeof FABRIC_SCHEMA_EPOCH;
+  baselineFile: "0001-current-baseline.sql";
+  baselineSha256: string;
+  catalogSha256: string;
+  objectCount: number;
+}>;
+
+type SchemaArtifacts = Readonly<{
+  manifest: CurrentSchemaManifest;
   sql: string;
-  preflight?: (database: Database.Database) => void;
-};
+}>;
 
-export type MigrationErrorCode =
-  | "MIGRATION_CHECKSUM_DRIFT"
-  | "MIGRATION_FUTURE_VERSION"
-  | "MIGRATION_INVALID_SET";
+type FabricSchemaRow = Readonly<{
+  epoch: string;
+  baseline_sha256: string;
+  catalog_sha256: string;
+}>;
 
-export class MigrationError extends Error {
-  readonly code: MigrationErrorCode;
+type CatalogRow = Readonly<{
+  type: string;
+  name: string;
+  tbl_name: string;
+  sql: string | null;
+}>;
 
-  constructor(code: MigrationErrorCode, message: string, options?: { cause?: unknown }) {
+export type SchemaBaselineErrorCode =
+  | "SCHEMA_BASELINE_INVALID"
+  | "SCHEMA_CUTOVER_REQUIRED";
+
+export class SchemaBaselineError extends Error {
+  readonly code: SchemaBaselineErrorCode;
+  readonly preserved: boolean;
+
+  constructor(
+    code: SchemaBaselineErrorCode,
+    message: string,
+    options?: Readonly<{ cause?: unknown; preserved?: boolean }>,
+  ) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });
-    this.name = "MigrationError";
+    this.name = "SchemaBaselineError";
     this.code = code;
+    this.preserved = options?.preserved ?? false;
   }
 }
 
-type MigrationRow = {
-  version: number;
-  name: string | null;
-  checksum: string | null;
-};
-
-const defaultMigrationFiles = [
-  "0001-core.sql",
-  "0002-observer-event-sequence.sql",
-  "0003-integrity-and-query-plans.sql",
-  "0004-project-session-operations.sql",
-  "0005-launch-custody.sql",
-  "0006-operator-lifecycle.sql",
-  "0007-provider-bridge-custody.sql",
-  "0008-external-effect-custody.sql",
-  "0009-launched-chair-bridge-loss.sql",
-  "0010-artifact-registry.sql",
-  "0011-automatic-session-membership.sql",
-  "0012-typed-git-custody.sql",
-  "0013-session-lifecycle-repair.sql",
-  "0014-workstreams-live-chair-handoff.sql",
-] as const;
-
-function loadDefaultMigrations(): Migration[] {
-  return defaultMigrationFiles.map((filename, index) => {
-    const candidates = [
-      new URL(`../../migrations/${filename}`, import.meta.url),
-      new URL(`../../../migrations/${filename}`, import.meta.url),
-    ];
-    const migrationUrl = candidates.find((candidate) => existsSync(candidate));
-    if (migrationUrl === undefined) {
-      throw new MigrationError("MIGRATION_INVALID_SET", `migration ${filename} is unavailable`);
-    }
-    return {
-      version: index + 1,
-      name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-      sql: readFileSync(migrationUrl, "utf8"),
-      ...(index === 2
-        ? { preflight: preflightAdditiveInvariants }
-        : index === 3
-          ? { preflight: preflightProjectSessionOperations }
-          : index === 4
-            ? { preflight: preflightLaunchCustody }
-            : index === 6
-              ? { preflight: preflightProviderBridgeCustody }
-              : index === 7
-                ? { preflight: preflightExternalEffectCustody }
-                : index === 8
-                  ? { preflight: preflightLaunchedChairBridgeLoss }
-                  : index === 9
-                  ? { preflight: preflightArtifactRegistry }
-                  : index === 11
-                    ? { preflight: preflightTypedGitCustody }
-                    : index === 12
-                      ? { preflight: preflightSessionLifecycleRepair }
-            : {}),
-    };
-  });
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
-function checksum(sql: string): string {
-  return createHash("sha256").update(sql).digest("hex");
-}
-
-function orderedMigrations(migrations: readonly Migration[]): Migration[] {
-  const ordered = [...migrations].sort((left, right) => left.version - right.version);
-  for (const [index, migration] of ordered.entries()) {
-    const expectedVersion = index + 1;
-    if (
-      migration.version !== expectedVersion ||
-      migration.name.length === 0 ||
-      migration.sql.trim().length === 0
-    ) {
-      throw new MigrationError(
-        "MIGRATION_INVALID_SET",
-        `migration set must contain one non-empty migration for every version from 1; expected ${expectedVersion}`,
-      );
-    }
-  }
-  return ordered;
-}
-
-function ensureRegistry(database: Database.Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT,
-      checksum TEXT,
-      applied_at TEXT NOT NULL
-    )
-  `);
-  const columns = database.prepare("PRAGMA table_info(schema_migrations)").all() as { name: string }[];
-  const names = new Set(columns.map((column) => column.name));
-  if (!["version", "name", "checksum", "applied_at"].every((name) => names.has(name))) {
-    throw new MigrationError("MIGRATION_INVALID_SET", "migration registry predates the canonical checksum baseline");
-  }
-}
-
-function splitConnectionPragmas(sql: string): { pragmas: string; body: string } {
-  let body = sql;
-  const pragmas: string[] = [];
-  const leadingPragma = /^\s*(PRAGMA\s+[^;]+;)/iu;
-  while (true) {
-    const match = leadingPragma.exec(body);
-    if (match?.[1] === undefined) break;
-    pragmas.push(match[1]);
-    body = body.slice(match[0].length);
-  }
-  return { pragmas: pragmas.join("\n"), body };
-}
-
-function registryRows(database: Database.Database): MigrationRow[] {
-  return database
-    .prepare("SELECT version, name, checksum FROM schema_migrations ORDER BY version")
-    .all() as MigrationRow[];
-}
-
-export function applyMigrations(
-  database: Database.Database,
-  migrations: readonly Migration[] = loadDefaultMigrations(),
-): { applied: number[]; currentVersion: number } {
-  const ordered = orderedMigrations(migrations);
-  ensureRegistry(database);
-
-  const rows = registryRows(database);
-  const maximumKnownVersion = ordered.length;
-  const future = rows.find((row) => row.version > maximumKnownVersion);
-  if (future !== undefined) {
-    throw new MigrationError(
-      "MIGRATION_FUTURE_VERSION",
-      `database schema version ${future.version} is newer than supported version ${maximumKnownVersion}`,
+function artifactUrl(directory: "migrations" | "schemas", filename: string): URL {
+  const candidates = [
+    new URL(`../../${directory}/${filename}`, import.meta.url),
+    new URL(`../../../${directory}/${filename}`, import.meta.url),
+  ];
+  const selected = candidates.find((candidate) => existsSync(candidate));
+  if (selected === undefined) {
+    throw new SchemaBaselineError(
+      "SCHEMA_BASELINE_INVALID",
+      `current schema artifact is unavailable: ${directory}/${filename}`,
     );
   }
+  return selected;
+}
 
-  const byVersion = new Map(ordered.map((migration) => [migration.version, migration]));
-  for (const row of rows) {
-    const migration = byVersion.get(row.version);
-    if (migration === undefined) {
-      throw new MigrationError("MIGRATION_INVALID_SET", `database contains unknown migration version ${row.version}`);
-    }
-    const expectedChecksum = checksum(migration.sql);
-    if (row.checksum === null) {
-      throw new MigrationError(
-        "MIGRATION_INVALID_SET",
-        `migration ${row.version} (${migration.name}) has no recorded checksum`,
+function parseManifest(value: unknown): CurrentSchemaManifest {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw new SchemaBaselineError("SCHEMA_BASELINE_INVALID", "current schema manifest is not an object");
+  }
+  const manifest = value as Record<string, unknown>;
+  const keys = Object.keys(manifest).sort();
+  const expected = [
+    "baselineFile",
+    "baselineSha256",
+    "catalogSha256",
+    "epoch",
+    "objectCount",
+    "schemaVersion",
+  ];
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, index) => key !== expected[index]) ||
+    manifest.schemaVersion !== 1 ||
+    manifest.epoch !== FABRIC_SCHEMA_EPOCH ||
+    manifest.baselineFile !== "0001-current-baseline.sql" ||
+    typeof manifest.baselineSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(manifest.baselineSha256) ||
+    typeof manifest.catalogSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(manifest.catalogSha256) ||
+    typeof manifest.objectCount !== "number" ||
+    !Number.isSafeInteger(manifest.objectCount) ||
+    manifest.objectCount < 1
+  ) {
+    throw new SchemaBaselineError("SCHEMA_BASELINE_INVALID", "current schema manifest is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    epoch: FABRIC_SCHEMA_EPOCH,
+    baselineFile: "0001-current-baseline.sql",
+    baselineSha256: manifest.baselineSha256,
+    catalogSha256: manifest.catalogSha256,
+    objectCount: manifest.objectCount,
+  };
+}
+
+function loadSchemaArtifacts(): SchemaArtifacts {
+  const manifestValue: unknown = JSON.parse(
+    readFileSync(artifactUrl("schemas", "database-baseline.v1.json"), "utf8"),
+  );
+  const manifest = parseManifest(manifestValue);
+  const sql = readFileSync(artifactUrl("migrations", manifest.baselineFile), "utf8");
+  if (sha256(sql) !== manifest.baselineSha256) {
+    throw new SchemaBaselineError(
+      "SCHEMA_BASELINE_INVALID",
+      "current schema baseline does not match its pinned manifest",
+    );
+  }
+  return { manifest, sql };
+}
+
+function catalogRows(database: Database.Database): CatalogRow[] {
+  return database.prepare(`
+    SELECT type,name,tbl_name,sql
+      FROM sqlite_schema
+     WHERE name NOT LIKE 'sqlite_%'
+     ORDER BY type,name,tbl_name
+  `).all() as CatalogRow[];
+}
+
+export function currentSchemaCatalogFingerprint(database: Database.Database): string {
+  const canonical = JSON.stringify(
+    catalogRows(database).map((row) => [row.type, row.name, row.tbl_name, row.sql]),
+  );
+  return sha256(canonical);
+}
+
+function cutover(message: string, cause?: unknown): SchemaBaselineError {
+  return new SchemaBaselineError(
+    "SCHEMA_CUTOVER_REQUIRED",
+    `${message}; existing database preserved`,
+    { ...(cause === undefined ? {} : { cause }), preserved: true },
+  );
+}
+
+function currentSchemaRow(database: Database.Database): FabricSchemaRow {
+  let rows: FabricSchemaRow[];
+  try {
+    rows = database.prepare(`
+      SELECT epoch,baseline_sha256,catalog_sha256 FROM fabric_schema
+    `).all() as FabricSchemaRow[];
+  } catch (error: unknown) {
+    throw cutover("database does not contain the current schema epoch", error);
+  }
+  if (rows.length !== 1 || rows[0] === undefined) {
+    throw cutover("database schema epoch metadata is missing or ambiguous");
+  }
+  return rows[0];
+}
+
+export function assertCurrentSchema(database: Database.Database): void {
+  const { manifest } = loadSchemaArtifacts();
+  const row = currentSchemaRow(database);
+  if (
+    row.epoch !== manifest.epoch ||
+    row.baseline_sha256 !== manifest.baselineSha256 ||
+    row.catalog_sha256 !== manifest.catalogSha256
+  ) {
+    throw cutover("database schema epoch does not match this runtime");
+  }
+  const rows = catalogRows(database);
+  if (
+    rows.length !== manifest.objectCount ||
+    currentSchemaCatalogFingerprint(database) !== manifest.catalogSha256
+  ) {
+    throw cutover("database schema catalog fingerprint does not match this runtime");
+  }
+}
+
+function userSchemaObjectCount(database: Database.Database): number {
+  const value = database.prepare(`
+    SELECT COUNT(*) AS count FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'
+  `).get() as { count: number };
+  return value.count;
+}
+
+function isolatedDatabaseImage(databasePath: string): Buffer {
+  const image = Buffer.from(readFileSync(databasePath));
+  const sqliteHeader = Buffer.from("SQLite format 3\0", "ascii");
+  if (image.length >= 20 && image.subarray(0, sqliteHeader.length).equals(sqliteHeader)) {
+    // A WAL-mode main file cannot be deserialised as an anonymous database.
+    // The isolated copy contains the checkpointed main image, so normalise
+    // only its in-memory read/write version bytes to rollback-journal format.
+    image[18] = 1;
+    image[19] = 1;
+  }
+  return image;
+}
+
+/**
+ * Initialises only a genuinely empty database connection. Existing current
+ * state is verified; every other epoch is rejected without repair or backfill.
+ */
+export function applyMigrations(
+  database: Database.Database,
+): { applied: number[]; currentVersion: 1 } {
+  if (userSchemaObjectCount(database) > 0) {
+    assertCurrentSchema(database);
+    return { applied: [], currentVersion: 1 };
+  }
+  const { manifest, sql } = loadSchemaArtifacts();
+  database.pragma("foreign_keys = ON");
+  const apply = database.transaction(() => {
+    database.exec(sql);
+    const rows = catalogRows(database);
+    const catalogSha256 = currentSchemaCatalogFingerprint(database);
+    if (rows.length !== manifest.objectCount || catalogSha256 !== manifest.catalogSha256) {
+      throw new SchemaBaselineError(
+        "SCHEMA_BASELINE_INVALID",
+        "current schema baseline produced an unexpected catalog fingerprint",
       );
     }
-    if (row.checksum !== null && row.checksum !== expectedChecksum) {
-      throw new MigrationError(
-        "MIGRATION_CHECKSUM_DRIFT",
-        `migration ${row.version} (${migration.name}) no longer matches its recorded checksum`,
-      );
-    }
-  }
+    database.prepare(`
+      INSERT INTO fabric_schema(singleton,epoch,baseline_sha256,catalog_sha256)
+      VALUES (1,?,?,?)
+    `).run(manifest.epoch, manifest.baselineSha256, catalogSha256);
+  });
+  apply();
+  assertCurrentSchema(database);
+  return { applied: [1], currentVersion: 1 };
+}
 
-  const appliedVersions = new Set(rows.map((row) => row.version));
-  for (let version = 1; version <= appliedVersions.size; version += 1) {
-    if (!appliedVersions.has(version)) {
-      throw new MigrationError("MIGRATION_INVALID_SET", `database migration registry has a gap at version ${version}`);
-    }
-  }
+export type FabricDatabaseInspection = Readonly<{
+  state: "absent" | "current";
+}>;
 
-  const applied: number[] = [];
-  for (const migration of ordered) {
-    if (appliedVersions.has(migration.version)) continue;
-    const { pragmas, body } = splitConnectionPragmas(migration.sql);
-    const foreignKeysBefore = Number(database.pragma("foreign_keys", { simple: true })) === 1;
-    if (pragmas.length > 0) database.exec(pragmas);
-    const applyOne = database.transaction(() => {
-      migration.preflight?.(database);
-      database.exec(body);
-      database
-        .prepare(`
-          INSERT INTO schema_migrations(version, name, checksum, applied_at)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(version) DO UPDATE SET name = excluded.name, checksum = excluded.checksum
-        `)
-        .run(migration.version, migration.name, checksum(migration.sql), new Date().toISOString());
-    });
-    try {
-      applyOne();
-    } finally {
-      if (foreignKeysBefore && Number(database.pragma("foreign_keys", { simple: true })) !== 1) {
-        database.pragma("foreign_keys = ON");
-      }
+/** Read-only compatibility gate used before any daemon/runtime mutation. */
+export function inspectFabricDatabase(databasePath: string): FabricDatabaseInspection {
+  let before;
+  try {
+    before = lstatSync(databasePath);
+  } catch (error: unknown) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return { state: "absent" };
     }
-    appliedVersions.add(migration.version);
-    applied.push(migration.version);
+    throw error;
   }
-
-  return { applied, currentVersion: ordered.length };
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw cutover("database path is not a regular non-symlink file");
+  }
+  let database: Database.Database | undefined;
+  try {
+    // SQLite may create WAL/SHM sidecars even for a readonly file handle. Load
+    // an isolated in-memory image so compatibility inspection has no writable
+    // relationship with the caller's path.
+    database = new BetterSqlite3(isolatedDatabaseImage(databasePath));
+    database.pragma("trusted_schema = OFF");
+    assertCurrentSchema(database);
+  } catch (error: unknown) {
+    if (error instanceof SchemaBaselineError) throw error;
+    throw cutover("database format or schema fingerprint is not current", error);
+  } finally {
+    database?.close();
+  }
+  const after = lstatSync(databasePath);
+  if (
+    before.dev !== after.dev ||
+    before.ino !== after.ino ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs ||
+    before.ctimeMs !== after.ctimeMs
+  ) {
+    throw cutover("database identity changed during read-only schema inspection");
+  }
+  return { state: "current" };
 }

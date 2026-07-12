@@ -1,36 +1,20 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
+import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
-import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
 const trustDigest = `sha256:${"a".repeat(64)}`;
 const subjectHash = `sha256:${"b".repeat(64)}`;
 const now = Date.parse("2027-01-01T00:00:00.000Z");
 
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
-
 function setup(): { database: Database.Database; store: OperatorStore } {
   const database = new Database(":memory:");
   databases.push(database);
-  applyMigrations(database, [
-    migration(1, "0001-core.sql"),
-    migration(2, "0002-observer-event-sequence.sql"),
-    migration(3, "0003-integrity-and-query-plans.sql"),
-    migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-  ]);
+  applyMigrations(database);
   return { database, store: new OperatorStore({ database, clock: () => now }) };
 }
 

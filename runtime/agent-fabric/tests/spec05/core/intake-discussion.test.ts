@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
 
 import {
   parseOperatorCapabilityGrant,
@@ -11,22 +10,12 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
+import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { IntakeStore } from "../../../src/project-session/intake-store.ts";
-import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
 const digest = `sha256:${"c".repeat(64)}`;
-
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close();
@@ -36,15 +25,18 @@ describe("revisioned intake", () => {
   it("creates and exactly replays one project-bound pre-session draft", () => {
     const database = new Database(":memory:");
     databases.push(database);
-    applyMigrations(database, [
-      migration(1, "0001-core.sql"),
-      migration(2, "0002-observer-event-sequence.sql"),
-      migration(3, "0003-integrity-and-query-plans.sql"),
-      migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-    ]);
+    applyMigrations(database);
     database.exec(`
       INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
-      VALUES ('project_01', '/project/one', 1, 1, 1, 1)
+      VALUES ('project_01', '/project/one', 1, 1, 1, 1);
+      INSERT INTO artifacts(
+        artifact_id,project_id,project_session_id,run_id,task_id,publisher_kind,
+        publisher_ref,publisher_agent_id,source_kind,evidence_kind,relative_path,
+        sha256,registry_state,quarantine_reason,revision,created_at
+      ) VALUES (
+        'artifact_spec_01','project_01',NULL,NULL,NULL,'project','project_01',NULL,
+        'project-file','artifact','docs/spec.md','${digest}','active',NULL,1,1
+      )
     `);
     const operatorStore = new OperatorStore({ database, clock: () => 1_000 });
     operatorStore.registerPrincipal({
@@ -104,15 +96,18 @@ describe("revisioned intake", () => {
   it("binds submission to an existing run and atomically commits its exact chair request once", () => {
     const database = new Database(":memory:");
     databases.push(database);
-    applyMigrations(database, [
-      migration(1, "0001-core.sql"),
-      migration(2, "0002-observer-event-sequence.sql"),
-      migration(3, "0003-integrity-and-query-plans.sql"),
-      migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-    ]);
+    applyMigrations(database);
     database.exec(`
       INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
       VALUES ('project_01', '/project/one', 1, 1, 1, 1);
+      INSERT INTO artifacts(
+        artifact_id,project_id,project_session_id,run_id,task_id,publisher_kind,
+        publisher_ref,publisher_agent_id,source_kind,evidence_kind,relative_path,
+        sha256,registry_state,quarantine_reason,revision,created_at
+      ) VALUES (
+        'artifact_spec_01','project_01',NULL,NULL,NULL,'project','project_01',NULL,
+        'project-file','artifact','docs/spec.md','${digest}','active',NULL,1,1
+      );
       INSERT INTO project_sessions(
         project_session_id, project_id, mode, state, revision, generation, authority_ref,
         budget_ref, launch_packet_path, launch_packet_digest, membership_revision,

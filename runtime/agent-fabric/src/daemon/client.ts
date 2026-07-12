@@ -12,6 +12,7 @@ import { OPERATOR_ACTIONS, type OperatorAction } from "@local/agent-fabric-proto
 import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
 import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
+import { inspectFabricDatabase } from "../core/migrations.js";
 import type {
   LocalOperatorConsoleCapabilityInput,
   LocalOperatorConsoleCapabilityResult,
@@ -977,11 +978,12 @@ function attachedHandle(
 
 export async function startFabricDaemon(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
   const normalized = normalizedStartOptions(options);
+  normalized.databasePath = safeDatabasePath(normalized.databasePath);
+  inspectFabricDatabase(normalized.databasePath);
   await Promise.all([
     ensurePrivateDirectory(normalized.stateDirectory),
     ensurePrivateDirectory(normalized.runtimeDirectory),
   ]);
-  normalized.databasePath = safeDatabasePath(normalized.databasePath);
   const paths = privateDiscoveryPaths(normalized.runtimeDirectory);
   const election = new BootstrapElection({ runtimeDirectory: normalized.runtimeDirectory });
   const actionId = stableBootstrapActionId(normalized);
@@ -1053,6 +1055,8 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
  */
 export async function forceStartFabricDaemonForTests(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
   const normalized = normalizedStartOptions(options);
+  normalized.databasePath = safeDatabasePath(normalized.databasePath);
+  inspectFabricDatabase(normalized.databasePath);
   await Promise.all([
     ensurePrivateDirectory(normalized.stateDirectory),
     ensurePrivateDirectory(normalized.runtimeDirectory),

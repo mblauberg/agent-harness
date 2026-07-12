@@ -50,6 +50,7 @@ import {
   type OptionalGitHubHostedChecksConfiguration,
 } from "../operator/github-hosted-checks.js";
 import type { TrustedGitConfiguration } from "../operator/trusted-git-registry.js";
+import { inspectFabricDatabase } from "../core/migrations.js";
 
 class DaemonProtocolError extends Error {
   readonly code: string;
@@ -141,6 +142,22 @@ if (
   throw new Error("agent fabric daemon environment is incomplete");
 }
 
+try {
+  inspectFabricDatabase(databasePath);
+} catch (error: unknown) {
+  const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : "DAEMON_DATABASE_PREFLIGHT_FAILED";
+  const message = error instanceof Error ? error.message : String(error);
+  const preserved = typeof error === "object" && error !== null && "preserved" in error && error.preserved === true;
+  await new Promise<void>((resolve) => process.stdout.write(
+    `${JSON.stringify({ ready: false, error: { code, message, ...(preserved ? { preserved: true } : {}) } })}\n`,
+    () => resolve(),
+  ));
+  process.exit(1);
+  throw error;
+}
+
 const localSubjectHash = localAuthenticatedSubjectHash(capabilityKey);
 const trustedStateDirectory = stateDirectory;
 const trustedExecutionProfile = executionProfile;
@@ -195,8 +212,6 @@ if (bootstrapMode === "test-forced-process-locks") {
     throw error;
   }
 }
-rmSync(socketPath, { force: true });
-
 const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON);
 const gitHostedChecks = await createOptionalGitHubHostedChecksAdapter(
   githubHostedChecksValue as OptionalGitHubHostedChecksConfiguration,
@@ -253,6 +268,7 @@ fabric.recoverDaemonRuntimeEpoch({
   instanceId: `${bootstrapActionId ?? "forced-process"}:${String(process.pid)}`,
 });
 await fabric.recoverStartupState();
+rmSync(socketPath, { force: true });
 const sockets = new Set<Socket>();
 let completeQueuedDaemonStop: (commandId: string) => void = () => undefined;
 let totalInFlight = 0;
