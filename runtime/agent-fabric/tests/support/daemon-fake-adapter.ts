@@ -8,6 +8,8 @@ if (journalPath === undefined) {
 }
 const requiredJournalPath: string = journalPath;
 const ephemeralSpawnEnabled = process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN === "1";
+const reportLoginIdentity = process.env.FAKE_ADAPTER_REPORT_LOGIN_IDENTITY === "1";
+const ephemeralSpawnDelayMs = Number(process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN_DELAY_MS ?? "0");
 
 type ActionRecord = {
   actionId: string;
@@ -138,10 +140,18 @@ input.on("line", (line) => {
       fail(request.id, "INVALID_PARAMS", "task-bound ephemeral spawn fields are required");
       return;
     }
-    respond(request.id, {
-      result: `review:${request.params.modelFamily}:${request.params.model}`,
+    const loginIdentity = reportLoginIdentity
+      ? `:${process.env.USER ?? "missing"}:${process.env.LOGNAME ?? "missing"}`
+      : "";
+    const complete = (): void => respond(request.id, {
+      result: `review:${request.params.modelFamily}:${request.params.model}${loginIdentity}`,
       taskId: request.params.taskId,
     });
+    if (Number.isSafeInteger(ephemeralSpawnDelayMs) && ephemeralSpawnDelayMs > 0) {
+      setTimeout(complete, ephemeralSpawnDelayMs);
+    } else {
+      complete();
+    }
     return;
   }
   if (request.method === "dispatch") {

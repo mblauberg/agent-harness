@@ -43,6 +43,7 @@ type Stage3OpenOptions = {
   databasePath: string;
   workspaceRoots: string[];
   clock: ManualClock["now"];
+  maximumConcurrentProviderTurns?: number;
   adapters: Record<string, { command: string[]; environment: Record<string, string> }>;
 };
 
@@ -76,12 +77,17 @@ function adapterOptions(fixture: {
   providerJournalPath: string;
   providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
   capabilitiesDelayMs?: number;
+  spawnDelayMs?: number;
   mandatoryUsageUnits?: boolean;
+  maximumConcurrentProviderTurns?: number;
 }): Stage3OpenOptions {
   return {
     databasePath: fixture.databasePath,
     workspaceRoots: [fixture.directory],
     clock: fixture.clock.now,
+    ...(fixture.maximumConcurrentProviderTurns === undefined
+      ? {}
+      : { maximumConcurrentProviderTurns: fixture.maximumConcurrentProviderTurns }),
     adapters: {
       "fake-lifecycle": {
         command: [process.execPath, "--import", "tsx", fakeProvider],
@@ -91,6 +97,9 @@ function adapterOptions(fixture: {
           ...(fixture.capabilitiesDelayMs === undefined
             ? {}
             : { LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS: String(fixture.capabilitiesDelayMs) }),
+          ...(fixture.spawnDelayMs === undefined
+            ? {}
+            : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(fixture.spawnDelayMs) }),
           LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
         },
       },
@@ -99,7 +108,12 @@ function adapterOptions(fixture: {
 }
 
 export async function createLifecycleFixture(
-  options: { capabilitiesDelayMs?: number; mandatoryUsageUnits?: boolean } = {},
+  options: {
+    capabilitiesDelayMs?: number;
+    spawnDelayMs?: number;
+    mandatoryUsageUnits?: boolean;
+    maximumConcurrentProviderTurns?: number;
+  } = {},
 ): Promise<LifecycleFixture> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-lifecycle-"));
   const runDirectory = join(directory, ".agent-run", "run-stage3");

@@ -7,6 +7,7 @@ if (journalPath === undefined) {
   throw new Error("LIFECYCLE_FAKE_JOURNAL is required");
 }
 const requiredJournalPath: string = journalPath;
+const spawnDelayMs = Number(process.env.LIFECYCLE_FAKE_SPAWN_DELAY_MS ?? "0");
 
 type Action = {
   actionId: string;
@@ -135,7 +136,7 @@ input.on("line", (line) => {
       return;
     }
     saveJournal(journal);
-    respond(request.id, {
+    const complete = (): void => respond(request.id, {
       resumeReference,
       generation,
       result: "fake provider review complete",
@@ -149,6 +150,8 @@ input.on("line", (line) => {
               ? { resourceUsage: "not-a-budget-vector" }
         : {}),
     });
+    if (Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) setTimeout(complete, spawnDelayMs);
+    else complete();
     return;
   }
   if (request.method === "release") {

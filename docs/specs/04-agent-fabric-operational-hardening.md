@@ -8,11 +8,11 @@ Chair: Codex
 Independent design peer: Claude Code
 
 Version 1.24 makes answer-bearing task work asynchronous behind the binding
-30-second public request maximum. Dispatch returns only after immutable action
-and budget custody commit, then one daemon-owned completion settles the same
-row. Read supplies the terminal answer; disconnect and retry cannot duplicate
-the provider effect, and shutdown drains the tracked completion after fencing
-its adapter before SQLite closes. Version 1.23 makes vector-valued ephemeral
+30-second public request maximum. Dispatch returns only after immutable action,
+budget custody and command receipt commit, then a bounded FIFO daemon worker
+claims and settles the same row. Read supplies the terminal answer; disconnect
+and retry cannot duplicate the provider effect, and shutdown drains tracked
+work before closing its adapter and SQLite. Version 1.23 makes vector-valued ephemeral
 provider-budget custody durable in
 the current SQLite baseline, derives Console gate/intake bindings from
 authoritative rows, and confines Claude review tooling to `Read`, `Glob` and
@@ -2449,12 +2449,15 @@ descendant, message or artifact capacity.
 
 Because provider turns may exceed the public protocol's 30-second request
 maximum, task-bound answer-bearing spawn is a durable asynchronous action.
-Dispatch commits `dispatched` custody and returns promptly while exactly one
-tracked daemon completion owns adapter I/O. The Console, MCP caller or chair
+Dispatch commits `prepared` custody and its command receipt atomically, then
+returns promptly while exactly one tracked daemon completion owns adapter I/O.
+A bounded FIFO worker claims `prepared -> dispatched` only within the shared
+provider-turn ceiling. The Console, MCP caller or chair
 uses `provider-action.read` to observe terminal `providerAnswer` evidence; it
-does not redispatch. Transport loss leaves the action live, daemon shutdown
-fences the adapter and drains the completion to terminal or ambiguous before
-database close, and restart reconciles the persisted action by lookup only.
+does not redispatch. Local reconciliation cannot look up or quarantine queued
+or active work. Transport loss leaves the action live, daemon shutdown drains
+tracked work before adapter/database close, and restart resumes prepared work
+or reconciles dispatched work by lookup without blind replay.
 
 Terminal adapter evidence moves exact usage to consumed and releases unused
 and concurrency reservation. A missing applicable usage value becomes unknown;

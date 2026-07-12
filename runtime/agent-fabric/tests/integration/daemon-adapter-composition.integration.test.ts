@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import { DAEMON_ROOT_AUTHORITY } from "../support/daemon-testkit.ts";
@@ -88,6 +88,8 @@ describe("daemon adapter composition", () => {
   });
 
   it("runs a task-bound ephemeral provider review through the generated MCP surface", async () => {
+    vi.stubEnv("USER", "fabric-provider-user");
+    vi.stubEnv("LOGNAME", "fabric-provider-login");
     const directory = await mkdtemp(join(tmpdir(), "af-ephemeral-"));
     const stateDirectory = join(directory, "state");
     const runtimeDirectory = join(directory, "runtime");
@@ -104,6 +106,8 @@ describe("daemon adapter composition", () => {
           environment: {
             FAKE_ADAPTER_JOURNAL: join(directory, "fake-journal.json"),
             FAKE_ADAPTER_EPHEMERAL_SPAWN: "1",
+            FAKE_ADAPTER_REPORT_LOGIN_IDENTITY: "1",
+            FAKE_ADAPTER_EPHEMERAL_SPAWN_DELAY_MS: "2000",
           },
           modelPolicy: {
             allowedFamilies: ["fake"],
@@ -151,7 +155,7 @@ describe("daemon adapter composition", () => {
           commandId: "daemon-ephemeral-review:task",
         });
         expect(task.isError, task.text).toBe(false);
-        const outcome = await callTool(chairProxy.client, "fabric_provider_action_dispatch", {
+        const dispatchInput = {
           adapterId: "fake",
           actionId: "daemon-ephemeral-review:spawn",
           operation: "spawn",
@@ -164,14 +168,60 @@ describe("daemon adapter composition", () => {
             cwd: "src",
           },
           commandId: "daemon-ephemeral-review:dispatch",
-        });
+        };
+        const dispatchStartedAt = Date.now();
+        const outcome = await callTool(chairProxy.client, "fabric_provider_action_dispatch", dispatchInput);
         expect(outcome.isError, outcome.text).toBe(false);
+        expect(Date.now() - dispatchStartedAt).toBeLessThan(750);
         expect(outcome.structured).toMatchObject({
+          actionId: "daemon-ephemeral-review:spawn",
+          status: "prepared",
+          executionCount: 0,
+          effectCount: 0,
+        });
+        expect(outcome.structured).not.toHaveProperty("providerAnswer");
+
+        const exactReplay = await callTool(chairProxy.client, "fabric_provider_action_dispatch", dispatchInput);
+        expect(exactReplay.isError, exactReplay.text).toBe(false);
+        expect(exactReplay.structured).toEqual(outcome.structured);
+        const changedAction = await callTool(chairProxy.client, "fabric_provider_action_dispatch", {
+          ...dispatchInput,
+          actionId: "daemon-ephemeral-review:changed-action",
+        });
+        expect(changedAction.isError).toBe(true);
+        expect(changedAction.structured).toMatchObject({ code: "DEDUPE_CONFLICT" });
+        const liveReconcile = await callTool(chairProxy.client, "fabric_provider_action_reconcile", {
+          actionId: "daemon-ephemeral-review:spawn",
+          commandId: "daemon-ephemeral-review:live-reconcile",
+        });
+        expect(liveReconcile.isError, liveReconcile.text).toBe(false);
+        expect(liveReconcile.structured.status).toBe("dispatched");
+
+        await chairProxy.close();
+        chairProxy = await spawnMcpProxy({
+          socketPath,
+          capability: run.chairCapability,
+          label: "daemon-ephemeral-review-chair-reconnected",
+        });
+
+        let terminal: Awaited<ReturnType<typeof callTool>> | undefined;
+        for (let attempt = 0; attempt < 160; attempt += 1) {
+          const observed = await callTool(chairProxy.client, "fabric_provider_action_read", {
+            actionId: "daemon-ephemeral-review:spawn",
+          });
+          expect(observed.isError, observed.text).toBe(false);
+          if (observed.structured.status === "terminal") {
+            terminal = observed;
+            break;
+          }
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+        }
+        expect(terminal?.structured).toMatchObject({
           actionId: "daemon-ephemeral-review:spawn",
           status: "terminal",
           executionCount: 1,
           effectCount: 1,
-          providerAnswer: "review:fake:fake-reviewer-v1",
+          providerAnswer: "review:fake:fake-reviewer-v1:fabric-provider-user:fabric-provider-login",
           resultDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
         });
       } finally {
@@ -181,6 +231,7 @@ describe("daemon adapter composition", () => {
       await Promise.allSettled([chairProxy?.close(), bootstrap.close()]);
       await daemon.stop();
       await rm(directory, { recursive: true, force: true });
+      vi.unstubAllEnvs();
     }
   });
 });

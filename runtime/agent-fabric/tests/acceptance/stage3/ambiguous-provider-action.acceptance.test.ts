@@ -2,6 +2,7 @@ import { rm } from "node:fs/promises";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import type { FabricClient } from "../../../src/index.ts";
 
 import {
   asLifecycleClient,
@@ -10,6 +11,21 @@ import {
 } from "../../support/lifecycle-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
+
+type ObservedProviderAction = Awaited<ReturnType<FabricClient["getProviderAction"]>>;
+
+async function waitForProviderAction(
+  client: FabricClient,
+  actionId: string,
+): Promise<ObservedProviderAction> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const action = await client.getProviderAction({ actionId });
+    if (["terminal", "ambiguous", "quarantined"].includes(action.status)) return action;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  throw new Error(`provider action did not settle: ${actionId}`);
+}
 
 function authorityBudget(
   databasePath: string,
@@ -127,7 +143,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "terminal-exact-usage",
       },
       commandId: "provider-review-vector:dispatch",
-    })).resolves.toMatchObject({ status: "terminal", providerAnswer: "fake provider review complete" });
+    })).resolves.toMatchObject({ status: "prepared", effectCount: 0 });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-vector:spawn"))
+      .resolves.toMatchObject({ status: "terminal", providerAnswer: "fake provider review complete" });
 
     expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
       turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
@@ -179,7 +197,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario,
       },
       commandId: `provider-review-invalid-usage:${scenario}:dispatch`,
-    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
       actionId,
       commandId: `provider-review-invalid-usage:${scenario}:reconcile`,
@@ -261,7 +280,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "ambiguous-review-usage-late",
       },
       commandId: "provider-review-late-usage:dispatch",
-    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
       actionId,
       commandId: "provider-review-late-usage:reconcile-1",
@@ -332,6 +352,113 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it.each([
+    ["gate", "GATE_BLOCKED"],
+    ["quiesce", "LIFECYCLE_PRECONDITION_FAILED"],
+    ["authority-expiry", "AUTHENTICATION_FAILED"],
+    ["chair-handoff", "CAPABILITY_FORBIDDEN"],
+  ] as const)("rechecks %s after delayed capabilities before provider dispatch", async (scenario, code) => {
+    const fixture = await createLifecycleFixture({ capabilitiesDelayMs: 200 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        ...(scenario === "authority-expiry"
+          ? { expiresAt: new Date(fixture.clock.now().getTime() + 100).toISOString() }
+          : {}),
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: `provider-review-admission-race:${scenario}:authority`,
+    });
+    const actionId = `provider-review-admission-race:${scenario}:spawn`;
+    const dispatch = fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Do not start after admission changes.",
+        cwd: "src/leader",
+      },
+      commandId: `provider-review-admission-race:${scenario}:dispatch`,
+    });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+
+    if (scenario === "authority-expiry") {
+      fixture.clock.advance(200);
+    } else {
+      const database = new Database(fixture.databasePath);
+      try {
+        if (scenario === "quiesce") {
+          database.prepare(`
+            UPDATE runs SET lifecycle_state='quiescing',revision=revision+1 WHERE run_id=?
+          `).run(fixture.runId);
+        } else if (scenario === "chair-handoff") {
+          database.prepare(`
+            UPDATE runs SET chair_agent_id='leader',revision=revision+1 WHERE run_id=?
+          `).run(fixture.runId);
+        } else {
+          const identity = database.prepare(`
+            SELECT project_session_id,dependency_revision FROM runs WHERE run_id=?
+          `).get(fixture.runId) as { project_session_id: string; dependency_revision: number };
+          database.prepare(`
+            INSERT INTO scoped_gates(
+              gate_id,project_session_id,coordination_run_id,dedupe_key,scope_kind,
+              scope_task_id,dependency_revision,blocked_operation_ids_json,
+              enforcement_points_json,question,reason,options_json,recommendation,
+              consequences_json,evidence_refs_json,created_by_ref,expected_approver_ref,
+              status,human_required,revision,created_at,updated_at
+            ) VALUES (?,?,?,'provider-review-admission-race','task',?,?,
+                      '["fabric.v1.provider-action.dispatch"]','["operation"]','Proceed?',
+                      'Admission changed','["approve","defer"]','defer','[]','[]',
+                      'agent:chair','authenticated-human-operator','pending',1,1,1,1)
+          `).run(
+            `gate-provider-review-admission-race`,
+            identity.project_session_id,
+            fixture.runId,
+            fixture.leaderTask.taskId,
+            identity.dependency_revision,
+          );
+          database.prepare(`
+            INSERT INTO scoped_gate_tasks(
+              gate_id,project_session_id,run_id,task_id,binding_kind,bound_dependency_revision
+            ) VALUES ('gate-provider-review-admission-race',?,?,?,'direct',?)
+          `).run(
+            identity.project_session_id,
+            fixture.runId,
+            fixture.leaderTask.taskId,
+            identity.dependency_revision,
+          );
+          database.prepare(`
+            INSERT INTO scoped_gate_operations(gate_id,operation_id)
+            VALUES ('gate-provider-review-admission-race','fabric.v1.provider-action.dispatch')
+          `).run();
+        }
+      } finally {
+        database.close();
+      }
+    }
+
+    await expect(dispatch).rejects.toMatchObject({ code });
+    const verification = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(verification.prepare(`
+        SELECT 1 FROM provider_actions WHERE run_id=? AND action_id=?
+      `).get(fixture.runId, actionId)).toBeUndefined();
+    } finally {
+      verification.close();
+    }
+  });
+
   it("blocks task terminalisation while its provider action remains unresolved", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => {
@@ -362,7 +489,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "ambiguous-review-valid",
       },
       commandId: "provider-review-task-obligation:dispatch",
-    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-task-obligation:spawn"))
+      .resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.leader.updateTask({
       taskId: fixture.leaderTask.taskId,
       expectedRevision: fixture.leaderTask.revision,
@@ -417,6 +546,68 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     expect(rejected).toMatchObject({ status: "rejected", reason: { code: "BUDGET_EXCEEDED" } });
   });
 
+  it("queues answer-bearing work within the shared provider-turn ceiling", async () => {
+    const fixture = await createLifecycleFixture({
+      maximumConcurrentProviderTurns: 1,
+      spawnDelayMs: 250,
+    });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 2 },
+      },
+      commandId: "provider-review-queue:authority",
+    });
+    const dispatch = async (suffix: string) => await fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: `provider-review-queue:${suffix}`,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: `Queued review ${suffix}.`,
+        cwd: "src/leader",
+      },
+      commandId: `provider-review-queue:${suffix}:dispatch`,
+    });
+
+    await expect(dispatch("one")).resolves.toMatchObject({ status: "prepared", executionCount: 0 });
+    await expect(dispatch("two")).resolves.toMatchObject({ status: "prepared", executionCount: 0 });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(database.prepare(`
+        SELECT action_id,status FROM provider_actions
+         WHERE action_id IN ('provider-review-queue:one','provider-review-queue:two')
+         ORDER BY action_id
+      `).all()).toEqual([
+        { action_id: "provider-review-queue:one", status: "dispatched" },
+        { action_id: "provider-review-queue:two", status: "prepared" },
+      ]);
+    } finally {
+      database.close();
+    }
+    await expect(fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review-queue:complete-early",
+    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+
+    await expect(waitForProviderAction(fixture.chair, "provider-review-queue:one"))
+      .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-queue:two"))
+      .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
+  });
+
   it("retains one turn reservation through restart and settles it from terminal lookup evidence", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
@@ -444,7 +635,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "ambiguous-review-valid",
       },
       commandId: "provider-review-restart-budget:dispatch",
-    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-restart-budget:ambiguous"))
+      .resolves.toMatchObject({ status: "ambiguous" });
 
     await fixture.fabric.close();
     const reopened = await reopenLifecycleFabric(fixture);
@@ -538,7 +731,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "ambiguous-review-empty",
       },
       commandId: "provider-review-unknown:dispatch",
-    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, action)).resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
       actionId: action,
       commandId: "provider-review-unknown:reconcile",
@@ -618,7 +812,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review:authority",
     });
     const before = await fixture.chair.getRunStatus({ runId: fixture.runId });
-    const result = await fixture.chair.dispatchProviderAction({
+    const dispatchReceipt = await fixture.chair.dispatchProviderAction({
       adapterId: "fake-lifecycle",
       actionId: "provider-review:spawn",
       operation: "spawn",
@@ -633,6 +827,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review:dispatch",
     });
 
+    expect(dispatchReceipt).toMatchObject({
+      actionId: "provider-review:spawn",
+      status: "prepared",
+      executionCount: 0,
+      effectCount: 0,
+    });
+    const result = await waitForProviderAction(fixture.chair, "provider-review:spawn");
     expect(result).toMatchObject({
       actionId: "provider-review:spawn",
       status: "terminal",
@@ -741,9 +942,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: `provider-review-recovery:${scenario}:dispatch`,
     });
 
-    await expect(dispatch("ambiguous-review-valid")).rejects.toMatchObject({
-      code: "LIFECYCLE_PRECONDITION_FAILED",
-    });
+    await expect(dispatch("ambiguous-review-valid")).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-recovery:ambiguous-review-valid"))
+      .resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
       actionId: "provider-review-recovery:ambiguous-review-valid",
       commandId: "provider-review-recovery:valid:reconcile",
@@ -763,9 +964,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         },
         commandId: `provider-review-recovery:${scenario}:authority`,
       });
-      await expect(dispatch(scenario, invalidAuthority.authorityId)).rejects.toMatchObject({
-        code: "LIFECYCLE_PRECONDITION_FAILED",
-      });
+      await expect(dispatch(scenario, invalidAuthority.authorityId)).resolves.toMatchObject({ status: "prepared" });
+      await expect(waitForProviderAction(fixture.chair, `provider-review-recovery:${scenario}`))
+        .resolves.toMatchObject({ status: "ambiguous" });
       await expect(fixture.chair.reconcileProviderAction({
         actionId: `provider-review-recovery:${scenario}`,
         commandId: `provider-review-recovery:${scenario}:reconcile`,

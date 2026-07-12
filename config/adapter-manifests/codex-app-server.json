@@ -52,7 +52,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/mcp-projection.js",
-      "sha256": "099c8273f69613d52d8fc9f584ee673883231a09a91e859b1e343e09fd322964"
+      "sha256": "c787726112dc0b1758a45f877285cbbb42d42f76b69ae2741bbb5227daf5ae12"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/membership.js",

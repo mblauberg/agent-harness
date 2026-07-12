@@ -457,10 +457,12 @@ export class ProviderSessionCoordinator {
         throw new FabricError("PROVIDER_TURN_ACTIVE", "provider session already has an unresolved turn");
       }
       const unresolvedCount = row(this.#database.prepare(`
-        SELECT COUNT(*) AS count
-          FROM provider_session_turn_leases
-         WHERE run_id = ? AND status IN ('active', 'quarantined')
-      `).get(input.runId), "provider turn count");
+        SELECT
+          (SELECT COUNT(*) FROM provider_session_turn_leases
+            WHERE status IN ('active','quarantined')) +
+          (SELECT COUNT(*) FROM provider_actions
+            WHERE budget_authority_id IS NOT NULL AND status='dispatched') AS count
+      `).get(), "provider turn count");
       if (typeof unresolvedCount.count !== "number" || unresolvedCount.count >= this.#maximumConcurrentTurns) {
         throw new FabricError("PROVIDER_TURN_ACTIVE", "maximum concurrent provider turns reached");
       }

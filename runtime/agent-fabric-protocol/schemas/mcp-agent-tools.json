@@ -184,19 +184,19 @@
     "fabric.v1.provider-action.dispatch": {
       "projection": "tool",
       "name": "fabric_provider_action_dispatch",
-      "description": "Invoke the closed fabric.v1.provider-action.dispatch operation as the authenticated Agent Fabric principal.",
+      "description": "Admit one durable provider action and return its immutable initial receipt; read that action to observe completion.",
       "receiptRenderer": "generic-v1"
     },
     "fabric.v1.provider-action.reconcile": {
       "projection": "tool",
       "name": "fabric_provider_action_reconcile",
-      "description": "Invoke the closed fabric.v1.provider-action.reconcile operation as the authenticated Agent Fabric principal.",
+      "description": "Recover a non-local or stalled provider action by stable lookup; do not use reconciliation to poll live work.",
       "receiptRenderer": "generic-v1"
     },
     "fabric.v1.provider-action.read": {
       "projection": "tool",
       "name": "fabric_provider_action_read",
-      "description": "Invoke the closed fabric.v1.provider-action.read operation as the authenticated Agent Fabric principal.",
+      "description": "Read durable provider-action state; poll this operation until the terminal bounded provider answer is available.",
       "receiptRenderer": "generic-v1"
     },
     "fabric.v1.operator-intervention.record": {
@@ -5777,7 +5777,7 @@
     {
       "operation": "fabric.v1.provider-action.dispatch",
       "name": "fabric_provider_action_dispatch",
-      "description": "Invoke the closed fabric.v1.provider-action.dispatch operation as the authenticated Agent Fabric principal.",
+      "description": "Admit one durable provider action and return its immutable initial receipt; read that action to observe completion.",
       "feature": "fabric-core.v1",
       "receiptRenderer": "generic-v1",
       "inputSchema": {
@@ -5897,7 +5897,7 @@
     {
       "operation": "fabric.v1.provider-action.read",
       "name": "fabric_provider_action_read",
-      "description": "Invoke the closed fabric.v1.provider-action.read operation as the authenticated Agent Fabric principal.",
+      "description": "Read durable provider-action state; poll this operation until the terminal bounded provider answer is available.",
       "feature": "fabric-core.v1",
       "receiptRenderer": "generic-v1",
       "inputSchema": {
@@ -5986,7 +5986,7 @@
     {
       "operation": "fabric.v1.provider-action.reconcile",
       "name": "fabric_provider_action_reconcile",
-      "description": "Invoke the closed fabric.v1.provider-action.reconcile operation as the authenticated Agent Fabric principal.",
+      "description": "Recover a non-local or stalled provider action by stable lookup; do not use reconciliation to poll live work.",
       "feature": "fabric-core.v1",
       "receiptRenderer": "generic-v1",
       "inputSchema": {

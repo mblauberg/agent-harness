@@ -70,6 +70,7 @@ function stableToolName(operation: AgentOperation): `fabric_${string}` {
 function tool(
   operation: AgentOperation,
   resource?: Extract<McpProjection, { projection: "tool" }>["resource"],
+  description?: string,
 ): Extract<McpProjection, { projection: "tool" }> {
   const receiptRenderer: McpReceiptRenderer = operation === FABRIC_OPERATIONS.launchAttest
     ? "launch-attestation-v1"
@@ -89,7 +90,7 @@ function tool(
   return Object.freeze({
     projection: "tool",
     name: stableToolName(operation),
-    description: `Invoke the closed ${operation} operation as the authenticated Agent Fabric principal.`,
+    description: description ?? `Invoke the closed ${operation} operation as the authenticated Agent Fabric principal.`,
     receiptRenderer,
     ...(resource === undefined ? {} : { resource }),
   });
@@ -141,9 +142,21 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.requestLifecycle]: tool(FABRIC_OPERATIONS.requestLifecycle),
   [FABRIC_OPERATIONS.getAgentLifecycle]: tool(FABRIC_OPERATIONS.getAgentLifecycle),
   [FABRIC_OPERATIONS.reportProviderState]: tool(FABRIC_OPERATIONS.reportProviderState),
-  [FABRIC_OPERATIONS.dispatchProviderAction]: tool(FABRIC_OPERATIONS.dispatchProviderAction),
-  [FABRIC_OPERATIONS.reconcileProviderAction]: tool(FABRIC_OPERATIONS.reconcileProviderAction),
-  [FABRIC_OPERATIONS.getProviderAction]: tool(FABRIC_OPERATIONS.getProviderAction),
+  [FABRIC_OPERATIONS.dispatchProviderAction]: tool(
+    FABRIC_OPERATIONS.dispatchProviderAction,
+    undefined,
+    "Admit one durable provider action and return its immutable initial receipt; read that action to observe completion.",
+  ),
+  [FABRIC_OPERATIONS.reconcileProviderAction]: tool(
+    FABRIC_OPERATIONS.reconcileProviderAction,
+    undefined,
+    "Recover a non-local or stalled provider action by stable lookup; do not use reconciliation to poll live work.",
+  ),
+  [FABRIC_OPERATIONS.getProviderAction]: tool(
+    FABRIC_OPERATIONS.getProviderAction,
+    undefined,
+    "Read durable provider-action state; poll this operation until the terminal bounded provider answer is available.",
+  ),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: tool(FABRIC_OPERATIONS.recordOperatorIntervention),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: tool(FABRIC_OPERATIONS.recordVisibilityFailure),
   [FABRIC_OPERATIONS.createTeam]: tool(FABRIC_OPERATIONS.createTeam),

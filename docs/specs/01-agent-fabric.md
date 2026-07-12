@@ -9,9 +9,9 @@ Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
 Version 0.28 keeps task-bound provider execution within the public protocol's
-30-second request ceiling. Dispatch atomically reserves and journals the action,
-starts one daemon-owned completion, and may return its durable `dispatched`
-receipt before provider completion. The chair reads the same action until a
+30-second request ceiling. Dispatch atomically reserves and journals the action
+plus command receipt, queues one daemon-owned completion, and returns its
+durable `prepared` or `dispatched` receipt before provider completion. The chair reads the same action until a
 terminal `providerAnswer` and digest are available; disconnect, timeout or an
 exact replay never starts another effect. Version 0.27 binds task-bound provider
 work and every applicable hard provider
@@ -1217,10 +1217,10 @@ Given the chair owns or participates in one active review task and delegates a
 read-only externally disclosable authority envelope
 When it dispatches `operation: spawn` to an activated compatible adapter with
 an explicit model, model family, prompt and exact task ID
-Then Fabric persists one action and returns either its durable `dispatched`
+Then Fabric persists one action and returns either its durable `prepared` or `dispatched`
 receipt or the bounded terminal answer through the closed `providerAnswer`
 action result field plus a canonical digest
-And a dispatched receipt remains readable while one daemon-owned completion
+And a nonterminal receipt remains readable while one daemon-owned completion
 settles it; the chair polls the same action rather than redispatching
 And a missing task, stale task scope, forbidden disclosure, model mismatch,
 duplicate changed action or unsupported adapter fails before provider work
@@ -3778,12 +3778,15 @@ later become terminal; a new action does not.
 
 Task-bound answer-bearing dispatch does not hold a public protocol request open
 for the provider turn. After the immutable action and full budget reservation
-commit, Fabric starts exactly one daemon-owned completion and may return the
-`dispatched` action receipt. `provider-action.read` observes that same action
+and command receipt commit together, Fabric queues exactly one daemon-owned
+completion and may return the `prepared` or `dispatched` action receipt. A
+bounded FIFO worker atomically claims `prepared -> dispatched` only when shared
+provider-turn capacity is available. `provider-action.read` observes that same action
 until terminal evidence supplies `providerAnswer` and the result digest.
 Connection closure, protocol timeout and exact command/action replay do not
-cancel or duplicate the effect. Daemon shutdown fences the adapter, lets the
-tracked completion journal its terminal or ambiguous state, and only then
+cancel or duplicate the effect. Live reconciliation observes locally owned
+prepared/dispatched work without lookup or quarantine. Daemon shutdown drains
+tracked work before closing its adapter and
 closes SQLite; restart uses lookup/reconciliation rather than blind replay.
 
 Terminal evidence settles every dimension exactly once: proven usage is

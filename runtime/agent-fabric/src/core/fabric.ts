@@ -800,6 +800,16 @@ export class Fabric {
   readonly #capabilityKey: string;
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
+  readonly #maximumConcurrentProviderTurns: number;
+  readonly #ownedProviderActions = new Map<string, Promise<void>>();
+  readonly #deferredProviderActions: Array<{
+    key: string;
+    runId: string;
+    actionId: string;
+    execute: () => Promise<ProviderActionResult>;
+    settle: () => void;
+  }> = [];
+  #pumpingDeferredProviderActions = false;
   readonly #operatorStore: OperatorStore;
   readonly #operatorProjections: OperatorProjectionStore;
   readonly #gitRepositoryReads: GitRepositoryReadService;
@@ -839,10 +849,11 @@ export class Fabric {
     this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
+    this.#maximumConcurrentProviderTurns = options.maximumConcurrentProviderTurns ?? 8;
     this.#providerSessions = new ProviderSessionCoordinator({
       database: this.#database,
       clock: this.#clock,
-      maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
+      maximumConcurrentTurns: this.#maximumConcurrentProviderTurns,
     });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
@@ -1226,6 +1237,7 @@ export class Fabric {
   }
 
   async close(): Promise<void> {
+    await Promise.allSettled([...this.#ownedProviderActions.values()]);
     await this.#adapterSupervisor.close();
     if (this.#database.open) {
       this.#database.pragma("wal_checkpoint(TRUNCATE)");
@@ -1236,6 +1248,87 @@ export class Fabric {
   async #requestAdapter(adapterId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
     this.#adapter(adapterId);
     return await this.#adapterSupervisor.request(adapterId, method, params);
+  }
+
+  #providerActionOwnershipKey(runId: string, actionId: string): string {
+    return `${runId}\u0000${actionId}`;
+  }
+
+  #enqueueDeferredProviderAction(input: {
+    runId: string;
+    actionId: string;
+    execute: () => Promise<ProviderActionResult>;
+  }): void {
+    const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
+    if (this.#ownedProviderActions.has(key)) return;
+    let settle = (): void => undefined;
+    const tracked = new Promise<void>((resolvePromise) => {
+      settle = resolvePromise;
+    });
+    this.#ownedProviderActions.set(key, tracked);
+    this.#deferredProviderActions.push({ key, ...input, settle });
+    this.#pumpDeferredProviderActions();
+  }
+
+  #claimDeferredProviderAction(runId: string, actionId: string): "claimed" | "blocked" | "stale" {
+    return this.#database.transaction(() => {
+      const action = this.#database.prepare(`
+        SELECT status FROM provider_actions WHERE run_id=? AND action_id=?
+      `).get(runId, actionId);
+      if (!isRow(action) || action.status !== "prepared") return "stale";
+      const active = rowOrNotFound(this.#database.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM provider_session_turn_leases
+            WHERE status IN ('active','quarantined')) +
+          (SELECT COUNT(*) FROM provider_actions
+            WHERE budget_authority_id IS NOT NULL AND status='dispatched') AS count
+      `).get(), "active provider turn count");
+      if (numberField(active, "count") >= this.#maximumConcurrentProviderTurns) return "blocked";
+      const claimed = this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='dispatched',history_json='["prepared","dispatched"]',
+               execution_count=1,updated_at=?
+         WHERE run_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), runId, actionId);
+      return claimed.changes === 1 ? "claimed" : "stale";
+    })();
+  }
+
+  #pumpDeferredProviderActions(): void {
+    if (this.#pumpingDeferredProviderActions) return;
+    this.#pumpingDeferredProviderActions = true;
+    try {
+      while (this.#deferredProviderActions.length > 0) {
+        const work = this.#deferredProviderActions[0];
+        if (work === undefined) return;
+        const claim = this.#claimDeferredProviderAction(work.runId, work.actionId);
+        if (claim === "blocked") return;
+        this.#deferredProviderActions.shift();
+        if (claim === "stale") {
+          this.#ownedProviderActions.delete(work.key);
+          work.settle();
+          continue;
+        }
+        void work.execute()
+          .catch(() => undefined)
+          .finally(() => {
+            this.#ownedProviderActions.delete(work.key);
+            work.settle();
+            this.#pumpDeferredProviderActions();
+          });
+      }
+    } finally {
+      this.#pumpingDeferredProviderActions = false;
+    }
+  }
+
+  #settleProviderTurnAndPump(
+    runId: string,
+    actionId: string,
+    status: "terminal" | "ambiguous" | "quarantined",
+  ): void {
+    this.#providerSessions.settleTurn(runId, actionId, status);
+    this.#pumpDeferredProviderActions();
   }
 
   #assertGenericProviderAction(runId: string, actionId: string): void {
@@ -4543,14 +4636,7 @@ export class Fabric {
       );
       let providerAuthorityId = stringField(actor, "authority_id");
       if (ephemeralSpawn) {
-        const delegated = rowOrNotFound(
-          this.#database.prepare("SELECT parent_authority_id FROM authorities WHERE run_id = ? AND authority_id = ?")
-            .get(runId, input.authorityId),
-          "ephemeral provider authority",
-        );
-        if (delegated.parent_authority_id !== providerAuthorityId) {
-          throw new FabricError("CAPABILITY_FORBIDDEN", "ephemeral provider authority is not delegated by the chair");
-        }
+        this.#assertEphemeralProviderAuthority(runId, actorAgentId, input.authorityId as string);
         providerAuthorityId = input.authorityId as string;
         ephemeralProviderAuthorityId = providerAuthorityId;
       }
@@ -4580,7 +4666,10 @@ export class Fabric {
     });
     if (existing) {
       const result = this.getProviderAction(runId, input.actionId);
-      if (result.status === "terminal" || result.status === "quarantined") {
+      if (
+        result.status === "terminal" || result.status === "quarantined" ||
+        (ephemeralSpawn && ["prepared", "dispatched", "accepted"].includes(result.status))
+      ) {
         this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
         return result;
       }
@@ -4646,8 +4735,36 @@ export class Fabric {
         requireProviderAnswer: true,
         authorityBudget: ephemeralAuthorityBudget,
         taskId,
+        deferCompletion: true,
+        deferredCommand: {
+          actorAgentId,
+          commandId: input.commandId,
+          payload: input,
+        },
+        revalidateAdmission: () => {
+          this.#assertChair(runId, actorAgentId);
+          this.#assertProviderPrincipalActive(runId, actorAgentId);
+          const reboundTaskId = resolveTaskBindingForActiveWork(
+            this.#database,
+            runId,
+            actorAgentId,
+            taskValue,
+          );
+          if (reboundTaskId !== taskId) {
+            throw new FabricError("CAPABILITY_FORBIDDEN", "provider task binding changed before dispatch");
+          }
+          assertScopedOperationAllowed(
+            this.#database,
+            runId,
+            FABRIC_OPERATIONS.dispatchProviderAction,
+            operationTarget,
+          );
+          assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
+          assertRunAcceptingWork(this.#database, runId);
+          this.#assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
+          this.#admitProviderPayload(runId, ephemeralProviderAuthorityId as string, taskBoundPayload);
+        },
       });
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
     let providerPayload = admittedInputPayload;
@@ -4710,7 +4827,7 @@ export class Fabric {
       const response = await this.#requestAdapter(input.adapterId, "dispatch", { actionId: input.actionId, operation: input.operation, payload: providerPayload });
       const result = providerActionResult(response);
       this.#persistProviderAction(runId, input.actionId, response, result);
-      this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     } catch {
@@ -4722,7 +4839,7 @@ export class Fabric {
         effectCount: 0,
       };
       this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, result);
-      this.#providerSessions.settleTurn(runId, input.actionId, "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.actionId, "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -4754,12 +4871,35 @@ export class Fabric {
       delete quarantined.providerAnswer;
       if (answerBearing) delete quarantined.result;
       this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, quarantined);
-      this.#providerSessions.settleTurn(runId, input.actionId, "quarantined");
+      this.#settleProviderTurnAndPump(runId, input.actionId, "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
       return quarantined;
     };
     let result = this.getProviderAction(runId, input.actionId);
+    if (this.#ownedProviderActions.has(this.#providerActionOwnershipKey(runId, input.actionId))) {
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+      return result;
+    }
     if (result.status === "prepared") {
+      if (answerBearing) {
+        const adapterId = stringField(stored, "adapter_id");
+        this.#enqueueDeferredProviderAction({
+          runId,
+          actionId: input.actionId,
+          execute: async () => await this.#completeAdapterOperation({
+            runId,
+            adapterId,
+            actionId: input.actionId,
+            operation: "spawn",
+            method: "spawn",
+            payload: storedPayload,
+            requireProviderAnswer: true,
+          }),
+        });
+        result = this.getProviderAction(runId, input.actionId);
+        this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+        return result;
+      }
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
@@ -4781,7 +4921,7 @@ export class Fabric {
         };
         this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, result);
       }
-      this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -4790,7 +4930,7 @@ export class Fabric {
       stored.budget_state === "usage-unknown";
     const resolvedEffectResult = result;
     const preserveResolvedEffect = (): ProviderActionResult => {
-      this.#providerSessions.settleTurn(
+      this.#settleProviderTurnAndPump(
         runId,
         input.actionId,
         resolvedEffectResult.status === "terminal" ? "terminal" : "quarantined",
@@ -4799,7 +4939,7 @@ export class Fabric {
       return resolvedEffectResult;
     };
     if (result.status !== "ambiguous" && result.status !== "dispatched" && !resolvedEffectWithUnknownUsage) {
-      this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -4830,7 +4970,7 @@ export class Fabric {
       }
     } else if (resolvedEffectWithUnknownUsage) {
       return preserveResolvedEffect();
-    } else if (idempotencyProven) {
+    } else if (idempotencyProven && !answerBearing) {
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
@@ -4848,7 +4988,7 @@ export class Fabric {
     } else {
       return quarantine(lookedUp);
     }
-    this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+    this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
     this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
     return result;
   }
@@ -6062,6 +6202,21 @@ export class Fabric {
     }
   }
 
+  #assertEphemeralProviderAuthority(runId: string, actorAgentId: string, authorityId: string): void {
+    const actor = rowOrNotFound(
+      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
+      "provider actor",
+    );
+    const delegated = rowOrNotFound(
+      this.#database.prepare("SELECT parent_authority_id FROM authorities WHERE run_id = ? AND authority_id = ?")
+        .get(runId, authorityId),
+      "ephemeral provider authority",
+    );
+    if (delegated.parent_authority_id !== stringField(actor, "authority_id")) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "ephemeral provider authority is not delegated by the chair");
+    }
+  }
+
   #adapterIdForAgent(runId: string, agentId: string): string {
     const binding = rowOrNotFound(
       this.#database.prepare("SELECT adapter_id FROM agent_adapter_bindings WHERE run_id = ? AND agent_id = ?").get(runId, agentId),
@@ -6083,6 +6238,13 @@ export class Fabric {
       reservation: Readonly<Record<string, number>>;
     }>;
     taskId?: string;
+    deferCompletion?: true;
+    deferredCommand?: {
+      actorAgentId: string;
+      commandId: string;
+      payload: unknown;
+    };
+    revalidateAdmission?: () => void;
   }): Promise<ProviderActionResult> {
     const payloadJson = canonicalJson(input.payload);
     const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
@@ -6109,8 +6271,20 @@ export class Fabric {
     if (existing) {
       return this.getProviderAction(input.runId, input.actionId);
     }
+    const deferred = input.deferCompletion === true;
+    if (deferred && input.deferredCommand === undefined) {
+      throw new Error("deferred provider action requires atomic command custody");
+    }
+    const receipt: ProviderActionResult = {
+      actionId: input.actionId,
+      status: deferred ? "prepared" : "dispatched",
+      history: deferred ? ["prepared"] : ["prepared", "dispatched"],
+      executionCount: deferred ? 0 : 1,
+      effectCount: 0,
+    };
     try {
       this.#database.transaction(() => {
+        input.revalidateAdmission?.();
         if (input.authorityBudget !== undefined) {
           if (input.taskId === undefined) throw new Error("provider budget requires an exact task binding");
           const task = rowOrNotFound(
@@ -6126,7 +6300,7 @@ export class Fabric {
         }
         this.#database
           .prepare(
-            "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at, task_id, budget_authority_id, budget_reservation_json, budget_settlement_json, budget_state, budget_started_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'dispatched', '[\"prepared\",\"dispatched\"]', 1, 0, 0, ?, ?, ?, ?, NULL, ?, ?)",
+            "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at, task_id, budget_authority_id, budget_reservation_json, budget_settlement_json, budget_state, budget_started_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, NULL, ?, ?)",
           )
           .run(
             input.runId,
@@ -6138,6 +6312,9 @@ export class Fabric {
             identityHash,
             sha256(payloadJson),
             payloadJson,
+            receipt.status,
+            canonicalJson(receipt.history),
+            receipt.executionCount,
             this.#clock(),
             input.taskId ?? null,
             input.authorityBudget?.authorityId ?? null,
@@ -6145,6 +6322,15 @@ export class Fabric {
             input.authorityBudget === undefined ? null : "reserved",
             input.authorityBudget === undefined ? null : this.#clock(),
           );
+        if (input.deferredCommand !== undefined) {
+          this.#commandJournal.write(
+            input.runId,
+            input.deferredCommand.actorAgentId,
+            input.deferredCommand.commandId,
+            input.deferredCommand.payload,
+            receipt,
+          );
+        }
       })();
     } catch (error: unknown) {
       if (
@@ -6165,8 +6351,33 @@ export class Fabric {
       }
       throw error;
     }
+    const complete = async (): Promise<ProviderActionResult> => await this.#completeAdapterOperation(input);
+    if (deferred) {
+      this.#enqueueDeferredProviderAction({
+        runId: input.runId,
+        actionId: input.actionId,
+        execute: complete,
+      });
+      return receipt;
+    }
+    return await complete();
+  }
+
+  async #completeAdapterOperation(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    operation: string;
+    method: string;
+    payload: Record<string, unknown>;
+    requireProviderAnswer?: true;
+  }): Promise<ProviderActionResult> {
     try {
-      const response = await this.#requestAdapter(input.adapterId, input.method, { ...input.payload, actionId: input.actionId, payload: input.payload });
+      const response = await this.#requestAdapter(input.adapterId, input.method, {
+        ...input.payload,
+        actionId: input.actionId,
+        payload: input.payload,
+      });
       const providerAnswer = input.requireProviderAnswer === true
         ? providerAnswerFromAdapterResult(response)
         : undefined;

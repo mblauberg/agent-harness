@@ -384,7 +384,7 @@ function childEnvironment(
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     TMPDIR: process.env.TMPDIR ?? "/tmp",
   };
-  for (const key of ["HOME", "CODEX_HOME", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE"] as const) {
+  for (const key of ["HOME", "USER", "LOGNAME", "CODEX_HOME", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE"] as const) {
     const value = process.env[key];
     if (value !== undefined) environment[key] = value;
   }
