@@ -1,4 +1,17 @@
 import type { ReleaseBinding, ScopedGate } from "./gates.js";
+import type {
+  GitAuthoriseIntent,
+  GitConflictReconcileBinding,
+  GitCustodyResolveIntent,
+  GitCustodyStatus,
+  GitOperationDraftIntent,
+  OperatorGitIntent,
+} from "./git-actions.js";
+export {
+  assertGitIntentState,
+  gitOperationVariant,
+  isPreauthorisedGitOperationVariant,
+} from "./git-actions.js";
 import type { ProviderActionRefV1 } from "./launch.js";
 import type { OperatorAction, OperatorCapabilityCredential, OperatorMutationContext } from "./operator.js";
 import type {
@@ -134,119 +147,6 @@ export type ChairBridgeRecoveryIntent = ChairBridgeRecoveryCommon & (
   | { path: "abandon"; reason: string }
 );
 
-export type GitRepositoryBinding = {
-  repositoryRoot: string;
-  worktreePath: string;
-  remoteName: string;
-  expectedHeadDigest: Sha256Digest;
-  expectedIndexDigest: Sha256Digest;
-  expectedWorktreeDigest: Sha256Digest;
-  expectedRemoteDigest: Sha256Digest;
-};
-
-export type GitObjectIntent =
-  | { kind: "commit"; objectName: string; objectDigest: Sha256Digest }
-  | { kind: "tag"; objectName: string; objectDigest: Sha256Digest }
-  | { kind: "local-branch"; objectName: string; objectDigest: Sha256Digest }
-  | { kind: "remote-ref"; remoteName: string; objectName: string; objectDigest: Sha256Digest }
-  | { kind: "tracking-ref"; remoteName: string; objectName: string; objectDigest: Sha256Digest };
-
-export type GitPushPolicy =
-  | { kind: "fast-forward-only" }
-  | { kind: "force-with-lease"; expectedRemoteObjectDigest: Sha256Digest };
-
-export type GitBranchEffect =
-  | { action: "create"; destination: Extract<GitObjectIntent, { kind: "local-branch" }>; source: GitObjectIntent }
-  | { action: "delete"; source: Extract<GitObjectIntent, { kind: "local-branch" }> }
-  | {
-      action: "rename";
-      source: Extract<GitObjectIntent, { kind: "local-branch" }>;
-      destination: Extract<GitObjectIntent, { kind: "local-branch" }>;
-    };
-
-export type GitWorktreeEffect =
-  | { action: "create"; destinationWorktreePath: string; source: GitObjectIntent }
-  | { action: "remove"; sourceWorktreePath: string; expectedWorktreeDigest: Sha256Digest }
-  | {
-      action: "move";
-      sourceWorktreePath: string;
-      destinationWorktreePath: string;
-      expectedWorktreeDigest: Sha256Digest;
-    };
-
-export type GitEffect =
-  | {
-      effect: "fetch";
-      source: Extract<GitObjectIntent, { kind: "remote-ref" }>;
-      destination: Extract<GitObjectIntent, { kind: "tracking-ref" }>;
-    }
-  | {
-      effect: "pull";
-      source: Extract<GitObjectIntent, { kind: "remote-ref" }>;
-      destination: Extract<GitObjectIntent, { kind: "local-branch" }>;
-      strategy: "fast-forward-only" | "merge" | "rebase";
-    }
-  | { effect: "stage"; paths: readonly string[] }
-  | { effect: "unstage"; paths: readonly string[] }
-  | {
-      effect: "commit";
-      sourceIndexDigest: Sha256Digest;
-      destination: Extract<GitObjectIntent, { kind: "commit" }>;
-      message: string;
-    }
-  | {
-      effect: "merge";
-      source: GitObjectIntent;
-      destination: Extract<GitObjectIntent, { kind: "local-branch" }>;
-    }
-  | {
-      effect: "rebase";
-      source: Extract<GitObjectIntent, { kind: "local-branch" }>;
-      destination: GitObjectIntent;
-    }
-  | {
-      effect: "push";
-      source: Extract<GitObjectIntent, { kind: "local-branch" }>;
-      destination: Extract<GitObjectIntent, { kind: "remote-ref" }>;
-      policy: GitPushPolicy;
-    }
-  | ({ effect: "branch" } & GitBranchEffect)
-  | ({ effect: "worktree" } & GitWorktreeEffect);
-
-export type OperatorGitIntent = {
-  kind: "git";
-  repository: GitRepositoryBinding;
-  operation: GitEffect;
-};
-
-export type GitCurrentState = {
-  headDigest: Sha256Digest;
-  indexDigest: Sha256Digest;
-  worktreeDigest: Sha256Digest;
-  remoteDigest: Sha256Digest;
-  objectDigests: Readonly<Record<string, Sha256Digest>>;
-};
-
-function gitObjectKey(object: GitObjectIntent): string {
-  return object.kind === "remote-ref" || object.kind === "tracking-ref"
-    ? `${object.kind}:${object.remoteName}:${object.objectName}`
-    : `${object.kind}:${object.objectName}`;
-}
-
-export function assertGitIntentState(intent: OperatorGitIntent, current: GitCurrentState): void {
-  const expected = intent.repository;
-  if (expected.expectedHeadDigest !== current.headDigest) throw new TypeError("operator Git HEAD state changed");
-  if (expected.expectedIndexDigest !== current.indexDigest) throw new TypeError("operator Git index state changed");
-  if (expected.expectedWorktreeDigest !== current.worktreeDigest) throw new TypeError("operator Git worktree state changed");
-  if (expected.expectedRemoteDigest !== current.remoteDigest) throw new TypeError("operator Git remote state changed");
-  const operation = intent.operation as unknown as { source?: GitObjectIntent; destination?: GitObjectIntent };
-  for (const [label, object] of [["source", operation.source], ["destination", operation.destination]] as const) {
-    if (object !== undefined && current.objectDigests[gitObjectKey(object)] !== object.objectDigest) {
-      throw new TypeError(`operator Git ${label} object state changed`);
-    }
-  }
-}
-
 export type RegisteredExternalEffectIntent = {
   kind: "registered-external-effect";
   integrationId: IntegrationId;
@@ -324,6 +224,9 @@ export type OperatorActionIntent =
   | ChairBridgeRecoveryIntent
   | OperatorLifecycleIntent
   | OperatorGitIntent
+  | GitAuthoriseIntent
+  | GitOperationDraftIntent
+  | GitCustodyResolveIntent
   | RegisteredExternalEffectIntent
   | PromotionIntent;
 
@@ -334,6 +237,13 @@ export function requiredOperatorActionForIntent(intent: OperatorActionIntent): O
   if (intent.kind === "project-session-drain" || intent.kind === "daemon-drain") return "drain";
   if (intent.kind === "project-session-stop" || intent.kind === "daemon-stop") return "stop";
   if (intent.kind === "git") return "git";
+  if (intent.kind === "git-authorise") return "git-authorise";
+  if (intent.kind === "git-operation-draft") {
+    return intent.action === "create" && intent.binding.kind === "custody-resolution"
+      ? "git-custody-resolve"
+      : "git";
+  }
+  if (intent.kind === "git-custody-resolve") return "git-custody-resolve";
   if (intent.kind === "registered-external-effect" || intent.kind === "promotion") return "external-effect";
   const exhaustive: never = intent;
   return exhaustive;
@@ -351,6 +261,9 @@ export type OperatorAvailableAction =
   | "daemon-drain"
   | "daemon-stop"
   | "git"
+  | "git-authorise"
+  | "git-operation-draft"
+  | "git-custody-resolve"
   | "registered-external-effect"
   | "promotion";
 
@@ -456,6 +369,7 @@ export type OperatorActionStatus =
       phase: "prepared" | "dispatched" | "accepted" | "observing";
       attemptGeneration: number;
       providerActionRef?: ProviderActionRefV1;
+      gitCustody?: GitCustodyStatus;
     }
   | ({
       status: "ambiguous";
@@ -465,7 +379,15 @@ export type OperatorActionStatus =
     } & (
       | { effectRef: ArtifactRef; providerActionRef?: never }
       | { effectRef?: ArtifactRef; providerActionRef: ProviderActionRefV1 }
+      | { effectRef?: ArtifactRef; providerActionRef?: never; gitCustody: GitCustodyStatus }
     ))
+  | {
+      status: "conflict" | "quarantined";
+      commandId: string;
+      intentDigest: Sha256Digest;
+      attemptGeneration: number;
+      gitCustody: GitCustodyStatus;
+    }
   | { status: "committed"; commandId: string; receipt: OperatorActionReceipt }
   | {
       status: "rejected";
@@ -475,11 +397,24 @@ export type OperatorActionStatus =
       evidenceRefs: readonly ArtifactRef[];
     };
 
-export type OperatorActionReconcileRequest = {
+type OperatorActionReconcileBase = {
   command: OperatorMutationContext;
   projectId: ProjectId;
   targetCommandId: string;
-  expectedStatus: "pending" | "ambiguous";
   expectedAttemptGeneration: number;
   mode: "observe-only";
 };
+
+export type OperatorActionReconcileRequest =
+  | (OperatorActionReconcileBase & {
+      expectedStatus: "pending" | "ambiguous";
+      gitConflict?: never;
+    })
+  | (OperatorActionReconcileBase & {
+      expectedStatus: "conflict";
+      gitConflict: Extract<GitConflictReconcileBinding, { kind: "owned-conflict" }>;
+    })
+  | (OperatorActionReconcileBase & {
+      expectedStatus: "pending" | "ambiguous" | "quarantined";
+      gitConflict: Extract<GitConflictReconcileBinding, { kind: "inherited-successor" }>;
+    });

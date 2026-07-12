@@ -38,6 +38,8 @@ export const OPERATOR_ACTIONS = [
   "launch",
   "takeover",
   "git",
+  "git-authorise",
+  "git-custody-resolve",
   "external-effect",
 ] as const;
 

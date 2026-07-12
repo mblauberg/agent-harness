@@ -510,23 +510,79 @@ const taskTarget = {
 } as const;
 const controlIntent = { kind: "control", action: "pause", target: taskTarget } as const;
 
+const gitRepository = {
+  repositoryRoot: "/workspace/project",
+  worktreePath: "/workspace/project/.worktrees/writer",
+  gitCommonDir: "/workspace/project/.git",
+  commonDirectoryIdentityDigest: digestA,
+  repositoryStateDigest: digestA,
+  headDigest: digestA,
+  indexDigest: digestA,
+  worktreeDigest: digestA,
+  remoteStateDigest: digestA,
+  configDigest: digestA,
+  worktreeRegistryDigest: digestA,
+} as const;
+const gitExecutionProfile = {
+  profileId: "sealed_git_v1",
+  revision: 1,
+  digest: digestA,
+  gitBinaryDigest: digestA,
+  objectFormat: "sha1",
+} as const;
+const gitResultRecipe = {
+  schemaVersion: 1,
+  executionProfileDigest: digestA,
+  resultRecipeDigest: digestA,
+  beforeRepositoryStateDigest: digestA,
+  expectedSuccessRepositoryStateDigest: digestB,
+  expectedConflict: null,
+  refUpdates: [],
+  configUpdates: [],
+  commitMappings: [],
+  affectedPaths: [{ path: "src/index.ts", beforeDigest: null, afterDigest: digestB }],
+  bounds: {
+    maximumRefOrConfigUpdates: 64,
+    maximumCommitMappings: 128,
+    maximumConflictPaths: 4096,
+  },
+} as const;
 const gitIntent = {
   kind: "git",
-  repository: {
-    repositoryRoot: "/workspace/project",
-    worktreePath: "/workspace/project/.worktrees/writer",
-    remoteName: "origin",
-    expectedHeadDigest: digestA,
-    expectedIndexDigest: digestA,
-    expectedWorktreeDigest: digestA,
-    expectedRemoteDigest: digestA,
+  authorisation: {
+    projectId: "project_01",
+    projectSessionId: "ps_01",
+    expectedSessionRevision: 4,
+    expectedSessionGeneration: 2,
+    coordinationRunId: "run_01",
+    expectedRunRevision: 5,
+    expectedDependencyRevision: 3,
+    authorityRef: digestA,
+    expectedAuthorityRevision: 1,
+    expectedGitAllowlistEpoch: 1,
+    gitAllowlistDigest: digestA,
+    repositoryRoot: gitRepository.repositoryRoot,
+    worktreePath: gitRepository.worktreePath,
+    repositoryStateDigest: gitRepository.repositoryStateDigest,
+    executionProfileId: gitExecutionProfile.profileId,
+    executionProfileRevision: gitExecutionProfile.revision,
+    executionProfileDigest: gitExecutionProfile.digest,
+    operationVariant: "stage",
+    remoteBinding: null,
+    resultRecipeDigest: gitResultRecipe.resultRecipeDigest,
+    operationId: "git_operation_01",
+    effectBindingDigest: digestA,
+    decision: {
+      kind: "preauthorised",
+      grantId: "git_grant_01",
+      expectedGrantRevision: 1,
+      grantDigest: digestA,
+    },
   },
-  operation: {
-    effect: "push",
-    source: { kind: "local-branch", objectName: "feature", objectDigest: digestA },
-    destination: { kind: "remote-ref", remoteName: "origin", objectName: "feature", objectDigest: digestA },
-    policy: { kind: "force-with-lease", expectedRemoteObjectDigest: digestA },
-  },
+  repository: gitRepository,
+  executionProfile: gitExecutionProfile,
+  operation: { variant: "stage", paths: ["src/index.ts"] },
+  resultRecipe: gitResultRecipe,
 } as const;
 
 const externalIntent = {
@@ -611,10 +667,10 @@ describe("closed two-phase action intents", () => {
   });
 
   it.each([
-    "expectedHeadDigest",
-    "expectedIndexDigest",
-    "expectedWorktreeDigest",
-    "expectedRemoteDigest",
+    "headDigest",
+    "indexDigest",
+    "worktreeDigest",
+    "remoteStateDigest",
   ] as const)("requires Git state fence %s", (field) => {
     const repository = { ...gitIntent.repository } as Record<string, unknown>;
     delete repository[field];
@@ -625,21 +681,37 @@ describe("closed two-phase action intents", () => {
     })).toThrowError(new RegExp(field, "iu"));
   });
 
-  it("rejects an illegal Git source/destination combination and an unbound force push", () => {
+  it("rejects sibling operation fields and an unbound force push", () => {
     expect(() => parseOperationInput(FABRIC_OPERATIONS.operatorActionPreview, {
       command: operatorCommand,
       projectId: "project_01",
       intent: {
         ...gitIntent,
-        operation: { ...gitIntent.operation, source: gitIntent.operation.destination },
+        operation: { ...gitIntent.operation, sourceRef: "refs/heads/main" },
       },
-    })).toThrowError(/source|allowed variant/iu);
+    })).toThrowError(/sourceRef|allowed variant/iu);
     expect(() => parseOperationInput(FABRIC_OPERATIONS.operatorActionPreview, {
       command: operatorCommand,
       projectId: "project_01",
       intent: {
         ...gitIntent,
-        operation: { ...gitIntent.operation, policy: { kind: "force-with-lease" } },
+        authorisation: { ...gitIntent.authorisation, operationVariant: "push-force-with-lease" },
+        operation: {
+          variant: "push-force-with-lease",
+          remote: {
+            registrationId: "remote_01",
+            revision: 1,
+            generation: 1,
+            remoteName: "origin",
+            targetDigest: digestA,
+            adapterId: "local_git",
+            adapterContractDigest: digestA,
+          },
+          sourceRef: "refs/heads/feature",
+          destinationRef: "refs/heads/feature",
+          sourceObjectDigest: digestA,
+          destinationObjectDigest: digestA,
+        },
       },
     })).toThrowError(/expectedRemoteObjectDigest|allowed variant/iu);
   });
@@ -658,15 +730,23 @@ describe("closed two-phase action intents", () => {
     if (typeof assertCurrent !== "function") return;
 
     expect(() => Reflect.apply(assertCurrent, undefined, [gitIntent, {
-      headDigest: digestB,
-      indexDigest: digestA,
-      worktreeDigest: digestA,
-      remoteDigest: digestA,
-      objectDigests: {
-        "local-branch:feature": digestA,
-        "remote-ref:origin:feature": digestA,
-      },
-    }])).toThrowError(/Git HEAD state changed/iu);
+      revision: 4,
+      projectId: "project_01",
+      projectSessionId: "ps_01",
+      sessionRevision: 4,
+      sessionGeneration: 2,
+      coordinationRunId: "run_01",
+      runRevision: 5,
+      dependencyRevision: 3,
+      authorityRef: digestA,
+      authorityRevision: 1,
+      gitAllowlistEpoch: 1,
+      gitAllowlistDigest: digestA,
+      repository: { ...gitRepository, repositoryStateDigest: digestB },
+      executionProfile: gitExecutionProfile,
+      remoteBinding: null,
+      grant: { grantId: "git_grant_01", revision: 1, grantDigest: digestA },
+    }])).toThrowError(/repository or execution profile changed/iu);
   });
 
   it("rejects unknown or stale registered external-effect contracts", () => {
