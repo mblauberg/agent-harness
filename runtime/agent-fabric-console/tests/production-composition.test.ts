@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   OperatorActionPreview,
@@ -455,7 +455,16 @@ describe("production Console package-root bootstrap", () => {
       operations: {},
       close,
     };
+    const typedEntryPlannerFactory = vi.fn(() => ({
+      capabilities: {
+        launch: { state: "unavailable" as const, reason: "launch-preparation-unavailable" },
+        git: { state: "unavailable" as const, reason: "git-preparation-unavailable" },
+        promotion: { state: "available" as const },
+      },
+      buildIntent: vi.fn(),
+    }));
     const bootstrap = createProductionConsoleBootstrap({
+      typedEntryPlannerFactory,
       loadFabric: async () => ({
         openLocalOperatorConsoleSession: async () => ({
           client,
@@ -488,10 +497,16 @@ describe("production Console package-root bootstrap", () => {
         confirmation: expect.any(Function),
       }),
       workflowPlanner: expect.objectContaining({
+        capabilities: expect.objectContaining({ promotion: { state: "available" } }),
         prepare: expect.any(Function),
         arm: expect.any(Function),
         commit: expect.any(Function),
       }),
+    });
+    expect(typedEntryPlannerFactory).toHaveBeenCalledWith({
+      client,
+      credential,
+      projectId,
     });
   });
 

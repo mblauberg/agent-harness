@@ -14,6 +14,7 @@ import {
   type FabricConsoleFrame,
 } from "./index.js";
 import { createProductionConsoleBootstrap } from "./production-composition.js";
+import { createProductionConsoleTypedEntryPlanner } from "./typed-entry-planner.js";
 import { createFabricUiState } from "./presenter.js";
 import { renderConsoleSnapshot, type ConsoleSnapshotFormat } from "./snapshot.js";
 import {
@@ -71,6 +72,15 @@ export type ConsoleCliDependencies = Readonly<{
 export type ConsoleRefreshLoop = Readonly<{
   stop(): Promise<void>;
 }>;
+
+export function createConsoleCliBootstrap(
+  createBootstrap: typeof createProductionConsoleBootstrap =
+    createProductionConsoleBootstrap,
+): ConsoleBootstrapPort {
+  return createBootstrap({
+    typedEntryPlannerFactory: createProductionConsoleTypedEntryPlanner,
+  });
+}
 
 export function startConsoleRefreshLoop(options: Readonly<{
   refresh(): Promise<unknown>;
@@ -172,7 +182,7 @@ export async function runConsoleCli(
   if (exportValue !== undefined) {
     const startApplication = dependencies.startApplication ?? startFabricConsoleApplication;
     const application = await startApplication({
-      bootstrap: dependencies.bootstrap ?? createProductionConsoleBootstrap(),
+      bootstrap: dependencies.bootstrap ?? createConsoleCliBootstrap(),
       projectRoot,
       surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
       viewport: {
@@ -228,7 +238,7 @@ export async function runConsoleCli(
   try {
     const startApplication = dependencies.startApplication ?? startFabricConsoleApplication;
     application = await startApplication({
-      bootstrap: dependencies.bootstrap ?? createProductionConsoleBootstrap(),
+      bootstrap: dependencies.bootstrap ?? createConsoleCliBootstrap(),
       projectRoot,
       surface: arguments_.includes("--herdr") ? "herdr" : "standalone",
       viewport: {

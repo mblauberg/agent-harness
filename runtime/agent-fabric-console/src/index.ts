@@ -33,6 +33,7 @@ export * from "./runtime.js";
 export * from "./snapshot.js";
 export * from "./terminal.js";
 export * from "./workflow.js";
+export * from "./typed-entry-planner.js";
 
 export const UNICODE_POLICY = Object.freeze({
   segmentation: "unicode-segmenter@0.17.0",

@@ -550,7 +550,12 @@ function rowActions(
       )
     )
   );
-  return row.actionAvailability.actions.map((action) => {
+  const guidedServerActions = dataset.workflowCapabilities === undefined
+    ? null
+    : new Set<OperatorAvailableAction>(["project-session-launch", "git", "promotion"]);
+  return row.actionAvailability.actions
+    .filter((action) => guidedServerActions?.has(action) !== true)
+    .map((action) => {
     const reason = dataset.productionActionPlanning === true
       ? productionActionUnavailableReason(action, row, dataset, ui)
       : null;
@@ -563,7 +568,7 @@ function rowActions(
       availableAction: action,
       ...(!enabled && reason !== null ? { reason } : {}),
     };
-  });
+    });
 }
 
 function productionActionUnavailableReason(
@@ -694,19 +699,27 @@ function projectWorkflowActions(
 ): readonly PresentedAction[] {
   if (row.view !== "project") return [];
   const capabilities = dataset.workflowCapabilities;
+  if (capabilities === undefined) return [];
   const mutationReason = canMutate ? null : "operator-mutation-unavailable";
+  const authorityReason = (action: OperatorAvailableAction): string | null =>
+    row.actionAvailability.state === "available" &&
+      row.actionAvailability.actions.includes(action)
+      ? null
+      : "authority-insufficient";
   return [
     guidedAction(
       "launch",
-      mutationReason ?? capabilityReason(capabilities?.launch),
+      mutationReason ?? capabilityReason(capabilities.launch) ??
+        authorityReason("project-session-launch"),
     ),
     guidedAction(
       "git",
-      mutationReason ?? capabilityReason(capabilities?.git),
+      mutationReason ?? capabilityReason(capabilities.git) ?? authorityReason("git"),
     ),
     guidedAction(
       "promotion",
-      mutationReason ?? capabilityReason(capabilities?.promotion),
+      mutationReason ?? capabilityReason(capabilities.promotion) ??
+        authorityReason("promotion"),
     ),
   ];
 }

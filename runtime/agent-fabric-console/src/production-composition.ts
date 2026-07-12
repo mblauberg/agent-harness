@@ -35,6 +35,7 @@ import {
 import type { FabricRuntimeActivation } from "./runtime.js";
 import { createProductionConsoleWorkflowPlanner } from "./workflow.js";
 import type { ConsoleTypedEntryPlanner } from "./workflow.js";
+import type { ProductionConsoleTypedEntryPlannerFactory } from "./typed-entry-planner.js";
 
 export type ProductionConsoleActionPlannerOptions = Readonly<{
   credential: OperatorCapabilityCredential;
@@ -51,41 +52,33 @@ const supportedActions = [
   "project-session-stop",
 ] as const satisfies readonly OperatorAvailableAction[];
 type ProductionConsoleAction = typeof supportedActions[number];
-const supportedActionSet = new Set<OperatorAvailableAction>(supportedActions);
-
-function restrictActionAvailability(
-  availability: OperatorActionAvailability,
-): OperatorActionAvailability {
-  if (availability.state === "read-only") return availability;
-  const actions = availability.actions.filter((action) => supportedActionSet.has(action));
-  return (actions.length === 0
-    ? { state: "read-only", reason: "feature-unavailable" }
-    : { ...availability, actions });
-}
 
 function restrictRowActionAvailability(
   availability: OperatorActionAvailability,
   view: string,
   detailKind: string,
 ): OperatorActionAvailability {
-  const restricted = restrictActionAvailability(availability);
-  if (restricted.state === "read-only") return restricted;
+  if (availability.state === "read-only") return availability;
   if (view === "attention") {
     return { state: "read-only", reason: "state-ineligible" };
   }
-  const actions = restricted.actions.filter((action) => {
+  const actions = availability.actions.filter((action) => {
     if (view === "runs" && detailKind === "run") {
       return action === "pause" || action === "resume" ||
         action === "cancel" || action === "steer";
     }
     if (view === "project" && detailKind === "project") {
-      return action === "project-session-drain" || action === "project-session-stop";
+      return action === "project-session-drain" ||
+        action === "project-session-stop" ||
+        action === "project-session-launch" ||
+        action === "git" ||
+        action === "promotion";
     }
     return false;
   });
   return actions.length === 0
     ? { state: "read-only", reason: "state-ineligible" }
-    : { ...restricted, actions };
+    : { ...availability, actions };
 }
 
 function restrictProductionActions(
@@ -313,6 +306,7 @@ type PublicFabricModule = Readonly<{
 export type ProductionConsoleBootstrapOptions = Readonly<{
   loadFabric?: () => Promise<unknown>;
   typedEntryPlanner?: ConsoleTypedEntryPlanner;
+  typedEntryPlannerFactory?: ProductionConsoleTypedEntryPlannerFactory;
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -426,6 +420,12 @@ function protocolIncompatibleResult(
 export function createProductionConsoleBootstrap(
   options: ProductionConsoleBootstrapOptions = {},
 ): ConsoleBootstrapPort {
+  if (
+    options.typedEntryPlanner !== undefined &&
+    options.typedEntryPlannerFactory !== undefined
+  ) {
+    throw new TypeError("Console bootstrap accepts one typed-entry planner source");
+  }
   const loadFabric = options.loadFabric ?? loadInstalledFabric;
   return {
     async startOrAttach(request) {
@@ -436,6 +436,12 @@ export function createProductionConsoleBootstrap(
         const session = publicSession(
           openedSession,
         );
+        const typedEntryPlanner = options.typedEntryPlanner ??
+          options.typedEntryPlannerFactory?.({
+            client: session.client,
+            credential: session.credential,
+            projectId: session.projectId,
+          });
         return {
           status: "connected",
           binding: restrictProductionActions(
@@ -457,9 +463,9 @@ export function createProductionConsoleBootstrap(
             operatorId: session.operatorId,
             clientId: session.clientId,
             projectId: session.projectId,
-            ...(options.typedEntryPlanner === undefined
+            ...(typedEntryPlanner === undefined
               ? {}
-              : { typedEntryPlanner: options.typedEntryPlanner }),
+              : { typedEntryPlanner }),
           }),
           detach: (input) => session.detach(input),
           close: () => session.close(),

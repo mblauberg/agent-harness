@@ -680,6 +680,21 @@ describe("structured presenter and responsive Fabric renderer", () => {
     if (project === undefined) throw new Error("project fixture unavailable");
     const typedEntries: FabricConsoleDataset = {
       ...dataset,
+      pages: {
+        ...dataset.pages,
+        project: {
+          ...dataset.pages.project,
+          rows: [{
+            ...project,
+            detailRef: { kind: "project", projectId, expectedRevision: 7 },
+            actionAvailability: {
+              state: "available",
+              actions: ["project-session-launch", "promotion"],
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
       workflowCapabilities: {
         intake: { state: "available" },
         gate: { state: "available" },
@@ -714,6 +729,34 @@ describe("structured presenter and responsive Fabric renderer", () => {
       }),
       expect.objectContaining({ id: "workflow:promotion", enabled: true }),
     ]));
+
+    const withoutPromotionAuthority = presentFabricConsole(
+      {
+        ...typedEntries,
+        pages: {
+          ...typedEntries.pages,
+          project: {
+            ...typedEntries.pages.project,
+            rows: [{
+              ...typedEntries.pages.project.rows[0]!,
+              actionAvailability: {
+                state: "available",
+                actions: ["project-session-launch"],
+                requiresPreview: true,
+              },
+            }],
+          },
+        },
+      },
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(withoutPromotionAuthority.actions).toContainEqual(expect.objectContaining({
+      id: "workflow:promotion",
+      enabled: false,
+      reason: "authority-insufficient",
+    }));
   });
 
   it("offers gate decisions only on judgement-bearing Attention rows", () => {

@@ -4,13 +4,25 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   CONSOLE_CLI_USAGE,
+  createConsoleCliBootstrap,
   runConsoleCli,
   startConsoleRefreshLoop,
 } from "../src/cli.js";
+import { createProductionConsoleTypedEntryPlanner } from "../src/typed-entry-planner.js";
 import { createBootstrapUnavailableDataset } from "../src/protocol-adapter.js";
 import { FABRIC_VIEWS } from "../src/model.js";
 
 describe("standalone Console executable", () => {
+  it("registers the production typed-entry planner with the shipped bootstrap", () => {
+    const bootstrap = { startOrAttach: vi.fn() };
+    const createBootstrap = vi.fn(() => bootstrap);
+
+    expect(createConsoleCliBootstrap(createBootstrap)).toBe(bootstrap);
+    expect(createBootstrap).toHaveBeenCalledWith({
+      typedEntryPlannerFactory: createProductionConsoleTypedEntryPlanner,
+    });
+  });
+
   it("ships a non-interactive help path and honestly describes production bootstrap", () => {
     const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     return runConsoleCli(["--help"]).then(() => {
@@ -39,7 +51,10 @@ describe("standalone Console executable", () => {
       },
     });
     expect(source.startsWith("#!/usr/bin/env node\n")).toBe(true);
-    expect(source).toContain("createProductionConsoleBootstrap()");
+    expect(source).toContain("createConsoleCliBootstrap()");
+    expect(source).toContain(
+      "typedEntryPlannerFactory: createProductionConsoleTypedEntryPlanner",
+    );
     expect(source).not.toContain("unavailableBootstrap");
   });
 
