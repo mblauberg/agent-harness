@@ -23,6 +23,20 @@ unit on any violation.
 | Retention never implies deletion authority | report/preview output fixes prune eligibility to false; archive is receipt-copy only | `retention-cli.unit.test.ts` |
 | Re-exporting unchanged committed state is byte-identical | receipt v2 canonical snapshot; export time stored separately | `receipt-export.acceptance.test.ts` |
 | Status and doctor never print bearer capabilities | metadata projection omits credential paths and values | `status-cli.unit.test.ts` |
+| Typed Git grants preserve exact human-input provenance and are rechecked after asynchronous observation | operator-action input-record digest propagation plus final authority/grant/gate/profile/remote/writer claim transaction | `operator-projection-actions.test.ts`, `typed-git-service.test.ts` |
+| A fixed local Git mutation starts only with a verified native first-mutation fence | no-follow pinned path/index bytes, native `index.lock`, atomic index install, `update-ref` old-object CAS, or an exact 0700 worktree-destination reservation followed by `--no-checkout`; every other fixed-port variant reports `CAPABILITY_UNAVAILABLE` before custody | `fixed-git-mutation-port.test.ts` |
+| Git profiles, secret-free remote targets and run allow-lists come only from trusted daemon composition | production child composition forwards only typed trusted Git configuration; `TrustedGitRegistry` digest-checks profiles/remotes, defers configured run allow-lists until their exact authority tuple exists, and persists every registry/allow-list revision behind immutable triggers | `production-bootstrap-wire.test.ts`, `trusted-git-registry.test.ts`, `typed-git-migration.test.ts` |
+
+The bundled fixed local mutation port currently admits `stage`, `unstage`,
+`commit`, `branch-create` and the three `worktree-create-*` variants. Worktree
+creation pins the exact source object/ref, owns one canonical direct-child
+destination and never materialises checkout content. Remote effects, pull,
+merge/rebase and successors, branch rename/delete, worktree move/remove and
+upstream configuration remain in the closed protocol vocabulary but return
+typed unavailability unless trusted daemon composition supplies a port with the
+required native/remote CAS and deterministic-result contract. The Console must
+display that unavailable state; it must not fall back to porcelain or arbitrary
+Git execution.
 
 The live database can also be checked without provider execution:
 

@@ -154,6 +154,7 @@ export type LocalOperatorConsoleSessionOptions = Readonly<{
     | "executionProfile"
     | "maximumConcurrentProviderTurns"
     | "workspaceRoots"
+    | "trustedGitConfiguration"
     | "configuration"
   >;
   clientId?: string;

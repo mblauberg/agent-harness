@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -170,6 +170,45 @@ describe("fixed typed Git mutation port", () => {
     expect(run(actualRoot, ["diff", "--cached", "--name-only"])).toBe("tracked.txt");
   });
 
+  it("stages a tracked deletion from the exact reviewed missing-path state", async () => {
+    const root = repository("typed-git-stage-deletion");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-stage-deletion-state-")));
+    directories.push(stateRoot);
+    rmSync(join(root, "tracked.txt"));
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    const before = await port.observe(root, root);
+    run(root, ["add", "--", "tracked.txt"]);
+    const expected = await port.observe(root, root);
+    run(root, ["restore", "--staged", "--", "tracked.txt"]);
+    expect((await port.observe(root, root)).repositoryStateDigest).toBe(before.repositoryStateDigest);
+
+    await expect(port.dispatch(
+      intentFor(root, before, expected, { variant: "stage", paths: ["tracked.txt"] }),
+      { remoteTarget: null },
+    )).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(run(root, ["diff", "--cached", "--name-status"])).toBe("D\ttracked.txt");
+  });
+
+  it("creates an exact empty native index when the reviewed repository has no index file", async () => {
+    const root = repository("typed-git-stage-missing-index");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-stage-missing-index-state-")));
+    directories.push(stateRoot);
+    rmSync(join(root, ".git", "index"));
+    writeFileSync(join(root, "first.txt"), "first\n");
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    const before = await port.observe(root, root);
+    run(root, ["add", "--", "first.txt"]);
+    const expected = await port.observe(root, root);
+    rmSync(join(root, ".git", "index"));
+    expect((await port.observe(root, root)).repositoryStateDigest).toBe(before.repositoryStateDigest);
+
+    await expect(port.dispatch(
+      intentFor(root, before, expected, { variant: "stage", paths: ["first.txt"] }),
+      { remoteTarget: null },
+    )).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(run(root, ["diff", "--cached", "--name-only"])).toBe("first.txt\ntracked.txt");
+  });
+
   it("rejects project-selected executable configuration before mutation", async () => {
     const root = repository("typed-git-hostile");
     const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-hostile-state-")));
@@ -218,7 +257,83 @@ describe("fixed typed Git mutation port", () => {
     expect((await readGitObjectDigest(root, "refs/heads/main")).digest).toBe(head.digest);
   });
 
-  it("deletes a merged branch against the exact reviewed base rather than the current branch", async () => {
+  it("commits from the pinned index while the native index lock excludes a competing Git writer", async () => {
+    const root = repository("typed-git-commit-native-fence");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-commit-native-fence-state-")));
+    directories.push(stateRoot);
+    run(root, ["add", "--", "tracked.txt"]);
+    const before = await new FixedGitMutationPort({ privateStateRoot: stateRoot }).observe(root, root);
+    const parent = await readGitObjectDigest(root, "refs/heads/main");
+    const treeNative = run(root, ["write-tree"]);
+    run(root, ["update-ref", "refs/fabric-test/tree", treeNative]);
+    const tree = await readGitObjectDigest(root, "refs/fabric-test/tree");
+    const identityEnvironment = {
+      GIT_AUTHOR_NAME: "Author",
+      GIT_AUTHOR_EMAIL: "author@example.invalid",
+      GIT_AUTHOR_DATE: "2026-01-02T00:00:00.000Z",
+      GIT_COMMITTER_NAME: "Committer",
+      GIT_COMMITTER_EMAIL: "committer@example.invalid",
+      GIT_COMMITTER_DATE: "2026-01-02T00:00:00.000Z",
+    };
+    const commitNative = execFileSync("/usr/bin/git", ["commit-tree", treeNative, "-p", parent.nativeObjectId], {
+      cwd: root,
+      encoding: "utf8",
+      input: "reviewed commit\n",
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", ...identityEnvironment },
+    }).trim();
+    run(root, ["update-ref", "refs/fabric-test/commit", commitNative]);
+    const commit = await readGitObjectDigest(root, "refs/fabric-test/commit");
+    run(root, ["update-ref", "refs/heads/main", commitNative, parent.nativeObjectId]);
+    const expected = await new FixedGitMutationPort({ privateStateRoot: stateRoot }).observe(root, root);
+    run(root, ["update-ref", "refs/heads/main", parent.nativeObjectId, commitNative]);
+    let competingWriterBlocked = false;
+    const port = new FixedGitMutationPort({
+      privateStateRoot: stateRoot,
+      faultInjector: (point) => {
+        if (point === "after-final-fence") {
+          const result = spawnSync("/usr/bin/git", ["add", "--", "tracked.txt"], {
+            cwd: root,
+            encoding: "utf8",
+            env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+          });
+          competingWriterBlocked = result.status !== 0 && result.stderr.includes("index.lock");
+        }
+        return Promise.resolve();
+      },
+    });
+    const intent = intentFor(root, before, expected, {
+      variant: "commit",
+      sourceIndexDigest: before.indexDigest,
+      parentObjectDigest: parent.digest,
+      treeDigest: tree.digest,
+      message: "reviewed commit",
+      author: { name: "Author", email: "author@example.invalid", timestamp: parseTimestamp("2026-01-02T00:00:00.000Z", "test.author") },
+      committer: { name: "Committer", email: "committer@example.invalid", timestamp: parseTimestamp("2026-01-02T00:00:00.000Z", "test.committer") },
+      resultingCommitDigest: commit.digest,
+    });
+
+    await expect(port.dispatch(intent, { remoteTarget: null })).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(competingWriterBlocked).toBe(true);
+    expect((await readGitObjectDigest(root, "refs/heads/main")).digest).toBe(commit.digest);
+  });
+
+  it("unstages through a private index and one native atomic install", async () => {
+    const root = repository("typed-git-unstage-native-fence");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-unstage-native-fence-state-")));
+    directories.push(stateRoot);
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    run(root, ["add", "--", "tracked.txt"]);
+    const before = await port.observe(root, root);
+    run(root, ["restore", "--staged", "--", "tracked.txt"]);
+    const expected = await port.observe(root, root);
+    run(root, ["add", "--", "tracked.txt"]);
+    const intent = intentFor(root, before, expected, { variant: "unstage", paths: ["tracked.txt"] });
+
+    await expect(port.dispatch(intent, { remoteTarget: null })).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(run(root, ["diff", "--cached", "--name-only"])).toBe("");
+  });
+
+  it("fails closed for merged deletion without a checked-out-worktree registry fence", async () => {
     const actualRoot = repository("typed-git-safe-delete-actual");
     const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-safe-delete-state-")));
     directories.push(stateRoot);
@@ -250,11 +365,11 @@ describe("fixed typed Git mutation port", () => {
       mergedIntoObjectDigest: base.digest,
     });
 
-    await expect(port.dispatch(intent, { remoteTarget: null })).resolves.toMatchObject({ outcome: "exact-applied" });
-    expect(() => run(actualRoot, ["show-ref", "--verify", "refs/heads/topic"])).toThrow();
+    await expect(port.dispatch(intent, { remoteTarget: null })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+    expect(run(actualRoot, ["show-ref", "--verify", "refs/heads/topic"])).toContain("refs/heads/topic");
   });
 
-  it("rejects a worktree move when the source worktree state digest is stale", async () => {
+  it("fails closed for worktree move without a native registry fence", async () => {
     const root = repository("typed-git-worktree-cas");
     const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-worktree-cas-state-")));
     directories.push(stateRoot);
@@ -271,11 +386,104 @@ describe("fixed typed Git mutation port", () => {
       expectedWorktreeStateDigest: digest("f"),
     });
 
-    await expect(port.dispatch(intent, { remoteTarget: null })).rejects.toMatchObject({ code: "STALE_REVISION" });
+    await expect(port.dispatch(intent, { remoteTarget: null })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
     expect(realpathSync(source)).toBe(source);
   });
 
-  it("rejects a worktree destination whose repository-owned parent is a symlink", async () => {
+  it("creates a detached no-checkout worktree from the exact reviewed object", async () => {
+    const root = repository("typed-git-worktree-create-detached");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-worktree-create-detached-state-")));
+    directories.push(stateRoot);
+    mkdirSync(join(root, ".worktrees"));
+    const destination = join(root, ".worktrees", "reviewer");
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    const head = await readGitObjectDigest(root, "refs/heads/main");
+    const before = await port.observe(root, root);
+    run(root, ["worktree", "add", "--no-checkout", "--detach", destination, head.nativeObjectId]);
+    chmodSync(destination, 0o700);
+    const expected = await port.observe(root, root);
+    run(root, ["worktree", "remove", "--force", destination]);
+    expect((await port.observe(root, root)).repositoryStateDigest).toBe(before.repositoryStateDigest);
+
+    await expect(port.dispatch(intentFor(root, before, expected, {
+      variant: "worktree-create-detached",
+      destinationWorktreePath: destination,
+      sourceObjectDigest: head.digest,
+    }), { remoteTarget: null })).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(realpathSync(destination)).toBe(destination);
+    expect(run(destination, ["status", "--porcelain"])).toContain("D  tracked.txt");
+  });
+
+  it("creates and checks out a reviewed new branch without materialising worktree files", async () => {
+    const root = repository("typed-git-worktree-create-branch");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-worktree-create-branch-state-")));
+    directories.push(stateRoot);
+    mkdirSync(join(root, ".worktrees"));
+    const destination = join(root, ".worktrees", "writer");
+    const branchRef = "refs/heads/reviewed-writer";
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    const head = await readGitObjectDigest(root, "refs/heads/main");
+    const before = await port.observe(root, root);
+    run(root, ["worktree", "add", "--no-checkout", "-b", "reviewed-writer", destination, head.nativeObjectId]);
+    chmodSync(destination, 0o700);
+    const expected = await port.observe(root, root);
+    run(root, ["worktree", "remove", "--force", destination]);
+    run(root, ["update-ref", "-d", branchRef, head.nativeObjectId]);
+    expect((await port.observe(root, root)).repositoryStateDigest).toBe(before.repositoryStateDigest);
+
+    await expect(port.dispatch(intentFor(root, before, expected, {
+      variant: "worktree-create-new-branch",
+      destinationWorktreePath: destination,
+      sourceObjectDigest: head.digest,
+      branchRef,
+    }), { remoteTarget: null })).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(run(destination, ["symbolic-ref", "HEAD"])).toBe(branchRef);
+    expect(existsSync(join(destination, "tracked.txt"))).toBe(false);
+  });
+
+  it("binds an existing branch worktree only while its reviewed object still matches", async () => {
+    const root = repository("typed-git-worktree-existing-branch");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-worktree-existing-branch-state-")));
+    directories.push(stateRoot);
+    mkdirSync(join(root, ".worktrees"));
+    const destination = join(root, ".worktrees", "existing-writer");
+    const branchRef = "refs/heads/existing-writer";
+    run(root, ["branch", "existing-writer", "HEAD"]);
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    const source = await readGitObjectDigest(root, branchRef);
+    const before = await port.observe(root, root);
+    run(root, ["worktree", "add", "--no-checkout", destination, "existing-writer"]);
+    chmodSync(destination, 0o700);
+    const expected = await port.observe(root, root);
+    run(root, ["worktree", "remove", "--force", destination]);
+    expect((await port.observe(root, root)).repositoryStateDigest).toBe(before.repositoryStateDigest);
+    let competingRefWriterBlocked = false;
+    const dispatchPort = new FixedGitMutationPort({
+      privateStateRoot: stateRoot,
+      faultInjector: (point) => {
+        if (point === "after-final-fence") {
+          const result = spawnSync("/usr/bin/git", ["update-ref", "-d", branchRef, source.nativeObjectId], {
+            cwd: root,
+            encoding: "utf8",
+            env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+          });
+          competingRefWriterBlocked = result.status !== 0 && result.stderr.includes("cannot lock ref");
+        }
+        return Promise.resolve();
+      },
+    });
+
+    await expect(dispatchPort.dispatch(intentFor(root, before, expected, {
+      variant: "worktree-create-existing-branch",
+      destinationWorktreePath: destination,
+      sourceObjectDigest: source.digest,
+      branchRef,
+    }), { remoteTarget: null })).resolves.toMatchObject({ outcome: "exact-applied" });
+    expect(competingRefWriterBlocked).toBe(true);
+    expect(run(destination, ["symbolic-ref", "HEAD"])).toBe(branchRef);
+  });
+
+  it("rejects a symlinked worktree parent before destination custody", async () => {
     const root = repository("typed-git-worktree-symlink");
     const outside = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-worktree-outside-")));
     const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-worktree-symlink-state-")));
@@ -316,5 +524,58 @@ describe("fixed typed Git mutation port", () => {
     await expect(port.dispatch(intent, { remoteTarget: null })).rejects.toMatchObject({ code: "STALE_REVISION" });
     expect(injected).toBe(true);
     expect(run(root, ["diff", "--cached", "--name-only"])).toBe("");
+  });
+
+  it("stages pinned reviewed bytes even when the worktree changes after the final observation", async () => {
+    const root = repository("typed-git-pinned-stage");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-pinned-stage-state-")));
+    directories.push(stateRoot);
+    let injected = false;
+    const port = new FixedGitMutationPort({
+      privateStateRoot: stateRoot,
+      faultInjector: (point) => {
+        if (point === "after-final-fence") {
+          injected = true;
+          writeFileSync(join(root, "tracked.txt"), "unreviewed replacement\n");
+        }
+        return Promise.resolve();
+      },
+    });
+    const before = await port.observe(root, root);
+    run(root, ["add", "--", "tracked.txt"]);
+    const expected = await port.observe(root, root);
+    run(root, ["restore", "--staged", "--", "tracked.txt"]);
+    const intent = intentFor(root, before, expected, { variant: "stage", paths: ["tracked.txt"] });
+
+    await expect(port.dispatch(intent, { remoteTarget: null })).resolves.toMatchObject({ outcome: "inconsistent" });
+    expect(injected).toBe(true);
+    expect(run(root, ["show", ":tracked.txt"])).toBe("after");
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("unreviewed replacement\n");
+  });
+
+  it("fails closed for a variant without a native deterministic fence", async () => {
+    const root = repository("typed-git-unavailable-merge");
+    const stateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "typed-git-unavailable-merge-state-")));
+    directories.push(stateRoot);
+    const port = new FixedGitMutationPort({ privateStateRoot: stateRoot });
+    const before = await port.observe(root, root);
+    const head = await readGitObjectDigest(root, "refs/heads/main");
+    const intent = intentFor(root, before, before, {
+      variant: "merge-commit-start",
+      sourceRef: "refs/heads/main",
+      destinationRef: "refs/heads/main",
+      sourceObjectDigest: head.digest,
+      destinationObjectDigest: head.digest,
+      backendId: "merge-ort-v1",
+      orderedParentDigests: [head.digest, head.digest],
+      outputTreeDigest: digest("a"),
+      message: "merge",
+      author: { name: "Author", email: "author@example.invalid", timestamp: parseTimestamp("2026-01-02T00:00:00.000Z", "test.author") },
+      committer: { name: "Committer", email: "committer@example.invalid", timestamp: parseTimestamp("2026-01-02T00:00:00.000Z", "test.committer") },
+      resultingCommitDigest: digest("b"),
+    } as OperatorGitIntent["operation"]);
+
+    await expect(port.dispatch(intent, { remoteTarget: null })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+    expect((await readGitObjectDigest(root, "refs/heads/main")).digest).toBe(head.digest);
   });
 });

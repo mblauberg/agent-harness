@@ -742,6 +742,12 @@ class ProductionOperatorActions {
 
   #typedGitAdministrativeRequest(request: OperatorEffectRequest): TypedGitAdministrativeRequest {
     if (!isTypedGitAdministration(request.intent)) throw new TypeError("typed Git administration requires its closed intent");
+    if (request.operatorInputRecordDigest === undefined) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "typed Git administration requires the exact independently attested operator input record",
+      );
+    }
     const scope = this.#effectScope(request);
     return {
       commandId: request.commandId,
@@ -755,7 +761,7 @@ class ProductionOperatorActions {
       intentDigest: request.intentDigest,
       beforeStateDigest: request.beforeStateDigest,
       attemptGeneration: request.attemptGeneration,
-      operatorInputRecordDigest: request.operatorInputRecordDigest ?? request.intentDigest,
+      operatorInputRecordDigest: request.operatorInputRecordDigest,
     };
   }
 

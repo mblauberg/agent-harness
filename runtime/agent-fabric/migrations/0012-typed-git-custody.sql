@@ -62,6 +62,24 @@ CREATE TABLE git_execution_profiles(
   CHECK(length(helper_registry_digest)=71 AND substr(helper_registry_digest,1,7)='sha256:'),
   CHECK(length(inspector_digest)=71 AND substr(inspector_digest,1,7)='sha256:')
 );
+CREATE UNIQUE INDEX one_active_git_execution_profile
+  ON git_execution_profiles(profile_id) WHERE state='active';
+CREATE TRIGGER git_execution_profile_identity_immutable
+BEFORE UPDATE OF profile_id,revision,profile_digest,git_binary_path,git_binary_version,
+  git_binary_digest,object_format,merge_backend_id,rebase_backend_id,environment_digest,
+  helper_registry_digest,inspector_digest,created_at ON git_execution_profiles
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_profile_immutable'); END;
+CREATE TRIGGER git_execution_profile_state_monotonic
+BEFORE UPDATE OF state ON git_execution_profiles
+WHEN NOT (OLD.state='active' AND NEW.state='revoked')
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_profile_state'); END;
+CREATE TRIGGER git_execution_profile_delete_forbidden
+BEFORE DELETE ON git_execution_profiles
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_profile_immutable'); END;
+CREATE TRIGGER global_revision_git_execution_profile_insert AFTER INSERT ON git_execution_profiles
+BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_git_execution_profile_update AFTER UPDATE ON git_execution_profiles
+BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
 CREATE TABLE git_remote_registrations(
   registration_id TEXT NOT NULL,
@@ -85,6 +103,22 @@ CREATE TABLE git_remote_registrations(
 );
 CREATE UNIQUE INDEX one_active_git_remote_name
   ON git_remote_registrations(project_id,remote_name) WHERE state='active';
+CREATE TRIGGER git_remote_registration_identity_immutable
+BEFORE UPDATE OF registration_id,revision,generation,project_id,remote_name,transport_kind,
+  target_identity,target_digest,adapter_id,adapter_contract_digest,credential_selector_digest,created_at
+ON git_remote_registrations
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_remote_immutable'); END;
+CREATE TRIGGER git_remote_registration_state_monotonic
+BEFORE UPDATE OF state ON git_remote_registrations
+WHEN NOT (OLD.state='active' AND NEW.state='revoked')
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_remote_state'); END;
+CREATE TRIGGER git_remote_registration_delete_forbidden
+BEFORE DELETE ON git_remote_registrations
+BEGIN SELECT RAISE(ABORT,'INVARIANT_git_remote_immutable'); END;
+CREATE TRIGGER global_revision_git_remote_insert AFTER INSERT ON git_remote_registrations
+BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER global_revision_git_remote_update AFTER UPDATE ON git_remote_registrations
+BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
 CREATE TABLE run_git_allowlists(
   project_session_id TEXT NOT NULL,
@@ -147,6 +181,45 @@ CREATE TABLE run_git_allowlist_paths(
   FOREIGN KEY(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
     REFERENCES run_git_allowlists(project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch)
 );
+CREATE TRIGGER run_git_allowlist_identity_immutable
+BEFORE UPDATE ON run_git_allowlists
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_immutable'); END;
+CREATE TRIGGER run_git_allowlist_delete_forbidden
+BEFORE DELETE ON run_git_allowlists
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_immutable'); END;
+CREATE TRIGGER global_revision_run_git_allowlist_insert AFTER INSERT ON run_git_allowlists
+BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
+CREATE TRIGGER run_git_allowlist_variant_immutable
+BEFORE UPDATE ON run_git_allowlist_variants
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_variant_delete_forbidden
+BEFORE DELETE ON run_git_allowlist_variants
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_profile_immutable
+BEFORE UPDATE ON run_git_allowlist_profiles
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_profile_delete_forbidden
+BEFORE DELETE ON run_git_allowlist_profiles
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_remote_immutable
+BEFORE UPDATE ON run_git_allowlist_remotes
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_remote_delete_forbidden
+BEFORE DELETE ON run_git_allowlist_remotes
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_ref_immutable
+BEFORE UPDATE ON run_git_allowlist_refs
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_ref_delete_forbidden
+BEFORE DELETE ON run_git_allowlist_refs
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_path_immutable
+BEFORE UPDATE ON run_git_allowlist_paths
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
+CREATE TRIGGER run_git_allowlist_path_delete_forbidden
+BEFORE DELETE ON run_git_allowlist_paths
+BEGIN SELECT RAISE(ABORT,'INVARIANT_run_git_allowlist_child_immutable'); END;
 
 CREATE TABLE operator_git_grants(
   grant_id TEXT NOT NULL,
@@ -327,28 +400,96 @@ CREATE UNIQUE INDEX one_live_operator_daemon_stop
 CREATE TABLE operator_external_effect_bindings(
   custody_id TEXT PRIMARY KEY REFERENCES operator_effect_custody(custody_id),
   effect_kind TEXT NOT NULL CHECK(effect_kind IN ('registered-external-effect','promotion')),
-  integration_id TEXT NOT NULL,
+  integration_id TEXT NOT NULL CHECK(length(integration_id) BETWEEN 1 AND 256),
   integration_generation INTEGER NOT NULL CHECK(integration_generation>=1),
-  operation_id TEXT NOT NULL,
-  contract_digest TEXT NOT NULL,
-  target_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 256),
+  contract_digest TEXT NOT NULL CHECK(length(contract_digest)=71 AND substr(contract_digest,1,7)='sha256:'),
+  target_id TEXT NOT NULL CHECK(length(target_id) BETWEEN 1 AND 512),
   target_revision INTEGER NOT NULL CHECK(target_revision>=1),
-  request_artifact_path TEXT NOT NULL,
-  request_artifact_digest TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL,
+  request_artifact_path TEXT NOT NULL CHECK(length(request_artifact_path) BETWEEN 1 AND 4096),
+  request_artifact_digest TEXT NOT NULL CHECK(
+    length(request_artifact_digest)=71 AND substr(request_artifact_digest,1,7)='sha256:'
+  ),
+  idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 512),
   release_gate_id TEXT REFERENCES scoped_gates(gate_id),
-  release_gate_revision INTEGER,
-  release_binding_digest TEXT,
+  release_gate_revision INTEGER CHECK(release_gate_revision IS NULL OR release_gate_revision>=1),
+  release_binding_digest TEXT CHECK(
+    release_binding_digest IS NULL OR
+    (length(release_binding_digest)=71 AND substr(release_binding_digest,1,7)='sha256:')
+  ),
   lookup_generation INTEGER NOT NULL DEFAULT 0 CHECK(lookup_generation>=0),
   lookup_evidence_digest TEXT,
   created_at INTEGER NOT NULL,
-  UNIQUE(integration_id,idempotency_key)
+  UNIQUE(integration_id,idempotency_key),
+  CHECK(
+    (effect_kind='registered-external-effect'
+      AND release_gate_id IS NULL
+      AND release_gate_revision IS NULL
+      AND release_binding_digest IS NULL) OR
+    (effect_kind='promotion'
+      AND release_gate_id IS NOT NULL
+      AND release_gate_revision IS NOT NULL
+      AND release_binding_digest IS NOT NULL)
+  ),
+  CHECK(
+    (lookup_generation=0 AND lookup_evidence_digest IS NULL) OR
+    (lookup_generation>0 AND lookup_evidence_digest IS NOT NULL
+      AND length(lookup_evidence_digest)=71
+      AND substr(lookup_evidence_digest,1,7)='sha256:')
+  )
 );
 INSERT INTO operator_external_effect_bindings SELECT * FROM operator_external_effect_bindings_0010;
 DROP TABLE operator_external_effect_bindings_0010;
 DROP TABLE operator_effect_custody_0010;
 CREATE INDEX operator_external_effect_bindings_recovery
   ON operator_external_effect_bindings(lookup_generation,custody_id);
+
+CREATE TRIGGER operator_external_effect_binding_insert_guard
+BEFORE INSERT ON operator_external_effect_bindings
+BEGIN
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM operator_effect_custody custody
+     WHERE custody.custody_id=NEW.custody_id
+       AND custody.state='prepared'
+       AND custody.operation='external-effect'
+       AND json_valid(custody.intent_json)=1
+       AND json_extract(custody.intent_json,'$.kind')=NEW.effect_kind
+  ) THEN RAISE(ABORT,'INVARIANT_external_effect_parent') END;
+
+  SELECT CASE WHEN NEW.effect_kind='registered-external-effect' AND NOT EXISTS (
+    SELECT 1 FROM operator_effect_custody custody
+     WHERE custody.custody_id=NEW.custody_id
+       AND json_extract(custody.intent_json,'$.integrationId')=NEW.integration_id
+       AND json_extract(custody.intent_json,'$.expectedIntegrationGeneration')=NEW.integration_generation
+       AND json_extract(custody.intent_json,'$.operationId')=NEW.operation_id
+       AND json_extract(custody.intent_json,'$.contractDigest')=NEW.contract_digest
+       AND json_extract(custody.intent_json,'$.targetId')=NEW.target_id
+       AND json_extract(custody.intent_json,'$.expectedTargetRevision')=NEW.target_revision
+       AND json_extract(custody.intent_json,'$.requestArtifactRef.path')=NEW.request_artifact_path
+       AND json_extract(custody.intent_json,'$.requestArtifactRef.digest')=NEW.request_artifact_digest
+       AND json_extract(custody.intent_json,'$.idempotencyKey')=NEW.idempotency_key
+  ) THEN RAISE(ABORT,'INVARIANT_external_effect_intent_binding') END;
+
+  SELECT CASE WHEN NEW.effect_kind='promotion' AND NOT EXISTS (
+    SELECT 1 FROM operator_effect_custody custody
+    JOIN scoped_gates gate ON gate.gate_id=NEW.release_gate_id
+     WHERE custody.custody_id=NEW.custody_id
+       AND gate.project_session_id=custody.project_session_id
+       AND gate.scope_kind='release'
+       AND gate.status='approved'
+       AND gate.revision=NEW.release_gate_revision
+       AND json_extract(custody.intent_json,'$.gateId')=NEW.release_gate_id
+       AND json_extract(custody.intent_json,'$.expectedGateRevision')=NEW.release_gate_revision
+       AND json_extract(custody.intent_json,'$.releaseBinding.acceptedDeliveryReceiptRef.path')=NEW.request_artifact_path
+       AND json_extract(custody.intent_json,'$.releaseBinding.acceptedDeliveryReceiptRef.digest')=NEW.request_artifact_digest
+       AND json_extract(custody.intent_json,'$.releaseBinding.promotionAction')=NEW.operation_id
+       AND json_extract(custody.intent_json,'$.releaseBinding.target')=NEW.target_id
+       AND json_extract(gate.release_binding_json,'$.acceptedDeliveryReceiptRef.path')=NEW.request_artifact_path
+       AND json_extract(gate.release_binding_json,'$.acceptedDeliveryReceiptRef.digest')=NEW.request_artifact_digest
+       AND json_extract(gate.release_binding_json,'$.promotionAction')=NEW.operation_id
+       AND json_extract(gate.release_binding_json,'$.target')=NEW.target_id
+  ) THEN RAISE(ABORT,'INVARIANT_promotion_release_binding') END;
+END;
 
 CREATE TRIGGER operator_external_effect_binding_identity_immutable
 BEFORE UPDATE OF custody_id,effect_kind,integration_id,integration_generation,operation_id,

@@ -90,6 +90,11 @@ import {
 import { FixedGitMutationPort, type GitMutationPort } from "../operator/fixed-git-mutation-port.js";
 import { TypedGitService, type GitConflictInspectorPort } from "../operator/typed-git-service.js";
 import {
+  TrustedGitRegistry,
+  type TrustedGitConfiguration,
+  type TrustedRunGitAllowlist,
+} from "../operator/trusted-git-registry.js";
+import {
   OperatorActionStore,
   type OperatorActionEffectPort,
   type OperatorActionStatePort,
@@ -195,6 +200,7 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   herdr?: HerdrDaemonIntegrationConfiguration;
   gitMutationPort?: GitMutationPort;
   gitConflictInspector?: GitConflictInspectorPort;
+  trustedGitConfiguration?: TrustedGitConfiguration;
 };
 
 type Row = Record<string, unknown>;
@@ -916,6 +922,8 @@ export class Fabric {
   readonly #herdr: HerdrDaemonIntegration;
   readonly #herdrConfigured: boolean;
   readonly #typedGit: TypedGitService;
+  readonly #trustedGitRegistry: TrustedGitRegistry;
+  readonly #trustedRunGitAllowlists: readonly TrustedRunGitAllowlist[];
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -975,6 +983,18 @@ export class Fabric {
       privateStateRoot: dirname(realpathSync(options.databasePath)),
     });
     const privateStateRoot = dirname(realpathSync(options.databasePath));
+    this.#trustedGitRegistry = new TrustedGitRegistry(this.#database, this.#clock);
+    this.#trustedRunGitAllowlists = options.trustedGitConfiguration?.runAllowlists ?? [];
+    if (options.trustedGitConfiguration !== undefined) {
+      this.#trustedGitRegistry.materialize({
+        ...(options.trustedGitConfiguration.executionProfiles === undefined
+          ? {}
+          : { executionProfiles: options.trustedGitConfiguration.executionProfiles }),
+        ...(options.trustedGitConfiguration.remoteRegistrations === undefined
+          ? {}
+          : { remoteRegistrations: options.trustedGitConfiguration.remoteRegistrations }),
+      });
+    }
     const gitMutationPort = options.gitMutationPort ?? new FixedGitMutationPort({
       privateStateRoot,
       clock: this.#clock,
@@ -983,6 +1003,12 @@ export class Fabric {
       database: this.#database,
       gitPort: gitMutationPort,
       ...(options.gitConflictInspector === undefined ? {} : { conflictInspector: options.gitConflictInspector }),
+      materializeTrustedRunAllowlist: (identity) => {
+        const matching = this.#trustedRunGitAllowlists.filter((allowlist) =>
+          allowlist.projectSessionId === identity.projectSessionId &&
+          allowlist.coordinationRunId === identity.coordinationRunId);
+        if (matching.length > 0) this.#trustedGitRegistry.materialize({ runAllowlists: matching });
+      },
       clock: this.#clock,
       daemonInstanceId: `git-owner-${randomBytes(16).toString("hex")}`,
     });
@@ -1115,6 +1141,15 @@ export class Fabric {
       clock: this.#clock,
     });
     this.#herdrConfigured = options.herdr !== undefined;
+  }
+
+  /** Trusted in-process daemon composition only; no protocol operation dispatches here. */
+  materializeTrustedGitConfiguration(configuration: TrustedGitConfiguration): {
+    profiles: number;
+    remotes: number;
+    runAllowlists: number;
+  } {
+    return this.#trustedGitRegistry.materialize(configuration);
   }
 
   async executeHerdrAction(request: HerdrDaemonActionRequest): Promise<HerdrDaemonActionResult> {

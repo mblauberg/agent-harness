@@ -1914,7 +1914,7 @@ const gitResolutionEligibilityCodec = unionOf([
     reason: gitResolutionEligibilityReasonCodec,
   }),
 ]);
-const gitCustodyStatusCodec = objectCodec({
+const gitCustodyStatusBaseCodec = objectCodec({
   custodyId: identifier,
   bindingStateRevision: positiveInteger,
   reservationGeneration: positiveInteger,
@@ -1929,6 +1929,45 @@ const gitCustodyStatusCodec = objectCodec({
   lookupObservedAt: nullable(timestamp),
   resolutionEligibility: gitResolutionEligibilityCodec,
 });
+const gitCustodyStatusCodec = parserBacked(
+  gitCustodyStatusBaseCodec,
+  (value) => {
+    const custody = value as Record<string, unknown>;
+    const predecessorCustodyId = custody.predecessorCustodyId;
+    const predecessorConflictGeneration = custody.predecessorConflictGeneration;
+    if ((predecessorCustodyId === null) !== (predecessorConflictGeneration === null)) {
+      throw new TypeError("Git custody predecessor lineage must be wholly present or absent");
+    }
+    const lookupGeneration = custody.lookupGeneration as number;
+    const lookupEvidenceDigest = custody.lookupEvidenceDigest;
+    const lookupOutcome = custody.lookupOutcome;
+    const lookupObservedAt = custody.lookupObservedAt;
+    const lookupFailureSignatureDigest = custody.lookupFailureSignatureDigest;
+    if (lookupGeneration === 0) {
+      if (lookupEvidenceDigest !== null || lookupOutcome !== null || lookupObservedAt !== null || lookupFailureSignatureDigest !== null) {
+        throw new TypeError("Git custody lookup generation zero cannot carry lookup evidence");
+      }
+    } else if (lookupEvidenceDigest === null || lookupOutcome === null || lookupObservedAt === null) {
+      throw new TypeError("Git custody positive lookup generation requires complete lookup evidence");
+    }
+    const signatureOutcomes = new Set([
+      "incomplete", "unavailable", "inconsistent", "inspector-unavailable",
+      "remote-proof-permanently-unavailable", "mixed-local-remote-evidence", "evidence-integrity-failure",
+      "conflict-state-unverifiable",
+    ]);
+    if (signatureOutcomes.has(String(lookupOutcome)) !== (lookupFailureSignatureDigest !== null)) {
+      throw new TypeError("Git custody lookup failure signature does not match its outcome");
+    }
+    const eligibility = custody.resolutionEligibility as Record<string, unknown>;
+    if (eligibility.kind === "eligible" && (
+      eligibility.lookupGeneration !== lookupGeneration ||
+      eligibility.evidenceDigest !== lookupEvidenceDigest ||
+      eligibility.reason !== lookupOutcome
+    )) throw new TypeError("Git custody resolution eligibility must bind the latest lookup evidence and outcome");
+    return value;
+  },
+  gitCustodyStatusBaseCodec.example,
+);
 const ownedConflictReconcileCodec = objectCodec({
   kind: literal("owned-conflict"),
   custodyId: identifier,
@@ -1999,7 +2038,7 @@ const operatorActionReconcileCodec = parserBacked(
     targetCommandId: "target_command_01",
   },
 );
-const operatorActionStatusCodec = unionOf([
+const operatorActionStatusBaseCodec = unionOf([
   objectCodec({ status: literal("not-found"), commandId: identifier }),
   objectCodec({
     status: literal("pending"),
@@ -2079,6 +2118,24 @@ const operatorActionStatusCodec = unionOf([
     evidenceRefs: artifactRefsCodec,
   }),
 ]);
+const operatorActionStatusCodec = parserBacked(
+  operatorActionStatusBaseCodec,
+  (value) => {
+    const status = value as Record<string, unknown>;
+    const custody = status.gitCustody as Record<string, unknown> | undefined;
+    if (custody === undefined) return value;
+    const predecessorPresent = custody.predecessorCustodyId !== null && custody.predecessorConflictGeneration !== null;
+    const eligibility = custody.resolutionEligibility as Record<string, unknown>;
+    if (status.status === "pending" && (
+      status.phase !== "prepared" || !predecessorPresent || custody.ownedConflictGeneration !== null || eligibility.kind !== "none"
+    )) throw new TypeError("Git custody pending status requires one inherited predecessor and no owned conflict or eligibility");
+    if (status.status === "conflict" && (
+      typeof custody.ownedConflictGeneration !== "number" || eligibility.kind !== "none"
+    )) throw new TypeError("Git custody conflict status requires one owned conflict and no resolution eligibility");
+    return value;
+  },
+  operatorActionStatusBaseCodec.example,
+);
 
 const operatorActionAvailabilityCodec = unionOf([
   objectCodec({

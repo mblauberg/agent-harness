@@ -217,4 +217,58 @@ describe("typed Git authority contract", () => {
       gitConflict: { ...reconcile.gitConflict, expectedOwnedConflictGeneration: null },
     })).toThrowError(/owned|generation|variant/iu);
   });
+
+  it("rejects impossible custody lineage, lookup and eligibility status combinations", () => {
+    const base = {
+      status: "ambiguous",
+      commandId: "commit_git_ambiguous_01",
+      intentDigest: sha("1"),
+      attemptGeneration: 2,
+      gitCustody: {
+        custodyId: "custody_git_01",
+        bindingStateRevision: 2,
+        reservationGeneration: 1,
+        commonDirectoryIdentityDigest: sha("2"),
+        predecessorCustodyId: null,
+        predecessorConflictGeneration: null,
+        ownedConflictGeneration: null,
+        lookupGeneration: 1,
+        lookupEvidenceDigest: sha("3"),
+        lookupOutcome: "unavailable",
+        lookupFailureSignatureDigest: sha("4"),
+        lookupObservedAt: "2026-07-12T10:00:00.000Z",
+        resolutionEligibility: { kind: "none" },
+      },
+    } as const;
+    expect(parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, base)).toStrictEqual(base);
+    for (const gitCustody of [
+      { ...base.gitCustody, predecessorCustodyId: "custody_parent_01" },
+      { ...base.gitCustody, lookupGeneration: 0 },
+      { ...base.gitCustody, lookupFailureSignatureDigest: null },
+      { ...base.gitCustody, lookupOutcome: "exact-no-effect" },
+      {
+        ...base.gitCustody,
+        resolutionEligibility: {
+          kind: "eligible",
+          lookupGeneration: 2,
+          evidenceDigest: sha("3"),
+          reason: "inspector-unavailable",
+        },
+      },
+    ]) {
+      expect(() => parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
+        ...base,
+        gitCustody,
+      })).toThrowError(/custody|lookup|lineage|eligib|signature/iu);
+    }
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
+      ...base,
+      status: "conflict",
+    })).toThrowError(/custody|conflict|owned/iu);
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
+      ...base,
+      status: "pending",
+      phase: "prepared",
+    })).toThrowError(/custody|pending|predecessor/iu);
+  });
 });

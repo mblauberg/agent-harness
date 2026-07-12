@@ -29,6 +29,7 @@ import {
   OperatorActionStore,
   type OperatorActionCurrentState,
   type OperatorActionEffectPort,
+  type OperatorEffectRequest,
   type OperatorEffectOutcome,
   type OperatorActionStatePort,
   type OperatorLaunchCustodyPort,
@@ -794,9 +795,11 @@ describe("operator action store", () => {
       }),
     };
     let dispatches = 0;
+    let dispatchedRequest: OperatorEffectRequest | null = null;
     const effectPort: OperatorActionEffectPort = {
-      dispatch: async () => {
+      dispatch: async (request) => {
         dispatches += 1;
+        dispatchedRequest = request;
         return { status: "committed", afterState: { lifecycleState: "paused" } };
       },
       observe: async () => {
@@ -882,6 +885,10 @@ describe("operator action store", () => {
     ));
     expect(await actions.commit(fixture.context, commitRequest)).toEqual(receipt);
     expect(dispatches).toBe(1);
+    expect(dispatchedRequest).toMatchObject({
+      operatorInputRecordDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    });
+    expect((dispatchedRequest as OperatorEffectRequest | null)?.operatorInputRecordDigest).not.toBe(preview.intentDigest);
     expect(actions.status({
       credential: fixture.credential,
       projectId,

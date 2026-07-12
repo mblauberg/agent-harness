@@ -76,6 +76,50 @@ describe("typed Git custody migration 0012", () => {
     expect(admissionSql.sql).toMatch(/'conflict'.*'ambiguous'.*'quarantined'/su);
   });
 
+  it("preserves registered and promotion external-effect guards after the 0012 rebuild", () => {
+    const database = migrated();
+    database.pragma("foreign_keys = OFF");
+    const digest = `sha256:${"a".repeat(64)}`;
+    database.prepare(`
+      INSERT INTO operator_effect_custody(
+        custody_id,operator_id,project_id,project_session_id,principal_generation,command_id,operation,
+        intent_digest,before_state_digest,intent_json,state,created_at,updated_at
+      ) VALUES('external_parent','operator_01','project_01','session_01',1,'command_01','external-effect',
+        ?,?,?,'prepared',1,1)
+    `).run(digest, digest, JSON.stringify({
+      kind: "registered-external-effect",
+      integrationId: "integration_01",
+      expectedIntegrationGeneration: 1,
+      operationId: "effect_01",
+      contractDigest: digest,
+      targetId: "target_01",
+      expectedTargetRevision: 1,
+      requestArtifactRef: { path: "effect.json", digest },
+      idempotencyKey: "idempotency_01",
+    }));
+    const insert = database.prepare(`
+      INSERT INTO operator_external_effect_bindings(
+        custody_id,effect_kind,integration_id,integration_generation,operation_id,contract_digest,
+        target_id,target_revision,request_artifact_path,request_artifact_digest,idempotency_key,
+        release_gate_id,release_gate_revision,release_binding_digest,lookup_generation,
+        lookup_evidence_digest,created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+
+    expect(() => insert.run(
+      "external_parent", "registered-external-effect", "wrong_integration", 1, "effect_01", digest,
+      "target_01", 1, "effect.json", digest, "idempotency_01", null, null, null, 0, null, 1,
+    )).toThrowError(/INVARIANT_external_effect_intent_binding/iu);
+    expect(() => insert.run(
+      "external_parent", "registered-external-effect", "integration_01", 1, "effect_01", digest,
+      "target_01", 1, "effect.json", digest, "idempotency_01", "gate_01", 1, digest, 0, null, 1,
+    )).toThrowError(/INVARIANT_external_effect_intent_binding|CHECK constraint failed/iu);
+    expect(() => insert.run(
+      "external_parent", "registered-external-effect", "integration_01", 1, "effect_01", "not-a-digest",
+      "target_01", 1, "effect.json", digest, "idempotency_01", null, null, null, 0, null, 1,
+    )).toThrowError(/INVARIANT_external_effect_intent_binding|CHECK constraint failed/iu);
+  });
+
   it("fails closed instead of inferring legacy coarse Git custody", () => {
     const database = migrated();
     database.pragma("foreign_keys = OFF");

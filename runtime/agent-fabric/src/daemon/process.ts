@@ -49,6 +49,7 @@ import {
   createOptionalGitHubHostedChecksAdapter,
   type OptionalGitHubHostedChecksConfiguration,
 } from "../operator/github-hosted-checks.js";
+import type { TrustedGitConfiguration } from "../operator/trusted-git-registry.js";
 
 class DaemonProtocolError extends Error {
   readonly code: string;
@@ -101,6 +102,9 @@ const workspaceRoots = Array.isArray(workspaceRootsValue) && workspaceRootsValue
 const githubHostedChecksValue: unknown = JSON.parse(
   process.env.AGENT_FABRIC_GITHUB_HOSTED_CHECKS_JSON ?? '{"enabled":false}',
 );
+const trustedGitValue: unknown = JSON.parse(process.env.AGENT_FABRIC_TRUSTED_GIT_JSON ?? "{}");
+if (!isRecord(trustedGitValue)) throw new Error("trusted Git daemon composition must be an object");
+const trustedGitConfiguration = trustedGitValue as TrustedGitConfiguration;
 const herdrProcessConfiguration = parseHerdrDaemonProcessConfiguration(
   process.env.AGENT_FABRIC_HERDR_JSON,
 );
@@ -222,6 +226,7 @@ const fabric = await openFabric({
   workspaceRoots,
   adapters: daemonAdapters,
   ...(gitHostedChecks === undefined ? {} : { gitHostedChecks }),
+  trustedGitConfiguration,
   herdr: herdrIntegration,
   daemonStopPort: {
     request: async (request) => {

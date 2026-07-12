@@ -49,6 +49,10 @@ export type TypedGitServiceOptions = {
   database: Database.Database;
   gitPort: GitMutationPort;
   conflictInspector?: GitConflictInspectorPort;
+  materializeTrustedRunAllowlist?: (identity: Readonly<{
+    projectSessionId: string;
+    coordinationRunId: string;
+  }>) => void;
   clock?: () => number;
   daemonInstanceId: string;
 };
@@ -101,6 +105,7 @@ export class TypedGitService {
   readonly #database: Database.Database;
   readonly #gitPort: GitMutationPort;
   readonly #conflictInspector: GitConflictInspectorPort | undefined;
+  readonly #materializeTrustedRunAllowlist: TypedGitServiceOptions["materializeTrustedRunAllowlist"];
   readonly #clock: () => number;
   readonly #daemonInstanceId: string;
 
@@ -108,6 +113,7 @@ export class TypedGitService {
     this.#database = options.database;
     this.#gitPort = options.gitPort;
     this.#conflictInspector = options.conflictInspector;
+    this.#materializeTrustedRunAllowlist = options.materializeTrustedRunAllowlist;
     this.#clock = options.clock ?? Date.now;
     this.#daemonInstanceId = options.daemonInstanceId;
   }
@@ -126,6 +132,8 @@ export class TypedGitService {
   }
 
   async readCurrentState(intent: OperatorGitIntent): Promise<GitCurrentState> {
+    this.#gitPort.assertAvailable(intent);
+    this.#materializeTrustedRunAllowlist?.(intent.authorisation);
     const authority = this.#authority(intent);
     const repository = await this.#gitPort.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
     const profile = this.#profile(intent);
@@ -154,6 +162,7 @@ export class TypedGitService {
   }
 
   readAdministrativeCurrentState(intent: TypedGitAdministrativeIntent): { revision: number; state: JsonValue } {
+    this.#materializeTrustedRunAllowlist?.(administrativeBinding(intent));
     const authority = this.#administrativeAuthority(intent);
     return {
       revision: authority.sessionRevision,
@@ -172,6 +181,7 @@ export class TypedGitService {
   }
 
   prepareAdministrative(request: TypedGitAdministrativeRequest): void {
+    this.#materializeTrustedRunAllowlist?.(administrativeBinding(request.intent));
     this.#database.transaction(() => {
       this.#administrativeAuthority(request.intent);
       switch (request.intent.kind) {
@@ -237,6 +247,8 @@ export class TypedGitService {
 
   prepare(request: TypedGitEffectRequest): void {
     const intent = request.intent;
+    this.#gitPort.assertAvailable(intent);
+    this.#materializeTrustedRunAllowlist?.(intent.authorisation);
     if (request.operation !== "git") {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git custody accepts only the Git action family");
     }
@@ -360,6 +372,7 @@ export class TypedGitService {
         gateId = decision.gateId;
         gateRevision = decision.expectedGateRevision;
       }
+      this.#assertParentWorktreeCreation(intent);
       const reservationGeneration = this.#prepareReservationTransfer(intent, custodyId);
       const lockPlanDigest = digest({
         commonDirectoryIdentityDigest: intent.repository.commonDirectoryIdentityDigest,
@@ -465,6 +478,7 @@ export class TypedGitService {
       });
     }
     const claimed = this.#database.transaction(() => {
+      this.#assertPointOfUse(request, binding);
       this.#assertFourOwnerState(custodyId, "prepared", "prepared", "authorised", "reserved");
       this.#database.prepare("UPDATE operator_git_effect_bindings SET state='dispatching',state_revision=state_revision+1,updated_at=? WHERE custody_id=? AND state='prepared'")
         .run(this.#clock(), custodyId);
@@ -965,7 +979,8 @@ export class TypedGitService {
     ), "typed Git positive run allow-list");
     if (
       Date.parse(grant.expiresAt) <= this.#clock() || Date.parse(grant.expiresAt) > integer(allowlist, "maximum_expiry") ||
-      (grant.constraints.allowWorktreeCreation && integer(allowlist, "allow_worktree_creation") !== 1)
+      (grant.constraints.allowWorktreeCreation && integer(allowlist, "allow_worktree_creation") !== 1) ||
+      (grant.constraints.operationVariants.some(isWorktreeCreateVariant) && !grant.constraints.allowWorktreeCreation)
     ) throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git grant expiry or worktree authority exceeds the allow-list");
     if (!isRow(this.#database.prepare(`
       SELECT 1 FROM run_git_allowlist_profiles
@@ -1385,6 +1400,9 @@ export class TypedGitService {
   }
 
   #assertGrantConstraints(intent: OperatorGitIntent, grant: GitActionGrant): void {
+    if (isWorktreeCreateVariant(intent.operation.variant) && !grant.constraints.allowWorktreeCreation) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git grant does not permit worktree creation");
+    }
     if (!grant.constraints.operationVariants.includes(intent.operation.variant as never)) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git grant digest does not admit this operation variant");
     }
@@ -1618,6 +1636,83 @@ export class TypedGitService {
     ) throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "typed Git custody replay changed");
   }
 
+  #assertPointOfUse(request: TypedGitEffectRequest, binding: Row): void {
+    const intent = request.intent;
+    const custodyId = this.custodyId(request);
+    this.#assertGenericCustody(custodyId, request);
+    this.#assertBindingReplay(custodyId, request);
+    const authority = this.#authority(intent);
+    const profile = this.#profile(intent);
+    const remote = this.#remote(intent);
+    this.#writerAdmission(intent);
+    if (
+      integer(binding, "prepared_session_revision") !== authority.sessionRevision ||
+      integer(binding, "session_generation") !== authority.sessionGeneration ||
+      integer(binding, "prepared_run_revision") !== authority.runRevision ||
+      integer(binding, "prepared_dependency_revision") !== authority.dependencyRevision ||
+      text(binding, "authority_ref") !== authority.authorityRef ||
+      integer(binding, "authority_revision") !== authority.authorityRevision ||
+      integer(binding, "git_allowlist_epoch") !== authority.gitAllowlistEpoch ||
+      nullableText(binding, "git_allowlist_digest") !== authority.gitAllowlistDigest ||
+      text(binding, "execution_profile_id") !== profile.profileId ||
+      integer(binding, "execution_profile_revision") !== profile.revision ||
+      text(binding, "execution_profile_digest") !== profile.digest ||
+      nullableText(binding, "remote_registration_id") !== (remote?.registrationId ?? null) ||
+      nullableInteger(binding, "remote_registration_revision") !== (remote?.revision ?? null) ||
+      nullableInteger(binding, "remote_generation") !== (remote?.generation ?? null) ||
+      nullableText(binding, "remote_target_digest") !== (remote?.targetDigest ?? null)
+    ) throw new ProjectFabricCoreError("STALE_GENERATION", "typed Git point-of-use binding changed");
+    const decision = intent.authorisation.decision;
+    if (decision.kind === "preauthorised") {
+      const grant = this.#grant(intent);
+      this.#assertGrantWithinAllowlist(grant);
+      this.#assertGrantConstraints(intent, grant);
+      this.#assertParentWorktreeCreation(intent);
+      if (
+        nullableText(binding, "grant_id") !== grant.grantId ||
+        nullableInteger(binding, "grant_revision") !== grant.revision ||
+        nullableText(binding, "draft_id") !== null || nullableText(binding, "gate_id") !== null
+      ) throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git grant binding changed before dispatch");
+      return;
+    }
+    this.#assertParentWorktreeCreation(intent);
+    const gate = row(this.#database.prepare(`
+      SELECT gate.*,draft.state AS draft_state,draft.revision AS draft_revision,
+             draft.draft_digest,draft.operation_id AS draft_operation_id
+        FROM scoped_gates gate
+        JOIN scoped_gate_operations operation ON operation.gate_id=gate.gate_id
+        JOIN git_operation_drafts draft ON draft.operation_id=operation.operation_id
+       WHERE gate.gate_id=? AND operation.operation_id=? AND draft.draft_id=?
+    `).get(decision.gateId, decision.blockedOperationId, decision.draftId), "typed Git point-of-use gate");
+    if (
+      text(gate, "status") !== "approved" || integer(gate, "human_required") !== 1 ||
+      nullableText(gate, "resolved_by_operator_id") === null ||
+      text(gate, "project_session_id") !== intent.authorisation.projectSessionId ||
+      text(gate, "coordination_run_id") !== intent.authorisation.coordinationRunId ||
+      integer(gate, "dependency_revision") !== intent.authorisation.expectedDependencyRevision ||
+      integer(gate, "revision") !== decision.expectedGateRevision ||
+      text(gate, "draft_state") !== "consumed" || text(gate, "draft_digest") !== decision.draftDigest ||
+      text(gate, "draft_operation_id") !== intent.authorisation.operationId ||
+      nullableText(binding, "draft_id") !== decision.draftId || nullableText(binding, "gate_id") !== decision.gateId ||
+      nullableInteger(binding, "gate_revision") !== decision.expectedGateRevision || nullableText(binding, "grant_id") !== null
+    ) throw new ProjectFabricCoreError("GATE_BLOCKED", "typed Git gate changed before dispatch");
+  }
+
+  #assertParentWorktreeCreation(intent: OperatorGitIntent): void {
+    if (!isWorktreeCreateVariant(intent.operation.variant)) return;
+    if (!isRow(this.#database.prepare(`
+      SELECT 1 FROM run_git_allowlists
+       WHERE project_session_id=? AND coordination_run_id=? AND authority_revision=?
+         AND git_allowlist_epoch=? AND git_allowlist_digest=? AND allow_worktree_creation=1
+    `).get(
+      intent.authorisation.projectSessionId,
+      intent.authorisation.coordinationRunId,
+      intent.authorisation.expectedAuthorityRevision,
+      intent.authorisation.expectedGitAllowlistEpoch,
+      intent.authorisation.gitAllowlistDigest,
+    ))) throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed Git parent authority does not permit worktree creation");
+  }
+
   #assertFourOwnerState(
     custodyId: string,
     bindingState: string,
@@ -1798,6 +1893,12 @@ function operationRefs(operation: GitOperation): readonly string[] {
 
 function operationRemote(operation: GitOperation): GitRemoteBinding | null {
   return "remote" in operation ? operation.remote : null;
+}
+
+function isWorktreeCreateVariant(variant: string): boolean {
+  return variant === "worktree-create-detached" ||
+    variant === "worktree-create-new-branch" ||
+    variant === "worktree-create-existing-branch";
 }
 
 function conflictPredecessor(operation: GitOperation): { custodyId: string; generation: number } | null {

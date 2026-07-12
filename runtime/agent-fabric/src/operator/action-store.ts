@@ -367,6 +367,7 @@ export class OperatorActionStore {
       intentDigest: envelope.preview.intentDigest,
       beforeStateDigest: envelope.preview.beforeStateDigest,
       attemptGeneration: 1,
+      operatorInputRecordDigest: preparedState.operatorInputRecordDigest,
     };
     const prepare = this.#database.transaction((): OperatorActionReceipt | null => {
       const concurrentReplay = this.#commandReplay(

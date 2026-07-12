@@ -28,11 +28,11 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/features.js",
-      "sha256": "53e76afa9ed7f6351f02233fdfb9214acdfbbf896e5c86293e4460346e5bc461"
+      "sha256": "9c5b6ff779bf37641c1a3dc9d95827d1245ed1362999798d19db98c726d0c6d1"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/gates.js",
-      "sha256": "e8accd18c14fef52533e7e587e034229b40aada5ae3967b99185a39dd90fbde5"
+      "sha256": "7a40508327c81b800fdfb3af4eab6ede5054692d9465d29ef4692c2629bc4938"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/git-actions.js",
@@ -64,7 +64,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operation-codecs.js",
-      "sha256": "d5e5c605465e42348c667ca100a07f5b6c093ea7195ef79ffbfec5449a63944c"
+      "sha256": "132f6dc4d9323161840be96c9f50d81e48c79a5b888e26e5670c90c276758b7b"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operations.js",
@@ -84,7 +84,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/project-session.js",
-      "sha256": "6c735d35e52ea0a187d5a62f2d65ca2710f454fa22488a21823269783bf1cef9"
+      "sha256": "dcf832258e73f5cca1f54295d8348c0f51ad0c70ad6394ce13f26f4f9dafdb30"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/projection.js",
@@ -104,7 +104,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/result-feature-shape.js",
-      "sha256": "0835443d2acfdd6461cd60f5888a8afac3581dde50266b1b4c5a2c1d8c6e5246"
+      "sha256": "281bde3dea91cc5f34797f3fe7ad42b72b6fd2e02257c9084fcb081bb90b7011"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/rpc-contract.js",
@@ -124,11 +124,11 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/agent-session-continuity.js",
-      "sha256": "68d86d45184d13dce8e9fe73008d8b96f10743a699bf4c38d8b54310189c5505"
+      "sha256": "fdcad14c79e26d23c25c796fda8b9d64f1f840f101cbba9bbeefcf1b2e6a2394"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/chair-launch-continuity.js",
-      "sha256": "f4e15e43cf82f344dbbd67bc5371d0ec98e5f01566e2cfb3ef11e0554266fe42"
+      "sha256": "3ab6f416e92e0fb0816cf548ea61607ba1975acd1ad91737326af377b7563686"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",

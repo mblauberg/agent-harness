@@ -40,6 +40,17 @@ export {
   deriveGitResultRecipeDigest,
   derivePreauthorisedGitOperationId,
 } from "./operator/typed-git-service.js";
+export {
+  TrustedGitRegistry,
+  deriveTrustedGitExecutionProfileDigest,
+  deriveTrustedGitRemoteTargetDigest,
+} from "./operator/trusted-git-registry.js";
+export type {
+  TrustedGitConfiguration,
+  TrustedGitExecutionProfile,
+  TrustedGitRemoteRegistration,
+  TrustedRunGitAllowlist,
+} from "./operator/trusted-git-registry.js";
 export type {
   GitConflictInspectorPort,
   TypedGitAdministrativeIntent,

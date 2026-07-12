@@ -35,6 +35,7 @@ afterEach(() => {
 class FakeGitPort implements GitMutationPort {
   dispatchCount = 0;
   inspectCount = 0;
+  onObserve: (() => void) | null = null;
   observation: GitRepositoryBinding;
   outcome: GitMutationInspection;
 
@@ -49,7 +50,11 @@ class FakeGitPort implements GitMutationPort {
     };
   }
 
+  assertAvailable(): void {}
+
   observe(): Promise<GitRepositoryBinding> {
+    this.onObserve?.();
+    this.onObserve = null;
     return Promise.resolve(this.observation);
   }
 
@@ -226,6 +231,16 @@ function fixture(): {
       merge_backend_id,rebase_backend_id,environment_digest,helper_registry_digest,inspector_digest,state,created_at
     ) VALUES('sealed-git-v1',1,'${profile.digest}','/usr/bin/git','2.39','${profile.gitBinaryDigest}','sha1',
       'merge-ort-v1','rebase-apply-v1','${sha("1")}','${sha("2")}','${sha("3")}','active',1);
+    INSERT INTO run_git_allowlists(
+      project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,git_allowlist_digest,
+      allow_worktree_creation,maximum_expiry,constraints_json,created_at
+    ) VALUES('session_01','run_01',1,1,'${grant.gitAllowlistDigest}',1,${now + 7_200_000},'{}',1);
+    INSERT INTO run_git_allowlist_variants VALUES('session_01','run_01',1,1,'stage');
+    INSERT INTO run_git_allowlist_variants VALUES('session_01','run_01',1,1,'worktree-create-detached');
+    INSERT INTO run_git_allowlist_profiles
+    VALUES('session_01','run_01',1,1,'sealed-git-v1',1,'${profile.digest}');
+    INSERT INTO run_git_allowlist_paths
+    VALUES('session_01','run_01',1,1,'/repo','/repo/.worktrees/writer','src');
   `);
   database.prepare(`
     INSERT INTO operator_git_grants(
@@ -325,6 +340,45 @@ describe("typed Git effect custody", () => {
     expect(value.port.dispatchCount).toBe(0);
     expect(value.database.prepare("SELECT COUNT(*) AS count FROM operator_git_effect_bindings").get()).toEqual({ count: 0 });
     expect(value.database.prepare("SELECT COUNT(*) AS count FROM git_mutation_reservations").get()).toEqual({ count: 0 });
+  });
+
+  it("rechecks the live grant after async observation and before claiming dispatch", async () => {
+    const value = fixture();
+    value.service.prepare(value.request);
+    value.port.onObserve = () => {
+      value.database.prepare(`
+        UPDATE operator_git_grants SET state='revoked',revoked_at=?
+         WHERE grant_id='grant_01' AND revision=1
+      `).run(now);
+    };
+
+    await expect(value.service.dispatch(value.request)).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    expect(value.port.dispatchCount).toBe(0);
+    expect(value.database.prepare(`
+      SELECT b.state AS binding_state,c.state AS custody_state,a.state AS admission_state,r.state AS reservation_state
+        FROM operator_git_effect_bindings b
+        JOIN operator_effect_custody c ON c.custody_id=b.custody_id
+        JOIN operation_admissions a ON a.operation_id=b.operation_id
+        JOIN git_mutation_reservations r ON r.custody_id=b.custody_id
+    `).get()).toEqual({
+      binding_state: "prepared",
+      custody_state: "prepared",
+      admission_state: "authorised",
+      reservation_state: "reserved",
+    });
+  });
+
+  it.each([
+    ["run authority", "UPDATE runs SET revision=revision+1 WHERE run_id='run_01'"],
+    ["execution profile", "UPDATE git_execution_profiles SET state='revoked' WHERE profile_id='sealed-git-v1' AND revision=1"],
+    ["writer admission", "UPDATE writer_admissions SET state='revoked' WHERE writer_admission_id='writer_01'"],
+  ])("rechecks %s after async observation before Git I/O", async (_name, mutation) => {
+    const value = fixture();
+    value.service.prepare(value.request);
+    value.port.onObserve = () => value.database.exec(mutation);
+
+    await expect(value.service.dispatch(value.request)).rejects.toBeInstanceOf(Error);
+    expect(value.port.dispatchCount).toBe(0);
   });
 
   it("retains intact conflict custody and quarantines destroyed conflict only through explicit read-only reconciliation", async () => {
@@ -651,17 +705,6 @@ describe("typed Git effect custody", () => {
   it("issues only a positive allow-list subset through git-authorise", () => {
     const value = fixture();
     const inputDigest = sha("f");
-    value.database.exec(`
-      INSERT INTO run_git_allowlists(
-        project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,git_allowlist_digest,
-        allow_worktree_creation,maximum_expiry,constraints_json,created_at
-      ) VALUES('session_01','run_01',1,1,'${value.intent.authorisation.gitAllowlistDigest}',0,${now + 7_200_000},'{}',1);
-      INSERT INTO run_git_allowlist_variants VALUES('session_01','run_01',1,1,'stage');
-      INSERT INTO run_git_allowlist_profiles
-      VALUES('session_01','run_01',1,1,'sealed-git-v1',1,'${value.intent.executionProfile.digest}');
-      INSERT INTO run_git_allowlist_paths
-      VALUES('session_01','run_01',1,1,'/repo','/repo/.worktrees/writer','src');
-    `);
     const proposedWithoutDigest = {
       grantId: "grant_02",
             revision: 1,
@@ -734,9 +777,30 @@ describe("typed Git effect custody", () => {
     })).toThrow(/allow-list/iu);
     expect(value.database.prepare("SELECT COUNT(*) AS count FROM operator_git_grants WHERE grant_id='grant_03'").get())
       .toEqual({ count: 0 });
+
+    const worktreeWithoutDigest = {
+      ...proposedWithoutDigest,
+      grantId: "grant_04",
+      constraints: {
+        ...proposedWithoutDigest.constraints,
+        operationVariants: ["worktree-create-detached"] as const,
+        allowWorktreeCreation: false,
+      },
+    };
+    const worktreeGrant = {
+      ...worktreeWithoutDigest,
+      grantDigest: deriveGitGrantDigest(worktreeWithoutDigest),
+    };
+    expect(() => value.service.prepareAdministrative({
+      ...request,
+      commandId: "commit_git_authorise_03",
+      intent: { ...intent, proposedGrant: worktreeGrant },
+    })).toThrow(/worktree/iu);
+    expect(value.database.prepare("SELECT COUNT(*) AS count FROM operator_git_grants WHERE grant_id='grant_04'").get())
+      .toEqual({ count: 0 });
   });
 
-  it("creates one no-authority gate draft and binds only its exact operation ID", () => {
+  it("creates one no-authority gate draft and binds only its exact operation ID", async () => {
     const value = fixture();
     const operation = { variant: "branch-delete-force" as const, sourceRef: "refs/heads/feature", sourceObjectDigest: sha("1") };
     const effectBindingDigest = deriveGitEffectBindingDigest({
@@ -848,6 +912,14 @@ describe("typed Git effect custody", () => {
       .toEqual({ state: "consumed" });
     expect(value.database.prepare("SELECT state FROM operation_admissions WHERE operation_id=?").get(draft.operation_id))
       .toEqual({ state: "authorised" });
+    value.port.onObserve = () => {
+      value.database.prepare(`
+        UPDATE scoped_gates SET status='superseded',revision=revision+1,updated_at=3
+         WHERE gate_id='gate_git_01'
+      `).run();
+    };
+    await expect(value.service.dispatch(finalRequest)).rejects.toMatchObject({ code: "GATE_BLOCKED" });
+    expect(value.port.dispatchCount).toBe(0);
   });
 
   it("human-adjudicates only eligible gate-bound custody with zero further Git calls", async () => {

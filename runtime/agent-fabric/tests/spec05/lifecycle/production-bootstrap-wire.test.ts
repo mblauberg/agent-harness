@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -7,8 +8,12 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import type { Sha256Digest } from "@local/agent-fabric-protocol";
 
-import { connectFabricDaemon } from "../../../src/index.ts";
+import {
+  connectFabricDaemon,
+  deriveTrustedGitExecutionProfileDigest,
+} from "../../../src/index.ts";
 import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
 import { MCP_ROOT_AUTHORITY } from "../../support/mcp-testkit.ts";
 
@@ -149,6 +154,50 @@ describe("production daemon bootstrap wiring", () => {
     // clean production stop.
     expect(exitCode).toBe(1);
     expect(childStderr).toContain("daemon shutdown failed during mark-terminal");
+  });
+
+  it("materialises trusted Git profiles through the production daemon composition boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ftg-"));
+    roots.push(root);
+    const binaryDigest = `sha256:${createHash("sha256").update(await readFile("/usr/bin/git")).digest("hex")}` as Sha256Digest;
+    const profileBase = {
+      profileId: "production-sealed-git",
+      revision: 1,
+      gitBinaryPath: "/usr/bin/git",
+      gitBinaryVersion: "system-git",
+      gitBinaryDigest: binaryDigest,
+      objectFormat: "sha1" as const,
+      mergeBackendId: "disabled",
+      rebaseBackendId: "disabled",
+      environmentDigest: `sha256:${"a".repeat(64)}` as Sha256Digest,
+      helperRegistryDigest: `sha256:${"b".repeat(64)}` as Sha256Digest,
+      inspectorDigest: `sha256:${"c".repeat(64)}` as Sha256Digest,
+    };
+    const options = {
+      databasePath: join(root, "s", "f.sqlite3"),
+      stateDirectory: join(root, "s"),
+      runtimeDirectory: join(root, "r"),
+      socketPath: join(root, "r", "f.sock"),
+      workspaceRoots: [root],
+      trustedGitConfiguration: {
+        executionProfiles: [{
+          ...profileBase,
+          profileDigest: deriveTrustedGitExecutionProfileDigest(profileBase),
+        }],
+      },
+    };
+
+    const daemon = await startFabricDaemon(options);
+    handles.push(daemon);
+    const database = new Database(options.databasePath, { readonly: true, fileMustExist: true });
+    try {
+      expect(database.prepare(`
+        SELECT profile_id,revision,state FROM git_execution_profiles
+         WHERE profile_id='production-sealed-git'
+      `).get()).toEqual({ profile_id: "production-sealed-git", revision: 1, state: "active" });
+    } finally {
+      database.close();
+    }
   });
 
   it("handshakes first and coalesces repeated starts through one flock election without lock databases", async () => {

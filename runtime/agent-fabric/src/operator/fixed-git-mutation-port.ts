@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import type {
@@ -33,6 +35,7 @@ export type GitMutationDispatchContext = {
 };
 
 export interface GitMutationPort {
+  assertAvailable(intent: OperatorGitIntent): void;
   observe(repositoryRoot: string, worktreePath: string): Promise<GitRepositoryBinding>;
   dispatch(intent: OperatorGitIntent, context: GitMutationDispatchContext): Promise<GitMutationInspection>;
   inspect(intent: OperatorGitIntent, context: GitMutationDispatchContext): Promise<GitMutationInspection>;
@@ -42,15 +45,46 @@ export type FixedGitMutationPortOptions = {
   gitExecutable?: string;
   privateStateRoot: string;
   clock?: () => number;
-  faultInjector?: (point: "after-private-lock" | "before-first-mutation") => Promise<void>;
+  faultInjector?: (point: "after-private-lock" | "before-first-mutation" | "after-final-fence") => Promise<void>;
 };
+
+type PinnedBlob = Readonly<{
+  path: string;
+  mode: "100644" | "100755";
+  nativeObjectId: string;
+  bytes: Buffer;
+}>;
+
+type NativeIndexMutationFence = {
+  kind: "index";
+  indexPath: string;
+  indexLockPath: string;
+  indexLock: FileHandle;
+  privateDirectory: string;
+  privateIndexPath: string;
+  pinnedBlobs: readonly PinnedBlob[];
+  installed: boolean;
+};
+
+type NativeWorktreeMutationFence = {
+  kind: "worktree";
+  destinationPath: string;
+  destinationHandle: FileHandle;
+  destinationSnapshot: Stats;
+  refLockPath: string | null;
+  refLock: FileHandle | null;
+  refLockSnapshot: Stats | null;
+  installed: boolean;
+};
+
+type NativeMutationFence = NativeIndexMutationFence | NativeWorktreeMutationFence;
 
 /** Fixed, bounded Git process owner. Callers provide typed data, never argv. */
 export class FixedGitMutationPort implements GitMutationPort {
   readonly #gitExecutable: string;
   readonly #privateStateRoot: string;
   readonly #clock: () => number;
-  readonly #faultInjector: ((point: "after-private-lock" | "before-first-mutation") => Promise<void>) | undefined;
+  readonly #faultInjector: ((point: "after-private-lock" | "before-first-mutation" | "after-final-fence") => Promise<void>) | undefined;
 
   constructor(options: FixedGitMutationPortOptions) {
     this.#gitExecutable = options.gitExecutable ?? DEFAULT_GIT;
@@ -64,31 +98,53 @@ export class FixedGitMutationPort implements GitMutationPort {
     return observeGitRepositoryForMutation(repositoryRoot, worktreePath);
   }
 
+  assertAvailable(intent: OperatorGitIntent): void {
+    if (![
+      "stage", "unstage", "commit", "branch-create",
+      "worktree-create-detached", "worktree-create-new-branch", "worktree-create-existing-branch",
+    ].includes(intent.operation.variant)) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_UNAVAILABLE",
+        `typed Git variant ${intent.operation.variant} has no verified native first-mutation fence`,
+      );
+    }
+  }
+
   async dispatch(intent: OperatorGitIntent, context: GitMutationDispatchContext): Promise<GitMutationInspection> {
+    this.assertAvailable(intent);
     return await this.#withPrivateReservation(intent.repository.commonDirectoryIdentityDigest, async () => {
       await this.#faultInjector?.("after-private-lock");
       await this.#assertBoundary(intent);
       const before = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
       assertSameRepositoryBinding(before, intent.repository, "Git repository changed before lock/CAS");
       await this.#assertTypedInputs(intent, context);
-      await this.#faultInjector?.("before-first-mutation");
-      const finalFence = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
-      assertSameRepositoryBinding(finalFence, intent.repository, "Git repository changed immediately before mutation");
+      const nativeFence = await this.#prepareNativeFence(intent);
       try {
-        await this.#mutate(intent, context);
-      } catch (error: unknown) {
-        const inspected = await this.#inspectAgainstRecipe(intent);
-        if (inspected.outcome !== "exact-no-effect") return inspected;
-        return {
-          ...inspected,
-          outcome: "exact-no-effect",
-          failureSignatureDigest: digest({
-            class: "git-process-failed-with-no-effect",
-            name: error instanceof Error ? error.name : "unknown",
-          }),
-        };
+        await this.#faultInjector?.("before-first-mutation");
+        const finalFence = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
+        assertSameRepositoryBinding(finalFence, intent.repository, "Git repository changed immediately before mutation");
+        await this.#faultInjector?.("after-final-fence");
+        try {
+          await this.#mutate(intent, nativeFence);
+        } catch (error: unknown) {
+          const inspected = await this.#inspectAgainstRecipe(intent);
+          if (inspected.outcome !== "exact-no-effect") return inspected;
+          return {
+            ...inspected,
+            // A failing Git process may already have written unreachable objects even
+            // when the reviewed refs/index still look unchanged. Never claim a proved
+            // no-effect after the mutation boundary has been crossed.
+            outcome: "inconsistent",
+            failureSignatureDigest: digest({
+              class: "git-process-failed-after-mutation-boundary",
+              name: error instanceof Error ? error.name : "unknown",
+            }),
+          };
+        }
+        return await this.#inspectAgainstRecipe(intent);
+      } finally {
+        await this.#releaseNativeFence(nativeFence);
       }
-      return await this.#inspectAgainstRecipe(intent);
     });
   }
 
@@ -180,6 +236,14 @@ export class FixedGitMutationPort implements GitMutationPort {
         throw new ProjectFabricCoreError("STALE_REVISION", "Git worktree source branch changed before mutation");
       }
     }
+    if (operation.variant === "worktree-create-new-branch") {
+      const existing = await this.#run(worktreePath, ["show-ref", "--verify", "--hash", operation.branchRef], {
+        allowedExitCodes: [1, 128],
+      });
+      if (existing.stdout.trim().length > 0) {
+        throw new ProjectFabricCoreError("CONFLICT", "Git worktree destination branch already exists");
+      }
+    }
     if (
       operation.variant === "worktree-create-detached" || operation.variant === "worktree-create-new-branch" ||
       operation.variant === "worktree-create-existing-branch" || operation.variant === "worktree-move"
@@ -192,33 +256,284 @@ export class FixedGitMutationPort implements GitMutationPort {
     }
   }
 
-  async #mutate(intent: OperatorGitIntent, context: GitMutationDispatchContext): Promise<void> {
+  async #prepareNativeFence(intent: OperatorGitIntent): Promise<NativeMutationFence | null> {
+    const operation = intent.operation;
+    if (operation.variant === "branch-create") return null;
+    if (
+      operation.variant === "worktree-create-detached" || operation.variant === "worktree-create-new-branch" ||
+      operation.variant === "worktree-create-existing-branch"
+    ) {
+      await this.#assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
+      try {
+        await mkdir(operation.destinationWorktreePath, { mode: 0o700 });
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          throw new ProjectFabricCoreError("CONFLICT", "Git worktree destination custody is already owned");
+        }
+        throw error;
+      }
+      try {
+        const destinationHandle = await open(
+          operation.destinationWorktreePath,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+        const destinationSnapshot = await destinationHandle.stat();
+        if (!destinationSnapshot.isDirectory() || (await realpath(operation.destinationWorktreePath)) !== operation.destinationWorktreePath) {
+          await destinationHandle.close();
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git worktree destination custody is not canonical");
+        }
+        let refLockPath: string | null = null;
+        let refLock: FileHandle | null = null;
+        let refLockSnapshot: Stats | null = null;
+        try {
+          if (operation.variant === "worktree-create-existing-branch") {
+            const refPath = join(intent.repository.gitCommonDir, operation.branchRef);
+            const refParent = await realpath(dirname(refPath)).catch(() => null);
+            if (refParent === null || !contains(intent.repository.gitCommonDir, refParent)) {
+              throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "Git worktree branch has no canonical native ref-lock parent");
+            }
+            refLockPath = `${refPath}.lock`;
+            try {
+              refLock = await open(
+                refLockPath,
+                constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+                0o600,
+              );
+            } catch (error: unknown) {
+              if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+                throw new ProjectFabricCoreError("CONFLICT", "Git worktree source branch native lock is already owned");
+              }
+              throw error;
+            }
+            refLockSnapshot = await refLock.stat();
+          }
+          return {
+            kind: "worktree",
+            destinationPath: operation.destinationWorktreePath,
+            destinationHandle,
+            destinationSnapshot,
+            refLockPath,
+            refLock,
+            refLockSnapshot,
+            installed: false,
+          };
+        } catch (error: unknown) {
+          await refLock?.close().catch(() => undefined);
+          if (refLockPath !== null) await unlink(refLockPath).catch(() => undefined);
+          await destinationHandle.close().catch(() => undefined);
+          throw error;
+        }
+      } catch (error: unknown) {
+        await rmdir(operation.destinationWorktreePath).catch(() => undefined);
+        throw error;
+      }
+    }
+    if (operation.variant !== "stage" && operation.variant !== "unstage" && operation.variant !== "commit") {
+      throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "typed Git variant has no native fence implementation");
+    }
+    const cwd = intent.repository.worktreePath;
+    const indexPath = (await this.#run(cwd, [
+      "rev-parse", "--path-format=absolute", "--git-path", "index",
+    ])).stdout.trim();
+    if (!indexPath.startsWith("/") || !contains(intent.repository.gitCommonDir, indexPath)) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "Git index path is outside the bound common directory");
+    }
+    let indexBytes: Buffer | null = null;
+    try {
+      const indexHandle = await openNoFollowRegular(indexPath, "Git index");
+      try {
+        const before = await indexHandle.stat();
+        indexBytes = await indexHandle.readFile();
+        const after = await indexHandle.stat();
+        if (!sameFileSnapshot(before, after)) {
+          throw new ProjectFabricCoreError("STALE_REVISION", "Git index changed while it was pinned");
+        }
+      } finally {
+        await indexHandle.close();
+      }
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await mkdir(this.#privateStateRoot, { recursive: true, mode: 0o700 });
+    const privateDirectory = await mkdtemp(join(this.#privateStateRoot, "git-native-fence-"));
+    const privateIndexPath = join(privateDirectory, "index");
+    const pinnedBlobs: PinnedBlob[] = [];
+    try {
+      if (indexBytes === null) {
+        await this.#run(cwd, ["read-tree", "--empty"], { environment: { GIT_INDEX_FILE: privateIndexPath } });
+      } else {
+        await writeFile(privateIndexPath, indexBytes, { flag: "wx", mode: 0o600 });
+      }
+      if (intent.operation.variant === "stage") {
+        for (const path of intent.operation.paths) {
+          const absolutePath = resolve(cwd, path);
+          if (!contains(cwd, absolutePath)) {
+            throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git stage path escapes the worktree");
+          }
+          let handle: FileHandle;
+          try {
+            handle = await openNoFollowRegular(absolutePath, `Git stage path ${path}`);
+          } catch (error: unknown) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            const entry = (await this.#run(cwd, ["ls-files", "--stage", "-z", "--", path], {
+              environment: { GIT_INDEX_FILE: privateIndexPath },
+            })).stdout;
+            const match = /^(100644|100755|120000|160000) [0-9a-f]{40,64} [0-3]\t([^\0]+)\0$/u.exec(entry);
+            if (match === null || match[2] !== path) {
+              throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", `Git stage missing path ${path} is not one tracked index entry`);
+            }
+            await this.#run(cwd, ["update-index", "--force-remove", "--", path], {
+              environment: { GIT_INDEX_FILE: privateIndexPath },
+            });
+            continue;
+          }
+          try {
+            const before = await handle.stat();
+            const bytes = await handle.readFile();
+            const after = await handle.stat();
+            if (!sameFileSnapshot(before, after)) {
+              throw new ProjectFabricCoreError("STALE_REVISION", `Git stage path ${path} changed while pinned`);
+            }
+            const mode = (before.mode & 0o111) === 0 ? "100644" as const : "100755" as const;
+            const nativeObjectId = (await this.#run(cwd, ["hash-object", "--stdin"], { stdin: bytes })).stdout.trim();
+            pinnedBlobs.push({ path, mode, nativeObjectId, bytes });
+            await this.#run(cwd, [
+              "update-index", "--add", "--info-only", "--cacheinfo", `${mode},${nativeObjectId},${path}`,
+            ], { environment: { GIT_INDEX_FILE: privateIndexPath } });
+          } finally {
+            await handle.close();
+          }
+        }
+      } else if (intent.operation.variant === "unstage") {
+        for (const path of intent.operation.paths) {
+          const entry = (await this.#run(cwd, ["ls-tree", "-z", "HEAD", "--", path])).stdout;
+          if (entry.length === 0) {
+            await this.#run(cwd, ["update-index", "--force-remove", "--", path], {
+              environment: { GIT_INDEX_FILE: privateIndexPath },
+            });
+            continue;
+          }
+          const match = /^(100644|100755|120000|160000) [a-z]+ ([0-9a-f]{40,64})\t([^\0]+)\0$/u.exec(entry);
+          if (match === null || match[3] !== path) {
+            throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "Git HEAD tree entry is not a bounded exact path");
+          }
+          await this.#run(cwd, [
+            "update-index", "--add", "--info-only", "--cacheinfo", `${match[1]},${match[2]},${path}`,
+          ], { environment: { GIT_INDEX_FILE: privateIndexPath } });
+        }
+      }
+      const indexLockPath = `${indexPath}.lock`;
+      let indexLock: FileHandle;
+      try {
+        indexLock = await open(
+          indexLockPath,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+          0o600,
+        );
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          throw new ProjectFabricCoreError("CONFLICT", "Git native index lock is already owned");
+        }
+        throw error;
+      }
+      return {
+        kind: "index",
+        indexPath,
+        indexLockPath,
+        indexLock,
+        privateDirectory,
+        privateIndexPath,
+        pinnedBlobs,
+        installed: false,
+      };
+    } catch (error: unknown) {
+      await rm(privateDirectory, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  async #installPrivateIndex(fence: NativeIndexMutationFence): Promise<void> {
+    const candidate = await readFile(fence.privateIndexPath);
+    await fence.indexLock.writeFile(candidate);
+    await fence.indexLock.sync();
+    await fence.indexLock.close();
+    await rename(fence.indexLockPath, fence.indexPath);
+    fence.installed = true;
+  }
+
+  async #releaseNativeFence(fence: NativeMutationFence | null): Promise<void> {
+    if (fence === null) return;
+    if (fence.kind === "index") {
+      if (!fence.installed) {
+        await fence.indexLock.close().catch(() => undefined);
+        await unlink(fence.indexLockPath).catch(() => undefined);
+      }
+      await rm(fence.privateDirectory, { recursive: true, force: true });
+      return;
+    }
+    let removable = false;
+    if (!fence.installed) {
+      try {
+        const held = await fence.destinationHandle.stat();
+        const atPath = await lstat(fence.destinationPath);
+        removable = sameFileSnapshot(held, fence.destinationSnapshot) && sameFileIdentity(held, atPath);
+      } catch {
+        removable = false;
+      }
+    }
+    await fence.destinationHandle.close().catch(() => undefined);
+    await fence.refLock?.close().catch(() => undefined);
+    if (fence.refLockPath !== null) await unlink(fence.refLockPath).catch(() => undefined);
+    if (removable) await rmdir(fence.destinationPath).catch(() => undefined);
+  }
+
+  async #assertWorktreeFence(fence: NativeMutationFence | null, destinationPath: string): Promise<NativeWorktreeMutationFence> {
+    if (fence === null || fence.kind !== "worktree" || fence.destinationPath !== destinationPath) {
+      throw new Error("typed Git worktree destination fence is absent");
+    }
+    const held = await fence.destinationHandle.stat();
+    const atPath = await lstat(destinationPath);
+    if (
+      !sameFileSnapshot(held, fence.destinationSnapshot) || !sameFileIdentity(held, atPath) ||
+      (await readdir(destinationPath)).length !== 0
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "Git worktree destination custody changed before mutation");
+    }
+    if (fence.refLock !== null && fence.refLockPath !== null && fence.refLockSnapshot !== null) {
+      const heldLock = await fence.refLock.stat();
+      const lockAtPath = await lstat(fence.refLockPath);
+      if (!sameFileSnapshot(heldLock, fence.refLockSnapshot) || !sameFileIdentity(heldLock, lockAtPath)) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "Git worktree source branch native lock changed before mutation");
+      }
+    }
+    return fence;
+  }
+
+  async #mutate(
+    intent: OperatorGitIntent,
+    nativeFence: NativeMutationFence | null,
+  ): Promise<void> {
     const cwd = intent.repository.worktreePath;
     const operation = intent.operation;
     switch (operation.variant) {
-      case "fetch":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
-        return;
-      case "pull-fast-forward-only":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
-        await this.#run(cwd, ["merge", "--ff-only", operation.destinationRef]);
-        return;
-      case "pull-merge-commit-start":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
-        await this.#run(cwd, ["merge", "--no-ff", "--no-edit", operation.destinationRef], { allowedExitCodes: [1] });
-        return;
-      case "pull-rebase-start":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
-        await this.#run(cwd, ["rebase", "--no-autostash", operation.destinationRef], { allowedExitCodes: [1] });
-        return;
       case "stage":
-        await this.#run(cwd, ["add", "--", ...operation.paths]);
+        if (nativeFence === null || nativeFence.kind !== "index") throw new Error("typed Git stage index fence is absent");
+        for (const blob of nativeFence.pinnedBlobs) {
+          const written = (await this.#run(cwd, ["hash-object", "-w", "--stdin"], { stdin: blob.bytes })).stdout.trim();
+          if (written !== blob.nativeObjectId) {
+            throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "pinned Git blob identity changed during write");
+          }
+        }
+        await this.#installPrivateIndex(nativeFence);
         return;
       case "unstage":
-        await this.#run(cwd, ["restore", "--staged", "--", ...operation.paths]);
+        if (nativeFence === null || nativeFence.kind !== "index") throw new Error("typed Git unstage index fence is absent");
+        await this.#installPrivateIndex(nativeFence);
         return;
       case "commit": {
-        const tree = (await this.#run(cwd, ["write-tree"])).stdout.trim();
+        if (nativeFence === null || nativeFence.kind !== "index") throw new Error("typed Git commit index fence is absent");
+        const indexEnvironment = { GIT_INDEX_FILE: nativeFence.privateIndexPath };
+        const tree = (await this.#run(cwd, ["write-tree"], { environment: indexEnvironment })).stdout.trim();
         const treeDigest = await objectDigestByNativeId(cwd, tree, this.#gitExecutable, await this.#environment());
         if (treeDigest !== operation.treeDigest) throw new ProjectFabricCoreError("STALE_REVISION", "Git index tree changed");
         const parent = (await this.#run(cwd, ["rev-parse", "--verify", "HEAD^{commit}"])).stdout.trim();
@@ -233,93 +548,41 @@ export class FixedGitMutationPort implements GitMutationPort {
         await this.#run(cwd, ["update-ref", headRef, commit, parent]);
         return;
       }
-      case "merge-fast-forward-only-start":
-        await this.#run(cwd, ["merge", "--ff-only", operation.sourceRef]);
-        return;
-      case "merge-commit-start":
-        await this.#run(cwd, ["merge", "--no-ff", "--no-edit", operation.sourceRef], { allowedExitCodes: [1] });
-        return;
-      case "merge-continue":
-        await this.#run(cwd, ["commit", "--no-edit"], { allowedExitCodes: [1] });
-        return;
-      case "merge-abort":
-        await this.#run(cwd, ["merge", "--abort"]);
-        return;
-      case "rebase-current-branch-no-autostash-start":
-        await this.#run(cwd, ["rebase", "--no-autostash", operation.destinationRef], { allowedExitCodes: [1] });
-        return;
-      case "rebase-continue":
-        await this.#run(cwd, ["rebase", "--continue"], { allowedExitCodes: [1] });
-        return;
-      case "rebase-abort":
-        await this.#run(cwd, ["rebase", "--abort"]);
-        return;
-      case "push-fast-forward-only":
-        await this.#run(cwd, ["push", "--porcelain", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
-        return;
-      case "push-force-with-lease": {
-        const nativeExpected = await nativeIdForDigest(
-          cwd,
-          operation.expectedRemoteObjectDigest,
-          this.#gitExecutable,
-          await this.#environment(),
-        );
-        await this.#run(cwd, [
-          "push", "--porcelain", `--force-with-lease=${operation.destinationRef}:${nativeExpected}`,
-          "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`,
-        ]);
-        return;
-      }
       case "branch-create": {
         const native = await nativeIdForDigest(cwd, operation.sourceObjectDigest, this.#gitExecutable, await this.#environment());
         await this.#run(cwd, ["update-ref", operation.destinationRef, native, zeroObject(native.length)]);
         return;
       }
-      case "branch-rename":
-        await this.#run(cwd, ["branch", "--move", branchShort(operation.sourceRef), branchShort(operation.destinationRef)]);
-        return;
-      case "branch-delete-merged-only":
-      case "branch-delete-force":
-        await this.#deleteRefExactly(cwd, operation.sourceRef, operation.sourceObjectDigest);
-        return;
       case "worktree-create-detached": {
-        assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
+        const fence = await this.#assertWorktreeFence(nativeFence, operation.destinationWorktreePath);
         const native = await nativeIdForDigest(cwd, operation.sourceObjectDigest, this.#gitExecutable, await this.#environment());
-        await this.#run(cwd, ["worktree", "add", "--detach", operation.destinationWorktreePath, native]);
+        await this.#run(cwd, ["worktree", "add", "--no-checkout", "--detach", operation.destinationWorktreePath, native]);
+        fence.installed = true;
         return;
       }
       case "worktree-create-new-branch": {
-        assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
+        const fence = await this.#assertWorktreeFence(nativeFence, operation.destinationWorktreePath);
         const native = await nativeIdForDigest(cwd, operation.sourceObjectDigest, this.#gitExecutable, await this.#environment());
-        await this.#run(cwd, ["worktree", "add", "-b", branchShort(operation.branchRef), operation.destinationWorktreePath, native]);
+        await this.#run(cwd, [
+          "worktree", "add", "--no-checkout", "-b", branchShort(operation.branchRef),
+          operation.destinationWorktreePath, native,
+        ]);
+        fence.installed = true;
         return;
       }
-      case "worktree-create-existing-branch":
-        assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
-        await this.#run(cwd, ["worktree", "add", operation.destinationWorktreePath, operation.branchRef]);
-        return;
-      case "worktree-move":
-        assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
-        await this.#run(cwd, ["worktree", "move", operation.sourceWorktreePath, operation.destinationWorktreePath]);
-        return;
-      case "worktree-remove-clean":
-        await this.#run(cwd, ["worktree", "remove", operation.sourceWorktreePath]);
-        return;
-      case "worktree-remove-force":
-        await this.#run(cwd, ["worktree", "remove", "--force", operation.sourceWorktreePath]);
-        return;
-      case "upstream-set": {
-        const name = branchShort(operation.localBranchRef);
-        await this.#run(cwd, ["config", "--local", `branch.${name}.remote`, operation.remote.remoteName]);
-        await this.#run(cwd, ["config", "--local", `branch.${name}.merge`, operation.remoteBranchRef]);
+      case "worktree-create-existing-branch": {
+        const fence = await this.#assertWorktreeFence(nativeFence, operation.destinationWorktreePath);
+        await this.#run(cwd, [
+          "worktree", "add", "--no-checkout", operation.destinationWorktreePath, branchShort(operation.branchRef),
+        ]);
+        fence.installed = true;
         return;
       }
-      case "upstream-unset": {
-        const name = branchShort(operation.localBranchRef);
-        await this.#run(cwd, ["config", "--local", "--unset-all", `branch.${name}.remote`], { allowedExitCodes: [5] });
-        await this.#run(cwd, ["config", "--local", "--unset-all", `branch.${name}.merge`], { allowedExitCodes: [5] });
-        return;
-      }
+      default:
+        throw new ProjectFabricCoreError(
+          "CAPABILITY_UNAVAILABLE",
+          `typed Git variant ${operation.variant} has no verified native first-mutation fence`,
+        );
     }
   }
 
@@ -433,12 +696,6 @@ export class FixedGitMutationPort implements GitMutationPort {
     }
   }
 
-  async #deleteRefExactly(cwd: string, ref: string, expectedDigest: Sha256Digest): Promise<void> {
-    const current = await readGitObjectDigest(cwd, ref);
-    if (current.digest !== expectedDigest) throw new ProjectFabricCoreError("STALE_REVISION", "Git branch changed before deletion");
-    await this.#run(cwd, ["update-ref", "-d", ref, current.nativeObjectId]);
-  }
-
   async #assertRefNotCheckedOut(cwd: string, ref: string): Promise<void> {
     const worktrees = (await this.#run(cwd, ["worktree", "list", "--porcelain"])).stdout;
     if (worktrees.split("\n").some((line) => line === `branch ${ref}`)) {
@@ -481,7 +738,7 @@ export class FixedGitMutationPort implements GitMutationPort {
     args: readonly string[],
     options: {
       allowedExitCodes?: readonly number[];
-      stdin?: string;
+      stdin?: string | Buffer;
       environment?: NodeJS.ProcessEnv;
     } = {},
   ): Promise<{ stdout: string; stderr: string }> {
@@ -529,6 +786,33 @@ function digest(value: unknown): Sha256Digest {
 function contains(root: string, target: string): boolean {
   const path = relative(root, target);
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !path.startsWith(sep));
+}
+
+async function openNoFollowRegular(path: string, label: string): Promise<FileHandle> {
+  let handle: FileHandle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", `${label} is a symbolic link`);
+    }
+    throw error;
+  }
+  const status = await handle.stat();
+  if (!status.isFile() || status.nlink !== 1) {
+    await handle.close();
+    throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", `${label} is not one regular no-follow file`);
+  }
+  return handle;
+}
+
+function sameFileSnapshot(left: Stats, right: Stats): boolean {
+  return sameFileIdentity(left, right) && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+
+function sameFileIdentity(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 function assertSameRepositoryBinding(actual: GitRepositoryBinding, expected: GitRepositoryBinding, message: string): void {
@@ -582,6 +866,7 @@ function refDigestChecks(operation: GitOperation): Array<[string, Sha256Digest]>
     ];
     case "branch-rename": case "branch-delete-force": return [[operation.sourceRef, operation.sourceObjectDigest]];
     case "branch-delete-merged-only": return [[operation.sourceRef, operation.sourceObjectDigest]];
+    case "worktree-create-existing-branch": return [[operation.branchRef, operation.sourceObjectDigest]];
     default: return [];
   }
 }
@@ -595,17 +880,6 @@ function usesWorktreeContent(operation: GitOperation): boolean {
   return ["stage", "unstage", "commit", "pull-fast-forward-only", "pull-merge-commit-start", "pull-rebase-start",
     "merge-fast-forward-only-start", "merge-commit-start", "merge-continue", "merge-abort",
     "rebase-current-branch-no-autostash-start", "rebase-continue", "rebase-abort"].includes(operation.variant);
-}
-
-function requiredRemote(context: GitMutationDispatchContext): string {
-  if (context.remoteTarget === null) throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "registered remote target is unavailable");
-  return context.remoteTarget;
-}
-
-function assertWorktreeDestination(repositoryRoot: string, destination: string): void {
-  if (dirname(destination) !== join(repositoryRoot, ".worktrees") || basename(destination).length === 0) {
-    throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "worktree destination is not a direct repository-owned child");
-  }
 }
 
 function commitEnvironment(author: { name: string; email: string; timestamp: string }, committer: { name: string; email: string; timestamp: string }): NodeJS.ProcessEnv {
