@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFabric, verifyFabricReceiptLink } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric, verifyFabricReceiptLink } from "../../src/index.ts";
 import { describe, expect, it } from "vitest";
 import { writeDeliveryRunFixture } from "../support/delivery-run-fixture.ts";
 import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
@@ -67,8 +67,8 @@ describe("Stage 1 chair receipt link", () => {
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-link"],
-            actions: ["read", "write", "message"],
-            disclosure: ["local"],
+            actions: [...AUTHORITY_ACTION_VOCABULARY],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2099-01-01T00:00:00.000Z",
             budget: { turns: 4, "cost:USD": 4 },
           },
@@ -134,8 +134,8 @@ describe("Stage 1 chair receipt link", () => {
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-stochastic-link"],
-            actions: ["read", "write", "message"],
-            disclosure: ["local"],
+            actions: [...AUTHORITY_ACTION_VOCABULARY],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2099-01-01T00:00:00.000Z",
             budget: { turns: 4, "cost:USD": 4 },
           },
@@ -188,8 +188,8 @@ describe("Stage 1 chair receipt link", () => {
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-legacy-link"],
-            actions: ["read", "write"],
-            disclosure: ["local"],
+            actions: [...AUTHORITY_ACTION_VOCABULARY],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2099-01-01T00:00:00.000Z",
             budget: { turns: 1 },
           },
@@ -231,8 +231,8 @@ describe("Stage 1 chair receipt link", () => {
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-partial"],
-            actions: ["read", "write"],
-            disclosure: ["local"],
+            actions: [...AUTHORITY_ACTION_VOCABULARY],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2099-01-01T00:00:00.000Z",
             budget: { turns: 1 },
           },
@@ -273,8 +273,8 @@ describe("Stage 1 chair receipt link", () => {
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-directory"],
-            actions: ["read", "write"],
-            disclosure: ["local"],
+            actions: [...AUTHORITY_ACTION_VOCABULARY],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2099-01-01T00:00:00.000Z",
             budget: { turns: 1 },
           },

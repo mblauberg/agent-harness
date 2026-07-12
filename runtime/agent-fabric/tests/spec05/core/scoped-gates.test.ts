@@ -278,30 +278,4 @@ describe("scoped gate service", () => {
       ]);
   });
 
-  it("converts compatibility human-gate IDs into pending scoped gates without legacy writes", () => {
-    const database = open();
-    const store = new ScopedGateStore({ database, clock: () => 1_000 });
-    const gates = store.createCompatibilityTaskGates(chairContext, {
-      commandId: "compatibility_gates",
-      expectedDependencyRevision: 1,
-      taskId: "task_root",
-      humanGateIds: ["human_01"],
-    });
-
-    expect(gates).toHaveLength(1);
-    expect(gates[0]).toMatchObject({
-      status: "pending",
-      scope: { kind: "task", taskId: "task_root" },
-      enforcementPoints: ["task-readiness", "scoped-barrier"],
-    });
-    expect(database.prepare("SELECT count(*) AS count FROM task_human_gates").get()).toEqual({ count: 0 });
-    expect(database.prepare("SELECT legacy_status FROM scoped_gates WHERE gate_id=?").get(gates[0]?.gateId))
-      .toEqual({ legacy_status: "declared" });
-    expect(store.createCompatibilityTaskGates(chairContext, {
-      commandId: "compatibility_gates",
-      expectedDependencyRevision: 1,
-      taskId: "task_root",
-      humanGateIds: ["human_01"],
-    })).toEqual(gates);
-  });
 });

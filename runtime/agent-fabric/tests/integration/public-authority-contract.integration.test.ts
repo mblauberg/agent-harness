@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import type { AuthorityInput } from "../../src/index.ts";
 import { callTool, spawnMcpProxy } from "../support/mcp-testkit.ts";
 import { requireRecord, teamCreateInput } from "../support/stage5-team-testkit.ts";
@@ -49,10 +49,10 @@ describe("public authority contract", () => {
         workspaceRoots: ["."],
         sourcePaths: ["src"],
         artifactPaths: [".agent-run"],
-        actions: ["read", "write", "delegate", "message", "team"],
+        actions: [...AUTHORITY_ACTION_VOCABULARY],
         deniedPaths: ["src/public-contract/private"],
         deniedActions: ["fabric.v1.task.update"],
-        disclosure: { level: "scoped", scopes: ["local", "approved-provider"] },
+        disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
         expiresAt: "2099-01-01T00:00:00.000Z",
         budget: { turns: 100, "cost:USD": 100, "input_tokens:google": 1_000, descendants: 20 },
       };
@@ -65,21 +65,21 @@ describe("public authority contract", () => {
       expect(storedAuthority(databasePath, run.chairAuthorityId)).toMatchObject({
         deniedPaths: ["src/public-contract/private"],
         deniedActions: ["fabric.v1.task.update"],
-        disclosure: { level: "scoped", scopes: ["approved-provider", "local"] },
+        disclosure: { level: "scoped", scopes: ["approved-provider", "local"] } as const,
         budget: { turns: 100, "cost:USD": 100, "input_tokens:google": 1_000, descendants: 20 },
       });
 
       const second = await createCurrentSessionRun({
         databasePath,
         workspaceRoot: directory,
-        runId: "run-public-authority-legacy",
+        runId: "run-public-authority-local-only",
         chair: {
-          agentId: "legacy-chair",
-          authority: { ...rootAuthority, deniedPaths: [], deniedActions: [], disclosure: ["local"] },
+          agentId: "local-chair",
+          authority: { ...rootAuthority, deniedPaths: [], deniedActions: [], disclosure: { level: "scoped", scopes: ["local"] } as const },
         },
       });
       expect(storedAuthority(databasePath, second.chairAuthorityId)).toMatchObject({
-        disclosure: { level: "scoped", scopes: ["local"] },
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
       });
 
       chairProxy = await spawnMcpProxy({
@@ -118,7 +118,7 @@ describe("public authority contract", () => {
             actions: leaderAuthority.actions,
             deniedPaths: ["src/public-contract/private"],
             deniedActions: ["fabric.v1.task.update"],
-            disclosure: { level: "scoped", scopes: ["approved-provider"] },
+            disclosure: { level: "scoped", scopes: ["approved-provider"] } as const,
             expiresAt: "2099-01-01T00:00:00.000Z",
             budget: { turns: 40, "cost:USD": 40, "input_tokens:google": 400, descendants: 6 },
           },
@@ -131,7 +131,7 @@ describe("public authority contract", () => {
       expect(storedAuthority(databasePath, createdLeader.authorityId)).toMatchObject({
         deniedPaths: ["src/public-contract/private"],
         deniedActions: ["fabric.v1.task.update"],
-        disclosure: { level: "scoped", scopes: ["approved-provider"] },
+        disclosure: { level: "scoped", scopes: ["approved-provider"] } as const,
         budget: { turns: 40, "cost:USD": 40, "input_tokens:google": 400, descendants: 6 },
       });
     } finally {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
@@ -22,7 +23,7 @@ describe("retryable token-bearing creation", () => {
       const delegated = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
         commandId: "capability:delegate",
-        authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/peer"], actions: ["read"], budget: { turns: 1 } },
+        authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/peer"], actions: [FABRIC_OPERATIONS.getRunStatus], budget: { turns: 1 } },
       });
       const registration = await chair.registerAgent({ agentId: "peer", authorityId: delegated.authorityId });
       expect(await chair.registerAgent({ agentId: "peer", authorityId: delegated.authorityId })).toEqual(registration);

@@ -218,15 +218,8 @@ function stringArray(value: unknown, field: string): string[] {
 const disclosureTargets = new Set(["local", "approved-provider", "external"]);
 
 function disclosurePolicy(value: unknown): AuthorityInput["disclosure"] {
-  if (Array.isArray(value)) {
-    const scopes = stringArray(value, "disclosure");
-    if (scopes.some((scope) => !disclosureTargets.has(scope))) {
-      throw new TypeError("disclosure contains an unknown scope");
-    }
-    return scopes;
-  }
   if (!isRecord(value) || typeof value.level !== "string") {
-    throw new TypeError("disclosure must be a policy object or legacy string array");
+    throw new TypeError("disclosure must be a policy object");
   }
   if ((value.level === "allowed" || value.level === "forbidden") && Object.keys(value).length === 1) {
     return { level: value.level };
@@ -644,7 +637,6 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
         ...(params.dependencies === undefined ? {} : { dependencies: stringArray(params.dependencies, "dependencies") }),
         ...(params.expectedArtifacts === undefined ? {} : { expectedArtifacts: stringArray(params.expectedArtifacts, "expectedArtifacts") }),
         ...(params.objectiveChecks === undefined ? {} : { objectiveChecks: stringArray(params.objectiveChecks, "objectiveChecks") }),
-        ...(params.humanGates === undefined ? {} : { humanGates: stringArray(params.humanGates, "humanGates") }),
         objective: requiredString(params, "objective"),
         baseRevision: requiredString(params, "baseRevision"),
         commandId: requiredString(params, "commandId"),

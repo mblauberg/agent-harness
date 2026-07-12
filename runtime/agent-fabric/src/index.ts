@@ -2,6 +2,7 @@ import { Fabric, type FabricRuntimeOpenOptions } from "./core/fabric.js";
 
 export { Fabric, FabricClient } from "./core/fabric.js";
 export type { FabricOperatorActionPorts, FabricRuntimeOpenOptions } from "./core/fabric.js";
+export type { TeamCreateInput, TeamResult } from "./core/contracts.js";
 export {
   connectFabricDaemon,
   FabricDaemonClient,
@@ -96,10 +97,9 @@ export { FabricError } from "./errors.js";
 export {
   AUTHORITY_ACTION_VOCABULARY,
   FABRIC_OPERATIONS,
-  LEGACY_AUTHORITY_ACTIONS,
   expandAuthorityActions,
 } from "./domain/operations.js";
-export type { FabricOperation, LegacyAuthorityAction } from "./domain/operations.js";
+export type { FabricOperation } from "./domain/operations.js";
 export { runAdapterConformance } from "./adapters/conformance.js";
 export { verifyAdapterCompatibility } from "./adapters/compatibility.js";
 export { startOptionalAdapterLeg } from "./adapters/optional-leg.js";

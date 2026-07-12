@@ -34,6 +34,8 @@ export type SeatPaths = {
   metadataPath: string;
 };
 
+export type SeatProject = Pick<SeatPaths, "projectKey" | "projectPath" | "directory">;
+
 type SeatGenerationPointer = {
   schemaVersion: 1;
   projectKey: string;
@@ -115,24 +117,19 @@ async function readPrivateFile(path: string): Promise<string> {
   }
 }
 
-async function activeGeneration(directory: string, key: string): Promise<string | undefined> {
+async function activeGeneration(directory: string, key: string): Promise<string> {
   const pointerPath = join(directory, "current.json");
-  try {
-    const pointer: unknown = JSON.parse(await readPrivateFile(pointerPath));
-    if (
-      typeof pointer !== "object" || pointer === null || Array.isArray(pointer) ||
-      !("schemaVersion" in pointer) || pointer.schemaVersion !== 1 ||
-      !("projectKey" in pointer) || pointer.projectKey !== key ||
-      !("generation" in pointer) || typeof pointer.generation !== "string" ||
-      !GENERATION_PATTERN.test(pointer.generation)
-    ) {
-      throw new Error(`MCP seat generation pointer is invalid: ${pointerPath}`);
-    }
-    return pointer.generation;
-  } catch (error: unknown) {
-    if (errorCode(error) === "ENOENT") return undefined;
-    throw error;
+  const pointer: unknown = JSON.parse(await readPrivateFile(pointerPath));
+  if (
+    typeof pointer !== "object" || pointer === null || Array.isArray(pointer) ||
+    !("schemaVersion" in pointer) || pointer.schemaVersion !== 1 ||
+    !("projectKey" in pointer) || pointer.projectKey !== key ||
+    !("generation" in pointer) || typeof pointer.generation !== "string" ||
+    !GENERATION_PATTERN.test(pointer.generation)
+  ) {
+    throw new Error(`MCP seat generation pointer is invalid: ${pointerPath}`);
   }
+  return pointer.generation;
 }
 
 export function parseMcpSeat(value: string): McpSeat {
@@ -151,12 +148,11 @@ export function projectKey(projectPath: string): string {
   return createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
 }
 
-export async function resolveSeatPaths(input: {
+export async function resolveSeatProject(input: {
   stateDirectory: string;
   project: string;
-  seat: McpSeat;
   createDirectories?: boolean;
-}): Promise<SeatPaths> {
+}): Promise<SeatProject> {
   const projectPath = await canonicalProjectPath(input.project);
   const key = projectKey(projectPath);
   const seatsDirectory = join(input.stateDirectory, "seats");
@@ -166,12 +162,19 @@ export async function resolveSeatPaths(input: {
     await createPrivateChildDirectory(seatsDirectory);
     await createPrivateChildDirectory(directory);
   }
-  const generation = await activeGeneration(directory, key);
-  const activeDirectory = generation === undefined ? directory : join(directory, "generations", generation);
+  return { projectKey: key, projectPath, directory };
+}
+
+export async function resolveSeatPaths(input: {
+  stateDirectory: string;
+  project: string;
+  seat: McpSeat;
+}): Promise<SeatPaths> {
+  const project = await resolveSeatProject(input);
+  const generation = await activeGeneration(project.directory, project.projectKey);
+  const activeDirectory = join(project.directory, "generations", generation);
   return {
-    projectKey: key,
-    projectPath,
-    directory,
+    ...project,
     credentialPath: join(activeDirectory, `${input.seat}.cap`),
     metadataPath: join(activeDirectory, `${input.seat}.json`),
   };
@@ -190,10 +193,9 @@ export async function installSeatGeneration(input: {
   }
   const first = input.seats[0];
   if (first === undefined) throw new Error("MCP seat generation must contain a seat");
-  const root = await resolveSeatPaths({
+  const root = await resolveSeatProject({
     stateDirectory: input.stateDirectory,
     project: input.projectPath,
-    seat: first.metadata.seat,
     createDirectories: true,
   });
   const generationsDirectory = join(root.directory, "generations");

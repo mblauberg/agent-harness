@@ -106,7 +106,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
     expect(unknown.keywords).toContain("additionalProperties");
   });
 
-  it("publishes the complete legacy-compatible operation vocabulary and rejects unknown actions", async () => {
+  it("publishes only the exact current operation vocabulary and rejects coarse actions", async () => {
     const schema = await readSchema("authority.schema.json");
     const properties = schema.properties;
     if (!isJsonObject(properties) || !isJsonObject(properties.actions) || !isJsonObject(properties.actions.items)) {
@@ -116,8 +116,8 @@ describe("Stage 1 versioned JSON Schemas", () => {
       workspaceRoots: ["."],
       sourcePaths: ["src"],
       artifactPaths: [".agent-run"],
-      actions: ["read", FABRIC_OPERATIONS.sendMessage],
-      disclosure: ["local"],
+      actions: [FABRIC_OPERATIONS.getTask, FABRIC_OPERATIONS.sendMessage],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: { turns: 1 },
     };
@@ -125,17 +125,20 @@ describe("Stage 1 versioned JSON Schemas", () => {
       expect(validateWithSchema(schema, { ...authority, actions: [action] }).valid, action).toBe(true);
     }
     expect(validateWithSchema(schema, authority).valid).toBe(true);
+    for (const action of ["read", "write", "delegate", "message", "team"]) {
+      expect(validateWithSchema(schema, { ...authority, actions: [action] }).valid, action).toBe(false);
+    }
     expect(validateWithSchema(schema, { ...authority, actions: ["deploy"] }).valid).toBe(false);
     expect(validateWithSchema(schema, { ...authority, actions: ["fabric.v1.deploy"] }).valid).toBe(false);
   });
 
-  it("publishes the complete authority policy while retaining legacy disclosure arrays", async () => {
+  it("publishes only the closed current disclosure policy", async () => {
     const schema = await readSchema("authority.schema.json");
     const base = {
       workspaceRoots: ["."],
       sourcePaths: ["src"],
       artifactPaths: [".agent-run"],
-      actions: ["read", "fabric.v1.task.update"],
+      actions: [FABRIC_OPERATIONS.getTask, FABRIC_OPERATIONS.updateTask],
       deniedPaths: ["src/private"],
       deniedActions: ["fabric.v1.artifact.publish"],
       expiresAt: "2099-01-01T00:00:00.000Z",
@@ -144,16 +147,19 @@ describe("Stage 1 versioned JSON Schemas", () => {
 
     expect(validateWithSchema(schema, {
       ...base,
-      disclosure: { level: "scoped", scopes: ["local", "approved-provider"] },
+      disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
     }).valid).toBe(true);
-    expect(validateWithSchema(schema, { ...base, disclosure: ["local"] }).valid).toBe(true);
-    expect(validateWithSchema(schema, { ...base, disclosure: { level: "scoped", scopes: [] } }).valid).toBe(false);
+    expect(validateWithSchema(schema, { ...base, disclosure: ["local"] }).valid).toBe(false);
+    expect(validateWithSchema(schema, { ...base, disclosure: { level: "scoped", scopes: [] } as const }).valid).toBe(false);
     expect(validateWithSchema(schema, { ...base, disclosure: { level: "forbidden", scopes: ["local"] } }).valid).toBe(false);
-    expect(validateWithSchema(schema, { ...base, disclosure: ["unknown"] }).valid).toBe(false);
     expect(validateWithSchema(schema, { ...base, budget: { costUsd: 2 } }).valid).toBe(false);
     expect(validateWithSchema(schema, { ...base, budget: { "cost:ZZZ": 2 } }).valid).toBe(false);
     for (const currency of ISO_4217_CURRENCY_CODES) {
-      expect(validateWithSchema(schema, { ...base, disclosure: ["local"], budget: { [`cost:${currency}`]: 1 } }).valid, currency).toBe(true);
+      expect(validateWithSchema(schema, {
+        ...base,
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
+        budget: { [`cost:${currency}`]: 1 },
+      }).valid, currency).toBe(true);
     }
     const definitions = schema.$defs;
     if (!isJsonObject(definitions) || !isJsonObject(definitions.budgetUnit) || !Array.isArray(definitions.budgetUnit.anyOf)) {

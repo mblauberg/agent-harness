@@ -70,7 +70,7 @@ describe("daemon adapter composition", () => {
         databasePath,
         workspaceRoot: directory,
         runId: "run-daemon-adapter",
-        chair: { agentId: "chair", authority: { ...DAEMON_ROOT_AUTHORITY, disclosure: ["local", "approved-provider"] } },
+        chair: { agentId: "chair", authority: { ...DAEMON_ROOT_AUTHORITY, disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const } },
       });
       const chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
       try {

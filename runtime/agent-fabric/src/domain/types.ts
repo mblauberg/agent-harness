@@ -2,7 +2,7 @@ export type DisclosureTarget = "local" | "approved-provider" | "external";
 
 export type DisclosurePolicy =
   | { level: "allowed" }
-  | { level: "scoped"; scopes: DisclosureTarget[] }
+  | { level: "scoped"; scopes: readonly DisclosureTarget[] }
   | { level: "forbidden" };
 
 export type AuthorityInput = {
@@ -12,7 +12,7 @@ export type AuthorityInput = {
   actions: string[];
   deniedPaths?: string[];
   deniedActions?: string[];
-  disclosure: DisclosurePolicy | string[];
+  disclosure: DisclosurePolicy;
   expiresAt: string;
   budget: Record<string, number>;
 };

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,29 @@ const CAPABILITY_A = `afc_${"a".repeat(43)}`;
 const CAPABILITY_B = `afc_${"b".repeat(43)}`;
 
 describe("MCP seat generation store", () => {
+  it("rejects flat seat files when the active generation pointer is absent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-seat-flat-rejection-"));
+    try {
+      const stateDirectory = join(root, "state");
+      const requestedProjectPath = join(root, "project");
+      await mkdir(stateDirectory, { mode: 0o700 });
+      await mkdir(requestedProjectPath);
+      const projectPath = await realpath(requestedProjectPath);
+      const flatDirectory = join(stateDirectory, "seats", projectKey(projectPath));
+      await mkdir(flatDirectory, { recursive: true, mode: 0o700 });
+      await writeFile(join(flatDirectory, "codex.cap"), CAPABILITY_A, { mode: 0o600 });
+      await writeFile(join(flatDirectory, "codex.json"), "{}\n", { mode: 0o600 });
+
+      await expect(resolveSeatPaths({
+        stateDirectory,
+        project: projectPath,
+        seat: "codex",
+      })).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the prior complete generation active when renewal fails before cutover", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-seat-generation-"));
     try {

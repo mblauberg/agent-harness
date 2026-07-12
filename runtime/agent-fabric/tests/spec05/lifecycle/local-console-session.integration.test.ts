@@ -477,9 +477,9 @@ describe("public local operator Console session", () => {
           project_session_id, project_id, mode, state, revision, generation,
           authority_ref, budget_ref, launch_packet_path, launch_packet_digest,
           membership_revision, origin_kind, origin_operator_id,
-          migration_manifest_ref, terminal_path_json, created_at, updated_at
+          terminal_path_json, created_at, updated_at
         ) VALUES (?, ?, 'coordinated', ?, 1, 1, ?, ?, ?, ?, 1,
-                  'operator-launch', ?, NULL, NULL, ?, ?)
+                  'operator-launch', ?, NULL, ?, ?)
       `);
       database.transaction(() => {
         insert.run(

@@ -1,6 +1,5 @@
 import {
   assertChairMutationAuthority,
-  parseChairMutationContext,
   parseScopedGate,
   type GateId,
   type GateOperationTarget,
@@ -60,13 +59,6 @@ export type SetTaskDependenciesRequest = Readonly<{
   expectedRevision: number;
   taskId: string;
   dependencyTaskIds: readonly string[];
-}>;
-
-export type CompatibilityTaskGatesRequest = Readonly<{
-  commandId: string;
-  expectedDependencyRevision: number;
-  taskId: string;
-  humanGateIds: readonly string[];
 }>;
 
 type InternalChairCommand = Readonly<{
@@ -443,85 +435,6 @@ export class ScopedGateStore {
         })),
       ],
     });
-  }
-
-  createCompatibilityTaskGates(
-    context: AuthenticatedAgentContext,
-    request: CompatibilityTaskGatesRequest,
-  ): readonly ScopedGate[] {
-    return this.#executeChairCommand(
-      context,
-      {
-        commandId: request.commandId,
-        expectedRevision: request.expectedDependencyRevision,
-      },
-      {
-        operation: "scoped-gate:compatibility-task-gates",
-        payload: {
-          taskId: request.taskId,
-          humanGateIds: [...request.humanGateIds].sort(),
-        },
-      },
-      () => {
-        const identity = this.#runIdentity(context.coordinationRunId);
-        this.#assertGateTopologyMutable(context.coordinationRunId);
-        if (identity.dependencyRevision !== request.expectedDependencyRevision) {
-          throw new ProjectFabricCoreError("STALE_REVISION", "dependency graph revision changed");
-        }
-        if (this.#database.prepare(`
-          SELECT 1 FROM tasks WHERE run_id=? AND task_id=?
-        `).get(context.coordinationRunId, request.taskId) === undefined) {
-          throw new ProjectFabricCoreError("NOT_FOUND", "compatibility gate task was not found");
-        }
-        const unique = [...new Set(request.humanGateIds)];
-        if (unique.length !== request.humanGateIds.length || unique.some((gateId) => gateId.trim().length === 0)) {
-          throw new ProjectFabricCoreError("PROTOCOL_INVALID", "compatibility gate IDs must be unique and non-empty");
-        }
-        const gates: ScopedGate[] = [];
-        for (const legacyGateId of unique.sort()) {
-          const activeLease = this.#activeChairLease(context);
-          const runRevision = integer(row(this.#database.prepare(`
-            SELECT revision FROM runs WHERE run_id=?
-          `).get(context.coordinationRunId), "coordination run"), "revision");
-          const command = parseChairMutationContext({
-            commandId: request.commandId,
-            agentId: context.agentId,
-            projectSessionId: context.projectSessionId,
-            coordinationRunId: context.coordinationRunId,
-            principalGeneration: context.principalGeneration,
-            chairLeaseId: text(activeLease, "lease_id"),
-            chairLeaseGeneration: integer(activeLease, "generation"),
-            expectedRunRevision: runRevision,
-            expectedRevision: request.expectedDependencyRevision,
-          });
-          const gate = this.#insertGate(`compatibility:${context.agentId}`, {
-            origin: "chair",
-            command,
-            intent: {
-              projectSessionId: context.projectSessionId,
-              coordinationRunId: context.coordinationRunId,
-              dedupeKey: `legacy-task:${request.taskId}:${legacyGateId}`,
-              scope: { kind: "task", taskId: request.taskId as TaskId },
-              blockedOperationIds: [],
-              enforcementPoints: ["task-readiness", "scoped-barrier"],
-              question: `Legacy human gate ${legacyGateId} requires explicit reconciliation.`,
-              reason: "The compatibility API declared a human gate without authenticated resolution evidence.",
-              options: ["approve", "reject", "defer", "cancel"],
-              recommendation: "defer",
-              consequences: ["The affected task remains blocked until an authenticated operator resolves the gate."],
-              evidenceRefs: [],
-            },
-          });
-          this.#database.prepare(`
-            UPDATE scoped_gates
-               SET legacy_status='declared', legacy_evidence=?
-             WHERE gate_id=?
-          `).run(canonicalJson({ legacyGateId, source: "Fabric.createTask" }), gate.gateId);
-          gates.push(this.getGate(gate.gateId));
-        }
-        return gates;
-      },
-    );
   }
 
   #insertGate(createdByRef: string, request: ScopedGateCreateRequest): ScopedGate {

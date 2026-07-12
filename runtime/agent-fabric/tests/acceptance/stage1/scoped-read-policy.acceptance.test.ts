@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
@@ -30,11 +31,21 @@ describe("chair, owner and participant scoped reads", () => {
     const chair = fabric.connect(run.chairCapability);
     const aliceAuthority = await chair.delegateAuthority({
       parentAuthorityId: run.chairAuthorityId,
-      authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/alice"], actions: ["read", "write"], budget: { turns: 5 } },
+      authority: {
+        ...ROOT_AUTHORITY,
+        sourcePaths: ["src/alice"],
+        actions: [FABRIC_OPERATIONS.getTask, FABRIC_OPERATIONS.listTasks, FABRIC_OPERATIONS.listAgents],
+        budget: { turns: 5 },
+      },
     });
     const bobAuthority = await chair.delegateAuthority({
       parentAuthorityId: run.chairAuthorityId,
-      authority: { ...ROOT_AUTHORITY, sourcePaths: ["src/bob"], actions: ["read", "write"], budget: { turns: 5 } },
+      authority: {
+        ...ROOT_AUTHORITY,
+        sourcePaths: ["src/bob"],
+        actions: [FABRIC_OPERATIONS.getTask, FABRIC_OPERATIONS.listTasks, FABRIC_OPERATIONS.listAgents],
+        budget: { turns: 5 },
+      },
     });
     const aliceRegistration = await chair.registerAgent({ agentId: "alice", authorityId: aliceAuthority.authorityId });
     const bobRegistration = await chair.registerAgent({ agentId: "bob", authorityId: bobAuthority.authorityId });

@@ -31,8 +31,10 @@
     "test:acceptance": "vitest run tests/acceptance",
     "test:load": "vitest run tests/performance",
     "test:evaluation": "vitest run tests/evaluation",
+    "schema:check": "node scripts/database-baseline.mjs --check",
+    "schema:update": "node scripts/database-baseline.mjs --write",
     "check:protocol": "npm --prefix ../agent-fabric-protocol ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric-protocol run check",
-    "check": "npm run check:protocol && npm run typecheck && npm run build && npm run test"
+    "check": "npm run check:protocol && npm run schema:check && npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.206",

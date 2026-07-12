@@ -114,8 +114,8 @@ export class ProjectSessionStore {
             project_session_id, project_id, mode, state, revision, generation,
             authority_ref, budget_ref, launch_packet_path, launch_packet_digest,
             membership_revision, origin_kind, origin_operator_id,
-            migration_manifest_ref, terminal_path_json, created_at, updated_at
-          ) VALUES (?, ?, ?, 'draft', 1, 1, ?, ?, ?, ?, 1, 'operator-launch', ?, NULL, NULL, ?, ?)
+            terminal_path_json, created_at, updated_at
+          ) VALUES (?, ?, ?, 'draft', 1, 1, ?, ?, ?, ?, 1, 'operator-launch', ?, NULL, ?, ?)
         `).run(
           request.projectSessionId,
           request.projectId,

@@ -441,7 +441,7 @@ describe("intake revision public routing", () => {
             artifact_id,project_id,project_session_id,run_id,task_id,publisher_kind,
             publisher_ref,publisher_agent_id,source_kind,evidence_kind,relative_path,
             sha256,registry_state,quarantine_reason,revision,created_at
-          ) VALUES ('artifact_quarantined_scope',?,NULL,NULL,NULL,'migration','test',NULL,
+          ) VALUES ('artifact_quarantined_scope',?,NULL,NULL,NULL,'project','test',NULL,
                     'project-file','artifact','quarantined.md',?,'quarantined','test',1,?)
         `).run(fixture.projectId, `sha256:${"c".repeat(64)}`, now);
         expect(() => database.prepare(`

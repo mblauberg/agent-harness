@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
 import { createLifecycleFixture, writeLifecycleCheckpoint } from "../support/lifecycle-testkit.ts";
 import {
   advanceOptionalLeg,
@@ -84,8 +85,8 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
           workspaceRoots: [fixture.directory],
           sourcePaths: [join(fixture.directory, "src", "outside-team-a")],
           artifactPaths: [fixture.runDirectory],
-          actions: ["read"],
-          disclosure: ["local"],
+          actions: [FABRIC_OPERATIONS.getRunStatus],
+          disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z",
           budget: { turns: 1, "cost:USD": 1 },
         },

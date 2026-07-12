@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { openFabric } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
 import type { Fabric, FabricClient } from "../../src/index.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
@@ -105,8 +105,8 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run/run-stage3"],
-    actions: ["read", "write", "delegate", "message"],
-    disclosure: ["local", "approved-provider"],
+    actions: [...AUTHORITY_ACTION_VOCABULARY],
+    disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
     budget: { turns: 40, "cost:USD": 20 },
   };
@@ -123,7 +123,7 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     authority: {
       ...rootAuthority,
       sourcePaths: ["src/leader"],
-      actions: ["read", "write", "delegate", "message"],
+      actions: [...rootAuthority.actions],
       budget: { turns: 20, "cost:USD": 10 },
     },
   });
@@ -139,7 +139,7 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     authority: {
       ...rootAuthority,
       sourcePaths: ["src/leader/child"],
-      actions: ["read", "write", "message"],
+      actions: [...rootAuthority.actions],
       budget: { turns: 5, "cost:USD": 2 },
     },
   });

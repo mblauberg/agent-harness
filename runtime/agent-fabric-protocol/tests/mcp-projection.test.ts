@@ -47,6 +47,13 @@ function digest(value: unknown): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
 describe("registry-owned current-agent MCP projection", () => {
   it("owns a launch-scoped one-use attestation descriptor", () => {
     const launchAttestation = FABRIC_OPERATIONS.launchAttest;
@@ -140,13 +147,17 @@ describe("registry-owned current-agent MCP projection", () => {
     expect(team?.outputSchema).toMatchObject({
       type: "object",
       additionalProperties: false,
-      properties: {
-        leader: {
-          type: "object",
-          additionalProperties: false,
-          required: ["agentId", "authorityId"],
-        },
-      },
+    });
+    const output = record(team?.outputSchema, "team output schema");
+    const properties = record(output.properties, "team output properties");
+    const leader = record(properties.leader, "team leader schema");
+    expect(leader.$ref).toMatch(/^#\/\$defs\/[A-Za-z0-9_]+$/u);
+    const definitionName = String(leader.$ref).slice("#/$defs/".length);
+    const definitions = record(output.$defs, "team output definitions");
+    expect(definitions[definitionName]).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["agentId", "authorityId"],
     });
   });
 

@@ -2,84 +2,9 @@ import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFabric } from "../../src/index.ts";
-import type { Fabric, FabricClient } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
+import type { Fabric, FabricClient, TeamResult } from "../../src/index.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
-
-export type TeamResult = {
-  teamId: string;
-  leaderAgentId: string;
-  rootTaskId: string;
-  ownedTaskIds: string[];
-  memberAgentIds: string[];
-  budgetId: string;
-  state: "active" | "frozen" | "barrier-closed";
-  generation: number;
-  successorAgentId: string | null;
-};
-
-export type BudgetResult = {
-  budgetId: string;
-  parentBudgetId: string | null;
-  state: "active" | "usage-unknown" | "released";
-  dimensions: Record<
-    string,
-    { granted: number; reserved: number; consumed: number; available: number; usageUnknown: boolean }
-  >;
-  returned: Record<string, number>;
-};
-
-export type Stage5Client = {
-  createTeam(input: {
-    teamId: string;
-    leaderAgentId: string;
-    rootTaskId: string;
-    ownedTaskIds: string[];
-    memberAgentIds: string[];
-    authorityId: string;
-    budget: Record<string, number>;
-    commandId: string;
-  }): Promise<TeamResult>;
-  getTeam(input: { teamId: string }): Promise<TeamResult>;
-  freezeSubtree(input: {
-    teamId: string;
-    expectedGeneration: number;
-    reason: string;
-    commandId: string;
-  }): Promise<TeamResult>;
-  adoptSubtree(input: {
-    teamId: string;
-    successorAgentId: string;
-    expectedGeneration: number;
-    handoffEvidence: string;
-    commandId: string;
-  }): Promise<TeamResult>;
-  closeSubtreeBarrier(input: {
-    teamId: string;
-    expectedGeneration: number;
-    commandId: string;
-  }): Promise<{ teamId: string; generation: number; closed: true }>;
-  reserveBudget(input: {
-    teamId: string;
-    expectedTeamGeneration: number;
-    parentBudgetId: string;
-    budgetId: string;
-    dimensions: Record<string, number>;
-    commandId: string;
-  }): Promise<BudgetResult>;
-  recordBudgetUsage(input: {
-    budgetId: string;
-    usage: Record<string, number | null>;
-    commandId: string;
-  }): Promise<BudgetResult>;
-  reconcileBudgetUsage(input: {
-    budgetId: string;
-    consumed: Record<string, number>;
-    commandId: string;
-  }): Promise<BudgetResult>;
-  releaseBudget(input: { budgetId: string; commandId: string }): Promise<BudgetResult>;
-  getBudget(input: { budgetId: string }): Promise<BudgetResult>;
-};
 
 export type Stage5Fixture = {
   directory: string;
@@ -115,10 +40,10 @@ export async function createStage5RecoveryFixture(): Promise<Stage5Fixture> {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run/run-stage5"],
-    actions: ["read", "write", "delegate", "message", "team"],
-    disclosure: ["local"],
+    actions: [...AUTHORITY_ACTION_VOCABULARY],
+    disclosure: { level: "scoped", scopes: ["local"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
-    budget: { turns: 100, "cost:USD": 50 },
+    budget: { turns: 200, "cost:USD": 200, descendants: 20 },
   };
   const run = await createCurrentSessionRun({
     databasePath,
@@ -128,14 +53,39 @@ export async function createStage5RecoveryFixture(): Promise<Stage5Fixture> {
     chair: { agentId: "chair", authority: rootAuthority },
   });
   const chairBase = fabric.connect(run.chairCapability);
-  const leaderA = await chairBase.delegateAuthority({
-    parentAuthorityId: run.chairAuthorityId,
-    authority: {
-      ...rootAuthority,
-      sourcePaths: ["src/team-a"],
-      budget: { turns: 30, "cost:USD": 15 },
+  const teamA = await chairBase.createTeam({
+    teamId: "team-a",
+    leader: {
+      agentId: "leader-a",
+      authority: {
+        ...rootAuthority,
+        sourcePaths: ["src/team-a"],
+        budget: { turns: 30, "cost:USD": 15 },
+      },
     },
+    rootTask: {
+      taskId: "team-a-root",
+      objective: "manage team A",
+      baseRevision: "stage5-base",
+    },
+    initialMembers: [{
+      agentId: "worker-a",
+      authority: {
+        ...rootAuthority,
+        sourcePaths: ["src/team-a/worker"],
+        budget: { turns: 5, "cost:USD": 2 },
+      },
+    }],
+    discussionGroups: [],
+    reservedBudget: { turns: 10, "cost:USD": 5 },
+    commandId: "stage5:team-a:create",
   });
+  const leaderA = teamA.leader;
+  const workerA = teamA.initialMembers?.[0];
+  const rootAReady = teamA.rootTask;
+  if (leaderA === undefined || workerA === undefined || rootAReady === undefined) {
+    throw new Error("atomic team creation omitted registered identities or root task");
+  }
   const leaderB = await chairBase.delegateAuthority({
     parentAuthorityId: run.chairAuthorityId,
     authority: {
@@ -152,32 +102,15 @@ export async function createStage5RecoveryFixture(): Promise<Stage5Fixture> {
       budget: { turns: 20, "cost:USD": 10 },
     },
   });
-  const leaderARegistration = await chairBase.registerAgent({ agentId: "leader-a", authorityId: leaderA.authorityId });
+  const leaderARegistration = await chairBase.registerAgent(leaderA);
   const leaderBRegistration = await chairBase.registerAgent({ agentId: "leader-b", authorityId: leaderB.authorityId });
   const replacementRegistration = await chairBase.registerAgent({
     agentId: "leader-replacement",
     authorityId: replacement.authorityId,
   });
   const leaderABase = fabric.connect(leaderARegistration.capability);
-  const workerA = await leaderABase.delegateAuthority({
-    parentAuthorityId: leaderA.authorityId,
-    authority: {
-      ...rootAuthority,
-      sourcePaths: ["src/team-a/worker"],
-      actions: ["read", "write", "message"],
-      budget: { turns: 5, "cost:USD": 2 },
-    },
-  });
-  const workerARegistration = await leaderABase.registerAgent({ agentId: "worker-a", authorityId: workerA.authorityId });
+  const workerARegistration = await leaderABase.registerAgent(workerA);
   const leaderBBase = fabric.connect(leaderBRegistration.capability);
-  const rootAReady = await chairBase.createTask({
-    taskId: "team-a-root",
-    authorityId: leaderA.authorityId,
-    eligibleAgentIds: ["leader-a"],
-    objective: "manage team A",
-    baseRevision: "stage5-base",
-    commandId: "stage5:create:root-a",
-  });
   const rootA = await leaderABase.claimTask({
     taskId: rootAReady.taskId,
     expectedRevision: rootAReady.revision,
@@ -231,14 +164,5 @@ export async function createStage5RecoveryFixture(): Promise<Stage5Fixture> {
 }
 
 export async function createTeamA(fixture: Stage5Fixture): Promise<TeamResult> {
-  return await fixture.chair.createTeam({
-    teamId: "team-a",
-    leaderAgentId: "leader-a",
-    rootTaskId: fixture.tasks.rootA.taskId,
-    ownedTaskIds: [fixture.tasks.rootA.taskId, fixture.tasks.workerA.taskId],
-    memberAgentIds: ["leader-a", "worker-a"],
-    authorityId: fixture.authorities.leaderA,
-    budget: { turns: 10, "cost:USD": 5 },
-    commandId: "stage5:team-a:create",
-  });
+  return await fixture.chair.getTeam({ teamId: "team-a" });
 }

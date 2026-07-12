@@ -76,7 +76,7 @@ CREATE TABLE artifacts (
   run_id TEXT,
   task_id TEXT,
   publisher_kind TEXT NOT NULL
-    CHECK (publisher_kind IN ('agent','operator','fabric','project','migration')),
+    CHECK (publisher_kind IN ('agent','operator','fabric','project')),
   publisher_ref TEXT NOT NULL,
   publisher_agent_id TEXT,
   source_kind TEXT NOT NULL
@@ -1407,9 +1407,8 @@ CREATE TABLE project_sessions (
   launch_packet_path TEXT NOT NULL,
   launch_packet_digest TEXT NOT NULL,
   membership_revision INTEGER NOT NULL CHECK (membership_revision >= 1),
-  origin_kind TEXT NOT NULL CHECK (origin_kind IN ('operator-launch','legacy-migration')),
-  origin_operator_id TEXT,
-  migration_manifest_ref TEXT,
+  origin_kind TEXT NOT NULL CHECK (origin_kind='operator-launch'),
+  origin_operator_id TEXT NOT NULL,
   terminal_path_json TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -1820,8 +1819,6 @@ CREATE TABLE scoped_gates (
   status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected','deferred','cancelled','superseded')),
   human_required INTEGER NOT NULL CHECK (human_required IN (0,1)),
   release_binding_json TEXT,
-  legacy_status TEXT,
-  legacy_evidence TEXT,
   revision INTEGER NOT NULL CHECK (revision >= 1),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -1872,16 +1869,6 @@ CREATE TABLE task_handoff_acknowledgements (
   acknowledged_by TEXT NOT NULL,
   acknowledged_at INTEGER NOT NULL,
   PRIMARY KEY (run_id, task_id, task_revision, owner_lease_generation)
-);
-
-CREATE TABLE task_human_gates (
-  run_id TEXT NOT NULL,
-  task_id TEXT NOT NULL,
-  gate_id TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  evidence TEXT, migrated_gate_id TEXT REFERENCES scoped_gates(gate_id),
-  PRIMARY KEY (run_id, task_id, gate_id),
-  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id)
 );
 
 CREATE TABLE task_objective_checks (
@@ -3102,12 +3089,6 @@ CREATE TRIGGER global_revision_workstreams_insert AFTER INSERT ON workstreams BE
 
 CREATE TRIGGER global_revision_workstreams_update AFTER UPDATE ON workstreams BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
-CREATE TRIGGER human_gate_status_insert BEFORE INSERT ON task_human_gates
-WHEN NEW.status NOT IN ('pending','approved','rejected') BEGIN SELECT RAISE(ABORT, 'INVARIANT_human_gate_status'); END;
-
-CREATE TRIGGER human_gate_status_update BEFORE UPDATE OF status ON task_human_gates
-WHEN NEW.status NOT IN ('pending','approved','rejected') BEGIN SELECT RAISE(ABORT, 'INVARIANT_human_gate_status'); END;
-
 CREATE TRIGGER intake_accepted_scope_insert
 BEFORE INSERT ON intakes
 WHEN NOT (
@@ -3414,15 +3395,6 @@ CREATE TRIGGER leases_values_update BEFORE UPDATE OF kind,status,generation,hold
     THEN RAISE(ABORT, 'INVARIANT_leases_holder_same_run') END;
 END;
 
-CREATE TRIGGER legacy_task_gates_delete BEFORE DELETE ON task_human_gates
-BEGIN SELECT RAISE(ABORT, 'AFAB_0004_LEGACY_GATES_READ_ONLY'); END;
-
-CREATE TRIGGER legacy_task_gates_insert BEFORE INSERT ON task_human_gates
-BEGIN SELECT RAISE(ABORT, 'AFAB_0004_LEGACY_GATES_READ_ONLY'); END;
-
-CREATE TRIGGER legacy_task_gates_update BEFORE UPDATE ON task_human_gates
-BEGIN SELECT RAISE(ABORT, 'AFAB_0004_LEGACY_GATES_READ_ONLY'); END;
-
 CREATE TRIGGER membership_same_run_insert BEFORE INSERT ON project_session_memberships
 WHEN NOT EXISTS (SELECT 1 FROM runs r WHERE r.project_session_id=NEW.project_session_id AND r.run_id=NEW.coordination_run_id)
 BEGIN SELECT RAISE(ABORT, 'AFAB_0004_MEMBERSHIP_RUN'); END;
@@ -3616,14 +3588,7 @@ WHEN (SELECT state FROM project_sessions WHERE project_session_id=NEW.project_se
      IN ('quiescing','awaiting_acceptance','closed','cancelled')
 BEGIN SELECT RAISE(ABORT,'AFAB_0004_MEMBERSHIP_FROZEN'); END;
 
-CREATE TRIGGER ps_origin_insert BEFORE INSERT ON project_sessions BEGIN
-  SELECT CASE WHEN
-    (NEW.origin_kind='operator-launch' AND (NEW.origin_operator_id IS NULL OR NEW.migration_manifest_ref IS NOT NULL)) OR
-    (NEW.origin_kind='legacy-migration' AND (NEW.origin_operator_id IS NOT NULL OR NEW.migration_manifest_ref IS NULL))
-    THEN RAISE(ABORT, 'AFAB_0004_SESSION_ORIGIN') END;
-END;
-
-CREATE TRIGGER ps_origin_update BEFORE UPDATE OF origin_kind,origin_operator_id,migration_manifest_ref ON project_sessions
+CREATE TRIGGER ps_origin_update BEFORE UPDATE OF origin_kind,origin_operator_id ON project_sessions
 BEGIN SELECT RAISE(ABORT, 'AFAB_0004_SESSION_ORIGIN_IMMUTABLE'); END;
 
 CREATE TRIGGER ps_revision_step BEFORE UPDATE OF state,revision,authority_ref,budget_ref,launch_packet_path,launch_packet_digest,membership_revision ON project_sessions

@@ -2,26 +2,28 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFabric } from "../../src/index.ts";
-import { expandAuthorityActions } from "../../src/domain/operations.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
+import type {
+  AuthorityInput,
+  FabricClient,
+  TeamCreateInput,
+  TeamResult,
+} from "../../src/index.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
-const teamAuthorityActions = expandAuthorityActions(["read", "write", "delegate", "message", "team"]);
-if (!teamAuthorityActions.ok) throw new Error("team test authority actions are invalid");
-
-export const TEAM_ROOT_AUTHORITY = {
+export const TEAM_ROOT_AUTHORITY: AuthorityInput = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: teamAuthorityActions.operations,
-  disclosure: ["local"],
+  actions: [...AUTHORITY_ACTION_VOCABULARY],
+  disclosure: { level: "scoped", scopes: ["local"] } as const,
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 200, "cost:USD": 200, descendants: 20 },
 };
 
 type TeamMemberInput = {
   agentId: string;
-  authority: typeof TEAM_ROOT_AUTHORITY;
+  authority: AuthorityInput;
 };
 
 export function teamAuthority(options: {
@@ -30,7 +32,7 @@ export function teamAuthority(options: {
   turns: number;
   costUsd: number;
   descendants: number;
-}): typeof TEAM_ROOT_AUTHORITY {
+}): AuthorityInput {
   return {
     ...TEAM_ROOT_AUTHORITY,
     sourcePaths: [options.sourcePath],
@@ -51,7 +53,7 @@ export function teamCreateInput(options: {
   leaderId?: string;
   memberAuthorities?: TeamMemberInput[];
   reservedBudget?: Record<string, number>;
-}): Record<string, unknown> {
+}): TeamCreateInput {
   const leaderId = options.leaderId ?? `${options.teamId}-leader`;
   const sourcePath = options.sourcePath ?? `src/${options.teamId}`;
   const artifactPath = options.artifactPath ?? `.agent-run/${options.teamId}`;
@@ -116,29 +118,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export async function createTeam(client: object, input: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const method: unknown = Reflect.get(client, "createTeam");
-  if (typeof method !== "function") {
-    throw new Error("FabricClient.createTeam is not implemented");
-  }
-  return requireRecord(await Reflect.apply(method, client, [input]), "team result");
+export async function createTeam(
+  client: Pick<FabricClient, "createTeam">,
+  input: TeamCreateInput,
+): Promise<TeamResult> {
+  return await client.createTeam(input);
 }
 
 export async function issueTeamLeaderCapability(
-  parentClient: object,
-  team: Record<string, unknown>,
+  parentClient: Pick<FabricClient, "registerAgent">,
+  team: TeamResult,
 ): Promise<string> {
-  const leader = requireRecord(team.leader, "team leader identity");
-  if (typeof leader.agentId !== "string" || typeof leader.authorityId !== "string") {
-    throw new TypeError("team leader identity is incomplete");
-  }
-  const method: unknown = Reflect.get(parentClient, "registerAgent");
-  if (typeof method !== "function") throw new Error("FabricClient.registerAgent is not implemented");
-  const registration = requireRecord(await Reflect.apply(method, parentClient, [{
-    agentId: leader.agentId,
-    authorityId: leader.authorityId,
-  }]), "team leader registration");
-  if (typeof registration.capability !== "string") throw new TypeError("team leader capability is missing");
+  const leader = team.leader;
+  if (leader === undefined) throw new TypeError("team leader identity is incomplete");
+  const registration = await parentClient.registerAgent(leader);
   return registration.capability;
 }
 

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { openFabric } from "../../../src/index.ts";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 describe("Stage 1 authority algebra", () => {
@@ -20,8 +21,12 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
-      actions: ["read", "write", "delegate"],
-      disclosure: ["local"],
+      actions: [
+        FABRIC_OPERATIONS.delegateAuthority,
+        FABRIC_OPERATIONS.registerAgent,
+        FABRIC_OPERATIONS.acquireWriteLease,
+      ],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: { turns: 2 },
     };
@@ -40,7 +45,7 @@ describe("Stage 1 authority algebra", () => {
           ...rootAuthority,
           sourcePaths: ["src"],
           artifactPaths: ["src"],
-          actions: ["write"],
+          actions: [FABRIC_OPERATIONS.acquireWriteLease],
           budget: { turns: 1 },
         },
       });
@@ -72,8 +77,12 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
-      actions: ["read", "write", "delegate"],
-      disclosure: ["local"],
+      actions: [
+        FABRIC_OPERATIONS.delegateAuthority,
+        FABRIC_OPERATIONS.registerAgent,
+        FABRIC_OPERATIONS.acquireWriteLease,
+      ],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: { turns: 2 },
     };
@@ -92,7 +101,7 @@ describe("Stage 1 authority algebra", () => {
           ...rootAuthority,
           sourcePaths: ["src"],
           artifactPaths: ["src"],
-          actions: ["write"],
+          actions: [FABRIC_OPERATIONS.acquireWriteLease],
           budget: { turns: 1 },
         },
       });
@@ -133,8 +142,8 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
-      actions: ["read"],
-      disclosure: ["local"],
+      actions: [FABRIC_OPERATIONS.getRunStatus],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
       budget: {},
     };
@@ -177,8 +186,8 @@ describe("Stage 1 authority algebra", () => {
             workspaceRoots: [workspaceRoot],
             sourcePaths: [join(workspaceRoot, "src")],
             artifactPaths: [runDirectory],
-            actions: ["read", "write"],
-            disclosure: ["local"],
+            actions: [FABRIC_OPERATIONS.getRunStatus],
+            disclosure: { level: "scoped", scopes: ["local"] } as const,
             expiresAt: "2027-07-10T00:00:00.000Z",
             budget: { turns: 1 },
           },
@@ -208,7 +217,7 @@ describe("Stage 1 authority algebra", () => {
             workspaceRoots: ["."],
             sourcePaths: ["src"],
             artifactPaths: [".agent-run"],
-            actions: ["read"],
+            actions: [FABRIC_OPERATIONS.getRunStatus],
             disclosure: { level: "forbidden" },
             expiresAt: "2027-07-10T00:00:00.000Z",
             budget: { costUsd: 1 },

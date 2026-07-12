@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFabric } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
 import { FakeHerdrBoundary, FakeProviderBoundary, VisibilityClock } from "./visibility-fakes.ts";
@@ -30,8 +30,8 @@ export async function createVisibilityFixture(runId = "run-visibility") {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run"],
-    actions: ["read", "write", "delegate", "message"],
-    disclosure: ["local"],
+    actions: [...AUTHORITY_ACTION_VOCABULARY],
+    disclosure: { level: "scoped", scopes: ["local"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
     budget: { turns: 20, "cost:USD": 20 },
   };
@@ -49,7 +49,7 @@ export async function createVisibilityFixture(runId = "run-visibility") {
       ...authority,
       sourcePaths: ["src/peer"],
       artifactPaths: [".agent-run/peer"],
-      actions: ["read", "write", "message"],
+      actions: [...authority.actions],
       budget: { turns: 8, "cost:USD": 8 },
     },
   });

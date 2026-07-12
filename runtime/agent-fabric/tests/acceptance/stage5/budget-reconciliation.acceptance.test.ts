@@ -23,7 +23,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
       expectedTeamGeneration: team.generation,
       parentBudgetId: team.budgetId,
       budgetId: "worker-budget-unknown",
-      dimensions: { turns: 6 },
+      dimensions: { turns: 4 },
       commandId: "stage5:budget:reserve:unknown",
     });
     await fixture.leaderA.recordBudgetUsage({
@@ -38,7 +38,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
     expect(frozen).toMatchObject({
       state: "usage-unknown",
       returned: {},
-      dimensions: { turns: { granted: 6, usageUnknown: true } },
+      dimensions: { turns: { granted: 4, usageUnknown: true } },
     });
     await expect(
       fixture.leaderA.reserveBudget({
@@ -46,7 +46,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
         expectedTeamGeneration: team.generation,
         parentBudgetId: team.budgetId,
         budgetId: "worker-budget-reuse-blocked",
-        dimensions: { turns: 5 },
+        dimensions: { turns: 2 },
         commandId: "stage5:budget:reserve:blocked",
       }),
     ).rejects.toMatchObject({ code: "BUDGET_USAGE_UNKNOWN" });
@@ -60,7 +60,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
       budgetId: child.budgetId,
       commandId: "stage5:budget:release:reconciled",
     });
-    expect(released).toMatchObject({ state: "released", returned: { turns: 4 } });
+    expect(released).toMatchObject({ state: "released", returned: { turns: 2 } });
   });
 
   it("makes release idempotent and never restores more than the original grant", async () => {
@@ -75,7 +75,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
       expectedTeamGeneration: team.generation,
       parentBudgetId: team.budgetId,
       budgetId: "worker-budget-idempotent",
-      dimensions: { turns: 6 },
+      dimensions: { turns: 4 },
       commandId: "stage5:budget:reserve:idempotent",
     });
     await fixture.leaderA.recordBudgetUsage({
@@ -94,7 +94,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
     expect(retry).toEqual(first);
     expect(await fixture.chair.getBudget({ budgetId: team.budgetId })).toMatchObject({
       dimensions: {
-        turns: { granted: 10, reserved: 0, consumed: 2, available: 8, usageUnknown: false },
+        turns: { granted: 10, reserved: 5, consumed: 2, available: 3, usageUnknown: false },
       },
     });
   });
@@ -111,13 +111,13 @@ describe("Stage 5 inherited budget reconciliation", () => {
       expectedTeamGeneration: team.generation,
       parentBudgetId: team.budgetId,
       budgetId: "worker-budget-monotonic",
-      dimensions: { turns: 6 },
+      dimensions: { turns: 4 },
       commandId: "stage5:budget:reserve:monotonic",
     });
     await fixture.leaderA.recordBudgetUsage({
       budgetId: child.budgetId,
-      usage: { turns: 5 },
-      commandId: "stage5:budget:usage:five",
+      usage: { turns: 3 },
+      commandId: "stage5:budget:usage:three",
     });
     await expect(fixture.leaderA.recordBudgetUsage({
       budgetId: child.budgetId,
@@ -130,7 +130,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
     });
     expect(released).toMatchObject({ state: "released", returned: { turns: 1 } });
     expect(await fixture.chair.getBudget({ budgetId: team.budgetId })).toMatchObject({
-      dimensions: { turns: { consumed: 5, available: 5 } },
+      dimensions: { turns: { reserved: 5, consumed: 3, available: 2 } },
     });
   });
 
@@ -147,7 +147,7 @@ describe("Stage 5 inherited budget reconciliation", () => {
         expectedTeamGeneration: team.generation,
         parentBudgetId: team.budgetId,
         budgetId,
-        dimensions: { turns: 3 },
+        dimensions: { turns: 2 },
         commandId: `stage5:budget:reserve:${budgetId}`,
       });
     }

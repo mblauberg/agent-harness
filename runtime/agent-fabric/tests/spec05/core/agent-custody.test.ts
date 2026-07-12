@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { connectFabricDaemon, startFabricDaemon } from "../../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, connectFabricDaemon, startFabricDaemon } from "../../../src/index.ts";
 import { callTool, spawnMcpProxy } from "../../support/mcp-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
@@ -16,8 +16,8 @@ const authority = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message", "team"],
-  disclosure: ["local", "approved-provider"],
+  actions: [...AUTHORITY_ACTION_VOCABULARY],
+  disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 100, descendants: 10 },
 };

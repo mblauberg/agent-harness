@@ -259,10 +259,10 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.getProviderAction]: object(["actionId", "status", "history", "executionCount", "effectCount"], ["result"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["interventionId"]),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: object(["visibility", "providerSession", "delivery"], ["recovery"]),
-  [FABRIC_OPERATIONS.createTeam]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMemberAgentIds"]),
-  [FABRIC_OPERATIONS.getTeam]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMemberAgentIds"]),
-  [FABRIC_OPERATIONS.freezeSubtree]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMemberAgentIds"]),
-  [FABRIC_OPERATIONS.adoptSubtree]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMemberAgentIds"]),
+  [FABRIC_OPERATIONS.createTeam]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMembers"]),
+  [FABRIC_OPERATIONS.getTeam]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMembers"]),
+  [FABRIC_OPERATIONS.freezeSubtree]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMembers"]),
+  [FABRIC_OPERATIONS.adoptSubtree]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMembers"]),
   [FABRIC_OPERATIONS.closeSubtreeBarrier]: object(["teamId", "generation", "closed"]),
   [FABRIC_OPERATIONS.reserveBudget]: object(["budgetId", "parentBudgetId", "state", "dimensions", "returned"]),
   [FABRIC_OPERATIONS.recordBudgetUsage]: object(["budgetId", "parentBudgetId", "state", "dimensions", "returned"]),
@@ -1065,7 +1065,7 @@ const teamResultCodec = objectCodec({
 }, {
   leader: objectCodec({ agentId: identifier, authorityId: identifier }),
   rootTask: taskResultCodec,
-  initialMemberAgentIds: stringList,
+  initialMembers: arrayOf(objectCodec({ agentId: identifier, authorityId: identifier }), { maximum: 5 }),
 });
 const visibleTeamResultCodec = objectCodec({
   teamId: identifier,
@@ -1083,7 +1083,6 @@ const visibleTeamResultCodec = objectCodec({
   reservedBudget: numberRecord,
 }, {
   rootTask: taskResultCodec,
-  initialMemberAgentIds: stringList,
 });
 const workstreamProjectionCodec = objectCodec({
   workstreamId: identifier,
@@ -3005,7 +3004,11 @@ function semanticFieldCodec(
   if (field === "detail") return stringRecord;
   if (field === "leader") return direction === "input" ? teamLeaderCodec : objectCodec({ agentId: identifier, authorityId: identifier });
   if (field === "rootTask") return direction === "input" ? rootTaskInputCodec : taskResultCodec;
-  if (field === "initialMembers") return arrayOf(teamMemberCodec, { maximum: 5 });
+  if (field === "initialMembers") {
+    return direction === "input"
+      ? arrayOf(teamMemberCodec, { maximum: 5 })
+      : arrayOf(objectCodec({ agentId: identifier, authorityId: identifier }), { maximum: 5 });
+  }
   if (field === "discussionGroups") return arrayOf(discussionGroupCodec, { maximum: 64 });
   if (field === "transition") return unionOf([
     objectCodec({ to: enumeration([
@@ -3111,7 +3114,7 @@ function semanticFieldCodec(
   if (field.endsWith("Ids")) return stringList;
   if ([
     "dependencies", "eligibleAgentIds", "participantAgentIds", "ownedTaskIds", "memberAgentIds",
-    "initialMemberAgentIds", "objectiveChecks", "blockingGateIds", "affectedTaskIds",
+    "objectiveChecks", "blockingGateIds", "affectedTaskIds",
   ].includes(field)) return stringList;
   if (field === "expectedArtifacts") return arrayOf(relativePath, { maximum: 128, unique: true });
   if (field === "enforcementPoints") return arrayOf(enumeration(["task-readiness", "operation", "scoped-barrier"]), { minimum: 1, maximum: 3, unique: true });

@@ -96,6 +96,62 @@ afterEach(async () => {
 });
 
 describe("production daemon bootstrap wiring", () => {
+  it("rejects process startup when the authoritative daemon epoch is absent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-missing-daemon-epoch-"));
+    roots.push(root);
+    const stateDirectory = join(root, "state");
+    const runtimeDirectory = join(root, "runtime");
+    await Promise.all([
+      mkdir(stateDirectory, { mode: 0o700 }),
+      mkdir(runtimeDirectory, { mode: 0o700 }),
+    ]);
+    const processPath = fileURLToPath(new URL("../../../src/daemon/process.ts", import.meta.url));
+    const child = spawn(process.execPath, ["--import", "tsx", processPath], {
+      cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: process.env.HOME ?? root,
+        AGENT_FABRIC_DATABASE_PATH: join(stateDirectory, "fabric.sqlite3"),
+        AGENT_FABRIC_SOCKET_PATH: join(runtimeDirectory, "fabric.sock"),
+        AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
+        AGENT_FABRIC_RUNTIME_DIRECTORY: runtimeDirectory,
+        AGENT_FABRIC_BOOTSTRAP_CAPABILITY: `afb_${"a".repeat(43)}`,
+        AGENT_FABRIC_BOOTSTRAP_MODE: "production-election",
+        AGENT_FABRIC_BOOTSTRAP_ACTION_ID: "bootstrap_missing_epoch_01",
+        AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION: "1",
+        AGENT_FABRIC_CAPABILITY_KEY: "b".repeat(43),
+        AGENT_FABRIC_EXECUTION_PROFILE: "headless",
+        AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: "1",
+        AGENT_FABRIC_WORKSPACE_ROOTS_JSON: JSON.stringify([root]),
+        AGENT_FABRIC_ADAPTERS_JSON: "{}",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (child.stdout === null || child.stderr === null) throw new Error("daemon epoch child pipes are unavailable");
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    const outcome = await new Promise<{ kind: "output"; line: string } | { kind: "closed"; code: number | null }>((resolvePromise, reject) => {
+      const timeout = setTimeout(() => reject(new Error("daemon epoch child did not terminate")), 10_000);
+      child.stdout?.once("data", (chunk: Buffer) => {
+        clearTimeout(timeout);
+        resolvePromise({ kind: "output", line: chunk.toString("utf8").trim() });
+      });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        resolvePromise({ kind: "closed", code });
+      });
+      child.once("error", reject);
+    });
+    if (outcome.kind === "output") {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
+    }
+
+    expect(outcome).toEqual({ kind: "closed", code: 1 });
+    expect(stderr).toContain("agent fabric daemon environment is incomplete");
+  });
+
   it("rejects a pre-cutover database before creating daemon runtime state", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-production-cutover-"));
     roots.push(root);

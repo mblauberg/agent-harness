@@ -1639,7 +1639,7 @@ export class OperatorProjectionStore {
           digest: text(artifact, "sha256"),
         }, "evidenceDetail.artifactRef"),
         sourceKind: text(artifact, "source_kind") as "project-file" | "run-file" | "git-private-diff",
-        publisherKind: text(artifact, "publisher_kind") as "agent" | "operator" | "fabric" | "project" | "migration",
+        publisherKind: text(artifact, "publisher_kind") as "agent" | "operator" | "fabric" | "project",
         publisherRef: text(artifact, "publisher_ref"),
         projectSessionId: nullableText(artifact, "project_session_id") as never,
         coordinationRunId: nullableText(artifact, "run_id") as never,

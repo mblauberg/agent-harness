@@ -87,11 +87,36 @@ describe("current pre-release protocol contract", () => {
 
     expect(parseOperationInput(FABRIC_OPERATIONS.createTeam, input)).toStrictEqual(input);
     expect(() => parseOperationInput(FABRIC_OPERATIONS.createTeam, {
-      teamId: "team_legacy",
+      teamId: "team_obsolete_shape",
       leaderAgentId: "agent_lead",
       rootTaskId: "task_root",
-      commandId: "command_legacy",
+      commandId: "command_obsolete_shape",
     })).toThrowError(/leader|unknown field/iu);
+  });
+
+  it("returns exact authority identities for atomically registered team members", () => {
+    const result = {
+      teamId: "team_01",
+      parentTeamId: null,
+      depth: 1,
+      leaderAgentId: "agent_lead",
+      rootTaskId: "task_root",
+      ownedTaskIds: ["task_root"],
+      memberAgentIds: ["agent_lead", "agent_member"],
+      budgetId: "team_01:budget",
+      state: "active",
+      generation: 1,
+      successorAgentId: null,
+      leader: { agentId: "agent_lead", authorityId: "authority_lead" },
+      initialMembers: [{ agentId: "agent_member", authorityId: "authority_member" }],
+      discussionGroups: [],
+      reservedBudget: { concurrent_turns: 2 },
+    } as const;
+    expect(parseOperationResult(FABRIC_OPERATIONS.createTeam, result)).toStrictEqual(result);
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.createTeam, {
+      ...result,
+      initialMemberAgentIds: ["agent_member"],
+    })).toThrowError(/initialMemberAgentIds/iu);
   });
 
   it("allows only operator-launched project-session origin", () => {

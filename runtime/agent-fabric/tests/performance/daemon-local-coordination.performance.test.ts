@@ -26,7 +26,7 @@ describe("Stage 1 local coordination performance", () => {
             ...DAEMON_ROOT_AUTHORITY,
             sourcePaths: [`src/${agentId}`],
             artifactPaths: [`.agent-run/${agentId}`],
-            actions: ["read", "message"],
+            actions: [...DAEMON_ROOT_AUTHORITY.actions],
             budget: { turns: 1, "cost:USD": 1 },
           },
         });

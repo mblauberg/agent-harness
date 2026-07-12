@@ -36901,19 +36901,36 @@
                     }
                   }
                 },
-                "initialMemberAgentIds": {
+                "initialMembers": {
                   "type": "array",
                   "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "agentId",
+                      "authorityId"
+                    ],
+                    "properties": {
+                      "agentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      }
+                    }
                   },
                   "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
+                  "maxItems": 5
                 }
               }
             }
@@ -37333,20 +37350,6 @@
                       "uniqueItems": true
                     }
                   }
-                },
-                "initialMemberAgentIds": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
                 }
               }
             }
@@ -37766,20 +37769,6 @@
                       "uniqueItems": true
                     }
                   }
-                },
-                "initialMemberAgentIds": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
                 }
               }
             }
@@ -38199,20 +38188,6 @@
                       "uniqueItems": true
                     }
                   }
-                },
-                "initialMemberAgentIds": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
                 }
               }
             }

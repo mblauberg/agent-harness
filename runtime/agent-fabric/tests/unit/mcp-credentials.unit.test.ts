@@ -13,6 +13,23 @@ afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
+async function createCurrentSeatDirectory(
+  stateDirectory: string,
+  projectPath: string,
+  generation: string,
+): Promise<{ key: string; directory: string }> {
+  const key = createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
+  const seatRoot = join(stateDirectory, "seats", key);
+  const directory = join(seatRoot, "generations", generation);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(seatRoot, "current.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    projectKey: key,
+    generation,
+  })}\n`, { mode: 0o600 });
+  return { key, directory };
+}
+
 describe("MCP capability loading", () => {
   it("loads a capability from a private regular file without placing it in client configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-credential-"));
@@ -55,9 +72,11 @@ describe("MCP capability loading", () => {
       mkdir(stateDirectory, { recursive: true, mode: 0o700 }),
     ]);
     const projectPath = await realpath(project);
-    const key = createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
-    const seatDirectory = join(stateDirectory, "seats", key);
-    await mkdir(seatDirectory, { recursive: true, mode: 0o700 });
+    const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
+      stateDirectory,
+      projectPath,
+      "generation-nearest",
+    );
     const credentialPath = join(seatDirectory, "codex.cap");
     const capability = `afc_${"c".repeat(43)}`;
     await writeFile(credentialPath, `${capability}\n`, { mode: 0o600 });
@@ -88,9 +107,11 @@ describe("MCP capability loading", () => {
     const project = join(directory, "project");
     await Promise.all([mkdir(project), mkdir(stateDirectory, { mode: 0o700 })]);
     const projectPath = await realpath(project);
-    const key = createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
-    const seatDirectory = join(stateDirectory, "seats", key);
-    await mkdir(seatDirectory, { recursive: true, mode: 0o700 });
+    const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
+      stateDirectory,
+      projectPath,
+      "generation-expiry",
+    );
     const credentialPath = join(seatDirectory, "codex.cap");
     await writeFile(credentialPath, `afc_${"d".repeat(43)}\n`, { mode: 0o600 });
     const metadataPath = join(seatDirectory, "codex.json");
@@ -112,9 +133,11 @@ describe("MCP capability loading", () => {
     const unrelatedCwd = join(directory, "unrelated");
     await Promise.all([mkdir(project), mkdir(unrelatedCwd), mkdir(stateDirectory, { mode: 0o700 })]);
     const projectPath = await realpath(project);
-    const key = createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
-    const seatDirectory = join(stateDirectory, "seats", key);
-    await mkdir(seatDirectory, { recursive: true, mode: 0o700 });
+    const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
+      stateDirectory,
+      projectPath,
+      "generation-explicit",
+    );
     const credentialPath = join(seatDirectory, "codex.cap");
     await writeFile(credentialPath, `afc_${"e".repeat(43)}\n`, { mode: 0o600 });
     await writeFile(join(seatDirectory, "codex.json"), `${JSON.stringify({ schemaVersion: 1, projectKey: key, projectPath, runId: "run", seat: "codex", agentId: "codex", role: "chair", credentialPath, expiresAt: "2099-01-01T00:00:00.000Z" })}\n`, { mode: 0o600 });

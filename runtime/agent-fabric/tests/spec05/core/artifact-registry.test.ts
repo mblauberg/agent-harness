@@ -6,7 +6,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openFabric } from "../../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const roots: string[] = [];
@@ -42,8 +42,8 @@ async function registryFixture(options: Readonly<{
         workspaceRoots: ["."],
         sourcePaths: ["."],
         artifactPaths: [...(options.artifactPaths ?? [options.rootEqual === true ? "." : ".agent-run/run-registry"])],
-        actions: ["read", "write"],
-        disclosure: ["local"],
+        actions: [...AUTHORITY_ACTION_VOCABULARY],
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
         expiresAt: "2099-01-01T00:00:00.000Z",
         budget: {},
       },

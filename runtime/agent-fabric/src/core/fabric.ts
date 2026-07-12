@@ -156,7 +156,6 @@ import {
 import { FabricClient } from "./client.js";
 import type {
   ArtifactResult,
-  AtomicTeamCreateInput,
   AuthorityResult,
   BarrierResult,
   BudgetDimensionResult,
@@ -165,7 +164,6 @@ import type {
   CurrentMcpSeatBindingInput,
   CurrentMcpSeatBindingResult,
   DiscussionGroupInput,
-  ExistingTeamCreateInput,
   EventsAfterResult,
   InterventionResult,
   LeaseResult,
@@ -206,6 +204,19 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
 };
 
 type Row = Record<string, unknown>;
+type TaskCreateInput = {
+  taskId: string;
+  authorityId: string;
+  eligibleAgentIds: string[];
+  proposedOwnerAgentId?: string;
+  participantAgentIds?: string[];
+  dependencies?: string[];
+  expectedArtifacts?: string[];
+  objectiveChecks?: string[];
+  objective: string;
+  baseRevision: string;
+  commandId: string;
+};
 type StoredAuthority = {
   workspaceRoots: string[];
   sourcePaths: string[];
@@ -363,15 +374,6 @@ function isDisclosureTarget(value: string): value is DisclosureTarget {
 }
 
 function normaliseDisclosure(value: AuthorityInput["disclosure"]): DisclosurePolicy {
-  if (Array.isArray(value)) {
-    const scopes = [...new Set(value)];
-    if (scopes.some((scope) => !isDisclosureTarget(scope))) {
-      throw new FabricError("AUTHORITY_WIDENING", "authority disclosure contains an unknown scope");
-    }
-    if (scopes.length === 0) return { level: "forbidden" };
-    if (scopes.length === DISCLOSURE_TARGETS.length) return { level: "allowed" };
-    return { level: "scoped", scopes: scopes.filter(isDisclosureTarget).sort() };
-  }
   if (!isRow(value)) throw new FabricError("AUTHORITY_WIDENING", "authority disclosure policy is invalid");
   if (value.level === "allowed" && !("scopes" in value)) return { level: "allowed" };
   if (value.level === "forbidden" && !("scopes" in value)) return { level: "forbidden" };
@@ -720,6 +722,10 @@ function isTeamResult(value: unknown): value is TeamResult {
     (value.state === "active" || value.state === "frozen" || value.state === "barrier-closed") &&
     typeof value.generation === "number" &&
     (typeof value.successorAgentId === "string" || value.successorAgentId === null) &&
+    (value.initialMembers === undefined || (
+      Array.isArray(value.initialMembers) && value.initialMembers.every((member) =>
+        isRow(member) && typeof member.agentId === "string" && typeof member.authorityId === "string")
+    )) &&
     Array.isArray(value.discussionGroups) &&
     isNumberRecord(value.reservedBudget)
   );
@@ -3090,22 +3096,22 @@ export class Fabric {
   createTask(
     runId: string,
     actorAgentId: string,
-    input: {
-      taskId: string;
-      authorityId: string;
-      eligibleAgentIds: string[];
-      proposedOwnerAgentId?: string;
-      participantAgentIds?: string[];
-      dependencies?: string[];
-      expectedArtifacts?: string[];
-      objectiveChecks?: string[];
-      humanGates?: string[];
-      objective: string;
-      baseRevision: string;
-      commandId: string;
-    },
+    input: TaskCreateInput,
   ): TaskResult {
-    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTaskResult, () => {
+    return this.#createTask(runId, actorAgentId, input, true);
+  }
+
+  #createTask(
+    runId: string,
+    actorAgentId: string,
+    input: TaskCreateInput,
+    bindToLedTeam: boolean,
+  ): TaskResult {
+    const journalPayload = {
+      ...input,
+      teamOwnershipBinding: bindToLedTeam ? "active-led-team" : "atomic-team-root",
+    } as const;
+    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, journalPayload, isTaskResult, () => {
       assertRunAcceptingWork(this.#database, runId);
       const agentContext = this.#agentContext(runId, actorAgentId);
       const dependencyRevision = numberField(
@@ -3192,22 +3198,29 @@ export class Fabric {
           .prepare("INSERT INTO task_objective_checks(run_id, task_id, check_id) VALUES (?, ?, ?)")
           .run(runId, input.taskId, checkId);
       }
-      const dependencyMutation = dependencies.length === 0
-        ? { dependencyRevision }
-        : this.#gates.setTaskDependencies(agentContext, {
+      if (dependencies.length > 0) {
+        this.#gates.setTaskDependencies(agentContext, {
             commandId: `${input.commandId}:dependencies`,
             expectedRevision: dependencyRevision,
             taskId: input.taskId,
             dependencyTaskIds: dependencies,
           });
-      const humanGates = [...new Set(input.humanGates ?? [])].sort();
-      if (humanGates.length > 0) {
-        this.#gates.createCompatibilityTaskGates(agentContext, {
-          commandId: `${input.commandId}:gates`,
-          expectedDependencyRevision: dependencyMutation.dependencyRevision,
-          taskId: input.taskId,
-          humanGateIds: humanGates,
-        });
+      }
+      if (bindToLedTeam) {
+        const ledTeam = this.#database.prepare(`
+          SELECT team_id FROM teams
+           WHERE run_id=? AND leader_agent_id=? AND state='active'
+           ORDER BY depth DESC, team_id
+        `).all(runId, actorAgentId) as Array<{ team_id: string }>;
+        if (ledTeam.length > 1) {
+          throw new FabricError("TASK_SUBTREE_CONFLICT", "task creator leads more than one active team");
+        }
+        const ownedTeam = ledTeam[0];
+        if (ownedTeam !== undefined) {
+          this.#database.prepare(
+            "INSERT INTO team_owned_tasks(run_id, team_id, task_id) VALUES (?, ?, ?)",
+          ).run(runId, ownedTeam.team_id, input.taskId);
+        }
       }
       this.#memberships.bindRequired(runId, [{ kind: "task", memberId: input.taskId }]);
       const result = this.getTask(runId, input.taskId);
@@ -3332,24 +3345,6 @@ export class Fabric {
         .run(input.status, input.evidence, runId, input.taskId, input.checkId);
       if (changed.changes !== 1) throw new FabricError("NOT_FOUND", "objective check is not declared for the task");
       return { taskId: input.taskId, checkId: input.checkId, status: input.status };
-    });
-  }
-
-  resolveHumanGate(
-    runId: string,
-    actorAgentId: string,
-    input: { taskId: string; gateId: string; status: "approved" | "rejected"; evidence: string; commandId: string },
-  ): { taskId: string; gateId: string; status: "approved" | "rejected" } {
-    const parse = (value: unknown): value is { taskId: string; gateId: string; status: "approved" | "rejected" } =>
-      isRow(value) && typeof value.taskId === "string" && typeof value.gateId === "string" && (value.status === "approved" || value.status === "rejected");
-    return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, parse, () => {
-      assertTaskOperationAdmitted(this.#database, runId, input.taskId);
-      this.#assertChair(runId, actorAgentId);
-      const changed = this.#database
-        .prepare("UPDATE task_human_gates SET status = ?, evidence = ? WHERE run_id = ? AND task_id = ? AND gate_id = ?")
-        .run(input.status, input.evidence, runId, input.taskId, input.gateId);
-      if (changed.changes !== 1) throw new FabricError("NOT_FOUND", "human gate is not declared for the task");
-      return { taskId: input.taskId, gateId: input.gateId, status: input.status };
     });
   }
 
@@ -4524,17 +4519,14 @@ export class Fabric {
   createTeam(runId: string, actorAgentId: string, input: TeamCreateInput): TeamResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isTeamResult, () => {
       const { depth, parentTeamId } = this.#teamCreationPosition(runId, actorAgentId, input.parentTeamId);
-      if ("leader" in input) {
-        return this.#createAtomicTeam(runId, actorAgentId, input, depth, parentTeamId);
-      }
-      return this.#createExistingTeam(runId, actorAgentId, input, depth, parentTeamId);
+      return this.#createTeam(runId, actorAgentId, input, depth, parentTeamId);
     });
   }
 
-  #createAtomicTeam(
+  #createTeam(
     runId: string,
     actorAgentId: string,
-    input: AtomicTeamCreateInput,
+    input: TeamCreateInput,
     depth: number,
     parentTeamId: string | null,
   ): TeamResult {
@@ -4563,7 +4555,7 @@ export class Fabric {
       agentId: input.leader.agentId,
       authorityId: leaderGrant.authorityId,
     });
-    const memberIds: string[] = [];
+    const initialMembers: Array<{ agentId: string; authorityId: string }> = [];
     for (const member of input.initialMembers) {
       const grant = this.delegateAuthority(runId, input.leader.agentId, {
         parentAuthorityId: leaderGrant.authorityId,
@@ -4571,19 +4563,19 @@ export class Fabric {
         commandId: `${input.commandId}:member-authority:${member.agentId}`,
       });
       this.#registerAgentIdentity(runId, input.leader.agentId, { agentId: member.agentId, authorityId: grant.authorityId });
-      memberIds.push(member.agentId);
+      initialMembers.push({ agentId: member.agentId, authorityId: grant.authorityId });
     }
-    const rootTask = this.createTask(runId, actorAgentId, {
+    const rootTask = this.#createTask(runId, actorAgentId, {
       taskId: input.rootTask.taskId,
       authorityId: leaderGrant.authorityId,
       proposedOwnerAgentId: input.leader.agentId,
-      participantAgentIds: [input.leader.agentId, ...memberIds],
+      participantAgentIds: [input.leader.agentId, ...initialMembers.map((member) => member.agentId)],
       eligibleAgentIds: [input.leader.agentId],
       dependencies: [],
       objective: input.rootTask.objective,
       baseRevision: input.rootTask.baseRevision,
       commandId: `${input.commandId}:root-task`,
-    });
+    }, false);
     const budgetId = `${input.teamId}:budget`;
     const initialReserved = Object.fromEntries(
       Object.keys(input.reservedBudget).map((unit) => [
@@ -4598,7 +4590,7 @@ export class Fabric {
       leaderAgentId: input.leader.agentId,
       rootTaskId: rootTask.taskId,
       ownedTaskIds: [rootTask.taskId],
-      memberAgentIds: [input.leader.agentId, ...memberIds],
+      memberAgentIds: [input.leader.agentId, ...initialMembers.map((member) => member.agentId)],
       authorityId: leaderGrant.authorityId,
       budgetId,
       budget: input.reservedBudget,
@@ -4613,62 +4605,8 @@ export class Fabric {
         authorityId: leaderGrant.authorityId,
       },
       rootTask,
-      initialMemberAgentIds: memberIds,
+      initialMembers,
     };
-  }
-
-  #createExistingTeam(
-    runId: string,
-    actorAgentId: string,
-    input: ExistingTeamCreateInput,
-    depth: number,
-    parentTeamId: string | null,
-  ): TeamResult {
-    const leader = rowOrNotFound(
-      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, input.leaderAgentId),
-      "team leader",
-    );
-    const authorityId = input.authorityId ?? stringField(leader, "authority_id");
-    if (stringField(leader, "authority_id") !== authorityId) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "team leader does not hold the named authority");
-    }
-    const members = [...new Set([input.leaderAgentId, ...(input.memberAgentIds ?? input.initialMemberAgentIds ?? [])])];
-    if (members.length - 1 > 5) throw new FabricError("BUDGET_EXCEEDED", "team exceeds five workers");
-    for (const agentId of members) {
-      rowOrNotFound(
-        this.#database.prepare("SELECT 1 FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, agentId),
-        `team member ${agentId}`,
-      );
-    }
-    const ownedTaskIds = [...new Set(input.ownedTaskIds ?? [input.rootTaskId])];
-    if (!ownedTaskIds.includes(input.rootTaskId)) throw new FabricError("TASK_SUBTREE_CONFLICT", "owned task set omits root");
-    const budget = input.budget ?? input.reservedBudget ?? {};
-    validateIntegerBudget(budget);
-    const authority = rowOrNotFound(
-      this.#database.prepare("SELECT authority_json FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
-      "team authority",
-    );
-    const authorityBudget = parseAuthority(stringField(authority, "authority_json")).budget;
-    for (const [unit, value] of Object.entries(budget)) {
-      if ((authorityBudget[unit] ?? -1) < value) throw new FabricError("BUDGET_EXCEEDED", `team budget exceeds authority for ${unit}`);
-    }
-    const budgetId = `${input.teamId}:budget`;
-    this.#insertTeamRecords(runId, {
-      teamId: input.teamId,
-      parentTeamId,
-      depth,
-      leaderAgentId: input.leaderAgentId,
-      rootTaskId: input.rootTaskId,
-      ownedTaskIds,
-      memberAgentIds: members,
-      authorityId,
-      budgetId,
-      budget,
-      initialReserved: {},
-      discussionGroups: input.discussionGroups ?? [],
-      actorAgentId,
-    });
-    return this.getTeam(runId, input.teamId);
   }
 
   #teamCreationPosition(runId: string, actorAgentId: string, requestedParentTeamId?: string): {

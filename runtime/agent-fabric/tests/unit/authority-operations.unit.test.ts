@@ -2,15 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   FABRIC_OPERATIONS,
-  LEGACY_OPERATION_BUNDLES,
   expandAuthorityActions,
 } from "../../src/domain/operations.js";
 
 describe("versioned fabric authority operations", () => {
-  it("expands legacy bundles into sorted exact operations", () => {
-    expect(expandAuthorityActions(["read", "message", "read"])).toEqual({
-      ok: true,
-      operations: [...new Set([...LEGACY_OPERATION_BUNDLES.read, ...LEGACY_OPERATION_BUNDLES.message])].sort(),
+  it.each(["read", "write", "delegate", "message", "team"])(
+    "rejects the retired %s authority bundle",
+    (action) => {
+      expect(expandAuthorityActions([action])).toEqual({ ok: false, unknownActions: [action] });
+    },
+  );
+
+  it("does not let a retired bundle hide beside an exact operation", () => {
+    expect(expandAuthorityActions([FABRIC_OPERATIONS.sendMessage, "read"])).toEqual({
+      ok: false,
+      unknownActions: ["read"],
     });
   });
 
@@ -22,6 +28,6 @@ describe("versioned fabric authority operations", () => {
   });
 
   it("rejects unknown unversioned actions", () => {
-    expect(expandAuthorityActions(["read", "deploy"])).toEqual({ ok: false, unknownActions: ["deploy"] });
+    expect(expandAuthorityActions(["deploy"])).toEqual({ ok: false, unknownActions: ["deploy"] });
   });
 });

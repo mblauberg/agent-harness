@@ -26,7 +26,7 @@ describe("AC-011 crash after provider acceptance", () => {
         databasePath,
         workspaceRoot: directory,
         runId: "run-crash-after-acceptance",
-        chair: { agentId: "chair", authority: { ...ROOT_AUTHORITY, disclosure: ["local", "approved-provider"] } },
+        chair: { agentId: "chair", authority: { ...ROOT_AUTHORITY, disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const } },
       });
       const chair = fabric.connect(run.chairCapability);
       const ambiguous = await chair.dispatchProviderAction({ adapterId: "crash", actionId: "crash-action-1", operation: "steer", payload: { instruction: "once" }, commandId: "crash:dispatch" });

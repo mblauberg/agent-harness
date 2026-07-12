@@ -120,7 +120,7 @@ export type TeamResult = {
   successorAgentId: string | null;
   leader?: { agentId: string; authorityId: string };
   rootTask?: TaskResult;
-  initialMemberAgentIds?: readonly string[];
+  initialMembers?: readonly { agentId: string; authorityId: string }[];
   discussionGroups: readonly { groupId: string; memberAgentIds: readonly string[] }[];
   reservedBudget: Readonly<Record<string, number>>;
 };

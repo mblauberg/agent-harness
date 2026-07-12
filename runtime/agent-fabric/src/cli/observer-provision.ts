@@ -80,7 +80,7 @@ export async function provisionObserverCredential(input: { project: string; path
   try {
     const authority: AuthorityInput = {
       workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
-      actions: [FABRIC_OPERATIONS.observeEvents], disclosure: ["local"], expiresAt: chair.expiresAt, budget: {},
+      actions: [FABRIC_OPERATIONS.observeEvents], disclosure: { level: "scoped", scopes: ["local"] } as const, expiresAt: chair.expiresAt, budget: {},
     };
     const delegated = await client.delegateAuthority({
       parentAuthorityId,

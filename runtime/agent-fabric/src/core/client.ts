@@ -148,7 +148,6 @@ export class FabricClient {
     dependencies?: string[];
     expectedArtifacts?: string[];
     objectiveChecks?: string[];
-    humanGates?: string[];
     objective: string;
     baseRevision: string;
     commandId: string;

@@ -162,12 +162,12 @@ function fixture(options: Readonly<{
         options_json, recommendation, consequences_json, evidence_refs_json,
         created_by_ref, expected_approver_ref, resolved_by_operator_id,
         resolution_json, deadline, default_action, status, human_required,
-        release_binding_json, legacy_status, legacy_evidence, revision,
+        release_binding_json, revision,
         created_at, updated_at
       ) VALUES (
         ?, ?, ?, 'release:01', 'release', NULL, ?, '[]', '["operation"]', ?, ?,
         ?, ?, ?, ?, ?, ?, 'operator_01', ?, NULL, NULL, 'approved', 1,
-        ?, NULL, NULL, ?, 1, 1
+        ?, ?, 1, 1
       )
     `).run(
       gate.gateId,

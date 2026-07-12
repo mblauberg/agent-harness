@@ -613,11 +613,12 @@ export class CoordinatedWorkstreamStore {
   }
 
   #mutableAuthority(authority: WorkstreamCreateRequest["team"]["leader"]["authority"]): AuthorityInput {
-    const disclosure: AuthorityInput["disclosure"] = "level" in authority.disclosure
-      ? authority.disclosure.level === "scoped"
-        ? { level: "scoped", scopes: [...authority.disclosure.scopes] }
-        : { ...authority.disclosure }
-      : [...authority.disclosure];
+    if (!("level" in authority.disclosure)) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "workstream authority disclosure must use the current policy object");
+    }
+    const disclosure: AuthorityInput["disclosure"] = authority.disclosure.level === "scoped"
+      ? { level: "scoped", scopes: [...authority.disclosure.scopes] }
+      : { ...authority.disclosure };
     return {
       workspaceRoots: [...authority.workspaceRoots],
       sourcePaths: [...authority.sourcePaths],

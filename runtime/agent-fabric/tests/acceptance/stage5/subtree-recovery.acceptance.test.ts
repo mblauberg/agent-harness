@@ -34,29 +34,20 @@ describe("Stage 5 subtree ownership and recovery", () => {
       generation: 1,
     });
 
+    await expect(createTeam(fixture.chair, teamCreateInput({
+      teamId: "team-overlap",
+      leaderId: "leader-b",
+      sourcePath: "src/team-b",
+      artifactPath: ".agent-run/run-stage5/team-overlap",
+      memberAuthorities: [],
+      reservedBudget: { turns: 5, "cost:USD": 2 },
+    }))).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
     await expect(
-      fixture.chair.createTeam({
-        teamId: "team-overlap",
-        leaderAgentId: "leader-b",
-        rootTaskId: fixture.tasks.rootB.taskId,
-        ownedTaskIds: [fixture.tasks.rootB.taskId, fixture.tasks.workerA.taskId],
-        memberAgentIds: ["leader-b"],
-        authorityId: fixture.authorities.leaderB,
-        budget: { turns: 5, "cost:USD": 2 },
-        commandId: "stage5:team-overlap:create",
-      }),
-    ).rejects.toMatchObject({ code: "TASK_SUBTREE_CONFLICT" });
-    await expect(
-      fixture.leaderA.createTeam({
+      createTeam(fixture.leaderA, teamCreateInput({
         teamId: "unauthorised-top-level-team",
-        leaderAgentId: "worker-a",
-        rootTaskId: fixture.tasks.workerA.taskId,
-        ownedTaskIds: [fixture.tasks.workerA.taskId],
-        memberAgentIds: ["worker-a"],
-        authorityId: fixture.authorities.workerA,
-        budget: { turns: 1 },
-        commandId: "stage5:team-unauthorised:create",
-      }),
+        memberAuthorities: [],
+        reservedBudget: { turns: 1 },
+      })),
     ).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
   });
 

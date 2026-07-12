@@ -141,9 +141,7 @@ const trustedGitConfiguration = trustedGitValue as TrustedGitConfiguration;
 const herdrProcessConfiguration = parseHerdrDaemonProcessConfiguration(
   process.env.AGENT_FABRIC_HERDR_JSON,
 );
-// Temporary compatibility fallback until every launcher supplies the persisted
-// runtime epoch. New bootstrap callers pass the authoritative generation.
-const daemonInstanceGenerationValue = process.env.AGENT_FABRIC_DAEMON_INSTANCE_GENERATION ?? "1";
+const daemonInstanceGenerationValue = process.env.AGENT_FABRIC_DAEMON_INSTANCE_GENERATION;
 const daemonInstanceGeneration = Number(daemonInstanceGenerationValue);
 
 if (
@@ -174,10 +172,12 @@ if (
   throw new Error("agent fabric daemon environment is incomplete");
 }
 
-try {
-  inspectFabricDatabase(databasePath);
-} catch (error: unknown) {
-  await reportPreReadyFailure(error, "DAEMON_DATABASE_PREFLIGHT_FAILED");
+if (bootstrapMode === "production-election") {
+  try {
+    inspectFabricDatabase(databasePath);
+  } catch (error: unknown) {
+    await reportPreReadyFailure(error, "DAEMON_DATABASE_PREFLIGHT_FAILED");
+  }
 }
 
 const localSubjectHash = localAuthenticatedSubjectHash(capabilityKey);
@@ -240,6 +240,13 @@ if (bootstrapMode === "test-forced-process-locks") {
     await new Promise<void>((resolve) => process.stdout.write(`${JSON.stringify({ ready: false, error: { code, message } })}\n`, () => resolve()));
     process.exit(1);
     throw error;
+  }
+  try {
+    inspectFabricDatabase(databasePath);
+  } catch (error: unknown) {
+    await releaseDaemonLocks(daemonLocks).catch(() => undefined);
+    daemonLocks = [];
+    await reportPreReadyFailure(error, "DAEMON_DATABASE_PREFLIGHT_FAILED");
   }
 }
 const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSON);

@@ -53,6 +53,33 @@ describe("current schema baseline", () => {
     }
   });
 
+  it("contains only the current operator-launched session and scoped-gate model", () => {
+    const database = openDatabase();
+    applyMigrations(database);
+
+    expect(database.prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'task_human_gates'",
+    ).get()).toBeUndefined();
+
+    const columns = (table: string): string[] => database.prepare(
+      `SELECT name FROM pragma_table_info(?) ORDER BY cid`,
+    ).all(table).map((row) => (row as { name: string }).name);
+    expect(columns("project_sessions")).not.toContain("migration_manifest_ref");
+    expect(columns("scoped_gates")).not.toContain("legacy_status");
+    expect(columns("scoped_gates")).not.toContain("legacy_evidence");
+
+    const projectSessionSql = database.prepare(
+      "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'project_sessions'",
+    ).pluck().get() as string;
+    expect(projectSessionSql).toContain("origin_kind='operator-launch'");
+    expect(projectSessionSql).not.toContain("legacy-migration");
+
+    const artifactSql = database.prepare(
+      "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'artifacts'",
+    ).pluck().get() as string;
+    expect(artifactSql).not.toContain("'migration'");
+  });
+
   it("installs the closed typed-Git variants and single-owner lease constraints", () => {
     const database = openDatabase();
     applyMigrations(database);

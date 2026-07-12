@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FabricError } from "../../../src/errors.ts";
+import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { DurableEventObserver } from "../../../src/visibility/event-observer.ts";
 import { createStage1Fixture, ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
@@ -39,7 +40,7 @@ describe("read-only Herdr event observer", () => {
       parentAuthorityId: fixture.run.chairAuthorityId,
       authority: {
         workspaceRoots: ["."], sourcePaths: [], artifactPaths: [], actions: [],
-        disclosure: ["local"], expiresAt: "2099-01-01T00:00:00.000Z", budget: {},
+        disclosure: { level: "scoped", scopes: ["local"] } as const, expiresAt: "2099-01-01T00:00:00.000Z", budget: {},
       },
     });
     const registration = await fixture.chair.registerAgent({ agentId: "observer-denied", authorityId: restricted.authorityId });
@@ -52,17 +53,17 @@ describe("read-only Herdr event observer", () => {
     expect(await fixture.bob.getMailboxState()).toEqual(before);
   });
 
-  it("does not grant run-wide message observation through legacy read authority", async () => {
+  it("does not grant run-wide event observation through mailbox-read authority", async () => {
     const fixture = await createStage1Fixture();
     const delegated = await fixture.chair.delegateAuthority({
       parentAuthorityId: fixture.run.chairAuthorityId,
       authority: {
         ...ROOT_AUTHORITY,
-        actions: ["read"],
+        actions: [FABRIC_OPERATIONS.getMailboxState],
         budget: {},
       },
     });
-    const registration = await fixture.chair.registerAgent({ agentId: "legacy-reader", authorityId: delegated.authorityId });
+    const registration = await fixture.chair.registerAgent({ agentId: "mailbox-reader", authorityId: delegated.authorityId });
     await expect(fixture.fabric.connect(registration.capability).eventsAfter({ cursor: 0, limit: 100 }))
       .rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
   });

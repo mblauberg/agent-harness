@@ -41,7 +41,6 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
     FABRIC_OPERATIONS.projectSessionTransition,
     FABRIC_OPERATIONS.projectSessionClose,
     FABRIC_OPERATIONS.membershipBind,
-    FABRIC_OPERATIONS.operatorCommand,
     FABRIC_OPERATIONS.intakeSubmit,
     FABRIC_OPERATIONS.intakeRevise,
     FABRIC_OPERATIONS.scopedGateCreate,

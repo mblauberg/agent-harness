@@ -1091,7 +1091,6 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
 export async function forceStartFabricDaemonForTests(options: DaemonStartOptions): Promise<FabricDaemonHandle> {
   const normalized = normalizedStartOptions(options);
   normalized.databasePath = safeDatabasePath(normalized.databasePath);
-  inspectFabricDatabase(normalized.databasePath);
   await Promise.all([
     ensurePrivateDirectory(normalized.stateDirectory),
     ensurePrivateDirectory(normalized.runtimeDirectory),

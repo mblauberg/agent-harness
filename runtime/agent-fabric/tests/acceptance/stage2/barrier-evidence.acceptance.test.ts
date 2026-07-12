@@ -21,14 +21,66 @@ describe("artifact, objective, gate and handoff barrier evidence", () => {
     try {
       const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-barrier-evidence", projectRunDirectory: directory, chair: { agentId: "chair", authority: { ...ROOT_AUTHORITY, workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: ["."] } } });
       const chair = fabric.connect(run.chairCapability);
-      const peerAuthority = await chair.delegateAuthority({ parentAuthorityId: run.chairAuthorityId, authority: { ...ROOT_AUTHORITY, workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: ["."], actions: ["read", "write"], budget: { turns: 1 } } });
+      const peerAuthority = await chair.delegateAuthority({
+        parentAuthorityId: run.chairAuthorityId,
+        authority: {
+          ...ROOT_AUTHORITY,
+          workspaceRoots: ["."],
+          sourcePaths: ["."],
+          artifactPaths: ["."],
+          actions: [FABRIC_OPERATIONS.acknowledgeTaskHandoff],
+          budget: { turns: 1 },
+        },
+      });
       const peerRegistration = await chair.registerAgent({ agentId: "peer", authorityId: peerAuthority.authorityId });
       const peer = fabric.connect(peerRegistration.capability);
       const task = await chair.createTask({
         taskId: "evidence-task", authorityId: run.chairAuthorityId, eligibleAgentIds: ["chair"], proposedOwnerAgentId: "chair", participantAgentIds: ["peer"],
-        expectedArtifacts: ["findings/evidence.md"], objectiveChecks: ["tests-pass"], humanGates: ["human-acceptance"],
+        expectedArtifacts: ["findings/evidence.md"], objectiveChecks: ["tests-pass"],
         objective: "prove all closure evidence", baseRevision: "base-1", commandId: "evidence:create",
       });
+      const verifiedChair = fabric.verifyProtocolCredential(run.chairCapability);
+      if (verifiedChair.principal.kind !== "agent") throw new Error("expected chair agent principal");
+      const chairContext: PublicProtocolContext = {
+        principal: verifiedChair.principal,
+        allowedOperations: new Set(verifiedChair.grantedOperations),
+        features: ["scoped-gates.v1"],
+        connectionNonce: "connection_evidence_chair",
+        credentialHash: createHash("sha256").update(run.chairCapability).digest("hex"),
+        daemonInstanceGeneration: 1,
+      };
+      const gate = await fabric.dispatchPublicProtocol(
+        chairContext,
+        FABRIC_OPERATIONS.scopedGateCreate,
+        {
+          origin: "chair",
+          command: {
+            commandId: "command_gate_create_evidence",
+            agentId: "chair" as never,
+            projectSessionId: run.projectSessionId as never,
+            coordinationRunId: run.runId as never,
+            principalGeneration: 1,
+            chairLeaseId: run.chairLeaseId as never,
+            chairLeaseGeneration: run.chairGeneration,
+            expectedRunRevision: run.runRevision,
+            expectedRevision: 1,
+          },
+          intent: {
+            projectSessionId: run.projectSessionId as never,
+            coordinationRunId: run.runId as never,
+            dedupeKey: "gate:evidence:human-acceptance",
+            scope: { kind: "task", taskId: task.taskId as never },
+            blockedOperationIds: [],
+            enforcementPoints: ["task-readiness", "scoped-barrier"],
+            question: "Accept the task evidence?",
+            reason: "Human acceptance is required before the task can start.",
+            options: ["approve", "reject", "defer"],
+            recommendation: "defer",
+            consequences: ["The task remains blocked until an operator decides."],
+            evidenceRefs: [],
+          },
+        },
+      ) as { gateId: string };
       await expect(chair.claimTask({
         taskId: task.taskId,
         expectedRevision: task.revision,
@@ -37,25 +89,23 @@ describe("artifact, objective, gate and handoff barrier evidence", () => {
 
       let projectId = "";
       let projectSessionId = "";
-      let gateId = "";
+      const gateId = gate.gateId;
       const operatorDatabase = new Database(databasePath);
       try {
         operatorDatabase.pragma("foreign_keys = ON");
         const identity = operatorDatabase.prepare(`
-          SELECT p.project_id, p.authority_generation, s.project_session_id, s.generation, g.gate_id
+          SELECT p.project_id, p.authority_generation, s.project_session_id, s.generation
             FROM projects p
             JOIN project_sessions s ON s.project_id=p.project_id
-            JOIN scoped_gates g ON g.project_session_id=s.project_session_id
-        `).get() as {
+           WHERE p.project_id=? AND s.project_session_id=?
+        `).get(run.projectId, run.projectSessionId) as {
           project_id: string;
           authority_generation: number;
           project_session_id: string;
           generation: number;
-          gate_id: string;
         };
         projectId = identity.project_id;
         projectSessionId = identity.project_session_id;
-        gateId = identity.gate_id;
         const operators = new OperatorStore({ database: operatorDatabase });
         operators.registerPrincipal({
           operatorId: "operator_evidence",

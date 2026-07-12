@@ -8,6 +8,7 @@ import type { FabricPaths } from "./paths.js";
 import {
   parseMcpSeat,
   installSeatGeneration,
+  resolveSeatProject,
   resolveSeatPaths,
   type McpSeat,
   type SeatMetadata,
@@ -226,10 +227,10 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
   if (chairBinding?.agentId !== chairAgentId) {
     throw new Error("mcp provision chair seat must bind the exact supplied chair agent");
   }
-  const firstSeat = bindings[0]?.seat;
-  if (firstSeat === undefined) throw new Error("mcp provision requires at least one seat");
-  const firstPaths = await resolveSeatPaths({ stateDirectory: paths.stateDirectory, project, seat: firstSeat });
-  const { projectKey, projectPath } = firstPaths;
+  const { projectKey, projectPath } = await resolveSeatProject({
+    stateDirectory: paths.stateDirectory,
+    project,
+  });
   const bindingIdentity = {
     projectSessionId,
     sessionRevision,

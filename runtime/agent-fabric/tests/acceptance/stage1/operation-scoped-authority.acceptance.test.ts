@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 describe("operation-scoped authority", () => {
-  it("stores only versioned operations after expanding legacy authority bundles", async () => {
+  it("stores only exact versioned operations", async () => {
     const fixture = await createStage1Fixture();
     cleanup.push(async () => {
       await fixture.fabric.close();
@@ -45,7 +45,7 @@ describe("operation-scoped authority", () => {
     }
   });
 
-  it("authorises one exact operation without granting its former legacy bundle", async () => {
+  it("authorises one exact operation without granting unrelated operations", async () => {
     const fixture = await createStage1Fixture();
     cleanup.push(async () => {
       await fixture.fabric.close();

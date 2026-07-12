@@ -55,7 +55,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       socketPath,
       capability: run.chairCapability,
     });
-    const chairCompatibility = await TimedNdjsonTransport.connect({
+    const chairPrivateProtocol = await TimedNdjsonTransport.connect({
       socketPath,
       capability: run.chairCapability,
     });
@@ -67,7 +67,7 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
         leaderProxy?.close(),
         leaderDaemon?.close(),
         chairDaemon.close(),
-        chairCompatibility.close(),
+        chairPrivateProtocol.close(),
         bootstrap.close(),
       ]);
       await daemon.stop();
@@ -94,9 +94,9 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
     });
 
     // Atomic team creation is identity/topology only. Activate the test leader
-    // explicitly through the private compatibility client, then exercise the
+    // explicitly through the current private protocol client, then exercise the
     // secret-free team operations through the generated MCP surface.
-    const created = requireRecord(await chairCompatibility.call("createTeam", {
+    const created = requireRecord(await chairPrivateProtocol.call("createTeam", {
       ...teamCreateInput({
         teamId: "stage5-mcp-team",
         memberAuthorities: [],

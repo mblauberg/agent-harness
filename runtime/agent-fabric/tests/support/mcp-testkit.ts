@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import {
   terminateTrackedTestProcess,
   trackTestProcess,
@@ -18,8 +18,8 @@ export const MCP_ROOT_AUTHORITY = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message", "team"],
-  disclosure: ["local"],
+  actions: [...AUTHORITY_ACTION_VOCABULARY],
+  disclosure: { level: "scoped", scopes: ["local"] } as const,
   expiresAt: "2099-01-01T00:00:00.000Z",
   budget: { turns: 128, "cost:USD": 128, descendants: 128 },
 };
@@ -185,7 +185,7 @@ export async function createMcpFixture(
       ...MCP_ROOT_AUTHORITY,
       sourcePaths: ["src/peer"],
       artifactPaths: [".agent-run/peer"],
-      actions: ["read", "write", "message"],
+      actions: [...MCP_ROOT_AUTHORITY.actions],
       budget: { turns: 8, "cost:USD": 8 },
     },
   });

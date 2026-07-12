@@ -2,17 +2,26 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFabric } from "../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 const ROOT_AUTHORITY = {
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],
-  actions: ["read", "write", "delegate", "message", "team"],
-  disclosure: ["local"],
+  actions: [...AUTHORITY_ACTION_VOCABULARY],
+  disclosure: { level: "scoped", scopes: ["local"] } as const,
   expiresAt: "2099-01-01T00:00:00.000Z",
-  budget: { turns: 100, "cost:USD": 100 },
+  budget: { turns: 200, "cost:USD": 200, descendants: 40 },
+};
+
+type MessagingAgentId = "alice" | "bob" | "carol" | "dave";
+
+type AtomicMessagingTeamInput = {
+  teamId: string;
+  leaderAgentId: string;
+  memberAgentIds: string[];
+  discussionGroups: Array<{ groupId: string; memberAgentIds: string[] }>;
 };
 
 export async function createStage5MessagingFixture() {
@@ -37,7 +46,7 @@ export async function createStage5MessagingFixture() {
         ...ROOT_AUTHORITY,
         sourcePaths: [`src/${agentId}`],
         artifactPaths: [`.agent-run/${agentId}`],
-        actions: ["read", "write", "message"],
+        actions: [...ROOT_AUTHORITY.actions],
         budget: { turns: 20, "cost:USD": 20 },
       },
     });
@@ -46,16 +55,64 @@ export async function createStage5MessagingFixture() {
     clients[agentId] = fabric.connect(registration.capability);
   }
 
-  function client(agentId: "alice" | "bob" | "carol" | "dave") {
+  function client(agentId: MessagingAgentId) {
     const value = clients[agentId];
     if (value === undefined) throw new Error(`fixture client missing: ${agentId}`);
     return value;
   }
 
-  function authority(agentId: "alice" | "bob" | "carol" | "dave"): string {
+  function authority(agentId: MessagingAgentId): string {
     const value = authorities[agentId];
     if (value === undefined) throw new Error(`fixture authority missing: ${agentId}`);
     return value;
+  }
+
+  async function createAtomicTeam(input: AtomicMessagingTeamInput) {
+    const leaderAuthority = {
+      ...ROOT_AUTHORITY,
+      sourcePaths: [`src/${input.teamId}`],
+      artifactPaths: [`.agent-run/${input.teamId}`],
+      budget: { turns: 30, "cost:USD": 30, descendants: input.memberAgentIds.length },
+    };
+    const result = await chair.createTeam({
+      teamId: input.teamId,
+      leader: { agentId: input.leaderAgentId, authority: leaderAuthority },
+      rootTask: {
+        taskId: `${input.teamId}-root-task`,
+        objective: `Coordinate ${input.teamId}`,
+        baseRevision: "rev-1",
+      },
+      initialMembers: input.memberAgentIds.map((agentId) => ({
+        agentId,
+        authority: {
+          ...ROOT_AUTHORITY,
+          sourcePaths: [`src/${input.teamId}/${agentId}`],
+          artifactPaths: [`.agent-run/${input.teamId}/${agentId}`],
+          budget: { turns: 3, "cost:USD": 3, descendants: 0 },
+        },
+      })),
+      discussionGroups: input.discussionGroups,
+      reservedBudget: {
+        turns: input.memberAgentIds.length * 3,
+        "cost:USD": input.memberAgentIds.length * 3,
+        descendants: 0,
+      },
+      commandId: `team:create:${input.teamId}`,
+    });
+    if (result.leader === undefined || result.initialMembers === undefined) {
+      throw new Error("atomic team result omitted provisioned identities");
+    }
+    const leaderRegistration = await chair.registerAgent(result.leader);
+    const leader = fabric.connect(leaderRegistration.capability);
+    const members: Record<string, { authorityId: string; client: ReturnType<typeof fabric.connect> }> = {};
+    for (const member of result.initialMembers) {
+      const registration = await leader.registerAgent(member);
+      members[member.agentId] = {
+        authorityId: member.authorityId,
+        client: fabric.connect(registration.capability),
+      };
+    }
+    return { result, leader, members };
   }
 
   return {
@@ -74,6 +131,7 @@ export async function createStage5MessagingFixture() {
       carol: authority("carol"),
       dave: authority("dave"),
     },
+    createAtomicTeam,
     async cleanup(): Promise<void> {
       await fabric.close();
       await rm(directory, { recursive: true, force: true });

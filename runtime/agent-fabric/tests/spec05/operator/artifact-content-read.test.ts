@@ -11,7 +11,7 @@ import {
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openFabric } from "../../../src/index.ts";
+import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
 import { ArtifactContentReadService } from "../../../src/operator/artifact-content-read.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
@@ -56,8 +56,8 @@ async function fixture<Content extends string | Buffer>(
         workspaceRoots: ["."],
         sourcePaths: ["."],
         artifactPaths: [options.projectFile === true ? "." : ".agent-run/run-content"],
-        actions: ["read", "write"],
-        disclosure: ["local"],
+        actions: [...AUTHORITY_ACTION_VOCABULARY],
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
         expiresAt: "2099-01-01T00:00:00.000Z",
         budget: {},
       },

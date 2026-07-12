@@ -73,7 +73,7 @@ async function setup(): Promise<Fixture> {
       ...ROOT_AUTHORITY,
       sourcePaths: ["src/peer"],
       artifactPaths: [".agent-run/peer"],
-      actions: ["read", FABRIC_OPERATIONS.membershipBind],
+      actions: [FABRIC_OPERATIONS.membershipBind],
       budget: { turns: 2, "cost:USD": 1 },
     },
   });

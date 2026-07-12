@@ -31,7 +31,10 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
           proposedOwnerAgentId: "team-alpha-leader",
           ownerLeaseGeneration: 0,
         },
-        initialMemberAgentIds: ["team-alpha-worker-a", "team-alpha-worker-b"],
+        initialMembers: [
+          { agentId: "team-alpha-worker-a", authorityId: expect.any(String) },
+          { agentId: "team-alpha-worker-b", authorityId: expect.any(String) },
+        ],
         discussionGroups: [{
           groupId: "team-alpha-coordination",
           memberAgentIds: [
@@ -59,6 +62,92 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
         expect.objectContaining({ agentId: "team-alpha-worker-a", parentAgentId: "team-alpha-leader", bridgeState: "none" }),
         expect.objectContaining({ agentId: "team-alpha-worker-b", parentAgentId: "team-alpha-leader", bridgeState: "none" }),
       ]));
+    } finally {
+      await fixture.fabric.close();
+    }
+  });
+
+  it("automatically binds tasks created by an active team leader into that team subtree", async () => {
+    const fixture = await createStage5TeamFixture("run-stage5-team-owned-task");
+    try {
+      const team = await createTeam(fixture.chair, teamCreateInput({
+        teamId: "team-owned-task",
+        memberAuthorities: [],
+      }));
+      const leader = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, team));
+      const leaderIdentity = team.leader;
+      if (!isIdentity(leaderIdentity)) throw new TypeError("team leader identity is missing");
+      const task = await leader.createTask({
+        taskId: "team-owned-task-follow-up",
+        authorityId: leaderIdentity.authorityId,
+        proposedOwnerAgentId: leaderIdentity.agentId,
+        participantAgentIds: [leaderIdentity.agentId],
+        eligibleAgentIds: [leaderIdentity.agentId],
+        dependencies: [],
+        objective: "Finish the team follow-up",
+        baseRevision: "revision-2",
+        commandId: "create-team-owned-follow-up",
+      });
+
+      expect(await leader.getTeam({ teamId: "team-owned-task" })).toMatchObject({
+        ownedTaskIds: ["team-owned-task-follow-up", "team-owned-task-root-task"],
+      });
+      expect(task.taskId).toBe("team-owned-task-follow-up");
+    } finally {
+      await fixture.fabric.close();
+    }
+  });
+
+  it("does not replay a parent-bound task as an atomic child-team root", async () => {
+    const fixture = await createStage5TeamFixture("run-stage5-team-root-dedupe");
+    try {
+      const parent = await createTeam(fixture.chair, teamCreateInput({
+        teamId: "team-preseed-parent",
+        memberAuthorities: [],
+      }));
+      if (!isIdentity(parent.leader)) throw new TypeError("parent leader identity is missing");
+      const parentLeader = fixture.fabric.connect(await issueTeamLeaderCapability(fixture.chair, parent));
+      const childAuthority = teamAuthority({
+        sourcePath: "src/team-preseed-parent/team-preseed-child",
+        artifactPath: ".agent-run/team-preseed-parent/team-preseed-child",
+        turns: 40,
+        costUsd: 40,
+        descendants: 6,
+      });
+      const childInput = teamCreateInput({
+        teamId: "team-preseed-child",
+        parentTeamId: "team-preseed-parent",
+        sourcePath: "src/team-preseed-parent/team-preseed-child",
+        artifactPath: ".agent-run/team-preseed-parent/team-preseed-child",
+        memberAuthorities: [],
+      });
+      const grant = await parentLeader.delegateAuthority({
+        parentAuthorityId: parent.leader.authorityId,
+        authority: childAuthority,
+        commandId: "create-team:team-preseed-child:leader-authority",
+      });
+      await parentLeader.registerAgent({
+        agentId: "team-preseed-child-leader",
+        authorityId: grant.authorityId,
+      });
+      await parentLeader.createTask({
+        taskId: "team-preseed-child-root-task",
+        authorityId: grant.authorityId,
+        proposedOwnerAgentId: "team-preseed-child-leader",
+        participantAgentIds: ["team-preseed-child-leader"],
+        eligibleAgentIds: ["team-preseed-child-leader"],
+        dependencies: [],
+        objective: "Deliver team-preseed-child",
+        baseRevision: "revision-1",
+        commandId: "create-team:team-preseed-child:root-task",
+      });
+
+      await expect(createTeam(parentLeader, childInput)).rejects.toMatchObject({
+        code: "DEDUPE_CONFLICT",
+      });
+      await expect(parentLeader.getTeam({ teamId: "team-preseed-parent" })).resolves.toMatchObject({
+        ownedTaskIds: ["team-preseed-child-root-task", "team-preseed-parent-root-task"],
+      });
     } finally {
       await fixture.fabric.close();
     }
@@ -198,8 +287,7 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
       const listed = await fixture.chairProxy.client.listTools();
       const tool = listed.tools.find((candidate) => candidate.name === "fabric_team_create");
       expect(tool).toBeDefined();
-      expect(tool?.inputSchema).toMatchObject({ type: "object", oneOf: expect.any(Array) });
-      expect((tool?.inputSchema as { oneOf?: unknown[] } | undefined)?.oneOf?.[0]).toMatchObject({
+      expect(tool?.inputSchema).toMatchObject({
         type: "object",
         additionalProperties: false,
         required: ["teamId", "leader", "rootTask", "initialMembers", "discussionGroups", "reservedBudget", "commandId"],
@@ -225,3 +313,9 @@ describe("FR-019 / AC-004 bounded team hierarchy", () => {
     }
   });
 });
+
+function isIdentity(value: unknown): value is { agentId: string; authorityId: string } {
+  return typeof value === "object" && value !== null &&
+    typeof Reflect.get(value, "agentId") === "string" &&
+    typeof Reflect.get(value, "authorityId") === "string";
+}

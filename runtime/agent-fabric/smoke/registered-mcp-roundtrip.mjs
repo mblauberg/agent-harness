@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { currentSeatDirectory } from "./current-seat-generation.mjs";
 
 const projectRoot = resolve(process.argv[2] ?? process.cwd());
 const stateDirectory = process.env.AGENT_FABRIC_STATE_DIRECTORY
@@ -14,9 +15,7 @@ const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH
   ?? join(stateDirectory, "runtime", "fabric-v1.sock");
 const projectKey = process.env.AGENT_FABRIC_PROJECT_KEY;
 if (projectKey === undefined) throw new Error("AGENT_FABRIC_PROJECT_KEY is required");
-const seatRoot = join(stateDirectory, "seats", projectKey);
-const pointer = await readFile(join(seatRoot, "current.json"), "utf8").then(JSON.parse).catch(() => undefined);
-const seatDirectory = pointer?.generation === undefined ? seatRoot : join(seatRoot, "generations", pointer.generation);
+const seatDirectory = await currentSeatDirectory(stateDirectory, projectKey);
 
 async function connect(seat) {
   const transport = new StdioClientTransport({

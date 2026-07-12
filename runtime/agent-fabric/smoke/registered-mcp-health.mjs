@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { currentSeatDirectory } from "./current-seat-generation.mjs";
 
 const projectRoot = resolve(process.argv[2] ?? process.cwd());
 const stateDirectory = process.env.AGENT_FABRIC_STATE_DIRECTORY
@@ -18,9 +19,7 @@ const seats = ["agy", "claude", "codex", "cursor", "kiro"];
 const requiredTools = ["fabric_message_send", "fabric_message_receive", "fabric_message_ack", "fabric_run_status"];
 
 const results = [];
-const seatRoot = join(stateDirectory, "seats", projectKey);
-const pointer = await readFile(join(seatRoot, "current.json"), "utf8").then(JSON.parse).catch(() => undefined);
-const seatDirectory = pointer?.generation === undefined ? seatRoot : join(seatRoot, "generations", pointer.generation);
+const seatDirectory = await currentSeatDirectory(stateDirectory, projectKey);
 for (const seat of seats) {
   const metadata = JSON.parse(await readFile(join(seatDirectory, `${seat}.json`), "utf8"));
   const transport = new StdioClientTransport({

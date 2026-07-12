@@ -16,7 +16,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/client.js",
-      "sha256": "52606d9affb716ea1cd54b59a38f70ca3f1e9981170ef4b2296d9c952834ef24"
+      "sha256": "02a7f2cc68ff149997229369d35ec0bb8064c198d551097cc51e33a28a466b4a"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/codec.js",
@@ -48,7 +48,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/launch.js",
-      "sha256": "48dede9a4a63d566c24d19feeee2a2ab25f346a1cdbb7ae115f8abad784bd950"
+      "sha256": "4ee03aba940a092b0017aaba6c1c819da3df3f4f3ce577310c1fb2b6c807f8f3"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/mcp-projection.js",
@@ -64,11 +64,11 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operation-codecs.js",
-      "sha256": "403b9561fbeb11c673838309c219abde3a50bb9af6e79309b7d984eb9db6df2f"
+      "sha256": "f3f50e53495b5576f1fb2d69b37d05f00a2ed70e733e4a37aac0fefcbef69c5f"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operations.js",
-      "sha256": "b01293318662ec5292056cb5b93ff8644a318ce7e3979f9175739e9fa2a088b4"
+      "sha256": "8b5668a75522cf48fb0f24efd9da5ee1e3dc874934e1e73c31f4edd28d1dadb4"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operator-actions.js",

@@ -390,7 +390,7 @@ export type FabricDatabaseInspection = Readonly<{
   state: "absent" | "current";
 }>;
 
-/** Read-only compatibility gate used before any daemon/runtime mutation. */
+/** Read-only cutover gate used before any daemon/runtime mutation. */
 export function inspectFabricDatabase(databasePath: string): FabricDatabaseInspection {
   let before;
   try {

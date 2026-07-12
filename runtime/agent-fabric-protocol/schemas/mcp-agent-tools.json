@@ -12497,9 +12497,6 @@
                 "$ref": "#/$defs/generated_2"
               }
             }
-          },
-          "initialMemberAgentIds": {
-            "$ref": "#/$defs/generated_2"
           }
         },
         "$defs": {
@@ -12533,7 +12530,7 @@
         }
       },
       "inputCodecDigest": "sha256:fe5e7016f0ba4fd4e4cc48a858a5de205512fdec5a99e07b09903364ce93dcef",
-      "outputCodecDigest": "sha256:88b44f63e6f4ad49f818f2dc86c40e1824b3bc475cb9863f2074bf34876826b1"
+      "outputCodecDigest": "sha256:eab480e45740f85e53c443928e6e07bef693eb502898fbade3fb48e5e9e8b3c5"
     },
     {
       "operation": "fabric.v1.subtree.freeze",
@@ -12744,9 +12741,6 @@
                 "$ref": "#/$defs/generated_2"
               }
             }
-          },
-          "initialMemberAgentIds": {
-            "$ref": "#/$defs/generated_2"
           }
         },
         "$defs": {
@@ -12780,7 +12774,7 @@
         }
       },
       "inputCodecDigest": "sha256:f230a66d282867e82217c8ca6c19b37f3d8304a86eaa18050a2203419ae4f800",
-      "outputCodecDigest": "sha256:88b44f63e6f4ad49f818f2dc86c40e1824b3bc475cb9863f2074bf34876826b1"
+      "outputCodecDigest": "sha256:eab480e45740f85e53c443928e6e07bef693eb502898fbade3fb48e5e9e8b3c5"
     },
     {
       "operation": "fabric.v1.task.claim",
@@ -15301,7 +15295,7 @@
         ],
         "properties": {
           "teamId": {
-            "$ref": "#/$defs/generated_3"
+            "$ref": "#/$defs/generated_4"
           },
           "parentTeamId": {
             "$ref": "#/$defs/generated_1"
@@ -15311,10 +15305,10 @@
             "minimum": 0
           },
           "leaderAgentId": {
-            "$ref": "#/$defs/generated_3"
+            "$ref": "#/$defs/generated_4"
           },
           "rootTaskId": {
-            "$ref": "#/$defs/generated_3"
+            "$ref": "#/$defs/generated_4"
           },
           "ownedTaskIds": {
             "$ref": "#/$defs/generated_2"
@@ -15323,7 +15317,7 @@
             "$ref": "#/$defs/generated_2"
           },
           "budgetId": {
-            "$ref": "#/$defs/generated_3"
+            "$ref": "#/$defs/generated_4"
           },
           "state": {
             "type": "string",
@@ -15351,12 +15345,12 @@
               ],
               "properties": {
                 "groupId": {
-                  "$ref": "#/$defs/generated_3"
+                  "$ref": "#/$defs/generated_4"
                 },
                 "memberAgentIds": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/generated_3"
+                    "$ref": "#/$defs/generated_4"
                   },
                   "minItems": 2,
                   "maxItems": 64,
@@ -15401,20 +15395,7 @@
             }
           },
           "leader": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "agentId",
-              "authorityId"
-            ],
-            "properties": {
-              "agentId": {
-                "$ref": "#/$defs/generated_3"
-              },
-              "authorityId": {
-                "$ref": "#/$defs/generated_3"
-              }
-            }
+            "$ref": "#/$defs/generated_3"
           },
           "rootTask": {
             "type": "object",
@@ -15430,7 +15411,7 @@
             ],
             "properties": {
               "taskId": {
-                "$ref": "#/$defs/generated_3"
+                "$ref": "#/$defs/generated_4"
               },
               "ownerAgentId": {
                 "$ref": "#/$defs/generated_1"
@@ -15462,15 +15443,20 @@
               }
             }
           },
-          "initialMemberAgentIds": {
-            "$ref": "#/$defs/generated_2"
+          "initialMembers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_3"
+            },
+            "minItems": 0,
+            "maxItems": 5
           }
         },
         "$defs": {
           "generated_1": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_3"
+                "$ref": "#/$defs/generated_4"
               },
               {
                 "type": "null"
@@ -15480,13 +15466,29 @@
           "generated_2": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_3"
+              "$ref": "#/$defs/generated_4"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
           },
           "generated_3": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agentId",
+              "authorityId"
+            ],
+            "properties": {
+              "agentId": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "authorityId": {
+                "$ref": "#/$defs/generated_4"
+              }
+            }
+          },
+          "generated_4": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -15497,7 +15499,7 @@
         }
       },
       "inputCodecDigest": "sha256:4ea9df4d4264daec0dee2ba2d7e24430b5ab32fa41078937f0b613ecb8d14f64",
-      "outputCodecDigest": "sha256:8aa83937ef68ab3f6c8965a180666c94d4b0c6c1825d2d075f854440fca047c5"
+      "outputCodecDigest": "sha256:49d61e0c6cc64daa7f79c3bbec4c8d008953ce85acd83d765cdd121029772674"
     },
     {
       "operation": "fabric.v1.team.read",
@@ -15686,9 +15688,6 @@
                 "$ref": "#/$defs/generated_2"
               }
             }
-          },
-          "initialMemberAgentIds": {
-            "$ref": "#/$defs/generated_2"
           }
         },
         "$defs": {
@@ -15722,7 +15721,7 @@
         }
       },
       "inputCodecDigest": "sha256:28942f788bf36e90e63029f275b3287a764915b493c25753f5ee839919947cf4",
-      "outputCodecDigest": "sha256:88b44f63e6f4ad49f818f2dc86c40e1824b3bc475cb9863f2074bf34876826b1"
+      "outputCodecDigest": "sha256:eab480e45740f85e53c443928e6e07bef693eb502898fbade3fb48e5e9e8b3c5"
     },
     {
       "operation": "fabric.v1.visibility-failure.record",

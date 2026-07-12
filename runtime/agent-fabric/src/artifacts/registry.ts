@@ -17,7 +17,7 @@ import { pathWithin, resolveRunArtifactRoot } from "./run-root.js";
 
 export type ArtifactSourceKind = "project-file" | "run-file" | "git-private-diff";
 export type ArtifactEvidenceKind = "artifact" | "diff" | "test" | "review" | "receipt";
-export type ArtifactPublisherKind = "agent" | "operator" | "fabric" | "project" | "migration";
+export type ArtifactPublisherKind = "agent" | "operator" | "fabric" | "project";
 
 export type ArtifactRegistration = {
   evidenceId: string;
