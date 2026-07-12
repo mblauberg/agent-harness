@@ -251,7 +251,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
       const checkpoint = await writeLifecycleCheckpoint(fixture, {
         agentId: "leader",
         inFlightChildren: ["child"],
-        openWork: ["leader-task", "child-task"],
+        openWork: ["leader-task"],
         nextAction: "reconcile owned work before release",
       });
       await fixture.leader.requestLifecycle({

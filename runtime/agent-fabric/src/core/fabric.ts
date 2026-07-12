@@ -2840,8 +2840,15 @@ export class Fabric {
     if (stringField(row, "lifecycle") === "archived") {
       throw new FabricError("AUTHENTICATION_FAILED", "archived agent capability is no longer active");
     }
-    if (!allowSuspended && stringField(row, "lifecycle") === "suspended" && !isReadFabricOperation(requiredOperation)) {
-      throw new FabricError("CONTEXT_UNRECONCILED", "suspended agent may only read until explicit lifecycle recovery");
+    const lifecycle = stringField(row, "lifecycle");
+    const lifecycleRecovery = requiredOperation === FABRIC_OPERATIONS.requestLifecycle;
+    if (
+      !allowSuspended &&
+      (lifecycle === "suspended" || lifecycle === "context-unreconciled") &&
+      !isReadFabricOperation(requiredOperation) &&
+      !lifecycleRecovery
+    ) {
+      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled agent may only read until explicit lifecycle recovery");
     }
   }
 
@@ -4401,22 +4408,43 @@ export class Fabric {
       const previous = this.#database
         .prepare("SELECT provider_session_generation, context_revision FROM provider_state WHERE run_id = ? AND agent_id = ?")
         .get(runId, input.agentId);
-      const changedWithoutCheckpoint =
-        isRow(previous) &&
+      const providerContextChanged = isRow(previous) &&
         (numberField(previous, "provider_session_generation") !== input.providerSessionGeneration ||
-          previous.context_revision !== input.contextRevision) &&
-        input.checkpointSha256 === undefined;
+          previous.context_revision !== input.contextRevision);
+      const checkpointValidated = input.checkpointSha256 !== undefined &&
+        this.#hasCurrentValidatedCheckpoint(runId, input.agentId, input.checkpointSha256);
+      const changedWithoutCheckpoint = providerContextChanged && !checkpointValidated;
       const lifecycle = changedWithoutCheckpoint ? "context-unreconciled" : this.getAgentLifecycle(runId, input.agentId).lifecycle;
       this.#database
         .prepare(
           "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, ?, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = excluded.context_revision, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
         )
-        .run(runId, input.agentId, input.providerSessionGeneration, input.contextRevision, input.checkpointSha256 ?? null);
+        .run(
+          runId,
+          input.agentId,
+          input.providerSessionGeneration,
+          input.contextRevision,
+          checkpointValidated ? input.checkpointSha256 : null,
+        );
       if (changedWithoutCheckpoint) {
         this.#database.prepare("UPDATE agents SET lifecycle = 'context-unreconciled' WHERE run_id = ? AND agent_id = ?").run(
           runId,
           input.agentId,
         );
+        this.#database.prepare(`
+          INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
+          VALUES (?, ?, 'context-unreconciled', ?)
+          ON CONFLICT(run_id, agent_id)
+          DO UPDATE SET reason=excluded.reason, created_at=excluded.created_at
+        `).run(runId, input.agentId, this.#clock());
+        this.#database.prepare(`
+          UPDATE leases SET status='quarantined', updated_at=?
+           WHERE run_id=? AND holder_agent_id=? AND status='active'
+        `).run(this.#clock(), runId, input.agentId);
+        this.#database.prepare(`
+          UPDATE provider_session_turn_leases SET status='quarantined', updated_at=?
+           WHERE run_id=? AND agent_id=? AND status='active'
+        `).run(this.#clock(), runId, input.agentId);
       }
       const result = { agentId: input.agentId, lifecycle, providerSessionGeneration: input.providerSessionGeneration };
       this.#event(runId, "provider-state-reported", actorAgentId, result);
@@ -4444,6 +4472,9 @@ export class Fabric {
     }
     if (!isLifecycleCheckpoint(input.checkpoint)) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "lifecycle checkpoint lacks a portable recovery field");
+    }
+    if (this.getAgentLifecycle(runId, input.agentId).lifecycle === "context-unreconciled" && input.action !== "rotate") {
+      throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context requires explicit rotation");
     }
     this.#verifyCheckpoint(runId, input.agentId, input.taskId, input.taskRevision, input.checkpoint);
 
@@ -6384,13 +6415,17 @@ export class Fabric {
 
   #assertProviderPrincipalActive(runId: string, agentId: string): void {
     const principal = rowOrNotFound(this.#database.prepare(`
-      SELECT c.revoked_at, c.expires_at
+      SELECT c.revoked_at, c.expires_at, agent.lifecycle
         FROM capabilities c
+        JOIN agents agent ON agent.run_id=c.run_id AND agent.agent_id=c.agent_id
        WHERE c.run_id = ? AND c.agent_id = ?
        ORDER BY c.principal_generation DESC LIMIT 1
     `).get(runId, agentId), "provider principal");
     if (principal.revoked_at !== null || numberField(principal, "expires_at") <= this.#clock()) {
       throw new FabricError("AUTHENTICATION_FAILED", "provider principal is revoked or expired");
+    }
+    if (principal.lifecycle === "suspended" || principal.lifecycle === "context-unreconciled") {
+      throw new FabricError("CONTEXT_UNRECONCILED", "provider principal requires explicit lifecycle recovery");
     }
   }
 
@@ -6637,10 +6672,7 @@ export class Fabric {
     ) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint record does not match its durable document");
     }
-    const mailbox = this.getMailboxState(runId, agentId);
-    if (mailbox.contiguousWatermark !== checkpoint.mailboxWatermark || canonicalJson(mailbox.acknowledgedAboveWatermark) !== canonicalJson(checkpoint.acknowledgedAboveWatermark)) {
-      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint mailbox state is stale");
-    }
+    this.#assertCheckpointMatchesCurrentState(runId, agentId, checkpoint);
     this.#database
       .prepare(
         "INSERT OR IGNORE INTO lifecycle_checkpoints(checkpoint_id, run_id, agent_id, task_id, task_revision, relative_path, sha256, checkpoint_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -6656,6 +6688,63 @@ export class Fabric {
         canonicalJson(checkpoint),
         this.#clock(),
       );
+  }
+
+  #assertCheckpointMatchesCurrentState(
+    runId: string,
+    agentId: string,
+    checkpoint: LifecycleCheckpoint,
+  ): void {
+    const mailbox = this.getMailboxState(runId, agentId);
+    if (mailbox.contiguousWatermark !== checkpoint.mailboxWatermark || canonicalJson(mailbox.acknowledgedAboveWatermark) !== canonicalJson(checkpoint.acknowledgedAboveWatermark)) {
+      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint mailbox state is stale");
+    }
+    const provider = rowOrNotFound(
+      this.#database.prepare("SELECT provider_session_ref FROM agents WHERE run_id=? AND agent_id=?").get(runId, agentId),
+      "checkpoint agent",
+    );
+    if (provider.provider_session_ref !== checkpoint.providerResumeReference) {
+      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint provider session does not match current Fabric state");
+    }
+    const currentChildren = this.#database.prepare(`
+      SELECT agent_id FROM agents
+       WHERE run_id=? AND parent_agent_id=?
+         AND lifecycle NOT IN ('completion-ready','archived')
+       ORDER BY agent_id
+    `).all(runId, agentId).map((value) => stringField(rowOrNotFound(value, "checkpoint child"), "agent_id"));
+    const currentOpenWork = this.#database.prepare(`
+      SELECT task_id FROM tasks
+       WHERE run_id=? AND owner_agent_id=?
+         AND state NOT IN ('complete','cancelled','degraded')
+       ORDER BY task_id
+    `).all(runId, agentId).map((value) => stringField(rowOrNotFound(value, "checkpoint task"), "task_id"));
+    if (
+      canonicalJson(checkpoint.inFlightChildren) !== canonicalJson(currentChildren) ||
+      canonicalJson(checkpoint.openWork) !== canonicalJson(currentOpenWork)
+    ) {
+      throw new FabricError("CHECKPOINT_INCOMPLETE", "checkpoint children or open work do not match current Fabric state");
+    }
+  }
+
+  #hasCurrentValidatedCheckpoint(runId: string, agentId: string, sha256Digest: string): boolean {
+    if (!/^[0-9a-f]{64}$/u.test(sha256Digest)) return false;
+    const stored = this.#database.prepare(`
+      SELECT checkpoint.checkpoint_json
+        FROM lifecycle_checkpoints checkpoint
+        JOIN tasks task
+          ON task.run_id=checkpoint.run_id AND task.task_id=checkpoint.task_id
+         AND task.revision=checkpoint.task_revision AND task.owner_agent_id=checkpoint.agent_id
+       WHERE checkpoint.run_id=? AND checkpoint.agent_id=? AND checkpoint.sha256=?
+    `).get(runId, agentId, sha256Digest);
+    if (!isRow(stored) || typeof stored.checkpoint_json !== "string") return false;
+    try {
+      const checkpoint: unknown = JSON.parse(stored.checkpoint_json);
+      if (!isLifecycleCheckpoint(checkpoint) || checkpoint.sha256 !== sha256Digest) return false;
+      this.#assertCheckpointMatchesCurrentState(runId, agentId, checkpoint);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   #assertReleaseReady(runId: string, agentId: string, taskId: string): void {

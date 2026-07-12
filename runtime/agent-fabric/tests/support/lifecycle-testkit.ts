@@ -268,6 +268,7 @@ export async function writeLifecycleCheckpoint(
     inFlightChildren?: string[];
     openWork?: string[];
     nextAction?: string;
+    providerResumeReference?: string;
   },
 ): Promise<LifecycleCheckpoint> {
   const relativePath = join("checkpoints", `${options.agentId}-${Date.now()}.json`);
@@ -281,8 +282,8 @@ export async function writeLifecycleCheckpoint(
     inFlightChildren: options.inFlightChildren ?? [],
     openWork: options.openWork ?? [],
     nextAction: options.nextAction ?? "release",
-    providerResumeReference:
-      options.agentId === "leader" ? fixture.providerSessionMarker : "fake-session:child:g1",
+    providerResumeReference: options.providerResumeReference ??
+      (options.agentId === "leader" ? fixture.providerSessionMarker : "fake-session:child:g1"),
   };
   const bytes = `${JSON.stringify(document, null, 2)}\n`;
   await writeFile(absolutePath, bytes, { mode: 0o600 });

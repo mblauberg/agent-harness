@@ -11,6 +11,53 @@ afterEach(async () => {
 });
 
 describe("FR-013 Stage 3 checkpointed lifecycle requests", () => {
+  it("rejects a self-consistent checkpoint that omits current children and open work", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: [],
+      openWork: [],
+      nextAction: "continue without the omitted work",
+    });
+
+    await expect(fixture.leader.requestLifecycle({
+      action: "completion-ready",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:completion-ready:false-current-state",
+    })).rejects.toMatchObject({ code: "CHECKPOINT_INCOMPLETE" });
+  });
+
+  it("rejects a self-consistent checkpoint for a different provider session", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "continue in the wrong provider session",
+      providerResumeReference: "different-provider-session",
+    });
+
+    await expect(fixture.leader.requestLifecycle({
+      action: "completion-ready",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:completion-ready:false-provider-state",
+    })).rejects.toMatchObject({ code: "CHECKPOINT_INCOMPLETE" });
+  });
+
   it("rejects rotation when the durable checkpoint omits resume-critical fields", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => {
