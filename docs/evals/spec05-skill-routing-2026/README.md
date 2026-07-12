@@ -31,6 +31,8 @@ Commands:
 ```sh
 python3 skills/orchestrate/evals/spec05_skill_evaluation.py validate-inputs
 python3 skills/orchestrate/evals/spec05_skill_evaluation.py probe
+python3 skills/orchestrate/evals/spec05_skill_evaluation.py import-bundle \
+  --bundle /tmp/spec05-routing-provider-bundle.json
 python3 skills/orchestrate/evals/spec05_skill_evaluation.py validate-routing \
   --result docs/evals/spec05-skill-routing-2026/routing-result.json
 ```

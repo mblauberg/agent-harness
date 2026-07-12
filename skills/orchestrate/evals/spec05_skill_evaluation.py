@@ -408,6 +408,115 @@ def make_contract_test_result(root: Path, evidence: Path, output_root: Path) -> 
     }
 
 
+def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
+    bundle = json.loads(bundle_path.read_text())
+    fail(not isinstance(bundle, dict) or set(bundle) != {
+        "schemaVersion", "evaluationId", "route", "head", "results",
+    }, "Fabric routing bundle keys are invalid")
+    fail(bundle["schemaVersion"] != SCHEMA_VERSION or bundle["evaluationId"] != EVALUATION_ID,
+         "Fabric routing bundle identity is invalid")
+    fail(bundle["route"] != ROUTE or not isinstance(bundle["head"], str) or not bundle["head"],
+         "Fabric routing bundle route or revision is invalid")
+    results = bundle["results"]
+    fail(not isinstance(results, list) or len(results) != len(FAMILIES),
+         "Fabric routing bundle family coverage is incomplete")
+    by_family = {row.get("family"): row for row in results if isinstance(row, dict)}
+    fail(set(by_family) != set(FAMILIES), "Fabric routing bundle families are unknown or duplicate")
+    raw = evidence / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    cases = live_cases(root)
+    known_skills = {path.parent.name for path in (root / "skills").glob("*/SKILL.md")}
+    primary = companions = rows = critical_failures = 0
+    invocations = []
+    for family in sorted(FAMILIES):
+        row = by_family[family]
+        required = {
+            "family", "adapterId", "model", "runId", "taskId", "actionId",
+            "status", "resultDigest", "baseRevision", "answer",
+        }
+        fail(set(row) != required, f"Fabric routing bundle {family} result keys are invalid")
+        fail(row["adapterId"] != FAMILIES[family], f"Fabric routing bundle {family} adapter differs")
+        fail(row["status"] != "terminal" or not DIGEST.fullmatch(str(row["resultDigest"])),
+             f"Fabric routing bundle {family} is not terminal")
+        fail(row["baseRevision"] != bundle["head"], f"Fabric routing bundle {family} revision differs")
+        for field in ("model", "runId", "taskId", "actionId", "answer"):
+            fail(not isinstance(row[field], str) or not row[field],
+                 f"Fabric routing bundle {family} {field} is missing")
+        action_path = raw / f"{family}-action.json"
+        output_path = raw / f"{family}-output.json"
+        action_path.write_text(json.dumps({
+            "schema_version": SCHEMA_VERSION,
+            "route": ROUTE,
+            "run_id": row["runId"],
+            "task_id": row["taskId"],
+            "action_id": row["actionId"],
+            "adapter_id": row["adapterId"],
+            "model_family": family,
+            "model": row["model"],
+            "status": row["status"],
+            "result_digest": row["resultDigest"],
+            "base_revision": row["baseRevision"],
+        }, indent=2, sort_keys=True) + "\n")
+        try:
+            parsed_answer = json.loads(row["answer"])
+        except json.JSONDecodeError as exc:
+            raise Invalid(f"Fabric routing bundle {family} answer is not exact JSON: {exc}") from exc
+        output_path.write_text(json.dumps(parsed_answer, indent=2, sort_keys=True) + "\n")
+        parsed = _parse_output(output_path, cases, known_skills)
+        selected = {selection["case_id"]: selection for selection in parsed["selections"]}
+        for case in cases:
+            selection = selected[case["id"]]
+            primary += int(selection["primary_skill"] == case["expected"]["primary_skill"])
+            companions += int(
+                selection["companion_skills"] == sorted(case["expected"]["companion_skills"])
+            )
+            rows += 1
+            if case["relation"] == "portability":
+                critical_failures += int(selection["portable_workflow"] != _expected_workflow(case))
+        invocations.append({
+            "invocation_id": f"fabric-{family}-01",
+            "family": family,
+            "adapter_id": row["adapterId"],
+            "model": row["model"],
+            "task_id": row["taskId"],
+            "action_id": row["actionId"],
+            "action_evidence_artifact": str(action_path.relative_to(evidence)),
+            "action_evidence_sha256": sha256_file(action_path),
+            "output_artifact": str(output_path.relative_to(evidence)),
+            "output_sha256": sha256_file(output_path),
+        })
+    plan = json.loads((evidence / "routing-plan.json").read_text())
+    metrics = {
+        "case_rows": rows,
+        "primary_correct": primary,
+        "primary_accuracy": primary / rows if rows else 0,
+        "companion_correct": companions,
+        "companion_fidelity": companions / rows if rows else 0,
+        "critical_portability_failures": critical_failures,
+    }
+    passed = (
+        metrics["primary_accuracy"] >= plan["thresholds"]["primary_accuracy"]
+        and metrics["companion_fidelity"] >= plan["thresholds"]["companion_fidelity"]
+        and metrics["critical_portability_failures"] == plan["thresholds"]["critical_portability_failures"]
+    )
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "evaluation_id": EVALUATION_ID,
+        "harness_revision": bundle["head"],
+        "dataset_sha256": plan["dataset"]["sha256"],
+        "catalogue_sha256": plan["catalogue"]["sha256"],
+        "classifier_sha256": plan["classifier"]["sha256"],
+        "packet_sha256": plan["classifier"]["packet_sha256"],
+        "invocations": invocations,
+        "metrics": metrics,
+        "status": "pass" if passed else "fail",
+    }
+    result_path = evidence / "routing-result.json"
+    result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    validate_routing_result(result, root, evidence)
+    return result_path
+
+
 def run_portability_probe(root: Path, probe_root: Path) -> dict[str, Any]:
     empty_bin = probe_root / "empty-bin"
     artifacts = probe_root / "project-artifacts"
@@ -522,16 +631,22 @@ def freeze(root: Path, evidence: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("freeze", "validate-inputs", "validate-routing", "probe"))
+    parser.add_argument("command", choices=(
+        "freeze", "import-bundle", "validate-inputs", "validate-routing", "probe",
+    ))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[3])
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--result", type=Path)
+    parser.add_argument("--bundle", type=Path)
     args = parser.parse_args(argv)
     root = args.root.resolve()
     evidence = (args.evidence or root / "docs" / "evals" / "spec05-skill-routing-2026").resolve()
     try:
         if args.command == "freeze":
             freeze(root, evidence)
+        elif args.command == "import-bundle":
+            fail(args.bundle is None, "--bundle is required")
+            import_fabric_bundle(root, evidence, args.bundle)
         elif args.command == "validate-inputs":
             validate_frozen_routing_inputs(root, evidence)
         elif args.command == "validate-routing":
