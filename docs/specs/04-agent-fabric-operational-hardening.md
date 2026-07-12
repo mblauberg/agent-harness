@@ -1,13 +1,14 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.13
+Version: 1.14
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.13 owns exact scoped-operation target enforcement, unresolved
+Version 1.14 owns integration-principal persistence, public input-attestation
+dispatch and provider-native provenance conformance. Version 1.13 owns exact scoped-operation target enforcement, unresolved
 operator-effect custody in closure/liveness/recovery and composition of the
 optional Herdr action/presence seam. Version 1.12 owns negotiated native-notification projection compatibility and
 revision invalidation. Version 1.11 owns the evidence-registry migration, accepted-scope persistence,
@@ -2187,3 +2188,58 @@ Deterministic verification additionally covers:
   presence degradation, stable replay, prepared-with-zero-I/O restart,
   lookup-only dispatched/ambiguous recovery and negative pane-inference
   canaries.
+
+### 9.17 Integration-principal and direct-human attestation enforcement
+
+Migration 0013 creates one hash-only integration credential table. Its unique
+identity binds capability ID and token hash to integration ID, project,
+principal generation, provider ID, provider-session reference, closed granted-
+operation JSON, issue/expiry/revocation timestamps and revision. Insert/update
+triggers reject unknown operations, empty grants, mutable identity fields,
+generation rollback, expiry before issue and any grant outside operations whose
+registry principal set includes `integration`. Revocation is monotonic. No raw
+credential column, compatibility backfill or project-wide wildcard exists.
+
+Trusted daemon composition owns provisioning; the public socket exposes no
+credential-issuance operation. Provisioning is idempotent only for an identical
+binding and token hash, uses the `afi_` family and returns the raw value once to
+the in-process/provider bridge. Authentication uses constant-shape hash lookup,
+expiry/revocation checks and the operation registry to produce the existing
+closed integration principal/grant. Dispatch has an explicit integration
+branch; it never falls through the operator dispatcher. For input attestation,
+the branch reloads the credential by connection hash and supplies the bound
+provider identity/session to `OperatorStore`, which compares them to the
+provider-native event before insert.
+
+One production `DirectHumanInputEventSource` boundary accepts only a closed
+native event union. The successful arm has provider-native attribution, exact
+provider/session/message/event identity, immutable event digest, `user` role
+and exact utterance. Assistant, tool, system, echo, wrapper, terminal, pane,
+CLI, injected, ambiguous and unavailable arms have no conversion to
+`direct-human`. Conformance invokes the actual adapter classifier with a fake
+native transport and proves no direct store or self-assertion shortcut. When no
+eligible provider event source is configured, conversational attestation is
+honestly unavailable; typed Console decision remains independent.
+
+The operator store and gate store share one canonical digest-binding function.
+It parses stored references through the public closed codecs, de-duplicates by
+first occurrence and appends release receipt/artifact digests. It compares
+length, order and every value both when recording and resolving. Resolution
+also requires the operator command's attested-provider provenance to match the
+same attestation ID, integration ID and generation. Any parse failure or state
+change fails closed without changing gate or membership state.
+
+Deterministic verification additionally covers:
+
+- migration rollback/checksum/restart, immutable identity, monotonic
+  revocation and all operation-registry/grant negatives;
+- real Unix-socket integration negotiation and dispatch, one successful
+  native callback flow, connection-hash rebinding checks and zero operator
+  fallthrough;
+- wrong, missing, extra, duplicate and reordered gate/release digest vectors
+  at record and resolve time, plus sentinel and explicit-operator matching;
+- every ineligible native-event arm, message/event replay, wrong provider/
+  session/project/generation and changed gate/provenance with zero mutation;
+  and
+- public-tree, SQLite, logs, errors, receipts, projection and rendering scans
+  proving no `afi_` bearer fragment survives.

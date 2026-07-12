@@ -1,14 +1,15 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.17
+Version: 0.18
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.17 closes the implementation-discovered scoped-operation target,
+Version 0.18 closes the acceptance-review-discovered unreachable integration-
+principal and unbound conversational-attestation gap. Version 0.17 closes the implementation-discovered scoped-operation target,
 generic operator-effect custody and optional Herdr composition gaps. Version
 0.16 closes the implementation-discovered notification-projection
 wire-compatibility gap. Version 0.15 closes the implementation-discovered evidence-registration,
@@ -3502,3 +3503,66 @@ Acceptance additionally requires:
   portability, stable replay, prepare/dispatch crash points, lookup-only
   ambiguity recovery and absence of every pane-derived authority, delivery or
   completion claim.
+
+### 32.17 Provider-native input attestation principal
+
+`fabric.v1.integration.input-attest` is reachable only through a dedicated
+integration principal issued by trusted daemon composition. Its credential
+binds one integration ID, project, principal generation, provider ID and exact
+provider-session reference, grants only an explicit subset of integration
+operations and has bounded issue/expiry/revocation state. The durable record
+contains only the credential hash. A raw `afi_` bearer exists only in the
+trusted adapter's volatile custody and is forbidden from SQLite, discovery,
+events, logs, projections, errors, receipts and rendered content. Console,
+agent and ordinary operator principals cannot issue or use this credential.
+
+The public protocol authenticator resolves a current integration credential to
+the existing closed integration principal. The dispatcher rechecks the exact
+credential binding and routes `fabric.v1.integration.input-attest` to the
+operator attestation store. The authenticated provider ID and provider-session
+reference must equal the attested native event; the request cannot select or
+substitute them. Project, integration and principal generation are likewise
+derived and rechecked at point of use. Revocation, expiry, wrong project,
+wrong provider/session, stale generation, operation omission and token reuse
+across bindings fail before any attestation mutation.
+
+The trusted provider bridge may classify an event `direct-human` only from an
+authenticated provider-native callback that carries the immutable provider
+message/event identifiers, exact human utterance and role. Pane/scrollback
+observation, Herdr state, terminal input, CLI or MCP injection, echoed text,
+assistant/tool output, wrapper-created assertions and ambiguous or unavailable
+role provenance are ineligible. The adapter remains a trusted translation
+boundary, so conformance runs its production classification code against a fake
+native transport: there is no wrapper-only success path.
+
+Before insert, the daemon derives one canonical ordered digest vector from the
+gate's persisted evidence references, preserving first occurrence, then the
+release receipt and accepted artifact digest when present. The attestation must
+match that vector exactly; missing, extra, wrong, duplicate or reordered values
+fail. The public gate sentinel `authenticated-human-operator` matches any active
+operator in the exact project, while an explicit operator ID matches only that
+principal. Gate resolution rechecks the attestation's exact operator,
+integration, generation, gate revision, command provenance and canonical
+digest vector against current durable state. A gate with no bound artifact
+digest cannot use conversational resolution.
+
+Added requirements are:
+
+- **FR-049:** A provider-native integration principal shall authenticate and
+  dispatch the input-attestation operation under hash-only, exact
+  project/provider-session/generation authority.
+- **FR-050:** Conversational attestation and later gate resolution shall both
+  match the gate's canonical ordered artifact-digest vector and exact attested
+  provenance.
+
+Acceptance additionally requires:
+
+- **AC-040:** A real public-protocol create/read context followed by a fake-
+  native-provider direct-human callback, integration attestation and operator
+  gate resolution succeeds once. Missing/extra/wrong/duplicate/reordered
+  digests; echo, assistant/tool, injected, ambiguous and unavailable roles;
+  wrong provider/session/project/operator/generation; expired/revoked/
+  insufficient credentials; message replay; changed gate revision; changed
+  command provenance and restart all fail closed. Durable and rendered output
+  contains no `afi_` fragment, and disabled provider integration leaves typed
+  Console resolution available.
