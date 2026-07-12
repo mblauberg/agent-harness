@@ -675,6 +675,64 @@ describe("Fabric Console runtime routing", () => {
     expect(detach).not.toHaveBeenCalled();
   });
 
+  it.each(["editor", "guided", "palette"] as const)(
+    "keeps q editable in normal %s mode but honors the advertised inert detach binding",
+    async (inputMode) => {
+      const detach = vi.fn(async () => {});
+      const runtime = new FabricConsoleRuntime({
+        controller: new FakeController(),
+        viewport: { columns: 80, rows: 24 },
+        ui: createFabricUiState({ inputMode, draft: "draft:" }),
+        draw: () => {},
+        detach,
+        activate: async () => {},
+        eventId: () => `event-inert-q-${inputMode}`,
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+
+      await runtime.handleInput({ kind: "key", key: "text", text: "q" });
+
+      expect(runtime.ui.draft).toBe("draft:q");
+      expect(detach).not.toHaveBeenCalled();
+
+      const inertFrame = runtime.resize({ columns: 8, rows: 1 });
+      expect(inertFrame).toMatchObject({ mode: "inert" });
+      expect(inertFrame.rows).toStrictEqual(["q detach"]);
+
+      await runtime.handleInput({ kind: "key", key: "text", text: "q" });
+
+      expect(detach).toHaveBeenCalledOnce();
+      expect(detach).toHaveBeenCalledWith({ reason: "operator" });
+      expect(runtime.ui.draft).toBe("draft:q");
+    },
+  );
+
+  it.each(["editor", "guided", "palette"] as const)(
+    "routes Ctrl-C through safety detach before %s mode dispatch after an inert resize",
+    async (inputMode) => {
+      const detach = vi.fn(async () => {});
+      const runtime = new FabricConsoleRuntime({
+        controller: new FakeController(),
+        viewport: { columns: 80, rows: 24 },
+        ui: createFabricUiState({ inputMode, draft: "preserved" }),
+        draw: () => {},
+        detach,
+        activate: async () => {},
+        eventId: () => `event-inert-ctrl-c-${inputMode}`,
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+
+      expect(runtime.resize({ columns: 1, rows: 1 }).mode).toBe("inert");
+      await runtime.handleInput({ kind: "key", key: "ctrl-c" });
+
+      expect(detach).toHaveBeenCalledOnce();
+      expect(detach).toHaveBeenCalledWith({ reason: "safety" });
+      expect(runtime.ui.draft).toBe("preserved");
+    },
+  );
+
   it("uses local keyboard and mouse paths for split resizing without commands", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({

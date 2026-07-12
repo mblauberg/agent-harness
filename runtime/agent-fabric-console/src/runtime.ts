@@ -304,6 +304,19 @@ export class FabricConsoleRuntime {
       this.repaint();
       return;
     }
+    if (event.kind === "key" && event.key === "ctrl-c") {
+      await this.close("safety");
+      return;
+    }
+    if (
+      event.kind === "key" &&
+      event.key === "text" &&
+      event.text === "q" &&
+      this.#frame.mode === "inert"
+    ) {
+      await this.close("operator");
+      return;
+    }
     if (this.#ui.inputMode !== "browse") {
       await this.#handleEditorInput(event);
       return;
@@ -417,10 +430,6 @@ export class FabricConsoleRuntime {
   async #handleBrowseKey(
     event: Extract<TerminalInputEvent, { kind: "key" }>,
   ): Promise<void> {
-    if (event.key === "ctrl-c") {
-      await this.close("safety");
-      return;
-    }
     if (event.key === "alt-m") {
       const enabled = !this.#ui.mouseCapture;
       this.#setMouseCapture?.(enabled);
