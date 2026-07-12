@@ -14,10 +14,10 @@ describe("shared fabric operation registry", () => {
     expect(OPERATION_REGISTRY).toBe(protocol.OPERATION_REGISTRY);
   });
 
-  it("recognises but never grants the retired legacy human-gate operation", () => {
-    expect(expandAuthorityActions([FABRIC_OPERATIONS.resolveHumanGate])).toStrictEqual({
+  it("rejects the obsolete human-gate operation", () => {
+    expect(expandAuthorityActions(["fabric.v1.task.human-gate.resolve"])).toStrictEqual({
       ok: false,
-      unknownActions: [FABRIC_OPERATIONS.resolveHumanGate],
+      unknownActions: ["fabric.v1.task.human-gate.resolve"],
     });
   });
 
@@ -35,9 +35,9 @@ describe("shared fabric operation registry", () => {
       ok: false,
       unknownActions: [FABRIC_OPERATIONS.launchAttest],
     });
-    expect(expandAuthorityActions([FABRIC_OPERATIONS.daemonStop])).toStrictEqual({
+    expect(expandAuthorityActions(["fabric.v1.daemon.stop"])).toStrictEqual({
       ok: false,
-      unknownActions: [FABRIC_OPERATIONS.daemonStop],
+      unknownActions: ["fabric.v1.daemon.stop"],
     });
   });
 });

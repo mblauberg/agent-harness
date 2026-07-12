@@ -30,7 +30,7 @@ const idSchema = { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$
 const timestampSchema = { type: "string", format: "date-time" } as const;
 const digestSchema = { type: "string", pattern: "^sha256:[a-f0-9]{64}$" } as const;
 const operations = Object.keys(OPERATION_REGISTRY) as ProtocolOperation[];
-const activeOperations = operations.filter((operation) => OPERATION_REGISTRY[operation].kind !== "retired");
+const activeOperations = operations;
 const boundedJsonDefinitions = {
   boundedJsonValue: BOUNDED_JSON_VALUE_SCHEMA,
   jsonValueNode: JSON_VALUE_NODE_SCHEMA,
@@ -348,11 +348,10 @@ export const PROTOCOL_SCHEMA = {
     initializeSuccess: initializeSuccessEnvelope,
     initializeFailure: failureVariant("initialize"),
     rpcRequest: { oneOf: operations.map(requestVariant), "$defs": boundedJsonDefinitions },
-    rpcResponse: { oneOf: operations.flatMap((operation) => (
-      OPERATION_REGISTRY[operation].kind === "retired"
-        ? [failureVariant(operation)]
-        : [successVariant(operation), failureVariant(operation)]
-    )), "$defs": boundedJsonDefinitions },
+    rpcResponse: { oneOf: operations.flatMap((operation) => [
+      successVariant(operation),
+      failureVariant(operation),
+    ]), "$defs": boundedJsonDefinitions },
   },
 } as const satisfies Readonly<Record<string, JsonValue>>;
 
@@ -361,9 +360,7 @@ export function protocolRequestSchemaFor(operation: ProtocolOperation): JsonSche
 }
 
 export function protocolResponseSchemasFor(operation: ProtocolOperation): readonly JsonSchema[] {
-  const variants = OPERATION_REGISTRY[operation].kind === "retired"
-    ? [failureVariant(operation)]
-    : [successVariant(operation), failureVariant(operation)];
+  const variants = [successVariant(operation), failureVariant(operation)];
   return variants.map((variant) => ({ ...variant, "$defs": boundedJsonDefinitions }));
 }
 

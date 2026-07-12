@@ -13,7 +13,6 @@ import {
   isFabricOperation,
   isActiveFabricOperation,
   isDaemonGrantableOperation,
-  OPERATION_REGISTRY,
   operationsForPrincipal,
   type FabricOperation,
 } from "./operations.js";
@@ -302,7 +301,7 @@ export function parseProtocolInitializeResult(value: unknown): ProtocolInitializ
     if (typeof operation !== "string" || !isFabricOperation(operation)) {
       throw new TypeError(`initialize.result.allowedOperations[${String(index)}] is invalid`);
     }
-    if (OPERATION_REGISTRY[operation].kind === "retired" || !legalOperations.has(operation)) {
+    if (!legalOperations.has(operation)) {
       throw new ProtocolAuthenticationError(`server granted ${operation} outside the bound principal`);
     }
     return operation;

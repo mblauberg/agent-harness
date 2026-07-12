@@ -29,11 +29,9 @@ type OperationDefinition = {
   operation: `fabric.v1.${string}`;
   feature: OperationFeature;
   principals: readonly OperationPrincipalKind[];
-  kind: "baseline" | "extension" | "retired";
+  kind: "baseline" | "extension";
   grantScope?: "provider-launch";
   gateOwner?: "scoped-gate";
-  replacementOperation?: `fabric.v1.${string}`;
-  retirementReason?: string;
 };
 
 function defineOperations<const Registry extends Record<string, OperationDefinition>>(registry: Registry): Registry {
@@ -55,15 +53,6 @@ const DEFINITIONS = defineOperations({
   claimTask: { operation: "fabric.v1.task.claim", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   refreshTaskReadiness: { operation: "fabric.v1.task.readiness.refresh", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   recordObjectiveCheck: { operation: "fabric.v1.task.objective-check.record", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
-  resolveHumanGate: {
-    operation: "fabric.v1.task.human-gate.resolve",
-    feature: "fabric-core.v1",
-    principals: [],
-    kind: "retired",
-    gateOwner: "scoped-gate",
-    replacementOperation: "fabric.v1.scoped-gate.resolve",
-    retirementReason: "identifier-only task gates migrated to daemon-owned scoped gates",
-  },
   acknowledgeTaskHandoff: { operation: "fabric.v1.task.handoff.acknowledge", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   getTask: { operation: "fabric.v1.task.read", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   updateTask: { operation: "fabric.v1.task.update", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
@@ -158,38 +147,6 @@ const DEFINITIONS = defineOperations({
   operatorRepositoryRead: { operation: "fabric.v1.operator-repository.read", feature: "operator-repository-read.v1", principals: ["operator"], kind: "extension" },
   evidencePublish: { operation: "fabric.v1.evidence.publish", feature: "artifact-registry.v1", principals: ["agent"], kind: "extension" },
   operatorArtifactContentRead: { operation: "fabric.v1.operator-artifact-content.read", feature: "artifact-content-read.v1", principals: ["operator"], kind: "extension" },
-  projectSessionDrain: {
-    operation: "fabric.v1.project-session.drain",
-    feature: "lifecycle-control.v1",
-    principals: [],
-    kind: "retired",
-    replacementOperation: "fabric.v1.operator-action.preview",
-    retirementReason: "typed operator actions own lifecycle preview, revision and consequence fencing",
-  },
-  projectSessionStop: {
-    operation: "fabric.v1.project-session.stop",
-    feature: "lifecycle-control.v1",
-    principals: [],
-    kind: "retired",
-    replacementOperation: "fabric.v1.operator-action.preview",
-    retirementReason: "typed operator actions own lifecycle preview, revision and consequence fencing",
-  },
-  daemonDrain: {
-    operation: "fabric.v1.daemon.drain",
-    feature: "lifecycle-control.v1",
-    principals: [],
-    kind: "retired",
-    replacementOperation: "fabric.v1.operator-action.preview",
-    retirementReason: "typed operator actions own lifecycle preview, global revision and consequence fencing",
-  },
-  daemonStop: {
-    operation: "fabric.v1.daemon.stop",
-    feature: "lifecycle-control.v1",
-    principals: [],
-    kind: "retired",
-    replacementOperation: "fabric.v1.operator-action.preview",
-    retirementReason: "typed operator actions own lifecycle preview, global revision and consequence fencing",
-  },
 });
 
 type OperationConstants = {
@@ -206,11 +163,6 @@ export const FABRIC_OPERATIONS = buildOperationConstants();
 export type FabricOperation = (typeof FABRIC_OPERATIONS)[keyof typeof FABRIC_OPERATIONS];
 export type BaselineOperation = {
   [Key in keyof typeof DEFINITIONS]: (typeof DEFINITIONS)[Key]["kind"] extends "baseline"
-    ? (typeof DEFINITIONS)[Key]["operation"]
-    : never;
-}[keyof typeof DEFINITIONS];
-export type RetiredOperation = {
-  [Key in keyof typeof DEFINITIONS]: (typeof DEFINITIONS)[Key]["kind"] extends "retired"
     ? (typeof DEFINITIONS)[Key]["operation"]
     : never;
 }[keyof typeof DEFINITIONS];
@@ -239,12 +191,6 @@ export const BASELINE_OPERATIONS = Object.freeze(
     .map(([operation]) => operation as BaselineOperation),
 );
 
-export const RETIRED_OPERATIONS = Object.freeze(
-  Object.entries(OPERATION_REGISTRY)
-    .filter(([, definition]) => definition.kind === "retired")
-    .map(([operation]) => operation as RetiredOperation),
-);
-
 const operationSet: ReadonlySet<string> = new Set(Object.keys(OPERATION_REGISTRY));
 
 export function isFabricOperation(value: string): value is FabricOperation {
@@ -255,24 +201,19 @@ export function isBaselineOperation(operation: FabricOperation): boolean {
   return OPERATION_REGISTRY[operation].kind === "baseline";
 }
 
-export function isActiveFabricOperation(value: string): value is Exclude<FabricOperation, RetiredOperation> {
-  return isFabricOperation(value) && OPERATION_REGISTRY[value].kind !== "retired";
-}
-
-export function isRetiredOperation(operation: FabricOperation): operation is RetiredOperation {
-  return OPERATION_REGISTRY[operation].kind === "retired";
+export function isActiveFabricOperation(value: string): value is FabricOperation {
+  return isFabricOperation(value);
 }
 
 export function isDaemonGrantableOperation(operation: FabricOperation): boolean {
-  return OPERATION_REGISTRY[operation].kind !== "retired" &&
-    OPERATION_REGISTRY[operation].grantScope !== "provider-launch";
+  return OPERATION_REGISTRY[operation].grantScope !== "provider-launch";
 }
 
 export function operationsForPrincipal<Principal extends OperationPrincipalKind>(
   principal: Principal,
 ): ReadonlySet<PrincipalOperation<Principal>> {
   const operations = Object.entries(OPERATION_REGISTRY)
-    .filter(([, definition]) => definition.kind !== "retired" && definition.principals.includes(principal))
+    .filter(([, definition]) => definition.principals.includes(principal))
     .map(([operation]) => operation as PrincipalOperation<Principal>);
   return new Set(operations);
 }

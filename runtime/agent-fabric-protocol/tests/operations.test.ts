@@ -47,10 +47,6 @@ describe("public operation vocabulary", () => {
       projectionPage: "fabric.v1.operator-projection.page",
       projectionEvents: "fabric.v1.operator-projection.events",
       messageBodyRead: "fabric.v1.message-body.read",
-      projectSessionDrain: "fabric.v1.project-session.drain",
-      projectSessionStop: "fabric.v1.project-session.stop",
-      daemonDrain: "fabric.v1.daemon.drain",
-      daemonStop: "fabric.v1.daemon.stop",
     });
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.scoped-gate.rebind");
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.operator.input-attest");

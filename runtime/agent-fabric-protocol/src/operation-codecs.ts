@@ -1,7 +1,7 @@
 import {
   FABRIC_OPERATIONS,
+  isFabricOperation,
   isActiveFabricOperation,
-  isRetiredOperation,
   OPERATION_REGISTRY,
   operationsForPrincipal,
   type FabricOperation,
@@ -104,7 +104,6 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.claimTask]: object(["taskId", "expectedRevision", "commandId"]),
   [FABRIC_OPERATIONS.refreshTaskReadiness]: object(["taskId", "expectedRevision", "commandId"]),
   [FABRIC_OPERATIONS.recordObjectiveCheck]: object(["taskId", "checkId", "status", "evidence", "commandId"]),
-  [FABRIC_OPERATIONS.resolveHumanGate]: object(["taskId", "gateId", "status", "evidence", "commandId"]),
   [FABRIC_OPERATIONS.acknowledgeTaskHandoff]: object(["taskId", "taskRevision", "ownerLeaseGeneration", "commandId"]),
   [FABRIC_OPERATIONS.getTask]: object(["taskId"]),
   [FABRIC_OPERATIONS.updateTask]: object(["taskId", "expectedRevision", "state", "commandId"]),
@@ -223,10 +222,6 @@ export const OPERATION_INPUT_SHAPES = {
     ],
     ["projectSessionId"],
   ),
-  [FABRIC_OPERATIONS.projectSessionDrain]: object(["command", "projectSessionId", "expectedGeneration", "consequencePreviewRef", "confirmedPreviewRevision"]),
-  [FABRIC_OPERATIONS.projectSessionStop]: object(["command", "projectSessionId", "expectedGeneration", "consequencePreviewRef", "confirmedPreviewRevision", "drainReceiptRef"]),
-  [FABRIC_OPERATIONS.daemonDrain]: object(["command", "expectedDaemonGeneration", "expectedGlobalStateRevision"]),
-  [FABRIC_OPERATIONS.daemonStop]: object(["command", "expectedDaemonGeneration", "expectedGlobalStateRevision", "drainReceiptRef"]),
 } as const satisfies Record<ProtocolOperation, WireShape>;
 
 export const OPERATION_RESULT_SHAPES = {
@@ -244,7 +239,6 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.claimTask]: object(["taskId", "ownerAgentId", "state", "revision", "ownerLeaseGeneration", "proposedOwnerAgentId", "dependencies"]),
   [FABRIC_OPERATIONS.refreshTaskReadiness]: object(["taskId", "ownerAgentId", "state", "revision", "ownerLeaseGeneration", "proposedOwnerAgentId", "dependencies"]),
   [FABRIC_OPERATIONS.recordObjectiveCheck]: object(["taskId", "checkId", "status"]),
-  [FABRIC_OPERATIONS.resolveHumanGate]: object(["taskId", "gateId", "status"]),
   [FABRIC_OPERATIONS.acknowledgeTaskHandoff]: object(["acknowledged"]),
   [FABRIC_OPERATIONS.getTask]: object(["taskId", "ownerAgentId", "state", "revision", "ownerLeaseGeneration", "proposedOwnerAgentId", "dependencies"]),
   [FABRIC_OPERATIONS.updateTask]: object(["taskId", "ownerAgentId", "state", "revision", "ownerLeaseGeneration", "proposedOwnerAgentId", "dependencies"]),
@@ -375,10 +369,6 @@ export const OPERATION_RESULT_SHAPES = {
       "credentialValuesRedacted",
     ],
   ),
-  [FABRIC_OPERATIONS.projectSessionDrain]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
-  [FABRIC_OPERATIONS.projectSessionStop]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
-  [FABRIC_OPERATIONS.daemonDrain]: object(["daemonInstanceGeneration", "globalStateRevision", "state", "receiptDigest"]),
-  [FABRIC_OPERATIONS.daemonStop]: object(["daemonInstanceGeneration", "globalStateRevision", "state", "receiptDigest"]),
 } as const satisfies Record<ProtocolOperation, WireShape>;
 
 const text = boundedString();
@@ -3006,9 +2996,6 @@ function enumField(operation: ProtocolOperation, field: string, direction: Codec
   if (field === "kind" && operation === FABRIC_OPERATIONS.recordVisibilityFailure) {
     return enumeration(["herdr-telemetry", "observer-pane", "interactive-tui"]);
   }
-  if (field === "state" && (operation === FABRIC_OPERATIONS.daemonDrain || operation === FABRIC_OPERATIONS.daemonStop) && direction === "result") {
-    return enumeration(["running", "quiescing", "stopped", "busy"]);
-  }
   if (field === "state" && operation === FABRIC_OPERATIONS.updateTask && direction === "input") {
     return enumeration(["complete", "cancelled", "degraded"]);
   }
@@ -3342,8 +3329,6 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
     FABRIC_OPERATIONS.projectSessionGet,
     FABRIC_OPERATIONS.projectSessionTransition,
     FABRIC_OPERATIONS.projectSessionClose,
-    FABRIC_OPERATIONS.projectSessionDrain,
-    FABRIC_OPERATIONS.projectSessionStop,
   ] as readonly ProtocolOperation[]).includes(operation)) return projectSessionCodec;
   if (operation === FABRIC_OPERATIONS.operatorAttach || operation === FABRIC_OPERATIONS.operatorHeartbeat) {
     return operatorAttachmentCodec;
@@ -3469,13 +3454,7 @@ export function parseOperationInput<Operation extends ProtocolOperation>(
   operation: Operation,
   value: unknown,
 ): OperationInputMap[Operation] {
-  if (isRetiredOperation(operation)) {
-    const definition = OPERATION_REGISTRY[operation];
-    throw new TypeError(
-      `${operation} is retired${definition.retirementReason === undefined ? "" : `: ${definition.retirementReason}`}` +
-      `${definition.replacementOperation === undefined ? "" : `; use ${definition.replacementOperation}`}`,
-    );
-  }
+  if (!isFabricOperation(operation)) throw new TypeError(`unknown fabric operation: ${String(operation)}`);
   return OPERATION_CODECS[operation].input.parse(value, `${operation}.input`) as OperationInputMap[Operation];
 }
 
@@ -3520,13 +3499,7 @@ export function parseOperationResult<Operation extends ProtocolOperation>(
   operation: Operation,
   value: unknown,
 ): OperationResultMap[Operation] {
-  if (isRetiredOperation(operation)) {
-    const definition = OPERATION_REGISTRY[operation];
-    throw new TypeError(
-      `${operation} is retired${definition.retirementReason === undefined ? "" : `: ${definition.retirementReason}`}` +
-      `${definition.replacementOperation === undefined ? "" : `; use ${definition.replacementOperation}`}`,
-    );
-  }
+  if (!isFabricOperation(operation)) throw new TypeError(`unknown fabric operation: ${String(operation)}`);
   return OPERATION_CODECS[operation].result.parse(value, `${operation}.result`) as OperationResultMap[Operation];
 }
 

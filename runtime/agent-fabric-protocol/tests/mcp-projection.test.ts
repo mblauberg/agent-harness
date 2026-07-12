@@ -9,7 +9,6 @@ import {
   MCP_PROJECTION_LIMITS,
   MCP_PROJECTION_REGISTRY,
   OPERATION_CODECS,
-  OPERATION_REGISTRY,
   buildMcpDescriptorSet,
   operationInputSchemaForPrincipal,
   operationsForPrincipal,
@@ -79,9 +78,7 @@ describe("registry-owned current-agent MCP projection", () => {
   });
 
   it("classifies every active agent operation exactly once", () => {
-    const activeAgentOperations = [...operationsForPrincipal("agent")]
-      .filter((operation) => OPERATION_REGISTRY[operation].kind !== "retired")
-      .sort();
+    const activeAgentOperations = [...operationsForPrincipal("agent")].sort();
 
     expect(Object.keys(MCP_PROJECTION_REGISTRY).sort()).toStrictEqual(activeAgentOperations);
     for (const operation of activeAgentOperations) {

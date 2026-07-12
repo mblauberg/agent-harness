@@ -24,8 +24,8 @@ const operatorCommand = {
 
 describe("retired gate wire operation", () => {
   it("recognises but terminally rejects the legacy agent approval operation", () => {
-    const fixture = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.resolveHumanGate];
-    expect(() => parseOperationInput(FABRIC_OPERATIONS.resolveHumanGate, fixture.input)).toThrowError(/retired.*scoped-gate/iu);
+    expect(() => parseOperationInput("fabric.v1.task.human-gate.resolve" as never, {}))
+      .toThrowError(/unknown fabric operation/iu);
   });
 });
 

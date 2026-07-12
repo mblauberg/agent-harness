@@ -407,8 +407,6 @@ function buildFixtures(): Readonly<Record<ProtocolOperation, ContractFixture>> {
     FABRIC_OPERATIONS.projectSessionGet,
     FABRIC_OPERATIONS.projectSessionTransition,
     FABRIC_OPERATIONS.projectSessionClose,
-    FABRIC_OPERATIONS.projectSessionDrain,
-    FABRIC_OPERATIONS.projectSessionStop,
   ] as const) {
     const existing = fixtures[operation];
     if (existing !== undefined) fixtures[operation] = { ...existing, result: session };

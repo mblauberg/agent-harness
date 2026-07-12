@@ -183,7 +183,7 @@ export type ProviderActionRefV1 =
 
 const RESOURCE_UNIT_PATTERN = "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$";
 const activeAgentOperations = Object.values(OPERATION_REGISTRY)
-  .filter((entry) => entry.kind !== "retired" && entry.principals.includes("agent"))
+  .filter((entry) => entry.principals.includes("agent"))
   .map((entry) => entry.operation);
 const firstAgentOperation = activeAgentOperations[0];
 if (firstAgentOperation === undefined) throw new Error("launch authority requires at least one active agent operation");

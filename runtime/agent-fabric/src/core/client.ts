@@ -182,17 +182,6 @@ export class FabricClient {
     return this.#fabric.recordObjectiveCheck(this.#runId, this.#agentId, input);
   }
 
-  async resolveHumanGate(input: {
-    taskId: string;
-    gateId: string;
-    status: "approved" | "rejected";
-    evidence: string;
-    commandId: string;
-  }): Promise<{ taskId: string; gateId: string; status: "approved" | "rejected" }> {
-    this.#authorise(FABRIC_OPERATIONS.resolveHumanGate);
-    return this.#fabric.resolveHumanGate(this.#runId, this.#agentId, input);
-  }
-
   async acknowledgeTaskHandoff(input: {
     taskId: string;
     taskRevision: number;

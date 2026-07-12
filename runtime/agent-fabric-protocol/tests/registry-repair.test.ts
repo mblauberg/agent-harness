@@ -17,7 +17,6 @@ const baselineOperations = [
   "fabric.v1.task.claim",
   "fabric.v1.task.readiness.refresh",
   "fabric.v1.task.objective-check.record",
-  "fabric.v1.task.human-gate.resolve",
   "fabric.v1.task.handoff.acknowledge",
   "fabric.v1.task.read",
   "fabric.v1.task.update",
@@ -70,16 +69,9 @@ describe("canonical exhaustive operation registry", () => {
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.scoped-gate.rebind");
   });
 
-  it("recognises but never grants the retired legacy human-gate wire operation", () => {
+  it("contains no obsolete human-gate wire operation", () => {
     const registry: unknown = Reflect.get(protocol, "OPERATION_REGISTRY");
 
-    expect(registry).toMatchObject({
-      "fabric.v1.task.human-gate.resolve": {
-        kind: "retired",
-        principals: [],
-        gateOwner: "scoped-gate",
-        replacementOperation: "fabric.v1.scoped-gate.resolve",
-      },
-    });
+    expect(registry).not.toHaveProperty("fabric.v1.task.human-gate.resolve");
   });
 });

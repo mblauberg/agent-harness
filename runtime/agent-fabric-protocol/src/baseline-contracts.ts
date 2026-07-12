@@ -193,7 +193,6 @@ export type BaselineOperationInputMap = {
   [FABRIC_OPERATIONS.claimTask]: { taskId: string; expectedRevision: number; commandId: string };
   [FABRIC_OPERATIONS.refreshTaskReadiness]: { taskId: string; expectedRevision: number; commandId: string };
   [FABRIC_OPERATIONS.recordObjectiveCheck]: { taskId: string; checkId: string; status: "pass" | "fail"; evidence: string; commandId: string };
-  [FABRIC_OPERATIONS.resolveHumanGate]: { taskId: string; gateId: string; status: "approved" | "rejected"; evidence: string; commandId: string };
   [FABRIC_OPERATIONS.acknowledgeTaskHandoff]: { taskId: string; taskRevision: number; ownerLeaseGeneration: number; commandId: string };
   [FABRIC_OPERATIONS.getTask]: { taskId: string };
   [FABRIC_OPERATIONS.updateTask]: { taskId: string; expectedRevision: number; state: "complete" | "cancelled" | "degraded"; commandId: string };
@@ -250,7 +249,6 @@ export type BaselineOperationResultMap = {
   [FABRIC_OPERATIONS.claimTask]: LegacyTaskResult;
   [FABRIC_OPERATIONS.refreshTaskReadiness]: LegacyTaskResult;
   [FABRIC_OPERATIONS.recordObjectiveCheck]: { taskId: string; checkId: string; status: "pass" | "fail" };
-  [FABRIC_OPERATIONS.resolveHumanGate]: { taskId: string; gateId: string; status: "approved" | "rejected" };
   [FABRIC_OPERATIONS.acknowledgeTaskHandoff]: { acknowledged: true };
   [FABRIC_OPERATIONS.getTask]: LegacyTaskResult;
   [FABRIC_OPERATIONS.updateTask]: LegacyTaskResult;

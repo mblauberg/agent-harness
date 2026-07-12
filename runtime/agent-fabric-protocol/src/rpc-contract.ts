@@ -64,14 +64,10 @@ import type {
   ProjectionSnapshotRequest,
 } from "./projection.js";
 import type {
-  DaemonDrainRequest,
-  DaemonStopRequest,
   ProjectSession,
   ProjectSessionCloseRequest,
   ProjectSessionCreateRequest,
-  ProjectSessionDrainRequest,
   ProjectSessionGetRequest,
-  ProjectSessionStopRequest,
   ProjectSessionTransitionRequest,
 } from "./project-session.js";
 import type {
@@ -220,10 +216,6 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadRequest;
   [FABRIC_OPERATIONS.evidencePublish]: EvidencePublishRequest;
   [FABRIC_OPERATIONS.operatorArtifactContentRead]: ArtifactContentReadRequest;
-  [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSessionDrainRequest;
-  [FABRIC_OPERATIONS.projectSessionStop]: ProjectSessionStopRequest;
-  [FABRIC_OPERATIONS.daemonDrain]: DaemonDrainRequest;
-  [FABRIC_OPERATIONS.daemonStop]: DaemonStopRequest;
 };
 
 export type OperationInputMap = BaselineOperationInputMap & ExtensionOperationInputMap;
@@ -247,13 +239,6 @@ export type TaskCompletionCommit = {
   taskRevision: number;
   replyRevision: number;
   resultDelivery: ResultDelivery;
-};
-
-export type DaemonLifecycleResult = {
-  daemonInstanceGeneration: number;
-  globalStateRevision: number;
-  state: "running" | "quiescing" | "stopped" | "busy";
-  receiptDigest: Sha256Digest;
 };
 
 type ExtensionOperationResultMap = {
@@ -304,10 +289,6 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadResult;
   [FABRIC_OPERATIONS.evidencePublish]: EvidenceArtifactRegistration;
   [FABRIC_OPERATIONS.operatorArtifactContentRead]: ArtifactContentReadResult;
-  [FABRIC_OPERATIONS.projectSessionDrain]: ProjectSession;
-  [FABRIC_OPERATIONS.projectSessionStop]: ProjectSession;
-  [FABRIC_OPERATIONS.daemonDrain]: DaemonLifecycleResult;
-  [FABRIC_OPERATIONS.daemonStop]: DaemonLifecycleResult;
 };
 
 export type OperationResultMap = BaselineOperationResultMap & ExtensionOperationResultMap;

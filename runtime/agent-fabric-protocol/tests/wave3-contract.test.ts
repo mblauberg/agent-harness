@@ -305,9 +305,9 @@ describe("bounded JSON and path parity", () => {
   it.each([
     ["traversal source path", { sourcePaths: ["../escape"] }],
     ["brace-glob artifact path", { artifactPaths: ["artifacts/{one,two}"] }],
-    ["retired authority action", { actions: [FABRIC_OPERATIONS.resolveHumanGate] }],
+    ["obsolete authority action", { actions: ["fabric.v1.task.human-gate.resolve"] }],
     ["unknown authority action", { actions: ["fabric.v1.unknown.operation"] }],
-    ["operator-only authority action", { actions: [FABRIC_OPERATIONS.daemonStop] }],
+    ["obsolete direct lifecycle action", { actions: ["fabric.v1.daemon.stop"] }],
     ["unqualified budget unit", { budget: { tokens: 10 } }],
     ["unrecognised ISO-4217 currency", { budget: { "cost:ZZZ": 10 } }],
   ] as const)("rejects %s in delegated authority at runtime and schema", (_label, mutation) => {

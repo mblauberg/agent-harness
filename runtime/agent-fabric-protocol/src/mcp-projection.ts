@@ -313,7 +313,7 @@ export function buildMcpDescriptorSet(allowedOperations: ReadonlySet<FabricOpera
     const projection = MCP_PROJECTION_REGISTRY[operation as AgentOperation] as McpProjection | undefined;
     if (projection === undefined || projection.projection === "none") continue;
     const definition = OPERATION_REGISTRY[operation];
-    if (definition.kind === "retired" || !definition.principals.includes("agent")) {
+    if (!definition.principals.includes("agent")) {
       throw new TypeError(`MCP projection contains an illegal agent operation: ${operation}`);
     }
     const codecs = OPERATION_CODECS[operation];
