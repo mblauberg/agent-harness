@@ -32,7 +32,7 @@ describe("artifact, objective, gate and handoff barrier evidence", () => {
         taskId: task.taskId,
         expectedRevision: task.revision,
         commandId: "evidence:claim:before-gate",
-      })).rejects.toThrow(/AFAB_0004_GATE_BLOCKED/u);
+      })).rejects.toMatchObject({ code: "GATE_BLOCKED" });
 
       let projectId = "";
       let projectSessionId = "";
@@ -109,7 +109,7 @@ describe("artifact, objective, gate and handoff barrier evidence", () => {
           status: "approved",
           decisionEvidence: {
             kind: "typed-console",
-            confirmationCommandId: "confirm_gate_evidence" as never,
+            confirmationCommandId: "command_gate_evidence" as never,
           },
         },
       )).resolves.toMatchObject({

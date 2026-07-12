@@ -92,10 +92,9 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
       commandId: "mcp:errors:claim-missing",
     });
     expect(missing.isError).toBe(true);
-    // Core checks claim eligibility before task existence, so an unknown task
-    // surfaces as CAPABILITY_FORBIDDEN; the contract here is a typed fabric
-    // code either way.
-    expect(missing.structured).toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    // Unknown task identity is reported as a typed public NOT_FOUND error,
+    // never a raw SQLite/driver failure.
+    expect(missing.structured).toMatchObject({ code: "NOT_FOUND" });
 
     const original = await callTool(fixture.chairProxy.client, "fabric_message_send", {
       audience: { kind: "agents", agentIds: ["peer"] },
