@@ -1061,6 +1061,92 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.notice).toContain("Stale Review input ignored");
   });
 
+  it("does not execute a queued view-tab click beneath a newly opened Review", async () => {
+    const controller = stateBoundControlController();
+    const activations: string[] = [];
+    let runtime: FabricConsoleRuntime;
+    runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "action:resume", mouseCapture: true }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async ({ regionId }) => {
+        activations.push(regionId);
+        if (regionId === "action:resume") {
+          runtime.setWorkflowReview(shortWorkflowReview("review"));
+        }
+      },
+      eventId: () => "stale-tab-beneath-review",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const projectTab = runtime.frame.hitRegions.find(
+      ({ id }) => id === "view:project",
+    );
+    expect(projectTab).toBeDefined();
+    if (projectTab === undefined) return;
+    const mouse = {
+      kind: "mouse" as const,
+      button: "left" as const,
+      x: projectTab.rect.x1,
+      y: projectTab.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    };
+
+    const openReview = runtime.handleInput({ kind: "key", key: "enter" });
+    const queuedPress = runtime.handleInput({ ...mouse, phase: "press" });
+    const queuedRelease = runtime.handleInput({ ...mouse, phase: "release" });
+    await Promise.all([openReview, queuedPress, queuedRelease]);
+
+    expect(controller.state.activeView).toBe("runs");
+    expect(activations).toStrictEqual(["action:resume"]);
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
+  });
+
+  it("does not execute a queued bound-row click beneath a newly opened Review", async () => {
+    const controller = stateBoundControlController();
+    const activations: string[] = [];
+    let runtime: FabricConsoleRuntime;
+    runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "action:resume", mouseCapture: true }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async ({ regionId }) => {
+        activations.push(regionId);
+        if (regionId === "action:resume") {
+          runtime.setWorkflowReview(shortWorkflowReview("review"));
+        }
+      },
+      eventId: () => "stale-row-beneath-review",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const row = runtime.frame.hitRegions.find(
+      ({ id }) => id === "row:runs:run:control",
+    );
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+    const mouse = {
+      kind: "mouse" as const,
+      button: "left" as const,
+      x: row.rect.x1,
+      y: row.rect.y1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    };
+
+    const openReview = runtime.handleInput({ kind: "key", key: "enter" });
+    const queuedPress = runtime.handleInput({ ...mouse, phase: "press" });
+    const queuedRelease = runtime.handleInput({ ...mouse, phase: "release" });
+    await Promise.all([openReview, queuedPress, queuedRelease]);
+
+    expect(controller.state.scrollAnchorByView.runs).toBeNull();
+    expect(activations).toStrictEqual(["action:resume"]);
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
+  });
+
   it("anchors an incomplete Review by content across widening and continues without Home", async () => {
     const runtime = new FabricConsoleRuntime({
       controller: new FakeController(),

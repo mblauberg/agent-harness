@@ -1046,8 +1046,14 @@ export class FabricConsoleRuntime {
     input: CapturedInput,
   ): Promise<void> {
     for (const { intent, region } of input.pointerIntents) {
+      const crossedReviewBoundary =
+        intent.kind === "activate-region" &&
+        region?.kind !== "detach" &&
+        input.reviewEpoch !== reviewEpoch(this.#frame);
       if (
-        (region?.kind === "action" || intent.regionId === "review:scroll") &&
+        (crossedReviewBoundary ||
+          region?.kind === "action" ||
+          intent.regionId === "review:scroll") &&
         !this.#reviewInputIsCurrent(input)
       ) return;
       if (intent.kind === "scroll") {
