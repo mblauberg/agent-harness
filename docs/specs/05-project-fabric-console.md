@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.5
+Version: 1.6
 Date: 12 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,7 +10,12 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.5 closes the implementation-review placeholders for Pause/Resume,
+Version 1.6 records the live MCP review finding that provider turns can exceed
+the binding 30-second public request maximum. Review dispatch therefore returns
+the durable action receipt promptly and the chair reads that exact action until
+its bounded terminal answer arrives; timeout, disconnect and polling never
+redispatch. Version 1.5 closes the implementation-review placeholders for
+Pause/Resume,
 Attention decisions and evidence Discuss/Request changes. Run control uses the
 existing revision-bound operator preview/commit path. Attention actions read
 and resolve only the exact daemon-projected open gate and revision. Discussion
@@ -820,5 +825,7 @@ without changing the one-live-run-per-session topology. Version 1.4 binds
 fresh external reviews to answer-bearing Fabric tasks. Version 1.5 makes every
 shipped Pause/Resume, Attention decision and evidence discussion/request-
 changes affordance execute its typed revision-bound review/confirm path; no
-required action remains an implementation placeholder. Final human acceptance remains pending; Git push,
+required action remains an implementation placeholder. Version 1.6 binds those
+review tasks to durable dispatch/read completion within the existing public
+protocol deadline. Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.

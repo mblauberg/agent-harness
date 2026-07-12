@@ -1,14 +1,20 @@
 # Shared agent fabric
 
 Status: Current protocol, provider-task, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
-Version: 0.27
+Version: 0.28
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.27 binds task-bound provider work and every applicable hard provider
+Version 0.28 keeps task-bound provider execution within the public protocol's
+30-second request ceiling. Dispatch atomically reserves and journals the action,
+starts one daemon-owned completion, and may return its durable `dispatched`
+receipt before provider completion. The chair reads the same action until a
+terminal `providerAnswer` and digest are available; disconnect, timeout or an
+exact replay never starts another effect. Version 0.27 binds task-bound provider
+work and every applicable hard provider
 dimension to one delegated authority-budget custody, and closes the Console
 decision projections. An ephemeral spawn atomically reserves its enforceable
 turn/call/concurrency ceiling plus each configured cost, token or wall-clock
@@ -1211,8 +1217,11 @@ Given the chair owns or participates in one active review task and delegates a
 read-only externally disclosable authority envelope
 When it dispatches `operation: spawn` to an activated compatible adapter with
 an explicit model, model family, prompt and exact task ID
-Then Fabric persists one action and returns the bounded provider answer through
-the closed `providerAnswer` action result field plus a canonical digest
+Then Fabric persists one action and returns either its durable `dispatched`
+receipt or the bounded terminal answer through the closed `providerAnswer`
+action result field plus a canonical digest
+And a dispatched receipt remains readable while one daemon-owned completion
+settles it; the chair polls the same action rather than redispatching
 And a missing task, stale task scope, forbidden disclosure, model mismatch,
 duplicate changed action or unsupported adapter fails before provider work
 And no retained agent identity, capability or hidden direct-CLI result path is
@@ -3766,6 +3775,16 @@ back all of them before provider work. While that action is open, the task
 cannot commit a terminal transition. Existing-action identity/replay is checked
 first, so an exact replay still returns its committed result after the task has
 later become terminal; a new action does not.
+
+Task-bound answer-bearing dispatch does not hold a public protocol request open
+for the provider turn. After the immutable action and full budget reservation
+commit, Fabric starts exactly one daemon-owned completion and may return the
+`dispatched` action receipt. `provider-action.read` observes that same action
+until terminal evidence supplies `providerAnswer` and the result digest.
+Connection closure, protocol timeout and exact command/action replay do not
+cancel or duplicate the effect. Daemon shutdown fences the adapter, lets the
+tracked completion journal its terminal or ambiguous state, and only then
+closes SQLite; restart uses lookup/reconciliation rather than blind replay.
 
 Terminal evidence settles every dimension exactly once: proven usage is
 consumed, unused reservation is released, concurrency is released, and an

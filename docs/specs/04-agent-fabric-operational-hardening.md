@@ -1,13 +1,19 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle, provider-budget, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.23
+Version: 1.24
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.23 makes vector-valued ephemeral provider-budget custody durable in
+Version 1.24 makes answer-bearing task work asynchronous behind the binding
+30-second public request maximum. Dispatch returns only after immutable action
+and budget custody commit, then one daemon-owned completion settles the same
+row. Read supplies the terminal answer; disconnect and retry cannot duplicate
+the provider effect, and shutdown drains the tracked completion after fencing
+its adapter before SQLite closes. Version 1.23 makes vector-valued ephemeral
+provider-budget custody durable in
 the current SQLite baseline, derives Console gate/intake bindings from
 authoritative rows, and confines Claude review tooling to `Read`, `Glob` and
 `Grep` beneath the trusted realpath of the admitted working root. Recovery
@@ -2440,6 +2446,15 @@ The custody reserves `turns`, one `provider_calls` and one
 `concurrent_turns` when configured, plus each delegated cost,
 provider-qualified token and wall-clock dimension. It does not debit unrelated
 descendant, message or artifact capacity.
+
+Because provider turns may exceed the public protocol's 30-second request
+maximum, task-bound answer-bearing spawn is a durable asynchronous action.
+Dispatch commits `dispatched` custody and returns promptly while exactly one
+tracked daemon completion owns adapter I/O. The Console, MCP caller or chair
+uses `provider-action.read` to observe terminal `providerAnswer` evidence; it
+does not redispatch. Transport loss leaves the action live, daemon shutdown
+fences the adapter and drains the completion to terminal or ambiguous before
+database close, and restart reconciles the persisted action by lookup only.
 
 Terminal adapter evidence moves exact usage to consumed and releases unused
 and concurrency reservation. A missing applicable usage value becomes unknown;
