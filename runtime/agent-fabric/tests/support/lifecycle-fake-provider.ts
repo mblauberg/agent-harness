@@ -123,7 +123,9 @@ input.on("line", (line) => {
         fail(request.id, "INVALID_PARAMS", "actionId is required");
         return;
       }
-      const answer = scenario === "ambiguous-review-valid" || scenario === "ambiguous-review-wrong-action-id"
+      const answer = scenario === "ambiguous-review-valid" ||
+        scenario === "ambiguous-review-wrong-action-id" ||
+        scenario === "ambiguous-review-concurrent-divergent"
         ? "recovered provider review"
         : scenario === "ambiguous-review-usage-late"
           ? "recovered provider review with late usage"
@@ -231,6 +233,22 @@ input.on("line", (line) => {
     if (action === undefined) {
       fail(request.id, "ACTION_NOT_FOUND", "action does not exist");
     } else {
+      if (action.scenario === "ambiguous-review-concurrent-divergent") {
+        action.lookupCount = (action.lookupCount ?? 0) + 1;
+        const lookupCount = action.lookupCount;
+        const candidate = {
+          ...action,
+          result: {
+            ...(isRecord(action.result) ? action.result : {}),
+            result: lookupCount === 1 ? "recovered provider review" : "divergent provider review",
+            resourceUsage: { turns: lookupCount === 1 ? 1 : 2 },
+          },
+        };
+        saveJournal(journal);
+        if (lookupCount === 1) setTimeout(() => respond(request.id, candidate), 100);
+        else respond(request.id, candidate);
+        return;
+      }
       if (action.scenario === "ambiguous-review-usage-late") {
         action.lookupCount = (action.lookupCount ?? 0) + 1;
         if (action.lookupCount >= 2 && isRecord(action.result)) {

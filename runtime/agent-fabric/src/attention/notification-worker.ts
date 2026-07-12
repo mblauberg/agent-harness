@@ -124,6 +124,7 @@ export class NativeNotificationWorker {
   }
 
   async #run(): Promise<NotificationWorkerPassResult> {
+    this.#outbox.recover();
     let discovery: NativeNotificationDiscovery;
     try {
       discovery = await this.#adapter.discover();

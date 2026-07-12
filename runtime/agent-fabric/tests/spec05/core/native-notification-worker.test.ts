@@ -143,4 +143,56 @@ describe("daemon-owned native notification worker", () => {
     expect(calls).toBe(1);
     expect(database.prepare("SELECT state FROM notification_deliveries").get()).toEqual({ state: "failed" });
   });
+
+  it("expires a claim that becomes overdue after restart on the next worker pass exactly once", async () => {
+    const database = openSpec05Database();
+    databases.push(database);
+    let now = 1_000;
+    const original = new NotificationOutbox({ database, clock: () => now });
+    const item = original.upsertAttention(producer, {
+      dedupeKey: "attention:restart-overdue",
+      kind: "consequential-gate",
+      severity: "critical-path",
+      payload: { title: "Release gate", summary: "Review evidence", gateId: "gate_release" },
+    });
+    const delivery = original.enqueue(producer, {
+      itemId: item.itemId,
+      expectedItemRevision: item.revision,
+      targetIntegration: "native-desktop",
+    });
+    original.setIntegrationAvailability({
+      workerInstanceId: "notification-worker-before-restart",
+      integrationId: "native-desktop",
+    }, { state: "available", discoveredContract: { schemaVersion: 1 } });
+    original.claim({
+      workerInstanceId: "notification-worker-before-restart",
+      integrationId: "native-desktop",
+    }, {
+      notificationId: delivery.notificationId,
+      expectedItemRevision: item.revision,
+      expectedClaimGeneration: 0,
+      claimDeadline: new Date(2_000).toISOString(),
+    });
+
+    const restarted = new NotificationOutbox({ database, clock: () => now });
+    expect(restarted.recover()).toEqual({ ambiguousClaims: 0 });
+    now = 3_000;
+    const sent: Array<{ title: string; body: string }> = [];
+    const worker = new NativeNotificationWorker({
+      outbox: restarted,
+      adapter: adapter(sent),
+      workerInstanceId: "notification-worker-after-restart",
+      integrationId: "native-desktop",
+      clock: () => now,
+    });
+
+    await expect(worker.runOnce()).resolves.toEqual({ examined: 0, sent: 0, failed: 0, deduplicated: 0 });
+    expect(sent).toEqual([]);
+    expect(restarted.get(delivery.notificationId)).toMatchObject({ state: "ambiguous", claimGeneration: 1 });
+    expect(database.prepare("SELECT state, COUNT(*) AS count FROM notification_attempts GROUP BY state").all())
+      .toEqual([{ state: "ambiguous", count: 1 }]);
+    await expect(worker.runOnce()).resolves.toEqual({ examined: 0, sent: 0, failed: 0, deduplicated: 0 });
+    expect(database.prepare("SELECT state, COUNT(*) AS count FROM notification_attempts GROUP BY state").all())
+      .toEqual([{ state: "ambiguous", count: 1 }]);
+  });
 });

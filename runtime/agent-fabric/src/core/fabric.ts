@@ -815,6 +815,7 @@ export class Fabric {
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #maximumConcurrentProviderTurns: number;
   readonly #ownedProviderActions = new Map<string, Promise<void>>();
+  readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
   readonly #activeProviderOperations = new Set<Promise<void>>();
   readonly #deferredProviderActions: Array<{
     key: string;
@@ -4926,7 +4927,33 @@ export class Fabric {
     input: { actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
     return await this.#trackProviderOperation(
-      async () => await this.#reconcileProviderAction(runId, actorAgentId, input),
+      async () => {
+        this.#assertChair(runId, actorAgentId);
+        this.#assertGenericProviderAction(runId, input.actionId);
+        const replay = this.#commandJournal.read(
+          runId,
+          actorAgentId,
+          input.commandId,
+          input,
+          isProviderActionResult,
+        );
+        if (replay !== undefined) return replay;
+        const key = this.#providerActionOwnershipKey(runId, input.actionId);
+        const existing = this.#providerActionReconciliations.get(key);
+        if (existing !== undefined) {
+          await existing;
+          return await this.#reconcileProviderAction(runId, actorAgentId, input);
+        }
+        const owned = this.#reconcileProviderAction(runId, actorAgentId, input);
+        this.#providerActionReconciliations.set(key, owned);
+        try {
+          return await owned;
+        } finally {
+          if (this.#providerActionReconciliations.get(key) === owned) {
+            this.#providerActionReconciliations.delete(key);
+          }
+        }
+      },
     );
   }
 

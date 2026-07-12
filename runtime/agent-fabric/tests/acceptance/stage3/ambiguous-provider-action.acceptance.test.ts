@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
@@ -1438,6 +1438,87 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       expect(await fixture.chair.getProviderAction({
         actionId: `provider-review-recovery:${scenario}`,
       })).toMatchObject({ status: "quarantined" });
+    }
+  });
+
+  it("singleflights concurrent reconciliation commands so divergent lookup evidence cannot rewrite terminal custody", async () => {
+    const fixture = await createLifecycleFixture({ payloadMaxTurns: true });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 2 },
+      },
+      commandId: "provider-review-concurrent:authority",
+    });
+    const actionId = "provider-review-concurrent:spawn";
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Recover one immutable answer.",
+        maxTurns: 2,
+        cwd: "src/leader",
+        scenario: "ambiguous-review-concurrent-divergent",
+      },
+      commandId: "provider-review-concurrent:dispatch",
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
+
+    const proxy = asLifecycleClient(fixture.fabric.connect(fixture.capabilities.chair));
+    const firstPromise = fixture.chair.reconcileProviderAction({
+      actionId,
+      commandId: "provider-review-concurrent:reconcile:first",
+    });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+    const secondPromise = proxy.reconcileProviderAction({
+      actionId,
+      commandId: "provider-review-concurrent:reconcile:second",
+    });
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ status: "terminal", providerAnswer: "recovered provider review" });
+    expect(await fixture.chair.getProviderAction({ actionId })).toEqual(first);
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId,
+      commandId: "provider-review-concurrent:reconcile:first",
+    })).resolves.toEqual(first);
+    await expect(proxy.reconcileProviderAction({
+      actionId,
+      commandId: "provider-review-concurrent:reconcile:second",
+    })).resolves.toEqual(first);
+
+    const providerJournal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
+      actions: Record<string, { lookupCount?: number }>;
+    };
+    expect(providerJournal.actions[actionId]?.lookupCount).toBe(1);
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
+    });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      const receipts = database.prepare(`
+        SELECT result_json FROM commands
+         WHERE run_id=? AND actor_agent_id='chair' AND command_id LIKE 'provider-review-concurrent:reconcile:%'
+         ORDER BY command_id
+      `).all(fixture.runId) as Array<{ result_json: string }>;
+      expect(receipts).toHaveLength(2);
+      expect(receipts[0]?.result_json).toBe(receipts[1]?.result_json);
+      expect(JSON.parse(receipts[0]?.result_json ?? "null")).toEqual(first);
+    } finally {
+      database.close();
     }
   });
 
