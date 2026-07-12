@@ -1099,13 +1099,13 @@ function reviewActions(review: ActionReview): readonly PresentedAction[] {
   }
   if (review.stage === "confirm") {
     return [
+      { id: "review:cancel", label: "Cancel Review", enabled: true, availableAction: null },
       {
         id: "review:confirm",
         label: review.preview.confirmationMode === "echo" ? "Confirm exact digest" : "Confirm action",
         enabled: true,
         availableAction: null,
       },
-      { id: "review:cancel", label: "Cancel Review", enabled: true, availableAction: null },
     ];
   }
   if (review.stage === "conflict") {
@@ -1131,13 +1131,13 @@ function workflowReviewActions(
   }
   if (review.stage === "confirm") {
     return [
+      { id: "review:cancel", label: "Cancel Review", enabled: true, availableAction: null },
       {
         id: "review:confirm",
         label: review.confirmationMode === "echo" ? "Confirm exact digest" : "Confirm workflow",
         enabled: true,
         availableAction: null,
       },
-      { id: "review:cancel", label: "Cancel Review", enabled: true, availableAction: null },
     ];
   }
   return [

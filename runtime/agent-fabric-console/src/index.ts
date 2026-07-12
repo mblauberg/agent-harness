@@ -291,7 +291,7 @@ export type FabricHitBinding = Readonly<{
 
 export type FabricHitRegion = Readonly<{
   id: string;
-  kind: "tab" | "row" | "session" | "action" | "detach" | "pager" | "splitter";
+  kind: "tab" | "row" | "session" | "action" | "detach" | "pager" | "splitter" | "input";
   rect: Rect;
   enabled: boolean;
   geometryKey: string;
@@ -316,6 +316,9 @@ export type FabricReviewCoverageObservation = Readonly<{
   visibleStart: number;
   visibleEnd: number;
   visibleLineCount: number;
+  previousAnchor: number;
+  nextAnchor: number;
+  endAnchor: number;
 }>;
 
 function fabricDimensions(viewport: FabricViewport): Readonly<{
@@ -997,16 +1000,18 @@ function renderFabricReview(
   const wrapped = wrapFabricReviewContent(content, columns);
   const lines = wrapped.lines;
   const visibleCount = bounds.y2 - bounds.y1 + 1;
+  const scrollMaximum = Math.max(0, lines.length - visibleCount);
+  const requestedAnchor = presentation.reviewScrollOffset;
+  const containingLine = lines.findIndex(({ end }) => end > requestedAnchor);
   const offset = Math.min(
-    presentation.reviewScrollOffset,
-    Math.max(0, lines.length - visibleCount),
+    scrollMaximum,
+    Math.max(0, containingLine < 0 ? scrollMaximum : containingLine),
   );
   for (const [index, line] of lines
     .slice(offset, offset + visibleCount)
     .entries()) {
     setFabricRow(rows, bounds.y1 + index, columns, line.value);
   }
-  const scrollMaximum = Math.max(0, lines.length - visibleCount);
   if (pointerEnabled && scrollMaximum > 0) {
     hitRegions.push({
       id: "review:scroll",
@@ -1034,6 +1039,7 @@ function renderFabricReview(
       Math.min(visibleEnd, wrapped.requiredEnd),
     );
   }
+  const stride = Math.max(1, visibleCount - 1);
   return {
     contextVisible: coveredThrough >= wrapped.requiredEnd,
     coverage: {
@@ -1043,8 +1049,24 @@ function renderFabricReview(
       visibleStart,
       visibleEnd,
       visibleLineCount: visible.length,
+      previousAnchor: lines[Math.max(0, offset - stride)]?.start ?? 0,
+      nextAnchor: lines[Math.min(scrollMaximum, offset + stride)]?.start ?? 0,
+      endAnchor: lines[scrollMaximum]?.start ?? 0,
     },
   };
+}
+
+function reviewProgressLabel(
+  coverage: FabricReviewCoverageObservation,
+  compact = false,
+): string {
+  const percent = coverage.requiredEnd <= 0
+    ? 100
+    : Math.min(100, Math.floor(coverage.coveredThrough * 100 / coverage.requiredEnd));
+  const ready = coverage.coveredThrough >= coverage.requiredEnd;
+  return compact
+    ? `R${String(percent)}% ${ready ? "READY" : "LOCK Home+PgDn"}`
+    : `REVIEW | Reviewed ${String(percent)}% | ${ready ? "Actions ready" : "LOCKED: Home + PgDn unlocks"} | End previews only`;
 }
 
 function actionBindingFor(
@@ -1125,10 +1147,25 @@ function renderFabricDetachRow(
     ? presentation.focusId === "detach" ? ">detach " : "q detach"
     : presentation.focusId === "detach" ? ">Detach " : "[Detach]";
   const prefixWidth = Math.max(0, columns - 9);
+  const inputId = `input:${presentation.inputMode}`;
+  const visiblePrefix = presentation.inputMode !== "browse" &&
+      presentation.focusId === inputId
+    ? `>${prefix}`
+    : prefix;
   const value = prefixWidth === 0
     ? label
-    : `${fitCells(chromeText(prefix), prefixWidth)} ${label}`;
+    : `${fitCells(chromeText(visiblePrefix), prefixWidth)} ${label}`;
   setFabricRow(rows, row, columns, value);
+  if (presentation.inputMode !== "browse" && prefixWidth > 0) {
+    hitRegions.push({
+      id: inputId,
+      kind: "input",
+      rect: { x1: 1, y1: row, x2: prefixWidth, y2: row },
+      enabled: true,
+      geometryKey,
+      binding: null,
+    });
+  }
   hitRegions.push({
     id: "detach",
     kind: "detach",
@@ -1229,7 +1266,7 @@ function renderFabricStrip(
       rows,
       columns,
       footerRow,
-      footerPrefix,
+      inputModal ? footerPrefix : reviewProgressLabel(reviewState.coverage, true),
       presentation,
       geometryKey,
       hitRegions,
@@ -1467,6 +1504,14 @@ export function renderFabricConsoleFrame(
     );
     reviewContextVisible = reviewState.contextVisible;
     reviewCoverage = reviewState.coverage;
+    if (!inputModal) {
+      setFabricRow(
+        rows,
+        4,
+        dimensions.columns,
+        reviewProgressLabel(reviewState.coverage),
+      );
+    }
   } else if (mode === "wide") {
     const masterWidth = Math.min(
       dimensions.columns - 32,
@@ -1738,6 +1783,7 @@ export function reduceFabricPointer(
     const activate =
       region !== null &&
       region.kind !== "splitter" &&
+      region.kind !== "input" &&
       state.pressed?.regionId === region.id &&
       state.pressed.geometryKey === frame.geometryKey &&
       region.geometryKey === frame.geometryKey &&

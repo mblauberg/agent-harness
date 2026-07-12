@@ -1746,7 +1746,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
   });
 
   it.each(["editor", "guided", "palette"] as const)(
-    "renders honest %s modal help with only local Detach pointer authority",
+    "renders honest %s modal help with explicit input focus and local Detach authority",
     (inputMode) => {
       const frame = renderFabricConsoleFrame(
         richDataset(),
@@ -1765,7 +1765,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect(visible).toContain("Detach");
       expect(visible).not.toContain("? help");
       expect(visible).not.toContain("q detach");
-      expect(frame.hitRegions.map(({ id }) => id)).toStrictEqual(["detach"]);
+      expect(frame.hitRegions.map(({ id }) => id)).toStrictEqual([
+        `input:${inputMode}`,
+        "detach",
+      ]);
     },
   );
 

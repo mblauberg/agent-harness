@@ -136,6 +136,7 @@ export class FabricConsoleRuntime {
     openerFocusId: string | null;
     editorSurrogateId: string | null;
   } | null = null;
+  #inputFocusSession: Readonly<{ openerFocusId: string | null }> | null = null;
   #pendingReviewOpener: Readonly<{ focusId: string | null }> | null = null;
   #closed = false;
   #closePromise: Promise<void> | null = null;
@@ -210,25 +211,7 @@ export class FabricConsoleRuntime {
 
   #reconcileFocus(frame: FabricConsoleFrame): FabricConsoleFrame {
     const review = frame.presentation.review;
-    if (review === null) {
-      const session = this.#reviewFocusSession;
-      if (session === null) return this.#reconcileBrowseFocus(frame);
-      this.#reviewFocusSession = null;
-      const openerVisible =
-        session.openerFocusId !== null && frame.hitRegions.some(
-          ({ enabled, id }) => enabled && id === session.openerFocusId,
-        );
-      const restoredFocusId = openerVisible
-        ? session.openerFocusId
-        : this.#visibleSafeFocus(frame);
-      if (this.#ui.focusId === restoredFocusId) {
-        return this.#reconcileBrowseFocus(frame);
-      }
-      this.#ui = { ...this.#ui, focusId: restoredFocusId };
-      return this.#reconcileBrowseFocus(this.#renderCurrentFrame());
-    }
-
-    if (this.#reviewFocusSession === null) {
+    if (review !== null && this.#reviewFocusSession === null) {
       this.#reviewFocusSession = {
         openerFocusId: this.#pendingReviewOpener === null
           ? this.#ui.focusId
@@ -238,16 +221,54 @@ export class FabricConsoleRuntime {
       this.#pendingReviewOpener = null;
     }
     if (this.#ui.inputMode !== "browse") {
-      const editorFocusId = frame.hitRegions.find(
+      const inputFocusId = frame.hitRegions.find(
+        ({ enabled, id, kind }) =>
+          enabled && kind === "input" && id === `input:${this.#ui.inputMode}`,
+      )?.id ?? frame.hitRegions.find(
         ({ enabled, id }) => enabled && id === "detach",
       )?.id ?? this.#visibleSafeFocus(frame);
-      this.#reviewFocusSession.editorSurrogateId = editorFocusId;
-      if (this.#ui.focusId === editorFocusId) return frame;
-      this.#ui = { ...this.#ui, focusId: editorFocusId };
+      if (review !== null && this.#reviewFocusSession !== null) {
+        this.#reviewFocusSession.editorSurrogateId = inputFocusId;
+      }
+      if (this.#ui.focusId === inputFocusId) return frame;
+      this.#ui = { ...this.#ui, focusId: inputFocusId };
       return this.#renderCurrentFrame();
     }
-    const editorSurrogateId = this.#reviewFocusSession.editorSurrogateId;
-    this.#reviewFocusSession.editorSurrogateId = null;
+    if (review === null) {
+      const session = this.#reviewFocusSession;
+      if (session !== null) {
+        this.#reviewFocusSession = null;
+        const openerVisible =
+          session.openerFocusId !== null && frame.hitRegions.some(
+            ({ enabled, id }) => enabled && id === session.openerFocusId,
+          );
+        const restoredFocusId = openerVisible
+          ? session.openerFocusId
+          : this.#visibleSafeFocus(frame);
+        if (this.#ui.focusId === restoredFocusId) {
+          return this.#reconcileBrowseFocus(frame);
+        }
+        this.#ui = { ...this.#ui, focusId: restoredFocusId };
+        return this.#reconcileBrowseFocus(this.#renderCurrentFrame());
+      }
+      const inputSession = this.#inputFocusSession;
+      this.#inputFocusSession = null;
+      if (inputSession === null) return this.#reconcileBrowseFocus(frame);
+      const openerVisible = inputSession.openerFocusId !== null && frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === inputSession.openerFocusId,
+      );
+      const restoredFocusId = openerVisible
+        ? inputSession.openerFocusId
+        : this.#visibleSafeFocus(frame);
+      this.#ui = { ...this.#ui, focusId: restoredFocusId };
+      return this.#reconcileBrowseFocus(this.#renderCurrentFrame());
+    }
+    this.#inputFocusSession = null;
+
+    const editorSurrogateId = this.#reviewFocusSession?.editorSurrogateId ?? null;
+    if (this.#reviewFocusSession !== null) {
+      this.#reviewFocusSession.editorSurrogateId = null;
+    }
     if (
       this.#ui.focusId !== editorSurrogateId &&
       frame.hitRegions.some(
@@ -261,7 +282,7 @@ export class FabricConsoleRuntime {
       review.stage === "review"
         ? "review:continue"
         : review.stage === "confirm"
-          ? "review:confirm"
+          ? "review:cancel"
           : review.stage === "conflict"
             ? "review:refresh"
             : review.stage === "pending" || review.stage === "ambiguous"
@@ -284,7 +305,6 @@ export class FabricConsoleRuntime {
   #reconcileBrowseFocus(frame: FabricConsoleFrame): FabricConsoleFrame {
     if (
       frame.mode === "inert" ||
-      this.#ui.inputMode !== "browse" ||
       this.#hasEnabledVisibleFocus(frame)
     ) {
       return frame;
@@ -428,6 +448,9 @@ export class FabricConsoleRuntime {
 
   setInputMode(mode: FabricConsoleUiState["inputMode"]): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
+    if (this.#ui.inputMode === "browse" && mode !== "browse") {
+      this.#rememberInputOpener();
+    }
     this.#ui = { ...this.#ui, inputMode: mode, notice: null };
     this.#setEditorActive?.(
       mode === "editor" || mode === "palette" || mode === "guided",
@@ -437,6 +460,7 @@ export class FabricConsoleRuntime {
 
   beginGuidedWorkflow(draft: ConsoleGuidedWorkflowDraft): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
+    this.#rememberInputOpener();
     this.#pendingReviewOpener = { focusId: this.#ui.focusId };
     this.#ui = {
       ...this.#ui,
@@ -454,6 +478,7 @@ export class FabricConsoleRuntime {
     if (this.#closed) return this.#frame;
     const pendingOpener = this.#pendingReviewOpener;
     this.#pendingReviewOpener = null;
+    this.#inputFocusSession = null;
     this.#ui = {
       ...this.#ui,
       guidedWorkflow: null,
@@ -493,6 +518,12 @@ export class FabricConsoleRuntime {
     this.#restorableSplitterFocus = null;
     this.#ui = { ...this.#ui, focusId };
     return this.repaint();
+  }
+
+  #rememberInputOpener(): void {
+    if (this.#inputFocusSession === null) {
+      this.#inputFocusSession = { openerFocusId: this.#ui.focusId };
+    }
   }
 
   handleInput(event: TerminalInputEvent): Promise<void> {
@@ -705,6 +736,7 @@ export class FabricConsoleRuntime {
         event.text === ":" &&
         this.#frame.presentation.review === null
       ) {
+        this.#rememberInputOpener();
         this.#ui = {
           ...this.#ui,
           inputMode: "palette",
@@ -753,6 +785,7 @@ export class FabricConsoleRuntime {
         return;
       }
       if (event.text === "e") {
+        this.#rememberInputOpener();
         const echoInput =
           this.#frame.presentation.review?.confirmationMode === "echo";
         this.#ui = {
@@ -823,8 +856,12 @@ export class FabricConsoleRuntime {
       if (this.#frame.presentation.review !== null) {
         this.#ui = {
           ...this.#ui,
-          reviewScrollOffset: event.key === "home" ? 0 : 10_000,
-          notice: null,
+          reviewScrollOffset: event.key === "home"
+            ? 0
+            : this.#frame.reviewCoverage?.endAnchor ?? this.#ui.reviewScrollOffset,
+          notice: event.key === "home"
+            ? null
+            : "End previews only; locked actions require Home + PgDn in order.",
         };
         this.repaint();
         return;
@@ -870,10 +907,10 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "enter" || event.key === "space") {
-      if (event.key === "enter" && this.#ui.focusId === "review:confirm") {
+      if (this.#frame.presentation.review?.stage === "confirm") {
         this.#ui = {
           ...this.#ui,
-          notice: "Bare Enter cannot confirm; use the explicit confirmation binding.",
+          notice: "Bare Enter/Space cannot confirm; use the explicit numbered confirmation binding.",
         };
         this.repaint();
         return;
@@ -929,14 +966,12 @@ export class FabricConsoleRuntime {
 
   #page(direction: -1 | 1, regionId: string | null = null): void {
     if (this.#frame.presentation.review !== null) {
-      const visibleLineCount = this.#frame.reviewCoverage?.visibleLineCount ?? 2;
-      const stride = Math.max(1, visibleLineCount - 1);
+      const coverage = this.#frame.reviewCoverage;
       this.#ui = {
         ...this.#ui,
-        reviewScrollOffset: Math.min(
-          10_000,
-          Math.max(0, this.#ui.reviewScrollOffset + direction * stride),
-        ),
+        reviewScrollOffset: direction < 0
+          ? coverage?.previousAnchor ?? 0
+          : coverage?.nextAnchor ?? this.#ui.reviewScrollOffset,
         notice: null,
       };
       this.repaint();
@@ -1103,6 +1138,7 @@ export class FabricConsoleRuntime {
       return;
     }
     if (region.kind === "splitter") return;
+    if (region.kind === "input") return;
     try {
       await this.#activate({
         regionId: region.id,

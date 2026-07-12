@@ -590,13 +590,13 @@ describe("Fabric Console runtime routing", () => {
 
     expect(runtime.ui.inputMode).toBe("editor");
     expect(runtime.ui.draft).toBe("");
-    expectEnabledVisibleFocus(runtime, "detach");
+    expectEnabledVisibleFocus(runtime, "input:editor");
     await runtime.handleInput({ kind: "paste", text: digest });
     expect(runtime.ui.draft).toBe(digest);
     expect(activate).not.toHaveBeenCalled();
     await runtime.handleInput({ kind: "key", key: "escape" });
     expect(runtime.ui.inputMode).toBe("browse");
-    expectEnabledVisibleFocus(runtime, "review:confirm");
+    expectEnabledVisibleFocus(runtime, "review:cancel");
     runtime.setWorkflowReview({
       ...shortWorkflowReview("committed"),
       confirmationMode: "echo",
@@ -652,7 +652,7 @@ describe("Fabric Console runtime routing", () => {
     });
 
     runtime.setWorkflowReview(shortWorkflowReview("confirm"));
-    expectEnabledVisibleFocus(runtime, "review:confirm");
+    expectEnabledVisibleFocus(runtime, "review:cancel");
     runtime.setWorkflowReview(shortWorkflowReview("committed"));
     expectEnabledVisibleFocus(runtime, "review:close");
     runtime.setWorkflowReview(null);
@@ -764,7 +764,7 @@ describe("Fabric Console runtime routing", () => {
 
     controller.state = { ...controller.state, review: directReview("confirm") };
     runtime.repaint();
-    expectEnabledVisibleFocus(runtime, "review:confirm");
+    expectEnabledVisibleFocus(runtime, "review:cancel");
     controller.state = { ...controller.state, review: directReview("committed") };
     runtime.repaint();
     expectEnabledVisibleFocus(runtime, "review:close");
@@ -850,6 +850,116 @@ describe("Fabric Console runtime routing", () => {
         .toMatchObject({ enabled: true });
     },
   );
+
+  it("does not roll a repeated Space from Review into consequential confirmation", async () => {
+    const activations: string[] = [];
+    let runtime: FabricConsoleRuntime;
+    runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async ({ regionId }) => {
+        activations.push(regionId);
+        if (regionId === "review:continue") {
+          runtime.setWorkflowReview(shortWorkflowReview("confirm"));
+        }
+      },
+      eventId: () => "repeat-space-confirmation",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("review"));
+
+    const first = runtime.handleInput({ kind: "key", key: "space" });
+    const repeated = runtime.handleInput({ kind: "key", key: "space" });
+    await Promise.all([first, repeated]);
+
+    expect(activations).toStrictEqual(["review:continue"]);
+    expectEnabledVisibleFocus(runtime, "review:cancel");
+    expect(runtime.ui.notice).toContain("explicit numbered confirmation");
+  });
+
+  it("anchors an incomplete Review by content across widening and continues without Home", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 40, rows: 12 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "review-content-anchor-resize",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(longBoundReview("Git"));
+    for (let page = 0; page < 2; page += 1) {
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+    }
+    const before = runtime.frame.reviewCoverage;
+    expect(before).toBeDefined();
+    if (before === undefined || before === null) return;
+    expect(before.coveredThrough).toBeLessThan(before.requiredEnd);
+
+    runtime.resize({ columns: 120, rows: 12 });
+
+    const widened = runtime.frame.reviewCoverage;
+    expect(widened).toBeDefined();
+    if (widened === undefined || widened === null) return;
+    expect(widened.visibleStart).toBeLessThanOrEqual(before.visibleStart);
+    expect(widened.visibleEnd).toBeGreaterThan(before.visibleStart);
+    expect(runtime.ui.reviewCoverage?.coveredThrough).toBeGreaterThanOrEqual(
+      before.coveredThrough,
+    );
+    for (let page = 0; page < 80; page += 1) {
+      if (runtime.frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === "review:continue",
+      )) break;
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+    }
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "review:continue"))
+      .toMatchObject({ enabled: true });
+  });
+
+  it("explains contiguous Review coverage and the non-unlocking End preview", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "review-progress-chrome",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(longBoundReview("Git"));
+
+    expect(runtime.frame.rows.join("\n")).toMatch(/Reviewed \d+%/u);
+    expect(runtime.frame.rows.join("\n")).toContain("Home + PgDn unlocks");
+    await runtime.handleInput({ kind: "key", key: "end" });
+    expect(runtime.frame.rows.join("\n")).toContain("End previews only");
+    expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
+      .toBe(false);
+  });
+
+  it("keeps compact Review lock progress visible at 30x6", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 30, rows: 6 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "strip-review-progress-chrome",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(longBoundReview("Git"));
+
+    expect(runtime.frame.rows.join("\n")).toMatch(/R\d+% LOCK Home\+PgDn/u);
+    await runtime.handleInput({ kind: "key", key: "end" });
+    expect(runtime.frame.rows.join("\n")).toMatch(/R\d+% LOCK Home\+PgDn/u);
+    expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
+      .toBe(false);
+  });
 
   it.each(["revision", "digest"] as const)(
     "resets cumulative review coverage when a stale %s is replaced",
@@ -1117,6 +1227,31 @@ describe("Fabric Console runtime routing", () => {
       expect(detach).toHaveBeenCalledOnce();
       expect(detach).toHaveBeenCalledWith({ reason: "operator" });
       expect(runtime.ui.draft).toBe("draft:q");
+    },
+  );
+
+  it.each(["editor", "guided", "palette"] as const)(
+    "gives %s input visible ownership and restores its exact opener",
+    (inputMode) => {
+      const controller = stateBoundControlController();
+      const opener = "action:resume";
+      const runtime = new FabricConsoleRuntime({
+        controller,
+        viewport: { columns: 80, rows: 24 },
+        ui: createFabricUiState({ focusId: opener }),
+        draw: () => {},
+        detach: async () => {},
+        activate: async () => {},
+        eventId: () => `input-focus-${inputMode}`,
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+
+      runtime.setInputMode(inputMode);
+      expectEnabledVisibleFocus(runtime, `input:${inputMode}`);
+
+      runtime.setInputMode("browse");
+      expectEnabledVisibleFocus(runtime, opener);
     },
   );
 
