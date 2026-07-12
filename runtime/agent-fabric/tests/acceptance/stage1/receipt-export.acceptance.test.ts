@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { openFabric } from "../../../src/index.ts";
 import { assertFabricReceiptSchema } from "../../../src/exports/schema.ts";
 import { ManualClock } from "../../support/manual-clock.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -24,7 +25,9 @@ describe("Stage 1 fabric receipt export", () => {
     const capabilityKey = "receipt-upgrade-capability-key";
     await mkdir(runDirectory, { recursive: true });
     let fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-upgrade", projectRunDirectory: runDirectory,
       chair: { agentId: "chair", authority: {
         workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
@@ -54,8 +57,9 @@ describe("Stage 1 fabric receipt export", () => {
     const runDirectory = join(root, ".agent-run", "run-receipt");
     await mkdir(runDirectory, { recursive: true });
     const clock = new ManualClock();
+    const databasePath = join(root, "fabric.sqlite3");
     const fabric = await openFabric({
-      databasePath: join(root, "fabric.sqlite3"),
+      databasePath,
       workspaceRoots: [root],
       clock: clock.now,
     });
@@ -63,7 +67,9 @@ describe("Stage 1 fabric receipt export", () => {
       await fabric.close();
       await rm(root, { recursive: true, force: true });
     });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-receipt",
       projectRunDirectory: runDirectory,
       chair: {
@@ -128,7 +134,8 @@ describe("Stage 1 fabric receipt export", () => {
     const runDirectory = join(root, ".agent-run", "run-receipt-state");
     await mkdir(runDirectory, { recursive: true });
     const clock = new ManualClock();
-    const fabric = await openFabric({ databasePath: join(root, "fabric.sqlite3"), workspaceRoots: [root], clock: clock.now });
+    const databasePath = join(root, "fabric.sqlite3");
+    const fabric = await openFabric({ databasePath, workspaceRoots: [root], clock: clock.now });
     cleanup.push(async () => {
       await fabric.close();
       await rm(root, { recursive: true, force: true });
@@ -138,7 +145,9 @@ describe("Stage 1 fabric receipt export", () => {
       actions: ["read", "write", "delegate", "message"], disclosure: ["local"],
       expiresAt: "2099-01-01T00:00:00.000Z", budget: { turns: 20, "cost:USD": 10 },
     };
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-receipt-state", projectRunDirectory: runDirectory,
       chair: { agentId: "chair", authority },
     });

@@ -162,6 +162,8 @@ import type {
   BudgetDimensionResult,
   BudgetResult,
   CapabilityRotationResult,
+  CurrentMcpSeatBindingInput,
+  CurrentMcpSeatBindingResult,
   DiscussionGroupInput,
   ExistingTeamCreateInput,
   EventsAfterResult,
@@ -173,14 +175,13 @@ import type {
   ProviderActionResult,
   ReceiptResult,
   RevocationResult,
-  RunCreation,
   TaskResult,
   TeamCreateInput,
   TeamResult,
 } from "./contracts.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
-import { normalizeRunArtifactDirectory, resolveRunArtifactRoot } from "../artifacts/run-root.js";
+import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
 
 export { FabricClient } from "./client.js";
 
@@ -283,50 +284,6 @@ function sha256Digest(value: string): string {
   return `sha256:${sha256(value)}`;
 }
 
-function compatibilityRunIdentity(
-  runId: string,
-  canonicalRoot: string,
-  authorityId: string,
-  authorityHash: string,
-  budget: Readonly<Record<string, number>>,
-): {
-  projectId: string;
-  projectSessionId: string;
-  authorityRef: string;
-  budgetRef: string;
-  manifestRef: string;
-  launchPacketPath: string;
-  launchPacketDigest: string;
-  projectScopeId: string;
-  sessionScopeId: string;
-  runScopeId: string;
-} {
-  const projectId = `prj_${sha256(canonicalRoot).slice(0, 32)}`;
-  const projectSessionId = `psl_${sha256(`0004\0${runId}\0${canonicalRoot}`).slice(0, 32)}`;
-  const authorityRef = `sha256:${authorityHash}`;
-  const budgetRef = `legacy-authority:${authorityId}`;
-  const dimensions = Object.entries(budget)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([unit, granted]) => [unit, { granted, reserved: 0, consumed: 0, unknown: false }]);
-  const manifestValue = JSON.stringify({ runId, canonicalRoot, authorityRef, dimensions });
-  const launchValue = JSON.stringify({ runId, projectId, projectSessionId, authorityRef });
-  return {
-    projectId,
-    projectSessionId,
-    authorityRef,
-    budgetRef,
-    manifestRef: canonicalJson({
-      path: `.agent-run/migrations/0004/${runId}-manifest.json`,
-      digest: sha256Digest(manifestValue),
-    }),
-    launchPacketPath: `.agent-run/migrations/0004/${runId}-launch.json`,
-    launchPacketDigest: sha256Digest(launchValue),
-    projectScopeId: `rsp_${sha256(canonicalRoot).slice(0, 32)}`,
-    sessionScopeId: `rss_${sha256(projectSessionId).slice(0, 32)}`,
-    runScopeId: `rsr_${sha256(runId).slice(0, 32)}`,
-  };
-}
-
 function canonicalPath(path: string): string {
   if (
     path.length === 0 ||
@@ -398,24 +355,6 @@ function canonicalAuthorityPath(workspaceRoot: string, path: string): string {
   return rel === "" ? "." : normalize(rel).replaceAll(sep, "/");
 }
 
-function canonicalStoredAuthorityPath(path: string): string {
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    isAbsoluteOnAnyPlatform(path) ||
-    path.split(/[\\/]/u).includes("..") ||
-    /[*?[\]{}]/u.test(path)
-  ) {
-    throw new FabricError("AUTHORITY_WIDENING", `unsafe stored workspace-relative path: ${path}`);
-  }
-  const slashPath = path.replaceAll("\\", "/");
-  const normalised = posix.normalize(slashPath);
-  if (normalised !== slashPath) {
-    throw new FabricError("AUTHORITY_WIDENING", `stored workspace-relative path is not canonical: ${path}`);
-  }
-  return normalised;
-}
-
 const DISCLOSURE_TARGETS = ["local", "approved-provider", "external"] as const satisfies readonly DisclosureTarget[];
 const disclosureTargets = new Set<string>(DISCLOSURE_TARGETS);
 
@@ -469,11 +408,10 @@ function validateBudgetUnitKeys(budget: Record<string, unknown>): void {
   if (invalid !== undefined) throw new FabricError("BUDGET_EXCEEDED", `budget unit key is invalid: ${invalid}`);
 }
 
-function normaliseAuthority(
+export function normaliseAuthority(
   authority: AuthorityInput,
   workspaceRoot: string,
   parent?: StoredAuthority,
-  pathSource: "filesystem" | "stored" = "filesystem",
 ): StoredAuthority {
   validateIntegerBudget(authority.budget);
   const expires = Date.parse(authority.expiresAt);
@@ -488,9 +426,7 @@ function normaliseAuthority(
   if (!deniedActionExpansion.ok) {
     throw new FabricError("AUTHORITY_WIDENING", `unknown denied authority actions: ${deniedActionExpansion.unknownActions.join(", ")}`);
   }
-  const canonicalisePath = (path: string): string => pathSource === "stored"
-    ? canonicalStoredAuthorityPath(path)
-    : canonicalAuthorityPath(workspaceRoot, path);
+  const canonicalisePath = (path: string): string => canonicalAuthorityPath(workspaceRoot, path);
   const workspaceRoots = [...new Set(authority.workspaceRoots.map(canonicalisePath))].sort();
   const sourcePaths = [...new Set(authority.sourcePaths.map(canonicalisePath))].sort();
   const artifactPaths = [...new Set(authority.artifactPaths.map(canonicalisePath))].sort();
@@ -543,99 +479,6 @@ function parseAuthority(serialised: string): StoredAuthority {
     throw new Error("stored authority is invalid");
   }
   return value;
-}
-
-function storedAuthorityInput(value: unknown): AuthorityInput {
-  if (
-    !isRow(value) ||
-    !isStringArray(value.workspaceRoots) ||
-    !isStringArray(value.sourcePaths) ||
-    !isStringArray(value.artifactPaths) ||
-    !isStringArray(value.actions) ||
-    (value.deniedPaths !== undefined && !isStringArray(value.deniedPaths)) ||
-    (value.deniedActions !== undefined && !isStringArray(value.deniedActions)) ||
-    !(isStringArray(value.disclosure) || (isRow(value.disclosure) && typeof value.disclosure.level === "string")) ||
-    typeof value.expiresAt !== "string" ||
-    !isNumberRecord(value.budget)
-  ) {
-    throw new Error("stored authority is invalid");
-  }
-  return {
-    workspaceRoots: value.workspaceRoots,
-    sourcePaths: value.sourcePaths,
-    artifactPaths: value.artifactPaths,
-    actions: value.actions,
-    ...(value.deniedPaths === undefined ? {} : { deniedPaths: value.deniedPaths }),
-    ...(value.deniedActions === undefined ? {} : { deniedActions: value.deniedActions }),
-    disclosure: value.disclosure as AuthorityInput["disclosure"],
-    expiresAt: value.expiresAt,
-    budget: value.budget,
-  };
-}
-
-function upgradeStoredAuthorities(database: Database.Database, configuredWorkspaceRoots: readonly string[]): void {
-  const rows = database.prepare(`
-    SELECT a.authority_id, a.parent_authority_id, a.authority_json, a.authority_hash, r.workspace_root
-      FROM authorities a JOIN runs r ON r.run_id = a.run_id
-     ORDER BY a.created_at, a.authority_id
-  `).all();
-  const pending = new Map<string, {
-    parentAuthorityId: string | null;
-    authority: StoredAuthority | AuthorityInput;
-    canonical: boolean;
-    workspaceRoot: string;
-  }>();
-  for (const value of rows) {
-    const row = rowOrNotFound(value, "stored authority");
-    const workspaceRoot = stringField(row, "workspace_root");
-    if (!configuredWorkspaceRoots.some((configuredRoot) => pathContains(configuredRoot, workspaceRoot))) {
-      throw new FabricError("AUTHORITY_WIDENING", `stored run workspace root is not configured: ${workspaceRoot}`);
-    }
-    const parsed: unknown = JSON.parse(stringField(row, "authority_json"));
-    const canonical = isStoredAuthority(parsed);
-    if (canonical) {
-      validateIntegerBudget(parsed.budget);
-      if (!Number.isFinite(Date.parse(parsed.expiresAt))) throw new Error("stored authority expiry is invalid");
-      if (canonicalJson(normaliseDisclosure(parsed.disclosure)) !== canonicalJson(parsed.disclosure)) {
-        throw new Error("stored authority disclosure is not canonical");
-      }
-      if (sha256(canonicalJson(parsed)) !== stringField(row, "authority_hash")) {
-        throw new Error("stored authority hash is invalid");
-      }
-    }
-    pending.set(stringField(row, "authority_id"), {
-      parentAuthorityId: row.parent_authority_id === null ? null : stringField(row, "parent_authority_id"),
-      authority: canonical ? parsed : storedAuthorityInput(parsed),
-      canonical,
-      workspaceRoot,
-    });
-  }
-
-  const upgraded = new Map<string, StoredAuthority>();
-  database.transaction(() => {
-    while (pending.size > 0) {
-      let progress = false;
-      for (const [authorityId, value] of pending) {
-        const parent = value.parentAuthorityId === null ? undefined : upgraded.get(value.parentAuthorityId);
-        if (value.parentAuthorityId !== null && parent === undefined) continue;
-        const authority = value.canonical
-          ? value.authority as StoredAuthority
-          : normaliseAuthority(value.authority as AuthorityInput, value.workspaceRoot, parent, "stored");
-        if (parent !== undefined && !authorityContained(authority, parent)) {
-          throw new FabricError("AUTHORITY_WIDENING", "stored delegated authority exceeds its parent");
-        }
-        if (!value.canonical) {
-          const serialised = canonicalJson(authority);
-          database.prepare("UPDATE authorities SET authority_json = ?, authority_hash = ? WHERE authority_id = ?")
-            .run(serialised, sha256(serialised), authorityId);
-        }
-        upgraded.set(authorityId, authority);
-        pending.delete(authorityId);
-        progress = true;
-      }
-      if (!progress) throw new Error("stored authority ancestry is invalid");
-    }
-  })();
 }
 
 function authorityContained(child: StoredAuthority, parent: StoredAuthority): boolean {
@@ -901,7 +744,6 @@ export class Fabric {
   readonly #readPolicy: FabricReadPolicy;
   readonly #commandJournal: CommandJournal;
   readonly #capabilityKey: string;
-  readonly #executionProfile: string;
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #operatorStore: OperatorStore;
@@ -938,7 +780,6 @@ export class Fabric {
       throw new FabricError("AUTHORITY_WIDENING", "fabric requires at least one configured workspace root");
     }
     this.#database = openFabricDatabase(options.databasePath);
-    upgradeStoredAuthorities(this.#database, this.#workspaceRoots);
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
     this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
@@ -950,7 +791,6 @@ export class Fabric {
       maximumConcurrentTurns: options.maximumConcurrentProviderTurns ?? 8,
     });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
-    this.#executionProfile = options.executionProfile ?? "headless";
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
     this.#gates = new ScopedGateStore({
       database: this.#database,
@@ -1307,58 +1147,6 @@ export class Fabric {
     input: LocalOperatorPrincipalRotationInput,
   ): LocalOperatorPrincipalRotationResult {
     return this.#operatorStore.rotatePrincipal(input);
-  }
-
-  #selectWorkspaceRoot(
-    projectRunDirectory: string | undefined,
-    requestedWorkspaceRoot: string | undefined,
-  ): { workspaceRoot: string; projectRunDirectory: string | null } {
-    if (requestedWorkspaceRoot !== undefined) {
-      if (!isAbsoluteOnAnyPlatform(requestedWorkspaceRoot)) {
-        throw new FabricError("AUTHORITY_WIDENING", "requested workspace root must be absolute");
-      }
-      const workspaceRoot = canonicalPath(requestedWorkspaceRoot);
-      const trusted = this.#workspaceRoots.some((root) => {
-        const rel = relative(root, workspaceRoot);
-        return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-      });
-      if (!trusted) {
-        throw new FabricError("AUTHORITY_WIDENING", "requested workspace root is outside configured workspace roots");
-      }
-      if (projectRunDirectory === undefined) return { workspaceRoot, projectRunDirectory: null };
-      if (!isAbsoluteOnAnyPlatform(projectRunDirectory)) {
-        throw new FabricError("AUTHORITY_WIDENING", "project run directory must be absolute");
-      }
-      const canonicalDirectory = canonicalPath(projectRunDirectory);
-      const rel = relative(workspaceRoot, canonicalDirectory);
-      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-        throw new FabricError("AUTHORITY_WIDENING", "project run directory is outside the requested workspace root");
-      }
-      return { workspaceRoot, projectRunDirectory: canonicalDirectory };
-    }
-    if (projectRunDirectory === undefined) {
-      if (this.#workspaceRoots.length !== 1) {
-        throw new FabricError("AUTHORITY_WIDENING", "run workspace root is ambiguous without a project run directory");
-      }
-      const workspaceRoot = this.#workspaceRoots[0];
-      if (workspaceRoot === undefined) throw new Error("configured workspace root is unavailable");
-      return { workspaceRoot, projectRunDirectory: null };
-    }
-    if (!isAbsoluteOnAnyPlatform(projectRunDirectory)) {
-      throw new FabricError("AUTHORITY_WIDENING", "project run directory must be absolute");
-    }
-    const canonicalDirectory = canonicalPath(projectRunDirectory);
-    const candidates = this.#workspaceRoots.filter((root) => {
-      const rel = relative(root, canonicalDirectory);
-      return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-    });
-    if (candidates.length === 0) {
-      throw new FabricError("AUTHORITY_WIDENING", "project run directory is outside configured workspace roots");
-    }
-    candidates.sort((left, right) => right.length - left.length);
-    const workspaceRoot = candidates[0];
-    if (workspaceRoot === undefined) throw new Error("selected workspace root is unavailable");
-    return { workspaceRoot, projectRunDirectory: canonicalDirectory };
   }
 
   #workspaceRootForRun(runId: string): string {
@@ -1790,169 +1578,147 @@ export class Fabric {
     return { actionsReconciled, actionsQuarantined, leasesQuarantined: expiredLeases.length, sessionsDegraded, deliveriesReleased };
   }
 
-  async createRun(input: RunCreation): Promise<{
-    runId: string;
-    chairAuthorityId: string;
-    chairCapability: string;
-  }> {
-    const location = this.#selectWorkspaceRoot(input.projectRunDirectory, input.workspaceRoot);
-    const storedRunDirectory = normalizeRunArtifactDirectory(location.workspaceRoot, location.projectRunDirectory);
-    const authority = normaliseAuthority(input.chair.authority, location.workspaceRoot);
-    const existing = this.#database.prepare(`
-      SELECT r.chair_agent_id, r.workspace_root, r.project_run_directory, g.authority_id, a.authority_hash,
-             c.principal_generation, c.revoked_at
-        FROM runs r JOIN agents g ON g.run_id = r.run_id AND g.agent_id = r.chair_agent_id
-        JOIN authorities a ON a.authority_id = g.authority_id
-        JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
-       WHERE r.run_id = ? ORDER BY c.principal_generation DESC LIMIT 1
-    `).get(input.runId);
-    if (isRow(existing)) {
-      if (existing.chair_agent_id !== input.chair.agentId || existing.workspace_root !== location.workspaceRoot || existing.project_run_directory !== storedRunDirectory || existing.authority_hash !== sha256(canonicalJson(authority))) {
-        throw new FabricError("DEDUPE_CONFLICT", "run ID was reused with changed creation input");
-      }
-      if (existing.revoked_at !== null) throw new FabricError("AUTHENTICATION_FAILED", "chair capability was revoked");
-      const generation = numberField(existing, "principal_generation");
-      return { runId: input.runId, chairAuthorityId: stringField(existing, "authority_id"), chairCapability: capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, generation) };
+  bindCurrentMcpSeats(input: CurrentMcpSeatBindingInput): CurrentMcpSeatBindingResult {
+    const canonicalRoot = canonicalWorkspaceRoot(input.canonicalRoot);
+    if (canonicalRoot !== input.canonicalRoot) {
+      throw new FabricError("AUTHORITY_WIDENING", "MCP binding requires the exact canonical project root");
     }
-    const authorityId = uuidv7();
-    const authorityJson = canonicalJson(authority);
-    const authorityHash = sha256(authorityJson);
-    const compatibility = compatibilityRunIdentity(
-      input.runId,
-      location.workspaceRoot,
-      authorityId,
-      authorityHash,
-      authority.budget,
-    );
-    const token = capabilityToken(this.#capabilityKey, input.runId, input.chair.agentId, 1);
-    const now = this.#clock();
-    this.#database.transaction(() => {
-      this.#database.prepare(`
-        INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
-        VALUES (?, ?, 1, 1, ?, ?)
-        ON CONFLICT(project_id) DO NOTHING
-      `).run(compatibility.projectId, location.workspaceRoot, now, now);
-      const persistedProject = rowOrNotFound(this.#database.prepare(`
-        SELECT canonical_root FROM projects WHERE project_id=?
-      `).get(compatibility.projectId), "compatibility project");
-      if (stringField(persistedProject, "canonical_root") !== location.workspaceRoot) {
-        throw new FabricError("DEDUPE_CONFLICT", "compatibility project identity changed canonical root");
+    if (!this.#workspaceRoots.some((root) => pathContains(root, canonicalRoot))) {
+      throw new FabricError("AUTHORITY_WIDENING", "MCP binding project root is not configured");
+    }
+    const expiresAt = Date.parse(input.expiresAt);
+    if (!Number.isFinite(expiresAt) || new Date(expiresAt).toISOString() !== input.expiresAt || expiresAt <= this.#clock()) {
+      throw new FabricError("AUTHENTICATION_FAILED", "MCP seat credential expiry is invalid or elapsed");
+    }
+    if (input.bindings.length === 0) throw new FabricError("DEDUPE_CONFLICT", "MCP seat binding roster is empty");
+    const seatIds = input.bindings.map(({ seat }) => seat);
+    const agentIds = input.bindings.map(({ agentId }) => agentId);
+    if (new Set(seatIds).size !== seatIds.length || new Set(agentIds).size !== agentIds.length) {
+      throw new FabricError("DEDUPE_CONFLICT", "MCP seat bindings must name distinct seats and agents");
+    }
+    const chairBinding = input.bindings.find(({ agentId }) => agentId === input.chairAgentId);
+    if (chairBinding === undefined) {
+      throw new FabricError("DEDUPE_CONFLICT", "MCP seat bindings do not contain the exact current chair");
+    }
+
+    return this.#database.transaction((): CurrentMcpSeatBindingResult => {
+      const identity = rowOrNotFound(this.#database.prepare(`
+        SELECT project.canonical_root, session.state AS session_state,
+               session.revision AS session_revision, session.generation AS session_generation,
+               session.origin_kind, session.origin_operator_id,
+               run.lifecycle_state AS run_state, run.revision AS run_revision,
+               run.chair_agent_id, run.chair_generation, run.chair_lease_id,
+               lease.holder_agent_id, lease.generation AS lease_generation, lease.status AS lease_status
+          FROM project_sessions session
+          JOIN projects project ON project.project_id=session.project_id
+          JOIN runs run ON run.project_session_id=session.project_session_id
+          JOIN run_chair_leases lease
+            ON lease.project_session_id=run.project_session_id
+           AND lease.run_id=run.run_id
+           AND lease.lease_id=run.chair_lease_id
+         WHERE session.project_session_id=? AND run.run_id=?
+      `).get(input.projectSessionId, input.runId), "current MCP project-session/run identity");
+      const currentStates = new Set(["active", "visibility_degraded"]);
+      if (
+        stringField(identity, "canonical_root") !== canonicalRoot ||
+        numberField(identity, "session_revision") !== input.expectedSessionRevision ||
+        numberField(identity, "session_generation") !== input.expectedSessionGeneration ||
+        numberField(identity, "run_revision") !== input.expectedRunRevision ||
+        stringField(identity, "chair_agent_id") !== input.chairAgentId ||
+        numberField(identity, "chair_generation") !== input.expectedChairGeneration ||
+        stringField(identity, "chair_lease_id") !== input.chairLeaseId ||
+        stringField(identity, "holder_agent_id") !== input.chairAgentId ||
+        numberField(identity, "lease_generation") !== input.expectedChairGeneration
+      ) {
+        throw new FabricError("DEDUPE_CONFLICT", "MCP binding identity is stale or crossed");
       }
-      this.#database.prepare(`
-        INSERT INTO project_sessions(
-          project_session_id, project_id, mode, state, revision, generation,
-          authority_ref, budget_ref, launch_packet_path, launch_packet_digest,
-          membership_revision, origin_kind, origin_operator_id, migration_manifest_ref,
-          terminal_path_json, created_at, updated_at
-        ) VALUES (?, ?, 'independent', 'recovery_required', 1, 1, ?, ?, ?, ?, 1,
-                  'legacy-migration', NULL, ?, NULL, ?, ?)
-      `).run(
-        compatibility.projectSessionId,
-        compatibility.projectId,
-        compatibility.authorityRef,
-        compatibility.budgetRef,
-        compatibility.launchPacketPath,
-        compatibility.launchPacketDigest,
-        compatibility.manifestRef,
-        now,
-        now,
-      );
-      this.#database.prepare(`
-        INSERT INTO runs(
-          run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
-          project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
-          authority_ref, budget_ref, dependency_revision, topology_slot
-          , project_run_directory_basis
-        ) VALUES (?, ?, ?, ?, ?, ?, 'recovery_required', 1, 1, ?, ?, ?, 1, NULL, ?)
-      `).run(
-        input.runId,
-        input.chair.agentId,
-        location.workspaceRoot,
-        storedRunDirectory,
-        now,
-        compatibility.projectSessionId,
-        `chair:${input.runId}:1`,
-        compatibility.authorityRef,
-        compatibility.budgetRef,
-        storedRunDirectory === null ? "none" : "project-relative",
-      );
-      this.#database
-        .prepare(
-          "INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at) VALUES (?, ?, NULL, ?, ?, ?)",
-        )
-        .run(authorityId, input.runId, authorityJson, authorityHash, now);
-      for (const [unitKey, granted] of Object.entries(authority.budget)) {
-        this.#database
-          .prepare("INSERT INTO authority_budget(authority_id, unit_key, granted) VALUES (?, ?, ?)")
-          .run(authorityId, unitKey, granted);
+      if (
+        stringField(identity, "origin_kind") !== "operator-launch" ||
+        typeof identity.origin_operator_id !== "string" ||
+        !currentStates.has(stringField(identity, "session_state")) ||
+        !currentStates.has(stringField(identity, "run_state")) ||
+        stringField(identity, "lease_status") !== "active"
+      ) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "MCP binding target is not a current active operator-launched run");
       }
-      this.#database
-        .prepare("INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id) VALUES (?, ?, NULL, ?)")
-        .run(input.runId, input.chair.agentId, authorityId);
-      this.#database.prepare(`
-        INSERT INTO run_chair_leases(
-          project_session_id, run_id, lease_id, holder_agent_id, generation, status, updated_at
-        ) VALUES (?, ?, ?, ?, 1, 'frozen', ?)
-      `).run(
-        compatibility.projectSessionId,
-        input.runId,
-        `chair:${input.runId}:1`,
-        input.chair.agentId,
-        now,
-      );
-      this.#database.prepare(`
-        INSERT INTO project_session_memberships(
-          project_session_id, coordination_run_id, member_kind, member_id,
-          required, state, revision, created_at, updated_at
-        ) VALUES (?, ?, 'coordination-run', ?, 1, 'active', 1, ?, ?)
-      `).run(compatibility.projectSessionId, input.runId, input.runId, now, now);
-      this.#database.prepare(`
-        INSERT INTO project_session_memberships(
-          project_session_id, coordination_run_id, member_kind, member_id,
-          required, state, revision, created_at, updated_at
-        ) VALUES (?, ?, 'lease', ?, 1, 'active', 1, ?, ?)
-      `).run(
-        compatibility.projectSessionId,
-        input.runId,
-        `chair:${input.runId}:1`,
-        now,
-        now,
-      );
-      const storedProjectLimits = Object.fromEntries(this.#database.prepare(`
-        SELECT unit_key, limit_value FROM resource_dimensions
-         WHERE scope_id=? ORDER BY unit_key
-      `).all(compatibility.projectScopeId).map((value) => {
-        const dimension = rowOrNotFound(value, "compatibility project resource dimension");
-        return [stringField(dimension, "unit_key"), numberField(dimension, "limit_value")];
-      }));
-      const projectLimits = Object.keys(storedProjectLimits).length === 0
-        ? authority.budget
-        : storedProjectLimits;
-      this.#resources.ensureRunHierarchy(
-        {
-          projectId: compatibility.projectId,
-          projectSessionId: compatibility.projectSessionId,
-          coordinationRunId: input.runId,
-          actor: { kind: "compatibility-import", migrationManifestDigest: compatibility.manifestRef },
-        },
-        {
-          project: { scopeId: compatibility.projectScopeId, limits: projectLimits },
-          session: { scopeId: compatibility.sessionScopeId, limits: authority.budget },
-          run: { scopeId: compatibility.runScopeId, limits: authority.budget },
-        },
-      );
-      this.#database
-        .prepare("INSERT INTO mailbox_state(run_id, recipient_id) VALUES (?, ?)")
-        .run(input.runId, input.chair.agentId);
-      this.#database.prepare("INSERT INTO run_metadata(run_id, execution_profile) VALUES (?, ?)").run(input.runId, this.#executionProfile);
-      this.#database
-        .prepare(
-          "INSERT INTO capabilities(token_hash, run_id, agent_id, expires_at) VALUES (?, ?, ?, ?)",
-        )
-        .run(sha256(token), input.runId, input.chair.agentId, Date.parse(authority.expiresAt));
-      this.#event(input.runId, "run-created", input.chair.agentId, { authorityId });
+
+      const credentials = input.bindings
+        .slice()
+        .sort((left, right) => left.seat.localeCompare(right.seat))
+        .map((binding) => {
+          const agent = rowOrNotFound(this.#database.prepare(`
+            SELECT agent.lifecycle, authority.authority_json,
+                   MAX(capability.principal_generation) AS principal_generation
+              FROM agents agent
+              JOIN authorities authority ON authority.authority_id=agent.authority_id
+              JOIN capabilities capability
+                ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
+             WHERE agent.run_id=? AND agent.agent_id=?
+               AND capability.revoked_at IS NULL AND capability.expires_at>?
+             GROUP BY agent.lifecycle, authority.authority_json
+          `).get(input.runId, binding.agentId, this.#clock()), `current MCP agent ${binding.agentId}`);
+          if (agent.lifecycle === "archived" || agent.lifecycle === "suspended") {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `MCP agent ${binding.agentId} is not active`);
+          }
+          const principalGeneration = numberField(agent, "principal_generation");
+          if (principalGeneration !== binding.expectedPrincipalGeneration) {
+            throw new FabricError("STALE_PRINCIPAL_GENERATION", `MCP agent ${binding.agentId} principal generation changed`);
+          }
+          const authority = parseAuthority(stringField(agent, "authority_json"));
+          if (Date.parse(authority.expiresAt) < expiresAt) {
+            throw new FabricError("AUTHORITY_WIDENING", `MCP credential for ${binding.agentId} outlives its authority`);
+          }
+          const capability = `afc_${createHmac("sha256", this.#capabilityKey)
+            .update(canonicalJson({
+              kind: "current-mcp-seat",
+              canonicalRoot,
+              projectSessionId: input.projectSessionId,
+              sessionRevision: input.expectedSessionRevision,
+              sessionGeneration: input.expectedSessionGeneration,
+              runId: input.runId,
+              runRevision: input.expectedRunRevision,
+              chairAgentId: input.chairAgentId,
+              chairGeneration: input.expectedChairGeneration,
+              chairLeaseId: input.chairLeaseId,
+              expiresAt: input.expiresAt,
+              ...binding,
+            }))
+            .digest("base64url")}`;
+          const tokenHash = sha256(capability);
+          const existing = this.#database.prepare(`
+            SELECT run_id, agent_id, principal_generation, expires_at, revoked_at
+              FROM capabilities WHERE token_hash=?
+          `).get(tokenHash);
+          if (existing === undefined) {
+            this.#database.prepare(`
+              INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+              VALUES (?, ?, ?, ?, ?)
+            `).run(tokenHash, input.runId, binding.agentId, principalGeneration, expiresAt);
+          } else if (
+            !isRow(existing) ||
+            existing.run_id !== input.runId ||
+            existing.agent_id !== binding.agentId ||
+            existing.principal_generation !== principalGeneration ||
+            existing.expires_at !== expiresAt ||
+            existing.revoked_at !== null
+          ) {
+            throw new FabricError("DEDUPE_CONFLICT", `MCP credential replay changed for ${binding.agentId}`);
+          }
+          return { ...binding, capability };
+        });
+      return {
+        projectSessionId: input.projectSessionId,
+        sessionRevision: input.expectedSessionRevision,
+        sessionGeneration: input.expectedSessionGeneration,
+        runId: input.runId,
+        runRevision: input.expectedRunRevision,
+        chairAgentId: input.chairAgentId,
+        chairGeneration: input.expectedChairGeneration,
+        chairLeaseId: input.chairLeaseId,
+        expiresAt: input.expiresAt,
+        credentials,
+      };
     })();
-    return { runId: input.runId, chairAuthorityId: authorityId, chairCapability: token };
   }
 
   connect(token: string): FabricClient {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { openFabric } from "../../src/index.ts";
 import { expandAuthorityActions } from "../../src/domain/operations.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 const teamAuthorityActions = expandAuthorityActions(["read", "write", "delegate", "message", "team"]);
 if (!teamAuthorityActions.ok) throw new Error("team test authority actions are invalid");
@@ -143,8 +144,11 @@ export async function issueTeamLeaderCapability(
 
 export async function createStage5TeamFixture(runId: string) {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-stage5-team-"));
-  const fabric = await openFabric({ databasePath: join(directory, "fabric.sqlite3"), workspaceRoots: [directory] });
-  const run = await fabric.createRun({
+  const databasePath = join(directory, "fabric.sqlite3");
+  const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId,
     projectRunDirectory: directory,
     chair: { agentId: "chair", authority: TEAM_ROOT_AUTHORITY },

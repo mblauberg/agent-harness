@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import { DAEMON_ROOT_AUTHORITY } from "../support/daemon-testkit.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const fakeAdapter = fileURLToPath(new URL("../support/daemon-fake-adapter.ts", import.meta.url));
 
@@ -58,13 +59,16 @@ describe("daemon adapter composition", () => {
     const stateDirectory = join(directory, "state");
     const runtimeDirectory = join(directory, "runtime");
     const socketPath = join(runtimeDirectory, "fabric.sock");
+    const databasePath = join(stateDirectory, "fabric.sqlite3");
     const daemon = await startFabricDaemon({
-      databasePath: join(stateDirectory, "fabric.sqlite3"), stateDirectory, runtimeDirectory, socketPath,
+      databasePath, stateDirectory, runtimeDirectory, socketPath,
       adapters: { fake: { command: [process.execPath, "--import", "tsx", fakeAdapter], environment: { FAKE_ADAPTER_JOURNAL: join(directory, "fake-journal.json") } } },
     });
     const bootstrap = await connectFabricDaemon({ socketPath, capability: daemon.bootstrapCapability });
     try {
-      const run = await bootstrap.createRun({
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot: directory,
         runId: "run-daemon-adapter",
         chair: { agentId: "chair", authority: { ...DAEMON_ROOT_AUTHORITY, disclosure: ["local", "approved-provider"] } },
       });

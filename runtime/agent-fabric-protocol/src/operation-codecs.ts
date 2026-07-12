@@ -695,10 +695,7 @@ const workstreamSettleCodec = objectCodec({
   expectedTeamGeneration: positiveInteger,
 });
 
-const projectSessionOriginCodec = unionOf([
-  objectCodec({ kind: literal("operator-launch"), operatorId: identifier }),
-  objectCodec({ kind: literal("legacy-migration"), migrationManifestRef: artifactRefCodec }),
-]);
+const projectSessionOriginCodec = objectCodec({ kind: literal("operator-launch"), operatorId: identifier });
 const cancelledTerminalPathCodec = objectCodec({ kind: literal("cancelled"), reason: text });
 const terminalPathCodec = unionOf([
   objectCodec({ kind: literal("accepted"), acceptanceRef: sha256 }),

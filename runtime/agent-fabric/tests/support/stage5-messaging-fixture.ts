@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { openFabric } from "../../src/index.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 const ROOT_AUTHORITY = {
   workspaceRoots: ["."],
@@ -16,8 +17,11 @@ const ROOT_AUTHORITY = {
 
 export async function createStage5MessagingFixture() {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-stage5-messaging-"));
-  const fabric = await openFabric({ databasePath: join(directory, "fabric.sqlite3"), workspaceRoots: [directory] });
-  const run = await fabric.createRun({
+  const databasePath = join(directory, "fabric.sqlite3");
+  const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId: "run-stage5-messaging",
     chair: { agentId: "chair", authority: ROOT_AUTHORITY },
   });

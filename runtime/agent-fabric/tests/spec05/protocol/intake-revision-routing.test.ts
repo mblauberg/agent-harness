@@ -17,6 +17,7 @@ import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { OperatorProjectionStore } from "../../../src/operator/projection-store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const now = Date.parse("2027-01-01T00:00:00Z");
 const digestA = `sha256:${"a".repeat(64)}`;
@@ -36,9 +37,10 @@ async function setupRoutingFixture(): Promise<RoutingFixture> {
   const directory = await mkdtemp(join(tmpdir(), "fabric-intake-revision-routing-"));
   const databasePath = join(directory, "fabric.sqlite3");
   const initial = await openFabric({ databasePath, workspaceRoots: [directory], clock: () => now });
-  const created = await initial.createRun({
-    runId: "run_intake_revision",
+  const created = await createCurrentSessionRun({
+    databasePath,
     workspaceRoot: directory,
+    runId: "run_intake_revision",
     chair: {
       agentId: "chair_01",
       authority: {

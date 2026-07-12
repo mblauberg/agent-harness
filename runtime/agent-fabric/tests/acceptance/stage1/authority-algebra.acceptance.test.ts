@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { openFabric } from "../../../src/index.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 describe("Stage 1 authority algebra", () => {
   it("preserves a canonical delegated path when its filesystem target changes before restart", async () => {
@@ -26,7 +27,9 @@ describe("Stage 1 authority algebra", () => {
     };
     let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
     try {
-      const run = await fabric.createRun({
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot,
         runId: "canonical-path-restart",
         chair: { agentId: "chair", authority: rootAuthority },
       });
@@ -58,7 +61,7 @@ describe("Stage 1 authority algebra", () => {
     }
   });
 
-  it("preserves a legacy delegated path while upgrading its stored authority shape", async () => {
+  it("does not upgrade a non-current stored authority shape on reopen", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-legacy-authority-restart-"));
     const databasePath = join(workspaceRoot, "fabric.sqlite3");
     await Promise.all([
@@ -76,7 +79,9 @@ describe("Stage 1 authority algebra", () => {
     };
     let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
     try {
-      const run = await fabric.createRun({
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot,
         runId: "legacy-path-restart",
         chair: { agentId: "chair", authority: rootAuthority },
       });
@@ -112,7 +117,7 @@ describe("Stage 1 authority algebra", () => {
         scope: ["src/new"],
         ttlMs: 1_000,
         commandId: "legacy-path-restart:lease",
-      })).rejects.toMatchObject({ code: "AUTHORITY_WIDENING" });
+      })).rejects.toThrow(/stored authority is invalid/u);
     } finally {
       await fabric.close().catch(() => undefined);
       await rm(workspaceRoot, { recursive: true, force: true });
@@ -135,9 +140,10 @@ describe("Stage 1 authority algebra", () => {
     };
     let fabric = await openFabric({ databasePath, workspaceRoots: [configuredRoot] });
     try {
-      const run = await fabric.createRun({
-        runId: "contained-root-restart",
+      const run = await createCurrentSessionRun({
+        databasePath,
         workspaceRoot: projectRoot,
+        runId: "contained-root-restart",
         chair: { agentId: "chair", authority },
       });
       await fabric.close();
@@ -160,7 +166,9 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: [workspaceRoot],
     });
     try {
-      await expect(fabric.createRun({
+      await expect(createCurrentSessionRun({
+        databasePath: join(workspaceRoot, "fabric.sqlite3"),
+        workspaceRoot,
         runId: "absolute-paths",
         projectRunDirectory: runDirectory,
         chair: {
@@ -190,7 +198,9 @@ describe("Stage 1 authority algebra", () => {
       workspaceRoots: [workspaceRoot],
     });
     try {
-      await expect(fabric.createRun({
+      await expect(createCurrentSessionRun({
+        databasePath: join(workspaceRoot, "fabric.sqlite3"),
+        workspaceRoot,
         runId: "legacy-budget-key",
         chair: {
           agentId: "chair",

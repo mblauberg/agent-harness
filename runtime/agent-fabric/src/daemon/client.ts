@@ -11,7 +11,13 @@ import { OPERATOR_ACTIONS, type OperatorAction } from "@local/agent-fabric-proto
 
 import type { AuthorityInput, MessageInput } from "../domain/types.js";
 import type { FabricOpenOptions } from "../domain/types.js";
-import type { BudgetResult, EventsAfterResult, TeamResult } from "../core/contracts.js";
+import type {
+  BudgetResult,
+  CurrentMcpSeatBindingInput,
+  CurrentMcpSeatBindingResult,
+  EventsAfterResult,
+  TeamResult,
+} from "../core/contracts.js";
 import { inspectFabricDatabase } from "../core/migrations.js";
 import type {
   LocalOperatorConsoleCapabilityInput,
@@ -1150,17 +1156,31 @@ export class FabricDaemonClient {
     await this.#transport.close();
   }
 
-  async createRun(input: {
-    runId: string;
-    workspaceRoot?: string;
-    projectRunDirectory?: string;
-    chair: { agentId: string; authority: AuthorityInput };
-  }): Promise<{ runId: string; chairAuthorityId: string; chairCapability: string }> {
-    const result = await this.#call("createRun", input);
-    if (!isRecord(result) || typeof result.runId !== "string" || typeof result.chairAuthorityId !== "string" || typeof result.chairCapability !== "string") {
-      throw new Error("daemon returned an invalid run result");
+  async bindCurrentMcpSeats(input: CurrentMcpSeatBindingInput): Promise<CurrentMcpSeatBindingResult> {
+    const result = await this.#call("bindCurrentMcpSeats", input);
+    if (
+      !isRecord(result) ||
+      typeof result.projectSessionId !== "string" ||
+      !isPositiveInteger(result.sessionRevision) ||
+      !isPositiveInteger(result.sessionGeneration) ||
+      typeof result.runId !== "string" ||
+      !isPositiveInteger(result.runRevision) ||
+      typeof result.chairAgentId !== "string" ||
+      !isPositiveInteger(result.chairGeneration) ||
+      typeof result.chairLeaseId !== "string" ||
+      typeof result.expiresAt !== "string" ||
+      !Array.isArray(result.credentials) ||
+      !result.credentials.every((credential) =>
+        isRecord(credential) &&
+        typeof credential.seat === "string" &&
+        typeof credential.agentId === "string" &&
+        isPositiveInteger(credential.expectedPrincipalGeneration) &&
+        typeof credential.capability === "string"
+      )
+    ) {
+      throw new Error("daemon returned an invalid current MCP seat binding result");
     }
-    return { runId: result.runId, chairAuthorityId: result.chairAuthorityId, chairCapability: result.chairCapability };
+    return result as CurrentMcpSeatBindingResult;
   }
 
   async provisionLocalOperator(

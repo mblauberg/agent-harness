@@ -12,6 +12,7 @@ import {
   trackTestProcess,
   untrackTestProcess,
 } from "./test-process-registry.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export const MCP_ROOT_AUTHORITY = {
   workspaceRoots: ["."],
@@ -169,7 +170,9 @@ export async function createMcpFixture(
 
   try {
   bootstrap = await connectFabricDaemon({ socketPath, capability: daemon.bootstrapCapability });
-  const run = await bootstrap.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId,
     projectRunDirectory,
     chair: { agentId: "chair", authority: MCP_ROOT_AUTHORITY },

@@ -131,9 +131,7 @@ export function assertRunAcceptingWork(database: Database.Database, runId: strin
   const runState = text(value, "run_state");
   const active = ["active", "visibility_degraded"].includes(sessionState) &&
     ["active", "visibility_degraded"].includes(runState);
-  const legacyRecovery = text(value, "origin_kind") === "legacy-migration" &&
-    sessionState === "recovery_required" && runState === "recovery_required";
-  if (!active && !legacyRecovery) {
+  if (!active) {
     throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "project session is not accepting new work");
   }
   const epoch = database.prepare(`

@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 import { createLifecycleFixture, reopenLifecycleFabric } from "../../support/lifecycle-testkit.ts";
 
 const lifecycleAdapter = fileURLToPath(
@@ -34,6 +35,17 @@ function authority(root: string, actions = ["read", "write", "delegate", "messag
   };
 }
 
+async function currentRun(
+  directory: string,
+  input: Omit<Parameters<typeof createCurrentSessionRun>[0], "databasePath" | "workspaceRoot">,
+) {
+  return await createCurrentSessionRun({
+    databasePath: join(directory, "fabric.sqlite3"),
+    workspaceRoot: directory,
+    ...input,
+  });
+}
+
 describe("provider session admission", () => {
   it("rejects provider spawn when delegated authority forbids provider disclosure", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-provider-disclosure-"));
@@ -49,7 +61,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-disclosure", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-disclosure", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
@@ -79,7 +91,7 @@ describe("provider session admission", () => {
       adapters: { lifecycle: { command: [process.execPath, "--import", "tsx", lifecycleAdapter], environment: { LIFECYCLE_FAKE_JOURNAL: journalPath } } },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-controls", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
@@ -118,7 +130,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-turn-controls", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-turn-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       const workerAuthority = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
@@ -171,7 +183,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-preflight",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -225,7 +237,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-identity",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -265,7 +277,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-reserved", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-reserved", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await chair.dispatchProviderAction({
         adapterId: "provider",
@@ -296,7 +308,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-targetless-admission", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-targetless-admission", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
         adapterId: "provider",
@@ -326,7 +338,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({ runId: "provider-model-free-controls", chair: { agentId: "chair", authority: authority(directory) } });
+      const run = await currentRun(directory, { runId: "provider-model-free-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
         adapterId: "provider", actionId: "provider-control:wakeup", operation: "wakeup", payload: {}, commandId: "provider-control:wakeup",
@@ -354,7 +366,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-capability",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -394,7 +406,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-turn",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -483,7 +495,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-lifecycle-intent",
         chair: { agentId: "chair", authority: authority(directory) },
       });
@@ -531,7 +543,7 @@ describe("provider session admission", () => {
       },
     });
     try {
-      const run = await fabric.createRun({
+      const run = await currentRun(directory, {
         runId: "provider-evidence",
         projectRunDirectory: runDirectory,
         chair: { agentId: "chair", authority: authority(directory) },

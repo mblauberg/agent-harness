@@ -1,4 +1,5 @@
 import type { FabricClient } from "../core/fabric.js";
+import type { CurrentMcpSeatBindingInput } from "../core/contracts.js";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import { FABRIC_PROTOCOL_LIMITS, type FabricProtocolLimits } from "../transport/bounded-ndjson.js";
@@ -779,21 +780,44 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
   }
 }
 
-export function createRunInput(params: Record<string, unknown>): {
-  runId: string;
-  workspaceRoot?: string;
-  projectRunDirectory?: string;
-  chair: { agentId: string; authority: AuthorityInput };
-} {
-  const chairValue = requiredRecord(params, "chair");
+export function bindCurrentMcpSeatsInput(params: Record<string, unknown>): CurrentMcpSeatBindingInput {
+  exactFields(params, [
+    "canonicalRoot",
+    "projectSessionId",
+    "expectedSessionRevision",
+    "expectedSessionGeneration",
+    "runId",
+    "expectedRunRevision",
+    "chairAgentId",
+    "expectedChairGeneration",
+    "chairLeaseId",
+    "expiresAt",
+    "bindings",
+  ], "current MCP seat binding");
+  if (!Array.isArray(params.bindings) || params.bindings.length === 0) {
+    throw new TypeError("current MCP seat binding requires a non-empty bindings array");
+  }
+  const bindings = params.bindings.map((value, index) => {
+    const binding = requiredRecord({ binding: value }, "binding");
+    exactFields(binding, ["seat", "agentId", "expectedPrincipalGeneration"], `current MCP seat binding ${String(index)}`);
+    return {
+      seat: requiredString(binding, "seat"),
+      agentId: requiredString(binding, "agentId"),
+      expectedPrincipalGeneration: requiredPositiveInteger(binding, "expectedPrincipalGeneration"),
+    };
+  });
   return {
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    projectSessionId: requiredString(params, "projectSessionId"),
+    expectedSessionRevision: requiredPositiveInteger(params, "expectedSessionRevision"),
+    expectedSessionGeneration: requiredPositiveInteger(params, "expectedSessionGeneration"),
     runId: requiredString(params, "runId"),
-    ...(typeof params.workspaceRoot === "string" ? { workspaceRoot: params.workspaceRoot } : {}),
-    ...(typeof params.projectRunDirectory === "string" ? { projectRunDirectory: params.projectRunDirectory } : {}),
-    chair: {
-      agentId: requiredString(chairValue, "agentId"),
-      authority: authority(chairValue.authority),
-    },
+    expectedRunRevision: requiredPositiveInteger(params, "expectedRunRevision"),
+    chairAgentId: requiredString(params, "chairAgentId"),
+    expectedChairGeneration: requiredPositiveInteger(params, "expectedChairGeneration"),
+    chairLeaseId: requiredString(params, "chairLeaseId"),
+    expiresAt: requiredString(params, "expiresAt"),
+    bindings,
   };
 }
 

@@ -16,6 +16,7 @@ import {
 } from "../../../src/index.ts";
 import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
 import { MCP_ROOT_AUTHORITY } from "../../support/mcp-testkit.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const handles: FabricDaemonHandle[] = [];
 const roots: string[] = [];
@@ -388,7 +389,9 @@ describe("production daemon bootstrap wiring", () => {
       socketPath: options.socketPath,
       capability: daemon.bootstrapCapability,
     });
-    await bootstrap.createRun({
+    await createCurrentSessionRun({
+      databasePath: options.databasePath,
+      workspaceRoot: root,
       runId: "run_signal_busy_01",
       projectRunDirectory: join(root, "project-run"),
       chair: { agentId: "chair_signal_busy_01", authority: MCP_ROOT_AUTHORITY },

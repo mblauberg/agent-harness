@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
 describe("retryable token-bearing creation", () => {
@@ -15,8 +16,8 @@ describe("retryable token-bearing creation", () => {
     try {
       const first = await openFabric({ databasePath, workspaceRoots: [directory], capabilityKey });
       const creation = { runId: "run-retryable-capabilities", chair: { agentId: "chair", authority: ROOT_AUTHORITY } };
-      const run = await first.createRun(creation);
-      expect(await first.createRun(creation)).toEqual(run);
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, ...creation });
+      expect(await createCurrentSessionRun({ databasePath, workspaceRoot: directory, ...creation })).toEqual(run);
       const chair = first.connect(run.chairCapability);
       const delegated = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
@@ -32,7 +33,7 @@ describe("retryable token-bearing creation", () => {
       await first.close();
 
       const reopened = await openFabric({ databasePath, workspaceRoots: [directory], capabilityKey });
-      expect(await reopened.createRun(creation)).toEqual(run);
+      expect(await createCurrentSessionRun({ databasePath, workspaceRoot: directory, ...creation })).toEqual(run);
       expect(reopened.connect(rotated.capability)).toBeDefined();
       await reopened.close();
     } finally {

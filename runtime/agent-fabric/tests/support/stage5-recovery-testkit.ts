@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { openFabric } from "../../src/index.ts";
 import type { Fabric, FabricClient } from "../../src/index.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export type TeamResult = {
   teamId: string;
@@ -108,7 +109,8 @@ export async function createStage5RecoveryFixture(): Promise<Stage5Fixture> {
   await mkdir(join(directory, "src", "team-b"), { recursive: true });
   await mkdir(join(directory, "src", "replacement"), { recursive: true });
   await mkdir(runDirectory, { recursive: true });
-  const fabric = await openFabric({ databasePath: join(directory, "fabric.sqlite3"), workspaceRoots: [directory] });
+  const databasePath = join(directory, "fabric.sqlite3");
+  const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
   const rootAuthority = {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
@@ -118,7 +120,9 @@ export async function createStage5RecoveryFixture(): Promise<Stage5Fixture> {
     expiresAt: "2099-01-01T00:00:00.000Z",
     budget: { turns: 100, "cost:USD": 50 },
   };
-  const run = await fabric.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId: "run-stage5",
     projectRunDirectory: runDirectory,
     chair: { agentId: "chair", authority: rootAuthority },

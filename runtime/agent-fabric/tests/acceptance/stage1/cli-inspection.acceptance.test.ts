@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openFabric, startFabricDaemon } from "../../../src/index.ts";
 import { parseCliJson, runSourceCli } from "../../support/cli-process.ts";
 import { writeDeliveryRunFixture } from "../../support/delivery-run-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -19,7 +20,9 @@ async function createInspectionDatabase(databasePath: string, runId: string, pro
   await mkdir(projectRunDirectory, { recursive: true });
   const fabric = await openFabric({ databasePath, workspaceRoots: [dirname(dirname(projectRunDirectory))] });
   try {
-    await fabric.createRun({
+    await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: dirname(dirname(projectRunDirectory)),
       runId,
       projectRunDirectory,
       chair: {
@@ -93,7 +96,9 @@ describe("Stage 1 command-line inspection", () => {
     const databasePath = join(root, "fabric.sqlite3");
     await mkdir(runDirectory, { recursive: true });
     const fabric = await openFabric({ databasePath, workspaceRoots: [root] });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId: "run-receipt",
       projectRunDirectory: runDirectory,
       chair: {

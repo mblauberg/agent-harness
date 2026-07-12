@@ -24,6 +24,7 @@ import {
 } from "../../src/operator/git-repository-read.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const execFileAsync = promisify(execFile);
 const now = Date.parse("2027-01-01T00:00:00Z");
@@ -84,9 +85,10 @@ async function setupFixture(options: {
 
   const databasePath = join(stateRoot, "fabric.sqlite3");
   const initial = await openFabric({ databasePath, workspaceRoots: [repositoryRoot], clock: () => now });
-  await initial.createRun({
-    runId: "run_git_read",
+  await createCurrentSessionRun({
+    databasePath,
     workspaceRoot: repositoryRoot,
+    runId: "run_git_read",
     chair: { agentId: "chair", authority: ROOT_AUTHORITY },
   });
   await initial.close();

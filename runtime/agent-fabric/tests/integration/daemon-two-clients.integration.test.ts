@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createDaemonFixture, DAEMON_ROOT_AUTHORITY } from "../support/daemon-testkit.ts";
+import { TimedNdjsonTransport } from "../../src/transport/ndjson-rpc.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -14,10 +15,18 @@ describe("Stage 1 shared daemon store", () => {
     cleanup.push(fixture.cleanup);
     const malformedAuthority = { ...DAEMON_ROOT_AUTHORITY, deniedPath: ["private"] };
 
-    await expect(fixture.bootstrap.createRun({
-      runId: "run-authority-parser-typo",
-      chair: { agentId: "chair", authority: malformedAuthority },
-    })).rejects.toThrow(/authority contains unknown fields: deniedPath/u);
+    const transport = await TimedNdjsonTransport.connect({
+      socketPath: fixture.socketPath,
+      capability: fixture.daemon.bootstrapCapability,
+    });
+    try {
+      await expect(transport.call("createRun", {
+        runId: "run-authority-parser-typo",
+        chair: { agentId: "chair", authority: malformedAuthority },
+      })).rejects.toMatchObject({ code: "BOOTSTRAP_SCOPE_VIOLATION" });
+    } finally {
+      await transport.close();
+    }
   });
 
   it("lets two capability-bound clients exchange and acknowledge one durable delivery", async () => {

@@ -10,9 +10,17 @@ export type SeatMetadata = {
   schemaVersion: 1;
   projectKey: string;
   projectPath: string;
+  projectSessionId: string;
+  sessionRevision: number;
+  sessionGeneration: number;
   runId: string;
+  runRevision: number;
+  chairAgentId: string;
+  chairGeneration: number;
+  chairLeaseId: string;
   seat: McpSeat;
   agentId: string;
+  principalGeneration: number;
   role: "chair" | "peer";
   credentialPath: string;
   expiresAt: string;

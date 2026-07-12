@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { connectFabricDaemon, startFabricDaemon } from "../../../src/index.ts";
 import { callTool, spawnMcpProxy } from "../../support/mcp-testkit.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const fakeAdapter = fileURLToPath(new URL("../../support/agent-bridge-fake-provider.ts", import.meta.url));
 
@@ -59,7 +60,7 @@ describe("Spec 05 provider child custody", () => {
     let chair: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
     let chairProxy: Awaited<ReturnType<typeof spawnMcpProxy>> | undefined;
     try {
-      const run = await bootstrap.createRun({ runId: "run-child-custody", chair: { agentId: "chair", authority } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-child-custody", chair: { agentId: "chair", authority } });
       chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
       chairProxy = await spawnMcpProxy({ socketPath, capability: run.chairCapability, label: "child-custody" });
       const child = await chair.delegateAuthority({
@@ -133,7 +134,7 @@ describe("Spec 05 provider child custody", () => {
     let chair: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
     let chairProxy: Awaited<ReturnType<typeof spawnMcpProxy>> | undefined;
     try {
-      const run = await bootstrap.createRun({ runId: "run-child-no-bridge", chair: { agentId: "chair", authority } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-child-no-bridge", chair: { agentId: "chair", authority } });
       chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
       chairProxy = await spawnMcpProxy({ socketPath, capability: run.chairCapability, label: "child-no-bridge" });
       const child = await chair.delegateAuthority({
@@ -212,7 +213,7 @@ describe("Spec 05 provider child custody", () => {
     let chair: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
     let chairProxy: Awaited<ReturnType<typeof spawnMcpProxy>> | undefined;
     try {
-      const run = await bootstrap.createRun({ runId: "run-child-loss", chair: { agentId: "chair", authority } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-child-loss", chair: { agentId: "chair", authority } });
       chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
       chairProxy = await spawnMcpProxy({ socketPath, capability: run.chairCapability, label: "child-live-loss" });
       const child = await chair.delegateAuthority({
@@ -252,7 +253,7 @@ describe("Spec 05 provider child custody", () => {
            WHERE p.target_agent_id='lost-child'
         `).get()).toEqual({ revoked: 1 });
         expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run-child-loss'").get())
-          .toEqual({ lifecycle_state: "recovery_required", revision: 1 });
+          .toEqual({ lifecycle_state: "active", revision: 1 });
       } finally {
         database.close();
       }
@@ -299,7 +300,7 @@ describe("Spec 05 provider child custody", () => {
     let second: Awaited<ReturnType<typeof startFabricDaemon>> | undefined;
     let firstStopped = false;
     try {
-      const run = await bootstrap.createRun({ runId: "run-child-restart", chair: { agentId: "chair", authority } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-child-restart", chair: { agentId: "chair", authority } });
       chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
       chairProxy = await spawnMcpProxy({ socketPath, capability: run.chairCapability, label: "child-restart" });
       const child = await chair.delegateAuthority({

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openFabric } from "../../../src/index.ts";
 import { ArtifactContentReadService } from "../../../src/operator/artifact-content-read.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const directories: string[] = [];
 const databases: Database.Database[] = [];
@@ -44,7 +45,9 @@ async function fixture<Content extends string | Buffer>(
   await writeFile(sourcePath, content);
   const databasePath = join(root, "fabric.sqlite3");
   const fabric = await openFabric({ databasePath, workspaceRoots: [root] });
-  const run = await fabric.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: root,
     runId: "run-content",
     projectRunDirectory: sourceRoot,
     chair: {

@@ -42223,62 +42223,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "type": "string",
@@ -42385,62 +42348,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "closed"
@@ -42599,62 +42525,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "cancelled"
@@ -42906,62 +42795,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "type": "string",
@@ -43068,62 +42920,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "closed"
@@ -43282,62 +43097,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "cancelled"
@@ -43589,62 +43367,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "type": "string",
@@ -43751,62 +43492,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "closed"
@@ -43965,62 +43669,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "cancelled"
@@ -44272,62 +43939,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "type": "string",
@@ -44434,62 +44064,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "closed"
@@ -44648,62 +44241,25 @@
                       "minimum": 0
                     },
                     "origin": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "operatorId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "operator-launch"
-                            },
-                            "operatorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "operator-launch"
                         },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "migrationManifestRef"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "legacy-migration"
-                            },
-                            "migrationManifestRef": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "required": [
-                                "path",
-                                "digest"
-                              ],
-                              "properties": {
-                                "path": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 4096,
-                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                },
-                                "digest": {
-                                  "type": "string",
-                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                }
-                              }
-                            }
-                          }
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                         }
-                      ]
+                      }
                     },
                     "state": {
                       "const": "cancelled"
@@ -62432,62 +61988,25 @@
                                       "minimum": 0
                                     },
                                     "origin": {
-                                      "oneOf": [
-                                        {
-                                          "type": "object",
-                                          "additionalProperties": false,
-                                          "required": [
-                                            "kind",
-                                            "operatorId"
-                                          ],
-                                          "properties": {
-                                            "kind": {
-                                              "const": "operator-launch"
-                                            },
-                                            "operatorId": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 128,
-                                              "x-minUtf8Bytes": 1,
-                                              "x-maxUtf8Bytes": 128,
-                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                                            }
-                                          }
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "operatorId"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "operator-launch"
                                         },
-                                        {
-                                          "type": "object",
-                                          "additionalProperties": false,
-                                          "required": [
-                                            "kind",
-                                            "migrationManifestRef"
-                                          ],
-                                          "properties": {
-                                            "kind": {
-                                              "const": "legacy-migration"
-                                            },
-                                            "migrationManifestRef": {
-                                              "type": "object",
-                                              "additionalProperties": false,
-                                              "required": [
-                                                "path",
-                                                "digest"
-                                              ],
-                                              "properties": {
-                                                "path": {
-                                                  "type": "string",
-                                                  "minLength": 1,
-                                                  "maxLength": 4096,
-                                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                                },
-                                                "digest": {
-                                                  "type": "string",
-                                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                                }
-                                              }
-                                            }
-                                          }
+                                        "operatorId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                         }
-                                      ]
+                                      }
                                     },
                                     "state": {
                                       "type": "string",
@@ -62594,62 +62113,25 @@
                                       "minimum": 0
                                     },
                                     "origin": {
-                                      "oneOf": [
-                                        {
-                                          "type": "object",
-                                          "additionalProperties": false,
-                                          "required": [
-                                            "kind",
-                                            "operatorId"
-                                          ],
-                                          "properties": {
-                                            "kind": {
-                                              "const": "operator-launch"
-                                            },
-                                            "operatorId": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 128,
-                                              "x-minUtf8Bytes": 1,
-                                              "x-maxUtf8Bytes": 128,
-                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                                            }
-                                          }
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "operatorId"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "operator-launch"
                                         },
-                                        {
-                                          "type": "object",
-                                          "additionalProperties": false,
-                                          "required": [
-                                            "kind",
-                                            "migrationManifestRef"
-                                          ],
-                                          "properties": {
-                                            "kind": {
-                                              "const": "legacy-migration"
-                                            },
-                                            "migrationManifestRef": {
-                                              "type": "object",
-                                              "additionalProperties": false,
-                                              "required": [
-                                                "path",
-                                                "digest"
-                                              ],
-                                              "properties": {
-                                                "path": {
-                                                  "type": "string",
-                                                  "minLength": 1,
-                                                  "maxLength": 4096,
-                                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                                },
-                                                "digest": {
-                                                  "type": "string",
-                                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                                }
-                                              }
-                                            }
-                                          }
+                                        "operatorId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                         }
-                                      ]
+                                      }
                                     },
                                     "state": {
                                       "const": "closed"
@@ -62808,62 +62290,25 @@
                                       "minimum": 0
                                     },
                                     "origin": {
-                                      "oneOf": [
-                                        {
-                                          "type": "object",
-                                          "additionalProperties": false,
-                                          "required": [
-                                            "kind",
-                                            "operatorId"
-                                          ],
-                                          "properties": {
-                                            "kind": {
-                                              "const": "operator-launch"
-                                            },
-                                            "operatorId": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 128,
-                                              "x-minUtf8Bytes": 1,
-                                              "x-maxUtf8Bytes": 128,
-                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                                            }
-                                          }
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "operatorId"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "operator-launch"
                                         },
-                                        {
-                                          "type": "object",
-                                          "additionalProperties": false,
-                                          "required": [
-                                            "kind",
-                                            "migrationManifestRef"
-                                          ],
-                                          "properties": {
-                                            "kind": {
-                                              "const": "legacy-migration"
-                                            },
-                                            "migrationManifestRef": {
-                                              "type": "object",
-                                              "additionalProperties": false,
-                                              "required": [
-                                                "path",
-                                                "digest"
-                                              ],
-                                              "properties": {
-                                                "path": {
-                                                  "type": "string",
-                                                  "minLength": 1,
-                                                  "maxLength": 4096,
-                                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                                },
-                                                "digest": {
-                                                  "type": "string",
-                                                  "pattern": "^sha256:[a-f0-9]{64}$"
-                                                }
-                                              }
-                                            }
-                                          }
+                                        "operatorId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                         }
-                                      ]
+                                      }
                                     },
                                     "state": {
                                       "const": "cancelled"
@@ -63065,62 +62510,25 @@
                                         "minimum": 0
                                       },
                                       "origin": {
-                                        "oneOf": [
-                                          {
-                                            "type": "object",
-                                            "additionalProperties": false,
-                                            "required": [
-                                              "kind",
-                                              "operatorId"
-                                            ],
-                                            "properties": {
-                                              "kind": {
-                                                "const": "operator-launch"
-                                              },
-                                              "operatorId": {
-                                                "type": "string",
-                                                "minLength": 1,
-                                                "maxLength": 128,
-                                                "x-minUtf8Bytes": 1,
-                                                "x-maxUtf8Bytes": 128,
-                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                                              }
-                                            }
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "kind",
+                                          "operatorId"
+                                        ],
+                                        "properties": {
+                                          "kind": {
+                                            "const": "operator-launch"
                                           },
-                                          {
-                                            "type": "object",
-                                            "additionalProperties": false,
-                                            "required": [
-                                              "kind",
-                                              "migrationManifestRef"
-                                            ],
-                                            "properties": {
-                                              "kind": {
-                                                "const": "legacy-migration"
-                                              },
-                                              "migrationManifestRef": {
-                                                "type": "object",
-                                                "additionalProperties": false,
-                                                "required": [
-                                                  "path",
-                                                  "digest"
-                                                ],
-                                                "properties": {
-                                                  "path": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 4096,
-                                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                                  },
-                                                  "digest": {
-                                                    "type": "string",
-                                                    "pattern": "^sha256:[a-f0-9]{64}$"
-                                                  }
-                                                }
-                                              }
-                                            }
+                                          "operatorId": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                           }
-                                        ]
+                                        }
                                       },
                                       "state": {
                                         "type": "string",
@@ -63227,62 +62635,25 @@
                                         "minimum": 0
                                       },
                                       "origin": {
-                                        "oneOf": [
-                                          {
-                                            "type": "object",
-                                            "additionalProperties": false,
-                                            "required": [
-                                              "kind",
-                                              "operatorId"
-                                            ],
-                                            "properties": {
-                                              "kind": {
-                                                "const": "operator-launch"
-                                              },
-                                              "operatorId": {
-                                                "type": "string",
-                                                "minLength": 1,
-                                                "maxLength": 128,
-                                                "x-minUtf8Bytes": 1,
-                                                "x-maxUtf8Bytes": 128,
-                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                                              }
-                                            }
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "kind",
+                                          "operatorId"
+                                        ],
+                                        "properties": {
+                                          "kind": {
+                                            "const": "operator-launch"
                                           },
-                                          {
-                                            "type": "object",
-                                            "additionalProperties": false,
-                                            "required": [
-                                              "kind",
-                                              "migrationManifestRef"
-                                            ],
-                                            "properties": {
-                                              "kind": {
-                                                "const": "legacy-migration"
-                                              },
-                                              "migrationManifestRef": {
-                                                "type": "object",
-                                                "additionalProperties": false,
-                                                "required": [
-                                                  "path",
-                                                  "digest"
-                                                ],
-                                                "properties": {
-                                                  "path": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 4096,
-                                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                                  },
-                                                  "digest": {
-                                                    "type": "string",
-                                                    "pattern": "^sha256:[a-f0-9]{64}$"
-                                                  }
-                                                }
-                                              }
-                                            }
+                                          "operatorId": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                           }
-                                        ]
+                                        }
                                       },
                                       "state": {
                                         "const": "closed"
@@ -63441,62 +62812,25 @@
                                         "minimum": 0
                                       },
                                       "origin": {
-                                        "oneOf": [
-                                          {
-                                            "type": "object",
-                                            "additionalProperties": false,
-                                            "required": [
-                                              "kind",
-                                              "operatorId"
-                                            ],
-                                            "properties": {
-                                              "kind": {
-                                                "const": "operator-launch"
-                                              },
-                                              "operatorId": {
-                                                "type": "string",
-                                                "minLength": 1,
-                                                "maxLength": 128,
-                                                "x-minUtf8Bytes": 1,
-                                                "x-maxUtf8Bytes": 128,
-                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                                              }
-                                            }
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "kind",
+                                          "operatorId"
+                                        ],
+                                        "properties": {
+                                          "kind": {
+                                            "const": "operator-launch"
                                           },
-                                          {
-                                            "type": "object",
-                                            "additionalProperties": false,
-                                            "required": [
-                                              "kind",
-                                              "migrationManifestRef"
-                                            ],
-                                            "properties": {
-                                              "kind": {
-                                                "const": "legacy-migration"
-                                              },
-                                              "migrationManifestRef": {
-                                                "type": "object",
-                                                "additionalProperties": false,
-                                                "required": [
-                                                  "path",
-                                                  "digest"
-                                                ],
-                                                "properties": {
-                                                  "path": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 4096,
-                                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                                  },
-                                                  "digest": {
-                                                    "type": "string",
-                                                    "pattern": "^sha256:[a-f0-9]{64}$"
-                                                  }
-                                                }
-                                              }
-                                            }
+                                          "operatorId": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 128,
+                                            "x-minUtf8Bytes": 1,
+                                            "x-maxUtf8Bytes": 128,
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                                           }
-                                        ]
+                                        }
                                       },
                                       "state": {
                                         "const": "cancelled"

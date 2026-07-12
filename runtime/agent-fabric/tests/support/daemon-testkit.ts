@@ -9,6 +9,7 @@ import {
   trackTestProcess,
   untrackTestProcess,
 } from "./test-process-registry.ts";
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export const DAEMON_ROOT_AUTHORITY = {
   workspaceRoots: ["."],
@@ -66,7 +67,9 @@ export async function createDaemonFixture(runId = "run-daemon") {
     socketPath,
     capability: daemon.bootstrapCapability,
   });
-  const run = await bootstrap.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId,
     chair: { agentId: "chair", authority: DAEMON_ROOT_AUTHORITY },
   });

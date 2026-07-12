@@ -523,17 +523,11 @@ export class OperatorProjectionStore {
 
   #sessionFromRow(stored: Row): ProjectSession {
     const originKind = text(stored, "origin_kind");
-    const origin = originKind === "operator-launch"
-      ? {
-          kind: "operator-launch",
-          operatorId: text(stored, "origin_operator_id"),
-        }
-      : originKind === "legacy-migration"
-        ? {
-            kind: "legacy-migration",
-            migrationManifestRef: JSON.parse(text(stored, "migration_manifest_ref")),
-          }
-        : (() => { throw new Error("stored project-session origin is invalid"); })();
+    if (originKind !== "operator-launch") throw new Error("stored project-session origin is invalid");
+    const origin = {
+      kind: "operator-launch" as const,
+      operatorId: text(stored, "origin_operator_id"),
+    };
     const terminalPath = nullableText(stored, "terminal_path_json");
     return parseProjectSession({
       projectSessionId: text(stored, "project_session_id"),

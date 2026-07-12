@@ -37,9 +37,7 @@ export const PROJECT_SESSION_STATES = [
 export type ProjectSessionState = (typeof PROJECT_SESSION_STATES)[number];
 export type ProjectSessionMode = "coordinated" | "independent";
 
-export type ProjectSessionOrigin =
-  | { kind: "operator-launch"; operatorId: OperatorId }
-  | { kind: "legacy-migration"; migrationManifestRef: ArtifactRef };
+export type ProjectSessionOrigin = { kind: "operator-launch"; operatorId: OperatorId };
 
 export type ProjectSessionTerminalPath =
   | { kind: "accepted"; acceptanceRef: Sha256Digest }
@@ -226,14 +224,7 @@ function parseOrigin(value: unknown): ProjectSessionOrigin {
       operatorId: parseIdentifier<"OperatorId">(record.operatorId, "projectSession.origin.operatorId"),
     };
   }
-  if (kindRecord.kind === "legacy-migration") {
-    const record = strictRecord(value, "projectSession.origin", ["kind", "migrationManifestRef"]);
-    return {
-      kind: "legacy-migration",
-      migrationManifestRef: parseArtifactRef(record.migrationManifestRef, "projectSession.origin.migrationManifestRef"),
-    };
-  }
-  throw new TypeError("projectSession.origin.kind must be operator-launch or legacy-migration");
+  throw new TypeError("projectSession.origin.kind must be operator-launch");
 }
 
 function strictRecordWithKnownKind(value: unknown, path: string): Record<string, unknown> & { kind: unknown } {

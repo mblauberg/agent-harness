@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { openFabric } from "../../src/index.ts";
 import type { Fabric, FabricClient } from "../../src/index.ts";
 
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
 
 const fakeProvider = fileURLToPath(new URL("./lifecycle-fake-provider.ts", import.meta.url));
@@ -109,7 +110,9 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     expiresAt: "2099-01-01T00:00:00.000Z",
     budget: { turns: 40, "cost:USD": 20 },
   };
-  const run = await fabric.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId: "run-stage3",
     projectRunDirectory: runDirectory,
     chair: { agentId: "chair", authority: rootAuthority },

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { archiveRun, retentionReport } from "../../src/cli/retention.ts";
 import { openFabric } from "../../src/index.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const cleanup: string[] = [];
 afterEach(async () => Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -20,7 +21,9 @@ async function fixture(runId = "run-terminal"): Promise<{ root: string; database
   await mkdir(runDirectory, { recursive: true });
   const fabric = await openFabric({ databasePath, workspaceRoots: [root] });
   try {
-    await fabric.createRun({
+    await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: root,
       runId,
       projectRunDirectory: runDirectory,
       chair: {

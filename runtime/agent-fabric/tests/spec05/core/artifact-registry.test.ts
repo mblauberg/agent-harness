@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const roots: string[] = [];
 const fabrics: Array<{ close(): Promise<void> }> = [];
@@ -30,7 +31,9 @@ async function registryFixture(options: Readonly<{
   const databasePath = join(root, "fabric.sqlite3");
   const fabric = await openFabric({ databasePath, workspaceRoots: [root] });
   fabrics.push(fabric);
-  const run = await fabric.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: root,
     runId: "run-registry",
     projectRunDirectory: runDirectory,
     chair: {

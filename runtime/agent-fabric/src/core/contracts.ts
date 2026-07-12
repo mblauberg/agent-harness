@@ -1,10 +1,36 @@
 import type { AuthorityInput } from "../domain/types.js";
 
-export type RunCreation = {
+export type CurrentMcpSeatBinding = {
+  seat: string;
+  agentId: string;
+  expectedPrincipalGeneration: number;
+};
+
+export type CurrentMcpSeatBindingInput = {
+  canonicalRoot: string;
+  projectSessionId: string;
+  expectedSessionRevision: number;
+  expectedSessionGeneration: number;
   runId: string;
-  workspaceRoot?: string;
-  projectRunDirectory?: string;
-  chair: { agentId: string; authority: AuthorityInput };
+  expectedRunRevision: number;
+  chairAgentId: string;
+  expectedChairGeneration: number;
+  chairLeaseId: string;
+  expiresAt: string;
+  bindings: CurrentMcpSeatBinding[];
+};
+
+export type CurrentMcpSeatBindingResult = {
+  projectSessionId: string;
+  sessionRevision: number;
+  sessionGeneration: number;
+  runId: string;
+  runRevision: number;
+  chairAgentId: string;
+  chairGeneration: number;
+  chairLeaseId: string;
+  expiresAt: string;
+  credentials: Array<CurrentMcpSeatBinding & { capability: string }>;
 };
 
 export type LeaseResult = {

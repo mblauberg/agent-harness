@@ -3,9 +3,7 @@ import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 
-import { connectFabricDaemon, type FabricDaemonClient } from "../daemon/client.js";
-import { AGENT_AUTHORITY_OPERATIONS, FABRIC_OPERATIONS } from "../domain/operations.js";
-import type { AuthorityInput } from "../domain/types.js";
+import { connectFabricDaemon } from "../daemon/client.js";
 import type { FabricPaths } from "./paths.js";
 import {
   parseMcpSeat,
@@ -16,28 +14,6 @@ import {
 } from "./seat-store.js";
 
 const MAXIMUM_SEAT_LIFETIME_MS = 31 * 24 * 60 * 60 * 1_000;
-
-const PEER_OPERATIONS = [
-  FABRIC_OPERATIONS.sendMessage,
-  FABRIC_OPERATIONS.receiveMessages,
-  FABRIC_OPERATIONS.acknowledgeDelivery,
-  FABRIC_OPERATIONS.abandonDelivery,
-  FABRIC_OPERATIONS.getMailboxState,
-  FABRIC_OPERATIONS.claimTask,
-  FABRIC_OPERATIONS.acknowledgeTaskHandoff,
-  FABRIC_OPERATIONS.getTask,
-  FABRIC_OPERATIONS.updateTask,
-  FABRIC_OPERATIONS.acquireWriteLease,
-  FABRIC_OPERATIONS.renewWriteLease,
-  FABRIC_OPERATIONS.getWriteLease,
-  FABRIC_OPERATIONS.releaseWriteLease,
-  FABRIC_OPERATIONS.requestLifecycle,
-  FABRIC_OPERATIONS.getAgentLifecycle,
-  FABRIC_OPERATIONS.publishArtifact,
-  FABRIC_OPERATIONS.getRunStatus,
-  FABRIC_OPERATIONS.listTasks,
-  FABRIC_OPERATIONS.listAgents,
-] as const;
 
 export type DiscoveryReceipt = {
   schemaVersion: 1;
@@ -50,17 +26,30 @@ export type McpProvisionOutput = {
   schemaVersion: 1;
   projectKey: string;
   projectPath: string;
+  projectSessionId: string;
+  sessionRevision: number;
+  sessionGeneration: number;
   runId: string;
+  runRevision: number;
+  chairAgentId: string;
+  chairGeneration: number;
+  chairLeaseId: string;
   chairSeat: McpSeat;
   expiresAt: string;
-  discussionGroupId: string;
   seats: Array<{
     seat: McpSeat;
     role: "chair" | "peer";
     agentId: string;
+    principalGeneration: number;
     credentialPath: string;
     metadataPath: string;
   }>;
+};
+
+type ParsedSeatBinding = {
+  seat: McpSeat;
+  agentId: string;
+  expectedPrincipalGeneration: number;
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -89,14 +78,43 @@ function option(arguments_: string[], name: string, command: string): string {
   return value;
 }
 
-function parseSeats(value: string): McpSeat[] {
-  const values = value.split(",");
-  if (values.length === 0 || values.some((seat) => seat.length === 0 || seat.trim() !== seat)) {
-    throw new Error("mcp provision --seats must be a comma-separated seat roster");
+function positiveInteger(value: string, optionName: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || String(parsed) !== value) {
+    throw new Error(`mcp provision ${optionName} must be a positive integer`);
   }
-  const seats = values.map(parseMcpSeat);
-  if (new Set(seats).size !== seats.length) throw new Error("mcp provision --seats contains a duplicate seat");
-  return seats.sort((left, right) => left.localeCompare(right));
+  return parsed;
+}
+
+function parseSeatBindings(value: string): ParsedSeatBinding[] {
+  const values = value.split(",");
+  if (values.length === 0 || values.some((binding) => binding.length === 0 || binding.trim() !== binding)) {
+    throw new Error("mcp provision --seat-bindings must be a comma-separated seat=agent@generation roster");
+  }
+  const bindings = values.map((value_) => {
+    const equals = value_.indexOf("=");
+    const at = value_.lastIndexOf("@");
+    if (equals < 1 || at <= equals + 1 || at === value_.length - 1) {
+      throw new Error("mcp provision --seat-bindings must use seat=agent@generation entries");
+    }
+    const seat = parseMcpSeat(value_.slice(0, equals));
+    const agentId = value_.slice(equals + 1, at);
+    if (agentId.length > 512 || agentId.includes("\0") || agentId.includes(",")) {
+      throw new Error("mcp provision --seat-bindings contains an invalid agent ID");
+    }
+    return {
+      seat,
+      agentId,
+      expectedPrincipalGeneration: positiveInteger(value_.slice(at + 1), "principal generation"),
+    };
+  });
+  if (new Set(bindings.map(({ seat }) => seat)).size !== bindings.length) {
+    throw new Error("mcp provision --seat-bindings contains a duplicate seat");
+  }
+  if (new Set(bindings.map(({ agentId }) => agentId)).size !== bindings.length) {
+    throw new Error("mcp provision --seat-bindings contains a duplicate agent");
+  }
+  return bindings.sort((left, right) => left.seat.localeCompare(right.seat));
 }
 
 export async function readDiscoveryReceipt(paths: FabricPaths): Promise<DiscoveryReceipt> {
@@ -155,96 +173,123 @@ function boundedExpiry(value: string): string {
   return value;
 }
 
-function authority(actions: readonly string[], expiresAt: string): AuthorityInput {
-  return {
-    workspaceRoots: ["."],
-    sourcePaths: ["."],
-    artifactPaths: [".agent-run"],
-    actions: [...actions],
-    disclosure: ["local"],
-    expiresAt,
-    budget: {},
-  };
-}
-
-function rosterDigest(seats: readonly McpSeat[]): string {
-  return createHash("sha256").update(seats.join(",")).digest("hex").slice(0, 16);
-}
-
-function provisionGeneration(chairSeat: McpSeat, seats: readonly McpSeat[], expiresAt: string): string {
+function provisionGeneration(input: {
+  projectSessionId: string;
+  sessionRevision: number;
+  sessionGeneration: number;
+  runId: string;
+  runRevision: number;
+  chairSeat: McpSeat;
+  chairAgentId: string;
+  chairGeneration: number;
+  chairLeaseId: string;
+  bindings: readonly ParsedSeatBinding[];
+  expiresAt: string;
+}): string {
   return createHash("sha256")
-    .update(JSON.stringify({ chairSeat, seats, expiresAt }))
+    .update(JSON.stringify(input))
     .digest("hex")
     .slice(0, 16);
 }
 
 export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths): Promise<McpProvisionOutput> {
   const command = "mcp provision";
-  assertExactOptions(arguments_, ["--project", "--chair", "--seats", "--expires-at"], command);
+  const optionNames = [
+    "--project",
+    "--project-session-id",
+    "--session-revision",
+    "--session-generation",
+    "--run-id",
+    "--run-revision",
+    "--chair-seat",
+    "--chair-agent-id",
+    "--chair-generation",
+    "--chair-lease-id",
+    "--seat-bindings",
+    "--expires-at",
+  ] as const;
+  assertExactOptions(arguments_, optionNames, command);
   const project = option(arguments_, "--project", command);
-  const chairSeat = parseMcpSeat(option(arguments_, "--chair", command));
-  const seats = parseSeats(option(arguments_, "--seats", command));
+  const projectSessionId = option(arguments_, "--project-session-id", command);
+  const sessionRevision = positiveInteger(option(arguments_, "--session-revision", command), "--session-revision");
+  const sessionGeneration = positiveInteger(option(arguments_, "--session-generation", command), "--session-generation");
+  const runId = option(arguments_, "--run-id", command);
+  const runRevision = positiveInteger(option(arguments_, "--run-revision", command), "--run-revision");
+  const chairSeat = parseMcpSeat(option(arguments_, "--chair-seat", command));
+  const chairAgentId = option(arguments_, "--chair-agent-id", command);
+  const chairGeneration = positiveInteger(option(arguments_, "--chair-generation", command), "--chair-generation");
+  const chairLeaseId = option(arguments_, "--chair-lease-id", command);
+  const bindings = parseSeatBindings(option(arguments_, "--seat-bindings", command));
   const expiresAt = boundedExpiry(option(arguments_, "--expires-at", command));
-  if (seats.length < 2) throw new Error("mcp provision requires at least two distinct seats");
-  if (!seats.includes(chairSeat)) throw new Error("mcp provision chair must be present in the supplied seat roster");
-  const firstSeat = seats[0];
+  if (bindings.length < 2) throw new Error("mcp provision requires at least two distinct seat bindings");
+  const chairBinding = bindings.find(({ seat }) => seat === chairSeat);
+  if (chairBinding?.agentId !== chairAgentId) {
+    throw new Error("mcp provision chair seat must bind the exact supplied chair agent");
+  }
+  const firstSeat = bindings[0]?.seat;
   if (firstSeat === undefined) throw new Error("mcp provision requires at least one seat");
   const firstPaths = await resolveSeatPaths({ stateDirectory: paths.stateDirectory, project, seat: firstSeat });
   const { projectKey, projectPath } = firstPaths;
-  const runId = `project-${projectKey}-${provisionGeneration(chairSeat, seats, expiresAt)}`;
+  const bindingIdentity = {
+    projectSessionId,
+    sessionRevision,
+    sessionGeneration,
+    runId,
+    runRevision,
+    chairSeat,
+    chairAgentId,
+    chairGeneration,
+    chairLeaseId,
+    bindings,
+    expiresAt,
+  };
   const discovery = await readDiscoveryReceipt(paths);
   const bootstrap = await connectFabricDaemon({
     socketPath: discovery.socketPath,
     capability: discovery.bootstrapCapability,
   });
-  let chair: FabricDaemonClient | undefined;
   try {
-    const run = await bootstrap.createRun({
+    const bound = await bootstrap.bindCurrentMcpSeats({
+      canonicalRoot: projectPath,
+      projectSessionId,
+      expectedSessionRevision: sessionRevision,
+      expectedSessionGeneration: sessionGeneration,
       runId,
-      workspaceRoot: projectPath,
-      projectRunDirectory: join(projectPath, ".agent-run", runId),
-      chair: {
-        agentId: chairSeat,
-        authority: authority(AGENT_AUTHORITY_OPERATIONS, expiresAt),
-      },
+      expectedRunRevision: runRevision,
+      chairAgentId,
+      expectedChairGeneration: chairGeneration,
+      chairLeaseId,
+      expiresAt,
+      bindings,
     });
-    chair = await connectFabricDaemon({ socketPath: discovery.socketPath, capability: run.chairCapability });
-    const registrations = new Map<McpSeat, string>([[chairSeat, run.chairCapability]]);
-    for (const seat of seats) {
-      if (seat === chairSeat) continue;
-      const delegated = await chair.delegateAuthority({
-        parentAuthorityId: run.chairAuthorityId,
-        commandId: `mcp-provision:${projectKey}:authority:${seat}`,
-        authority: authority(PEER_OPERATIONS, expiresAt),
-      });
-      const registration = await chair.registerAgent({ agentId: seat, authorityId: delegated.authorityId });
-      registrations.set(seat, registration.capability);
-    }
-    const discussionGroupId = `${runId}:seats:${rosterDigest(seats)}`;
-    await chair.createDiscussionGroup({
-      groupId: discussionGroupId,
-      memberAgentIds: seats,
-      commandId: `mcp-provision:${projectKey}:discussion-group:${rosterDigest(seats)}`,
-    });
-
     const stagedSeats: Array<{ metadata: Omit<SeatMetadata, "credentialPath">; credential: string }> = [];
-    for (const seat of seats) {
-      const credential = registrations.get(seat);
-      if (credential === undefined) throw new Error(`daemon did not return a credential for seat ${seat}`);
-      const role = seat === chairSeat ? "chair" : "peer";
+    for (const binding of bindings) {
+      const credential = bound.credentials.find(({ seat }) => seat === binding.seat);
+      if (credential === undefined || credential.agentId !== binding.agentId) {
+        throw new Error(`daemon did not bind the exact credential for seat ${binding.seat}`);
+      }
+      const role = binding.seat === chairSeat ? "chair" : "peer";
       const metadata: Omit<SeatMetadata, "credentialPath"> = {
         schemaVersion: 1,
         projectKey,
         projectPath,
+        projectSessionId,
+        sessionRevision,
+        sessionGeneration,
         runId,
-        seat,
-        agentId: seat,
+        runRevision,
+        chairAgentId,
+        chairGeneration,
+        chairLeaseId,
+        seat: binding.seat,
+        agentId: binding.agentId,
+        principalGeneration: binding.expectedPrincipalGeneration,
         role,
         expiresAt,
       };
-      stagedSeats.push({ metadata, credential });
+      stagedSeats.push({ metadata, credential: credential.capability });
     }
-    const generation = provisionGeneration(chairSeat, seats, expiresAt);
+    const generation = provisionGeneration(bindingIdentity);
     const installed = await installSeatGeneration({
       stateDirectory: paths.stateDirectory,
       projectPath,
@@ -252,14 +297,15 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
       seats: stagedSeats,
     });
     const outputSeats: McpProvisionOutput["seats"] = [];
-    for (const seat of seats) {
-      const written = installed.find((candidate) => candidate.seat === seat);
-      if (written === undefined) throw new Error(`seat generation did not install ${seat}`);
-      const role = seat === chairSeat ? "chair" : "peer";
+    for (const binding of bindings) {
+      const written = installed.find((candidate) => candidate.seat === binding.seat);
+      if (written === undefined) throw new Error(`seat generation did not install ${binding.seat}`);
+      const role = binding.seat === chairSeat ? "chair" : "peer";
       outputSeats.push({
-        seat,
+        seat: binding.seat,
         role,
-        agentId: seat,
+        agentId: binding.agentId,
+        principalGeneration: binding.expectedPrincipalGeneration,
         credentialPath: written.credentialPath,
         metadataPath: written.metadataPath,
       });
@@ -268,14 +314,20 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
       schemaVersion: 1,
       projectKey,
       projectPath,
+      projectSessionId,
+      sessionRevision,
+      sessionGeneration,
       runId,
+      runRevision,
+      chairAgentId,
+      chairGeneration,
+      chairLeaseId,
       chairSeat,
       expiresAt,
-      discussionGroupId,
       seats: outputSeats,
     };
   } finally {
-    await Promise.allSettled([chair?.close() ?? Promise.resolve(), bootstrap.close()]);
+    await bootstrap.close();
   }
 }
 

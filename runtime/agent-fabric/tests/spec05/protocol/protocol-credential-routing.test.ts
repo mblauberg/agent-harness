@@ -17,6 +17,7 @@ import { operatorOperationsForActions } from "../../../src/daemon/protocol-crede
 import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 describe("public protocol credential routing", () => {
   it("derives an agent principal and exact stored authority operations from its bearer token", async () => {
@@ -25,7 +26,9 @@ describe("public protocol credential routing", () => {
     try {
       const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
       try {
-        const run = await fabric.createRun({
+        const run = await createCurrentSessionRun({
+          databasePath,
+          workspaceRoot: directory,
           runId: "run_protocol_credential",
           chair: {
             agentId: "chair",
@@ -193,7 +196,9 @@ describe("public protocol credential routing", () => {
     const databasePath = join(directory, "fabric.sqlite3");
     try {
       const initial = await openFabric({ databasePath, workspaceRoots: [directory] });
-      await initial.createRun({
+      await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot: directory,
         runId: "run_operator_protocol",
         chair: { agentId: "chair", authority: ROOT_AUTHORITY },
       });
@@ -289,7 +294,7 @@ describe("public protocol credential routing", () => {
             expectedGeneration: 1,
           },
         );
-        expect(session).toMatchObject({ projectId: principal.projectId, state: "recovery_required" });
+        expect(session).toMatchObject({ projectId: principal.projectId, state: "active" });
         await expect(reopened.dispatchPublicProtocol(
           context,
           FABRIC_OPERATIONS.projectionSnapshot,

@@ -11,6 +11,7 @@ import { openFabric } from "../../../src/index.ts";
 import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 describe("artifact, objective, gate and handoff barrier evidence", () => {
   it("keeps a stage barrier closed until every declared evidence class is satisfied", async () => {
@@ -18,7 +19,7 @@ describe("artifact, objective, gate and handoff barrier evidence", () => {
     const databasePath = join(directory, "fabric.sqlite3");
     const fabric = await openFabric({ databasePath, workspaceRoots: [directory] });
     try {
-      const run = await fabric.createRun({ runId: "run-barrier-evidence", projectRunDirectory: directory, chair: { agentId: "chair", authority: { ...ROOT_AUTHORITY, workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: ["."] } } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-barrier-evidence", projectRunDirectory: directory, chair: { agentId: "chair", authority: { ...ROOT_AUTHORITY, workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: ["."] } } });
       const chair = fabric.connect(run.chairCapability);
       const peerAuthority = await chair.delegateAuthority({ parentAuthorityId: run.chairAuthorityId, authority: { ...ROOT_AUTHORITY, workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: ["."], actions: ["read", "write"], budget: { turns: 1 } } });
       const peerRegistration = await chair.registerAgent({ agentId: "peer", authorityId: peerAuthority.authorityId });

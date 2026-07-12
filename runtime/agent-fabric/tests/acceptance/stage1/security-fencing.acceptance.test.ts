@@ -9,6 +9,7 @@ import { FabricError } from "../../../src/errors.ts";
 import { openFabric } from "../../../src/index.ts";
 
 import { ManualClock } from "../../support/manual-clock.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 import { createStage1Fixture, ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
 // Contract tests for the Stage 1 security-fencing findings in
@@ -177,7 +178,9 @@ describe("Stage 1 security fencing: symlink escapes are rejected (finding A5; sp
     cleanup.push(async () => {
       await fabric.close();
     });
-    const run = await fabric.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: project,
       runId: "run-symlink",
       chair: {
         agentId: "chair",
@@ -283,7 +286,7 @@ describe("Stage 1 security fencing: retried commands never leak raw SQLite error
       runId: "run-retry",
       chair: { agentId: "chair", authority: ROOT_AUTHORITY },
     };
-    const original = await first.createRun(creation);
+    const original = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, ...creation });
     expect(original.runId).toBe("run-retry");
 
     // A client that lost the first acknowledgement retries the identical
@@ -292,7 +295,7 @@ describe("Stage 1 security fencing: retried commands never leak raw SQLite error
     // retry." Proposed minimal API change: createRun accepts a commandId and
     // replays idempotently; at minimum the failure must be a typed
     // FabricError, never a raw SqliteError constraint leak.
-    const retry = await second.createRun(creation).then(
+    const retry = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, ...creation }).then(
       (result) => ({ kind: "result" as const, result }),
       (error: unknown) => ({ kind: "error" as const, error }),
     );

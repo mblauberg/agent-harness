@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { openFabric } from "../../src/index.ts";
 import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
 
+import { createCurrentSessionRun } from "./current-session-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
 
 export const ROOT_AUTHORITY = {
@@ -22,7 +23,9 @@ export async function createStage1Fixture() {
   const databasePath = join(directory, "fabric.sqlite3");
   const clock = new ManualClock();
   const fabric = await openFabric({ databasePath, workspaceRoots: [directory], clock: clock.now });
-  const run = await fabric.createRun({
+  const run = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: directory,
     runId: "run-stage1",
     chair: { agentId: "chair", authority: ROOT_AUTHORITY },
   });

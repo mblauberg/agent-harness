@@ -9,6 +9,7 @@ import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import type { AuthorityInput } from "../../src/index.ts";
 import { callTool, spawnMcpProxy } from "../support/mcp-testkit.ts";
 import { requireRecord, teamCreateInput } from "../support/stage5-team-testkit.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 function storedAuthority(databasePath: string, authorityId: string): Record<string, unknown> {
   const database = new Database(databasePath, { readonly: true });
@@ -55,7 +56,9 @@ describe("public authority contract", () => {
         expiresAt: "2099-01-01T00:00:00.000Z",
         budget: { turns: 100, "cost:USD": 100, "input_tokens:google": 1_000, descendants: 20 },
       };
-      const run = await bootstrap.createRun({
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot: directory,
         runId: "run-public-authority",
         chair: { agentId: "chair", authority: rootAuthority },
       });
@@ -66,14 +69,16 @@ describe("public authority contract", () => {
         budget: { turns: 100, "cost:USD": 100, "input_tokens:google": 1_000, descendants: 20 },
       });
 
-      const legacy = await bootstrap.createRun({
+      const second = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot: directory,
         runId: "run-public-authority-legacy",
         chair: {
           agentId: "legacy-chair",
           authority: { ...rootAuthority, deniedPaths: [], deniedActions: [], disclosure: ["local"] },
         },
       });
-      expect(storedAuthority(databasePath, legacy.chairAuthorityId)).toMatchObject({
+      expect(storedAuthority(databasePath, second.chairAuthorityId)).toMatchObject({
         disclosure: { level: "scoped", scopes: ["local"] },
       });
 

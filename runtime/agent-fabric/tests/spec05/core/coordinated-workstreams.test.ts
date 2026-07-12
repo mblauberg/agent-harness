@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openFabric, type Fabric } from "../../../src/index.ts";
 import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const now = Date.parse("2027-01-01T00:00:00.000Z");
 const digest = `sha256:${"a".repeat(64)}` as const;
@@ -50,9 +51,10 @@ async function setup(): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), "fabric-workstream-"));
   const databasePath = join(directory, "fabric.sqlite3");
   const initial = await openFabric({ databasePath, workspaceRoots: [directory], clock: () => now });
-  const created = await initial.createRun({
-    runId: "run_workstream",
+  const created = await createCurrentSessionRun({
+    databasePath,
     workspaceRoot: directory,
+    runId: "run_workstream",
     chair: {
       agentId: "chair_workstream",
       authority: {

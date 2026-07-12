@@ -174,30 +174,42 @@ Claude to Codex mailbox messages through separate MCP proxies.
 
 ## Renew seats
 
-Provision a fresh immutable run before the current expiry. Use a future ISO
-timestamp no more than 31 days away:
+Bind a new immutable seat generation to the exact current operator-launched
+project session and coordination run before the current credentials expire.
+Use the revisions, generations, chair identity and active chair lease reported
+by the current operator projection. The requested expiry must be a future ISO
+timestamp no more than 31 days away and cannot outlive any bound agent's
+authority:
 
 ```sh
 scripts/agent-fabric mcp provision \
   --project "$HOME/.agents" \
-  --chair codex \
-  --seats agy,claude,codex,cursor,kiro \
+  --project-session-id '<current project-session ID>' \
+  --session-revision '<current session revision>' \
+  --session-generation '<current session generation>' \
+  --run-id '<current coordination-run ID>' \
+  --run-revision '<current run revision>' \
+  --chair-seat codex \
+  --chair-agent-id '<current chair agent ID>' \
+  --chair-generation '<current chair generation>' \
+  --chair-lease-id '<active chair lease ID>' \
+  --seat-bindings 'agy=<agent>@<generation>,claude=<agent>@<generation>,codex=<chair-agent>@<generation>,cursor=<agent>@<generation>,kiro=<agent>@<generation>' \
   --expires-at '<ISO timestamp>'
 ```
 
-Renewal intentionally creates a new immutable run because expiry is part of
-the authority envelope; rotating a capability cannot extend that authority.
-Before renewal, drain and checkpoint the old run, export its receipt, close its
-barriers, and stop old proxies. Provisioning writes the complete roster into an
-immutable `generations/<generation>/` directory, fsyncs every private file, then
+Provisioning creates only agent capabilities for the supplied existing
+principals. It does not create or select a project, session, run, chair,
+authority, agent or discussion group. Any stale or crossed identity fails
+atomically. An exact replay is idempotent.
+
+The command writes the complete roster into an immutable
+`generations/<generation>/` directory, fsyncs every private file, then
 atomically replaces `current.json`. Readers therefore observe either the whole
 old roster or the whole new roster; an interrupted staging pass does not create
-a mixed generation. Legacy flat seat files remain readable until the next
-successful renewal. Restart or reconnect all clients together after cutover and
-rerun both smoke checks.
-Already-connected old proxies remain bound to the old run until stopped or its
-capabilities expire; do not operate old and new generations as one team. Retain
-the old immutable run for audit and reconciliation.
+a mixed generation. Stop old proxies before cutover, restart or reconnect all
+clients together, and rerun both smoke checks. Already-connected proxies remain
+bound to their old capabilities until stopped, revoked or expired; do not treat
+two generations as one team.
 
 ## Recovery
 

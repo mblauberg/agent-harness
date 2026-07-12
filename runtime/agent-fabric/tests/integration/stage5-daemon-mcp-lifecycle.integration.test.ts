@@ -13,6 +13,7 @@ import {
   type McpProxy,
 } from "../support/mcp-testkit.ts";
 import { requireRecord, teamCreateInput } from "../support/stage5-team-testkit.ts";
+import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -26,8 +27,9 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
     const stateDirectory = join(directory, "state");
     const runtimeDirectory = join(directory, "runtime");
     const socketPath = join(runtimeDirectory, "fabric.sock");
+    const databasePath = join(stateDirectory, "fabric.sqlite3");
     const daemon = await startFabricDaemon({
-      databasePath: join(stateDirectory, "fabric.sqlite3"),
+      databasePath,
       stateDirectory,
       runtimeDirectory,
       socketPath,
@@ -37,7 +39,9 @@ describe("Stage 5 lifecycle through the shared daemon and MCP", () => {
       socketPath,
       capability: daemon.bootstrapCapability,
     });
-    const run = await bootstrap.createRun({
+    const run = await createCurrentSessionRun({
+      databasePath,
+      workspaceRoot: directory,
       runId: "run-stage5-daemon-mcp",
       projectRunDirectory: join(directory, "project-run"),
       chair: { agentId: "chair", authority: MCP_ROOT_AUTHORITY },

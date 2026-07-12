@@ -871,9 +871,10 @@ export class ProjectSessionStore {
 
   #sessionFromRow(stored: Row): ProjectSession {
     const state = text(stored, "state") as ProjectSessionState;
-    const origin = text(stored, "origin_kind") === "operator-launch"
-      ? { kind: "operator-launch" as const, operatorId: text(stored, "origin_operator_id") }
-      : { kind: "legacy-migration" as const, migrationManifestRef: JSON.parse(text(stored, "migration_manifest_ref")) };
+    if (text(stored, "origin_kind") !== "operator-launch") {
+      throw new Error("stored project-session origin is invalid for the current baseline");
+    }
+    const origin = { kind: "operator-launch" as const, operatorId: text(stored, "origin_operator_id") };
     const base = {
       projectSessionId: text(stored, "project_session_id"),
       projectId: text(stored, "project_id"),

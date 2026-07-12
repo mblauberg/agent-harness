@@ -2,11 +2,13 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
-import Database from "better-sqlite3";
+import { connectFabricDaemon, startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
+import { MCP_ROOT_AUTHORITY } from "../../support/mcp-testkit.ts";
 import { parseCliJson, runSourceCli } from "../../support/cli-process.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const roots: string[] = [];
 const daemons: FabricDaemonHandle[] = [];
@@ -16,24 +18,42 @@ afterEach(async () => {
   await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(): Promise<{
+type Fixture = {
   environment: Record<string, string>;
   projectPath: string;
   stateDirectory: string;
-}> {
+  databasePath: string;
+  identity: {
+    projectSessionId: string;
+    sessionRevision: number;
+    sessionGeneration: number;
+    runId: string;
+    runRevision: number;
+    chairAgentId: string;
+    chairGeneration: number;
+    chairLeaseId: string;
+  };
+  seatBindings: string;
+};
+
+async function fixture(options: { broaderRoot?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "fabric-mcp-provision-"));
   roots.push(root);
   const stateDirectory = join(root, "state");
   const runtimeDirectory = join(root, "runtime");
-  const requestedProjectPath = join(root, "project");
+  const requestedProjectPath = options.broaderRoot === true
+    ? join(root, "projects", "one")
+    : join(root, "project");
   await mkdir(requestedProjectPath, { recursive: true });
   const projectPath = await realpath(requestedProjectPath);
+  const databasePath = join(stateDirectory, "fabric-v1.sqlite3");
+  const socketPath = join(runtimeDirectory, "fabric-v1.sock");
   const daemon = await startFabricDaemon({
-    databasePath: join(stateDirectory, "fabric-v1.sqlite3"),
+    databasePath,
     stateDirectory,
     runtimeDirectory,
-    socketPath: join(runtimeDirectory, "fabric-v1.sock"),
-    workspaceRoots: [projectPath],
+    socketPath,
+    workspaceRoots: [options.broaderRoot === true ? root : projectPath],
   });
   daemons.push(daemon);
   const discoveryPath = join(runtimeDirectory, "fabric-v1.discovery.json");
@@ -41,13 +61,49 @@ async function fixture(): Promise<{
     discoveryPath,
     `${JSON.stringify({
       schemaVersion: 1,
-      socketPath: join(runtimeDirectory, "fabric-v1.sock"),
+      socketPath,
       pid: daemon.pid,
       bootstrapCapability: daemon.bootstrapCapability,
     })}\n`,
     { mode: 0o600 },
   );
   await chmod(discoveryPath, 0o600);
+
+  const current = await createCurrentSessionRun({
+    databasePath,
+    workspaceRoot: projectPath,
+    runId: "run_current_mcp",
+    projectRunDirectory: join(projectPath, ".agent-run", "run_current_mcp"),
+    chair: {
+      agentId: "agent_codex_chair",
+      authority: {
+        ...MCP_ROOT_AUTHORITY,
+        workspaceRoots: ["."],
+        sourcePaths: ["."],
+        artifactPaths: [".agent-run"],
+      },
+    },
+  });
+  const chair = await connectFabricDaemon({ socketPath, capability: current.chairCapability });
+  try {
+    for (const agentId of ["agent_agy", "agent_claude", "agent_cursor", "agent_kiro"]) {
+      const delegated = await chair.delegateAuthority({
+        parentAuthorityId: current.chairAuthorityId,
+        commandId: `mcp-current-fixture:authority:${agentId}`,
+        authority: {
+          ...MCP_ROOT_AUTHORITY,
+          workspaceRoots: ["."],
+          sourcePaths: ["."],
+          artifactPaths: [".agent-run"],
+          budget: { turns: 8, "cost:USD": 8, descendants: 0 },
+        },
+      });
+      await chair.registerAgent({ agentId, authorityId: delegated.authorityId });
+    }
+  } finally {
+    await chair.close();
+  }
+
   return {
     environment: {
       AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
@@ -55,6 +111,24 @@ async function fixture(): Promise<{
     },
     projectPath,
     stateDirectory,
+    databasePath,
+    identity: {
+      projectSessionId: current.projectSessionId,
+      sessionRevision: current.sessionRevision,
+      sessionGeneration: current.sessionGeneration,
+      runId: current.runId,
+      runRevision: current.runRevision,
+      chairAgentId: current.chairAgentId,
+      chairGeneration: current.chairGeneration,
+      chairLeaseId: current.chairLeaseId,
+    },
+    seatBindings: [
+      "agy=agent_agy@1",
+      "claude=agent_claude@1",
+      "codex=agent_codex_chair@1",
+      "cursor=agent_cursor@1",
+      "kiro=agent_kiro@1",
+    ].join(","),
   };
 }
 
@@ -62,100 +136,144 @@ type ProvisionOutput = {
   schemaVersion: 1;
   projectKey: string;
   projectPath: string;
+  projectSessionId: string;
+  sessionRevision: number;
+  sessionGeneration: number;
   runId: string;
+  runRevision: number;
+  chairAgentId: string;
+  chairGeneration: number;
+  chairLeaseId: string;
   chairSeat: string;
   expiresAt: string;
   seats: Array<{
     seat: string;
     role: "chair" | "peer";
     agentId: string;
+    principalGeneration: number;
     credentialPath: string;
     metadataPath: string;
   }>;
 };
 
-describe("MCP project seat provisioning", () => {
-  it("idempotently provisions distinct private seat credentials without printing capabilities", async () => {
-    const { environment, projectPath, stateDirectory } = await fixture();
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString();
-    const arguments_ = [
-      "mcp",
-      "provision",
-      "--project",
-      projectPath,
-      "--chair",
-      "codex",
-      "--seats",
-      "agy,claude,codex,cursor,kiro",
-      "--expires-at",
-      expiresAt,
-    ];
+function provisionArguments(fixture_: Fixture, expiresAt: string): string[] {
+  const identity = fixture_.identity;
+  return [
+    "mcp", "provision",
+    "--project", fixture_.projectPath,
+    "--project-session-id", identity.projectSessionId,
+    "--session-revision", String(identity.sessionRevision),
+    "--session-generation", String(identity.sessionGeneration),
+    "--run-id", identity.runId,
+    "--run-revision", String(identity.runRevision),
+    "--chair-seat", "codex",
+    "--chair-agent-id", identity.chairAgentId,
+    "--chair-generation", String(identity.chairGeneration),
+    "--chair-lease-id", identity.chairLeaseId,
+    "--seat-bindings", fixture_.seatBindings,
+    "--expires-at", expiresAt,
+  ];
+}
 
-    const firstResult = await runSourceCli(arguments_, { environment });
+type PersistenceCounts = {
+  projects: number;
+  project_sessions: number;
+  runs: number;
+  authorities: number;
+  agents: number;
+  capabilities: number;
+};
+
+function persistenceCounts(databasePath: string): PersistenceCounts {
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    const count = (table: keyof PersistenceCounts): number =>
+      (database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number }).count;
+    return {
+      projects: count("projects"),
+      project_sessions: count("project_sessions"),
+      runs: count("runs"),
+      authorities: count("authorities"),
+      agents: count("agents"),
+      capabilities: count("capabilities"),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+describe("MCP current project seat provisioning", () => {
+  it("idempotently binds private seat credentials without creating a project, run, authority or agent", async () => {
+    const current = await fixture();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString();
+    const arguments_ = provisionArguments(current, expiresAt);
+    const before = persistenceCounts(current.databasePath);
+
+    const firstResult = await runSourceCli(arguments_, { environment: current.environment });
     const first = parseCliJson(firstResult) as ProvisionOutput;
     expect(first).toMatchObject({
       schemaVersion: 1,
-      projectPath,
+      projectPath: current.projectPath,
+      ...current.identity,
       chairSeat: "codex",
       expiresAt,
       seats: [
-        { seat: "agy", role: "peer" },
-        { seat: "claude", role: "peer" },
-        { seat: "codex", role: "chair" },
-        { seat: "cursor", role: "peer" },
-        { seat: "kiro", role: "peer" },
+        { seat: "agy", agentId: "agent_agy", role: "peer", principalGeneration: 1 },
+        { seat: "claude", agentId: "agent_claude", role: "peer", principalGeneration: 1 },
+        { seat: "codex", agentId: "agent_codex_chair", role: "chair", principalGeneration: 1 },
+        { seat: "cursor", agentId: "agent_cursor", role: "peer", principalGeneration: 1 },
+        { seat: "kiro", agentId: "agent_kiro", role: "peer", principalGeneration: 1 },
       ],
     });
-    expect(first.runId).toMatch(new RegExp(`^project-${first.projectKey}-[0-9a-f]{16}$`, "u"));
     expect(firstResult.stdout).not.toMatch(/af[bc]_[A-Za-z0-9_-]+/u);
     expect(firstResult.stdout).not.toContain("capability");
 
-    const credentials = await Promise.all(
-      first.seats.map(async (seat) => {
-        expect(seat.credentialPath).toMatch(new RegExp(`/seats/${first.projectKey}/generations/[0-9a-f]{16}/${seat.seat}\\.cap$`, "u"));
-        expect(seat.metadataPath).toMatch(new RegExp(`/seats/${first.projectKey}/generations/[0-9a-f]{16}/${seat.seat}\\.json$`, "u"));
-        const [credentialStat, metadataStat, credential, metadataText] = await Promise.all([
-          lstat(seat.credentialPath),
-          lstat(seat.metadataPath),
-          readFile(seat.credentialPath, "utf8"),
-          readFile(seat.metadataPath, "utf8"),
-        ]);
-        expect(credentialStat.isFile()).toBe(true);
-        expect(credentialStat.isSymbolicLink()).toBe(false);
-        expect(credentialStat.mode & 0o777).toBe(0o600);
-        expect(metadataStat.isFile()).toBe(true);
-        expect(metadataStat.isSymbolicLink()).toBe(false);
-        expect(metadataStat.mode & 0o777).toBe(0o600);
-        expect(credential).toMatch(/^afc_[A-Za-z0-9_-]{43}$/u);
-        expect(metadataText).not.toMatch(/afc_[A-Za-z0-9_-]+/u);
-        expect(JSON.parse(metadataText)).toMatchObject({
-          schemaVersion: 1,
-          projectKey: first.projectKey,
-          projectPath,
-          runId: first.runId,
-          seat: seat.seat,
-          agentId: seat.agentId,
-          role: seat.role,
-          credentialPath: seat.credentialPath,
-          expiresAt,
-        });
-        return credential;
-      }),
-    );
+    const credentials = await Promise.all(first.seats.map(async (seat) => {
+      expect(seat.credentialPath).toMatch(new RegExp(`/seats/${first.projectKey}/generations/[0-9a-f]{16}/${seat.seat}\\.cap$`, "u"));
+      const [credentialStat, metadataStat, credential, metadataText] = await Promise.all([
+        lstat(seat.credentialPath),
+        lstat(seat.metadataPath),
+        readFile(seat.credentialPath, "utf8"),
+        readFile(seat.metadataPath, "utf8"),
+      ]);
+      expect(credentialStat.isFile()).toBe(true);
+      expect(credentialStat.isSymbolicLink()).toBe(false);
+      expect(credentialStat.mode & 0o777).toBe(0o600);
+      expect(metadataStat.isFile()).toBe(true);
+      expect(metadataStat.isSymbolicLink()).toBe(false);
+      expect(metadataStat.mode & 0o777).toBe(0o600);
+      expect(credential).toMatch(/^afc_[A-Za-z0-9_-]{43}$/u);
+      expect(metadataText).not.toMatch(/afc_[A-Za-z0-9_-]+/u);
+      expect(JSON.parse(metadataText)).toMatchObject({
+        schemaVersion: 1,
+        projectKey: first.projectKey,
+        projectPath: current.projectPath,
+        ...current.identity,
+        seat: seat.seat,
+        agentId: seat.agentId,
+        principalGeneration: 1,
+        role: seat.role,
+        credentialPath: seat.credentialPath,
+        expiresAt,
+      });
+      return credential;
+    }));
     expect(new Set(credentials).size).toBe(5);
-    expect((await lstat(join(stateDirectory, "seats"))).mode & 0o777).toBe(0o700);
-    expect((await lstat(join(stateDirectory, "seats", first.projectKey))).mode & 0o777).toBe(0o700);
+    expect((await lstat(join(current.stateDirectory, "seats"))).mode & 0o777).toBe(0o700);
+    expect((await lstat(join(current.stateDirectory, "seats", first.projectKey))).mode & 0o777).toBe(0o700);
 
-    const secondResult = await runSourceCli(arguments_, { environment });
+    const afterFirst = persistenceCounts(current.databasePath);
+    expect(afterFirst).toEqual({ ...before, capabilities: before.capabilities + 5 });
+    const secondResult = await runSourceCli(arguments_, { environment: current.environment });
     const second = parseCliJson(secondResult) as ProvisionOutput;
     expect(second).toEqual(first);
-    await expect(Promise.all(second.seats.map(async (seat) => readFile(seat.credentialPath, "utf8")))).resolves.toEqual(
-      credentials,
-    );
+    expect(persistenceCounts(current.databasePath)).toEqual(afterFirst);
+    await expect(Promise.all(second.seats.map(async (seat) => readFile(seat.credentialPath, "utf8"))))
+      .resolves.toEqual(credentials);
 
     const seatPathResult = await runSourceCli(
-      ["mcp", "seat-path", "--project", projectPath, "--seat", "claude"],
-      { environment },
+      ["mcp", "seat-path", "--project", current.projectPath, "--seat", "claude"],
+      { environment: current.environment },
     );
     expect(parseCliJson(seatPathResult)).toEqual({
       schemaVersion: 1,
@@ -164,78 +282,78 @@ describe("MCP project seat provisioning", () => {
       credentialPath: first.seats[1]?.credentialPath,
       metadataPath: first.seats[1]?.metadataPath,
     });
-    expect(seatPathResult.stdout).not.toMatch(/afc_[A-Za-z0-9_-]+/u);
+  });
+
+  it("rejects stale exact identity and leaves all authority state untouched", async () => {
+    const current = await fixture();
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1_000).toISOString();
+    const arguments_ = provisionArguments(current, expiresAt);
+    const revisionIndex = arguments_.indexOf("--run-revision") + 1;
+    arguments_[revisionIndex] = "2";
+    const before = persistenceCounts(current.databasePath);
+
+    const result = await runSourceCli(arguments_, { environment: current.environment });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/stale or crossed/u);
+    expect(result.stderr).not.toMatch(/afc_[A-Za-z0-9_-]+/u);
+    expect(persistenceCounts(current.databasePath)).toEqual(before);
   });
 
   it("refuses to replace a symlinked credential", async () => {
-    const { environment, projectPath } = await fixture();
-    const arguments_ = [
-      "mcp", "provision", "--project", projectPath, "--chair", "codex", "--seats", "claude,codex",
-      "--expires-at", new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString(),
-    ];
-    const provisioned = parseCliJson(await runSourceCli(arguments_, { environment })) as ProvisionOutput;
-    const target = join(projectPath, "must-not-change");
+    const current = await fixture();
+    const arguments_ = provisionArguments(
+      current,
+      new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString(),
+    );
+    const provisioned = parseCliJson(await runSourceCli(arguments_, { environment: current.environment })) as ProvisionOutput;
+    const target = join(current.projectPath, "must-not-change");
     await writeFile(target, "safe");
     const credentialPath = provisioned.seats[0]?.credentialPath;
-    if (credentialPath === undefined) throw new Error("test fixture did not return the claude credential path");
+    if (credentialPath === undefined) throw new Error("test fixture did not return the agy credential path");
     await unlink(credentialPath);
     await symlink(target, credentialPath);
 
-    const result = await runSourceCli(arguments_, { environment });
+    const result = await runSourceCli(arguments_, { environment: current.environment });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toMatch(/private regular file|symbolic link/u);
     expect(result.stderr).not.toMatch(/afc_[A-Za-z0-9_-]+/u);
     await expect(readFile(target, "utf8")).resolves.toBe("safe");
   });
 
-  it("uses a new durable run generation for renewal and rejects a one-seat roster", async () => {
-    const { environment, projectPath } = await fixture();
+  it("renews credentials on the same explicit run and rejects a one-seat binding", async () => {
+    const current = await fixture();
     const firstExpiry = new Date(Date.now() + 14 * 24 * 60 * 60 * 1_000).toISOString();
     const secondExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString();
-    const base = ["mcp", "provision", "--project", projectPath, "--chair", "codex", "--seats", "claude,codex"];
-
-    const first = parseCliJson(await runSourceCli([...base, "--expires-at", firstExpiry], { environment })) as ProvisionOutput;
-    const second = parseCliJson(await runSourceCli([...base, "--expires-at", secondExpiry], { environment })) as ProvisionOutput;
-    expect(second.runId).not.toBe(first.runId);
+    const first = parseCliJson(await runSourceCli(provisionArguments(current, firstExpiry), {
+      environment: current.environment,
+    })) as ProvisionOutput;
+    const second = parseCliJson(await runSourceCli(provisionArguments(current, secondExpiry), {
+      environment: current.environment,
+    })) as ProvisionOutput;
+    expect(second.runId).toBe(first.runId);
     expect(second.seats.map((seat) => seat.credentialPath)).not.toEqual(first.seats.map((seat) => seat.credentialPath));
+    expect(persistenceCounts(current.databasePath).runs).toBe(1);
 
-    const invalid = await runSourceCli([
-      "mcp", "provision", "--project", projectPath, "--chair", "codex", "--seats", "codex", "--expires-at", secondExpiry,
-    ], { environment });
+    const invalidArguments = provisionArguments(current, secondExpiry);
+    const bindingsIndex = invalidArguments.indexOf("--seat-bindings") + 1;
+    invalidArguments[bindingsIndex] = "codex=agent_codex_chair@1";
+    const invalid = await runSourceCli(invalidArguments, { environment: current.environment });
     expect(invalid.exitCode).toBe(1);
-    expect(invalid.stderr).toMatch(/at least two distinct seats/u);
+    expect(invalid.stderr).toMatch(/at least two distinct seat bindings/u);
   });
 
-  it("binds a provisioned run to the requested project under a broader trusted root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fabric-mcp-project-root-"));
-    roots.push(root);
-    const stateDirectory = join(root, "state");
-    const runtimeDirectory = join(root, "runtime");
-    const projectPath = join(root, "projects", "one");
-    await mkdir(projectPath, { recursive: true });
-    const databasePath = join(stateDirectory, "fabric-v1.sqlite3");
-    const daemon = await startFabricDaemon({
-      databasePath,
-      stateDirectory,
-      runtimeDirectory,
-      socketPath: join(runtimeDirectory, "fabric-v1.sock"),
-      workspaceRoots: [root],
-    });
-    daemons.push(daemon);
-    await writeFile(join(runtimeDirectory, "fabric-v1.discovery.json"), `${JSON.stringify({
-      schemaVersion: 1,
-      socketPath: join(runtimeDirectory, "fabric-v1.sock"),
-      pid: daemon.pid,
-      bootstrapCapability: daemon.bootstrapCapability,
-    })}\n`, { mode: 0o600 });
-    const result = parseCliJson(await runSourceCli([
-      "mcp", "provision", "--project", projectPath, "--chair", "codex", "--seats", "claude,codex",
-      "--expires-at", new Date(Date.now() + 14 * 24 * 60 * 60 * 1_000).toISOString(),
-    ], { environment: { AGENT_FABRIC_STATE_DIRECTORY: stateDirectory, AGENT_FABRIC_RUNTIME_DIRECTORY: runtimeDirectory } })) as ProvisionOutput;
-
-    const database = new Database(databasePath, { readonly: true });
+  it("binds only the requested current project under a broader trusted root", async () => {
+    const current = await fixture({ broaderRoot: true });
+    const result = parseCliJson(await runSourceCli(
+      provisionArguments(current, new Date(Date.now() + 14 * 24 * 60 * 60 * 1_000).toISOString()),
+      { environment: current.environment },
+    )) as ProvisionOutput;
+    expect(result.projectPath).toBe(current.projectPath);
+    expect(result.runId).toBe(current.identity.runId);
+    const database = new Database(current.databasePath, { readonly: true });
     try {
-      expect(database.prepare("SELECT workspace_root FROM runs WHERE run_id = ?").pluck().get(result.runId)).toBe(await realpath(projectPath));
+      expect(database.prepare("SELECT workspace_root FROM runs WHERE run_id = ?").pluck().get(result.runId))
+        .toBe(current.projectPath);
     } finally {
       database.close();
     }

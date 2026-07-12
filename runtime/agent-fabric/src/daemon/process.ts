@@ -10,7 +10,7 @@ import {
 
 import { openFabric } from "../index.js";
 import {
-  createRunInput,
+  bindCurrentMcpSeatsInput,
   FABRIC_DAEMON_VERSION,
   daemonInitializeParams,
   daemonInitializeResult,
@@ -330,8 +330,8 @@ const servePrivateControlConnection = (socket: Socket): void => {
     }
     if (secretEqual(request.capability, bootstrapCapability)) {
       switch (request.method) {
-        case "createRun":
-          return await fabric.createRun(createRunInput(request.params));
+        case "bindCurrentMcpSeats":
+          return fabric.bindCurrentMcpSeats(bindCurrentMcpSeatsInput(request.params));
         case "provisionLocalOperator":
           return fabric.provisionLocalOperator(await withTrustedLocalSubject(
             provisionLocalOperatorInput(request.params),
@@ -529,8 +529,6 @@ await new Promise<void>((resolve, reject) => {
 });
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 
-process.stdout.write(`${JSON.stringify({ ready: true })}\n`);
-
 let shuttingDown = false;
 const markProductionTerminal = async (
   signal: NodeJS.Signals | null,
@@ -717,3 +715,4 @@ const shutdown = (signal: "SIGINT" | "SIGTERM"): void => {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+process.stdout.write(`${JSON.stringify({ ready: true })}\n`);

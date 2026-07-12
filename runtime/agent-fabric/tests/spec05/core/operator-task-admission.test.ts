@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
+import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const roots: string[] = [];
 
@@ -21,7 +22,7 @@ describe("operator task admission", () => {
     const databasePath = join(root, "fabric.sqlite3");
     const fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey: "scoped-barrier-key" });
     try {
-      const run = await fabric.createRun({ runId: "run_barrier_gate", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: root, runId: "run_barrier_gate", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
       const chair = fabric.connect(run.chairCapability);
       const database = new Database(databasePath);
       try {
@@ -66,7 +67,7 @@ describe("operator task admission", () => {
     const databasePath = join(root, "fabric.sqlite3");
     const fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey: "scoped-gate-admission-key" });
     try {
-      const run = await fabric.createRun({ runId: "run_gate_admission", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: root, runId: "run_gate_admission", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
       const chair = fabric.connect(run.chairCapability);
       const delegated = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
@@ -169,7 +170,7 @@ describe("operator task admission", () => {
     const databasePath = join(root, "fabric.sqlite3");
     const fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey: "operator-task-admission-key" });
     try {
-      const run = await fabric.createRun({ runId: "run_admission", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: root, runId: "run_admission", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
       const chair = fabric.connect(run.chairCapability);
       const delegated = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,
@@ -253,7 +254,7 @@ describe("operator task admission", () => {
     const databasePath = join(root, "fabric.sqlite3");
     const fabric = await openFabric({ databasePath, workspaceRoots: [root], capabilityKey: "operator-state-admission-key" });
     try {
-      const run = await fabric.createRun({ runId: "run_exceptional", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
+      const run = await createCurrentSessionRun({ databasePath, workspaceRoot: root, runId: "run_exceptional", chair: { agentId: "chair", authority: ROOT_AUTHORITY } });
       const chair = fabric.connect(run.chairCapability);
       const delegated = await chair.delegateAuthority({
         parentAuthorityId: run.chairAuthorityId,

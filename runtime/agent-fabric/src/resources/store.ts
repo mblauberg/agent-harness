@@ -36,9 +36,7 @@ export type EnsureRunHierarchyContext = Readonly<{
   projectId: string;
   projectSessionId: string;
   coordinationRunId: string;
-  actor:
-    | { kind: "operator-launch"; operatorId: string }
-    | { kind: "compatibility-import"; migrationManifestDigest: string };
+  actor: { kind: "operator-launch"; operatorId: string };
 }>;
 
 export type ScopeLimits = Readonly<Record<string, number>>;
@@ -91,10 +89,9 @@ export class HierarchicalAdmissionStore {
   ): readonly ResourceScopeProjection[] {
     const execute = this.#database.transaction((): readonly ResourceScopeProjection[] => {
       this.#assertHierarchyContext(context);
-      const legacyEmptyBudget = context.actor.kind === "compatibility-import";
-      this.#validateLimits(request.project.limits, "project", legacyEmptyBudget);
-      this.#validateLimits(request.session.limits, "project-session", legacyEmptyBudget);
-      this.#validateLimits(request.run.limits, "coordination-run", legacyEmptyBudget);
+      this.#validateLimits(request.project.limits, "project");
+      this.#validateLimits(request.session.limits, "project-session");
+      this.#validateLimits(request.run.limits, "coordination-run");
       this.#assertNarrowing(request.project.limits, request.session.limits, "project-session");
       this.#assertNarrowing(request.session.limits, request.run.limits, "coordination-run");
       const definitions = [
@@ -452,10 +449,9 @@ export class HierarchicalAdmissionStore {
     ) {
       throw new ProjectFabricCoreError("WRONG_PROJECT", "run hierarchy context does not match persistence");
     }
-    const actor = context.actor.kind === "operator-launch"
-      ? context.actor.operatorId
-      : context.actor.migrationManifestDigest;
-    if (actor.trim().length === 0) throw new ProjectFabricCoreError("PROTOCOL_INVALID", "hierarchy actor is required");
+    if (context.actor.operatorId.trim().length === 0) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "hierarchy actor is required");
+    }
   }
 
   #assertAgentContext(context: AuthenticatedAgentContext): void {
