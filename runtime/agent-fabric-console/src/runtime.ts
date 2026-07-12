@@ -128,8 +128,8 @@ export class FabricConsoleRuntime {
   #ui: FabricConsoleUiState;
   #frame: FabricConsoleFrame;
   #pointer: FabricPointerState = { pressed: null };
-  #restorableSplitterFocus: Readonly<{
-    splitterId: string;
+  #restorableResizeFocus: Readonly<{
+    focusId: string;
     migratedFocusId: string | null;
   }> | null = null;
   #reviewFocusSession: {
@@ -319,10 +319,10 @@ export class FabricConsoleRuntime {
     );
     this.#ui = { ...this.#ui, focusId: nextFocusId };
     if (
-      this.#restorableSplitterFocus?.migratedFocusId === previousFocusId
+      this.#restorableResizeFocus?.migratedFocusId === previousFocusId
     ) {
-      this.#restorableSplitterFocus = {
-        ...this.#restorableSplitterFocus,
+      this.#restorableResizeFocus = {
+        ...this.#restorableResizeFocus,
         migratedFocusId: nextFocusId,
       };
     }
@@ -347,28 +347,15 @@ export class FabricConsoleRuntime {
     this.#viewport = viewport;
     this.#pointer = { pressed: null };
     let frame = this.#renderCurrentFrame();
-    if (
-      previousFocus?.startsWith("splitter:") === true &&
-      !frame.hitRegions.some(({ enabled, id }) => enabled && id === previousFocus)
-    ) {
-      const migratedFocusId = this.#visibleSafeFocus(frame);
-      this.#ui = { ...this.#ui, focusId: migratedFocusId };
-      this.#restorableSplitterFocus = {
-        splitterId: previousFocus,
-        migratedFocusId,
-      };
-      frame = this.#renderCurrentFrame();
-    } else if (
-      this.#restorableSplitterFocus !== null
-    ) {
-      const restorable = this.#restorableSplitterFocus;
-      const splitterVisible = frame.hitRegions.some(
-        ({ enabled, id }) => enabled && id === restorable.splitterId,
+    if (this.#restorableResizeFocus !== null) {
+      const restorable = this.#restorableResizeFocus;
+      const originalVisible = frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === restorable.focusId,
       );
-      if (splitterVisible) {
-        this.#restorableSplitterFocus = null;
+      if (originalVisible) {
+        this.#restorableResizeFocus = null;
         if (this.#ui.focusId === restorable.migratedFocusId) {
-          this.#ui = { ...this.#ui, focusId: restorable.splitterId };
+          this.#ui = { ...this.#ui, focusId: restorable.focusId };
           frame = this.#renderCurrentFrame();
         }
       } else if (!frame.hitRegions.some(
@@ -376,12 +363,23 @@ export class FabricConsoleRuntime {
       )) {
         const migratedFocusId = this.#visibleSafeFocus(frame);
         this.#ui = { ...this.#ui, focusId: migratedFocusId };
-        this.#restorableSplitterFocus = {
+        this.#restorableResizeFocus = {
           ...restorable,
           migratedFocusId,
         };
         frame = this.#renderCurrentFrame();
       }
+    } else if (
+      previousFocus !== null &&
+      !frame.hitRegions.some(({ enabled, id }) => enabled && id === previousFocus)
+    ) {
+      const migratedFocusId = this.#visibleSafeFocus(frame);
+      this.#ui = { ...this.#ui, focusId: migratedFocusId };
+      this.#restorableResizeFocus = {
+        focusId: previousFocus,
+        migratedFocusId,
+      };
+      frame = this.#renderCurrentFrame();
     }
     this.#frame = this.#reconcileFocus(frame);
     this.#draw(this.#frame);
@@ -515,7 +513,7 @@ export class FabricConsoleRuntime {
 
   setFocus(focusId: string | null): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
-    this.#restorableSplitterFocus = null;
+    this.#restorableResizeFocus = null;
     this.#ui = { ...this.#ui, focusId };
     return this.repaint();
   }
@@ -543,7 +541,7 @@ export class FabricConsoleRuntime {
   }
 
   async #handleInput(event: TerminalInputEvent): Promise<void> {
-    this.#restorableSplitterFocus = null;
+    this.#restorableResizeFocus = null;
     if (event.kind === "fatal") {
       await this.close("safety");
       return;

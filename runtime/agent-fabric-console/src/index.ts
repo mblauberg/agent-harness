@@ -1107,11 +1107,29 @@ function renderFabricActions(
     );
     return;
   }
+  const compactLabels: Readonly<Record<string, string>> = {
+    "review:continue": "Continue",
+    "review:cancel": "Cancel",
+    "review:confirm": "Confirm",
+    "review:refresh": "Refresh",
+    "review:observe": "Observe",
+    "review:close": "Close",
+  };
+  const actionLabel = (action: PresentedAction, index: number, compact: boolean): string => {
+    const marker = presentation.focusId === action.id ? ">" : "";
+    const text = compact ? compactLabels[action.id] ?? action.label : action.label;
+    return `${marker}[${String(index + 1)} ${action.enabled ? "" : "×"}${text}]`;
+  };
+  const fullWidth = actions.reduce(
+    (width, action, index) =>
+      width + (index === 0 ? 0 : 1) + cellWidth(actionLabel(action, index, false)),
+    0,
+  );
+  const compact = fullWidth > columns;
   let line = "";
   let x = 1;
   for (const [index, action] of actions.entries()) {
-    const marker = presentation.focusId === action.id ? ">" : "";
-    const label = `${marker}[${String(index + 1)} ${action.enabled ? "" : "×"}${action.label}]`;
+    const label = actionLabel(action, index, compact);
     const gap = x === 1 ? "" : " ";
     const width = cellWidth(label);
     const x1 = x + cellWidth(gap);

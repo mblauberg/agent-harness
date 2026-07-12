@@ -961,6 +961,37 @@ describe("Fabric Console runtime routing", () => {
       .toBe(false);
   });
 
+  it("keeps both explicit confirmation bindings reachable at 30x6", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 30, rows: 6 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "strip-confirm-actions",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("confirm"));
+    for (let page = 0; page < 80; page += 1) {
+      if (runtime.ui.reviewCoverage !== null &&
+          runtime.ui.reviewCoverage.coveredThrough >= runtime.ui.reviewCoverage.requiredEnd) break;
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+    }
+
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "review:cancel"))
+      .toMatchObject({ enabled: true });
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "review:confirm"))
+      .toMatchObject({ enabled: true });
+    await runtime.handleInput({ kind: "key", key: "text", text: "2" });
+    expect(activate).toHaveBeenCalledOnce();
+    expect(activate).toHaveBeenCalledWith(expect.objectContaining({
+      regionId: "review:confirm",
+      provenance: "keyboard",
+    }));
+  });
+
   it.each(["revision", "digest"] as const)(
     "resets cumulative review coverage when a stale %s is replaced",
     async (changedBinding) => {
@@ -1477,6 +1508,32 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.focusId).toBe("detach");
     runtime.resize({ columns: 80, rows: 24 });
     expect(runtime.ui.focusId).toBe("splitter:master-detail");
+  });
+
+  it("restores an arbitrary semantic focus after a temporary compact resize", () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "semantic-resize-focus",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const detailFocus = runtime.frame.hitRegions.find(
+      ({ id, kind }) => kind === "pager" && id.startsWith("detail:"),
+    )?.id;
+    expect(detailFocus).toBeDefined();
+    if (detailFocus === undefined) return;
+    runtime.setFocus(detailFocus);
+
+    runtime.resize({ columns: 60, rows: 18 });
+    expect(runtime.ui.focusId).not.toBe(detailFocus);
+    expectEnabledVisibleFocus(runtime);
+    runtime.resize({ columns: 80, rows: 24 });
+
+    expectEnabledVisibleFocus(runtime, detailFocus);
   });
 
   it("retains splitter restoration when projection refresh invalidates its surrogate", () => {
