@@ -6,12 +6,13 @@ agent or chair. Run them only after operator launch has established the exact
 current identity and `agent-fabric mcp provision` has bound its existing agents
 to the registered seat generation.
 
-From `runtime/agent-fabric`, build the runtime and export the project key shown
-by `agent-fabric status --json`:
+From `runtime/agent-fabric`, build the runtime and resolve the project key from
+the current project-keyed seat pointer:
 
 ```sh
 npm run build
-export AGENT_FABRIC_PROJECT_KEY='<project-key>'
+export AGENT_FABRIC_PROJECT_KEY="$(../../scripts/agent-fabric mcp seat-path \
+  --project ../.. --seat codex | jq -r .projectKey)"
 ```
 
 Verify all registered seats, discovery and readable current-run state:
@@ -27,7 +28,9 @@ separate MCP stdio proxies:
 node smoke/registered-mcp-roundtrip.mjs ../..
 ```
 
-Both commands consume the atomically installed current seat generation. They
-fail closed when seats disagree on the run or a credential is stale, revoked,
-expired or no longer bound to its recorded principal generation. They do not
-invoke a model provider or expose bearer credentials in output.
+Both commands consume the daemon-activated and atomically published current
+seat generation. They fail closed when seats disagree on the project/session/
+run or a credential belongs to an inactive generation, is stale, revoked,
+expired or no longer bound to its recorded principal generation. There is no
+flat-seat fallback. The smokes do not invoke a model provider or expose bearer
+credentials in output.

@@ -5,26 +5,29 @@ Status: active
 
 ## Destination
 
-Deliver the approved [Spec 05](../specs/05-project-fabric-console.md) from
-`c2fc623`: a project-scoped terminal Console over the shared Fabric, including
-the owned Spec 01/04 extensions, adaptive one-chair sessions, typed operator
-actions, reliable result delivery, lifecycle skills and full verification.
-Stop at explicit human acceptance; push and release remain separate gates.
+Deliver the approved [Spec 05](../specs/05-project-fabric-console.md) from its
+`c2fc623` approval baseline: a project-scoped terminal Console over the shared
+Fabric, including the owned Spec 01/04 extensions, adaptive one-chair sessions,
+typed operator actions, reliable result delivery, lifecycle skills and full
+verification. Stop at explicit human acceptance; push and release remain
+separate gates.
 
 ## Route
 
-- [x] Leg 1 — canonical AFAB-004 run, Spec 01 v0.4 and Spec 04 v1.1 amendments, independent amendment review and frozen evaluation plan (`c80e07f`)
-- [>] Leg 2 — standalone public protocol package — IN PROGRESS; handoff: `.agent-run/AFAB-004/CHECKPOINT.md`
-- [ ] Leg 3 — project-session/operator persistence and daemon lifecycle (depends: leg 2)
-- [ ] Leg 4 — standalone Node Console and Herdr control adapter (depends: leg 2); first gate is the responsive cell-grid/SGR/PTY spike in the [terminal-runtime decision](../research/project-fabric-console-tui-options-2026.md), with Rust/Ratatui as the objective fallback
-- [ ] Leg 5 — serial Fabric/RPC/MCP/package integration and affected lifecycle skills (depends: legs 3–4)
-- [ ] Leg 6 — deterministic, security, evaluation and load gates (depends: leg 5)
-- [ ] Leg 7 — native, Claude, Cursor Grok and Gemini review, bounded repair and machine-ready receipt (depends: leg 6)
-- [ ] Leg 8 — final human acceptance
+- [x] Leg 1: canonical delivery run, binding Spec 01/04 amendments, independent amendment review and versioned evaluation plan
+- [x] Leg 2: one current public protocol and one current database baseline; incompatible pre-release state is preserved and rejected
+- [x] Leg 3: project-session/operator persistence, daemon lifecycle, current-generation seats, task-bound answer-bearing provider reviews and MCP projection
+- [x] Leg 4: standalone TypeScript Console and Herdr adapter, including responsive cell-grid rendering, terminal restoration and dynamic resize from ultra-small through wide layouts
+- [x] Leg 5: serial Fabric/RPC/MCP/package integration and affected lifecycle skills
+- [>] Leg 6: clean full harness/runtime/Console/Herdr/evaluation/load/audit gates and live MCP round-trip on the final integrated commit
+- [ ] Leg 7: fresh native, Claude Opus, Cursor Grok and Gemini reviews, bounded repair and machine-ready receipt
+- [ ] Leg 8: human-recorded 80x24 timed-identification evaluation and explicit final human acceptance
 
-## Blocked / parked
+## Human gates and exclusions
 
-- The primary checkout has unrelated uncommitted skill-portfolio work. AFAB-004 preserves it untouched and uses authorised repository-owned worktrees. The overlapping skills leg waits for that writer to close or provide a non-overlapping integration base.
+- The automated Console evaluation intentionally cannot certify the human
+  identification criterion. Final acceptance requires the human-recorded
+  repetitions in the current [activation and acceptance handoff](../handoffs/HANDOFF-2026-07-12-project-fabric-console.md).
 - Browser Console, remote listener, login daemon, arbitrary shell, automatic release/deploy and unauthorised Git publication remain excluded.
 
 ## Invariants for every leg
@@ -41,3 +44,9 @@ Stop at explicit human acceptance; push and release remain separate gates.
 - 11 July 2026 Codex: compared current TypeScript, Rust, Go and C++ TUI stacks and open-source operator interfaces. Selected a small Node cell-grid terminal layer because it preserves one typed protocol/toolchain, with a mandatory responsive-render/PTY spike and automatic Rust/Ratatui fallback. Spec 05 v1.1 records 80x24 as the default/reference acceptance viewport and requires dynamic reflow with terminal resizing.
 - 11 July 2026 Codex: compared 18 current open-source agent harnesses. Retained Fabric's one-chair, one-transaction-owner architecture; adopted gap-free durable projection catch-up and immutable Git-object binding as non-normative implementation hardening, while parking browser, external-ledger and merge-automation scope.
 - 12 July 2026 Codex: completed the Console multi-session correction. The project client remains attached, exactly one attachable session auto-selects, multiple sessions require a stable run/session choice, `s` returns to the project selector, `--session` supports explicit/headless selection, and responsive/evidence state remains preserved across resize. Current Console clients require exact run/session projection instead of adding another legacy shim.
+- 12 July 2026 Codex: consolidated Fabric onto one manifest-pinned database
+  baseline and current protocol, removed pre-release import/fallback paths,
+  bound MCP seats to current project/session/run principals and added
+  task-bound answer-bearing provider review actions. The remaining route is
+  fresh integrated evidence, independent review, the human timed-identification
+  evaluation and final acceptance.
