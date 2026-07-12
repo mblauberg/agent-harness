@@ -1,4 +1,4 @@
-You are a blind skill-routing evaluator. For every opaque case, choose exactly one primary skill and zero or more genuinely required companion skills from the complete catalogue. Copy skill names exactly. For portability cases, also complete the requested workflow using project artifacts only and return the named artifact kind without Console, Herdr, or GitHub. Return only one JSON object with schema_version 1 and a selections array. Each selection must contain exactly case_id, primary_skill, companion_skills, and portable_workflow. portable_workflow is null for ordinary cases; otherwise it contains exactly artifact_kind, artifact_basis (project-artifacts), adapters_used (an empty array), and status (completed). Do not use tools, infer from case IDs, or include commentary.
+You are a blind skill-routing evaluator. For every opaque case, choose exactly one primary skill and zero or more genuinely required companion skills from the complete catalogue. The primary skill's built-in obligations do not become companions: add a companion only when the user explicitly requests a separate second lifecycle, domain, tool, or presentation outcome. Preserving decision context, starting or checkpointing a session, adapting topology, and feeding evidence forward stay inside the named primary when its own contract already requires them. Copy skill names exactly. For portability cases, also complete the requested workflow using project artifacts only and return the named artifact kind without Console, Herdr, or GitHub. Return only one JSON object with schema_version 1 and a selections array. Each selection must contain exactly case_id, primary_skill, companion_skills, and portable_workflow. portable_workflow is null for ordinary cases; otherwise it contains exactly artifact_kind, artifact_basis (project-artifacts), adapters_used (an empty array), and status (completed). Do not use tools, infer from case IDs, or include commentary.
 
 ## Skill catalogue
 
@@ -50,7 +50,7 @@ c009: Implement this approved substantial change in a fresh session, adapting th
 c010: The intended outcome and authority are unsettled; decide the scope before any implementation.
 c011: Implement this approved cross-cutting change with adaptive, partitioned agent teams and independent review.
 c012: With Console, Herdr and GitHub unavailable, implement the approved change using project artifacts and the canonical delivery receipt.
-c013: Keep one chair while dynamically forming coordinated workstreams, settle only after recursive obligations close, and use a generation-bound live handoff if the chair must change.
+c013: For this bounded delivery, keep one chair while dynamically forming coordinated workstreams, settle only after recursive obligations close, and use a generation-bound live handoff if the chair must change.
 c014: Implement this approved tightly coupled one-file fix with no useful parallel decomposition.
 c015: Implement the approved migration with non-overlapping parallel writers in isolated repository worktrees.
 c016: With Console, Herdr and GitHub unavailable, orchestrate native workers from project artifacts and return namespaced evidence to one chair.
@@ -64,7 +64,7 @@ c023: Retrospect on the completed run, then scope the supported lifecycle improv
 c024: With Console, Herdr and GitHub unavailable, derive the retrospective from canonical project artifacts and retained receipts.
 c025: Turn this unsettled project intake and its decision context into an approved digest-bound scope handoff.
 c026: The digest-bound scope is approved; implement the minor software change through verification.
-c027: Grill me on the highest-leverage project decision, then land the resolved scope and acceptance contract.
+c027: Turn this unresolved intake into an approved scope and acceptance contract, using one-question-at-a-time grilling as the companion interview.
 c028: With Console, Herdr and GitHub unavailable, scope this request from project artifacts and return a digest-bound handoff.
 c029: Start a fresh substantial session from the digest-bound handoff, then checkpoint before compaction.
 c030: Create the persistent project route across runs and leads rather than a session handoff.

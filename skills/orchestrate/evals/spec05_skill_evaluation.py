@@ -47,7 +47,7 @@ ARTIFACT_KINDS = {
     "work-map": "effort-map",
 }
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-CLASSIFIER_INSTRUCTION = """You are a blind skill-routing evaluator. For every opaque case, choose exactly one primary skill and zero or more genuinely required companion skills from the complete catalogue. Copy skill names exactly. For portability cases, also complete the requested workflow using project artifacts only and return the named artifact kind without Console, Herdr, or GitHub. Return only one JSON object with schema_version 1 and a selections array. Each selection must contain exactly case_id, primary_skill, companion_skills, and portable_workflow. portable_workflow is null for ordinary cases; otherwise it contains exactly artifact_kind, artifact_basis (project-artifacts), adapters_used (an empty array), and status (completed). Do not use tools, infer from case IDs, or include commentary.
+CLASSIFIER_INSTRUCTION = """You are a blind skill-routing evaluator. For every opaque case, choose exactly one primary skill and zero or more genuinely required companion skills from the complete catalogue. The primary skill's built-in obligations do not become companions: add a companion only when the user explicitly requests a separate second lifecycle, domain, tool, or presentation outcome. Preserving decision context, starting or checkpointing a session, adapting topology, and feeding evidence forward stay inside the named primary when its own contract already requires them. Copy skill names exactly. For portability cases, also complete the requested workflow using project artifacts only and return the named artifact kind without Console, Herdr, or GitHub. Return only one JSON object with schema_version 1 and a selections array. Each selection must contain exactly case_id, primary_skill, companion_skills, and portable_workflow. portable_workflow is null for ordinary cases; otherwise it contains exactly artifact_kind, artifact_basis (project-artifacts), adapters_used (an empty array), and status (completed). Do not use tools, infer from case IDs, or include commentary.
 """
 PROVIDER_PREAMBLE = (
     "Perform the frozen blind routing evaluation below.\n\n"
@@ -230,8 +230,8 @@ def _parse_output(path: Path, cases: list[dict[str, Any]], known_skills: set[str
         seen.add(case_id)
         fail(row["primary_skill"] not in known_skills, "provider selected an unknown primary skill")
         companions = row["companion_skills"]
-        fail(not isinstance(companions, list) or companions != sorted(set(companions)),
-             "provider companion skills must be a sorted unique list")
+        fail(not isinstance(companions, list) or len(companions) != len(set(companions)),
+             "provider companion skills must be a unique list")
         fail(any(value not in known_skills for value in companions), "provider selected an unknown companion skill")
         expected_workflow = _expected_workflow(by_id[case_id])
         fail(row["portable_workflow"] != expected_workflow,
@@ -336,7 +336,9 @@ def validate_routing_result(
             row = by_id[case["id"]]
             expected = case["expected"]
             primary += int(row["primary_skill"] == expected["primary_skill"])
-            companions += int(row["companion_skills"] == sorted(expected["companion_skills"]))
+            companions += int(
+                sorted(row["companion_skills"]) == sorted(expected["companion_skills"])
+            )
             rows += 1
             if case["relation"] == "portability":
                 critical_failures += int(row["portable_workflow"] != _expected_workflow(case))
@@ -493,7 +495,8 @@ def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
             selection = selected[case["id"]]
             primary += int(selection["primary_skill"] == case["expected"]["primary_skill"])
             companions += int(
-                selection["companion_skills"] == sorted(case["expected"]["companion_skills"])
+                sorted(selection["companion_skills"])
+                == sorted(case["expected"]["companion_skills"])
             )
             rows += 1
             if case["relation"] == "portability":

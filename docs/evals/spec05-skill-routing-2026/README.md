@@ -1,7 +1,7 @@
 # Spec 05 lifecycle-skill evaluation
 
-Status: frozen inputs and adapter-absent executable probe pass; real Fabric
-routing outputs pending
+Status: revised frozen inputs and adapter-absent executable probe pass; fresh
+real Fabric routing rerun pending after one retained semantic non-pass
 Date: 12 July 2026
 
 This evaluation closes Spec 05 AC24 without treating the focused skill YAML as
@@ -40,3 +40,12 @@ python3 skills/orchestrate/evals/spec05_skill_evaluation.py validate-routing \
 Provider generation is deliberately outside the deterministic evaluator. It
 must use one Fabric coordination run with one chair; direct provider CLIs and
 hand-authored outputs do not satisfy this gate.
+
+## Retained non-passes
+
+Attempt 01 used all three required Fabric routes and returned valid complete
+JSON, but scored 103/108 primary and 92/108 companion rows. The raw actions and
+outputs remain under `attempts/attempt-01/`. Adjudication corrected one
+misowned session fixture, sharpened two genuinely ambiguous prompts and stated
+the pre-existing companion boundary explicitly. No failed output was relabelled
+or reused; the revised packet requires a fresh three-family run.

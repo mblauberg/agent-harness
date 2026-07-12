@@ -103,9 +103,9 @@ cases:
   portable_artifact_kind: implementation-checkpoint
 - id: c013
   relation: positive
-  prompt: Keep one chair while dynamically forming coordinated workstreams, settle
-    only after recursive obligations close, and use a generation-bound live handoff
-    if the chair must change.
+  prompt: For this bounded delivery, keep one chair while dynamically forming coordinated
+    workstreams, settle only after recursive obligations close, and use a generation-bound
+    live handoff if the chair must change.
   expected:
     primary_skill: orchestrate
     companion_skills: []
@@ -219,8 +219,8 @@ cases:
   portable_artifact_kind: null
 - id: c027
   relation: adjacent
-  prompt: Grill me on the highest-leverage project decision, then land the resolved
-    scope and acceptance contract.
+  prompt: Turn this unresolved intake into an approved scope and acceptance contract,
+    using one-question-at-a-time grilling as the companion interview.
   expected:
     primary_skill: scope
     companion_skills:
@@ -255,9 +255,9 @@ cases:
   prompt: Checkpoint this substantial implementation and preserve only safe provider-session
     continuity evidence.
   expected:
-    primary_skill: implement
+    primary_skill: session
     companion_skills:
-    - session
+    - implement
   portable_artifact_kind: null
 - id: c032
   relation: portability

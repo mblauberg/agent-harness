@@ -5,15 +5,15 @@
   },
   "classifier": {
     "packet_path": "routing-packet.txt",
-    "packet_sha256": "sha256:4e5a2c7255bfd191ed7f17cce469b9063335773d4305b09a4994a453a91304a2",
+    "packet_sha256": "sha256:8e90bc2daf2d933ae635ef131cf68ae39be5ecc8b9bc0d2a43f7a87755deefb2",
     "path": "classifier-instruction.txt",
-    "provider_prompt_sha256": "sha256:e99cbc16656878ed16f59aac5380e284557ebec1be508c93dcbf97db8dce70c6",
-    "sha256": "sha256:a47969795bd7103ca169ec7d71bf55708434b6fffb2a424228bc041c323bdbb1"
+    "provider_prompt_sha256": "sha256:544940af49f16b23d6c72dc124b9f1c3e074f86a37ef65740f1cad20500d2763",
+    "sha256": "sha256:f677ff7f5bb25ef4c16a271ec01b182a6c3dfa33a00917b648ea5f312d7c8dab"
   },
   "dataset": {
     "cases": 36,
     "path": "routing-holdout.yaml",
-    "sha256": "sha256:b2bf46930a10100b58c7ca7b77714f9d3970ca07f7b8c48469628f54aa9567e8"
+    "sha256": "sha256:ce933c16e2dc78a835d2b18489b3398a381bc4569217154641a309b9e8f3e065"
   },
   "evaluation_id": "spec05-skill-routing-20260712-v1",
   "schedule": {
