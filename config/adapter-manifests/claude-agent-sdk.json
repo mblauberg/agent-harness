@@ -136,7 +136,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
-      "sha256": "7fd32a000e36abb96f1cd03197fc70cc67e7b1d66ba3c0c361d659d4e954338e"
+      "sha256": "07c2871886260c8ddd1a0c451e74b192336b506685cf519775ee82705899e22d"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",

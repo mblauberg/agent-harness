@@ -21,9 +21,9 @@ adapters:
       executable: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
       executable_sha256: "1397a062c6889675055e3314dd956376ac51262a7734ad9e819c26975d71547a"
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
-      wrapper_entrypoint_sha256: "7fd32a000e36abb96f1cd03197fc70cc67e7b1d66ba3c0c361d659d4e954338e"
+      wrapper_entrypoint_sha256: "07c2871886260c8ddd1a0c451e74b192336b506685cf519775ee82705899e22d"
       wrapper_manifest: "config/adapter-manifests/claude-agent-sdk.json"
-      wrapper_manifest_sha256: "dfef2eabe34b37835d76bd121bb2c5db536d3a68dee7cf5d7ccbefa6be4e080f"
+      wrapper_manifest_sha256: "1c9613b56254155ab9bfa78ebef07ba73214fbe892ba7b734d2733965d2c9f28"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli

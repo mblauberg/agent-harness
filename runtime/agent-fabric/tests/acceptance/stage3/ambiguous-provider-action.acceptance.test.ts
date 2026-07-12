@@ -193,7 +193,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "terminal-partial-turn-usage",
       },
       commandId: "provider-review-partial-turns:first:dispatch",
-    })).resolves.toMatchObject({ status: "terminal" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-partial-turns:first"))
+      .resolves.toMatchObject({ status: "terminal" });
 
     expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
       turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
@@ -213,7 +215,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         scenario: "terminal-partial-turn-usage",
       },
       commandId: "provider-review-partial-turns:second:dispatch",
-    })).resolves.toMatchObject({ status: "terminal" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-partial-turns:second"))
+      .resolves.toMatchObject({ status: "terminal" });
   });
 
   it("keeps an unreported multi-turn usage reservation unknown", async () => {
@@ -247,7 +251,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         cwd: "src/leader",
       },
       commandId: "provider-review-missing-turns:dispatch",
-    })).resolves.toMatchObject({ status: "terminal" });
+    })).resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-missing-turns:spawn"))
+      .resolves.toMatchObject({ status: "terminal" });
     expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
       turns: { granted: 2, reserved: 2, consumed: 0, usageUnknown: true },
     });
@@ -288,7 +294,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
           scenario,
         },
         commandId: `provider-review-invalid-turns:${scenario}:dispatch`,
-      })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+      })).resolves.toMatchObject({ status: "prepared" });
+      await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
       await expect(fixture.chair.reconcileProviderAction({
         actionId,
         commandId: `provider-review-invalid-turns:${scenario}:reconcile`,
