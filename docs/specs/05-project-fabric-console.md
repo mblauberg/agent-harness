@@ -386,16 +386,29 @@ receiving owner to reopen them. It shall not paste large artifacts into the
 prompt.
 
 Fresh external implementation review is a Fabric review task, not an
-unattributed provider transcript. The chair shall publish one
-`implementation-delivery-manifest` from its authenticated active provider
-bridge and create the review task. Fabric proves the publication-time
+unattributed provider transcript. Through the authenticated current chair,
+Fabric seals `delivery-requirement-map.v1`,
+`coordination-gate-snapshot.v1` and
+`implementation-delivery-manifest.v1`, then creates the review task. Callers
+cannot supply their bytes, Git base or evidence list. AFAB-004's immutable
+approved run-start base is
+`c2fc623a2529f87feca27982e1a140969ab5a258`. Fabric proves the publication-time
 principal/bridge/provider-custody lineage; an operator-, Fabric-, project- or
 Git-published root remains honestly unproved and cannot satisfy this profile.
 Git diffs and other evidence remain valid covered inputs.
 
-`review-target.prepare` seals the delivery review basis and clean canonical Git
-base/head state, derives the complete changed-file and required-evidence set,
-and builds one bounded `review-bundle.v1`. Exact before/after/diff/evidence
+Requirement-map seal is current-chair-only and requires expected generation
+zero iff none exists, otherwise the exact current generation. It hashes a
+generation-free catalogue/scope/source/requirement/evidence closure before
+allocation: an equal closure reuses the current map, and only a changed closure
+allocates current plus one. Command-ID churn cannot stale a completed basis.
+
+The seal derives the exhaustive profile/catalogue requirement/evidence closure,
+pre-review gate snapshot and clean canonical Git base/head state, then commits
+the immutable review basis. `review-target.prepare` accepts only that current
+sealed basis, with expected target generation 0 when none exists and the exact
+positive current generation otherwise. It derives the complete changed-file
+and required-evidence set and builds one bounded `review-bundle.v1`. Exact before/after/diff/evidence
 objects are content-addressed and chunked; a coverage digest proves the complete
 manifest. The request accepts no summary or caller-selected file list.
 Omission, truncation, dirty or changed source/evidence fails. Source, delivery,
@@ -405,30 +418,53 @@ reprepare.
 Bundle bytes stay behind the action-only digest-bound portal, so the fixed
 rubric/target/profile envelope fits the prompt limit. Every portal read names
 the exact bundle, root/page, object and chunk digest. Mandatory consumption is
-the complete manifest/read map, required scope/spec/ADR/gate records and every
-full carried finding. A daemon-owned immutable bundle search/risk map then
+the complete manifest/read map, delivery manifest/map, required scope/spec/ADR/
+decision/gate records and bounded pages containing every full carried finding.
+A daemon-owned immutable bundle search/risk map then
 selects exact highest-risk diff chunks from every nonempty group by checked-in
-score/path rules; that bounded caller/provider-independent sample is mandatory.
+score/path rules; at most 32 chunks/2 MiB are mandatory.
 Zero/insufficient reads cannot certify. Literal bundle search and all other
 diff/before/after objects remain available for deeper review.
 `certifying-review-packet-only.v1`
 binds each activated adapter contract. A daemon-built per-action 0700 synthetic
 HOME may contain only exact 0600 adapter auth/config bytes outside the model
 read/tool namespace; the model sees only the exact portal. Claude/Codex use it
-directly; Cursor/Agy synthetic config names one pinned local portal helper whose
-action capability is delivered out-of-band and whose executable alone is
-Seatbelt-allowed. Agy deny
-policy/hooks and Cursor Read-only plus WebSearch/WebFetch canaries must attest
-outer confinement and current no-effect enforcement. Synthetic config has no
-unrelated plugins/MCP: discovery returns exactly the portal server/tools and no
-resources/other tools. Offered inert web tools are acceptable only when the
-transcript proves hard-rejected/no-effect. Any extra MCP surface, successful web
-effect or outside-portal/auth-file read invalidates the action.
+directly. For Cursor/Agy, the outer adapter supervisor executes the exact
+provider-runtime closure and its provider MCP manager may internally launch
+only the contract-pinned `agent-fabric-review-portal-helper` stdio server
+through a UID/PGID/executable-
+verified one-use AF_UNIX broker. Their exact model allowlist is
+`mcp(agent-fabric-review-bundle/review_bundle_read)` and
+`mcp(agent-fabric-review-bundle/review_bundle_search)`; every other MCP,
+command, filesystem, web/network, resource and prompt effect is denied.
+Discovery returns that one server/two tools; list probes for resources/templates/
+prompts return empty. Any extra surface, successful denied effect or outside-
+portal/auth-file read invalidates the action.
+Read payloads are RFC 4648 padded base64: at most 65,536 raw bytes, 8,192 bytes
+of canonical JSON-RPC/MCP metadata and 98,304 bytes for the complete response.
+Ledgers count exact canonical wire bytes and target preparation precomputes
+mandatory fit; search retains its separate 65,536-byte response limit.
 Missing enforcement advertises false, fails before provider I/O and never
 falls back. The exact helper/CLI process group receives TERM at its deadline and
 KILL after 250 ms; a passing canary proves no child, portal or auth capsule
-remains. Stock Cursor/Agy routes remain capability=false until the pinned helper
-and outer confinement pass every current-build canary.
+remains and that no pinned child can `setsid`-escape. The model has no executable
+tool. Seatbelt/`sandbox-exec` is usable only under an exact-OS-version passing
+canary. Agy requires proved direct execution or one exact pinned fixed-argv
+trampoline if its hook transits `/bin/sh`. A provider process that also exposes
+model web tools needs provider-native separation proof or a destination-
+constrained API proxy. The narrow hardened shim is a `std`-only Rust opaque
+relay for bounded binary framing/FD/process/peer checks; TypeScript owns JSON-
+RPC/MCP/hook semantics and journalling. Stock Cursor/Agy routes remain
+capability=false until the pinned helper and outer confinement pass every
+current-build canary.
+
+One target has one logical bundle/root: up to 64 MiB unique objects, 16 MiB per
+object, 16,384 objects and 32,768 deterministic chunks, never a bundle chain.
+The mandatory set is at most 80 unique responses/6 MiB. Direct primaries reserve
+up to 112 portal calls plus 16 planning/final turns; helper routes reserve 128
+internal calls. Their guaranteed exploration headroom is respectively 32 or 48
+calls/4 MiB, with a 10 MiB combined wire-byte ceiling; search consumes it and
+is capped at 16 calls/1 MiB aggregate.
 
 The target snapshots the exact chair agent/principal/lease generation and the
 resolved checked-in `spec05-four-slot-v1` profile. Its slots are `native`,
@@ -436,14 +472,14 @@ resolved checked-in `spec05-four-slot-v1` profile. Its slots are `native`,
 resolve respectively to the native Codex route, Claude/Anthropic,
 cursor-agent/`grok-4.5-xhigh`/xAI and
 Agy/`Gemini 3.1 Pro (High)`/Google. Native is explicitly exempt from
-publisher/chair independence. Each external slot requires both. Any chair
+reviewer independence; each external slot must differ from the target-chair
+family. Publisher eligibility separately proves the root publisher equals that
+target family, so no duplicate publisher-independence flag exists. Any chair
 rotation supersedes the target instead of reinterpreting prior evidence.
 
-The resolved profile jointly bounds a reachable review. Direct-portal primaries
-may reserve at most 128 provider turns and 128 reads/8 MiB; portal-helper
-Cursor/Agy reserve one Fabric turn plus at most 128 instrumented helper calls/
-8 MiB. The mandatory set is at most 128 reads and 4 MiB. Turns, reads and
-bytes are reserved before provider I/O; an adapter or delivery that cannot meet
+Turns, mandatory/exploration reads and exact response bytes are separately
+reserved/debited before provider I/O. Mandatory unique reads cannot be spent by
+search/duplicates. An adapter or delivery that cannot meet
 the mandatory/risk predicate is unavailable, not silently one-shot or falsely
 byte-complete.
 
@@ -469,7 +505,9 @@ ambiguous with its reservation held until an exact consequential
 provider-route-integrity-retire Preview/Commit receives direct-human
 confirmation. Retirement performs no provider call, charges the full remaining
 ceiling and exposes retired-unknown; it never fabricates no-effect. This is a
-genuine human gate and is the only route-budget escape from unprovable effect.
+genuine review-and-liveness gate: while open it blocks slot dispatch, target
+reprepare, review/run acceptance or close, and the budget. Retirement or
+proved terminal reconciliation is the only escape from unprovable effect.
 
 Every CLEAN, FINDINGS or UNUSABLE provider terminal transaction automatically
 inserts evidence and linearly CAS-advances one per-target/slot head before the
@@ -492,15 +530,17 @@ read/list/operator projection.
 The Console reads review state only through its scoped operator Evidence
 row/detail projection. Rows show slot/head, target chair/profile,
 current/superseded, certifying, answer safety or terminal-failure code,
-CLEAN/FINDINGS/UNUSABLE, P0-P2/open counts, provider/model, independence and
+CLEAN/FINDINGS/UNUSABLE, P0-P2/open counts, provider/model, reviewer independence and
 artifact/bundle/coverage/answer/result digests. Detail adds task/action, safe
 findings, route/final-prompt and publication lineage. Malformed fields reject
 the whole variant.
 
 The Evidence header displays the exact `reviewCompletionV1` response as
 `Final review: Complete` or `Blocked`, including target chair, artifact,
-bundle/coverage/profile digests and one slot-head row with the daemon's ordered
-closed blockers. `open-findings` is the only finding blocker;
+bundle/coverage/profile digests, top-level ordered blockers and, when a target
+profile exists, its four slot-head rows. Missing target or unavailable profile
+uses the closed empty-slot branch, so the header still shows the reason.
+`open-findings` is the only finding blocker;
 `provider-terminal-failure`, `terminal-no-effect` and `retired-unknown` are
 distinct from `ambiguous-action`. The Console
 does not recompute, choose a latest timestamp or hide a blocker.
@@ -511,8 +551,9 @@ gets at most one pair lookup; valid answers use the same automatic terminal
 transaction. Unresolved effect reaches the direct-human retirement gate above.
 The Console never offers a generic retry/resume for that custody.
 The schema-v2 Fabric receipt exports this same reducer under
-`reviewCompletion` and safe recovery digests under
-`routeIntegrityRecoveries`; the Console does not invent alternate receipt
+`reviewCompletion`, exact safe route/review rows under `providerRoutes` and
+`providerReviews`, and safe recovery digests under `routeIntegrityRecoveries`;
+the Console does not invent alternate receipt
 fields.
 
 A direct Claude, Cursor, Gemini or other provider CLI may be used only when
@@ -854,8 +895,9 @@ schema belongs to the protocol/delivery contract, not to any UI package.
 For this approved AFAB-004 delivery, `finalReviewComplete` is one daemon query,
 not a chair assertion. It is true only when:
 
-1. one current target binds the current eligible implementation-delivery
-   manifest, proved publication lineage, sealed delivery review basis, clean
+1. one current target binds the current fabric-sealed
+   implementation-delivery-manifest.v1 and delivery-requirement-map.v1, proved
+   publication lineage, sealed delivery review basis, clean
    base/head source-state digest, complete review bundle/coverage digest, exact
    target-chair generation and one resolved `spec05-four-slot-v1` snapshot;
 2. its four linear slot heads each name one current terminal safe certifying
@@ -863,10 +905,10 @@ not a chair assertion. It is true only when:
 3. every head/action/evidence record binds that target, chair, artifact,
    bundle, coverage, profile, task, route, answer/result and final-prompt digest,
    and its route equals the activated adapter/family/model/effort snapshot;
-4. `native` satisfies its explicit profile exemption, while `other-primary`,
-   `cursor-grok` and `agy-gemini` each prove both distinct publisher and chair
-   family; and
-5. every slot blocker array is empty. A nonterminal, ambiguous, route-integrity,
+4. `native` satisfies its explicit reviewer-independence exemption, while
+   `other-primary`, `cursor-grok` and `agy-gemini` each prove reviewer family
+   distinct from the target-chair family; and
+5. top-level blockers and every slot blocker array are empty. A nonterminal, ambiguous, route-integrity,
    insufficient-read, stale, UNUSABLE or proved terminal provider-failure
    action cannot complete a slot.
 
@@ -1026,7 +1068,7 @@ Implementation is accepted only when objective tests demonstrate:
     ambiguity retains. The terminal-input digest makes exact callback/lookup
     replay idempotent and changed input an integrity quarantine. It exposes no
     raw error and never redispatches. Bundle/source mutation, CLEAN/P0-P2
-    grammar, unsafe canaries, profile independence, all-certifying-action
+    grammar, unsafe canaries, reviewer independence, all-certifying-action
     recovery/generic exclusion, four-slot completion and repaired-target carry-
     forward all pass.
 39. Rotate/compact returns an immutable accepted-suspended receipt after
@@ -1036,9 +1078,15 @@ Implementation is accepted only when objective tests demonstrate:
     one and bridge target its chair-or-child bridge high-water plus one, never
     reused; only provider-originated launch.attest over the exact checkpoint and
     exact source-row snapshot may atomically swap the proper bridge owner at
-    those reserved generations. Current state is read through lifecycle read; enqueue
-    may stale the checkpoint, claims/acks are blocked, write leases remain
-    quarantined, and startup adopt/no-effect/quarantine/supersede recovery owns
+    those reserved generations. Current state is read through lifecycle read.
+    A delivery cut keeps ready/unclaimed and later enqueues in stored state
+    `ready` with the derived `successor-pending` routing disposition outside
+    the adoption vector, so they cannot stale the checkpoint; claims/
+    acks are blocked and writes remain quarantined. Unannounced generation or
+    context advance creates the exact typed generation-loss predecessor;
+    provider-generation advance is canonical if both change. It ratchets
+    observed high-water and supports only validated-checkpoint fresh rotation or
+    abandon. Startup adopt/no-effect/quarantine/supersede recovery owns
     every lifecycle row before generic scans without replay. A stranded agent
     cannot self-rotate: exact narrow-capability `agent-lifecycle-recovery`
     fresh-rotate binds distinct custody/action/adapter/contract and an empty

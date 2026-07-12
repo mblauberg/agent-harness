@@ -197,6 +197,12 @@ continue to pin executable, wrapper and schema artifacts.
    no v1 decoder, importer, projection or compatibility fixture. An older file
    is preserved as an unknown user artifact but is not protocol evidence.
    Immutable schema-v2 receipt history is never rewritten.
+6. Export uses bounded two-phase publication. Phase A fixes the database
+   watermark/owner revisions plus exact Git HEAD/tree/index/worktree and
+   registered external source/evidence currency tokens and writes a private
+   candidate. Phase B equality-rechecks database revisions and reruns fixed no-
+   follow external reads before atomic publication. Drift discards and retries
+   or fails; a receipt cannot publish review completion against stale bytes.
 
 ### 3.7 Machine status and documentation
 
@@ -2464,10 +2470,10 @@ capacity and task terminal transition while a bound action remains open.
 Fabric injects default `maxTurns: 1` for ordinary one-shot work before hashing
 or dispatch. Certifying review is the closed exception owned by the resolved
 target profile: direct-portal Claude/Codex may reserve up to 128 SDK turns and
-128 portal reads/8 MiB, while portal-helper Cursor/Agy reserve one Fabric turn
-plus at most 128 instrumented helper calls/8 MiB. The exact admitted
-ceilings must cover the target's at-most-128-read/4-MiB mandatory set and
-risk-group predicate. An adapter
+112 portal calls/10 MiB, preserving 16 planning/final turns, while portal-helper
+Cursor/Agy reserve one Fabric turn plus at most 128 instrumented helper calls/10
+MiB. Both reserve the exact at-most-80-read/6-MiB mandatory set plus 32 direct
+or 48 helper exploration calls/4 MiB. An adapter
 that cannot enforce or reach them advertises
 certifying-review-packet-only.v1 false.
 The custody reserves `turns`, `review_read_ops`, `review_read_bytes`, one `provider_calls` and one
@@ -2555,11 +2561,105 @@ field can make it proved. Update/delete triggers make all lineage content
 immutable.
 
 Only an active project-file or strict-descendant run-file registration of
-evidence kind implementation-delivery-manifest, published by an agent with
+explicit evidence kind implementation-delivery-manifest.v1, published by an agent with
 proved lineage, is target-eligible. spec05-four-slot-v1 additionally requires
-that publisher family equal target-chair family. git-private-diff,
+an equality join to implementation_delivery_manifests and the one current
+delivery_review_bases row produced by fabric-seal, and that publisher family
+equal target-chair family. A generic artifact registration carrying the same
+kind/content cannot satisfy that join. git-private-diff,
 operator-, Fabric- and project-published rows remain valid bundle evidence but
 are never silently promoted to eligible root targets.
+
+The current evidence/artifact-kind catalogue explicitly contains delivery-
+requirement-map.v1, implementation-delivery-manifest.v1 and coordination-gate-
+snapshot.v1; none
+is inferred by parsing generic receipt content. Their persistence owners are:
+
+~~~sql
+delivery_run_starts(
+  project_session_id, run_id, delivery_run_id, repository_object_format,
+  approved_base_object_id, authority_digest, created_revision,
+  PRIMARY KEY(project_session_id, run_id, delivery_run_id)
+)
+
+delivery_requirement_maps(
+  run_id, delivery_run_id, map_generation, closure_digest, catalogue_digest,
+  accepted_scope_artifact_id, accepted_scope_revision,
+  accepted_scope_digest, source_set_digest, requirement_set_digest,
+  artifact_id, artifact_revision, content_digest, current, private_cas_path,
+  PRIMARY KEY(run_id, delivery_run_id, map_generation),
+  UNIQUE(content_digest)
+)
+
+coordination_gate_snapshots(
+  run_id, delivery_run_id, snapshot_generation, event_watermark,
+  chair_snapshot_digest, authority_digest, accepted_scope_digest,
+  requirement_map_digest, gate_closure_digest, objective_evidence_digest,
+  artifact_id, artifact_revision, content_digest, private_cas_path,
+  PRIMARY KEY(run_id, delivery_run_id, snapshot_generation),
+  UNIQUE(content_digest)
+)
+
+implementation_delivery_manifests(
+  run_id, delivery_run_id, seal_generation, command_id,
+  snapshot_generation, profile_digest, accepted_scope_digest,
+  requirement_map_digest, evidence_closure_digest,
+  base_object_id, head_object_id, head_tree_id, index_tree_id,
+  repository_source_state_digest, artifact_id, artifact_revision,
+  content_digest, publication_lineage_digest, private_cas_path,
+  PRIMARY KEY(run_id, delivery_run_id, seal_generation),
+  UNIQUE(content_digest)
+)
+
+delivery_review_bases(
+  run_id, delivery_run_id, review_basis_revision,
+  manifest_artifact_id, manifest_artifact_revision, manifest_digest,
+  snapshot_digest, profile_digest, repository_source_state_digest,
+  requirement_map_digest, evidence_closure_digest, current, basis_digest,
+  PRIMARY KEY(run_id, delivery_run_id, review_basis_revision)
+)
+~~~
+
+Run start is immutable; AFAB-004 stores the full
+c2fc623a2529f87feca27982e1a140969ab5a258 base. Snapshot/manifest content has no
+self-digest or final-basis reference. `fabric.v1.implementation-delivery.seal`
+implements replay and stable run/delivery-run single-flight before work. Phase
+A captures the exact chair principal/lease/bridge/session lineage, run-start,
+delivery RUN/scope/full requirement-map entries, profile, authority/gate/
+evidence/artifact revisions and Git HEAD/index/worktree tokens. The request's
+expected HEAD is only an optimistic lock; no caller field selects base or
+closure content.
+
+Before manifest seal, `fabric.v1.delivery-requirement-map.seal` derives the one
+current closed map from accepted scope and the checked-in
+spec05-delivery-requirements.v1 catalogue. Only the authenticated current chair
+may call it. Its closed request contains command/project-session/run/delivery-
+run IDs, expected current map generation (zero iff none), expected current
+accepted-scope revision and expected checked-in catalogue digest. A wrong zero/
+positive/current sentinel conflicts before work. It equality-CASes catalogue/
+scope/source/evidence revisions, requires every binding ID exactly once and
+proved, and registers delivery-requirement-map.v1 bytes. Stable run/delivery-
+run single-flight precedes phase A: exact command replay returns its immutable
+result, changed replay conflicts and different commands serialize. Before
+generation allocation, `closure_digest` hashes RFC 8785 JCS of the complete
+prospective map with only map generation and closure digest omitted. Equality
+with current returns its existing bytes/registration/generation; otherwise the
+daemon allocates current generation plus one and inserts. Only changed
+catalogue, accepted-scope/binding-source or selected evidence closure advances
+generation; command-ID churn cannot stale a basis. delivery-run v1 remains
+unchanged; no mutable RUN.json digest becomes a review-basis dependency.
+
+Outside SQLite, fixed no-follow readers validate the complete profile-derived
+requirement/evidence closure and clean base-to-HEAD state. They write the
+coordination snapshot and manifest to reserved digest-named run-file CAS paths
+create-exclusive, fsync, re-read and verify. Phase B reauthenticates, equality-
+CASes every captured row/token and atomically inserts both artifact
+registrations, authenticated-agent publication lineage, final review-basis row
+and immutable command receipt. `producer_kind=fabric-seal` is distinct from the
+authenticated agent publisher. Failure leaves no DB row; unreferenced CAS bytes
+are run-owned GC. Exact replay returns the stored result; changed replay
+conflicts. Any source/scope/map/profile/gate/evidence/lineage revision makes the
+basis stale and requires a new seal.
 
 #### 9.21.2 Bundle store and target transaction
 
@@ -2573,33 +2673,35 @@ review_bundles(
   base_object_id, head_object_id, head_tree_id, index_tree_id,
   repository_source_state_digest,
   publication_lineage_digest,
-  coverage_digest, manifest_digest, manifest_root_digest, bundle_digest,
+  coverage_digest, manifest_body_digest, manifest_root_digest, bundle_digest,
   bundle_search_index_digest, risk_read_map_digest,
   mandatory_read_set_digest, mandatory_read_count, mandatory_read_bytes,
-  changed_path_count, required_evidence_count,
+  changed_path_count, required_evidence_count, carried_finding_count,
   object_count, chunk_count, total_object_bytes,
-  private_manifest_path, created_at,
+  manifest_page_bytes, search_index_bytes, risk_map_bytes,
+  private_manifest_body_path, private_manifest_root_path,
+  private_bundle_ref_path, created_at,
   PRIMARY KEY(run_id, bundle_generation),
   UNIQUE(bundle_digest)
 )
 
 review_bundle_objects(
   bundle_digest, object_digest, media_type, byte_length, ordinal,
-  PRIMARY KEY(bundle_digest, object_digest)
+  PRIMARY KEY(bundle_digest, object_digest),
+  UNIQUE(bundle_digest, ordinal)
 )
 
 review_bundle_chunks(
   bundle_digest, object_digest, ordinal, chunk_digest, byte_length,
   private_chunk_path,
-  PRIMARY KEY(bundle_digest, object_digest, ordinal),
-  UNIQUE(bundle_digest, object_digest, chunk_digest)
+  PRIMARY KEY(bundle_digest, object_digest, ordinal)
 )
 
 review_bundle_manifest_pages(
   bundle_digest, ordinal, page_digest, byte_length, private_page_path,
-  PRIMARY KEY(bundle_digest, ordinal),
-  UNIQUE(bundle_digest, page_digest)
+  PRIMARY KEY(bundle_digest, ordinal)
 )
+
 ~~~
 
 Normalised changed-file, required-evidence and carried-open-finding child rows
@@ -2610,30 +2712,48 @@ repair-required successor must advance both artifact/delivery revision and
 source-state digest from every origin; identical-byte reprepare fails. Checks enforce the
 Spec 01 counts and byte limits, exact before/after/diff shapes per Git status,
 contiguous object/chunk/manifest-page ordinals and one computed coverage,
-logical-manifest, bounded-root and bundle digest. Each page is at most 65,536
-bytes, the root at most 49,152 bytes and lists every ordered page digest. Empty
+manifest-body, bounded-root and bundle digest. Identical chunk bytes may recur
+at multiple ordinals; the ordinal key preserves the object sequence while the
+private CAS deduplicates physical storage by chunk digest. Each page is at most 65,536
+bytes, there are at most 16 pages/1 MiB, and the root is at most 49,152 bytes
+and lists every ordered page digest. Empty
 objects have no chunk; every nonempty object has complete contiguous chunk
 coverage. Insert/update triggers reject partial manifests and make every
 committed row immutable.
 
-The mandatory set is root + every manifest page + every carried finding and
-required accepted-scope/spec/ADR/gate-decision object. Target commit rejects
-more than 128 reads or 4 MiB mandatory bytes; total bundle bytes remain at most
-16 MiB. All changed-file diffs and other evidence remain completely available.
+Digest construction follows Spec 01's acyclic order: JCS manifest body with no
+self/later digest -> raw body pages -> JCS root -> JCS final bundle ref; each
+digest is stored outside its own bytes. The mandatory set is root + every
+manifest-body page, which contains every full carried finding, and
+the delivery manifest/map plus required accepted-scope/spec/ADR/decision/gate-
+decision/coordination-snapshot objects.
+Target commit rejects more than 80 unique root/page/chunk responses or 6 MiB
+mandatory bytes. Limits are 4,096 changed paths, 1,024 evidence rows, 256
+carried findings, 16,384 objects, 32,768 deterministic 64-KiB chunks, 16 MiB per
+object, 64 MiB unique object bytes, 4 MiB search index and 256 KiB risk-map
+output. All changed-file diffs and other evidence remain completely available.
+The AFAB-004 measured gate records the live
+c2fc623a2529f87feca27982e1a140969ab5a258..baebc1e catalogue as 636,420
+bytes and the prospective v4 owner-spec set as a separate 621,586-byte design
+input. The final target recomputes exact bytes; with the full 2 MiB risk-sample
+ceiling it must materialise under 6 MiB mandatory/10 MiB combined wire bytes.
 The daemon also writes an immutable bundle-search.v1 index and applies the
 checked-in review-risk-map.v1 to every manifest entry. The rules score and sort
 changed objects deterministically, then select exact highest-risk diff chunks
-from every nonempty group, at most 64 chunks/4 MiB total. Those caller/provider-
+from every nonempty group, at most 32 chunks/2 MiB total. Those caller/provider-
 independent sample digests join the mandatory set; target prepare fails if the
-whole mandatory set cannot remain within 128 reads/4 MiB. Literal search is
-available for deeper exploration but never substitutes for the sample. Target
-state binds search/risk/sample/mandatory digests and budgets.
+whole mandatory set cannot remain within 80 reads/6 MiB. Literal search is
+available for deeper exploration but never substitutes for the sample; it is
+limited to 16 calls/1 MiB aggregate response per action. Target state binds
+search/risk/sample/mandatory digests and budgets. Each target owns one logical
+bundle/root; pages/chunks are internal and CAS reuse never creates a bundle
+chain. Bundle digest covers manifest/object/search/risk/mandatory components.
+This coverage is transitive through body -> root -> final ref; no digest domain
+contains itself.
 
-The required receipt object is the immutable pre-review coordination/gate
-snapshot sealed by the delivery review basis. Its canonical digest excludes
-the four review actions, evidence heads and final completion result. The final
-fabric-receipt.json is exported after completion and cannot advance or stale
-that basis retroactively.
+The required coordination-gate-snapshot.v1 object is produced by the seal owner
+above. It excludes review/final-acceptance/release/final-receipt state.
+fabric-receipt.json is never a bundle input and cannot advance/stale the basis.
 
 Target preparation uses three phases without a long SQLite transaction:
 
@@ -2673,26 +2793,52 @@ evidence transaction instead always settles and advances its reserved head.
 Only new target preparation atomically supersedes the old row while inserting
 its successor.
 
+Prepare request uses expected target generation zero iff no target exists and
+the exact positive current generation otherwise. The command receipt/input
+digest stores that sentinel; wrong zero/positive/current combinations conflict
+before bundle work.
+
 review_profile_snapshots and review_profile_slots normalise the exact four-slot
 target snapshot. The checked-in schema/profile catalogue digest is verified at
 startup. Slot rows contain adapter class/ID/contract, family/model, aliases,
 effort/source mode, provider/internal-step/read ceilings and explicit
-publisher/chair independence flags. The baseline
+reviewer-independence requirement. Publisher eligibility remains the separate
+proved lineage/family-equals-target predicate. The baseline
 requires exactly native, other-primary, cursor-grok and agy-gemini and enforces
-the exact Spec 01 mapping. Native has both flags false; all three external slots
-have both true. Missing or extra slots prevent target commit.
+the exact Spec 01 mapping. Native is exempt; all three external slots require
+reviewer family distinct from target-chair family. No publisher-independence
+column/blocker exists. Missing or extra slots prevent target commit.
 
 The action-only portal authenticates an ephemeral capability hash bound to
-action, target, bundle, coverage digest and expiry. It reads only committed
-root/page/object/chunk joins, verifies their complete digest chain and journals
-bounded read/search-result digests/bytes per action. Search accepts only literal
-substring/token queries over the immutable index, bounded to 256 query bytes,
-100 results, 65,536 result bytes and 250 ms CPU; it returns exact object/offset/
-snippet/result digests. Portal-helper adapters count trusted helper/stream/hook
-events in the same daemon journal. OS policy confines paths outside the helper;
-an unobserved source read contributes no
-certification coverage. The portal resolves no caller path or filesystem
-locator. Response/prompt bounds apply before adapter I/O.
+action, target, bundle, coverage digest and expiry. Its MCP server name is
+agent-fabric-review-bundle and its only tools are review_bundle_read and
+review_bundle_search. initialize/initialized, ping and tools/list/call are
+allowed. resources/list, resources/templates/list and prompts/list return exact
+empty arrays; resource read/subscription, prompts/get and sampling/roots/
+completion/elicitation/logging are denied. It reads only committed root/page/
+object/chunk joins and verifies their complete digest chain.
+
+Read payloads use RFC 4648 padded base64. Raw root/page/chunk bytes are at most
+65,536; encoded payload is at most 87,384 bytes, all other canonical JSON-RPC/
+MCP envelope and metadata bytes are at most 8,192, and the complete read
+response is at most 98,304 bytes. The journal/ledgers debit exact complete
+canonical wire bytes. Target prepare materialises every mandatory response and
+proves aggregate fit. Search retains its separate 65,536-byte response limit;
+exact-bound binary/page/root/empty/search fixtures gate activation.
+
+The read journal owns separate nonfungible mandatory and exploration counters.
+The first response for each mandatory digest debits mandatory; duplicate/
+optional reads, search and authenticated malformed/out-of-bundle calls debit
+exploration. Direct mode reserves mandatory <=80 calls/6 MiB plus 32 calls/4
+MiB exploration; helper mode reserves mandatory plus 48 calls/4 MiB. Both have
+a 10 MiB combined wire-byte ceiling. Search is
+inside exploration and is bounded to 16 calls/1 MiB aggregate plus 256 query
+bytes, 100 results, 65,536 result bytes and 250 ms CPU per call. Each row stores
+subledger/ordinal/tool/request/result/status/exact canonical response bytes.
+Unique root/page/chunk responses alone satisfy mandatory; call order is free.
+Portal-helper stream/hook events join the same journal. The portal resolves no
+caller path or filesystem locator. Response/prompt bounds apply before adapter
+I/O.
 
 #### 9.21.3 Adapter capability and route admission
 
@@ -2700,8 +2846,9 @@ adapter-compatibility activation gains one digest-bound closed capability,
 certifying-review-packet-only.v1. Its conformance record covers a daemon-built
 per-action 0700 synthetic HOME with only exact 0600 auth/config bytes outside
 the model tool namespace; model-visible non-secret env; empty read-only cwd;
-one action-only portal, direct or through a pinned local helper whose action
-capability is delivered out-of-band; no inherited user/project path, unrelated plugin/source
+one action-only portal, direct or through the pinned
+agent-fabric-review-portal-helper stdio executable whose trusted absolute path,
+inode/digest and fixed `--stdio` argv are contract-bound; no inherited user/project path, unrelated plugin/source
 MCP effect, workspace index, shell/write/browser/general-network effect; outer
 OS confinement and live canaries;
 fixed provider transport; process-tree
@@ -2710,24 +2857,55 @@ after 250 ms, proving no descendant remains; and output/capsule/portal cleanup. 
 combinations advertise false. The exact activated contract digest and source
 mode are stored in each resolved profile slot and route.
 
-Claude/Codex expose the portal MCP tool directly. Cursor/Agy synthetic config
-names exactly one pinned local portal helper; Seatbelt permits execution of
-only that helper. They create no source workspace and disable
-project workspace/Composer index, terminal, unrelated plugin/MCP, web and
-tool-level network effects. MCP discovery must return exactly the portal
-server/tools and no resources/other tools.
-An offered inert discovery/web tool is acceptable only when invocation is hard-
-rejected before effect and the transcript proves empty/no-effect; any nonempty
-extra resource/tool, successful web effect or outside-portal source read invalidates the
-action. Their hardened wrappers must add outer confinement and mediate native
-effects; tool-policy-only stock CLI advertises false. Provider auth/config may
-exist only in a trusted capsule or adapter-internal Keychain channel and never
-in model-visible HOME/env/files/tools.
-The Agy wrapper hard-denies read_url(*), execute_url(*), command(*), mcp(*) and
-write_file(*) at policy and PreToolUse hooks, permitting only portal reads. The
-Cursor wrapper allows only portal Read, denies Write/Shell and must pass a
-current-build WebSearch/WebFetch no-effect, empty-MCP and auth-file-read canary
-before capability=true.
+Claude/Codex expose the named portal server/tools directly. Cursor/Agy launch
+only the pinned helper as adapter-internal bootstrap. It connects to a per-
+action daemon AF_UNIX broker that verifies UID, action PGID, executable path/
+inode/digest and one-use private-descriptor binding; capability stays broker-
+side. Their model allowlist is exactly
+mcp(agent-fabric-review-bundle/review_bundle_read) and
+mcp(agent-fabric-review-bundle/review_bundle_search). Every other model mcp,
+command, filesystem, shell, browser/web/network, resource and prompt effect is
+denied. Exact-empty list probes remain permitted as above.
+
+Agy hooks allow only the two MCP tuples and adapter-owned bootstrap, then deny
+read_url(*), execute_url(*), read_file(*), write_file(*), every other mcp(*) and
+command(*). An auth file in synthetic HOME requires a passing absolute auth-read
+denial canary. Cursor receives only per-action synthetic HOME/workspace/data
+directories, no global CLI config, and exposes those two MCP tools while denying
+Read/Write/Shell/WebSearch/WebFetch and all unrelated MCP/resources. Current-
+build canaries prove both positive tool calls, exact discovery/empty list probes,
+every negative, broker identity/one-use binding and process-group cleanup. They
+also prove every pinned provider/helper/trampoline descendant cannot escape by
+`setsid` or an equivalent daemonisation path; group cleanup alone is not proof.
+Hardened wrappers mediate native effects; stock/tool-policy-only CLI advertises
+false. Provider auth/config never appears in model-visible env/files/tools.
+
+Executable policy separates trusted adapter bootstrap from model-triggerable
+effects. The outer adapter supervisor may execute only the exact activated
+provider-runtime closure; its provider MCP manager may internally launch only
+the exact helper/broker closure. Neither launch is model-command authority; the
+model exposes no executable and only the two portal tools. Cursor
+activation resolves/bypasses its shell launcher to a pinned real target where
+possible; otherwise launcher, shell, Node, index and private cache/data closure
+plus fixed argv are all pinned/confined. Agy pins its signed native executable
+by path/code identity/digest and proves direct execution; a hook that transits
+`/bin/sh` instead requires one exact path/inode/digest-pinned fixed-argv
+trampoline and a proved complete child closure. Seatbelt/`sandbox-exec` is an
+exact-OS-version canary capability: unavailable/deprecated behaviour, semantic
+drift or any failed positive/negative canary advertises false. Any unresolved
+closure advertises false.
+
+When provider API transport and model web tools share a process, activation
+requires provider-native proof of policy separation or a contract-pinned,
+destination-constrained provider proxy; otherwise capability is false. The
+threat model covers accidental or model-induced misuse of an authentic pinned
+runtime, not a deliberately compromised provider binary, which fails the
+separate binary provenance/code-identity gate. The hardened containment shim is
+a `std`-only Rust opaque byte relay for bounded fixed binary transport framing,
+file descriptors, process/peer identity, inherited binding and AF_UNIX bytes.
+TypeScript retains JSON semantic framing, MCP schema, hook parsing/policy and
+canonical journalling, so there is one protocol implementation and no native
+JSON parser.
 If any adapter cannot enforce the capability,
 target prepare or dispatch fails before router/provider I/O and budget/action
 insert.
@@ -2745,8 +2923,11 @@ providerRouteProjectionV1: route request/receipt digests, adapter/contract,
 family/model, requested/effective effort, target/slot, reviewed artifact,
 publication lineage, bundle/root/coverage/search/risk/mandatory-set/prompt
 digests, target chair agent/principal/lease/adapter/family/model/route,
-profile digest and slot-head/attempt generations. Public action read joins that
-immutable row to provider_review_terminal_journal, whose unique key is
+profile digest and slot-head/attempt generations. Public action read never
+reconstructs a route. With `route_state=present` it joins that immutable row;
+with `missing` or `integrity-failed` it instead projects a null route plus the
+safe route-recovery evidence digest owned below. It then joins
+provider_review_terminal_journal, whose unique key is
 run/action/target/slot/attempt and whose immutable columns are terminal kind,
 terminal-input digest, private answer/result/adapter-result digests,
 authenticated-usage digest, read-journal digest, public terminal projection
@@ -2837,7 +3018,9 @@ head generations, prior evidence, complete prior open set, separately stored
 provider-reported-resolved and daemon-accepted-resolved prior sets, current
 finding set, complete new open set,
 repair-required set, action/result/route/bundle/coverage/profile/chair and safe
-independence/annotation/read-coverage fields. It contains no currency column.
+reviewer-independence/annotation/read-coverage fields. It also stores the exact
+task, answer/result safety digests and final-prompt route join required by
+reviewEvidenceReadV1. It contains no currency column.
 
 Dispatch CAS-increments attempt generation and reserves one exact
 target/slot/head. The safe/UNUSABLE provider terminal transaction automatically
@@ -2857,7 +3040,8 @@ review evidence. A later attempt may then reserve the unchanged evidence head.
 
 fabric.v1.review-evidence.annotate writes only an optional current-chair
 non-gating annotation against exact existing evidence/result/head. It cannot
-create evidence or change head/verdict/findings/repair/independence/completion.
+create evidence or change head/verdict/findings/repair/reviewer-independence/
+completion.
 Exact annotation replay returns its immutable receipt before live-chair check.
 The dispatch command's original prepared/dispatched receipt is immutable and
 never gains terminal fields on replay. Terminalisation has a separate internal
@@ -2876,10 +3060,18 @@ Target prepare rejects any predecessor nonterminal action and cannot commit
 until every safe/UNUSABLE terminal has atomically reached its head. No source
 change can launder a late finding.
 
+An ambiguous/awaiting-human-retire attempt remains nonterminal and owns its
+target/slot/head/reservation. It blocks sibling dispatch, target reprepare/
+supersession and review/run acceptance or close until proved terminal recovery
+or confirmed retirement. This freezes budget and gates review/liveness.
+
 Read/list responses join immutable evidence to a freshly derived
 review_evidence_currency value. Exact command replay never performs that join.
-Operator Evidence row/detail uses the same reader under operator
-project/session/run scope.
+Operator Evidence row/detail uses the exact operatorReviewEvidenceRowV1 union
+under operator project/session/run scope. Its view joins task/action, terminal
+kind/safety/failure code, answer/result, route/final-prompt, adapter/family/
+model, bundle/coverage, severity/open counts, reviewer independence and safe
+detail fields without raw content.
 
 #### 9.21.5 Completion and deterministic projection
 
@@ -2887,11 +3079,11 @@ ReviewCompletionReducer first runs target currency checks, then reads one
 current target, one resolved four-slot profile and exactly four slot heads.
 It never scans for an unsuperseded latest row. For each head it validates the
 latest action/evidence chain, target/bundle/route/chair/profile joins,
-independence flags and complete open-finding set.
+reviewer-independence and complete open-finding set.
 Its query columns map one-for-one to reviewCompletionV1: target chair/artifact/
 lineage/bundle/root/coverage/risk/mandatory/profile digests and, per slot, head/
 attempt/action/evidence/verdict/result/route, resolved adapter/family/model,
-read coverage, both independence dispositions, certifying state, complete open
+read coverage, reviewer-independence disposition, certifying state, complete open
 records and ordered blockers.
 
 It emits only the ordered closed blockers in Spec 01. open-findings is the sole
@@ -2899,15 +3091,16 @@ finding blocker. A proved no-answer/max-turn terminal result emits
 provider-terminal-failure; terminal no-effect and human-retired unknown emit
 their exact blockers; route-integrity covers a terminal but unverifiable route
 chain. ambiguous-action is reserved for unproved provider effect/outcome.
-Missing head evidence emits missing-evidence. Zero/multiple
-target/head rows or a broken chain emits integrity-failure. All target-wide
-blockers are copied to all four slots in the same precedence order.
+Missing head evidence emits missing-evidence. Zero/multiple targets or a missing
+profile return the exact top-level blocker/empty-slot union in Spec 01. With a
+valid profile, exactly four rows exist; stale-target is top-level and is not
+copied into rows. Zero/multiple heads or a broken chain emits integrity-failure.
 
 The operator System/Evidence projection and agent completion read call this
 same reducer. Mutation receipts do not. fabric-receipt.json exports only closed
 safe route, target, bundle/coverage/profile, slot-head, evidence and recovery
-digests through the exact top-level `reviewCompletion` and
-`routeIntegrityRecoveries` fields in Spec 01 section 19. It contains no raw
+digests through exact `reviewCompletion`, `providerRoutes`, `providerReviews`
+and `routeIntegrityRecoveries` codecs in Spec 01 section 19. It contains no raw
 answer/error, private diagnostics, bundle bytes, portal transcript, prompt,
 secret HMAC, adapter result or usage.
 
@@ -2921,9 +3114,9 @@ action, whether its joins are intact or contradictory:
 route_integrity_recoveries(
   run_id, adapter_id, action_id,
   recovery_generation, owner_daemon_generation,
-  state, reason, reservation_id,
-  lookup_attempted, lookup_evidence_digest,
-  terminal_disposition, settlement_digest,
+  state, reason, terminal_disposition, reservation_id, reservation_digest,
+  route_state, route_receipt_digest, recovery_evidence_digest,
+  lookup_state, lookup_evidence_digest, settlement_digest,
   created_at, updated_at,
   PRIMARY KEY(run_id, adapter_id, action_id)
 )
@@ -2931,11 +3124,22 @@ route_integrity_recoveries(
 
 State is detected, inspecting, terminal-proved-no-effect,
 terminal-proved-usage, awaiting-human-retire or terminal-retired-unknown. The
-row joins the exact action and reservation. reason is one closed intact-effect-
-ambiguity or exact broken-binding code. Insert fences further provider I/O,
+row joins the exact action and reservation/digest. reason and terminal
+disposition use the exact closed receipt-v2 enums. lookup_state is not-
+attempted, in-flight or completed, with evidence digest non-null exactly for
+completed. Nonterminal states have null disposition/settlement; proved-no-
+effect, proved-usage and retired-unknown use their exact receipt-v2 disposition
+arm and a non-null settlement digest. Insert fences further provider I/O,
 marks the action noncertifying while unresolved and freezes only that
 reservation's dimensions. All certifying route/action rows are excluded from
 generic startup recovery and prepared-action re-enqueue.
+
+`route_state` is exactly present, missing or integrity-failed. Present requires
+the immutable route-receipt digest and an exact join to provider_action_routes;
+missing/integrity-failed require that digest null and a non-null safe recovery-
+evidence digest. The service owns that discriminator and evidence atomically;
+no reader, receipt exporter or Console projection may infer or reconstruct a
+route from provider, action, bundle or prompt remnants.
 
 The service runs before generic provider recovery. Prepared with durable
 zero-dispatch proof releases the full reservation and terminalises no-effect.
@@ -2977,11 +3181,14 @@ Deterministic verification covers:
   joins and target eligibility for each source/publisher kind;
 - complete base/head changed-file and required-evidence coverage, all bundle
   limits/digests/chunk chains, create-exclusive collision handling and every
-  before/during/phase-B source or delivery mutation;
-- target/profile creation, exact four-slot mapping and independence flags,
+  before/during/phase-B source or delivery mutation; the AFAB fixture proves
+  601 changes/1,434 objects/27,607,019 bytes/largest 4,097,314 bytes fit one
+  bundle and 64 MiB+1 fails;
+- target/profile creation, exact four-slot mapping and reviewer independence,
   target supersession after every source, chair generation/family and adapter
   contract advance;
-- contract-bound Claude/Cursor/Agy sandbox/tool canaries and no cross-bundle
+- contract-bound Claude/Cursor/Agy exact server/tool/helper/broker sandbox
+  canaries, empty list probes, denied extra methods/effects and no cross-bundle
   portal read;
 - structural Python/TypeScript route-schema parity, post-router admission
   checks, process-tree kill, stable-key single-flight, changed concurrent input
@@ -2994,7 +3201,8 @@ Deterministic verification covers:
 - first/second FINDINGS, UNUSABLE, concurrent head forks, full open-set
   carry-forward, repaired-target CLEAN, immutable mutation replay and live read
   currency;
-- every reducer blocker/precedence and operator/agent/receipt projection; and
+- every reducer top-level/slot blocker union, operator/agent projection and
+  standalone receipt-v2 local codec/sort/equality/history/count/JCS hash; and
 - every certifying-action recovery branch, bounded lookup, conservative
   consumption, direct-human retirement, liveness exit, generic-recovery
   exclusion and absence of redispatch/reconstruction.
@@ -3025,10 +3233,12 @@ agent_lifecycle_bridge_high_water(
 
 lifecycle_rotation_custody(
   run_id, agent_id, custody_id, command_id, provider_action_id,
-  recovery_from_custody_id,
+  recovery_source_kind, recovery_from_custody_id,
+  recovery_from_generation_loss_id,
   bridge_owner_kind, state, terminal_disposition, revision,
   caller_turn_lease_id, caller_turn_generation,
   predecessor_turn_set_digest, quarantined_write_set_digest,
+  delivery_cut_watermark, adoption_delivery_set_digest,
   checkpoint_ref, checkpoint_digest, checkpoint_validation_revision,
   task_revision, mailbox_revision, child_set_digest,
   source_provider_session_ref, source_capability_hash,
@@ -3046,10 +3256,35 @@ lifecycle_rotation_custody(
   UNIQUE(run_id, provider_action_id)
 )
 
+lifecycle_generation_losses(
+  run_id, agent_id, generation_loss_id, loss_kind, state,
+  terminal_disposition, revision, old_provider_session_ref,
+  new_provider_session_ref, old_provider_generation,
+  new_provider_generation, old_context_revision, new_context_revision,
+  source_custody_action_id, source_adapter_id, source_adapter_contract_digest,
+  source_principal_generation, source_bridge_generation, bridge_owner_kind,
+  source_bridge_row_id, source_bridge_revision, source_capability_hash,
+  source_project_session_generation, source_run_generation,
+  source_chair_lease_generation,
+  checkpoint_state, checkpoint_ref, checkpoint_digest,
+  loss_evidence_digest, active_recovery_custody_id,
+  PRIMARY KEY(run_id, agent_id, generation_loss_id)
+)
+
+lifecycle_custody_adoption_deliveries(
+  run_id, agent_id, custody_id, ordinal, delivery_id,
+  delivery_generation, recipient_agent_id, source_state,
+  PRIMARY KEY(run_id, agent_id, custody_id, ordinal),
+  UNIQUE(run_id, delivery_id, delivery_generation),
+  FOREIGN KEY(run_id, agent_id, custody_id)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id)
+)
+
 agent_lifecycle_recovery_capability_issues(
   issue_id, capability_hash, operator_id, project_id, session_id, run_id,
   agent_id, session_revision, session_generation, run_revision,
-  old_custody_id, old_action_id, old_custody_revision,
+  recovery_source_kind, old_custody_id, old_action_id, old_custody_revision,
+  generation_loss_id, generation_loss_revision,
   checkpoint_digest, source_provider_session_ref, source_capability_hash,
   source_custody_action_id, source_adapter_id, source_adapter_contract_digest,
   source_bridge_row_id, source_bridge_revision, source_provider_generation,
@@ -3062,12 +3297,28 @@ agent_lifecycle_recovery_capability_issues(
 )
 
 agent_lifecycle_recovery_retirements(
-  run_id, agent_id, recovery_intent_id, old_custody_id,
+  run_id, agent_id, recovery_intent_id, recovery_source_kind,
+  old_custody_id, generation_loss_id,
   old_terminal_disposition, abandon_reason, consequence_digest,
   direct_human_attestation_digest, created_at,
   PRIMARY KEY(run_id, agent_id, recovery_intent_id)
 )
 ~~~
+
+No delivery schema/state is added. `successor-pending` is the pure joined
+projection for which delivery state is `ready`, delivery recipient equals the
+agent, and the active lifecycle-delivery owner is exactly one of: a nonfinal
+custody, a standalone open generation loss, or a recovery-in-progress loss
+whose `active_recovery_custody_id` exactly names that nonfinal custody. A
+standalone recovery-in-progress loss or crossed/multiple unrelated rows is an
+integrity failure and remains claim-fenced. The existing recipient/state/
+sequence and lifecycle-owner indexes serve it. Mailbox/operator reads expose that row as
+stored state ready plus routing disposition successor-pending; receipt ready
+counts include it and no successor-pending counter exists. Claim reuses the
+same predicate under its CAS. Adoption finalises custody and any linked loss
+without mutating the ready delivery, clearing the disposition and making it claimable; abandon
+updates every matching ready row to abandoned with reason/watermark before
+finalising custody. Enqueue before/after the delivery cut needs no extra field.
 
 High-water rows and custody identity/source/checkpoint/target fields are
 immutable except through their named CAS transactions. Custody target
@@ -3087,15 +3338,24 @@ multiple, foreign or quarantined matches reject, as does any second active or
 quarantined predecessor. Terminal predecessor states are released and revoked.
 It then changes every active agent-owned write lease to
 lifecycle-quarantined before computing the checkpoint/precondition digest;
-captures the exact daemon-validated checkpoint and all revision/set digests;
+fences claims, records delivery_cut_watermark, captures only claimed predecessor
+delivery IDs/generations in adoption_delivery_set_digest, and captures the exact
+daemon-validated checkpoint and all other revision/set digests;
 rechecks the post-housekeeping lease/freeze set; inserts custody; fences new
 claims/turns; sets suspended; and commits accepted-suspended without adapter
 I/O. Exact replay returns that immutable receipt; current lifecycle is a read.
 Every delivery-claim transaction performs the same expiry/reclaim/watermark
 housekeeping and rechecks lifecycle freeze immediately before its claim CAS.
+The request transaction inserts the exact claimed rows into
+lifecycle_custody_adoption_deliveries with contiguous ordinals/source state;
+their canonical digest must equal adoption_delivery_set_digest. Adoption CASes
+those foreign-keyed IDs/generations, never a fresh query over current claims.
 
-Delivery enqueue remains durable and increments mailbox/checkpoint revision,
-but delivery claim/ack and write acquisition are trigger-denied. The old grant
+Delivery enqueue remains durable, but ready/unclaimed rows at the cut and later
+enqueues are successor-pending and excluded from checkpoint/precondition/
+adoption digests. They cannot stale rotation; adoption makes the same rows
+claimable without replay. Delivery claim/ack and write acquisition are trigger-
+denied while custody owns the agent. The old grant
 may finish only the captured lifecycle call and bounded reads. The staged grant
 exposes only the existing launch.attest descriptor bound to custody/action,
 challenge and checkpoint vector. Every other agent/task/mailbox/authority/
@@ -3131,9 +3391,31 @@ quarantines. No path dispatches, redispatches, reconstructs a secret or treats
 a resume reference as continuity. Checkpoint A can never adopt B; B reserves a
 new action/capability/challenge and new high-water targets.
 
+The generation-loss table is the second explicit lifecycleRecoverySourceV1
+arm; custody and loss foreign keys are exclusive/non-null by discriminator.
+loss_kind is generation-advance (new provider generation > old) or context-
+advance (new provider generation equals old and new context revision differs).
+Generation-advance wins when provider and context both change, so one
+observation has one canonical loss ID. checkpoint
+state is absent, invalid or last-validated; ref/digest are non-null iff last-
+validated. Detection requires no active custody, inserts open loss, fences the
+source, and CAS-ratchets identity/owner-bridge high-water rows to at least every
+observed generation before replacement can reserve. Generic scans exclude it.
+Capability issuance equality-copies every immutable loss source action,
+adapter/contract, principal/bridge/owner and chair session/run/lease field; it
+never late-resolves a mutable bridge/session join.
+
+Loss edges are open -> recovery-in-progress -> recovered-adopted|abandoned.
+Fresh custody no-effect/quarantine/supersession returns it to open with attempt
+history; only adopted custody terminalises recovered and clears freezes.
+Absent/invalid checkpoint permits fresh rotation only after the read-only
+recovery-checkpoint validator binds an existing daemon-valid artifact; otherwise
+only abandon is reachable. The recovery capability/intent/retirement rows bind
+the exact custody-or-loss union and phase-B CAS its revision.
+
 Lifecycle remains the sole recovery owner for a rotating true chair until
 adoption or confirmed abandon. The chair-loss scanner excludes a nonfinal
-custody and a finalized nonadopted lifecycle-recovery marker and creates no
+custody, open generation loss and finalized nonadopted lifecycle-recovery marker and creates no
 chair_bridge_loss row. Child custody cannot update chair tables.
 
 The private local issuer for agent-lifecycle-recovery-takeover requires the
@@ -3148,14 +3430,15 @@ adapter/activated contract/distinct action, current daemon-validated checkpoint
 row/vector and proposed high-water reservation. Preview changes no lifecycle
 or provider state. fresh-rotate Commit consumes the issue and inserts a
 distinct null-caller awaiting-boundary custody with an immutable recovery-from
-link after all predecessor turns are terminal. A nonfinal predecessor may take
+custody-or-loss link after all predecessor turns are terminal. A nonfinal custody predecessor may take
 its legal superseded edge; a finalized no-effect/quarantined/superseded row is
 never mutated. Commit performs no provider call.
 
 abandon instead requires exact session cancel authority, a consequential gate
 and independent destructive direct-human attestation. Its one transaction
 moves a nonfinal custody through abandoned, or preserves a finalized custody
-and inserts agent_lifecycle_recovery_retirements; archives the agent; revokes
+and inserts agent_lifecycle_recovery_retirements; a loss source takes its exact
+abandoned edge. It archives the agent; revokes
 old/staged capability, principal and bridge; terminally revokes turns; and
 moves lifecycle-quarantined write leases to revoked-abandoned. It terminally
 abandons every owned or sole-recipient ready/claimed delivery, task owner lease,
@@ -3171,8 +3454,11 @@ up only a new dispatched action. Generic Resume cannot mutate these rows.
 
 Verification covers schema/catalogue and every legal/illegal state edge and
 transaction crash; unique self-turn inference and operator null-caller
-boundary; housekeeping/quarantine/digest ordering; delivery enqueue versus
-claim/ack; old/staged operation negatives; accepted/current-read separation;
+boundary; housekeeping/quarantine/delivery-cut ordering; successor-pending
+stored-as-ready state/count and enqueue without adoption starvation versus
+claim/ack fencing for custody, open loss and exact linked loss/custody owners;
+adoption/abandon and crossed/multiple-owner negatives; old/staged
+operation negatives; accepted/current-read separation;
 global identity/owner-scoped bridge high-water A-to-B nonreuse and exact source/
 target final CAS; launch.attest attribution;
 retained-successor-before-CAS, child/chair table swap and postcommit retirement;
@@ -3180,5 +3466,9 @@ predispatch versus advertised postdispatch no-effect; sole-chair lifecycle
 ownership and generic recovery exclusion. Operator fixtures cover capability
 parent issuance grant/gate/revoke/consume, fresh adapter/contract/action/
 checkpoint binding, finalized-custody immutability, exact abandon delivery/
-watermark/barrier transitions and generic-resume/chair-loss negatives. No code in
+watermark/barrier transitions and generic-resume/chair-loss negatives.
+Generation-loss fixtures cover both loss kinds, every checkpoint state,
+simultaneous provider/context advance classified once as generation-advance,
+observed high-water ratchet, custody-or-loss foreign keys, recovery/adopt/
+reopen/abandon edges and absent/null/generic-resume negatives. No code in
 this amendment adds automatic pressure, successor selection or Spec 06 policy.
