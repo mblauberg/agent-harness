@@ -45,6 +45,46 @@ afterEach(async () => {
 });
 
 describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
+  it("rejects provider authority without a positive hard turns ceiling before provider I/O", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: {
+          provider_calls: 1,
+          "cost:USD": 10,
+          "input_tokens:fake": 10,
+          "output_tokens:fake": 10,
+        },
+      },
+      commandId: "provider-review-no-turns:authority",
+    });
+    const actionId = "provider-review-no-turns:spawn";
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Hard turns capacity is mandatory.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-no-turns:dispatch",
+    })).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    await expect(fixture.chair.getProviderAction({ actionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("reserves and exactly settles every configured provider budget dimension", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => {

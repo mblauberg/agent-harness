@@ -5985,8 +5985,8 @@ export class Fabric {
       }
       reservation[unit] = amount;
     }
-    if (Object.keys(reservation).length === 0) {
-      throw new FabricError("BUDGET_EXCEEDED", "delegated authority has no bounded provider budget");
+    if (reservation.turns !== maximumTurns) {
+      throw new FabricError("BUDGET_EXCEEDED", "delegated provider authority has no positive hard turns ceiling");
     }
     return reservation;
   }

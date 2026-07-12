@@ -79,6 +79,18 @@ describe("additive persistence invariants", () => {
         'task-a','authority-a','{"descendants":1}',NULL,'reserved',1
       )
     `).run()).toThrow(/INVARIANT_provider_actions_budget_reservation/u);
+    expect(() => database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
+        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
+        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
+        task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
+      ) VALUES (
+        'run-a','action-missing-turns','fake','spawn',NULL,NULL,NULL,'identity-no-turns','payload-no-turns','{"maxTurns":1}',
+        'dispatched','["prepared","dispatched"]',1,0,0,NULL,1,1,
+        'task-a','authority-a','{"provider_calls":1}',NULL,'reserved',1
+      )
+    `).run()).toThrow(/INVARIANT_provider_actions_budget_reservation/u);
     database.prepare(`
       INSERT INTO provider_actions(
         run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
@@ -86,7 +98,7 @@ describe("additive persistence invariants", () => {
         execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
         task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
       ) VALUES (
-        'run-a','action-budget','fake','spawn',NULL,NULL,NULL,'identity','payload','{}',
+        'run-a','action-budget','fake','spawn',NULL,NULL,NULL,'identity','payload','{"maxTurns":2}',
         'dispatched','["prepared","dispatched"]',1,0,0,NULL,1,1,
         'task-a','authority-a','{"provider_calls":1,"turns":2}',NULL,'reserved',1
       )
@@ -149,7 +161,7 @@ describe("additive persistence invariants", () => {
         execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
         task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
       ) VALUES (
-        'run-a','action-unknown','fake','spawn',NULL,NULL,NULL,'identity-unknown','payload-unknown','{}',
+        'run-a','action-unknown','fake','spawn',NULL,NULL,NULL,'identity-unknown','payload-unknown','{"maxTurns":1}',
         'dispatched','["prepared","dispatched"]',1,0,0,NULL,2,1,
         'task-a','authority-a','{"turns":1}',NULL,'reserved',2
       )

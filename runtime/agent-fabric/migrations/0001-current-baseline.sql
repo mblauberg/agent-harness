@@ -3721,6 +3721,10 @@ CREATE TRIGGER provider_actions_values_insert BEFORE INSERT ON provider_actions 
   SELECT CASE WHEN NEW.budget_authority_id IS NOT NULL AND (
     NEW.budget_state<>'reserved' OR json_type(NEW.budget_reservation_json)<>'object'
     OR NOT EXISTS (SELECT 1 FROM json_each(NEW.budget_reservation_json))
+    OR COALESCE(json_type(NEW.payload_json,'$.maxTurns'),'')<>'integer'
+    OR json_extract(NEW.payload_json,'$.maxTurns')<1
+    OR COALESCE(json_type(NEW.budget_reservation_json,'$.turns'),'')<>'integer'
+    OR json_extract(NEW.budget_reservation_json,'$.turns')<>json_extract(NEW.payload_json,'$.maxTurns')
     OR EXISTS (
       SELECT 1 FROM json_each(NEW.budget_reservation_json) reservation
        LEFT JOIN authority_budget budget
