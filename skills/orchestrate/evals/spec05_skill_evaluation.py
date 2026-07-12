@@ -49,6 +49,10 @@ ARTIFACT_KINDS = {
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 CLASSIFIER_INSTRUCTION = """You are a blind skill-routing evaluator. For every opaque case, choose exactly one primary skill and zero or more genuinely required companion skills from the complete catalogue. Copy skill names exactly. For portability cases, also complete the requested workflow using project artifacts only and return the named artifact kind without Console, Herdr, or GitHub. Return only one JSON object with schema_version 1 and a selections array. Each selection must contain exactly case_id, primary_skill, companion_skills, and portable_workflow. portable_workflow is null for ordinary cases; otherwise it contains exactly artifact_kind, artifact_basis (project-artifacts), adapters_used (an empty array), and status (completed). Do not use tools, infer from case IDs, or include commentary.
 """
+PROVIDER_PREAMBLE = (
+    "Perform the frozen blind routing evaluation below.\n\n"
+    "Do not call tools. Return only the required JSON object; no Markdown fence or commentary."
+)
 
 
 class Invalid(ValueError):
@@ -131,6 +135,10 @@ def routing_packet(catalogue: str, cases: list[dict[str, Any]]) -> str:
     )
 
 
+def provider_prompt(packet: str) -> str:
+    return f"{PROVIDER_PREAMBLE}\n\n{packet}"
+
+
 def _dataset_payload(root: Path) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -158,6 +166,9 @@ def _routing_plan(root: Path, evidence: Path) -> dict[str, Any]:
             "sha256": sha256_file(evidence / "classifier-instruction.txt"),
             "packet_path": "routing-packet.txt",
             "packet_sha256": sha256_file(evidence / "routing-packet.txt"),
+            "provider_prompt_sha256": sha256_bytes(
+                provider_prompt((evidence / "routing-packet.txt").read_text()).encode()
+            ),
         },
         "schedule": {
             "families": sorted(FAMILIES),
@@ -228,7 +239,11 @@ def _parse_output(path: Path, cases: list[dict[str, Any]], known_skills: set[str
     return output
 
 
-def _action_evidence(path: Path, invocation: dict[str, Any]) -> dict[str, Any]:
+def _action_evidence(
+    path: Path,
+    invocation: dict[str, Any],
+    expected_prompt_sha256: str,
+) -> dict[str, Any]:
     try:
         action = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -236,7 +251,7 @@ def _action_evidence(path: Path, invocation: dict[str, Any]) -> dict[str, Any]:
     required = {
         "schema_version", "route", "run_id", "task_id", "action_id",
         "adapter_id", "model_family", "model", "status", "result_digest",
-        "base_revision",
+        "base_revision", "prompt_sha256",
     }
     fail(not isinstance(action, dict) or set(action) != required, "Fabric action evidence keys are invalid")
     family = invocation["family"]
@@ -244,6 +259,8 @@ def _action_evidence(path: Path, invocation: dict[str, Any]) -> dict[str, Any]:
          "action evidence is not from the generated MCP Fabric route")
     fail(action["adapter_id"] != FAMILIES.get(family), "action evidence does not use a real Agent Fabric adapter")
     fail(action["model_family"] != family, "action evidence family is inconsistent")
+    fail(action["prompt_sha256"] != expected_prompt_sha256,
+         "action evidence is not bound to the frozen provider prompt")
     for field in ("task_id", "action_id", "adapter_id", "model"):
         fail(action[field] != invocation[field], f"action evidence {field} is inconsistent")
     fail(action["status"] != "terminal" or not DIGEST.fullmatch(str(action["result_digest"])),
@@ -308,7 +325,11 @@ def validate_routing_result(
             (output_path, invocation["output_sha256"], "output"),
         ):
             fail(not path.is_file() or sha256_file(path) != digest, f"routing {label} evidence is missing or changed")
-        _action_evidence(action_path, invocation)
+        _action_evidence(
+            action_path,
+            invocation,
+            plan["classifier"]["provider_prompt_sha256"],
+        )
         output = _parse_output(output_path, cases, known_skills)
         by_id = {row["case_id"]: row for row in output["selections"]}
         for case in cases:
@@ -372,6 +393,7 @@ def make_contract_test_result(root: Path, evidence: Path, output_root: Path) -> 
             "status": "terminal",
             "result_digest": sha256_bytes(family.encode()),
             "base_revision": "contract-test-revision",
+            "prompt_sha256": plan["classifier"]["provider_prompt_sha256"],
         }, sort_keys=True) + "\n")
         output_path.write_text(json.dumps(_expected_output(root), sort_keys=True) + "\n")
         invocations.append({
@@ -432,13 +454,15 @@ def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
         row = by_family[family]
         required = {
             "family", "adapterId", "model", "runId", "taskId", "actionId",
-            "status", "resultDigest", "baseRevision", "answer",
+            "status", "resultDigest", "baseRevision", "promptSha256", "answer",
         }
         fail(set(row) != required, f"Fabric routing bundle {family} result keys are invalid")
         fail(row["adapterId"] != FAMILIES[family], f"Fabric routing bundle {family} adapter differs")
         fail(row["status"] != "terminal" or not DIGEST.fullmatch(str(row["resultDigest"])),
              f"Fabric routing bundle {family} is not terminal")
         fail(row["baseRevision"] != bundle["head"], f"Fabric routing bundle {family} revision differs")
+        fail(row["promptSha256"] != json.loads((evidence / "routing-plan.json").read_text())["classifier"]["provider_prompt_sha256"],
+             f"Fabric routing bundle {family} prompt digest differs")
         for field in ("model", "runId", "taskId", "actionId", "answer"):
             fail(not isinstance(row[field], str) or not row[field],
                  f"Fabric routing bundle {family} {field} is missing")
@@ -456,6 +480,7 @@ def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
             "status": row["status"],
             "result_digest": row["resultDigest"],
             "base_revision": row["baseRevision"],
+            "prompt_sha256": row["promptSha256"],
         }, indent=2, sort_keys=True) + "\n")
         try:
             parsed_answer = json.loads(row["answer"])
