@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseIdentifier } from "@local/agent-fabric-protocol";
+import { parseIdentifier, parseOperatorCapabilityGrant } from "@local/agent-fabric-protocol";
 import type {
   GitActionGrant,
   GitRepositoryBinding,
@@ -11,9 +11,11 @@ import type {
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
 import { readGlobalLiveness } from "../../../src/daemon/global-liveness.ts";
-import { canonicalJson } from "../../../src/project-session/store-support.ts";
+import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
+import { OperatorActionStore } from "../../../src/operator/action-store.ts";
 import type { GitMutationDispatchContext, GitMutationInspection, GitMutationPort } from "../../../src/operator/fixed-git-mutation-port.ts";
 import { createProductionOperatorActionPorts } from "../../../src/operator/production-action-ports.ts";
+import { OperatorStore } from "../../../src/operator/store.ts";
 import {
   TypedGitService,
   deriveGitEffectBindingDigest,
@@ -478,6 +480,172 @@ describe("typed Git effect custody", () => {
     await expect(ports.effectPort.dispatch(value.request)).resolves.toMatchObject({ status: "committed" });
     expect(value.port.dispatchCount).toBe(1);
     expect(value.database.prepare("SELECT state FROM operator_git_effect_bindings").get()).toEqual({ state: "applied" });
+  });
+
+  it("runs conflict status and read-only reconciliation through the public operator action owner with stable replay", async () => {
+    const value = fixture();
+    value.database.prepare("DELETE FROM operator_effect_custody").run();
+    const operatorStore = new OperatorStore({ database: value.database, clock: () => now });
+    operatorStore.registerPrincipal({
+      operatorId: "operator_01",
+      projectId: "project_01",
+      authenticatedSubjectHash: "subject_hash_git",
+      projectAuthorityGeneration: 1,
+    });
+    const capability = parseOperatorCapabilityGrant({
+      capabilityId: "cap_git_01",
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-07-12T09:00:00.000Z",
+      expiresAt: "2026-07-12T12:00:00.000Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_01",
+      sessionGeneration: 1,
+      actions: ["read", "git", "git-custody-resolve"],
+    });
+    operatorStore.issueCapability(capability, "git-capability-secret");
+    const previewCommandId = "preview_command_git_01";
+    const previewId = `preview_${sha256(`operator_01:${previewCommandId}`).slice(0, 48)}`;
+    const intent = {
+      ...value.intent,
+      authorisation: {
+        ...value.intent.authorisation,
+        operationId: derivePreauthorisedGitOperationId({
+          operatorId: "operator_01",
+          projectId: value.intent.authorisation.projectId,
+          projectSessionId: value.intent.authorisation.projectSessionId,
+          previewId,
+          effectBindingDigest: value.intent.authorisation.effectBindingDigest,
+        }),
+      },
+    } satisfies OperatorGitIntent;
+    value.port.outcome = {
+      outcome: "exact-conflict",
+      repository: value.intent.repository,
+      evidenceDigest: sha("1"),
+      failureSignatureDigest: null,
+      conflict: {
+        kind: "merge",
+        operationStateDigest: sha("2"),
+        indexDigest: sha("3"),
+        worktreeDigest: sha("4"),
+        conflictPaths: [],
+      },
+    };
+    const ports = createProductionOperatorActionPorts({
+      database: value.database,
+      clock: () => now,
+      adapter: {
+        capabilities: () => Promise.resolve({}),
+        dispatch: () => Promise.reject(new Error("provider dispatch is not expected")),
+        lookup: () => Promise.reject(new Error("provider lookup is not expected")),
+      },
+      typedGit: value.service,
+    });
+    const actions = new OperatorActionStore({
+      database: value.database,
+      operatorStore,
+      statePort: ports.statePort,
+      effectPort: ports.effectPort,
+      clock: () => now,
+    });
+    const context = {
+      operatorId: parseIdentifier<"OperatorId">("operator_01", "test.operatorId"),
+      projectId: parseIdentifier<"ProjectId">("project_01", "test.projectId"),
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    };
+    const credential = {
+      capabilityId: parseIdentifier<"CapabilityId">("cap_git_01", "test.capabilityId"),
+      token: "git-capability-secret",
+    };
+    const preview = await actions.preview(context, {
+      command: {
+        credential,
+        commandId: parseIdentifier<"CommandId">(previewCommandId, "test.previewCommandId"),
+        expectedRevision: 2,
+        actor: context.operatorId,
+        provenance: {
+          kind: "console-direct-input",
+          clientId: parseIdentifier<"OperatorClientId">("console_git_01", "test.clientId"),
+          inputEventId: "input_preview_git_01",
+        },
+        evidenceRefs: [],
+      },
+      projectId: context.projectId,
+      intent,
+    });
+    expect(preview.previewId).toBe(previewId);
+    const commitCommandId = parseIdentifier<"CommandId">("commit_command_git_01", "test.commitCommandId");
+    await actions.commit(context, {
+      command: {
+        credential,
+        commandId: commitCommandId,
+        expectedRevision: 2,
+        actor: context.operatorId,
+        provenance: {
+          kind: "console-direct-input",
+          clientId: parseIdentifier<"OperatorClientId">("console_git_01", "test.clientId"),
+          inputEventId: "input_commit_git_01",
+        },
+        evidenceRefs: [],
+      },
+      projectId: context.projectId,
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_git_01" },
+    });
+    const conflict = actions.status({ credential, projectId: context.projectId, commandId: commitCommandId });
+    if (conflict.status !== "conflict") throw new Error("expected public typed Git conflict status");
+    const git = conflict.gitCustody;
+    const reconcileRequest = {
+      command: {
+        credential,
+        commandId: parseIdentifier<"CommandId">("reconcile_command_git_01", "test.reconcileCommandId"),
+        expectedRevision: 2,
+        actor: context.operatorId,
+        provenance: {
+          kind: "console-direct-input" as const,
+          clientId: parseIdentifier<"OperatorClientId">("console_git_01", "test.clientId"),
+          inputEventId: "input_reconcile_git_01",
+        },
+        evidenceRefs: [],
+      },
+      projectId: context.projectId,
+      targetCommandId: commitCommandId,
+      expectedStatus: "conflict" as const,
+      expectedAttemptGeneration: conflict.attemptGeneration,
+      mode: "observe-only" as const,
+      gitConflict: {
+        kind: "owned-conflict" as const,
+        custodyId: git.custodyId,
+        expectedBindingState: "conflict" as const,
+        expectedBindingStateRevision: git.bindingStateRevision,
+        expectedOwnedConflictGeneration: git.ownedConflictGeneration ?? 0,
+        expectedPredecessorCustodyId: git.predecessorCustodyId,
+        expectedPredecessorConflictGeneration: git.predecessorConflictGeneration,
+        expectedReservationGeneration: git.reservationGeneration,
+        expectedCommonDirectoryIdentityDigest: git.commonDirectoryIdentityDigest,
+        expectedLookupGeneration: git.lookupGeneration,
+        expectedLookupEvidenceDigest: git.lookupEvidenceDigest,
+        expectedResolutionEligibility: "none" as const,
+      },
+    };
+    const retained = await actions.reconcile(context, reconcileRequest);
+    expect(retained).toMatchObject({ status: "conflict", attemptGeneration: 2, gitCustody: { lookupGeneration: 2 } });
+    const inspectionCount = value.port.inspectCount;
+    await expect(actions.reconcile(context, reconcileRequest)).resolves.toEqual(retained);
+    expect(value.port.inspectCount).toBe(inspectionCount);
+    await expect(actions.reconcile(context, {
+      ...reconcileRequest,
+      gitConflict: { ...reconcileRequest.gitConflict, expectedLookupGeneration: git.lookupGeneration + 1 },
+    })).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+    expect(value.port.dispatchCount).toBe(1);
   });
 
   it("issues only a positive allow-list subset through git-authorise", () => {

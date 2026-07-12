@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import type {
@@ -62,25 +62,27 @@ export class FixedGitMutationPort implements GitMutationPort {
   }
 
   async dispatch(intent: OperatorGitIntent, context: GitMutationDispatchContext): Promise<GitMutationInspection> {
-    await this.#assertBoundary(intent);
-    const before = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
-    assertSameRepositoryBinding(before, intent.repository, "Git repository changed before lock/CAS");
-    await this.#assertTypedInputs(intent.operation, intent.repository.worktreePath, context);
-    try {
-      await this.#mutate(intent, context);
-    } catch (error: unknown) {
-      const inspected = await this.#inspectAgainstRecipe(intent);
-      if (inspected.outcome !== "exact-no-effect") return inspected;
-      return {
-        ...inspected,
-        outcome: "exact-no-effect",
-        failureSignatureDigest: digest({
-          class: "git-process-failed-with-no-effect",
-          name: error instanceof Error ? error.name : "unknown",
-        }),
-      };
-    }
-    return await this.#inspectAgainstRecipe(intent);
+    return await this.#withPrivateReservation(intent.repository.commonDirectoryIdentityDigest, async () => {
+      await this.#assertBoundary(intent);
+      const before = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
+      assertSameRepositoryBinding(before, intent.repository, "Git repository changed before lock/CAS");
+      await this.#assertTypedInputs(intent, context);
+      try {
+        await this.#mutate(intent, context);
+      } catch (error: unknown) {
+        const inspected = await this.#inspectAgainstRecipe(intent);
+        if (inspected.outcome !== "exact-no-effect") return inspected;
+        return {
+          ...inspected,
+          outcome: "exact-no-effect",
+          failureSignatureDigest: digest({
+            class: "git-process-failed-with-no-effect",
+            name: error instanceof Error ? error.name : "unknown",
+          }),
+        };
+      }
+      return await this.#inspectAgainstRecipe(intent);
+    });
   }
 
   async inspect(intent: OperatorGitIntent, _context: GitMutationDispatchContext): Promise<GitMutationInspection> {
@@ -97,6 +99,10 @@ export class FixedGitMutationPort implements GitMutationPort {
     if (!contains(root, worktree)) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git worktree is outside the trusted repository");
     }
+    const binaryDigest = `sha256:${createHash("sha256").update(await readFile(this.#gitExecutable)).digest("hex")}`;
+    if (binaryDigest !== intent.executionProfile.gitBinaryDigest) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git executable no longer matches the execution profile");
+    }
     const hostile = await this.#run(worktree, [
       "config", "--local", "--get-regexp",
       "^(alias\\.|core\\.(hooksPath|sshCommand|pager|attributesFile)|filter\\.|merge\\..*\\.driver|diff\\..*\\.command|credential\\.|gpg\\.|commit\\.gpgSign|include|includeIf|remote\\..*\\.(url|pushurl))",
@@ -107,16 +113,17 @@ export class FixedGitMutationPort implements GitMutationPort {
   }
 
   async #assertTypedInputs(
-    operation: GitOperation,
-    worktreePath: string,
+    intent: OperatorGitIntent,
     context: GitMutationDispatchContext,
   ): Promise<void> {
+    const operation = intent.operation;
+    const worktreePath = intent.repository.worktreePath;
     for (const path of operationPaths(operation)) assertRelativeGitPath(path);
     for (const ref of operationRefs(operation)) assertFullRef(ref);
     if (requiresRemote(operation) && context.remoteTarget === null) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "remote Git operation lacks a registered target");
     }
-    if (context.remoteTarget !== null && /[\r\n\0]/u.test(context.remoteTarget)) {
+    if (context.remoteTarget !== null && (context.remoteTarget.length === 0 || /[\r\n\0]/u.test(context.remoteTarget))) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "registered Git target is malformed");
     }
     if (usesWorktreeContent(operation)) {
@@ -124,7 +131,15 @@ export class FixedGitMutationPort implements GitMutationPort {
       if (attributes.stdout.trim().length > 0) {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "project attributes make the typed Git effect unavailable");
       }
+      const { existsSync } = await import("node:fs");
+      if (existsSync(join(intent.repository.gitCommonDir, "info", "attributes"))) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "repository-local attributes make the typed Git effect unavailable");
+      }
     }
+    if (
+      (operation.variant === "upstream-set" || operation.variant === "upstream-unset") &&
+      operation.expectedConfigDigest !== intent.repository.configDigest
+    ) throw new ProjectFabricCoreError("STALE_REVISION", "Git local configuration changed before upstream mutation");
     for (const [ref, expected] of refDigestChecks(operation)) {
       const observed = await readGitObjectDigest(worktreePath, ref);
       if (observed.digest !== expected) {
@@ -138,18 +153,18 @@ export class FixedGitMutationPort implements GitMutationPort {
     const operation = intent.operation;
     switch (operation.variant) {
       case "fetch":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
+        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
         return;
       case "pull-fast-forward-only":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
+        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
         await this.#run(cwd, ["merge", "--ff-only", operation.destinationRef]);
         return;
       case "pull-merge-commit-start":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
+        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
         await this.#run(cwd, ["merge", "--no-ff", "--no-edit", operation.destinationRef], { allowedExitCodes: [1] });
         return;
       case "pull-rebase-start":
-        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
+        await this.#run(cwd, ["fetch", "--no-tags", "--no-write-fetch-head", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
         await this.#run(cwd, ["rebase", "--no-autostash", operation.destinationRef], { allowedExitCodes: [1] });
         return;
       case "stage":
@@ -196,13 +211,18 @@ export class FixedGitMutationPort implements GitMutationPort {
         await this.#run(cwd, ["rebase", "--abort"]);
         return;
       case "push-fast-forward-only":
-        await this.#run(cwd, ["push", "--porcelain", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
+        await this.#run(cwd, ["push", "--porcelain", "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`]);
         return;
       case "push-force-with-lease": {
-        const nativeExpected = (await this.#run(cwd, ["rev-parse", "--verify", `${operation.destinationRef}^{object}`], { allowedExitCodes: [1] })).stdout.trim();
+        const nativeExpected = await nativeIdForDigest(
+          cwd,
+          operation.expectedRemoteObjectDigest,
+          this.#gitExecutable,
+          await this.#environment(),
+        );
         await this.#run(cwd, [
           "push", "--porcelain", `--force-with-lease=${operation.destinationRef}:${nativeExpected}`,
-          requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`,
+          "--", requiredRemote(context), `${operation.sourceRef}:${operation.destinationRef}`,
         ]);
         return;
       }
@@ -348,6 +368,27 @@ export class FixedGitMutationPort implements GitMutationPort {
       GIT_MERGE_AUTOEDIT: "no",
       AGENT_FABRIC_EMPTY_HOOKS: hooks,
     };
+  }
+
+  async #withPrivateReservation<T>(identityDigest: Sha256Digest, action: () => Promise<T>): Promise<T> {
+    const directory = join(this.#privateStateRoot, "git-mutation-locks");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const lockPath = join(directory, `${identityDigest.slice("sha256:".length)}.lock`);
+    let handle;
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new ProjectFabricCoreError("CONFLICT", "another typed Git mutation owns the private reservation lock");
+      }
+      throw error;
+    }
+    try {
+      return await action();
+    } finally {
+      await handle.close();
+      await unlink(lockPath).catch(() => undefined);
+    }
   }
 
   async #run(

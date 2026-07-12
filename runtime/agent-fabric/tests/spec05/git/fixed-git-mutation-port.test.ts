@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +11,7 @@ import { FixedGitMutationPort } from "../../../src/operator/fixed-git-mutation-p
 
 const directories: string[] = [];
 const digest = (value: string): Sha256Digest => `sha256:${value.repeat(64).slice(0, 64)}` as Sha256Digest;
+const gitBinaryDigest = `sha256:${createHash("sha256").update(readFileSync("/usr/bin/git")).digest("hex")}` as Sha256Digest;
 
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -54,7 +56,7 @@ describe("fixed typed Git mutation port", () => {
       profileId: "sealed-git-v1",
       revision: 1,
       digest: digest("1"),
-      gitBinaryDigest: digest("2"),
+      gitBinaryDigest,
       objectFormat: "sha1",
     } as const;
     const resultRecipeDigest = digest("3");
@@ -120,7 +122,7 @@ describe("fixed typed Git mutation port", () => {
     const intent = {
       kind: "git",
       repository: before,
-      executionProfile: { profileId: "sealed", revision: 1, digest: digest("1"), gitBinaryDigest: digest("2"), objectFormat: "sha1" },
+      executionProfile: { profileId: "sealed", revision: 1, digest: digest("1"), gitBinaryDigest, objectFormat: "sha1" },
       authorisation: { effectBindingDigest: digest("3") },
       operation: { variant: "stage", paths: ["tracked.txt"] },
       resultRecipe: {

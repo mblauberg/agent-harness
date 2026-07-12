@@ -909,14 +909,14 @@ export class OperatorActionStore {
       "git-custody-resolve",
     );
     this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
+    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+    if (replay !== null) return replay;
     if (
       status.status !== request.expectedStatus ||
       !("attemptGeneration" in status) ||
       status.attemptGeneration !== request.expectedAttemptGeneration
     ) throw new ProjectFabricCoreError("STALE_REVISION", "typed Git reconciliation target changed");
-    const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
-    if (replay !== null) return replay;
     if (request.command.commandId === request.targetCommandId) {
       throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
     }
