@@ -37,7 +37,7 @@
     "check": "npm run check:protocol && npm run schema:check && npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.206",
+    "@anthropic-ai/claude-agent-sdk": "0.3.207",
     "@local/agent-fabric-protocol": "file:../agent-fabric-protocol",
     "@modelcontextprotocol/sdk": "1.29.0",
     "ajv": "8.20.0",
