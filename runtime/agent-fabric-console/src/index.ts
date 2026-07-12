@@ -1753,7 +1753,7 @@ function renderFabricStrip(
       binding: presentedBinding(dataset, top),
     });
   }
-  if (rows.length >= 3) {
+  if (rows.length >= 4) {
     setFabricRow(
       rows,
       rows.length - 1,
@@ -1765,6 +1765,8 @@ function renderFabricStrip(
             ? `FORM:${String(Buffer.byteLength(presentation.draft))}B Enter Review Esc cancel`
           : `Health:${header.health} Attn:${String(header.attentionCount)} Next:${header.nextMilestone}`),
     );
+  }
+  if (rows.length >= 3) {
     const help = "? help | q detach";
     setFabricRow(rows, rows.length, columns, help);
     if (columns >= 17) {
@@ -1810,12 +1812,23 @@ export function renderFabricConsoleFrame(
   const hitRegions: FabricHitRegion[] = [];
   if (mode === "inert") {
     if (rows.length > 0) {
+      const showsDetach = dimensions.columns >= 8;
       setFabricRow(
         rows,
         1,
         dimensions.columns,
-        dimensions.columns >= 8 ? "q detach" : "",
+        showsDetach ? "q detach" : "",
       );
+      if (showsDetach) {
+        hitRegions.push({
+          id: "detach",
+          kind: "detach",
+          rect: { x1: 1, y1: 1, x2: 8, y2: 1 },
+          enabled: true,
+          geometryKey,
+          binding: null,
+        });
+      }
     }
     return {
       columns: dimensions.columns,

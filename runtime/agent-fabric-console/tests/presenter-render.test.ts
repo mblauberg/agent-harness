@@ -1379,6 +1379,51 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(frame.rows[1]).toContain("Approve quarantine");
   });
 
+  it("preserves header, top attention, and detach affordance at minimum strip height", () => {
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState(),
+      { columns: 30, rows: 3 },
+    );
+
+    expect(frame.mode).toBe("strip");
+    expect(frame.rows[0]).toContain("P:");
+    expect(frame.rows[1]).toContain("Approve quarantine");
+    expect(frame.rows[1]).not.toContain("Health:");
+    expect(frame.rows[2]).toContain("q detach");
+    expect(frame.hitRegions.find(({ id }) => id === "row:attention:attention:safety"))
+      .toMatchObject({ rect: { x1: 1, y1: 2, x2: 30, y2: 2 } });
+  });
+
+  it("exposes inert detach geometry only when its label is visible", () => {
+    const dataset = richDataset();
+    const state = controllerState();
+    const ui = createFabricUiState();
+    const visible = renderFabricConsoleFrame(dataset, state, ui, {
+      columns: 8,
+      rows: 1,
+    });
+    const clipped = renderFabricConsoleFrame(dataset, state, ui, {
+      columns: 7,
+      rows: 1,
+    });
+
+    expect(visible).toMatchObject({ mode: "inert", rows: ["q detach"] });
+    expect(visible.hitRegions).toStrictEqual([
+      {
+        id: "detach",
+        kind: "detach",
+        rect: { x1: 1, y1: 1, x2: 8, y2: 1 },
+        enabled: true,
+        geometryKey: visible.geometryKey,
+        binding: null,
+      },
+    ]);
+    expect(clipped.rows[0]?.trim()).toBe("");
+    expect(clipped.hitRegions).toStrictEqual([]);
+  });
+
   it("binds row and action hit geometry to item and projection revisions", () => {
     const dataset = controllableRunDataset();
     const frame = renderFabricConsoleFrame(

@@ -733,6 +733,40 @@ describe("Fabric Console runtime routing", () => {
     },
   );
 
+  it("routes inert mouse detach through the local close path without Fabric mutation", async () => {
+    const controller = new FakeController();
+    const beforeController = structuredClone(controller.state);
+    const detach = vi.fn(async () => {});
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 8, rows: 1 },
+      ui: createFabricUiState({ mouseCapture: true }),
+      draw: () => {},
+      detach,
+      activate,
+      eventId: () => "event-inert-mouse-detach",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const mouse = {
+      kind: "mouse" as const,
+      button: "left" as const,
+      x: 1,
+      y: 1,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    };
+
+    await runtime.handleInput({ ...mouse, phase: "press" });
+    await runtime.handleInput({ ...mouse, phase: "release" });
+
+    expect(detach).toHaveBeenCalledOnce();
+    expect(detach).toHaveBeenCalledWith({ reason: "operator" });
+    expect(activate).not.toHaveBeenCalled();
+    expect(controller.state).toStrictEqual(beforeController);
+    expect(runtime.closed).toBe(true);
+  });
+
   it("uses local keyboard and mouse paths for split resizing without commands", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({
