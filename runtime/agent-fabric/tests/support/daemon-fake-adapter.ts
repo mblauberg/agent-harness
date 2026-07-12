@@ -7,6 +7,7 @@ if (journalPath === undefined) {
   throw new Error("FAKE_ADAPTER_JOURNAL is required");
 }
 const requiredJournalPath: string = journalPath;
+const ephemeralSpawnEnabled = process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN === "1";
 
 type ActionRecord = {
   actionId: string;
@@ -104,14 +105,24 @@ input.on("line", (line) => {
   if (request.method === "capabilities") {
     respond(request.id, {
       protocolVersion: 1,
-      operations: ["capabilities", "spawn", "dispatch", "lookup_action", "cancel_action", "release"],
+      operations: [
+        "capabilities",
+        ...(ephemeralSpawnEnabled ? ["spawn"] : []),
+        "dispatch",
+        "lookup_action",
+        "cancel_action",
+        "release",
+      ],
       actionJournal: true,
-      ephemeralWorker: true,
-      answerBearingSpawn: true,
+      ...(ephemeralSpawnEnabled ? { ephemeralWorker: true, answerBearingSpawn: true } : {}),
     });
     return;
   }
   if (request.method === "spawn") {
+    if (!ephemeralSpawnEnabled) {
+      fail(request.id, "METHOD_NOT_FOUND", "ephemeral spawn is disabled");
+      return;
+    }
     if (
       typeof request.params.actionId !== "string" ||
       typeof request.params.model !== "string" ||

@@ -101,7 +101,10 @@ describe("daemon adapter composition", () => {
       adapters: {
         fake: {
           command: [process.execPath, "--import", "tsx", fakeAdapter],
-          environment: { FAKE_ADAPTER_JOURNAL: join(directory, "fake-journal.json") },
+          environment: {
+            FAKE_ADAPTER_JOURNAL: join(directory, "fake-journal.json"),
+            FAKE_ADAPTER_EPHEMERAL_SPAWN: "1",
+          },
           modelPolicy: {
             allowedFamilies: ["fake"],
             allowedModelPatterns: ["fake-reviewer-*"],
