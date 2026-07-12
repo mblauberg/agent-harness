@@ -14,10 +14,9 @@ leaders, form/retire teams, pair or reroute inside authority.
 ## Rules
 
 - Once triggered, **default to fan-out** across bounded, useful
-  slices. If safe decomposition fails, use a read-only audit fan-out or one
-  worker.
+  slices. If safe decomposition fails, use one read-only auditor.
 - Preflight dependencies, tool density and shared error sources. Keep
-  coordination-heavy reasoning with one owner; agent count is not a target.
+  coordination-heavy reasoning with one owner.
 - **No concurrent shared-state writes.** Partition source scopes. With approved
   worktree authority, writers use isolated repository-owned
   `.worktrees/<task-agent>`; otherwise use read/patch-only workers and one
@@ -26,8 +25,9 @@ leaders, form/retire teams, pair or reroute inside authority.
   the sole run/chair. Independent concurrency uses separate project sessions;
   never create a second live run inside one session.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
-  Pane injection is fire-and-forget steering. Without a tested callback, record
-  `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded collection.
+  Pane injection is fire-and-forget steering. Without a tested callback,
+  record `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded
+  collection.
 - Record each worker's task-relevant cwd; never assume one global repository.
 - **Workers write full output to files** when scratch authority exists and
   return only a short digest plus path.

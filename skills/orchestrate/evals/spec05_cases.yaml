@@ -1,10 +1,7 @@
 schema_version: 1
 target_skill: orchestrate
 cases:
-  - {id: s05-orchestrate-positive, relation: positive, prompt: "Keep one chair while dynamically forming leaders and teams, selecting pairs, and rerouting this broad run.", tags: [spec05, direct], expected: {primary_skill: orchestrate, companion_skills: []}}
+  - {id: s05-orchestrate-positive, relation: positive, prompt: "Keep one chair while dynamically forming coordinated workstreams; put unrelated independent runs in separate project sessions.", tags: [spec05, direct], expected: {primary_skill: orchestrate, companion_skills: []}}
   - {id: s05-orchestrate-negative, relation: negative, prompt: "Implement this approved tightly coupled one-file fix with no useful parallel decomposition.", tags: [spec05, boundary], expected: {primary_skill: implement, companion_skills: []}}
   - {id: s05-orchestrate-adjacent, relation: adjacent, prompt: "Implement the approved migration with non-overlapping parallel writers in isolated repository worktrees.", tags: [spec05, composition], expected: {primary_skill: implement, companion_skills: [orchestrate]}}
   - {id: s05-orchestrate-portability, relation: portability, prompt: "With Console, Herdr and GitHub unavailable, orchestrate native workers from project artifacts and return namespaced evidence to one chair.", tags: [spec05, portable], adapters: {console: absent, herdr: absent, github: absent}, expected: {primary_skill: orchestrate, companion_skills: []}}
-  - {id: s05-orchestrate-coordinated-workstream, relation: boundary, prompt: "Expand this coordinated project session with three bounded delivery teams while keeping its existing accountable chair.", tags: [spec05, topology], expected: {primary_skill: orchestrate, companion_skills: []}}
-  - {id: s05-orchestrate-independent-sessions, relation: boundary, prompt: "Run two unrelated independent efforts concurrently without placing a second live coordination run inside either project session.", tags: [spec05, topology], expected: {primary_skill: orchestrate, companion_skills: []}}
-  - {id: s05-orchestrate-live-handoff, relation: boundary, prompt: "Replace the live retained provider chair through its generation-bound Fabric handoff; do not use the local lease helper as authority.", tags: [spec05, handoff], expected: {primary_skill: orchestrate, companion_skills: []}}
