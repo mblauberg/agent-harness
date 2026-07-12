@@ -191,6 +191,8 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.resultDeliveryRetry]: tool(FABRIC_OPERATIONS.resultDeliveryRetry),
   [FABRIC_OPERATIONS.resultDeliveryReassign]: tool(FABRIC_OPERATIONS.resultDeliveryReassign),
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: tool(FABRIC_OPERATIONS.resultDeliveryAbandon),
+  [FABRIC_OPERATIONS.workstreamCreate]: tool(FABRIC_OPERATIONS.workstreamCreate),
+  [FABRIC_OPERATIONS.workstreamSettle]: tool(FABRIC_OPERATIONS.workstreamSettle),
   [FABRIC_OPERATIONS.launchAttest]: tool(FABRIC_OPERATIONS.launchAttest),
 } as const satisfies Record<AgentOperation, McpProjection>);
 

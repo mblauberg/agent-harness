@@ -120,6 +120,7 @@ import {
 import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
+import { CoordinatedWorkstreamStore } from "../project-session/workstream-store.js";
 import {
   LaunchCustodyService,
   parseLaunchAdapterContract,
@@ -914,6 +915,7 @@ export class Fabric {
   readonly #intakes: IntakeStore;
   readonly #gates: ScopedGateStore;
   readonly #resources: HierarchicalAdmissionStore;
+  readonly #workstreams: CoordinatedWorkstreamStore;
   readonly #results: AtomicDeliveryStore;
   readonly #notifications: NotificationOutbox;
   readonly #notificationWorker: NativeNotificationWorker;
@@ -1071,6 +1073,9 @@ export class Fabric {
           retireVolatileProjectSession: (projectSessionId) => {
             this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
           },
+          retireVolatileChairBridge: (entry) => {
+            this.#adapterSupervisor.retireChairBridge(entry);
+          },
           daemonInstanceGeneration: () => this.#currentDaemonInstanceGeneration(),
         });
     if (this.#launchCustody !== undefined) {
@@ -1088,6 +1093,7 @@ export class Fabric {
       effectPort: options.operatorActionPorts?.effectPort ?? productionOperatorPorts.effectPort,
       ...(this.#launchCustody === undefined ? {} : { launchCustody: this.#launchCustody }),
       ...(this.#launchCustody === undefined ? {} : { chairRecoveryCustody: this.#launchCustody }),
+      ...(this.#launchCustody === undefined ? {} : { chairLiveHandoffCustody: this.#launchCustody }),
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
@@ -1127,6 +1133,13 @@ export class Fabric {
       },
     });
     this.#resources = new HierarchicalAdmissionStore({ database: this.#database, clock: this.#clock });
+    this.#workstreams = new CoordinatedWorkstreamStore({
+      database: this.#database,
+      clock: this.#clock,
+      commandJournal: this.#commandJournal,
+      resources: this.#resources,
+      createTeam: (runId, actorAgentId, input) => this.createTeam(runId, actorAgentId, input),
+    });
     this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
     this.#notificationWorker = new NativeNotificationWorker({
       outbox: this.#notifications,
@@ -2099,6 +2112,16 @@ export class Fabric {
             agent,
             input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceReconcile],
           );
+        case FABRIC_OPERATIONS.workstreamCreate:
+          return this.#workstreams.create(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.workstreamCreate],
+          );
+        case FABRIC_OPERATIONS.workstreamSettle:
+          return this.#workstreams.settle(
+            agent,
+            input as OperationInputMap[typeof FABRIC_OPERATIONS.workstreamSettle],
+          );
         case FABRIC_OPERATIONS.taskRequest:
           return this.#results.request(
             agent,
@@ -2392,24 +2415,28 @@ export class Fabric {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
+        this.#assertChairLiveHandoffFeature(context, operation, request);
         return this.#operatorActions.preview(credential.context, request);
       }
       case FABRIC_OPERATIONS.operatorActionCommit: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionCommit];
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
+        this.#assertChairLiveHandoffFeature(context, operation, request);
         return this.#operatorActions.commit(credential.context, request);
       }
       case FABRIC_OPERATIONS.operatorActionStatus: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionStatus];
         const credential = operatorCredential();
         operatorCommand(credential, { credential: request.credential });
+        this.#assertChairLiveHandoffFeature(context, operation, request);
         return this.#operatorActions.status(request);
       }
       case FABRIC_OPERATIONS.operatorActionReconcile: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionReconcile];
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
+        this.#assertChairLiveHandoffFeature(context, operation, request);
         return this.#operatorActions.reconcile(credential.context, request);
       }
       case FABRIC_OPERATIONS.chairTakeover: {
@@ -2422,6 +2449,50 @@ export class Fabric {
         throw Object.assign(new Error(`public protocol operation is not wired: ${operation}`), {
           code: "PROTOCOL_UNSUPPORTED",
         });
+    }
+  }
+
+  #assertChairLiveHandoffFeature(
+    context: PublicProtocolContext,
+    operation: ProtocolOperation,
+    input: unknown,
+  ): void {
+    if (!this.#operatorActionTargetsChairLiveHandoff(operation, input)) return;
+    if (!context.features.includes("chair-live-handoff.v1")) {
+      throw new ProjectFabricCoreError(
+        "FEATURE_UNAVAILABLE",
+        "chair live handoff requires chair-live-handoff.v1 negotiation",
+      );
+    }
+  }
+
+  #operatorActionTargetsChairLiveHandoff(operation: ProtocolOperation, input: unknown): boolean {
+    if (!isRow(input)) return false;
+    if (operation === FABRIC_OPERATIONS.operatorActionPreview) {
+      return isRow(input.intent) && input.intent.kind === "chair-live-handoff";
+    }
+    let preview: unknown;
+    if (operation === FABRIC_OPERATIONS.operatorActionCommit && typeof input.previewId === "string") {
+      preview = this.#database.prepare("SELECT preview_json FROM operator_previews WHERE preview_id=?")
+        .get(input.previewId);
+    } else {
+      const commandId = operation === FABRIC_OPERATIONS.operatorActionStatus
+        ? input.commandId
+        : operation === FABRIC_OPERATIONS.operatorActionReconcile
+          ? input.targetCommandId
+          : undefined;
+      if (typeof commandId !== "string") return false;
+      preview = this.#database.prepare(`
+        SELECT preview_json FROM operator_previews WHERE confirmed_command_id=?
+      `).get(commandId);
+    }
+    if (!isRow(preview) || typeof preview.preview_json !== "string") return false;
+    try {
+      const envelope: unknown = JSON.parse(preview.preview_json);
+      return isRow(envelope) && isRow(envelope.preview) &&
+        isRow(envelope.preview.intent) && envelope.preview.intent.kind === "chair-live-handoff";
+    } catch {
+      return false;
     }
   }
 

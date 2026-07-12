@@ -55,6 +55,7 @@ const defaultMigrationFiles = [
   "0011-automatic-session-membership.sql",
   "0012-typed-git-custody.sql",
   "0013-session-lifecycle-repair.sql",
+  "0014-workstreams-live-chair-handoff.sql",
 ] as const;
 
 function loadDefaultMigrations(): Migration[] {

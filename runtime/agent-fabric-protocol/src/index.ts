@@ -22,5 +22,6 @@ export * from "./request-result.js";
 export * from "./result-feature-shape.js";
 export * from "./resource-unit-keys.js";
 export * from "./resources.js";
+export * from "./workstreams.js";
 export * from "./rpc-contract.js";
 export * from "./schema.js";

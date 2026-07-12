@@ -11,6 +11,7 @@ import {
   parseProjectSessionLaunchIntent,
   parseSha256Digest,
   type ChairBridgeRecoveryIntent,
+  type ChairLiveHandoffIntent,
   type OperatorId,
   type OperatorActionCommitRequest,
   type OperatorActionPreviewRequest,
@@ -122,6 +123,7 @@ function createFixture(options: Readonly<{
   lookupChairRecovery?: (input: { adapterId: string; actionId: string }) => Promise<unknown>;
   promoteSuccessor?: (input: Record<string, unknown>) => Promise<boolean>;
   lookupSuccessor?: (input: Record<string, unknown>) => Promise<"child" | "chair" | "missing">;
+  retireChair?: (entry: { agentId: string; providerSessionRef: string }) => void;
 }> = {}): {
   database: Database.Database;
   databasePath: string;
@@ -252,6 +254,7 @@ function createFixture(options: Readonly<{
         ? {}
         : { promoteRetainedSuccessorBridge: options.promoteSuccessor }),
     },
+    ...(options.retireChair === undefined ? {} : { retireVolatileChairBridge: options.retireChair }),
   });
   const intent: LaunchCustodyIntent = parseProjectSessionLaunchIntent({
     kind: "project-session-launch",
@@ -271,6 +274,36 @@ function createFixture(options: Readonly<{
     resourceStateDigest: computeLaunchResourceStateDigest(database, "project_01", "session_launch_01"),
   });
   return { database, databasePath, root, service, intent };
+}
+
+function restartedLiveHandoffService(
+  fixture: ReturnType<typeof createFixture>,
+  options: Readonly<{
+    promote?: (input: Record<string, unknown>) => Promise<boolean>;
+    lookup?: (input: Record<string, unknown>) => Promise<"child" | "chair" | "missing">;
+    retireChair?: (entry: { agentId: string; providerSessionRef: string }) => void;
+  }> = {},
+): LaunchCustodyService {
+  return new LaunchCustodyService({
+    database: fixture.database,
+    clock: () => now,
+    randomCapability: () => "unused-live-handoff-restart-secret",
+    fabricSocketPath: "/private/agent-fabric.sock",
+    adapterContracts: { inspect: async () => contract },
+    adapterEffects: {
+      dispatch: async () => { throw new Error("live handoff restart must not dispatch launch"); },
+      lookup: async () => { throw new Error("live handoff restart must not lookup launch"); },
+      ...(options.promote === undefined ? {} : { promoteRetainedSuccessorBridge: options.promote }),
+      ...(options.lookup === undefined ? {} : { lookupRetainedSuccessorBridge: options.lookup }),
+    },
+    agentEffects: {
+      dispatch: async () => { throw new Error("live handoff restart must not dispatch an agent"); },
+      attachWithoutBridge: async () => { throw new Error("live handoff restart must not attach an agent"); },
+      lookup: async () => { throw new Error("live handoff restart must not lookup an agent action"); },
+      hasRetainedBridge: () => true,
+    },
+    ...(options.retireChair === undefined ? {} : { retireVolatileChairBridge: options.retireChair }),
+  });
 }
 
 function closeTrackedDatabase(database: Database.Database): void {
@@ -366,6 +399,193 @@ async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promis
   })();
   if (handle === undefined) throw new Error("launch handle was not prepared");
   return { inspection, handle };
+}
+
+function seedLiveHandoffSuccessor(fixture: ReturnType<typeof createFixture>): {
+  intent: ChairLiveHandoffIntent;
+  successorCapabilityHash: string;
+} {
+  const chair = fixture.database.prepare(`
+    SELECT agent.authority_id, authority.authority_json
+      FROM agents agent JOIN authorities authority USING(authority_id)
+     WHERE agent.run_id='run_launch_01' AND agent.agent_id='chair_launch_01'
+  `).get() as { authority_id: string; authority_json: string };
+  const successorAuthorityId = "authority_successor_live_01";
+  const successorAuthority = {
+    ...(JSON.parse(chair.authority_json) as Record<string, unknown>),
+    sourcePaths: [fixture.root],
+    artifactPaths: [join(fixture.root, ".agent-run/AFAB-LAUNCH/successor")],
+    budget: { provider_calls: 2 },
+  };
+  const successorAuthorityJson = canonicalJson(successorAuthority);
+  const successorAuthorityHash = sha256(successorAuthorityJson);
+  const successorCapabilityHash = sha256("successor-live-capability-secret");
+  const handoffRef = parseArtifactRef({
+    path: ".agent-run/AFAB-LAUNCH/chair-handoff.json",
+    digest: digest("live-chair-handoff"),
+  }, "test.liveHandoffRef");
+  const successorResult = canonicalJson({
+    agentId: "successor_live_01",
+    authorityId: successorAuthorityId,
+    adapterId: "claude-agent-sdk",
+    actionId: "successor_live_action_01",
+    providerSessionRef: "claude-successor-live-session",
+    providerSessionGeneration: 1,
+    bridgeState: "active",
+    bridgeGeneration: 1,
+    evidenceDigest: digest("successor-live-activation"),
+  });
+  const successorPayload = canonicalJson({ payload: {} });
+  fixture.database.transaction(() => {
+    fixture.database.prepare(`
+      INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
+      VALUES (?, 'run_launch_01', ?, ?, ?, ?)
+    `).run(successorAuthorityId, chair.authority_id, successorAuthorityJson, successorAuthorityHash, now);
+    fixture.database.prepare(`
+      INSERT INTO authority_budget(authority_id, unit_key, granted, reserved, consumed, usage_unknown)
+      VALUES (?, 'provider_calls', 2, 0, 0, 0)
+    `).run(successorAuthorityId);
+    fixture.database.prepare(`
+      INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_launch_01', 'successor_live_01', 'chair_launch_01', ?, 'claude-successor-live-session', 'ready')
+    `).run(successorAuthorityId);
+    fixture.database.prepare(`INSERT INTO mailbox_state(run_id, recipient_id) VALUES ('run_launch_01', 'successor_live_01')`).run();
+    fixture.database.prepare(`
+      INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+      VALUES (?, 'run_launch_01', 'successor_live_01', 1, ?)
+    `).run(successorCapabilityHash, now + 60_000);
+    fixture.database.prepare(`
+      INSERT INTO provider_actions(
+        run_id, action_id, adapter_id, operation, target_agent_id,
+        provider_session_generation, turn_lease_generation, identity_hash,
+        payload_hash, payload_json, status, history_json, execution_count,
+        effect_count, idempotency_proven, result_json, updated_at
+      ) VALUES (
+        'run_launch_01', 'successor_live_action_01', 'claude-agent-sdk', 'spawn', 'successor_live_01',
+        1, NULL, ?, ?, ?, 'terminal', '["prepared","dispatched","accepted","terminal"]',
+        1, 1, 1, ?, ?
+      )
+    `).run(
+      sha256("successor-live-identity"),
+      sha256(successorPayload),
+      successorPayload,
+      successorResult,
+      now,
+    );
+    fixture.database.prepare(`
+      INSERT INTO provider_agent_custody(
+        run_id, action_id, operation, actor_agent_id, target_agent_id, authority_id,
+        adapter_id, bridge_contract_digest, bridge_capable, capability_hash,
+        capability_expires_at, principal_generation, requested_provider_session_ref,
+        intent_digest, created_at
+      ) VALUES (
+        'run_launch_01', 'successor_live_action_01', 'spawn', 'chair_launch_01', 'successor_live_01', ?,
+        'claude-agent-sdk', ?, 1, ?, ?, 1, NULL, ?, ?
+      )
+    `).run(
+      successorAuthorityId,
+      digest("successor-live-bridge-contract"),
+      successorCapabilityHash,
+      now + 60_000,
+      digest("successor-live-intent"),
+      now,
+    );
+    fixture.database.prepare(`
+      INSERT INTO agent_bridge_state(
+        run_id, agent_id, adapter_id, action_id, provider_session_ref,
+        provider_session_generation, bridge_state, bridge_generation,
+        capability_hash, activation_evidence_digest, revision, created_at, updated_at
+      ) VALUES (
+        'run_launch_01', 'successor_live_01', 'claude-agent-sdk', 'successor_live_action_01',
+        'claude-successor-live-session', 1, 'active', 1, ?, ?, 1, ?, ?
+      )
+    `).run(successorCapabilityHash, digest("successor-live-activation"), now, now);
+    fixture.database.prepare(`
+      INSERT INTO provider_state(run_id, agent_id, provider_session_generation)
+      VALUES ('run_launch_01', 'successor_live_01', 1)
+    `).run();
+    fixture.database.prepare(`
+      INSERT INTO artifacts(
+        artifact_id, project_id, project_session_id, run_id, task_id,
+        publisher_kind, publisher_ref, publisher_agent_id, source_kind, evidence_kind,
+        relative_path, sha256, registry_state, quarantine_reason, revision, created_at
+      ) VALUES (
+        'artifact_live_handoff_01', 'project_01', 'session_launch_01', 'run_launch_01', NULL,
+        'agent', 'chair_launch_01', 'chair_launch_01', 'run-file', 'artifact',
+        ?, ?, 'active', NULL, 1, ?
+      )
+    `).run(handoffRef.path, handoffRef.digest, now);
+  })();
+  const session = fixture.database.prepare(`
+    SELECT revision, generation, membership_revision FROM project_sessions WHERE project_session_id='session_launch_01'
+  `).get() as { revision: number; generation: number; membership_revision: number };
+  const run = fixture.database.prepare(`
+    SELECT revision, chair_generation, chair_lease_id FROM runs WHERE run_id='run_launch_01'
+  `).get() as { revision: number; chair_generation: number; chair_lease_id: string };
+  const bridge = fixture.database.prepare(`
+    SELECT revision, bridge_generation FROM launched_chair_bridge_state
+  `).get() as { revision: number; bridge_generation: number };
+  return {
+    successorCapabilityHash,
+    intent: {
+      kind: "chair-live-handoff",
+      schemaVersion: 1,
+      projectSessionId: "session_launch_01" as never,
+      coordinationRunId: "run_launch_01" as never,
+      handoffRef,
+      predecessorAgentId: "chair_launch_01" as never,
+      successorAgentId: "successor_live_01" as never,
+      successorAuthorityId,
+      successorAuthorityDigest: `sha256:${successorAuthorityHash}` as Sha256Digest,
+      expectedSessionRevision: session.revision,
+      expectedSessionGeneration: session.generation,
+      expectedMembershipRevision: session.membership_revision,
+      expectedRunRevision: run.revision,
+      expectedChairGeneration: run.chair_generation,
+      expectedChairLeaseId: run.chair_lease_id,
+      expectedBridgeRevision: bridge.revision,
+      expectedChairBridgeGeneration: bridge.bridge_generation,
+      expectedPredecessorPrincipalGeneration: 1,
+      expectedSuccessorPrincipalGeneration: 1,
+      expectedSuccessorBridgeRevision: 1,
+      expectedSuccessorBridgeGeneration: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: contractDigest,
+    },
+  };
+}
+
+async function prepareLiveHandoffFixture(
+  options: NonNullable<Parameters<typeof createFixture>[0]> = {},
+): Promise<{
+  fixture: ReturnType<typeof createFixture>;
+  seeded: ReturnType<typeof seedLiveHandoffSuccessor>;
+  inspection: Awaited<ReturnType<LaunchCustodyService["inspectChairLiveHandoff"]>>;
+}> {
+  const fixture = createFixture({
+    retainedChairBridge: true,
+    dispatch: async () => ({
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return",
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success",
+        providerSessionRef: "claude-chair-live-helper",
+        providerSessionGeneration: 2,
+        effectDigest: digest("provider-live-helper-predecessor"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    }),
+    ...options,
+  });
+  const { handle } = await prepareFixture(fixture);
+  await fixture.service.dispatchPrepared(handle);
+  const seeded = seedLiveHandoffSuccessor(fixture);
+  const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
+  return { fixture, seeded, inspection };
 }
 
 afterEach(() => {
@@ -2127,5 +2347,615 @@ describe("launch custody", () => {
       launchPacketRef: parseArtifactRef({ path: "linked-packet.json", digest: digest("{}") }, "test.linkedPacketRef"),
     })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
     expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM runs").get()).toEqual({ count: 0 });
+  });
+
+  it("rejects every stale live-handoff generation, authority, provider and artifact binding", async () => {
+    const { fixture, seeded } = await prepareLiveHandoffFixture();
+    const cases: ReadonlyArray<readonly [string, ChairLiveHandoffIntent, string]> = [
+      ["session generation", { ...seeded.intent, expectedSessionGeneration: seeded.intent.expectedSessionGeneration + 1 }, "STALE_REVISION"],
+      ["chair generation", { ...seeded.intent, expectedChairGeneration: seeded.intent.expectedChairGeneration + 1 }, "STALE_REVISION"],
+      ["successor bridge revision", { ...seeded.intent, expectedSuccessorBridgeRevision: seeded.intent.expectedSuccessorBridgeRevision + 1 }, "STALE_REVISION"],
+      ["predecessor principal", { ...seeded.intent, expectedPredecessorPrincipalGeneration: seeded.intent.expectedPredecessorPrincipalGeneration + 1 }, "STALE_REVISION"],
+      ["successor authority", { ...seeded.intent, successorAuthorityId: "authority_wrong" }, "STALE_REVISION"],
+      ["successor authority digest", { ...seeded.intent, successorAuthorityDigest: digest("wrong-successor-authority") }, "STALE_REVISION"],
+      ["provider adapter", { ...seeded.intent, providerAdapterId: "wrong-adapter" }, "STALE_REVISION"],
+      ["provider contract", { ...seeded.intent, providerContractDigest: digest("wrong-provider-contract") }, "STALE_REVISION"],
+      ["handoff artifact", {
+        ...seeded.intent,
+        handoffRef: { ...seeded.intent.handoffRef, digest: digest("wrong-handoff-artifact") },
+      }, "ARTIFACT_DIGEST_INVALID"],
+    ];
+    for (const [_label, intent, code] of cases) {
+      await expect(fixture.service.inspectChairLiveHandoff(intent)).rejects.toMatchObject({ code });
+    }
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM chair_live_handoff_custody").get())
+      .toEqual({ count: 0 });
+  });
+
+  it("rolls back failed prepare and commit transactions, then reconciles commit by lookup", async () => {
+    const prepared = await prepareLiveHandoffFixture({
+      fault: (label) => {
+        if (label === "chair-live-handoff:prepared") throw new Error("prepare crash");
+      },
+    });
+    expect(() => prepared.fixture.database.transaction(() => {
+      prepared.fixture.service.prepareChairLiveHandoffInTransaction({
+        inspection: prepared.inspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_prepare_crash_01",
+      });
+    })()).toThrow("prepare crash");
+    expect(prepared.fixture.database.prepare(`
+      SELECT (SELECT COUNT(*) FROM chair_live_handoff_custody) AS custody,
+             (SELECT COUNT(*) FROM provider_actions WHERE operation='promote_retained_bridge') AS actions,
+             (SELECT COUNT(*) FROM delivery_freezes WHERE run_id='run_launch_01') AS freezes
+    `).get()).toEqual({ custody: 0, actions: 0, freezes: 0 });
+    expect(prepared.fixture.database.prepare(`
+      SELECT lifecycle_state, revision FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({ lifecycle_state: "active", revision: prepared.seeded.intent.expectedRunRevision });
+    expect(prepared.fixture.database.prepare("SELECT status FROM run_chair_leases WHERE lease_id=?")
+      .get(prepared.seeded.intent.expectedChairLeaseId)).toEqual({ status: "active" });
+
+    let promotions = 0;
+    const committing = await prepareLiveHandoffFixture({
+      fault: (label) => {
+        if (label === "chair-live-handoff:committing") throw new Error("commit crash");
+      },
+      promoteSuccessor: async () => { promotions += 1; return true; },
+    });
+    const handoff = committing.fixture.service.prepareChairLiveHandoffInTransaction({
+      inspection: committing.inspection,
+      operatorId: "operator_01",
+      operatorCommandId: "commit_live_handoff_commit_crash_01",
+    });
+    await expect(committing.fixture.service.dispatchPreparedChairLiveHandoff(handoff))
+      .rejects.toThrow("commit crash");
+    expect(promotions).toBe(1);
+    expect(committing.fixture.database.prepare(`
+      SELECT state FROM chair_live_handoff_custody WHERE custody_id=?
+    `).get(handoff.custodyId)).toEqual({ state: "dispatched" });
+    expect(committing.fixture.database.prepare(`
+      SELECT chair_agent_id, bridge_generation FROM launched_chair_bridge_state
+    `).get()).toEqual({
+      chair_agent_id: "chair_launch_01",
+      bridge_generation: committing.seeded.intent.expectedChairBridgeGeneration,
+    });
+    let restartPromotions = 0;
+    let restartLookups = 0;
+    const restarted = restartedLiveHandoffService(committing.fixture, {
+      promote: async () => { restartPromotions += 1; throw new Error("restart promoted"); },
+      lookup: async () => { restartLookups += 1; return "chair"; },
+    });
+    await expect(restarted.reconcileChairLiveHandoff(
+      "operator_01",
+      "commit_live_handoff_commit_crash_01",
+    )).resolves.toMatchObject({ status: "committed" });
+    expect({ restartPromotions, restartLookups }).toEqual({ restartPromotions: 0, restartLookups: 1 });
+  });
+
+  it("promotes one retained child through distinct live-handoff custody and retires predecessor authority", async () => {
+    let promotions = 0;
+    let retiredPredecessor = 0;
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "claude-chair-live-old",
+        providerSessionGeneration: 2,
+        effectDigest: digest("provider-live-handoff-predecessor"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      promoteSuccessor: async (input) => {
+        promotions += 1;
+        expect(input).toMatchObject({
+          agentId: "successor_live_01",
+          sourceActionId: "successor_live_action_01",
+          sourceBridgeGeneration: 1,
+          chairBridgeGeneration: 2,
+        });
+        expect(String(input.promotionActionId)).not.toBe(String(input.sourceActionId));
+        expect(fixture.database.prepare(`
+          SELECT state FROM chair_live_handoff_custody
+        `).get()).toEqual({ state: "dispatched" });
+        return true;
+      },
+      retireChair: (entry) => {
+        retiredPredecessor += 1;
+        expect(entry).toMatchObject({ agentId: "chair_launch_01", providerSessionRef: "claude-chair-live-old" });
+      },
+    });
+    const { handle: launchHandle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(launchHandle);
+    const seeded = seedLiveHandoffSuccessor(fixture);
+    const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
+    let handoff = fixture.service.prepareChairLiveHandoffInTransaction({
+      inspection,
+      operatorId: "operator_01",
+      operatorCommandId: "commit_live_handoff_01",
+    });
+    expect(promotions).toBe(0);
+    expect(fixture.database.prepare(`
+      SELECT lifecycle_state, revision FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({
+      lifecycle_state: "reconciling",
+      revision: seeded.intent.expectedRunRevision + 1,
+    });
+    expect(fixture.database.prepare(`
+      SELECT status FROM run_chair_leases WHERE lease_id=?
+    `).get(seeded.intent.expectedChairLeaseId)).toEqual({ status: "frozen" });
+
+    await expect(fixture.service.dispatchPreparedChairLiveHandoff(handoff)).resolves.toMatchObject({
+      status: "committed",
+    });
+    expect(promotions).toBe(1);
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, chair_generation, lifecycle_state, revision
+        FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({
+      chair_agent_id: "successor_live_01",
+      chair_generation: seeded.intent.expectedChairGeneration + 1,
+      lifecycle_state: "active",
+      revision: seeded.intent.expectedRunRevision + 2,
+    });
+    expect(fixture.database.prepare(`
+      SELECT generation, revision, membership_revision FROM project_sessions
+       WHERE project_session_id='session_launch_01'
+    `).get()).toEqual({
+      generation: seeded.intent.expectedSessionGeneration + 1,
+      revision: seeded.intent.expectedSessionRevision + 1,
+      membership_revision: seeded.intent.expectedMembershipRevision + 1,
+    });
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, provider_action_id, bridge_generation, state
+        FROM launched_chair_bridge_state
+    `).get()).toMatchObject({
+      chair_agent_id: "successor_live_01",
+      bridge_generation: 2,
+      state: "active",
+    });
+    expect(fixture.database.prepare(`
+      SELECT bridge_state, capability_hash, provider_session_ref
+        FROM agent_bridge_state WHERE agent_id='successor_live_01'
+    `).get()).toEqual({ bridge_state: "none", capability_hash: null, provider_session_ref: null });
+    expect(fixture.database.prepare(`
+      SELECT revoked_at FROM capabilities
+       WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
+    `).get()).toEqual({ revoked_at: now });
+    expect(fixture.database.prepare(`
+      SELECT revoked_at FROM capabilities WHERE token_hash=?
+    `).get(seeded.successorCapabilityHash)).toEqual({ revoked_at: null });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM run_chair_leases WHERE status='active'
+    `).get()).toEqual({ count: 1 });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM delivery_freezes WHERE run_id='run_launch_01'
+    `).get()).toEqual({ count: 0 });
+    expect(retiredPredecessor).toBe(1);
+    expect(fixture.service.chairLiveHandoffStatus("operator_01", "commit_live_handoff_01"))
+      .toMatchObject({ status: "committed", custodyId: handoff.custodyId });
+  });
+
+  it("restores the predecessor without authority drift when promotion lookup proves no effect", async () => {
+    let promotions = 0;
+    let lookups = 0;
+    const fixture = createFixture({
+      retainedChairBridge: true,
+      dispatch: async () => ({
+        schemaVersion: 1,
+        providerAdapterId: "claude-agent-sdk",
+        providerActionId: "provider_launch_01",
+        providerContractDigest: contractDigest,
+        observationKind: "dispatch-return",
+        observedAt: "2027-01-01T00:00:00.000Z",
+        outcome: {
+          kind: "terminal-success",
+          providerSessionRef: "claude-chair-live-no-effect",
+          providerSessionGeneration: 2,
+          effectDigest: digest("provider-live-no-effect-predecessor"),
+          resourceUsage: { provider_calls: 1 },
+        },
+      }),
+      promoteSuccessor: async () => { promotions += 1; return false; },
+      lookupSuccessor: async () => { lookups += 1; return "child"; },
+    });
+    const { handle: launchHandle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(launchHandle);
+    const seeded = seedLiveHandoffSuccessor(fixture);
+    const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
+    const handoff = fixture.service.prepareChairLiveHandoffInTransaction({
+      inspection,
+      operatorId: "operator_01",
+      operatorCommandId: "commit_live_handoff_no_effect_01",
+    });
+
+    await expect(fixture.service.dispatchPreparedChairLiveHandoff(handoff)).resolves.toMatchObject({
+      status: "no-effect",
+    });
+    expect({ promotions, lookups }).toEqual({ promotions: 1, lookups: 1 });
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, chair_generation, lifecycle_state, revision
+        FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({
+      chair_agent_id: "chair_launch_01",
+      chair_generation: seeded.intent.expectedChairGeneration,
+      lifecycle_state: "active",
+      revision: seeded.intent.expectedRunRevision + 2,
+    });
+    expect(fixture.database.prepare(`
+      SELECT generation, revision, membership_revision FROM project_sessions
+       WHERE project_session_id='session_launch_01'
+    `).get()).toEqual({
+      generation: seeded.intent.expectedSessionGeneration,
+      revision: seeded.intent.expectedSessionRevision,
+      membership_revision: seeded.intent.expectedMembershipRevision,
+    });
+    expect(fixture.database.prepare("SELECT status FROM run_chair_leases WHERE lease_id=?")
+      .get(seeded.intent.expectedChairLeaseId)).toEqual({ status: "active" });
+    expect(fixture.database.prepare(`
+      SELECT bridge_state FROM agent_bridge_state WHERE agent_id='successor_live_01'
+    `).get()).toEqual({ bridge_state: "active" });
+    expect(fixture.database.prepare(`
+      SELECT state FROM chair_live_handoff_custody WHERE custody_id=?
+    `).get(handoff.custodyId)).toEqual({ state: "no-effect" });
+    expect(fixture.database.prepare(`
+      SELECT status, execution_count, effect_count FROM provider_actions WHERE action_id=?
+    `).get(handoff.promotionActionId)).toEqual({ status: "terminal", execution_count: 1, effect_count: 0 });
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM delivery_freezes WHERE run_id='run_launch_01'").get())
+      .toEqual({ count: 0 });
+  });
+
+  it("keeps prepared restart inert and recovers durable dispatched custody by lookup only", async () => {
+    const preparedFixture = createFixture({
+      retainedChairBridge: true,
+      dispatch: async () => ({
+        schemaVersion: 1,
+        providerAdapterId: "claude-agent-sdk",
+        providerActionId: "provider_launch_01",
+        providerContractDigest: contractDigest,
+        observationKind: "dispatch-return",
+        observedAt: "2027-01-01T00:00:00.000Z",
+        outcome: {
+          kind: "terminal-success",
+          providerSessionRef: "claude-chair-live-prepared-restart",
+          providerSessionGeneration: 2,
+          effectDigest: digest("provider-live-prepared-restart"),
+          resourceUsage: { provider_calls: 1 },
+        },
+      }),
+    });
+    const { handle: preparedLaunch } = await prepareFixture(preparedFixture);
+    await preparedFixture.service.dispatchPrepared(preparedLaunch);
+    const preparedSeed = seedLiveHandoffSuccessor(preparedFixture);
+    const preparedInspection = await preparedFixture.service.inspectChairLiveHandoff(preparedSeed.intent);
+    preparedFixture.service.prepareChairLiveHandoffInTransaction({
+      inspection: preparedInspection,
+      operatorId: "operator_01",
+      operatorCommandId: "commit_live_handoff_prepared_restart_01",
+    });
+    let preparedIo = 0;
+    const preparedRestart = restartedLiveHandoffService(preparedFixture, {
+      promote: async () => { preparedIo += 1; throw new Error("prepared restart promoted"); },
+      lookup: async () => { preparedIo += 1; throw new Error("prepared restart looked up"); },
+    });
+    await expect(preparedRestart.recover()).resolves.toEqual({
+      preparedFailed: 1,
+      lookedUp: 0,
+      activated: 0,
+      failed: 1,
+      ambiguous: 0,
+      recoveryRequired: 0,
+    });
+    expect(preparedIo).toBe(0);
+    expect(preparedFixture.database.prepare(`
+      SELECT state FROM chair_live_handoff_custody
+       WHERE operator_command_id='commit_live_handoff_prepared_restart_01'
+    `).get()).toEqual({ state: "no-effect" });
+    expect(preparedFixture.database.prepare(`
+      SELECT lifecycle_state FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({ lifecycle_state: "active" });
+
+    let promotions = 0;
+    const dispatchedFixture = createFixture({
+      retainedChairBridge: true,
+      dispatch: async () => ({
+        schemaVersion: 1,
+        providerAdapterId: "claude-agent-sdk",
+        providerActionId: "provider_launch_01",
+        providerContractDigest: contractDigest,
+        observationKind: "dispatch-return",
+        observedAt: "2027-01-01T00:00:00.000Z",
+        outcome: {
+          kind: "terminal-success",
+          providerSessionRef: "claude-chair-live-dispatched-restart",
+          providerSessionGeneration: 2,
+          effectDigest: digest("provider-live-dispatched-restart"),
+          resourceUsage: { provider_calls: 1 },
+        },
+      }),
+      fault: (label) => {
+        if (label === "chair-live-handoff:dispatched") throw new Error("crash after durable dispatch");
+      },
+      promoteSuccessor: async () => { promotions += 1; return true; },
+    });
+    const { handle: dispatchedLaunch } = await prepareFixture(dispatchedFixture);
+    await dispatchedFixture.service.dispatchPrepared(dispatchedLaunch);
+    const dispatchedSeed = seedLiveHandoffSuccessor(dispatchedFixture);
+    const dispatchedInspection = await dispatchedFixture.service.inspectChairLiveHandoff(dispatchedSeed.intent);
+    const dispatched = dispatchedFixture.service.prepareChairLiveHandoffInTransaction({
+      inspection: dispatchedInspection,
+      operatorId: "operator_01",
+      operatorCommandId: "commit_live_handoff_dispatched_restart_01",
+    });
+    await expect(dispatchedFixture.service.dispatchPreparedChairLiveHandoff(dispatched))
+      .rejects.toThrow("crash after durable dispatch");
+    expect(promotions).toBe(0);
+    expect(dispatchedFixture.database.prepare(`
+      SELECT state FROM chair_live_handoff_custody WHERE custody_id=?
+    `).get(dispatched.custodyId)).toEqual({ state: "dispatched" });
+    expect(dispatchedFixture.database.prepare(`
+      SELECT status, execution_count FROM provider_actions WHERE action_id=?
+    `).get(dispatched.promotionActionId)).toEqual({ status: "dispatched", execution_count: 1 });
+
+    let restartPromotions = 0;
+    let restartLookups = 0;
+    const dispatchedRestart = restartedLiveHandoffService(dispatchedFixture, {
+      promote: async () => { restartPromotions += 1; throw new Error("restart promoted"); },
+      lookup: async () => { restartLookups += 1; return "chair"; },
+    });
+    await expect(dispatchedRestart.recover()).resolves.toMatchObject({
+      lookedUp: 1,
+      activated: 1,
+      ambiguous: 0,
+      recoveryRequired: 0,
+    });
+    expect({ restartPromotions, restartLookups }).toEqual({ restartPromotions: 0, restartLookups: 1 });
+    expect(dispatchedFixture.database.prepare(`
+      SELECT execution_count, effect_count FROM provider_actions WHERE action_id=?
+    `).get(dispatched.promotionActionId)).toEqual({ execution_count: 1, effect_count: 1 });
+  });
+
+  it("keeps ambiguous promotion fenced until lookup proves the successor chair", async () => {
+    let promotions = 0;
+    let lookups = 0;
+    const fixture = createFixture({
+      retainedChairBridge: true,
+      dispatch: async () => ({
+        schemaVersion: 1,
+        providerAdapterId: "claude-agent-sdk",
+        providerActionId: "provider_launch_01",
+        providerContractDigest: contractDigest,
+        observationKind: "dispatch-return",
+        observedAt: "2027-01-01T00:00:00.000Z",
+        outcome: {
+          kind: "terminal-success",
+          providerSessionRef: "claude-chair-live-ambiguous",
+          providerSessionGeneration: 2,
+          effectDigest: digest("provider-live-ambiguous-predecessor"),
+          resourceUsage: { provider_calls: 1 },
+        },
+      }),
+      fault: (label) => {
+        if (label === "chair-live-handoff:after-adapter") throw new Error("transport vanished after promotion");
+      },
+      promoteSuccessor: async () => { promotions += 1; return true; },
+      lookupSuccessor: async () => { lookups += 1; return "chair"; },
+    });
+    const { handle: launchHandle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(launchHandle);
+    const seeded = seedLiveHandoffSuccessor(fixture);
+    const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
+    const handoff = fixture.service.prepareChairLiveHandoffInTransaction({
+      inspection,
+      operatorId: "operator_01",
+      operatorCommandId: "commit_live_handoff_ambiguous_01",
+    });
+    await expect(fixture.service.dispatchPreparedChairLiveHandoff(handoff)).resolves.toMatchObject({
+      status: "ambiguous",
+    });
+    expect({ promotions, lookups }).toEqual({ promotions: 1, lookups: 0 });
+    expect(fixture.database.prepare(`
+      SELECT lifecycle_state FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({ lifecycle_state: "reconciling" });
+    expect(() => fixture.database.prepare(`
+      INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+      VALUES ('forbidden-live-grant', 'run_launch_01', 'successor_live_01', 1, ?)
+    `).run(now + 60_000)).toThrow(/INVARIANT_chair_live_handoff_freezes_grants/u);
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at
+      ) VALUES (
+        'operator_cap_live_mutation_01', ?, 'operator_01', 'project_01', 'session_launch_01',
+        1, ?, 1, 'session', '["read","decide"]', ?, ?
+      )
+    `).run(
+      sha256("operator-live-mutation-secret"),
+      seeded.intent.expectedSessionGeneration,
+      now - 1,
+      now + 60_000,
+    );
+    const sessions = new ProjectSessionStore({
+      database: fixture.database,
+      operatorStore: new OperatorStore({ database: fixture.database, clock: () => now }),
+      clock: () => now,
+    });
+    expect(() => sessions.transitionProjectSession({
+      operatorId: "operator_01" as OperatorId,
+      projectId: "project_01" as ProjectId,
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    }, {
+      command: {
+        credential: { capabilityId: "operator_cap_live_mutation_01", token: "operator-live-mutation-secret" },
+        commandId: "forbidden_live_handoff_session_mutation_01",
+        expectedRevision: seeded.intent.expectedSessionRevision,
+        actor: "operator_01",
+        provenance: {
+          kind: "console-direct-input",
+          clientId: "console_live_handoff_01",
+          inputEventId: "input_live_handoff_mutation_01",
+        },
+        evidenceRefs: [],
+      },
+      projectSessionId: "session_launch_01",
+      expectedGeneration: seeded.intent.expectedSessionGeneration,
+      transition: { to: "visibility_degraded", reason: "generic mutation must not steal live handoff custody" },
+    } as unknown as ProjectSessionTransitionRequest)).toThrowError(
+      expect.objectContaining({ code: "LIFECYCLE_PRECONDITION_FAILED" }),
+    );
+    await expect(fixture.service.inspectChairRecovery({
+      kind: "chair-bridge-recovery",
+      schemaVersion: 1,
+      path: "rebind",
+      projectSessionId: seeded.intent.projectSessionId,
+      coordinationRunId: seeded.intent.coordinationRunId,
+      lossId: "loss_live_handoff_forbidden_01",
+      recoveryManifestDigest: digest("loss-live-handoff-forbidden"),
+      expectedSessionRevision: seeded.intent.expectedSessionRevision,
+      expectedSessionGeneration: seeded.intent.expectedSessionGeneration,
+      expectedRunRevision: seeded.intent.expectedRunRevision + 1,
+      expectedChairGeneration: seeded.intent.expectedChairGeneration,
+      expectedPrincipalGeneration: seeded.intent.expectedPredecessorPrincipalGeneration,
+      expectedBridgeRevision: seeded.intent.expectedBridgeRevision,
+      expectedLostBridgeGeneration: seeded.intent.expectedChairBridgeGeneration,
+      expectedProviderSessionGeneration: 2,
+      providerAdapterId: seeded.intent.providerAdapterId,
+      providerContractDigest: seeded.intent.providerContractDigest,
+      providerActionId: "provider_recovery_forbidden_01" as never,
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(fixture.service.reconcileChairLiveHandoff(
+      "operator_01",
+      "commit_live_handoff_ambiguous_01",
+    )).resolves.toMatchObject({ status: "committed" });
+    expect({ promotions, lookups }).toEqual({ promotions: 1, lookups: 1 });
+    expect(fixture.database.prepare(`
+      SELECT chair_agent_id, lifecycle_state FROM runs WHERE run_id='run_launch_01'
+    `).get()).toEqual({ chair_agent_id: "successor_live_01", lifecycle_state: "active" });
+  });
+
+  it("routes live handoff preview and commit through takeover custody with zero generic effects", async () => {
+    const outcome = {
+      schemaVersion: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      providerContractDigest: contractDigest,
+      observationKind: "dispatch-return" as const,
+      observedAt: "2027-01-01T00:00:00.000Z",
+      outcome: {
+        kind: "terminal-success" as const,
+        providerSessionRef: "claude-chair-live-operator-old",
+        providerSessionGeneration: 2,
+        effectDigest: digest("provider-live-operator-predecessor"),
+        resourceUsage: { provider_calls: 1 },
+      },
+    };
+    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true, promoteSuccessor: async () => true });
+    const { handle: launchHandle } = await prepareFixture(fixture);
+    await fixture.service.dispatchPrepared(launchHandle);
+    const { intent } = seedLiveHandoffSuccessor(fixture);
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at, handoff_digest,
+        old_chair_generation, expected_run_id, expected_run_revision,
+        expected_session_revision, cas_target_revision
+      ) VALUES (
+        'operator_cap_live_handoff_01', ?, 'operator_01', 'project_01', 'session_launch_01',
+        1, ?, 1, 'takeover', '["takeover","read"]', ?, ?, ?, ?,
+        'run_launch_01', ?, ?, ?
+      )
+    `).run(
+      sha256("operator-live-handoff-secret"),
+      intent.expectedSessionGeneration,
+      now - 1,
+      now + 60_000,
+      intent.handoffRef.digest,
+      intent.expectedChairGeneration,
+      intent.expectedRunRevision,
+      intent.expectedSessionRevision,
+      intent.expectedBridgeRevision,
+    );
+    const operatorStore = new OperatorStore({ database: fixture.database, clock: () => now });
+    let genericEffects = 0;
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore,
+      statePort: { read: async () => { throw new Error("generic state must not inspect live handoff"); } },
+      effectPort: {
+        dispatch: async () => { genericEffects += 1; throw new Error("generic effect must not hand off chair"); },
+        observe: async () => { genericEffects += 1; throw new Error("generic effect must not hand off chair"); },
+      },
+      chairLiveHandoffCustody: fixture.service,
+      clock: () => now,
+    });
+    const context = {
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    } as never;
+    const previewCommand = {
+      credential: { capabilityId: "operator_cap_live_handoff_01", token: "operator-live-handoff-secret" },
+      commandId: "preview_live_handoff_01",
+      expectedRevision: intent.expectedBridgeRevision,
+      actor: "operator_01",
+      provenance: {
+        kind: "console-direct-input",
+        clientId: "console_live_handoff_01",
+        inputEventId: "input_live_handoff_preview_01",
+      },
+      evidenceRefs: [],
+    };
+    const preview = await actions.preview(context, {
+      command: previewCommand,
+      projectId: "project_01",
+      intent,
+    } as unknown as OperatorActionPreviewRequest);
+    const receipt = await actions.commit(context, {
+      command: {
+        ...previewCommand,
+        commandId: "commit_live_handoff_operator_01",
+        provenance: { ...previewCommand.provenance, inputEventId: "input_live_handoff_commit_01" },
+      },
+      projectId: "project_01",
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_live_handoff_01" },
+    } as unknown as OperatorActionCommitRequest);
+    expect(genericEffects).toBe(0);
+    expect(receipt.afterStateDigest).not.toEqual(receipt.beforeStateDigest);
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at
+      ) VALUES (
+        'operator_cap_live_status_01', ?, 'operator_01', 'project_01', 'session_launch_01',
+        1, ?, 1, 'session', '["read"]', ?, ?
+      )
+    `).run(
+      sha256("operator-live-status-secret"),
+      intent.expectedSessionGeneration + 1,
+      now,
+      now + 60_000,
+    );
+    expect(actions.status({
+      credential: { capabilityId: "operator_cap_live_status_01", token: "operator-live-status-secret" },
+      projectId: "project_01",
+      commandId: "commit_live_handoff_operator_01",
+    } as never)).toMatchObject({ status: "committed" });
   });
 });

@@ -622,6 +622,29 @@ export class AdapterSupervisor {
   }
 
   /** Removes cleanly retired bridges without emitting a fabricated loss. */
+  retireChairBridge(entry: RetainedChairBridge): void {
+    const key = chairTransportKey(entry.adapterId, entry.providerSessionRef);
+    const current = this.#chairEntryBySession.get(key);
+    if (
+      current === undefined || current.projectSessionId !== entry.projectSessionId ||
+      current.runId !== entry.runId || current.agentId !== entry.agentId ||
+      current.principalGeneration !== entry.principalGeneration || current.actionId !== entry.actionId ||
+      current.providerSessionGeneration !== entry.providerSessionGeneration ||
+      current.bridgeGeneration !== entry.bridgeGeneration
+    ) return;
+    this.#bridgeTransitions.add(key);
+    const transport = this.#chairTransports.get(key);
+    this.#purgeChairBridge(key);
+    if (transport === undefined) {
+      this.#bridgeTransitions.delete(key);
+      return;
+    }
+    void transport.close()
+      .catch(() => undefined)
+      .finally(() => this.#bridgeTransitions.delete(key));
+  }
+
+  /** Removes cleanly retired bridges without emitting a fabricated loss. */
   retireProjectSessionBridges(projectSessionId: string): void {
     const transports = new Set<AdapterProcessTransport>();
     const transitionKeys: string[] = [];
@@ -829,68 +852,73 @@ export class AdapterSupervisor {
     providerSessionGeneration: number;
     sourceBridgeGeneration: number;
     chairBridgeGeneration: number;
+    sourceActionId?: string;
+    promotionActionId?: string;
   }>): Promise<boolean> {
+    const sourceActionId = input.sourceActionId ?? input.actionId;
+    const chairActionId = input.promotionActionId ?? input.actionId;
     const key = chairTransportKey(input.adapterId, input.providerSessionRef);
     if (this.#bridgeTransitions.has(key)) return false;
     this.#bridgeTransitions.add(key);
     try {
-    const retainedChairTransport = this.#chairTransports.get(key);
-    const retainedChairEntry = this.#chairEntryBySession.get(key);
-    if (
-      retainedChairTransport !== undefined && retainedChairEntry !== undefined &&
-      retainedChairEntry.actionId === input.actionId && retainedChairEntry.runId === input.runId &&
-      retainedChairEntry.projectSessionId === input.projectSessionId && retainedChairEntry.agentId === input.agentId &&
-      retainedChairEntry.principalGeneration === input.principalGeneration &&
-      retainedChairEntry.providerSessionGeneration === input.providerSessionGeneration &&
-      retainedChairEntry.bridgeGeneration === input.chairBridgeGeneration &&
-      await this.#probeChairBridge(retainedChairTransport, retainedChairEntry)
-    ) return true;
-    const transport = this.#childTransports.get(key);
-    const entry = this.#childEntryBySession.get(key);
-    const principal = this.#childPrincipalBySession.get(key);
-    if (
-      transport === undefined || entry === undefined || principal === undefined ||
-      entry.actionId !== input.actionId || entry.runId !== input.runId || entry.agentId !== input.agentId ||
-      entry.providerSessionGeneration !== input.providerSessionGeneration ||
-      entry.bridgeGeneration !== input.sourceBridgeGeneration ||
-      principal.projectSessionId !== input.projectSessionId ||
-      principal.principalGeneration !== input.principalGeneration ||
-      !await this.#probeChildBridge(transport, entry, principal)
-    ) return false;
-    const promoted = await transport.request("promote_retained_bridge", {
-      schemaVersion: 1,
-      actionId: input.actionId,
-      agentId: input.agentId,
-      projectSessionId: input.projectSessionId,
-      runId: input.runId,
-      principalGeneration: input.principalGeneration,
-      providerSessionRef: input.providerSessionRef,
-      providerSessionGeneration: input.providerSessionGeneration,
-      sourceBridgeGeneration: input.sourceBridgeGeneration,
-      chairBridgeGeneration: input.chairBridgeGeneration,
-    }, { timeoutMs: this.#controlTimeoutMs });
-    if (
-      typeof promoted !== "object" || promoted === null ||
-      Reflect.get(promoted, "schemaVersion") !== 1 || Reflect.get(promoted, "promoted") !== true
-    ) return false;
-    this.#purgeChildBridge(key);
-    const chairEntry: RetainedChairBridge = Object.freeze({
-      projectSessionId: input.projectSessionId,
-      runId: input.runId,
-      agentId: input.agentId,
-      principalGeneration: input.principalGeneration,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-      providerSessionRef: input.providerSessionRef,
-      providerSessionGeneration: input.providerSessionGeneration,
-      bridgeGeneration: input.chairBridgeGeneration,
-    });
-    this.#chairTransports.set(key, transport);
-    this.#knownChairSessions.set(key, input.providerSessionGeneration);
-    this.#chairSessionByAction.set(chairActionKey(input.adapterId, input.actionId), key);
-    this.#chairEntryBySession.set(key, chairEntry);
-    this.#chairProjectBySession.set(key, chairEntry.projectSessionId);
-    return await this.#probeChairBridge(transport, chairEntry);
+      const retainedChairTransport = this.#chairTransports.get(key);
+      const retainedChairEntry = this.#chairEntryBySession.get(key);
+      if (
+        retainedChairTransport !== undefined && retainedChairEntry !== undefined &&
+        retainedChairEntry.actionId === chairActionId && retainedChairEntry.runId === input.runId &&
+        retainedChairEntry.projectSessionId === input.projectSessionId && retainedChairEntry.agentId === input.agentId &&
+        retainedChairEntry.principalGeneration === input.principalGeneration &&
+        retainedChairEntry.providerSessionGeneration === input.providerSessionGeneration &&
+        retainedChairEntry.bridgeGeneration === input.chairBridgeGeneration &&
+        await this.#probeChairBridge(retainedChairTransport, retainedChairEntry)
+      ) return true;
+      const transport = this.#childTransports.get(key);
+      const entry = this.#childEntryBySession.get(key);
+      const principal = this.#childPrincipalBySession.get(key);
+      if (
+        transport === undefined || entry === undefined || principal === undefined ||
+        entry.actionId !== sourceActionId || entry.runId !== input.runId || entry.agentId !== input.agentId ||
+        entry.providerSessionGeneration !== input.providerSessionGeneration ||
+        entry.bridgeGeneration !== input.sourceBridgeGeneration ||
+        principal.projectSessionId !== input.projectSessionId ||
+        principal.principalGeneration !== input.principalGeneration ||
+        !await this.#probeChildBridge(transport, entry, principal)
+      ) return false;
+      const promoted = await transport.request("promote_retained_bridge", {
+        schemaVersion: 1,
+        actionId: chairActionId,
+        sourceActionId,
+        agentId: input.agentId,
+        projectSessionId: input.projectSessionId,
+        runId: input.runId,
+        principalGeneration: input.principalGeneration,
+        providerSessionRef: input.providerSessionRef,
+        providerSessionGeneration: input.providerSessionGeneration,
+        sourceBridgeGeneration: input.sourceBridgeGeneration,
+        chairBridgeGeneration: input.chairBridgeGeneration,
+      }, { timeoutMs: this.#controlTimeoutMs });
+      if (
+        typeof promoted !== "object" || promoted === null ||
+        Reflect.get(promoted, "schemaVersion") !== 1 || Reflect.get(promoted, "promoted") !== true
+      ) return false;
+      this.#purgeChildBridge(key);
+      const chairEntry: RetainedChairBridge = Object.freeze({
+        projectSessionId: input.projectSessionId,
+        runId: input.runId,
+        agentId: input.agentId,
+        principalGeneration: input.principalGeneration,
+        adapterId: input.adapterId,
+        actionId: chairActionId,
+        providerSessionRef: input.providerSessionRef,
+        providerSessionGeneration: input.providerSessionGeneration,
+        bridgeGeneration: input.chairBridgeGeneration,
+      });
+      this.#chairTransports.set(key, transport);
+      this.#knownChairSessions.set(key, input.providerSessionGeneration);
+      this.#chairSessionByAction.set(chairActionKey(input.adapterId, chairActionId), key);
+      this.#chairEntryBySession.set(key, chairEntry);
+      this.#chairProjectBySession.set(key, chairEntry.projectSessionId);
+      return await this.#probeChairBridge(transport, chairEntry);
     } finally {
       this.#bridgeTransitions.delete(key);
     }
@@ -907,7 +935,11 @@ export class AdapterSupervisor {
     providerSessionGeneration: number;
     sourceBridgeGeneration: number;
     chairBridgeGeneration: number;
+    sourceActionId?: string;
+    promotionActionId?: string;
   }>): Promise<"child" | "chair" | "missing"> {
+    const sourceActionId = input.sourceActionId ?? input.actionId;
+    const chairActionId = input.promotionActionId ?? input.actionId;
     const key = chairTransportKey(input.adapterId, input.providerSessionRef);
     const chairTransport = this.#chairTransports.get(key);
     const chairEntry = this.#chairEntryBySession.get(key);
@@ -915,7 +947,7 @@ export class AdapterSupervisor {
       chairTransport !== undefined && chairEntry !== undefined &&
       chairEntry.projectSessionId === input.projectSessionId && chairEntry.runId === input.runId &&
       chairEntry.agentId === input.agentId && chairEntry.principalGeneration === input.principalGeneration &&
-      chairEntry.actionId === input.actionId &&
+      chairEntry.actionId === chairActionId &&
       chairEntry.providerSessionGeneration === input.providerSessionGeneration &&
       chairEntry.bridgeGeneration === input.chairBridgeGeneration
     ) {
@@ -930,7 +962,7 @@ export class AdapterSupervisor {
     if (
       childTransport === undefined || childEntry === undefined || principal === undefined ||
       childEntry.runId !== input.runId || childEntry.agentId !== input.agentId ||
-      childEntry.actionId !== input.actionId ||
+      childEntry.actionId !== sourceActionId ||
       childEntry.providerSessionGeneration !== input.providerSessionGeneration ||
       childEntry.bridgeGeneration !== input.sourceBridgeGeneration ||
       principal.projectSessionId !== input.projectSessionId || principal.principalGeneration !== input.principalGeneration
@@ -940,7 +972,7 @@ export class AdapterSupervisor {
       const recoveredChairEntry: RetainedChairBridge = Object.freeze({
         ...principal,
         adapterId: input.adapterId,
-        actionId: input.actionId,
+        actionId: chairActionId,
         providerSessionRef: input.providerSessionRef,
         providerSessionGeneration: input.providerSessionGeneration,
         bridgeGeneration: input.chairBridgeGeneration,
@@ -949,7 +981,7 @@ export class AdapterSupervisor {
       this.#purgeChildBridge(key);
       this.#chairTransports.set(key, childTransport);
       this.#knownChairSessions.set(key, input.providerSessionGeneration);
-      this.#chairSessionByAction.set(chairActionKey(input.adapterId, input.actionId), key);
+      this.#chairSessionByAction.set(chairActionKey(input.adapterId, chairActionId), key);
       this.#chairEntryBySession.set(key, recoveredChairEntry);
       this.#chairProjectBySession.set(key, recoveredChairEntry.projectSessionId);
       return "chair";

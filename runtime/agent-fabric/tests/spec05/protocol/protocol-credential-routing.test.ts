@@ -339,6 +339,53 @@ describe("public protocol credential routing", () => {
             limit: 10,
           },
         )).resolves.toHaveProperty("page.value.items.0.nativeNotification");
+        const handoffDigest = `sha256:${"a".repeat(64)}`;
+        const liveHandoffPreview = {
+          command: {
+            credential: { capabilityId: "cap_operator_protocol", token: "operator-protocol-secret" },
+            commandId: "command_live_handoff_without_feature_01",
+            expectedRevision: 1,
+            actor: "operator_protocol",
+            provenance: { kind: "console-direct-input", clientId: "console_01", inputEventId: "input_live_01" },
+            evidenceRefs: [],
+          },
+          projectId: principal.projectId,
+          intent: {
+            kind: "chair-live-handoff",
+            schemaVersion: 1,
+            projectSessionId,
+            coordinationRunId: "run_operator_protocol",
+            handoffRef: { path: ".agent-run/handoff.json", digest: handoffDigest },
+            predecessorAgentId: "chair",
+            successorAgentId: "successor",
+            successorAuthorityId: "authority_successor",
+            successorAuthorityDigest: handoffDigest,
+            expectedSessionRevision: 1,
+            expectedSessionGeneration: 1,
+            expectedMembershipRevision: 1,
+            expectedRunRevision: 1,
+            expectedChairGeneration: 1,
+            expectedChairLeaseId: "chair:run_operator_protocol:1",
+            expectedBridgeRevision: 1,
+            expectedChairBridgeGeneration: 1,
+            expectedPredecessorPrincipalGeneration: 1,
+            expectedSuccessorPrincipalGeneration: 1,
+            expectedSuccessorBridgeRevision: 1,
+            expectedSuccessorBridgeGeneration: 1,
+            providerAdapterId: "claude-agent-sdk",
+            providerContractDigest: handoffDigest,
+          },
+        };
+        await expect(reopened.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.operatorActionPreview,
+          liveHandoffPreview as never,
+        )).rejects.toMatchObject({ code: "FEATURE_UNAVAILABLE" });
+        await expect(reopened.dispatchPublicProtocol(
+          { ...context, features: [...context.features, "chair-live-handoff.v1"] },
+          FABRIC_OPERATIONS.operatorActionPreview,
+          liveHandoffPreview as never,
+        )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
         const preview = await reopened.dispatchPublicProtocol(
           context,
           FABRIC_OPERATIONS.operatorActionPreview,

@@ -104,6 +104,11 @@ import type {
   ResourceReservation,
   ResourceReservationRequest,
 } from "./resources.js";
+import type {
+  WorkstreamCreateRequest,
+  WorkstreamProjection,
+  WorkstreamSettleRequest,
+} from "./workstreams.js";
 
 export interface ProtocolRpcTransport {
   readonly features: readonly ProtocolFeature[];
@@ -175,6 +180,11 @@ export interface RequestResultClient {
 }
 
 export type AgentRequestResultClient = Omit<RequestResultClient, "providerAccept">;
+
+export interface WorkstreamClient {
+  create(input: WorkstreamCreateRequest): Promise<WorkstreamProjection>;
+  settle(input: WorkstreamSettleRequest): Promise<WorkstreamProjection>;
+}
 
 export type PrincipalOperationFacade<Principal extends OperationPrincipalKind> = {
   readonly [Operation in PrincipalOperation<Principal> & keyof OperationInputMap]?: (
@@ -258,6 +268,7 @@ export type NegotiatedAgentClient = {
   gates?: Pick<ScopedGateClient, "check">;
   resources?: ResourceReservationClient;
   requestResults?: AgentRequestResultClient;
+  workstreams?: WorkstreamClient;
   evidence?: EvidenceRegistryClient;
   close(): Promise<void>;
 };
@@ -493,6 +504,15 @@ export function createAgentClient(transport: ProtocolRpcTransport): NegotiatedAg
         retry: (input: ResultDeliveryRetryRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryRetry, input),
         reassign: (input: ResultDeliveryReassignRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryReassign, input),
         abandon: (input: ResultDeliveryAbandonRequest) => transport.call(FABRIC_OPERATIONS.resultDeliveryAbandon, input),
+      },
+    } : {}),
+    ...(hasFeature(transport, "workstreams.v1") && hasOperations(transport, [
+      FABRIC_OPERATIONS.workstreamCreate,
+      FABRIC_OPERATIONS.workstreamSettle,
+    ]) ? {
+      workstreams: {
+        create: (input: WorkstreamCreateRequest) => transport.call(FABRIC_OPERATIONS.workstreamCreate, input),
+        settle: (input: WorkstreamSettleRequest) => transport.call(FABRIC_OPERATIONS.workstreamSettle, input),
       },
     } : {}),
     ...(hasFeature(transport, "artifact-registry.v1") &&

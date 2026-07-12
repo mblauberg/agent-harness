@@ -21,7 +21,9 @@ export type OperationFeature =
   | "operator-repository-read.v1"
   | "artifact-registry.v1"
   | "artifact-content-read.v1"
-  | "lifecycle-control.v1";
+  | "lifecycle-control.v1"
+  | "workstreams.v1"
+  | "chair-live-handoff.v1";
 
 type OperationDefinition = {
   operation: `fabric.v1.${string}`;
@@ -139,6 +141,8 @@ const DEFINITIONS = defineOperations({
   resultDeliveryRetry: { operation: "fabric.v1.result-delivery.retry", feature: "request-results.v1", principals: ["agent"], kind: "extension" },
   resultDeliveryReassign: { operation: "fabric.v1.result-delivery.reassign", feature: "request-results.v1", principals: ["agent"], kind: "extension" },
   resultDeliveryAbandon: { operation: "fabric.v1.result-delivery.abandon", feature: "request-results.v1", principals: ["agent"], kind: "extension" },
+  workstreamCreate: { operation: "fabric.v1.workstream.create", feature: "workstreams.v1", principals: ["agent"], kind: "extension" },
+  workstreamSettle: { operation: "fabric.v1.workstream.settle", feature: "workstreams.v1", principals: ["agent"], kind: "extension" },
   chairTakeover: { operation: "fabric.v1.chair.takeover", feature: "chair-takeover.v1", principals: ["operator"], kind: "extension" },
   projectDiscover: { operation: "fabric.v1.project.discover", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },
   projectionSnapshot: { operation: "fabric.v1.operator-projection.snapshot", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },

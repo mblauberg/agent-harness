@@ -103,6 +103,11 @@ import type {
   ResourceReservation,
   ResourceReservationRequest,
 } from "./resources.js";
+import type {
+  WorkstreamCreateRequest,
+  WorkstreamProjection,
+  WorkstreamSettleRequest,
+} from "./workstreams.js";
 
 export type ProtocolLimits = {
   maximumFrameBytes: number;
@@ -198,6 +203,8 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.resultDeliveryRetry]: ResultDeliveryRetryRequest;
   [FABRIC_OPERATIONS.resultDeliveryReassign]: ResultDeliveryReassignRequest;
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: ResultDeliveryAbandonRequest;
+  [FABRIC_OPERATIONS.workstreamCreate]: WorkstreamCreateRequest;
+  [FABRIC_OPERATIONS.workstreamSettle]: WorkstreamSettleRequest;
   [FABRIC_OPERATIONS.chairTakeover]: ChairTakeoverRequest;
   [FABRIC_OPERATIONS.projectDiscover]: ProjectDiscoveryRequest;
   [FABRIC_OPERATIONS.projectionSnapshot]: ProjectionSnapshotRequest;
@@ -280,6 +287,8 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.resultDeliveryRetry]: ResultDelivery;
   [FABRIC_OPERATIONS.resultDeliveryReassign]: ResultDelivery;
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: ResultDelivery;
+  [FABRIC_OPERATIONS.workstreamCreate]: WorkstreamProjection;
+  [FABRIC_OPERATIONS.workstreamSettle]: WorkstreamProjection;
   [FABRIC_OPERATIONS.chairTakeover]: ChairTakeoverResult;
   [FABRIC_OPERATIONS.projectDiscover]: ProjectDiscoveryResult;
   [FABRIC_OPERATIONS.projectionSnapshot]: OperatorProjectionSnapshot;

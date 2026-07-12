@@ -259,12 +259,16 @@ describe("persistent adapter supervision", () => {
       },
     }, { bridgeHealthIntervalMs: 1 });
     const childLoss = vi.fn();
+    const chairLoss = vi.fn();
     supervisor.setChildBridgeLossHandler(childLoss);
+    supervisor.setChairBridgeLossHandler(chairLoss);
     const principal = { agentId: "successor", projectSessionId: "session-1", runId: "run-1", principalGeneration: 2 } as const;
     const exact = {
       ...principal,
       adapterId: "fake",
       actionId: "successor-spawn-action",
+      sourceActionId: "successor-spawn-action",
+      promotionActionId: "successor-chair-promotion-action",
       providerSessionRef: "fixture-child-session",
       providerSessionGeneration: 1,
       sourceBridgeGeneration: 3,
@@ -290,7 +294,22 @@ describe("persistent adapter supervision", () => {
       await expect(supervisor.promoteRetainedChildBridgeToChair(exact)).resolves.toBe(true);
       await expect(supervisor.lookupRetainedSuccessorBridge(exact)).resolves.toBe("chair");
       await expect(supervisor.promoteRetainedChildBridgeToChair(exact)).resolves.toBe(true);
+      const promoted = {
+        projectSessionId: principal.projectSessionId,
+        runId: principal.runId,
+        agentId: principal.agentId,
+        principalGeneration: principal.principalGeneration,
+        adapterId: exact.adapterId,
+        actionId: exact.promotionActionId,
+        providerSessionRef: exact.providerSessionRef,
+        providerSessionGeneration: exact.providerSessionGeneration,
+        bridgeGeneration: exact.chairBridgeGeneration,
+      };
+      expect(supervisor.hasRetainedChairBridge(promoted)).toBe(true);
+      supervisor.retireChairBridge(promoted);
+      expect(supervisor.hasRetainedChairBridge(promoted)).toBe(false);
       expect(childLoss).not.toHaveBeenCalled();
+      expect(chairLoss).not.toHaveBeenCalled();
       expect(await readFile(countPath, "utf8")).toBe("1");
     } finally {
       await supervisor.close();

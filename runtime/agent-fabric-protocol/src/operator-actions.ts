@@ -26,6 +26,7 @@ import type {
   TaskId,
   Timestamp,
 } from "./primitives.js";
+import type { ChairLiveHandoffIntent } from "./workstreams.js";
 
 export type OperatorRevisionTarget =
   | {
@@ -222,6 +223,7 @@ export type OperatorActionIntent =
   | OperatorControlIntent
   | ProjectSessionLaunchIntent
   | ChairBridgeRecoveryIntent
+  | ChairLiveHandoffIntent
   | OperatorLifecycleIntent
   | OperatorGitIntent
   | GitAuthoriseIntent
@@ -234,6 +236,7 @@ export function requiredOperatorActionForIntent(intent: OperatorActionIntent): O
   if (intent.kind === "control") return intent.action;
   if (intent.kind === "project-session-launch") return "launch";
   if (intent.kind === "chair-bridge-recovery") return "takeover";
+  if (intent.kind === "chair-live-handoff") return "takeover";
   if (intent.kind === "project-session-drain" || intent.kind === "daemon-drain") return "drain";
   if (intent.kind === "project-session-stop" || intent.kind === "daemon-stop") return "stop";
   if (intent.kind === "git") return "git";
@@ -256,6 +259,7 @@ export type OperatorAvailableAction =
   | "steer"
   | "project-session-launch"
   | "chair-bridge-recovery"
+  | "chair-live-handoff"
   | "project-session-drain"
   | "project-session-stop"
   | "daemon-drain"

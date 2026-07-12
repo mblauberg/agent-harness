@@ -433,6 +433,18 @@
       "description": "Invoke the closed fabric.v1.result-delivery.abandon operation as the authenticated Agent Fabric principal.",
       "receiptRenderer": "generic-v1"
     },
+    "fabric.v1.workstream.create": {
+      "projection": "tool",
+      "name": "fabric_workstream_create",
+      "description": "Invoke the closed fabric.v1.workstream.create operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "generic-v1"
+    },
+    "fabric.v1.workstream.settle": {
+      "projection": "tool",
+      "name": "fabric_workstream_settle",
+      "description": "Invoke the closed fabric.v1.workstream.settle operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "generic-v1"
+    },
     "fabric.v1.launch.attest": {
       "projection": "tool",
       "name": "fabric_launch_attest",
@@ -1097,6 +1109,8 @@
               "fabric.v1.team.create",
               "fabric.v1.team.read",
               "fabric.v1.visibility-failure.record",
+              "fabric.v1.workstream.create",
+              "fabric.v1.workstream.settle",
               "fabric.v1.write-lease.acquire",
               "fabric.v1.write-lease.read",
               "fabric.v1.write-lease.recover",
@@ -1137,7 +1151,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:51c35a9e0c08f1f3bd1dfd89f777c2b1757e71621df44050788c6593360d9b8e",
+      "inputCodecDigest": "sha256:1c568fc8920f1cbef00d3b51dba79a5c14fddaa00cb1e2c6fab5b83725d744bf",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -11237,6 +11251,8 @@
                   "fabric.v1.result-delivery.retry",
                   "fabric.v1.result-delivery.reassign",
                   "fabric.v1.result-delivery.abandon",
+                  "fabric.v1.workstream.create",
+                  "fabric.v1.workstream.settle",
                   "fabric.v1.chair.takeover",
                   "fabric.v1.project.discover",
                   "fabric.v1.operator-projection.snapshot",
@@ -11365,7 +11381,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:05e8581f70b7ae8ddf9e2feed8832d143a05f34d6a4ccd0bb6acbd8b1b7b4b9e",
+      "inputCodecDigest": "sha256:e8b80d188c0b64c936d1531f140aef213f3973b3a1ea2e3f2b772c5f148234c6",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -11613,6 +11629,8 @@
                     "fabric.v1.result-delivery.retry",
                     "fabric.v1.result-delivery.reassign",
                     "fabric.v1.result-delivery.abandon",
+                    "fabric.v1.workstream.create",
+                    "fabric.v1.workstream.settle",
                     "fabric.v1.chair.takeover",
                     "fabric.v1.project.discover",
                     "fabric.v1.operator-projection.snapshot",
@@ -12207,7 +12225,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:973f0bcb56d6ad651e0cebc8e3c6806717057f6858d21797e260675fc44153c9",
+      "inputCodecDigest": "sha256:2f39b6654fde9b1e3c277f28263c33ad0a3a44ff38958e698d4614b654e95b7b",
       "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {
@@ -15323,6 +15341,8 @@
               "fabric.v1.team.create",
               "fabric.v1.team.read",
               "fabric.v1.visibility-failure.record",
+              "fabric.v1.workstream.create",
+              "fabric.v1.workstream.settle",
               "fabric.v1.write-lease.acquire",
               "fabric.v1.write-lease.read",
               "fabric.v1.write-lease.recover",
@@ -15577,7 +15597,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:cdb804cf22a16dc5a358577ad307d28ab1637886ff158032a6ba80caf1a247d7",
+      "inputCodecDigest": "sha256:9ab8130acda2cf01d1580c8e2133683ec3e7e39c84915b2891d3fe0b9994c01b",
       "outputCodecDigest": "sha256:8aa83937ef68ab3f6c8965a180666c94d4b0c6c1825d2d075f854440fca047c5"
     },
     {
@@ -15883,6 +15903,817 @@
       },
       "inputCodecDigest": "sha256:afc5041f3d06d8ee1e8db88c1d8bb9cf8defdfe959afc6b8b3f1fe937d3913f9",
       "outputCodecDigest": "sha256:7d928a9fd1b17419cd9c88195347cd222b9a71dcd4308c51c7a560880a488c91"
+    },
+    {
+      "operation": "fabric.v1.workstream.create",
+      "name": "fabric_workstream_create",
+      "description": "Invoke the closed fabric.v1.workstream.create operation as the authenticated Agent Fabric principal.",
+      "feature": "workstreams.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command",
+          "expectedSessionGeneration",
+          "expectedMembershipRevision",
+          "workstreamId",
+          "deliveryRunId",
+          "launchPacketRef",
+          "team",
+          "resources"
+        ],
+        "properties": {
+          "command": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "commandId",
+              "agentId",
+              "projectSessionId",
+              "coordinationRunId",
+              "principalGeneration",
+              "chairLeaseId",
+              "chairLeaseGeneration",
+              "expectedRunRevision",
+              "expectedRevision"
+            ],
+            "properties": {
+              "commandId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "agentId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "projectSessionId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "coordinationRunId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "principalGeneration": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chairLeaseId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "chairLeaseGeneration": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "expectedRunRevision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "expectedSessionGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expectedMembershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "workstreamId": {
+            "$ref": "#/$defs/generated_17"
+          },
+          "deliveryRunId": {
+            "$ref": "#/$defs/generated_17"
+          },
+          "launchPacketRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/generated_18"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "team": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "teamId",
+              "leader",
+              "rootTask",
+              "initialMembers",
+              "discussionGroups",
+              "reservedBudget"
+            ],
+            "properties": {
+              "teamId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "leader": {
+                "$ref": "#/$defs/generated_9"
+              },
+              "rootTask": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "taskId",
+                  "objective",
+                  "baseRevision"
+                ],
+                "properties": {
+                  "taskId": {
+                    "$ref": "#/$defs/generated_17"
+                  },
+                  "objective": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 4096
+                  },
+                  "baseRevision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 4096
+                  }
+                }
+              },
+              "initialMembers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/generated_9"
+                },
+                "minItems": 0,
+                "maxItems": 5
+              },
+              "discussionGroups": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "groupId",
+                    "memberAgentIds"
+                  ],
+                  "properties": {
+                    "groupId": {
+                      "$ref": "#/$defs/generated_17"
+                    },
+                    "memberAgentIds": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/generated_17"
+                      },
+                      "minItems": 2,
+                      "maxItems": 64,
+                      "uniqueItems": true
+                    }
+                  }
+                },
+                "minItems": 0,
+                "maxItems": 64
+              },
+              "reservedBudget": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "runScopeId",
+              "teamScopeId",
+              "teamLimits",
+              "agentScopes"
+            ],
+            "properties": {
+              "runScopeId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "teamScopeId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "teamLimits": {
+                "$ref": "#/$defs/generated_14"
+              },
+              "agentScopes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "agentId",
+                    "scopeId",
+                    "limits"
+                  ],
+                  "properties": {
+                    "agentId": {
+                      "$ref": "#/$defs/generated_17"
+                    },
+                    "scopeId": {
+                      "$ref": "#/$defs/generated_17"
+                    },
+                    "limits": {
+                      "$ref": "#/$defs/generated_14"
+                    }
+                  }
+                },
+                "minItems": 1,
+                "maxItems": 6
+              }
+            }
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "oneOf": [
+              {
+                "const": "."
+              },
+              {
+                "$ref": "#/$defs/generated_18"
+              }
+            ]
+          },
+          "generated_2": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_11"
+              },
+              {
+                "$ref": "#/$defs/generated_12"
+              },
+              {
+                "$ref": "#/$defs/generated_10"
+              },
+              {
+                "$ref": "#/$defs/generated_7"
+              }
+            ]
+          },
+          "generated_3": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_16"
+              },
+              {
+                "$ref": "#/$defs/generated_19"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            ]
+          },
+          "generated_4": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_1"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_5": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_1"
+            },
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true
+          },
+          "generated_6": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_15"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_7": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "local",
+                "approved-provider",
+                "external"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "generated_8": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "local",
+                "approved-provider",
+                "external"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "generated_9": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agentId",
+              "authority"
+            ],
+            "properties": {
+              "agentId": {
+                "$ref": "#/$defs/generated_17"
+              },
+              "authority": {
+                "$ref": "#/$defs/generated_13"
+              }
+            }
+          },
+          "generated_10": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level",
+              "scopes"
+            ],
+            "properties": {
+              "level": {
+                "const": "scoped"
+              },
+              "scopes": {
+                "$ref": "#/$defs/generated_8"
+              }
+            }
+          },
+          "generated_11": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level"
+            ],
+            "properties": {
+              "level": {
+                "const": "allowed"
+              }
+            }
+          },
+          "generated_12": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level"
+            ],
+            "properties": {
+              "level": {
+                "const": "forbidden"
+              }
+            }
+          },
+          "generated_13": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "workspaceRoots",
+              "sourcePaths",
+              "artifactPaths",
+              "actions",
+              "disclosure",
+              "expiresAt",
+              "budget"
+            ],
+            "properties": {
+              "workspaceRoots": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "sourcePaths": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "artifactPaths": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "actions": {
+                "$ref": "#/$defs/generated_6"
+              },
+              "disclosure": {
+                "$ref": "#/$defs/generated_2"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "budget": {
+                "$ref": "#/$defs/generated_14"
+              },
+              "deniedPaths": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "deniedActions": {
+                "$ref": "#/$defs/generated_6"
+              }
+            }
+          },
+          "generated_14": {
+            "type": "object",
+            "minProperties": 0,
+            "maxProperties": 128,
+            "propertyNames": {
+              "$ref": "#/$defs/generated_3"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "generated_15": {
+            "type": "string",
+            "enum": [
+              "fabric.v1.agent.attach",
+              "fabric.v1.agent.list",
+              "fabric.v1.agent.register",
+              "fabric.v1.agent.spawn",
+              "fabric.v1.artifact.publish",
+              "fabric.v1.authority.delegate",
+              "fabric.v1.barrier.close",
+              "fabric.v1.budget.read",
+              "fabric.v1.budget.release",
+              "fabric.v1.budget.reserve",
+              "fabric.v1.budget.usage.reconcile",
+              "fabric.v1.budget.usage.record",
+              "fabric.v1.capability.revoke",
+              "fabric.v1.capability.rotate",
+              "fabric.v1.delivery.abandon",
+              "fabric.v1.delivery.acknowledge",
+              "fabric.v1.discussion-group.create",
+              "fabric.v1.events.observe",
+              "fabric.v1.evidence.publish",
+              "fabric.v1.intake.revise",
+              "fabric.v1.launch.attest",
+              "fabric.v1.lease.revocation-proof.record",
+              "fabric.v1.lifecycle.read",
+              "fabric.v1.lifecycle.request",
+              "fabric.v1.mailbox.read",
+              "fabric.v1.message.receive",
+              "fabric.v1.message.send",
+              "fabric.v1.operator-intervention.record",
+              "fabric.v1.project-session.membership.bind",
+              "fabric.v1.provider-action.dispatch",
+              "fabric.v1.provider-action.read",
+              "fabric.v1.provider-action.reconcile",
+              "fabric.v1.provider-state.report",
+              "fabric.v1.receipt.export",
+              "fabric.v1.receipt.list",
+              "fabric.v1.resource.reconcile",
+              "fabric.v1.resource.release",
+              "fabric.v1.resource.reserve",
+              "fabric.v1.result-delivery.abandon",
+              "fabric.v1.result-delivery.claim",
+              "fabric.v1.result-delivery.consume",
+              "fabric.v1.result-delivery.reassign",
+              "fabric.v1.result-delivery.retry",
+              "fabric.v1.run-status.read",
+              "fabric.v1.scoped-gate.check",
+              "fabric.v1.scoped-gate.create",
+              "fabric.v1.subtree-barrier.close",
+              "fabric.v1.subtree.adopt",
+              "fabric.v1.subtree.freeze",
+              "fabric.v1.task.claim",
+              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.task.create",
+              "fabric.v1.task.handoff.acknowledge",
+              "fabric.v1.task.list",
+              "fabric.v1.task.objective-check.record",
+              "fabric.v1.task.owner-recovery-proof.record",
+              "fabric.v1.task.owner.recover",
+              "fabric.v1.task.read",
+              "fabric.v1.task.readiness.refresh",
+              "fabric.v1.task.request",
+              "fabric.v1.task.update",
+              "fabric.v1.team.create",
+              "fabric.v1.team.read",
+              "fabric.v1.visibility-failure.record",
+              "fabric.v1.workstream.create",
+              "fabric.v1.workstream.settle",
+              "fabric.v1.write-lease.acquire",
+              "fabric.v1.write-lease.read",
+              "fabric.v1.write-lease.recover",
+              "fabric.v1.write-lease.release",
+              "fabric.v1.write-lease.renew"
+            ]
+          },
+          "generated_16": {
+            "type": "string",
+            "enum": [
+              "turns",
+              "provider_calls",
+              "concurrent_turns",
+              "descendants",
+              "message_bytes",
+              "artifact_bytes",
+              "wall_clock_milliseconds"
+            ]
+          },
+          "generated_17": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_18": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+          },
+          "generated_19": {
+            "type": "string",
+            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workstreamId",
+          "projectSessionId",
+          "coordinationRunId",
+          "deliveryRunId",
+          "teamId",
+          "rootTaskId",
+          "leadAgentId",
+          "authorityId",
+          "budgetId",
+          "teamScopeId",
+          "state",
+          "revision",
+          "membershipRevision"
+        ],
+        "properties": {
+          "workstreamId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "projectSessionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "coordinationRunId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "deliveryRunId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "teamId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "rootTaskId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "leadAgentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "budgetId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "teamScopeId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "complete",
+              "cancelled",
+              "degraded"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:e8e165f30c7dd04dbcdcf71a55169cfd271536f579fa9eb526d82dcac57e30e9",
+      "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
+    },
+    {
+      "operation": "fabric.v1.workstream.settle",
+      "name": "fabric_workstream_settle",
+      "description": "Invoke the closed fabric.v1.workstream.settle operation as the authenticated Agent Fabric principal.",
+      "feature": "workstreams.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command",
+          "expectedSessionGeneration",
+          "expectedMembershipRevision",
+          "workstreamId",
+          "expectedWorkstreamRevision",
+          "expectedRootTaskRevision",
+          "expectedTeamGeneration"
+        ],
+        "properties": {
+          "command": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "commandId",
+              "agentId",
+              "projectSessionId",
+              "coordinationRunId",
+              "principalGeneration",
+              "chairLeaseId",
+              "chairLeaseGeneration",
+              "expectedRunRevision",
+              "expectedRevision"
+            ],
+            "properties": {
+              "commandId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "agentId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "projectSessionId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "coordinationRunId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "principalGeneration": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chairLeaseId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "chairLeaseGeneration": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "expectedRunRevision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "expectedSessionGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expectedMembershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "workstreamId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "expectedWorkstreamRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expectedRootTaskRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expectedTeamGeneration": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workstreamId",
+          "projectSessionId",
+          "coordinationRunId",
+          "deliveryRunId",
+          "teamId",
+          "rootTaskId",
+          "leadAgentId",
+          "authorityId",
+          "budgetId",
+          "teamScopeId",
+          "state",
+          "revision",
+          "membershipRevision"
+        ],
+        "properties": {
+          "workstreamId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "projectSessionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "coordinationRunId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "deliveryRunId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "teamId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "rootTaskId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "leadAgentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "budgetId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "teamScopeId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "complete",
+              "cancelled",
+              "degraded"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:457876b5bc79f13c8936d79378294a3822f8b41f0e8ee175494c130d54e39646",
+      "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {
       "operation": "fabric.v1.write-lease.acquire",

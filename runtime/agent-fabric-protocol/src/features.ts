@@ -27,6 +27,8 @@ export const OPERATION_FEATURES = [
   "artifact-registry.v1",
   "artifact-content-read.v1",
   "lifecycle-control.v1",
+  "workstreams.v1",
+  "chair-live-handoff.v1",
 ] as const satisfies readonly OperationFeature[];
 
 export const RESULT_SHAPE_FEATURES = [

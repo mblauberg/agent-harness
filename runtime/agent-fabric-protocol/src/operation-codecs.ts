@@ -70,6 +70,10 @@ import {
   parseEvidenceArtifactRegistration,
   parseEvidencePublishRequest,
 } from "./artifacts.js";
+import {
+  assertWorkstreamCreateSemantics,
+  type WorkstreamCreateRequest,
+} from "./workstreams.js";
 
 export type ObjectWireShape = {
   kind: "object";
@@ -170,6 +174,14 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.resultDeliveryRetry]: object(["commandId", "resultDeliveryId", "expectedRevision", "sameCallbackId", "reason"]),
   [FABRIC_OPERATIONS.resultDeliveryReassign]: object(["commandId", "resultDeliveryId", "expectedRevision", "targetAgentId", "targetProviderSessionRef", "reason"]),
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: object(["commandId", "resultDeliveryId", "expectedRevision", "reason"]),
+  [FABRIC_OPERATIONS.workstreamCreate]: object([
+    "command", "expectedSessionGeneration", "expectedMembershipRevision", "workstreamId",
+    "deliveryRunId", "launchPacketRef", "team", "resources",
+  ]),
+  [FABRIC_OPERATIONS.workstreamSettle]: object([
+    "command", "expectedSessionGeneration", "expectedMembershipRevision", "workstreamId",
+    "expectedWorkstreamRevision", "expectedRootTaskRevision", "expectedTeamGeneration",
+  ]),
   [FABRIC_OPERATIONS.chairTakeover]: object(["command", "projectSessionId", "runId", "expectedChairAgentId", "successorChairAgentId", "expectedChairGeneration", "expectedSessionGeneration", "handoffRef", "targetRevision"]),
   [FABRIC_OPERATIONS.projectDiscover]: object(["credential", "projectId", "after", "limit"]),
   [FABRIC_OPERATIONS.projectionSnapshot]: object(["credential", "projectId"], ["projectSessionId"]),
@@ -302,6 +314,16 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.resultDeliveryRetry]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
   [FABRIC_OPERATIONS.resultDeliveryReassign]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
+  [FABRIC_OPERATIONS.workstreamCreate]: object([
+    "workstreamId", "projectSessionId", "coordinationRunId", "deliveryRunId", "teamId",
+    "rootTaskId", "leadAgentId", "authorityId", "budgetId", "teamScopeId", "state",
+    "revision", "membershipRevision",
+  ]),
+  [FABRIC_OPERATIONS.workstreamSettle]: object([
+    "workstreamId", "projectSessionId", "coordinationRunId", "deliveryRunId", "teamId",
+    "rootTaskId", "leadAgentId", "authorityId", "budgetId", "teamScopeId", "state",
+    "revision", "membershipRevision",
+  ]),
   [FABRIC_OPERATIONS.chairTakeover]: object(["projectSessionId", "sessionRevision", "runRevision", "chairAgentId", "chairGeneration"]),
   [FABRIC_OPERATIONS.projectDiscover]: object(["project", "sessions"]),
   [FABRIC_OPERATIONS.projectionSnapshot]: object(["schemaVersion", "snapshotRevision", "readTransactionId", "project", "session", "runs", "attention", "capacity", "cursor", "stateDigest"]),
@@ -626,6 +648,62 @@ const discussionGroupCodec = objectCodec({
 });
 const teamLeaderCodec = objectCodec({ agentId: identifier, authority: authorityCodec });
 const rootTaskInputCodec = objectCodec({ taskId: identifier, objective: text, baseRevision: text });
+const workstreamCreateBaseCodec = objectCodec({
+  command: chairMutationCodec,
+  expectedSessionGeneration: positiveInteger,
+  expectedMembershipRevision: positiveInteger,
+  workstreamId: identifier,
+  deliveryRunId: identifier,
+  launchPacketRef: artifactRefCodec,
+  team: objectCodec({
+    teamId: identifier,
+    leader: teamLeaderCodec,
+    rootTask: rootTaskInputCodec,
+    initialMembers: arrayOf(teamMemberCodec, { maximum: 5 }),
+    discussionGroups: arrayOf(discussionGroupCodec, { maximum: 64 }),
+    reservedBudget: numberRecord,
+  }),
+  resources: objectCodec({
+    runScopeId: identifier,
+    teamScopeId: identifier,
+    teamLimits: numberRecord,
+    agentScopes: arrayOf(objectCodec({
+      agentId: identifier,
+      scopeId: identifier,
+      limits: numberRecord,
+    }), { minimum: 1, maximum: 6 }),
+  }),
+});
+const baseWorkstreamCreateExample = workstreamCreateBaseCodec.example as WorkstreamCreateRequest;
+const workstreamCreateCodec = parserBacked(
+  workstreamCreateBaseCodec,
+  (value) => assertWorkstreamCreateSemantics(value as WorkstreamCreateRequest),
+  assertWorkstreamCreateSemantics({
+    ...baseWorkstreamCreateExample,
+    team: {
+      ...baseWorkstreamCreateExample.team,
+      reservedBudget: { provider_calls: 1 },
+    },
+    resources: {
+      ...baseWorkstreamCreateExample.resources,
+      teamLimits: { provider_calls: 1 },
+      agentScopes: [{
+        agentId: baseWorkstreamCreateExample.team.leader.agentId,
+        scopeId: "workstream_agent_scope_01",
+        limits: { provider_calls: 1 },
+      }],
+    },
+  }),
+);
+const workstreamSettleCodec = objectCodec({
+  command: chairMutationCodec,
+  expectedSessionGeneration: positiveInteger,
+  expectedMembershipRevision: positiveInteger,
+  workstreamId: identifier,
+  expectedWorkstreamRevision: positiveInteger,
+  expectedRootTaskRevision: positiveInteger,
+  expectedTeamGeneration: positiveInteger,
+});
 
 const projectSessionOriginCodec = unionOf([
   objectCodec({ kind: literal("operator-launch"), operatorId: identifier }),
@@ -1022,6 +1100,21 @@ const visibleTeamResultCodec = objectCodec({
 }, {
   rootTask: taskResultCodec,
   initialMemberAgentIds: stringList,
+});
+const workstreamProjectionCodec = objectCodec({
+  workstreamId: identifier,
+  projectSessionId: identifier,
+  coordinationRunId: identifier,
+  deliveryRunId: identifier,
+  teamId: identifier,
+  rootTaskId: identifier,
+  leadAgentId: identifier,
+  authorityId: identifier,
+  budgetId: identifier,
+  teamScopeId: identifier,
+  state: enumeration(["active", "complete", "cancelled", "degraded"]),
+  revision: positiveInteger,
+  membershipRevision: positiveInteger,
 });
 
 const intakeBindingCodec = objectCodec({
@@ -1786,6 +1879,31 @@ const operatorActionIntentCodec = unionOf([
     reason: text,
   }),
   objectCodec({
+    kind: literal("chair-live-handoff"),
+    schemaVersion: literal(1),
+    projectSessionId: identifier,
+    coordinationRunId: identifier,
+    handoffRef: artifactRefCodec,
+    predecessorAgentId: identifier,
+    successorAgentId: identifier,
+    successorAuthorityId: identifier,
+    successorAuthorityDigest: sha256,
+    expectedSessionRevision: positiveInteger,
+    expectedSessionGeneration: positiveInteger,
+    expectedMembershipRevision: positiveInteger,
+    expectedRunRevision: positiveInteger,
+    expectedChairGeneration: positiveInteger,
+    expectedChairLeaseId: identifier,
+    expectedBridgeRevision: positiveInteger,
+    expectedChairBridgeGeneration: positiveInteger,
+    expectedPredecessorPrincipalGeneration: positiveInteger,
+    expectedSuccessorPrincipalGeneration: positiveInteger,
+    expectedSuccessorBridgeRevision: positiveInteger,
+    expectedSuccessorBridgeGeneration: positiveInteger,
+    providerAdapterId: identifier,
+    providerContractDigest: sha256,
+  }),
+  objectCodec({
     kind: literal("project-session-drain"),
     projectSessionId: identifier,
     expectedSessionRevision: positiveInteger,
@@ -2151,6 +2269,7 @@ const operatorActionAvailabilityCodec = unionOf([
       "steer",
       "project-session-launch",
       "chair-bridge-recovery",
+      "chair-live-handoff",
       "project-session-drain",
       "project-session-stop",
       "daemon-drain",
@@ -2158,7 +2277,7 @@ const operatorActionAvailabilityCodec = unionOf([
       "git",
       "registered-external-effect",
       "promotion",
-    ]), { minimum: 1, maximum: 13, unique: true }),
+    ]), { minimum: 1, maximum: 17, unique: true }),
     requiresPreview: literal(true),
   }),
 ]);
@@ -3173,6 +3292,8 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationInputCodec;
   if (operation === FABRIC_OPERATIONS.sendMessage) return legacyMessageCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateCodec;
+  if (operation === FABRIC_OPERATIONS.workstreamCreate) return workstreamCreateCodec;
+  if (operation === FABRIC_OPERATIONS.workstreamSettle) return workstreamSettleCodec;
   if (operation === FABRIC_OPERATIONS.intakeDraftCreate) return intakeDraftCreateCodec;
   if (operation === FABRIC_OPERATIONS.scopedGateRead) return scopedGateReadInputCodec;
   if (operation === FABRIC_OPERATIONS.projectionViewPage) return operatorViewPageInputCodec;
@@ -3210,6 +3331,9 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (lifecycleResultOperations.has(operation)) return lifecycleResultCodec;
   if (providerActionResultOperations.has(operation)) return providerActionResultCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamResultCodec;
+  if (operation === FABRIC_OPERATIONS.workstreamCreate || operation === FABRIC_OPERATIONS.workstreamSettle) {
+    return workstreamProjectionCodec;
+  }
   if (operation === FABRIC_OPERATIONS.listAgents) return agentListResultCodec;
   if (teamResultOperations.has(operation)) return visibleTeamResultCodec;
   if (budgetResultOperations.has(operation)) return budgetResultCodec;

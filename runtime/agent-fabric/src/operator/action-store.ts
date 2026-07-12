@@ -40,6 +40,10 @@ import type {
   ChairRecoveryDispatchHandle,
   ChairRecoveryInspection,
   ChairRecoveryCommit,
+  ChairLiveHandoffCurrentState,
+  ChairLiveHandoffDispatchHandle,
+  ChairLiveHandoffInspection,
+  ChairLiveHandoffCommit,
 } from "../project-session/launch-custody.js";
 import { canonicalJson, integer, isRow, nullableText, row, sha256, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
@@ -74,6 +78,7 @@ export type OperatorActionCurrentState =
       drainReceiptRef: ArtifactRef | null;
     }
   | { kind: "chair-bridge-recovery"; revision: number; state: ChairRecoveryCurrentState }
+  | { kind: "chair-live-handoff"; revision: number; state: ChairLiveHandoffCurrentState }
   | { kind: "git"; revision: number; state: GitCurrentState }
   | { kind: "git-administration"; revision: number; state: JsonValue }
   | { kind: "registered-external-effect"; revision: number; state: RegisteredExternalEffectState }
@@ -146,12 +151,26 @@ export interface OperatorChairRecoveryCustodyPort {
   reconcileChairRecovery(operatorId: string, operatorCommandId: string): Promise<ChairRecoveryCommit>;
 }
 
+export interface OperatorChairLiveHandoffCustodyPort {
+  readChairLiveHandoffCurrentState(intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>): Promise<ChairLiveHandoffCurrentState>;
+  inspectChairLiveHandoff(intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>): Promise<ChairLiveHandoffInspection>;
+  prepareChairLiveHandoffInTransaction(input: Readonly<{
+    inspection: ChairLiveHandoffInspection;
+    operatorId: string;
+    operatorCommandId: string;
+  }>): ChairLiveHandoffDispatchHandle;
+  dispatchPreparedChairLiveHandoff(handle: ChairLiveHandoffDispatchHandle): Promise<ChairLiveHandoffCommit>;
+  chairLiveHandoffStatus(operatorId: string, operatorCommandId: string): ChairLiveHandoffCommit;
+  reconcileChairLiveHandoff(operatorId: string, operatorCommandId: string): Promise<ChairLiveHandoffCommit>;
+}
+
 export type OperatorActionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
   statePort: OperatorActionStatePort;
   effectPort: OperatorActionEffectPort;
   launchCustody?: OperatorLaunchCustodyPort;
   chairRecoveryCustody?: OperatorChairRecoveryCustodyPort;
+  chairLiveHandoffCustody?: OperatorChairLiveHandoffCustodyPort;
   previewTtlMs?: number;
 };
 
@@ -162,6 +181,7 @@ export class OperatorActionStore {
   readonly #effectPort: OperatorActionEffectPort;
   readonly #launchCustody: OperatorLaunchCustodyPort | undefined;
   readonly #chairRecoveryCustody: OperatorChairRecoveryCustodyPort | undefined;
+  readonly #chairLiveHandoffCustody: OperatorChairLiveHandoffCustodyPort | undefined;
   readonly #clock: () => number;
   readonly #previewTtlMs: number;
   readonly #inFlightCommits = new Map<string, { payloadHash: string; promise: Promise<OperatorActionReceipt> }>();
@@ -173,6 +193,7 @@ export class OperatorActionStore {
     this.#effectPort = options.effectPort;
     this.#launchCustody = options.launchCustody;
     this.#chairRecoveryCustody = options.chairRecoveryCustody;
+    this.#chairLiveHandoffCustody = options.chairLiveHandoffCustody;
     this.#clock = options.clock ?? Date.now;
     this.#previewTtlMs = options.previewTtlMs ?? 5 * 60_000;
     if (!Number.isSafeInteger(this.#previewTtlMs) || this.#previewTtlMs < 1) {
@@ -324,6 +345,17 @@ export class OperatorActionStore {
     }
     if (envelope.preview.intent.kind === "chair-bridge-recovery") {
       return await this.#commitChairRecovery(
+        context,
+        request,
+        envelope,
+        envelope.preview.intent,
+        authenticated,
+        payloadHash,
+        current,
+      );
+    }
+    if (envelope.preview.intent.kind === "chair-live-handoff") {
+      return await this.#commitChairLiveHandoff(
         context,
         request,
         envelope,
@@ -617,6 +649,104 @@ export class OperatorActionStore {
     return receipt;
   }
 
+  async #commitChairLiveHandoff(
+    context: AuthenticatedOperatorContext,
+    request: OperatorActionCommitRequest,
+    envelope: StoredPreviewEnvelope,
+    intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>,
+    authenticated: AuthenticatedOperatorCredential,
+    payloadHash: string,
+    current: OperatorActionCurrentState,
+  ): Promise<OperatorActionReceipt> {
+    const custody = this.#chairLiveHandoffCustody;
+    if (custody === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
+    }
+    const inspection = await custody.inspectChairLiveHandoff(intent);
+    const provisionalState = {
+      status: "pending" as const,
+      commandId: request.command.commandId,
+      phase: "prepared" as const,
+      attemptGeneration: 1,
+    };
+    const provisionalReceipt: OperatorActionReceipt = {
+      commandId: request.command.commandId,
+      previewId: envelope.preview.previewId,
+      previewRevision: envelope.preview.previewRevision,
+      intentDigest: envelope.preview.intentDigest,
+      beforeStateDigest: envelope.preview.beforeStateDigest,
+      afterStateDigest: digestValue(provisionalState, "operatorChairLiveHandoffCommit.provisionalStateDigest"),
+      evidenceRefs: envelope.preview.evidenceRefs,
+      committedAt: toTimestamp(this.#clock(), "operatorChairLiveHandoffCommit.committedAt"),
+    };
+    const prepare = this.#database.transaction(():
+      | { kind: "replay"; receipt: OperatorActionReceipt }
+      | { kind: "prepared"; handle: ChairLiveHandoffDispatchHandle } => {
+      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
+      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
+      const latest = this.#previewRow(request.previewId);
+      this.#assertPreviewClaim(latest, request.command.commandId);
+      this.#database.prepare(`
+        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
+      `).run(
+        canonicalJson({ preview: envelope.preview, action: { ...provisionalState, receipt: provisionalReceipt } }),
+        request.command.commandId,
+        request.previewId,
+      );
+      this.#insertCommand(
+        context,
+        request.command,
+        request.projectId,
+        actionSessionId(authenticated, intent),
+        "takeover",
+        payloadHash,
+        current,
+        provisionalState,
+        provisionalReceipt,
+        "committed",
+      );
+      return {
+        kind: "prepared",
+        handle: custody.prepareChairLiveHandoffInTransaction({
+          inspection,
+          operatorId: context.operatorId,
+          operatorCommandId: request.command.commandId,
+        }),
+      };
+    });
+    const prepared = prepare();
+    if (prepared.kind === "replay") return prepared.receipt;
+    let outcome: ChairLiveHandoffCommit;
+    try {
+      outcome = await custody.dispatchPreparedChairLiveHandoff(prepared.handle);
+    } catch {
+      return provisionalReceipt;
+    }
+    if (outcome.status !== "committed") return provisionalReceipt;
+    const receipt: OperatorActionReceipt = {
+      ...provisionalReceipt,
+      afterStateDigest: digestValue(outcome, "operatorChairLiveHandoffCommit.afterStateDigest"),
+    };
+    const terminal: StoredTerminalAction = {
+      status: "terminal",
+      commandId: request.command.commandId,
+      receipt,
+    };
+    this.#database.transaction(() => {
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, terminal);
+      this.#database.prepare(`
+        UPDATE operator_commands SET result_json=?, after_json=?
+         WHERE operator_id=? AND command_id=? AND status='committed'
+      `).run(
+        canonicalJson(receipt),
+        canonicalJson(outcome),
+        context.operatorId,
+        request.command.commandId,
+      );
+    })();
+    return receipt;
+  }
+
   status(request: OperatorActionStatusRequest): OperatorActionStatus {
     const authenticated = this.#operatorStore.authenticateCredential(request.credential.token);
     if (
@@ -673,6 +803,13 @@ export class OperatorActionStore {
         envelope,
       );
     }
+    if (envelope.preview.intent.kind === "chair-live-handoff") {
+      return this.#chairLiveHandoffStatus(
+        authenticated.context.operatorId,
+        request.commandId,
+        envelope,
+      );
+    }
     if (envelope.preview.intent.kind === "git") {
       const gitStatus = this.#effectPort.status?.(request.commandId, envelope.preview.intentDigest);
       if (gitStatus !== undefined && gitStatus !== null) return gitStatus;
@@ -714,6 +851,54 @@ export class OperatorActionStore {
       commandId,
       intentDigest: envelope.preview.intentDigest,
       phase: observed.status === "ambiguous" ? "observing" : "prepared",
+      attemptGeneration,
+    };
+  }
+
+  #chairLiveHandoffStatus(
+    operatorId: string,
+    commandId: string,
+    envelope: StoredPreviewEnvelope,
+  ): OperatorActionStatus {
+    const custody = this.#chairLiveHandoffCustody;
+    if (custody === undefined || envelope.action === null) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
+    }
+    const observed = custody.chairLiveHandoffStatus(operatorId, commandId);
+    if (observed.status === "committed") {
+      const receipt: OperatorActionReceipt = {
+        ...parseStoredReceipt(envelope.action),
+        afterStateDigest: digestValue(observed, "operatorChairLiveHandoffStatus.afterStateDigest"),
+      };
+      return { status: "committed", commandId, receipt };
+    }
+    if (observed.status === "no-effect") {
+      return {
+        status: "rejected",
+        commandId,
+        intentDigest: envelope.preview.intentDigest,
+        code: "state-changed",
+        evidenceRefs: [],
+      };
+    }
+    const attemptGeneration = envelope.action.status === "pending" || envelope.action.status === "ambiguous"
+      ? envelope.action.attemptGeneration
+      : 1;
+    if (observed.status === "ambiguous") {
+      if (envelope.preview.intent.kind !== "chair-live-handoff") throw new Error("chair live handoff preview changed");
+      return {
+        status: "ambiguous",
+        commandId,
+        intentDigest: envelope.preview.intentDigest,
+        attemptGeneration,
+        effectRef: envelope.preview.intent.handoffRef,
+      };
+    }
+    return {
+      status: "pending",
+      commandId,
+      intentDigest: envelope.preview.intentDigest,
+      phase: "observing",
       attemptGeneration,
     };
   }
@@ -773,6 +958,9 @@ export class OperatorActionStore {
     }
     if (envelope.preview.intent.kind === "chair-bridge-recovery") {
       return await this.#reconcileChairRecovery(context, request, stored, envelope);
+    }
+    if (envelope.preview.intent.kind === "chair-live-handoff") {
+      return await this.#reconcileChairLiveHandoff(context, request, stored, envelope);
     }
     if (request.gitConflict !== undefined) {
       return await this.#reconcileGitConflict(context, request, stored, envelope);
@@ -1066,6 +1254,84 @@ export class OperatorActionStore {
     return result;
   }
 
+  async #reconcileChairLiveHandoff(
+    context: AuthenticatedOperatorContext,
+    request: OperatorActionReconcileRequest,
+    stored: Row,
+    envelope: StoredPreviewEnvelope,
+  ): Promise<OperatorActionStatus> {
+    const custody = this.#chairLiveHandoffCustody;
+    if (custody === undefined || envelope.action === null || envelope.preview.intent.kind !== "chair-live-handoff") {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
+    }
+    const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
+    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
+    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+    if (replay !== null) return replay;
+    if (request.command.commandId === request.targetCommandId) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
+    }
+    const currentStatus = this.#chairLiveHandoffStatus(context.operatorId, request.targetCommandId, envelope);
+    if (
+      currentStatus.status !== request.expectedStatus ||
+      (currentStatus.status === "pending" || currentStatus.status === "ambiguous") &&
+        currentStatus.attemptGeneration !== request.expectedAttemptGeneration
+    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair live handoff reconciliation target changed");
+    const observed = await custody.reconcileChairLiveHandoff(context.operatorId, request.targetCommandId);
+    const baseReceipt = parseStoredReceipt(envelope.action);
+    let result: OperatorActionStatus;
+    if (observed.status === "committed") {
+      const receipt: OperatorActionReceipt = {
+        ...baseReceipt,
+        afterStateDigest: digestValue(observed, "operatorChairLiveHandoffReconcile.afterStateDigest"),
+      };
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, {
+        status: "terminal",
+        commandId: request.targetCommandId,
+        receipt,
+      });
+      this.#database.prepare(`
+        UPDATE operator_commands SET result_json=?, after_json=?
+         WHERE operator_id=? AND command_id=?
+      `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
+      result = { status: "committed", commandId: request.targetCommandId, receipt };
+    } else if (observed.status === "no-effect") {
+      result = {
+        status: "rejected",
+        commandId: request.targetCommandId,
+        intentDigest: envelope.preview.intentDigest,
+        code: "state-changed",
+        evidenceRefs: [],
+      };
+    } else {
+      const pending: StoredPendingAction = {
+        status: "pending",
+        commandId: request.targetCommandId,
+        phase: "observing",
+        attemptGeneration: request.expectedAttemptGeneration + 1,
+        receipt: baseReceipt,
+      };
+      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, pending);
+      result = statusFromAction(pending, envelope.preview.intentDigest);
+    }
+    this.#database.transaction(() => {
+      this.#insertCommand(
+        context,
+        request.command,
+        request.projectId,
+        actionSessionId(authenticated, envelope.preview.intent),
+        "takeover",
+        payloadHash,
+        currentStatus,
+        result,
+        result,
+        "committed",
+      );
+    })();
+    return result;
+  }
+
   async #readCurrentState(intent: OperatorActionIntent): Promise<OperatorActionCurrentState> {
     if (intent.kind === "chair-bridge-recovery") {
       if (this.#chairRecoveryCustody === undefined) {
@@ -1073,6 +1339,13 @@ export class OperatorActionStore {
       }
       const state = await this.#chairRecoveryCustody.readChairRecoveryCurrentState(intent);
       return { kind: "chair-bridge-recovery", revision: state.revision, state };
+    }
+    if (intent.kind === "chair-live-handoff") {
+      if (this.#chairLiveHandoffCustody === undefined) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
+      }
+      const state = await this.#chairLiveHandoffCustody.readChairLiveHandoffCurrentState(intent);
+      return { kind: "chair-live-handoff", revision: state.revision, state };
     }
     if (intent.kind !== "project-session-launch") return await this.#statePort.read(intent);
     if (this.#launchCustody === undefined) {
@@ -1143,6 +1416,29 @@ export class OperatorActionStore {
         throw new ProjectFabricCoreError(
           "CAPABILITY_FORBIDDEN",
           "chair recovery requires exact loss-manifest takeover authority",
+        );
+      }
+    } else if (intent.kind === "chair-live-handoff") {
+      const binding = row(this.#database.prepare(`
+        SELECT kind, handoff_digest, old_chair_generation, expected_run_id,
+               expected_run_revision, expected_session_revision, cas_target_revision
+          FROM operator_capabilities WHERE capability_id=?
+      `).get(authenticated.capabilityId), "chair live handoff operator capability");
+      if (
+        authenticated.kind !== "takeover" ||
+        authenticated.projectSessionId !== intent.projectSessionId ||
+        authenticated.sessionGeneration !== intent.expectedSessionGeneration ||
+        text(binding, "kind") !== "takeover" ||
+        text(binding, "handoff_digest") !== intent.handoffRef.digest ||
+        integer(binding, "old_chair_generation") !== intent.expectedChairGeneration ||
+        text(binding, "expected_run_id") !== intent.coordinationRunId ||
+        integer(binding, "expected_run_revision") !== intent.expectedRunRevision ||
+        integer(binding, "expected_session_revision") !== intent.expectedSessionRevision ||
+        integer(binding, "cas_target_revision") !== intent.expectedBridgeRevision
+      ) {
+        throw new ProjectFabricCoreError(
+          "CAPABILITY_FORBIDDEN",
+          "chair live handoff requires exact handoff-bound takeover authority",
         );
       }
     } else if (intentSessionId !== undefined && authenticated.projectSessionId !== intentSessionId) {
@@ -1650,6 +1946,15 @@ function validateCurrentState(
     }
     return;
   }
+  if (intent.kind === "chair-live-handoff") {
+    if (current.kind !== "chair-live-handoff") {
+      throw new TypeError("chair live handoff intent received another current-state family");
+    }
+    if (intent.expectedBridgeRevision !== current.revision) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "chair live handoff bridge revision changed");
+    }
+    return;
+  }
   if (current.kind !== "promotion") throw new TypeError("promotion intent received another current-state family");
   try {
     assertPromotionIntentGate(intent, current.gate);
@@ -1756,6 +2061,8 @@ function combinedEvidence(request: OperatorActionPreviewRequest): ArtifactRef[] 
   const evidence = [...request.command.evidenceRefs];
   if (request.intent.kind === "project-session-launch") {
     evidence.push(request.intent.launchPacketRef, request.intent.resourcePlanRef);
+  } else if (request.intent.kind === "chair-live-handoff") {
+    evidence.push(request.intent.handoffRef);
   } else if (request.intent.kind === "control" && request.intent.action === "steer") {
     evidence.push(...request.intent.evidenceRefs);
   } else if (request.intent.kind === "registered-external-effect") {
@@ -1773,6 +2080,7 @@ function combinedEvidence(request: OperatorActionPreviewRequest): ArtifactRef[] 
 function sessionIdForIntent(intent: OperatorActionIntent): string | undefined {
   if (intent.kind === "project-session-launch") return intent.projectSessionId;
   if (intent.kind === "chair-bridge-recovery") return intent.projectSessionId;
+  if (intent.kind === "chair-live-handoff") return intent.projectSessionId;
   if (intent.kind === "control") return intent.target.projectSessionId;
   if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop" || intent.kind === "promotion") {
     return intent.projectSessionId;
@@ -1792,6 +2100,7 @@ function sessionIdForIntent(intent: OperatorActionIntent): string | undefined {
 function actionSessionId(authenticated: AuthenticatedOperatorCredential, intent: OperatorActionIntent): string {
   if (intent.kind === "project-session-launch") return intent.projectSessionId;
   if (intent.kind === "chair-bridge-recovery") return intent.projectSessionId;
+  if (intent.kind === "chair-live-handoff") return intent.projectSessionId;
   return requiredSession(authenticated);
 }
 
@@ -1845,6 +2154,7 @@ function rejectionForIntent(intent: OperatorActionIntent): OperatorActionRejecti
   if (
     intent.kind === "project-session-launch" ||
     intent.kind === "chair-bridge-recovery" ||
+    intent.kind === "chair-live-handoff" ||
     intent.kind === "project-session-drain" ||
     intent.kind === "project-session-stop" ||
     intent.kind === "daemon-drain" ||

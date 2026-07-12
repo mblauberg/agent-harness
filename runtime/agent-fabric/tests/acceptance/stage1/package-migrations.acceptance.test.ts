@@ -50,6 +50,7 @@ describe("packed agent-fabric migration custody", () => {
       "0011-automatic-session-membership.sql",
       "0012-typed-git-custody.sql",
       "0013-session-lifecycle-repair.sql",
+      "0014-workstreams-live-chair-handoff.sql",
     ]);
 
     await symlink(new URL("../../../node_modules", import.meta.url), join(extracted, "node_modules"));
@@ -77,7 +78,7 @@ describe("packed agent-fabric migration custody", () => {
     try {
       expect(database.prepare(
         "SELECT version FROM schema_migrations ORDER BY version",
-      ).all()).toStrictEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((version) => ({ version })));
+      ).all()).toStrictEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map((version) => ({ version })));
     } finally {
       database.close();
     }

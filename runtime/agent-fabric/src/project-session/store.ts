@@ -190,6 +190,7 @@ export class ProjectSessionStore {
       () => this.#sessionRevision(request.projectSessionId),
       () => {
         const current = this.#sessionIdentity(request.projectSessionId);
+        this.#assertNoOpenLiveHandoff(request.projectSessionId);
         if (current.generation !== request.expectedGeneration) {
           throw new ProjectFabricCoreError("STALE_GENERATION", "project-session generation changed");
         }
@@ -357,6 +358,7 @@ export class ProjectSessionStore {
       () => this.#sessionRevision(request.projectSessionId),
       () => {
         const current = this.#sessionIdentity(request.projectSessionId);
+        this.#assertNoOpenLiveHandoff(request.projectSessionId);
         const accepted = request.terminalPath.kind === "accepted";
         if (accepted && current.state !== "awaiting_acceptance") {
           throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "accepted project close requires awaiting acceptance");
@@ -634,6 +636,7 @@ export class ProjectSessionStore {
       () => this.#sessionRevision(request.projectSessionId),
       () => {
         const currentSession = this.#sessionIdentity(request.projectSessionId);
+        this.#assertNoOpenLiveHandoff(request.projectSessionId);
         if (["quiescing", "awaiting_acceptance", "closed", "cancelled"].includes(currentSession.state)) {
           throw new ProjectFabricCoreError(
             "LIFECYCLE_PRECONDITION_FAILED",
@@ -1580,6 +1583,18 @@ export class ProjectSessionStore {
        LIMIT 1
     `).get(projectSessionId) !== undefined) {
       throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unresolved operator-effect custody remains active");
+    }
+  }
+
+  #assertNoOpenLiveHandoff(projectSessionId: string): void {
+    if (this.#database.prepare(`
+      SELECT 1 FROM chair_live_handoff_custody
+       WHERE project_session_id=? AND state NOT IN ('terminal','no-effect') LIMIT 1
+    `).get(projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "chair live handoff custody owns this project-session mutation",
+      );
     }
   }
 
