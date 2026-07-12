@@ -177,6 +177,7 @@ import type {
   TeamCreateInput,
   TeamResult,
 } from "./contracts.js";
+import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
 import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
@@ -270,6 +271,14 @@ function rowOrNotFound(value: unknown, label: string): Row {
     throw new FabricError("NOT_FOUND", `${label} was not found`);
   }
   return value;
+}
+
+function assertActiveMcpSeatGeneration(row: Row): void {
+  const generation = row.mcp_seat_generation;
+  if (generation === null || generation === undefined) return;
+  if (typeof generation !== "string" || row.active_mcp_seat_generation !== generation) {
+    throw new FabricError("AUTHENTICATION_FAILED", "capability belongs to an inactive MCP seat generation");
+  }
 }
 
 function canonicalJson(value: unknown): string {
@@ -1633,10 +1642,26 @@ export class Fabric {
     if (chairBinding === undefined) {
       throw new FabricError("DEDUPE_CONFLICT", "MCP seat bindings do not contain the exact current chair");
     }
+    const derivedGeneration = currentMcpSeatGeneration({
+      canonicalRoot,
+      projectSessionId: input.projectSessionId,
+      sessionRevision: input.expectedSessionRevision,
+      sessionGeneration: input.expectedSessionGeneration,
+      runId: input.runId,
+      runRevision: input.expectedRunRevision,
+      chairAgentId: input.chairAgentId,
+      chairGeneration: input.expectedChairGeneration,
+      chairLeaseId: input.chairLeaseId,
+      expiresAt: input.expiresAt,
+      bindings: input.bindings,
+    });
+    if (input.generation !== derivedGeneration.generation) {
+      throw new FabricError("DEDUPE_CONFLICT", "MCP seat generation does not match its immutable binding");
+    }
 
     return this.#database.transaction((): CurrentMcpSeatBindingResult => {
       const identity = rowOrNotFound(this.#database.prepare(`
-        SELECT project.canonical_root, session.state AS session_state,
+        SELECT project.project_id, project.canonical_root, session.state AS session_state,
                session.revision AS session_revision, session.generation AS session_generation,
                session.origin_kind, session.origin_operator_id,
                run.lifecycle_state AS run_state, run.revision AS run_revision,
@@ -1673,6 +1698,71 @@ export class Fabric {
         stringField(identity, "lease_status") !== "active"
       ) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "MCP binding target is not a current active operator-launched run");
+      }
+
+      const projectId = stringField(identity, "project_id");
+      const activeValue = this.#database.prepare(`
+        SELECT generation FROM mcp_active_seat_generations WHERE project_id=?
+      `).get(projectId);
+      const activeGeneration = activeValue === undefined
+        ? null
+        : stringField(rowOrNotFound(activeValue, "active MCP seat generation"), "generation");
+      const storedValue = this.#database.prepare(`
+        SELECT project_id,project_session_id,session_revision,session_generation,
+               run_id,run_revision,chair_agent_id,chair_generation,chair_lease_id,
+               previous_generation,binding_json,expires_at
+          FROM mcp_seat_generations WHERE generation=?
+      `).get(input.generation);
+      const replay = storedValue !== undefined;
+      if (replay) {
+        const stored = rowOrNotFound(storedValue, "stored MCP seat generation");
+        if (
+          activeGeneration !== input.generation ||
+          stored.project_id !== projectId ||
+          stored.project_session_id !== input.projectSessionId ||
+          stored.session_revision !== input.expectedSessionRevision ||
+          stored.session_generation !== input.expectedSessionGeneration ||
+          stored.run_id !== input.runId ||
+          stored.run_revision !== input.expectedRunRevision ||
+          stored.chair_agent_id !== input.chairAgentId ||
+          stored.chair_generation !== input.expectedChairGeneration ||
+          stored.chair_lease_id !== input.chairLeaseId ||
+          stored.previous_generation !== input.expectedPreviousGeneration ||
+          stored.binding_json !== derivedGeneration.bindingJson ||
+          stored.expires_at !== expiresAt
+        ) {
+          throw new FabricError("DEDUPE_CONFLICT", "MCP seat generation replay is stale, crossed or changed");
+        }
+      } else {
+        if (activeGeneration !== input.expectedPreviousGeneration) {
+          throw new FabricError("DEDUPE_CONFLICT", "active MCP seat generation changed");
+        }
+        if (input.expectedPreviousGeneration === input.generation) {
+          throw new FabricError("DEDUPE_CONFLICT", "MCP seat generation cannot replace itself");
+        }
+        this.#database.prepare(`
+          INSERT INTO mcp_seat_generations(
+            generation,project_id,project_session_id,session_revision,session_generation,
+            run_id,run_revision,chair_agent_id,chair_generation,chair_lease_id,previous_generation,
+            binding_json,binding_digest,expires_at,created_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(
+          input.generation,
+          projectId,
+          input.projectSessionId,
+          input.expectedSessionRevision,
+          input.expectedSessionGeneration,
+          input.runId,
+          input.expectedRunRevision,
+          input.chairAgentId,
+          input.expectedChairGeneration,
+          input.chairLeaseId,
+          input.expectedPreviousGeneration,
+          derivedGeneration.bindingJson,
+          `sha256:${input.generation}`,
+          expiresAt,
+          this.#clock(),
+        );
       }
 
       const credentials = input.bindings
@@ -1713,6 +1803,7 @@ export class Fabric {
               chairAgentId: input.chairAgentId,
               chairGeneration: input.expectedChairGeneration,
               chairLeaseId: input.chairLeaseId,
+              generation: input.generation,
               expiresAt: input.expiresAt,
               ...binding,
             }))
@@ -1723,6 +1814,9 @@ export class Fabric {
               FROM capabilities WHERE token_hash=?
           `).get(tokenHash);
           if (existing === undefined) {
+            if (replay) {
+              throw new FabricError("DEDUPE_CONFLICT", `MCP credential replay is missing for ${binding.agentId}`);
+            }
             this.#database.prepare(`
               INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
               VALUES (?, ?, ?, ?, ?)
@@ -1737,9 +1831,64 @@ export class Fabric {
           ) {
             throw new FabricError("DEDUPE_CONFLICT", `MCP credential replay changed for ${binding.agentId}`);
           }
+          const member = this.#database.prepare(`
+            SELECT run_id,agent_id,principal_generation,token_hash,expires_at
+              FROM mcp_seat_generation_members WHERE generation=? AND seat=?
+          `).get(input.generation, binding.seat);
+          if (replay) {
+            if (
+              !isRow(member) ||
+              member.run_id !== input.runId ||
+              member.agent_id !== binding.agentId ||
+              member.principal_generation !== principalGeneration ||
+              member.token_hash !== tokenHash ||
+              member.expires_at !== expiresAt
+            ) {
+              throw new FabricError("DEDUPE_CONFLICT", `MCP seat generation replay changed for ${binding.seat}`);
+            }
+          } else {
+            this.#database.prepare(`
+              INSERT INTO mcp_seat_generation_members(
+                generation,seat,run_id,agent_id,principal_generation,token_hash,expires_at
+              ) VALUES (?,?,?,?,?,?,?)
+            `).run(
+              input.generation,
+              binding.seat,
+              input.runId,
+              binding.agentId,
+              principalGeneration,
+              tokenHash,
+              expiresAt,
+            );
+          }
           return { ...binding, capability };
         });
+      if (!replay) {
+        if (input.expectedPreviousGeneration !== null) {
+          this.#database.prepare(`
+            UPDATE capabilities SET revoked_at=?
+             WHERE revoked_at IS NULL AND token_hash IN (
+               SELECT token_hash FROM mcp_seat_generation_members WHERE generation=?
+             )
+          `).run(this.#clock(), input.expectedPreviousGeneration);
+          const updated = this.#database.prepare(`
+            UPDATE mcp_active_seat_generations
+               SET generation=?,activated_at=?
+             WHERE project_id=? AND generation=?
+          `).run(input.generation, this.#clock(), projectId, input.expectedPreviousGeneration);
+          if (updated.changes !== 1) {
+            throw new FabricError("DEDUPE_CONFLICT", "active MCP seat generation changed during rotation");
+          }
+        } else {
+          this.#database.prepare(`
+            INSERT INTO mcp_active_seat_generations(project_id,generation,activated_at)
+            VALUES (?,?,?)
+          `).run(projectId, input.generation, this.#clock());
+        }
+      }
       return {
+        expectedPreviousGeneration: input.expectedPreviousGeneration,
+        generation: input.generation,
         projectSessionId: input.projectSessionId,
         sessionRevision: input.expectedSessionRevision,
         sessionGeneration: input.expectedSessionGeneration,
@@ -1757,26 +1906,37 @@ export class Fabric {
   connect(token: string): FabricClient {
     const row = rowOrNotFound(
       this.#database
-        .prepare(
-          "SELECT run_id, agent_id, expires_at, revoked_at FROM capabilities WHERE token_hash = ?",
-        )
+        .prepare(`
+          SELECT capability.run_id,capability.agent_id,capability.expires_at,capability.revoked_at,
+                 member.generation AS mcp_seat_generation,
+                 active.generation AS active_mcp_seat_generation
+            FROM capabilities capability
+            LEFT JOIN mcp_seat_generation_members member ON member.token_hash=capability.token_hash
+            LEFT JOIN current_mcp_seat_generation_members active ON active.token_hash=capability.token_hash
+           WHERE capability.token_hash=?
+        `)
         .get(sha256(token)),
       "capability",
     );
     if (row.revoked_at !== null || numberField(row, "expires_at") <= this.#clock()) {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired or revoked");
     }
+    assertActiveMcpSeatGeneration(row);
     return new FabricClient(this, stringField(row, "run_id"), stringField(row, "agent_id"), sha256(token));
   }
 
   verifyProtocolCredential(token: string): VerifiedProtocolCredential {
     const authenticated = this.#database.prepare(`
       SELECT c.run_id, c.agent_id, c.principal_generation, c.expires_at, c.revoked_at,
-             a.authority_json, r.project_session_id
+             a.authority_json, r.project_session_id,
+             member.generation AS mcp_seat_generation,
+             active.generation AS active_mcp_seat_generation
         FROM capabilities c
         JOIN agents g ON g.run_id=c.run_id AND g.agent_id=c.agent_id
         JOIN authorities a ON a.authority_id=g.authority_id
         JOIN runs r ON r.run_id=c.run_id
+        LEFT JOIN mcp_seat_generation_members member ON member.token_hash=c.token_hash
+        LEFT JOIN current_mcp_seat_generation_members active ON active.token_hash=c.token_hash
        WHERE c.token_hash=?
     `).get(sha256(token));
     if (!isRow(authenticated)) {
@@ -1795,6 +1955,7 @@ export class Fabric {
     if (authenticated.revoked_at !== null || numberField(authenticated, "expires_at") <= this.#clock()) {
       throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired or revoked");
     }
+    assertActiveMcpSeatGeneration(authenticated);
     const authority = parseAuthority(stringField(authenticated, "authority_json"));
     const denied = new Set(authority.deniedActions);
     return {
@@ -2412,9 +2573,17 @@ export class Fabric {
 
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {
     const row = this.#database
-      .prepare(
-        "SELECT c.expires_at, c.revoked_at, a.authority_json, g.lifecycle FROM capabilities c JOIN agents g ON g.run_id = c.run_id AND g.agent_id = c.agent_id JOIN authorities a ON a.authority_id = g.authority_id WHERE c.token_hash = ? AND c.run_id = ? AND c.agent_id = ?",
-      )
+      .prepare(`
+        SELECT c.expires_at,c.revoked_at,a.authority_json,g.lifecycle,
+               member.generation AS mcp_seat_generation,
+               active.generation AS active_mcp_seat_generation
+          FROM capabilities c
+          JOIN agents g ON g.run_id=c.run_id AND g.agent_id=c.agent_id
+          JOIN authorities a ON a.authority_id=g.authority_id
+          LEFT JOIN mcp_seat_generation_members member ON member.token_hash=c.token_hash
+          LEFT JOIN current_mcp_seat_generation_members active ON active.token_hash=c.token_hash
+         WHERE c.token_hash=? AND c.run_id=? AND c.agent_id=?
+      `)
       .get(tokenHash, runId, agentId);
     if (
       !isRow(row) ||
@@ -2423,6 +2592,7 @@ export class Fabric {
     ) {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired, revoked or unknown");
     }
+    assertActiveMcpSeatGeneration(row);
     const authority = parseAuthority(stringField(row, "authority_json"));
     if (authority.deniedActions.includes(requiredOperation) || !authority.actions.includes(requiredOperation)) {
       throw new FabricError("CAPABILITY_FORBIDDEN", `authority does not permit ${requiredOperation}`);

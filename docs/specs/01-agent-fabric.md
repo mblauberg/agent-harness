@@ -1,14 +1,20 @@
 # Shared agent fabric
 
-Status: Current protocol and provider-task extension approved; implementation in progress; final human acceptance pending
-Version: 0.25
+Status: Current protocol, provider-task and seat-generation extensions approved; implementation in progress; final human acceptance pending
+Version: 0.26
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.25 closes the answer-bearing review contract: a successful task-bound
+Version 0.26 binds every locally provisioned MCP roster to one daemon-owned
+active generation. Replacement is an exact predecessor/replacement CAS that
+atomically revokes the prior roster; private filesystem publication uses the
+same generation CAS, so a delayed writer cannot restore an older roster.
+Point-of-use authentication revalidates the active seat, current session/run,
+chair lease and principal generation. Version 0.25 closes the answer-bearing
+review contract: a successful task-bound
 ephemeral provider action projects one validated, nonempty, bounded UTF-8
 `providerAnswer` string plus its canonical result digest. It never projects the
 raw adapter result object, resume reference, usage record, transport detail or
@@ -20,8 +26,8 @@ reviewers and bonus-family workers. `fabric_provider_action_dispatch` accepts
 explicit model/family and read-only admitted payload. It records the provider
 action and bounded result without creating a retained agent identity or a
 second control plane. Version 0.23 remains the normative pre-release
-consolidation. Fabric supports one
-current database baseline and public protocol, preserves incompatible local
+consolidation. Fabric supports one current database baseline and public
+protocol, preserves incompatible local
 state without mutation, and rejects it explicitly rather than importing or
 emulating it. It also owns exact project/session/run topology, coordinated
 workstreams, generation-bound live chair handoff and typed operator effects.
@@ -714,6 +720,13 @@ private or agent `createRun` method, and `fabric_run_create` is never an MCP des
 proxy accepts only an `afc_` agent capability, initialises with
 `expectedPrincipalKind: agent` and rejects a bootstrap credential before
 advertising tools.
+
+Private local seat provisioning names an expected prior roster generation and
+one immutable replacement generation for the exact project/session/run/chair
+identity. The database owns the sole active generation per project and revokes
+all capabilities belonging to its predecessor in the same transaction that
+activates the replacement. Exact current-generation replay is idempotent;
+stale, rollback and cross-project attempts fail closed.
 
 The generated read descriptors additionally own these resource templates:
 

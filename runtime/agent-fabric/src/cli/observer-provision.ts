@@ -29,6 +29,10 @@ function seatMetadata(value: unknown): SeatMetadata {
     !("schemaVersion" in value) || value.schemaVersion !== 1 ||
     !("projectKey" in value) || typeof value.projectKey !== "string" ||
     !("projectPath" in value) || typeof value.projectPath !== "string" ||
+    !("generation" in value) || typeof value.generation !== "string" || !/^[0-9a-f]{64}$/u.test(value.generation) ||
+    !("previousGeneration" in value) ||
+      (value.previousGeneration !== null &&
+        (typeof value.previousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(value.previousGeneration))) ||
     !("projectSessionId" in value) || typeof value.projectSessionId !== "string" ||
     !("sessionRevision" in value) || typeof value.sessionRevision !== "number" ||
     !("sessionGeneration" in value) || typeof value.sessionGeneration !== "number" ||

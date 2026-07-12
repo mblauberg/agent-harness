@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveMcpCapability } from "../../src/mcp/credentials.ts";
 
 const cleanup: string[] = [];
+const GENERATION_NEAREST = "a".repeat(64);
+const GENERATION_EXPIRY = "b".repeat(64);
+const GENERATION_EXPLICIT = "c".repeat(64);
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -25,6 +28,7 @@ async function createCurrentSeatDirectory(
   await writeFile(join(seatRoot, "current.json"), `${JSON.stringify({
     schemaVersion: 1,
     projectKey: key,
+    previousGeneration: null,
     generation,
   })}\n`, { mode: 0o600 });
   return { key, directory };
@@ -75,7 +79,7 @@ describe("MCP capability loading", () => {
     const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
       stateDirectory,
       projectPath,
-      "generation-nearest",
+      GENERATION_NEAREST,
     );
     const credentialPath = join(seatDirectory, "codex.cap");
     const capability = `afc_${"c".repeat(43)}`;
@@ -84,6 +88,8 @@ describe("MCP capability loading", () => {
       schemaVersion: 1,
       projectKey: key,
       projectPath,
+      generation: GENERATION_NEAREST,
+      previousGeneration: null,
       runId: "run-project-a",
       seat: "codex",
       agentId: "codex",
@@ -110,12 +116,24 @@ describe("MCP capability loading", () => {
     const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
       stateDirectory,
       projectPath,
-      "generation-expiry",
+      GENERATION_EXPIRY,
     );
     const credentialPath = join(seatDirectory, "codex.cap");
     await writeFile(credentialPath, `afc_${"d".repeat(43)}\n`, { mode: 0o600 });
     const metadataPath = join(seatDirectory, "codex.json");
-    const metadata = (expiresAt: string) => ({ schemaVersion: 1, projectKey: key, projectPath, runId: "run", seat: "codex", agentId: "codex", role: "chair", credentialPath, expiresAt });
+    const metadata = (expiresAt: string) => ({
+      schemaVersion: 1,
+      projectKey: key,
+      projectPath,
+      generation: GENERATION_EXPIRY,
+      previousGeneration: null,
+      runId: "run",
+      seat: "codex",
+      agentId: "codex",
+      role: "chair",
+      credentialPath,
+      expiresAt,
+    });
     const environment = { AGENT_FABRIC_SEAT: "codex", AGENT_FABRIC_STATE_DIRECTORY: stateDirectory };
     const warn = vi.fn();
     await writeFile(metadataPath, `${JSON.stringify(metadata(new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()))}\n`, { mode: 0o600 });
@@ -136,11 +154,15 @@ describe("MCP capability loading", () => {
     const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
       stateDirectory,
       projectPath,
-      "generation-explicit",
+      GENERATION_EXPLICIT,
     );
     const credentialPath = join(seatDirectory, "codex.cap");
     await writeFile(credentialPath, `afc_${"e".repeat(43)}\n`, { mode: 0o600 });
-    await writeFile(join(seatDirectory, "codex.json"), `${JSON.stringify({ schemaVersion: 1, projectKey: key, projectPath, runId: "run", seat: "codex", agentId: "codex", role: "chair", credentialPath, expiresAt: "2099-01-01T00:00:00.000Z" })}\n`, { mode: 0o600 });
+    await writeFile(join(seatDirectory, "codex.json"), `${JSON.stringify({
+      schemaVersion: 1, projectKey: key, projectPath, generation: GENERATION_EXPLICIT,
+      previousGeneration: null, runId: "run", seat: "codex", agentId: "codex", role: "chair",
+      credentialPath, expiresAt: "2099-01-01T00:00:00.000Z",
+    })}\n`, { mode: 0o600 });
     await expect(resolveMcpCapability({
       AGENT_FABRIC_SEAT: "codex",
       AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,

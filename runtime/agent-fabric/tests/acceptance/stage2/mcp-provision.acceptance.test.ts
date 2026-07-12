@@ -1,11 +1,13 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { connectFabricDaemon, startFabricDaemon, type FabricDaemonHandle } from "../../../src/daemon/client.ts";
+import { currentMcpSeatGeneration } from "../../../src/core/mcp-seat-generation.ts";
 import { MCP_ROOT_AUTHORITY } from "../../support/mcp-testkit.ts";
 import { parseCliJson, runSourceCli } from "../../support/cli-process.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
@@ -35,6 +37,14 @@ type Fixture = {
   };
   seatBindings: string;
 };
+
+const CURRENT_BINDINGS = [
+  { seat: "agy", agentId: "agent_agy", expectedPrincipalGeneration: 1 },
+  { seat: "claude", agentId: "agent_claude", expectedPrincipalGeneration: 1 },
+  { seat: "codex", agentId: "agent_codex_chair", expectedPrincipalGeneration: 1 },
+  { seat: "cursor", agentId: "agent_cursor", expectedPrincipalGeneration: 1 },
+  { seat: "kiro", agentId: "agent_kiro", expectedPrincipalGeneration: 1 },
+] as const;
 
 async function fixture(options: { broaderRoot?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "fabric-mcp-provision-"));
@@ -122,13 +132,9 @@ async function fixture(options: { broaderRoot?: boolean } = {}): Promise<Fixture
       chairGeneration: current.chairGeneration,
       chairLeaseId: current.chairLeaseId,
     },
-    seatBindings: [
-      "agy=agent_agy@1",
-      "claude=agent_claude@1",
-      "codex=agent_codex_chair@1",
-      "cursor=agent_cursor@1",
-      "kiro=agent_kiro@1",
-    ].join(","),
+    seatBindings: CURRENT_BINDINGS
+      .map(({ seat, agentId, expectedPrincipalGeneration }) => `${seat}=${agentId}@${String(expectedPrincipalGeneration)}`)
+      .join(","),
   };
 }
 
@@ -136,6 +142,8 @@ type ProvisionOutput = {
   schemaVersion: 1;
   projectKey: string;
   projectPath: string;
+  expectedPreviousGeneration: string | null;
+  generation: string;
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;
@@ -214,6 +222,7 @@ describe("MCP current project seat provisioning", () => {
     expect(first).toMatchObject({
       schemaVersion: 1,
       projectPath: current.projectPath,
+      expectedPreviousGeneration: null,
       ...current.identity,
       chairSeat: "codex",
       expiresAt,
@@ -229,7 +238,7 @@ describe("MCP current project seat provisioning", () => {
     expect(firstResult.stdout).not.toContain("capability");
 
     const credentials = await Promise.all(first.seats.map(async (seat) => {
-      expect(seat.credentialPath).toMatch(new RegExp(`/seats/${first.projectKey}/generations/[0-9a-f]{16}/${seat.seat}\\.cap$`, "u"));
+      expect(seat.credentialPath).toMatch(new RegExp(`/seats/${first.projectKey}/generations/[0-9a-f]{64}/${seat.seat}\\.cap$`, "u"));
       const [credentialStat, metadataStat, credential, metadataText] = await Promise.all([
         lstat(seat.credentialPath),
         lstat(seat.metadataPath),
@@ -248,6 +257,8 @@ describe("MCP current project seat provisioning", () => {
         schemaVersion: 1,
         projectKey: first.projectKey,
         projectPath: current.projectPath,
+        generation: first.generation,
+        previousGeneration: null,
         ...current.identity,
         seat: seat.seat,
         agentId: seat.agentId,
@@ -278,6 +289,7 @@ describe("MCP current project seat provisioning", () => {
     expect(parseCliJson(seatPathResult)).toEqual({
       schemaVersion: 1,
       projectKey: first.projectKey,
+      generation: first.generation,
       seat: "claude",
       credentialPath: first.seats[1]?.credentialPath,
       metadataPath: first.seats[1]?.metadataPath,
@@ -327,12 +339,145 @@ describe("MCP current project seat provisioning", () => {
     const first = parseCliJson(await runSourceCli(provisionArguments(current, firstExpiry), {
       environment: current.environment,
     })) as ProvisionOutput;
+    const firstCredentials = await Promise.all(first.seats.map(async (seat) => await readFile(seat.credentialPath, "utf8")));
     const second = parseCliJson(await runSourceCli(provisionArguments(current, secondExpiry), {
       environment: current.environment,
     })) as ProvisionOutput;
     expect(second.runId).toBe(first.runId);
     expect(second.seats.map((seat) => seat.credentialPath)).not.toEqual(first.seats.map((seat) => seat.credentialPath));
     expect(persistenceCounts(current.databasePath).runs).toBe(1);
+    const database = new Database(current.databasePath);
+    try {
+      expect(database.prepare(`
+        SELECT active.generation
+          FROM mcp_active_seat_generations active
+          JOIN projects project ON project.project_id=active.project_id
+         WHERE project.canonical_root=?
+      `).get(current.projectPath)).toEqual({ generation: second.generation });
+      expect(database.prepare(`
+        SELECT count(*) AS count
+          FROM mcp_seat_generation_members member
+          JOIN capabilities capability ON capability.token_hash=member.token_hash
+         WHERE member.generation=? AND capability.revoked_at IS NOT NULL
+      `).get(first.generation)).toEqual({ count: CURRENT_BINDINGS.length });
+      expect(() => database.prepare(`
+        UPDATE mcp_active_seat_generations SET generation=? WHERE generation=?
+      `).run(first.generation, second.generation)).toThrow(/INVARIANT_mcp_active_seat_generation_forward_only/u);
+    } finally {
+      database.close();
+    }
+    const discovery = JSON.parse(await readFile(join(current.environment.AGENT_FABRIC_RUNTIME_DIRECTORY ?? "", "fabric-v1.discovery.json"), "utf8")) as {
+      socketPath: string;
+      bootstrapCapability: string;
+    };
+    for (const credential of firstCredentials) {
+      const client = await connectFabricDaemon({ socketPath: discovery.socketPath, capability: credential });
+      await expect(client.getMailboxState())
+        .rejects.toThrow(/expired or revoked|authentication failed/iu);
+      await client.close();
+    }
+    const staleCredential = firstCredentials[0];
+    if (staleCredential === undefined) throw new Error("first generation did not contain a credential");
+    const staleHash = createHash("sha256").update(staleCredential).digest("hex");
+    const corrupted = new Database(current.databasePath);
+    try {
+      corrupted.prepare("UPDATE capabilities SET revoked_at=NULL WHERE token_hash=?").run(staleHash);
+    } finally {
+      corrupted.close();
+    }
+    const staleClient = await connectFabricDaemon({ socketPath: discovery.socketPath, capability: staleCredential });
+    await expect(staleClient.getMailboxState()).rejects.toThrow(/inactive MCP seat generation/iu);
+    await staleClient.close();
+    const repaired = new Database(current.databasePath);
+    try {
+      repaired.prepare("UPDATE capabilities SET revoked_at=? WHERE token_hash=?").run(Date.now(), staleHash);
+    } finally {
+      repaired.close();
+    }
+    for (const seat of second.seats) {
+      const client = await connectFabricDaemon({
+        socketPath: discovery.socketPath,
+        capability: await readFile(seat.credentialPath, "utf8"),
+      });
+      await expect(client.getMailboxState()).resolves.toMatchObject({ contiguousWatermark: 0 });
+      await client.close();
+    }
+    const currentSeat = second.seats[0];
+    if (currentSeat === undefined) throw new Error("second generation did not contain a credential");
+    const currentCredential = await readFile(currentSeat.credentialPath, "utf8");
+    const topology = new Database(current.databasePath);
+    try {
+      topology.prepare("UPDATE run_chair_leases SET status='frozen' WHERE lease_id=?")
+        .run(current.identity.chairLeaseId);
+    } finally {
+      topology.close();
+    }
+    const topologyStaleClient = await connectFabricDaemon({
+      socketPath: discovery.socketPath,
+      capability: currentCredential,
+    });
+    await expect(topologyStaleClient.getMailboxState()).rejects.toThrow(/inactive MCP seat generation/iu);
+    await topologyStaleClient.close();
+    const restoredTopology = new Database(current.databasePath);
+    try {
+      restoredTopology.prepare("UPDATE run_chair_leases SET status='active' WHERE lease_id=?")
+        .run(current.identity.chairLeaseId);
+    } finally {
+      restoredTopology.close();
+    }
+    const control = await connectFabricDaemon({
+      socketPath: discovery.socketPath,
+      capability: discovery.bootstrapCapability,
+    });
+    try {
+      await expect(control.bindCurrentMcpSeats({
+        canonicalRoot: current.projectPath,
+        expectedPreviousGeneration: first.expectedPreviousGeneration,
+        generation: first.generation,
+        projectSessionId: first.projectSessionId,
+        expectedSessionRevision: first.sessionRevision,
+        expectedSessionGeneration: first.sessionGeneration,
+        runId: first.runId,
+        expectedRunRevision: first.runRevision,
+        chairAgentId: first.chairAgentId,
+        expectedChairGeneration: first.chairGeneration,
+        chairLeaseId: first.chairLeaseId,
+        expiresAt: first.expiresAt,
+        bindings: CURRENT_BINDINGS.map((binding) => ({ ...binding })),
+      })).rejects.toThrow(/replay is stale|crossed or changed/iu);
+
+      const thirdExpiry = new Date(Date.now() + 29 * 24 * 60 * 60 * 1_000).toISOString();
+      const third = currentMcpSeatGeneration({
+        canonicalRoot: current.projectPath,
+        projectSessionId: current.identity.projectSessionId,
+        sessionRevision: current.identity.sessionRevision,
+        sessionGeneration: current.identity.sessionGeneration,
+        runId: current.identity.runId,
+        runRevision: current.identity.runRevision,
+        chairAgentId: current.identity.chairAgentId,
+        chairGeneration: current.identity.chairGeneration,
+        chairLeaseId: current.identity.chairLeaseId,
+        expiresAt: thirdExpiry,
+        bindings: CURRENT_BINDINGS,
+      });
+      await expect(control.bindCurrentMcpSeats({
+        canonicalRoot: current.projectPath,
+        expectedPreviousGeneration: first.generation,
+        generation: third.generation,
+        projectSessionId: current.identity.projectSessionId,
+        expectedSessionRevision: current.identity.sessionRevision,
+        expectedSessionGeneration: current.identity.sessionGeneration,
+        runId: current.identity.runId,
+        expectedRunRevision: current.identity.runRevision,
+        chairAgentId: current.identity.chairAgentId,
+        expectedChairGeneration: current.identity.chairGeneration,
+        chairLeaseId: current.identity.chairLeaseId,
+        expiresAt: thirdExpiry,
+        bindings: CURRENT_BINDINGS.map((binding) => ({ ...binding })),
+      })).rejects.toThrow(/active MCP seat generation changed/iu);
+    } finally {
+      await control.close();
+    }
 
     const invalidArguments = provisionArguments(current, secondExpiry);
     const bindingsIndex = invalidArguments.indexOf("--seat-bindings") + 1;
@@ -357,5 +502,16 @@ describe("MCP current project seat provisioning", () => {
     } finally {
       database.close();
     }
+
+    const siblingProject = join(dirname(current.projectPath), "two");
+    await mkdir(siblingProject);
+    const crossedArguments = provisionArguments(
+      current,
+      new Date(Date.now() + 13 * 24 * 60 * 60 * 1_000).toISOString(),
+    );
+    crossedArguments[crossedArguments.indexOf("--project") + 1] = siblingProject;
+    const crossed = await runSourceCli(crossedArguments, { environment: current.environment });
+    expect(crossed.exitCode).toBe(1);
+    expect(crossed.stderr).toMatch(/stale or crossed/u);
   });
 });

@@ -8,6 +8,8 @@ export type CurrentMcpSeatBinding = {
 
 export type CurrentMcpSeatBindingInput = {
   canonicalRoot: string;
+  expectedPreviousGeneration: string | null;
+  generation: string;
   projectSessionId: string;
   expectedSessionRevision: number;
   expectedSessionGeneration: number;
@@ -21,6 +23,8 @@ export type CurrentMcpSeatBindingInput = {
 };
 
 export type CurrentMcpSeatBindingResult = {
+  expectedPreviousGeneration: string | null;
+  generation: string;
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;

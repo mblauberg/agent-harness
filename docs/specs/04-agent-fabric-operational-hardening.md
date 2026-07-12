@@ -1,13 +1,20 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.21
+Version: 1.22
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.21 permits one closed public text field for answer-bearing review
+Version 1.22 completes the current MCP seat cutover as a database and
+filesystem compare-and-swap rather than a client-side pointer convention. The
+daemon owns immutable generation/member records and one active project pointer;
+activation transactionally revokes the prior roster. Every private and public
+credential check revalidates that active generation, the current session/run,
+chair lease, lifecycle and capability identity. Filesystem staging is immutable,
+fsynced and `flock`-serialised against the exact predecessor. Version 1.21
+permits one closed public text field for answer-bearing review
 work without weakening the raw-result boundary. A task-bound ephemeral spawn
 must use an adapter that advertises answer-bearing support; Fabric validates a
 nonempty bounded UTF-8 provider result string, persists the complete private
@@ -764,6 +771,18 @@ current feature and operation grant before `tools/list`; a stale descriptor, mis
 feature or revoked generation is removed or rejected before daemon mutation.
 The current private-control method vocabulary cannot own the MCP tool list or
 bypass public principal/generation checks.
+
+`bindCurrentMcpSeats` requires the exact expected prior generation and a
+content-addressed immutable replacement. The database persists immutable
+generation/member rows, owns one active generation per project and revokes the
+prior member capabilities in the activation transaction. Exact replay of the
+active generation is safe; reuse of a retired generation, a stale predecessor
+or a crossed project/session/run binding is rejected. Filesystem publication
+stages and fsyncs a complete immutable generation, then under an OS-backed
+per-project lock compare-and-swaps `current.json`, including its predecessor.
+Interrupted staging leaves the prior complete pointer active and a delayed old
+writer cannot restore an earlier generation. No flat-file or prior-generation
+authentication fallback exists.
 
 The standalone proxy accepts only an `afc_` agent capability and requests an
 agent principal. A bootstrap `afb_` credential is rejected before `tools/list`;

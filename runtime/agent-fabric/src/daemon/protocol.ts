@@ -776,6 +776,8 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
 export function bindCurrentMcpSeatsInput(params: Record<string, unknown>): CurrentMcpSeatBindingInput {
   exactFields(params, [
     "canonicalRoot",
+    "expectedPreviousGeneration",
+    "generation",
     "projectSessionId",
     "expectedSessionRevision",
     "expectedSessionGeneration",
@@ -787,6 +789,14 @@ export function bindCurrentMcpSeatsInput(params: Record<string, unknown>): Curre
     "expiresAt",
     "bindings",
   ], "current MCP seat binding");
+  if (
+    (params.expectedPreviousGeneration !== null &&
+      (typeof params.expectedPreviousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(params.expectedPreviousGeneration))) ||
+    typeof params.generation !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(params.generation)
+  ) {
+    throw new TypeError("current MCP seat binding generations are invalid");
+  }
   if (!Array.isArray(params.bindings) || params.bindings.length === 0) {
     throw new TypeError("current MCP seat binding requires a non-empty bindings array");
   }
@@ -801,6 +811,8 @@ export function bindCurrentMcpSeatsInput(params: Record<string, unknown>): Curre
   });
   return {
     canonicalRoot: requiredString(params, "canonicalRoot"),
+    expectedPreviousGeneration: params.expectedPreviousGeneration,
+    generation: params.generation,
     projectSessionId: requiredString(params, "projectSessionId"),
     expectedSessionRevision: requiredPositiveInteger(params, "expectedSessionRevision"),
     expectedSessionGeneration: requiredPositiveInteger(params, "expectedSessionGeneration"),

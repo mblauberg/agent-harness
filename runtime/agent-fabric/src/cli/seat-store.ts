@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { flock } from "fs-ext";
 
 export const MCP_SEATS = ["agy", "claude", "codex", "cursor", "kiro"] as const;
 export type McpSeat = (typeof MCP_SEATS)[number];
@@ -10,6 +11,8 @@ export type SeatMetadata = {
   schemaVersion: 1;
   projectKey: string;
   projectPath: string;
+  generation: string;
+  previousGeneration: string | null;
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;
@@ -30,19 +33,22 @@ export type SeatPaths = {
   projectKey: string;
   projectPath: string;
   directory: string;
+  generation: string;
   credentialPath: string;
   metadataPath: string;
 };
 
 export type SeatProject = Pick<SeatPaths, "projectKey" | "projectPath" | "directory">;
 
-type SeatGenerationPointer = {
+export type SeatGenerationPointer = {
   schemaVersion: 1;
   projectKey: string;
+  previousGeneration: string | null;
   generation: string;
 };
 
-const GENERATION_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
+const GENERATION_PATTERN = /^[0-9a-f]{64}$/u;
+const pointerQueues = new Map<string, Promise<void>>();
 
 function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
@@ -100,6 +106,55 @@ async function atomicPrivateWrite(path: string, contents: string): Promise<void>
   }
 }
 
+async function syncDirectory(path: string): Promise<void> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    if (!info.isDirectory()) throw new Error(`private seat path is not a directory: ${path}`);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function flockPromise(fileDescriptor: number, mode: "ex" | "un"): Promise<void> {
+  await new Promise<void>((resolvePromise, reject) => {
+    flock(fileDescriptor, mode, (error) => error === null ? resolvePromise() : reject(error));
+  });
+}
+
+async function withPointerLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = join(directory, "current.lock");
+  const previous = pointerQueues.get(lockPath) ?? Promise.resolve();
+  let releaseQueue!: () => void;
+  const queued = new Promise<void>((resolveQueue) => { releaseQueue = resolveQueue; });
+  const tail = previous.then(() => queued);
+  pointerQueues.set(lockPath, tail);
+  await previous;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(
+      lockPath,
+      constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW,
+      0o600,
+    );
+    const info = await handle.stat();
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600) {
+      throw new Error(`MCP seat generation lock must be a private regular file: ${lockPath}`);
+    }
+    await flockPromise(handle.fd, "ex");
+    try {
+      return await operation();
+    } finally {
+      await flockPromise(handle.fd, "un");
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    releaseQueue();
+    if (pointerQueues.get(lockPath) === tail) pointerQueues.delete(lockPath);
+  }
+}
+
 async function readPrivateFile(path: string): Promise<string> {
   const before = await lstat(path);
   if (!before.isFile() || before.isSymbolicLink() || (before.mode & 0o077) !== 0) {
@@ -117,19 +172,41 @@ async function readPrivateFile(path: string): Promise<string> {
   }
 }
 
-async function activeGeneration(directory: string, key: string): Promise<string> {
-  const pointerPath = join(directory, "current.json");
-  const pointer: unknown = JSON.parse(await readPrivateFile(pointerPath));
+function parseGenerationPointer(pointer: unknown, pointerPath: string, key: string): SeatGenerationPointer {
   if (
     typeof pointer !== "object" || pointer === null || Array.isArray(pointer) ||
+    Object.keys(pointer).sort().join(",") !== "generation,previousGeneration,projectKey,schemaVersion" ||
     !("schemaVersion" in pointer) || pointer.schemaVersion !== 1 ||
     !("projectKey" in pointer) || pointer.projectKey !== key ||
+    !("previousGeneration" in pointer) ||
+    (pointer.previousGeneration !== null &&
+      (typeof pointer.previousGeneration !== "string" || !GENERATION_PATTERN.test(pointer.previousGeneration))) ||
     !("generation" in pointer) || typeof pointer.generation !== "string" ||
-    !GENERATION_PATTERN.test(pointer.generation)
+    !GENERATION_PATTERN.test(pointer.generation) ||
+    pointer.previousGeneration === pointer.generation
   ) {
     throw new Error(`MCP seat generation pointer is invalid: ${pointerPath}`);
   }
-  return pointer.generation;
+  return pointer as SeatGenerationPointer;
+}
+
+async function activeGeneration(directory: string, key: string): Promise<string> {
+  const pointerPath = join(directory, "current.json");
+  return parseGenerationPointer(JSON.parse(await readPrivateFile(pointerPath)), pointerPath, key).generation;
+}
+
+export async function readActiveSeatGeneration(input: {
+  stateDirectory: string;
+  projectPath: string;
+}): Promise<SeatGenerationPointer | null> {
+  const root = await resolveSeatProject({ stateDirectory: input.stateDirectory, project: input.projectPath });
+  const pointerPath = join(root.directory, "current.json");
+  try {
+    return parseGenerationPointer(JSON.parse(await readPrivateFile(pointerPath)), pointerPath, root.projectKey);
+  } catch (error: unknown) {
+    if (errorCode(error) === "ENOENT") return null;
+    throw error;
+  }
 }
 
 export function parseMcpSeat(value: string): McpSeat {
@@ -175,6 +252,7 @@ export async function resolveSeatPaths(input: {
   const activeDirectory = join(project.directory, "generations", generation);
   return {
     ...project,
+    generation,
     credentialPath: join(activeDirectory, `${input.seat}.cap`),
     metadataPath: join(activeDirectory, `${input.seat}.json`),
   };
@@ -184,10 +262,17 @@ export async function installSeatGeneration(input: {
   stateDirectory: string;
   projectPath: string;
   generation: string;
+  expectedPreviousGeneration: string | null;
   seats: Array<{ metadata: Omit<SeatMetadata, "credentialPath">; credential: string }>;
   beforeActivate?: () => void | Promise<void>;
 }): Promise<Array<{ seat: McpSeat; credentialPath: string; metadataPath: string }>> {
   if (!GENERATION_PATTERN.test(input.generation)) throw new Error("MCP seat generation is invalid");
+  if (input.expectedPreviousGeneration !== null && !GENERATION_PATTERN.test(input.expectedPreviousGeneration)) {
+    throw new Error("expected previous MCP seat generation is invalid");
+  }
+  if (input.expectedPreviousGeneration === input.generation) {
+    throw new Error("MCP seat generation cannot replace itself");
+  }
   if (input.seats.length === 0 || new Set(input.seats.map(({ metadata }) => metadata.seat)).size !== input.seats.length) {
     throw new Error("MCP seat generation must contain a non-empty distinct roster");
   }
@@ -210,6 +295,12 @@ export async function installSeatGeneration(input: {
       if (!/^afc_[A-Za-z0-9_-]{43}$/u.test(credential)) throw new Error("daemon returned an invalid seat credential");
       if (metadata.projectKey !== root.projectKey || metadata.projectPath !== root.projectPath) {
         throw new Error(`seat metadata does not match its project-keyed path for ${metadata.seat}`);
+      }
+      if (
+        metadata.generation !== input.generation ||
+        metadata.previousGeneration !== input.expectedPreviousGeneration
+      ) {
+        throw new Error(`seat metadata does not match its generation for ${metadata.seat}`);
       }
       const credentialPath = join(generationDirectory, `${metadata.seat}.cap`);
       const metadataPath = join(generationDirectory, `${metadata.seat}.json`);
@@ -235,8 +326,31 @@ export async function installSeatGeneration(input: {
         }
       }
     }
-    const pointer: SeatGenerationPointer = { schemaVersion: 1, projectKey: root.projectKey, generation: input.generation };
-    await atomicPrivateWrite(join(root.directory, "current.json"), `${JSON.stringify(pointer, null, 2)}\n`);
+    await syncDirectory(generationDirectory);
+    await syncDirectory(generationsDirectory);
+    await withPointerLock(root.directory, async () => {
+      const active = await readActiveSeatGeneration({
+        stateDirectory: input.stateDirectory,
+        projectPath: input.projectPath,
+      });
+      if (active?.generation === input.generation) {
+        if (active.previousGeneration !== input.expectedPreviousGeneration) {
+          throw new Error("active MCP seat generation replay changed its predecessor");
+        }
+        return;
+      }
+      if ((active?.generation ?? null) !== input.expectedPreviousGeneration) {
+        throw new Error("active MCP seat generation changed before filesystem cutover");
+      }
+      const pointer: SeatGenerationPointer = {
+        schemaVersion: 1,
+        projectKey: root.projectKey,
+        previousGeneration: input.expectedPreviousGeneration,
+        generation: input.generation,
+      };
+      await atomicPrivateWrite(join(root.directory, "current.json"), `${JSON.stringify(pointer, null, 2)}\n`);
+      await syncDirectory(root.directory);
+    });
     return written;
   } finally {
     await rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined);

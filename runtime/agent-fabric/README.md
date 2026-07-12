@@ -91,9 +91,10 @@ ancestor projects for the nearest matching provisioned seat and fails closed
 when none exists. Client labels never change the MCP schema or authority. The
 raw capability is stored only in its private `0600` `.cap` file; registry
 configuration contains neither the credential nor a fixed project seat path.
-Seat rotation stages a complete immutable generation and atomically switches a
-single private `current.json` pointer. Existing flat seat files remain a
-read-only compatibility fallback until a successful rotation.
+Seat rotation binds one content-addressed generation in the daemon database,
+atomically revokes the prior roster, stages the complete immutable filesystem
+generation and compare-and-swaps a private `current.json` pointer. There is no
+flat-seat fallback or second accepted generation.
 
 The current daemon is a foreground process in Herdr's infrastructure tab, not
 an installed login service. A separate least-privilege `fabric-events` pane

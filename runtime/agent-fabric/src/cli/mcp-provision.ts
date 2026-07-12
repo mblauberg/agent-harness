@@ -1,13 +1,14 @@
-import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 
 import { connectFabricDaemon } from "../daemon/client.js";
+import { currentMcpSeatGeneration } from "../core/mcp-seat-generation.js";
 import type { FabricPaths } from "./paths.js";
 import {
   parseMcpSeat,
   installSeatGeneration,
+  readActiveSeatGeneration,
   resolveSeatProject,
   resolveSeatPaths,
   type McpSeat,
@@ -27,6 +28,8 @@ export type McpProvisionOutput = {
   schemaVersion: 1;
   projectKey: string;
   projectPath: string;
+  expectedPreviousGeneration: string | null;
+  generation: string;
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;
@@ -174,25 +177,6 @@ function boundedExpiry(value: string): string {
   return value;
 }
 
-function provisionGeneration(input: {
-  projectSessionId: string;
-  sessionRevision: number;
-  sessionGeneration: number;
-  runId: string;
-  runRevision: number;
-  chairSeat: McpSeat;
-  chairAgentId: string;
-  chairGeneration: number;
-  chairLeaseId: string;
-  bindings: readonly ParsedSeatBinding[];
-  expiresAt: string;
-}): string {
-  return createHash("sha256")
-    .update(JSON.stringify(input))
-    .digest("hex")
-    .slice(0, 16);
-}
-
 export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths): Promise<McpProvisionOutput> {
   const command = "mcp provision";
   const optionNames = [
@@ -232,18 +216,26 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
     project,
   });
   const bindingIdentity = {
+    canonicalRoot: projectPath,
     projectSessionId,
     sessionRevision,
     sessionGeneration,
     runId,
     runRevision,
-    chairSeat,
     chairAgentId,
     chairGeneration,
     chairLeaseId,
     bindings,
     expiresAt,
   };
+  const { generation } = currentMcpSeatGeneration(bindingIdentity);
+  const activeGeneration = await readActiveSeatGeneration({
+    stateDirectory: paths.stateDirectory,
+    projectPath,
+  });
+  const expectedPreviousGeneration = activeGeneration?.generation === generation
+    ? activeGeneration.previousGeneration
+    : activeGeneration?.generation ?? null;
   const discovery = await readDiscoveryReceipt(paths);
   const bootstrap = await connectFabricDaemon({
     socketPath: discovery.socketPath,
@@ -252,6 +244,8 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
   try {
     const bound = await bootstrap.bindCurrentMcpSeats({
       canonicalRoot: projectPath,
+      expectedPreviousGeneration,
+      generation,
       projectSessionId,
       expectedSessionRevision: sessionRevision,
       expectedSessionGeneration: sessionGeneration,
@@ -263,6 +257,12 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
       expiresAt,
       bindings,
     });
+    if (
+      bound.generation !== generation ||
+      bound.expectedPreviousGeneration !== expectedPreviousGeneration
+    ) {
+      throw new Error("daemon returned a crossed MCP seat generation");
+    }
     const stagedSeats: Array<{ metadata: Omit<SeatMetadata, "credentialPath">; credential: string }> = [];
     for (const binding of bindings) {
       const credential = bound.credentials.find(({ seat }) => seat === binding.seat);
@@ -274,6 +274,8 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
         schemaVersion: 1,
         projectKey,
         projectPath,
+        generation,
+        previousGeneration: expectedPreviousGeneration,
         projectSessionId,
         sessionRevision,
         sessionGeneration,
@@ -290,11 +292,11 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
       };
       stagedSeats.push({ metadata, credential: credential.capability });
     }
-    const generation = provisionGeneration(bindingIdentity);
     const installed = await installSeatGeneration({
       stateDirectory: paths.stateDirectory,
       projectPath,
       generation,
+      expectedPreviousGeneration,
       seats: stagedSeats,
     });
     const outputSeats: McpProvisionOutput["seats"] = [];
@@ -315,6 +317,8 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
       schemaVersion: 1,
       projectKey,
       projectPath,
+      expectedPreviousGeneration,
+      generation,
       projectSessionId,
       sessionRevision,
       sessionGeneration,
@@ -335,6 +339,7 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
 export async function mcpSeatPath(arguments_: string[], paths: FabricPaths): Promise<{
   schemaVersion: 1;
   projectKey: string;
+  generation: string;
   seat: McpSeat;
   credentialPath: string;
   metadataPath: string;
@@ -347,6 +352,7 @@ export async function mcpSeatPath(arguments_: string[], paths: FabricPaths): Pro
   return {
     schemaVersion: 1,
     projectKey: seatPaths.projectKey,
+    generation: seatPaths.generation,
     seat,
     credentialPath: seatPaths.credentialPath,
     metadataPath: seatPaths.metadataPath,

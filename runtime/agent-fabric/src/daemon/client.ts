@@ -1203,6 +1203,10 @@ export class FabricDaemonClient {
     const result = await this.#call("bindCurrentMcpSeats", input);
     if (
       !isRecord(result) ||
+      (result.expectedPreviousGeneration !== null &&
+        (typeof result.expectedPreviousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(result.expectedPreviousGeneration))) ||
+      typeof result.generation !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(result.generation) ||
       typeof result.projectSessionId !== "string" ||
       !isPositiveInteger(result.sessionRevision) ||
       !isPositiveInteger(result.sessionGeneration) ||

@@ -199,6 +199,87 @@ CREATE TABLE capabilities (
   FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id)
 );
 
+CREATE TABLE mcp_seat_generations (
+  generation TEXT PRIMARY KEY CHECK (
+    length(generation)=64 AND generation NOT GLOB '*[^0-9a-f]*'
+  ),
+  project_id TEXT NOT NULL REFERENCES projects(project_id),
+  project_session_id TEXT NOT NULL,
+  session_revision INTEGER NOT NULL CHECK(session_revision>=1),
+  session_generation INTEGER NOT NULL CHECK(session_generation>=1),
+  run_id TEXT NOT NULL,
+  run_revision INTEGER NOT NULL CHECK(run_revision>=1),
+  chair_agent_id TEXT NOT NULL,
+  chair_generation INTEGER NOT NULL CHECK(chair_generation>=1),
+  chair_lease_id TEXT NOT NULL,
+  previous_generation TEXT REFERENCES mcp_seat_generations(generation),
+  binding_json TEXT NOT NULL CHECK (json_valid(binding_json)=1),
+  binding_digest TEXT NOT NULL UNIQUE CHECK (
+    length(binding_digest)=71 AND substr(binding_digest,1,7)='sha256:'
+  ),
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(project_id,generation),
+  FOREIGN KEY(project_session_id,project_id) REFERENCES project_sessions(project_session_id,project_id),
+  FOREIGN KEY(project_session_id,run_id) REFERENCES runs(project_session_id,run_id),
+  FOREIGN KEY(run_id,chair_agent_id) REFERENCES agents(run_id,agent_id),
+  FOREIGN KEY(chair_lease_id) REFERENCES run_chair_leases(lease_id),
+  CHECK(previous_generation IS NULL OR previous_generation<>generation)
+);
+
+CREATE TABLE mcp_active_seat_generations (
+  project_id TEXT PRIMARY KEY REFERENCES projects(project_id),
+  generation TEXT NOT NULL UNIQUE,
+  activated_at INTEGER NOT NULL,
+  FOREIGN KEY(project_id,generation) REFERENCES mcp_seat_generations(project_id,generation)
+);
+
+CREATE TABLE mcp_seat_generation_members (
+  generation TEXT NOT NULL REFERENCES mcp_seat_generations(generation),
+  seat TEXT NOT NULL CHECK (length(seat) BETWEEN 1 AND 64),
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  principal_generation INTEGER NOT NULL CHECK(principal_generation>=1),
+  token_hash TEXT NOT NULL UNIQUE REFERENCES capabilities(token_hash),
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY(generation,seat),
+  UNIQUE(generation,agent_id),
+  FOREIGN KEY(run_id,agent_id) REFERENCES agents(run_id,agent_id)
+);
+
+CREATE VIEW current_mcp_seat_generation_members AS
+SELECT member.generation,member.seat,member.run_id,member.agent_id,
+       member.principal_generation,member.token_hash,member.expires_at
+  FROM mcp_seat_generation_members member
+  JOIN capabilities capability
+    ON capability.token_hash=member.token_hash
+   AND capability.run_id=member.run_id
+   AND capability.agent_id=member.agent_id
+   AND capability.principal_generation=member.principal_generation
+   AND capability.expires_at=member.expires_at
+  JOIN mcp_seat_generations generation ON generation.generation=member.generation
+  JOIN mcp_active_seat_generations active
+    ON active.project_id=generation.project_id AND active.generation=generation.generation
+  JOIN project_sessions session
+    ON session.project_session_id=generation.project_session_id
+   AND session.project_id=generation.project_id
+   AND session.generation=generation.session_generation
+   AND session.state IN ('active','visibility_degraded')
+  JOIN runs run
+    ON run.project_session_id=generation.project_session_id
+   AND run.run_id=generation.run_id
+   AND run.chair_agent_id=generation.chair_agent_id
+   AND run.chair_generation=generation.chair_generation
+   AND run.chair_lease_id=generation.chair_lease_id
+   AND run.lifecycle_state IN ('active','visibility_degraded')
+  JOIN run_chair_leases lease
+    ON lease.project_session_id=generation.project_session_id
+   AND lease.run_id=generation.run_id
+   AND lease.lease_id=generation.chair_lease_id
+   AND lease.holder_agent_id=generation.chair_agent_id
+   AND lease.generation=generation.chair_generation
+   AND lease.status='active';
+
 CREATE TABLE chair_bridge_loss_resolutions (
   loss_id TEXT PRIMARY KEY,
   recovery_id TEXT NOT NULL UNIQUE,
@@ -2432,6 +2513,44 @@ WHEN NEW.principal_generation < 1 BEGIN SELECT RAISE(ABORT, 'INVARIANT_capabilit
 
 CREATE TRIGGER capabilities_generation_update BEFORE UPDATE OF principal_generation ON capabilities
 WHEN NEW.principal_generation < 1 BEGIN SELECT RAISE(ABORT, 'INVARIANT_capabilities_generation'); END;
+
+CREATE TRIGGER mcp_seat_generation_previous_project_insert
+BEFORE INSERT ON mcp_seat_generations
+WHEN NEW.previous_generation IS NOT NULL AND NOT EXISTS (
+  SELECT 1 FROM mcp_seat_generations previous
+   WHERE previous.generation=NEW.previous_generation AND previous.project_id=NEW.project_id
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_seat_generation_previous_project'); END;
+
+CREATE TRIGGER mcp_seat_generations_update_forbidden
+BEFORE UPDATE ON mcp_seat_generations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_seat_generations_immutable'); END;
+
+CREATE TRIGGER mcp_seat_generations_delete_forbidden
+BEFORE DELETE ON mcp_seat_generations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_seat_generations_immutable'); END;
+
+CREATE TRIGGER mcp_seat_generation_members_update_forbidden
+BEFORE UPDATE ON mcp_seat_generation_members
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_seat_generation_members_immutable'); END;
+
+CREATE TRIGGER mcp_seat_generation_members_delete_forbidden
+BEFORE DELETE ON mcp_seat_generation_members
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_seat_generation_members_immutable'); END;
+
+CREATE TRIGGER mcp_active_seat_generation_forward_only
+BEFORE UPDATE OF generation ON mcp_active_seat_generations
+WHEN NOT EXISTS (
+  SELECT 1 FROM mcp_seat_generations next
+   WHERE next.generation=NEW.generation
+     AND next.project_id=OLD.project_id
+     AND next.previous_generation=OLD.generation
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_active_seat_generation_forward_only'); END;
+
+CREATE TRIGGER mcp_active_seat_generation_delete_forbidden
+BEFORE DELETE ON mcp_active_seat_generations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_mcp_active_seat_generation_immutable'); END;
 
 CREATE TRIGGER chair_bridge_loss_blocks_run_reactivation
 BEFORE UPDATE OF lifecycle_state ON runs
