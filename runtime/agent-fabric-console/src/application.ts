@@ -17,6 +17,8 @@ import {
 } from "./controller.js";
 import {
   FABRIC_VIEWS,
+  GUIDED_WORKFLOW_ACTIONS,
+  type GuidedWorkflowAction,
   type FabricView,
 } from "./model.js";
 import {
@@ -237,6 +239,16 @@ const rejectingActions: OperatorActionClient = {
   reconcile: async () => Promise.reject(new Error("operator actions unavailable")),
 };
 
+function guidedWorkflowPrompt(action: GuidedWorkflowAction): string {
+  if (
+    action === "discuss" || action === "accept" ||
+    action === "request-changes" || action === "defer"
+  ) {
+    return `GUIDED ${action}: enter intake=<stable-id>; optional summary=<text>; Enter reviews; Esc cancels`;
+  }
+  return `GUIDED ${action}: enter named key=value fields; projection values are supplied by the typed planner; Enter reviews; Esc cancels`;
+}
+
 function directActivation(
   activation: FabricRuntimeActivation,
 ): DirectConsoleActivation {
@@ -317,9 +329,17 @@ export class FabricConsoleApplication {
     if (this.#adapter === null) return this.dataset;
     const inspection = this.dataset.inspection;
     const next = await this.#adapter.poll();
+    const localCapabilities = {
+      ...(this.dataset.workflowCapabilities === undefined
+        ? {}
+        : { workflowCapabilities: this.dataset.workflowCapabilities }),
+      ...(this.dataset.productionActionPlanning === true
+        ? { productionActionPlanning: true as const }
+        : {}),
+    };
     const mutationVisible = this.#plannerEnablesMutation
-      ? next
-      : { ...next, canMutate: false };
+      ? { ...next, ...localCapabilities }
+      : { ...next, ...localCapabilities, canMutate: false };
     const visible =
       inspection !== undefined &&
       inspection.binding.projectionRevision === mutationVisible.snapshotRevision
@@ -418,6 +438,66 @@ export class FabricConsoleApplication {
     }
     const workflowPlanner = this.#workflowPlanner;
     const workflowReview = this.#runtime.ui.workflowReview;
+    if (activation.regionId.startsWith("workflow:")) {
+      const action = activation.regionId.slice("workflow:".length);
+      if (
+        workflowPlanner === undefined ||
+        activation.binding === null ||
+        !(GUIDED_WORKFLOW_ACTIONS as readonly string[]).includes(action)
+      ) {
+        throw new Error("guided typed workflow is unavailable");
+      }
+      const binding = activation.binding;
+      const currentRegion = this.#runtime.frame.hitRegions.find(
+        (region) =>
+          region.id === activation.regionId &&
+          region.enabled &&
+          region.geometryKey === this.#runtime.frame.geometryKey &&
+          region.binding?.view === binding.view &&
+          region.binding.itemId === binding.itemId &&
+          region.binding.itemRevision === binding.itemRevision &&
+          region.binding.projectionRevision === binding.projectionRevision,
+      );
+      if (currentRegion === undefined) {
+        throw new Error("guided typed workflow is unavailable");
+      }
+      this.#runtime.beginGuidedWorkflow({
+        action: action as GuidedWorkflowAction,
+        binding,
+        prompt: guidedWorkflowPrompt(action as GuidedWorkflowAction),
+      });
+      return;
+    }
+    if (activation.regionId === "guided:cancel") {
+      this.#runtime.cancelGuidedWorkflow();
+      return;
+    }
+    if (activation.regionId === "guided:submit") {
+      const guided = this.#runtime.ui.guidedWorkflow;
+      if (
+        workflowPlanner === undefined ||
+        guided === null ||
+        activation.binding === null ||
+        activation.binding.view !== guided.binding.view ||
+        activation.binding.itemId !== guided.binding.itemId ||
+        activation.binding.itemRevision !== guided.binding.itemRevision ||
+        activation.binding.projectionRevision !== guided.binding.projectionRevision
+      ) {
+        throw new Error("guided typed workflow binding is stale");
+      }
+      const review = await workflowPlanner.prepareGuided({
+        action: guided.action,
+        binding: guided.binding,
+        raw: this.#runtime.ui.draft,
+        dataset: this.dataset,
+        eventId: activation.eventId,
+        ...(this.#runtime.ui.artifactConfirmation === null
+          ? {}
+          : { artifactConfirmation: this.#runtime.ui.artifactConfirmation }),
+      });
+      this.#runtime.setWorkflowReview(review);
+      return;
+    }
     if (activation.regionId === "palette:submit") {
       if (workflowPlanner === undefined) {
         throw new Error("typed Console workflows are unavailable");
@@ -572,10 +652,17 @@ async function openConsoleApplicationConnection(
       const actionClient = adapter.actionClient;
       planner ??= bootstrap.actionPlanner;
       workflowPlanner = bootstrap.workflowPlanner;
+      dataset = {
+        ...dataset,
+        ...(workflowPlanner === undefined
+          ? {}
+          : { workflowCapabilities: workflowPlanner.capabilities }),
+        ...(planner === undefined ? {} : { productionActionPlanning: true }),
+      };
       plannerEnablesMutation =
         (actionClient !== null && planner !== undefined) ||
         workflowPlanner !== undefined;
-      if (!plannerEnablesMutation) dataset = { ...dataset, canMutate: false };
+      dataset = { ...dataset, canMutate: plannerEnablesMutation };
       mutationController = new ConsoleController({
         dataset,
         actions: actionClient ?? rejectingActions,

@@ -1629,7 +1629,7 @@ function renderFabricActions(
   let x = 1;
   for (const [index, action] of presentation.actions.entries()) {
     const marker = presentation.focusId === action.id ? ">" : "";
-    const label = `${marker}[${String(index + 1)} ${action.label}]${action.enabled ? "" : "(disabled)"}`;
+    const label = `${marker}[${String(index + 1)} ${action.enabled ? "" : "×"}${action.label}]`;
     const gap = x === 1 ? "" : " ";
     const width = cellWidth(label);
     const x1 = x + cellWidth(gap);
@@ -1665,6 +1665,8 @@ function renderFabricFooter(
     presentation.notice ??
       (presentation.inputMode === "palette"
         ? `WORKFLOW JSON: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels`
+        : presentation.inputMode === "guided"
+          ? `GUIDED FORM: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels`
         : presentation.inputMode === "editor"
           ? `DRAFT: ${String(Buffer.byteLength(presentation.draft))} bytes | Esc returns to browse`
           :
@@ -1672,7 +1674,7 @@ function renderFabricFooter(
             ? `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}${presentation.review === null ? "" : ` REVIEW+${String(presentation.reviewScrollOffset)}`}`
             : `Action failed: ${presentation.failureCode}`)),
   );
-  const help = "? help | [ ] views | e draft | : workflow | PgUp/PgDn | q detach";
+  const help = "? help | [ ] views | e draft | : advanced | PgUp/PgDn | Alt-M mouse | q detach";
   setFabricRow(rows, helpRow, columns, help);
   const detachIndex = help.indexOf("q detach");
   if (detachIndex >= 0 && detachIndex + 8 <= columns) {
@@ -1727,6 +1729,8 @@ function renderFabricStrip(
       presentation.notice ??
         (presentation.inputMode === "palette"
           ? `WORKFLOW:${String(Buffer.byteLength(presentation.draft))}B Enter Review Esc cancel`
+          : presentation.inputMode === "guided"
+            ? `FORM:${String(Buffer.byteLength(presentation.draft))}B Enter Review Esc cancel`
           : `Health:${header.health} Attn:${String(header.attentionCount)} Next:${header.nextMilestone}`),
     );
     const help = "? help | q detach";

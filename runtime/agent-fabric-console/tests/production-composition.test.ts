@@ -405,7 +405,7 @@ describe("production Console mutation planner", () => {
         dataset: available,
         state: state(),
         draft: action === "project-session-stop"
-          ? JSON.stringify({ path: "receipts/drain.json", digest })
+          ? `receipts/drain.json@${digest}`
           : "exact operator payload",
       })).resolves.toMatchObject({ availableAction: action });
     }
@@ -607,8 +607,6 @@ describe("production Console package-root bootstrap", () => {
         "resume",
         "cancel",
         "steer",
-        "project-session-drain",
-        "project-session-stop",
       ],
       requiresPreview: true,
     });

@@ -87,6 +87,31 @@ export type ConsoleActionAvailability =
       reason: "fact-unavailable" | "fact-conflict";
     }>;
 
+export const GUIDED_WORKFLOW_ACTIONS = Object.freeze([
+  "discuss",
+  "accept",
+  "request-changes",
+  "defer",
+  "implement",
+  "launch",
+  "git",
+  "promotion",
+] as const);
+
+export type GuidedWorkflowAction = (typeof GUIDED_WORKFLOW_ACTIONS)[number];
+
+export type ConsoleWorkflowCapability =
+  | Readonly<{ state: "available" }>
+  | Readonly<{ state: "unavailable"; reason: string }>;
+
+export type ConsoleWorkflowCapabilities = Readonly<{
+  intake: ConsoleWorkflowCapability;
+  gate: ConsoleWorkflowCapability;
+  launch: ConsoleWorkflowCapability;
+  git: ConsoleWorkflowCapability;
+  promotion: ConsoleWorkflowCapability;
+}>;
+
 export type ConsoleNativeNotification =
   | Readonly<NativeNotificationDeliverySummary & { kind: "daemon-journal" }>
   | Readonly<{

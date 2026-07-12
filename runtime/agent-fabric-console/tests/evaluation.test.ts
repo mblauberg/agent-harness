@@ -6,9 +6,21 @@ import {
   evaluateUsabilityManifest,
   parseUsabilityManifest,
 } from "../src/evaluation.js";
-import { renderFabricConsoleFrame } from "../src/index.js";
+import { reduceFabricPointer, renderFabricConsoleFrame } from "../src/index.js";
 
-const dependencies = { render: renderFabricConsoleFrame };
+const dependencies = {
+  render: renderFabricConsoleFrame,
+  reducePointer: reduceFabricPointer,
+  identify: async ({ fixture, repetition }: {
+    fixture: ReturnType<typeof parseUsabilityManifest>["fixtures"][number];
+    repetition: number;
+  }) => ({
+    observer: "automated-proxy" as const,
+    durationMs: 1_500 + repetition * 100,
+    topAttentionId: fixture.expectedTopAttentionId,
+    answers: fixture.expectedAnswers,
+  }),
+};
 
 const fixtureUrl = new URL(
   "../evals/usability-fixtures.v1.json",
@@ -20,9 +32,9 @@ async function manifestValue(): Promise<unknown> {
 }
 
 describe("versioned Console usability evaluation", () => {
-  it("passes all required scenarios across three timed 80x24 repetitions", async () => {
+  it("passes interaction checks while withholding the human timing claim from proxy repetitions", async () => {
     const manifest = parseUsabilityManifest(await manifestValue());
-    const report = evaluateUsabilityManifest(manifest, dependencies);
+    const report = await evaluateUsabilityManifest(manifest, dependencies);
 
     expect(manifest).toMatchObject({
       schemaVersion: 1,
@@ -38,7 +50,10 @@ describe("versioned Console usability evaluation", () => {
     ]);
     expect(report).toMatchObject({
       schemaVersion: 1,
-      passed: true,
+      passed: false,
+      interactionPassed: true,
+      recordedIdentificationPassed: true,
+      humanIdentificationPassed: false,
       topItemSuccessRate: 1,
       fieldSuccessRate: 1,
     });
@@ -59,11 +74,17 @@ describe("versioned Console usability evaluation", () => {
           observation.exactViewport,
       ),
     ).toBe(true);
+    expect(report.observations.every((observation) =>
+      observation.identificationObserver === "automated-proxy" &&
+      observation.keyboardEventCount >= 8 &&
+      observation.mouseEventCount >= 2 &&
+      observation.resizeEventCount >= 3
+    )).toBe(true);
   });
 
   it("proves ordering, duplicate grouping and optional GitHub degradation", async () => {
     const manifest = parseUsabilityManifest(await manifestValue());
-    const report = evaluateUsabilityManifest(manifest, dependencies);
+    const report = await evaluateUsabilityManifest(manifest, dependencies);
     const concurrent = report.observations.filter(
       ({ fixtureId }) => fixtureId === "concurrent-multi-run",
     );
@@ -116,5 +137,27 @@ describe("versioned Console usability evaluation", () => {
     expect(() => parseUsabilityManifest({ ...value, fixtures })).toThrow(
       /fixture IDs must be unique/,
     );
+  });
+
+  it("fails recorded identification attempts that are late or wrong instead of inferring answers from rendered text", async () => {
+    const manifest = parseUsabilityManifest(await manifestValue());
+    const report = await evaluateUsabilityManifest(manifest, {
+      ...dependencies,
+      identify: async ({ fixture, repetition }) => ({
+        observer: "automated-proxy" as const,
+        durationMs: repetition === 1 ? manifest.maximumIdentificationMs + 1 : 500,
+        topAttentionId: fixture.expectedTopAttentionId,
+        answers: {
+          ...fixture.expectedAnswers,
+          owner: "wrong-owner",
+        },
+      }),
+    });
+
+    expect(report.passed).toBe(false);
+    expect(report.fieldSuccessRate).toBeLessThan(1);
+    expect(report.observations.some(
+      ({ durationMs }) => durationMs > manifest.maximumIdentificationMs,
+    )).toBe(true);
   });
 });

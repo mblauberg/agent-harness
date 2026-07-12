@@ -6,13 +6,18 @@ import {
   type NegotiatedOperatorClient,
   type OperatorCapabilityCredential,
   type OperatorProjectionSnapshot,
+  type Intake,
   type ProjectId,
   type ProjectSessionId,
   type Sha256Digest,
+  type ScopedGate,
   type Timestamp,
 } from "@local/agent-fabric-protocol";
 
-import { createProductionConsoleWorkflowPlanner } from "../src/workflow.js";
+import {
+  createProductionConsoleWorkflowPlanner,
+  type ConsoleTypedEntryPlanner,
+} from "../src/workflow.js";
 import { createEmptyViewPages, revisionFromProtocol } from "../src/model.js";
 import type { FabricConsoleDataset } from "../src/protocol-adapter.js";
 
@@ -287,6 +292,390 @@ describe("typed Console workflow planner", () => {
       previewId: expect.any(String),
       confirmation: expect.objectContaining({ kind: "echo" }),
     }));
+  });
+
+  it("builds an evidence acceptance workflow from a guided intake ID without raw JSON", async () => {
+    const intake: Intake = {
+      intakeId: "intake_guided_accept" as never,
+      projectId,
+      projectSessionId,
+      coordinationRunId: "run_guided_accept" as never,
+      revision: 4,
+      state: "awaiting-human",
+      dedupeKey: "guided-accept",
+      summary: "Review the accepted scope",
+      artifactRefs: [],
+      gateIds: [],
+    };
+    const read = vi.fn(async () => intake);
+    const revise = vi.fn(async (request) => ({ ...intake, ...request, revision: 5 } as never));
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: { createDraft: vi.fn(), read, submit: vi.fn(), revise },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+    });
+    const selected = dataset();
+    const artifactRef = { path: "docs/spec.md" as never, digest };
+    const binding = {
+      view: "evidence" as const,
+      itemId: "evidence_guided_accept",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(11),
+    };
+    const guidedDataset: FabricConsoleDataset = {
+      ...selected,
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding,
+        readTransactionId: "guided-artifact-read",
+        result: {
+          artifactRef,
+          evidenceRevision: 7,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair-guided",
+          projectSessionId,
+          coordinationRunId: intake.coordinationRunId,
+          taskId: null,
+          createdAt: observedAt,
+          mediaType: "text/markdown",
+          content: "approved scope",
+          totalBytes: 14,
+          totalLines: 1,
+          renderedTotalBytes: 14,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: digest,
+          transformation: "none",
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{ pageIndex: 0, lineFragment: "whole", pageContentDigest: digest, bytes: 14 }],
+          coverage: { complete: true, verified: true, pageCount: 1 },
+          reviewDisposition: "eligible",
+        },
+      },
+    };
+
+    const review = await planner.prepareGuided({
+      action: "accept",
+      binding,
+      raw: "intake=intake_guided_accept",
+      dataset: guidedDataset,
+      eventId: "guided-accept-open",
+    });
+
+    expect(read).toHaveBeenCalledWith({ credential, intakeId: "intake_guided_accept" });
+    expect(revise).not.toHaveBeenCalled();
+    expect(review).toMatchObject({
+      kind: "intake-revise",
+      stage: "review",
+      details: expect.arrayContaining([
+        { label: "state", value: '"accepted"' },
+        { label: "acceptedScopeRef", value: expect.stringContaining("docs/spec.md") },
+      ]),
+    });
+
+    await planner.commit({
+      review: planner.arm(review, "guided-accept-arm"),
+      eventId: "guided-accept-confirm",
+    });
+    expect(revise).toHaveBeenCalledWith(expect.objectContaining({
+      intakeId: "intake_guided_accept",
+      expectedRevision: 4,
+      state: "accepted",
+      artifactRefs: [artifactRef],
+      acceptedScopeRef: artifactRef,
+    }));
+  });
+
+  it("fails a guided decision before mutation when the supplied intake is cross-session", async () => {
+    const wrongSessionIntake: Intake = {
+      intakeId: "intake_wrong_session" as never,
+      projectId,
+      projectSessionId: "ps_other" as never,
+      coordinationRunId: "run_other" as never,
+      revision: 2,
+      state: "awaiting-human" as const,
+      dedupeKey: "wrong-session",
+      summary: "Wrong session",
+      artifactRefs: [],
+      gateIds: [],
+    };
+    const read = vi.fn(async () => wrongSessionIntake);
+    const revise = vi.fn();
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: { createDraft: vi.fn(), read, submit: vi.fn(), revise },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+    });
+
+    await expect(planner.prepareGuided({
+      action: "discuss",
+      binding: {
+        view: "evidence",
+        itemId: "evidence_wrong_session",
+        itemRevision: revisionFromProtocol(1),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "intake=intake_wrong_session",
+      dataset: dataset(),
+      eventId: "guided-wrong-session",
+    })).rejects.toThrow("another project session");
+    expect(revise).not.toHaveBeenCalled();
+  });
+
+  it("routes typed launch, Git and promotion forms only through the registered entry planner", async () => {
+    const intent = {
+      kind: "promotion" as const,
+      projectSessionId,
+      coordinationRunId: "run_promotion" as never,
+      gateId: "gate_promotion" as never,
+      expectedGateRevision: 3,
+      expectedGateStatus: "approved" as const,
+      releaseBinding: {
+        acceptedDeliveryReceiptRef: { path: "receipts/accepted.json" as never, digest },
+        artifactDigest: digest,
+        promotionAction: "publish-package",
+        target: "registry:staging",
+      },
+    };
+    const buildIntent = vi.fn(async () => ({ intent, expectedRevision: 3 }));
+    const typedEntryPlanner: ConsoleTypedEntryPlanner = {
+      capabilities: {
+        launch: { state: "available" },
+        git: { state: "unavailable", reason: "git-contract-not-negotiated" },
+        promotion: { state: "available" },
+      },
+      buildIntent,
+    };
+    const preview = vi.fn(async (request) => ({
+      previewId: "preview_guided_promotion",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent: request.intent,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "promotion" as const,
+      evidenceRefs: [],
+      gateIds: [intent.gateId],
+      confirmationMode: "explicit" as const,
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    }));
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: { preview, commit: vi.fn(), status: vi.fn(), reconcile: vi.fn() },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      typedEntryPlanner,
+    });
+    const binding = {
+      view: "project" as const,
+      itemId: projectId,
+      itemRevision: revisionFromProtocol(3),
+      projectionRevision: revisionFromProtocol(11),
+    };
+
+    const review = await planner.prepareGuided({
+      action: "promotion",
+      binding,
+      raw: "gate=gate_promotion\ntarget=registry:staging",
+      dataset: dataset(),
+      eventId: "guided-promotion",
+    });
+
+    expect(planner.capabilities).toMatchObject({
+      launch: { state: "available" },
+      git: { state: "unavailable", reason: "git-contract-not-negotiated" },
+      promotion: { state: "available" },
+    });
+    expect(buildIntent).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "promotion",
+      fields: { gate: "gate_promotion", target: "registry:staging" },
+      binding,
+    }));
+    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ intent }));
+    expect(review).toMatchObject({ source: "daemon-preview", consequenceClass: "promotion" });
+
+    await expect(planner.prepareGuided({
+      action: "git",
+      binding,
+      raw: "operation=stage",
+      dataset: dataset(),
+      eventId: "guided-git-unavailable",
+    })).rejects.toThrow("git-contract-not-negotiated");
+    expect(buildIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns guided Attention decisions into revision-bound gate workflows", async () => {
+    const gate = sessionBoundFixture(
+      OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateResolve].result,
+    ) as ScopedGate;
+    const readGate = vi.fn(async () => ({
+      status: "current" as const,
+      gate,
+      readTransactionId: "guided-gate-read",
+      stateDigest: digest,
+    }));
+    const resolve = vi.fn(async () => gate);
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        gates: { create: vi.fn(), resolve },
+        console: {
+          readOnly: false,
+          launchAvailable: false,
+          actions: { preview: vi.fn(), commit: vi.fn(), status: vi.fn(), reconcile: vi.fn() },
+          gates: { read: readGate },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+    });
+    const binding = {
+      view: "attention" as const,
+      itemId: "attention_gate",
+      itemRevision: revisionFromProtocol(1),
+      projectionRevision: revisionFromProtocol(11),
+    };
+
+    const review = await planner.prepareGuided({
+      action: "request-changes",
+      binding,
+      raw: `gate=${String(gate.gateId)}`,
+      dataset: dataset(),
+      eventId: "guided-gate-request-changes",
+    });
+
+    expect(readGate).toHaveBeenCalledWith(expect.objectContaining({ gateId: gate.gateId }));
+    expect(resolve).not.toHaveBeenCalled();
+    expect(review).toMatchObject({
+      kind: "scoped-gate-resolve",
+      summary: expect.stringContaining("Gate:"),
+      details: expect.arrayContaining([{ label: "status", value: '"rejected"' }]),
+    });
+    await planner.commit({
+      review: planner.arm(review, "guided-gate-arm"),
+      eventId: "guided-gate-confirm",
+    });
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      gateId: gate.gateId,
+      status: "rejected",
+      decisionEvidence: expect.objectContaining({ kind: "typed-console" }),
+    }));
+  });
+
+  it("requires the exact terminal-neutralised artifact confirmation before guided acceptance", async () => {
+    const intake: Intake = {
+      intakeId: "intake_terminal_neutralised" as never,
+      projectId,
+      projectSessionId,
+      coordinationRunId: "run_terminal_neutralised" as never,
+      revision: 2,
+      state: "awaiting-human",
+      dedupeKey: "terminal-neutralised",
+      summary: "Review neutralised source",
+      artifactRefs: [],
+      gateIds: [],
+    };
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: {
+          createDraft: vi.fn(),
+          read: vi.fn(async () => intake),
+          submit: vi.fn(),
+          revise: vi.fn(),
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+    });
+    const binding = {
+      view: "evidence" as const,
+      itemId: "evidence_terminal_neutralised",
+      itemRevision: revisionFromProtocol(9),
+      projectionRevision: revisionFromProtocol(11),
+    };
+    const renderedDigest = (`sha256:${"b".repeat(64)}`) as Sha256Digest;
+    const selected: FabricConsoleDataset = {
+      ...dataset(),
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding,
+        readTransactionId: "terminal-neutralised-read",
+        result: {
+          artifactRef: { path: "docs/neutralised.md" as never, digest },
+          evidenceRevision: 9,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair",
+          projectSessionId,
+          coordinationRunId: intake.coordinationRunId,
+          taskId: null,
+          createdAt: observedAt,
+          mediaType: "text/markdown",
+          content: "neutralised",
+          totalBytes: 12,
+          totalLines: 1,
+          renderedTotalBytes: 11,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: renderedDigest,
+          transformation: "terminal-neutralised",
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{ pageIndex: 0, lineFragment: "whole", pageContentDigest: renderedDigest, bytes: 11 }],
+          coverage: { complete: true, verified: true, pageCount: 1 },
+          reviewDisposition: "confirm-terminal-neutralised",
+        },
+      },
+    };
+    const input = {
+      action: "accept" as const,
+      binding,
+      raw: "intake=intake_terminal_neutralised",
+      dataset: selected,
+      eventId: "terminal-neutralised-accept",
+    };
+
+    await expect(planner.prepareGuided(input)).rejects.toThrow(
+      "exact terminal-neutralised confirmation",
+    );
+    await expect(planner.prepareGuided({
+      ...input,
+      artifactConfirmation: {
+        evidenceId: binding.itemId,
+        evidenceRevision: 9,
+        sourceDigest: digest,
+        renderedDigest,
+        transformation: "terminal-neutralised",
+        pageCount: 1,
+      },
+    })).resolves.toMatchObject({ kind: "intake-revise", stage: "review" });
   });
 
   it("rejects unsupported or changed payloads before dispatch and never treats arbitrary methods as workflow", async () => {

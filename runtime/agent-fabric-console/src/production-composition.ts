@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 
 import type {
-  ArtifactRef,
   CommandId,
   NegotiatedOperatorClient,
   OperatorActionIntent,
+  OperatorActionAvailability,
   OperatorAvailableAction,
   OperatorCapabilityCredential,
   OperatorClientId,
@@ -22,6 +22,7 @@ import type {
   ConsoleBootstrapPort,
   ConsoleBootstrapResult,
 } from "./application.js";
+import { parseArtifactReferenceDraft } from "./action-input.js";
 import { operatorIntentRevision } from "./action-revision.js";
 import type { ConsoleControllerState } from "./controller.js";
 import { revisionToProtocol, type ConsoleRow } from "./model.js";
@@ -33,6 +34,7 @@ import {
 } from "./protocol-adapter.js";
 import type { FabricRuntimeActivation } from "./runtime.js";
 import { createProductionConsoleWorkflowPlanner } from "./workflow.js";
+import type { ConsoleTypedEntryPlanner } from "./workflow.js";
 
 export type ProductionConsoleActionPlannerOptions = Readonly<{
   credential: OperatorCapabilityCredential;
@@ -51,19 +53,39 @@ const supportedActions = [
 type ProductionConsoleAction = typeof supportedActions[number];
 const supportedActionSet = new Set<OperatorAvailableAction>(supportedActions);
 
-function restrictActionAvailability<Availability extends {
-  state: "read-only" | "available";
-}>(availability: Availability): Availability {
+function restrictActionAvailability(
+  availability: OperatorActionAvailability,
+): OperatorActionAvailability {
   if (availability.state === "read-only") return availability;
-  const available = availability as Availability & {
-    state: "available";
-    actions: readonly OperatorAvailableAction[];
-    requiresPreview: true;
-  };
-  const actions = available.actions.filter((action) => supportedActionSet.has(action));
+  const actions = availability.actions.filter((action) => supportedActionSet.has(action));
   return (actions.length === 0
     ? { state: "read-only", reason: "feature-unavailable" }
-    : { ...available, actions }) as Availability;
+    : { ...availability, actions });
+}
+
+function restrictRowActionAvailability(
+  availability: OperatorActionAvailability,
+  view: string,
+  detailKind: string,
+): OperatorActionAvailability {
+  const restricted = restrictActionAvailability(availability);
+  if (restricted.state === "read-only") return restricted;
+  if (view === "attention") {
+    return { state: "read-only", reason: "state-ineligible" };
+  }
+  const actions = restricted.actions.filter((action) => {
+    if (view === "runs" && detailKind === "run") {
+      return action === "pause" || action === "resume" ||
+        action === "cancel" || action === "steer";
+    }
+    if (view === "project" && detailKind === "project") {
+      return action === "project-session-drain" || action === "project-session-stop";
+    }
+    return false;
+  });
+  return actions.length === 0
+    ? { state: "read-only", reason: "state-ineligible" }
+    : { ...restricted, actions };
 }
 
 function restrictProductionActions(
@@ -90,8 +112,10 @@ function restrictProductionActions(
                 ...row.fact,
                 value: {
                   ...row.fact.value,
-                  actionAvailability: restrictActionAvailability(
+                  actionAvailability: restrictRowActionAvailability(
                     row.fact.value.actionAvailability,
+                    request.view,
+                    row.fact.value.detailRef.kind,
                   ),
                 },
               },
@@ -230,7 +254,7 @@ function plannedIntent(
   }
   if (action === "project-session-stop") {
     const globalRevision = dataset.snapshotRevision;
-    const drainReceiptRef = parseArtifactRef(draft);
+    const drainReceiptRef = parseArtifactReferenceDraft(draft);
     if (globalRevision === null || drainReceiptRef === null) return null;
     return {
       kind: "project-session-stop",
@@ -257,33 +281,6 @@ function plannedIntent(
       : { kind: "control", action, target, instruction: draft, evidenceRefs: [] };
   }
   return null;
-}
-
-function parseArtifactRef(value: string): ArtifactRef | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return null;
-  }
-  if (!isRecord(parsed) || Object.keys(parsed).sort().join(",") !== "digest,path") {
-    return null;
-  }
-  const path = parsed.path;
-  const digestValue = parsed.digest;
-  if (
-    typeof path !== "string" ||
-    path.length < 1 ||
-    path.length > 4_096 ||
-    path.startsWith("/") ||
-    path.includes("\\") ||
-    path.split("/").some((segment) => segment === "" || segment === "." || segment === "..") ||
-    typeof digestValue !== "string" ||
-    !/^sha256:[a-f0-9]{64}$/u.test(digestValue)
-  ) {
-    return null;
-  }
-  return { path: path as ArtifactRef["path"], digest: digestValue as ArtifactRef["digest"] };
 }
 
 function requiredIntentRevision(intent: OperatorActionIntent): number {
@@ -315,6 +312,7 @@ type PublicFabricModule = Readonly<{
 
 export type ProductionConsoleBootstrapOptions = Readonly<{
   loadFabric?: () => Promise<unknown>;
+  typedEntryPlanner?: ConsoleTypedEntryPlanner;
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -459,6 +457,9 @@ export function createProductionConsoleBootstrap(
             operatorId: session.operatorId,
             clientId: session.clientId,
             projectId: session.projectId,
+            ...(options.typedEntryPlanner === undefined
+              ? {}
+              : { typedEntryPlanner: options.typedEntryPlanner }),
           }),
           detach: (input) => session.detach(input),
           close: () => session.close(),

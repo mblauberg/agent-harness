@@ -51,6 +51,7 @@ import {
   type ConsoleViewPage,
   type ConsoleViewPages,
   type FabricView,
+  type ConsoleWorkflowCapabilities,
   type Revision,
 } from "./model.js";
 
@@ -394,6 +395,8 @@ export type FabricConsoleDataset = Readonly<{
   pages: ConsoleViewPages;
   loadedAtMs: number;
   canMutate: boolean;
+  workflowCapabilities?: ConsoleWorkflowCapabilities;
+  productionActionPlanning?: true;
   inspection?: ConsoleReadInspection;
 }>;
 

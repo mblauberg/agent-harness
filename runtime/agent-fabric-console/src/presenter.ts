@@ -4,6 +4,7 @@ import type {
   ProjectionFact,
 } from "@local/agent-fabric-protocol";
 
+import { parseArtifactReferenceDraft } from "./action-input.js";
 import type {
   ActionReview,
   ConsoleControllerState,
@@ -15,11 +16,14 @@ import {
   type ConsoleFreshness,
   type ConsoleRow,
   type ConsoleUrgency,
+  type ConsoleWorkflowCapability,
+  type GuidedWorkflowAction,
   type FabricView,
   type Revision,
 } from "./model.js";
 import type {
   ConsoleArtifactContentResult,
+  ConsoleInspectionBinding,
   FabricConsoleDataset,
 } from "./protocol-adapter.js";
 import type { ConsoleWorkflowReview } from "./workflow.js";
@@ -41,7 +45,7 @@ export type FabricConsoleUiState = Readonly<{
   compactPane: "master" | "detail";
   draft: string;
   mouseCapture: boolean;
-  inputMode: "browse" | "editor" | "palette";
+  inputMode: "browse" | "editor" | "palette" | "guided";
   scrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
   detailScrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
   rejectedInputCount: number;
@@ -50,6 +54,13 @@ export type FabricConsoleUiState = Readonly<{
   reviewScrollOffset: number;
   workflowReview: ConsoleWorkflowReview | null;
   artifactConfirmation: ArtifactReviewConfirmation | null;
+  guidedWorkflow: ConsoleGuidedWorkflowDraft | null;
+}>;
+
+export type ConsoleGuidedWorkflowDraft = Readonly<{
+  action: GuidedWorkflowAction;
+  binding: ConsoleInspectionBinding;
+  prompt: string;
 }>;
 
 export type ArtifactReviewConfirmation = Readonly<{
@@ -86,6 +97,7 @@ export function createFabricUiState(
         : Math.max(0, overrides.reviewScrollOffset),
     workflowReview: overrides.workflowReview ?? null,
     artifactConfirmation: overrides.artifactConfirmation ?? null,
+    guidedWorkflow: overrides.guidedWorkflow ?? null,
   };
 }
 
@@ -189,6 +201,7 @@ export type PresentedAction = Readonly<{
   label: string;
   enabled: boolean;
   availableAction: OperatorAvailableAction | null;
+  reason?: string;
 }>;
 
 export type PresentedReviewGate = Readonly<{
@@ -537,12 +550,200 @@ function rowActions(
       )
     )
   );
-  return row.actionAvailability.actions.map((action) => ({
-    id: `action:${action}`,
-    label: actionLabel(action),
-    enabled: canMutate && row.freshness.state === "live" && artifactReviewEligible,
-    availableAction: action,
-  }));
+  return row.actionAvailability.actions.map((action) => {
+    const reason = dataset.productionActionPlanning === true
+      ? productionActionUnavailableReason(action, row, dataset, ui)
+      : null;
+    const enabled = canMutate && row.freshness.state === "live" &&
+      artifactReviewEligible && reason === null;
+    return {
+      id: `action:${action}`,
+      label: actionLabel(action),
+      enabled,
+      availableAction: action,
+      ...(!enabled && reason !== null ? { reason } : {}),
+    };
+  });
+}
+
+function productionActionUnavailableReason(
+  action: OperatorAvailableAction,
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
+): string | null {
+  if (
+    action === "pause" || action === "resume" || action === "cancel" ||
+    action === "steer"
+  ) {
+    if (row.detailRef?.kind !== "run" && row.detailRef?.kind !== "session") {
+      return "selected-row-has-no-control-target";
+    }
+    if (row.summary?.kind === "run") {
+      const paused = row.summary.phase.toLowerCase().includes("pause");
+      if (action === "pause" && paused) return "run-is-already-paused";
+      if (action === "resume" && !paused) return "run-is-not-paused";
+    }
+    if (action === "cancel" && ui.draft.trim().length === 0) {
+      return "enter-a-reason";
+    }
+    if (action === "steer" && ui.draft.trim().length === 0) {
+      return "enter-an-instruction";
+    }
+    return null;
+  }
+  if (action === "project-session-drain") {
+    const session = dataset.snapshot?.session;
+    if (session?.freshness !== "live" || session.value === null) {
+      return "live-session-required";
+    }
+    return session.value.state === "active" ||
+      session.value.state === "visibility_degraded" ||
+      session.value.state === "recovery_required" ||
+      session.value.state === "quarantined"
+      ? null
+      : "session-is-not-drainable";
+  }
+  if (action === "project-session-stop") {
+    const session = dataset.snapshot?.session;
+    if (session?.freshness !== "live" || session.value === null) {
+      return "live-session-required";
+    }
+    if (session.value.state !== "quiescing") return "drain-session-first";
+    return parseArtifactReferenceDraft(ui.draft) !== null
+      ? null
+      : "enter-drain-receipt-ref";
+  }
+  return "typed-guided-entry-required";
+}
+
+const GUIDED_ACTION_LABELS: Readonly<Record<GuidedWorkflowAction, string>> = {
+  discuss: "Discuss",
+  accept: "Accept",
+  "request-changes": "Request changes",
+  defer: "Defer",
+  implement: "Implement...",
+  launch: "Launch...",
+  git: "Git...",
+  promotion: "Promote...",
+};
+
+function capabilityReason(
+  capability: ConsoleWorkflowCapability | undefined,
+): string | null {
+  if (capability === undefined) return "typed-workflow-unavailable";
+  return capability.state === "available" ? null : capability.reason;
+}
+
+function guidedAction(
+  action: GuidedWorkflowAction,
+  reason: string | null,
+): PresentedAction {
+  return {
+    id: `workflow:${action}`,
+    label: GUIDED_ACTION_LABELS[action],
+    enabled: reason === null,
+    availableAction: null,
+    ...(reason === null ? {} : { reason }),
+  };
+}
+
+function evidenceWorkflowActions(
+  row: ConsoleRow,
+  canMutate: boolean,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
+): readonly PresentedAction[] {
+  if (row.view !== "evidence") return [];
+  const capabilities = dataset.workflowCapabilities;
+  if (capabilities === undefined) return [];
+  const intakeReason = canMutate
+    ? capabilityReason(capabilities.intake)
+    : "operator-mutation-unavailable";
+  const inspection = dataset.inspection;
+  const currentArtifact = inspection?.kind === "artifact" &&
+    inspection.state === "current" &&
+    inspection.binding.itemId === row.stableId &&
+    inspection.binding.itemRevision === row.revision &&
+    inspection.binding.projectionRevision === dataset.snapshotRevision
+      ? inspection
+      : null;
+  const artifactReason = currentArtifact === null
+    ? "artifact-content-unverified"
+    : currentArtifact.result.reviewDisposition === "eligible" ||
+        matchesArtifactConfirmation(ui.artifactConfirmation, row.stableId, currentArtifact.result)
+      ? null
+      : currentArtifact.result.reviewDisposition === "confirm-terminal-neutralised"
+        ? "confirm-terminal-neutralised"
+        : "artifact-content-redacted";
+  const decisionReason = intakeReason ?? artifactReason;
+  const launchReason = decisionReason ?? capabilityReason(capabilities.launch);
+  return [
+    guidedAction("discuss", intakeReason),
+    guidedAction("accept", decisionReason),
+    guidedAction("request-changes", intakeReason),
+    guidedAction("defer", intakeReason),
+    guidedAction("implement", launchReason),
+  ];
+}
+
+function projectWorkflowActions(
+  row: ConsoleRow,
+  canMutate: boolean,
+  dataset: FabricConsoleDataset,
+): readonly PresentedAction[] {
+  if (row.view !== "project") return [];
+  const capabilities = dataset.workflowCapabilities;
+  const mutationReason = canMutate ? null : "operator-mutation-unavailable";
+  return [
+    guidedAction(
+      "launch",
+      mutationReason ?? capabilityReason(capabilities?.launch),
+    ),
+    guidedAction(
+      "git",
+      mutationReason ?? capabilityReason(capabilities?.git),
+    ),
+    guidedAction(
+      "promotion",
+      mutationReason ?? capabilityReason(capabilities?.promotion),
+    ),
+  ];
+}
+
+function attentionWorkflowActions(
+  row: ConsoleRow,
+  canMutate: boolean,
+  dataset: FabricConsoleDataset,
+): readonly PresentedAction[] {
+  if (
+    row.view !== "attention" || row.summary?.kind !== "attention" ||
+    (row.summary.label !== "Decision" && row.summary.label !== "Approval")
+  ) return [];
+  const capabilities = dataset.workflowCapabilities;
+  if (capabilities === undefined) return [];
+  const mutationReason = canMutate ? null : "operator-mutation-unavailable";
+  const intakeReason = mutationReason ?? capabilityReason(capabilities.intake);
+  const gateReason = mutationReason ?? capabilityReason(capabilities.gate);
+  return [
+    guidedAction("discuss", intakeReason),
+    guidedAction("accept", gateReason),
+    guidedAction("request-changes", gateReason),
+    guidedAction("defer", gateReason),
+  ];
+}
+
+function guidedRowActions(
+  row: ConsoleRow,
+  canMutate: boolean,
+  dataset: FabricConsoleDataset,
+  ui: FabricConsoleUiState,
+): readonly PresentedAction[] {
+  return [
+    ...evidenceWorkflowActions(row, canMutate, dataset, ui),
+    ...projectWorkflowActions(row, canMutate, dataset),
+    ...attentionWorkflowActions(row, canMutate, dataset),
+  ];
 }
 
 function rowAndArtifactActions(
@@ -552,7 +753,10 @@ function rowAndArtifactActions(
   ui: FabricConsoleUiState,
 ): readonly PresentedAction[] {
   const actions = rowActions(row, canMutate, dataset, ui);
-  if (row?.view !== "evidence") return actions;
+  const workflowActions = row === null
+    ? []
+    : guidedRowActions(row, canMutate, dataset, ui);
+  if (row?.view !== "evidence") return [...actions, ...workflowActions];
   const inspection = dataset.inspection;
   if (
     inspection?.kind !== "artifact" ||
@@ -562,13 +766,13 @@ function rowAndArtifactActions(
     inspection.binding.projectionRevision !== dataset.snapshotRevision ||
     inspection.result.reviewDisposition !== "confirm-terminal-neutralised" ||
     matchesArtifactConfirmation(ui.artifactConfirmation, row.stableId, inspection.result)
-  ) return actions;
+  ) return [...workflowActions, ...actions];
   return [{
     id: "artifact:confirm-terminal-neutralised",
     label: `Confirm ${inspection.result.transformation} + source digest`,
     enabled: true,
     availableAction: null,
-  }, ...actions];
+  }, ...workflowActions, ...actions];
 }
 
 function scopeLabel(gate: ReviewGate): string {
@@ -827,6 +1031,23 @@ function workflowReviewActions(
   ];
 }
 
+function guidedWorkflowActions(): readonly PresentedAction[] {
+  return [
+    {
+      id: "guided:submit",
+      label: "Review typed workflow",
+      enabled: true,
+      availableAction: null,
+    },
+    {
+      id: "guided:cancel",
+      label: "Cancel form",
+      enabled: true,
+      availableAction: null,
+    },
+  ];
+}
+
 export function presentFabricConsole(
   dataset: FabricConsoleDataset,
   controller: ConsoleControllerState,
@@ -841,6 +1062,35 @@ export function presentFabricConsole(
       : activeRows.find((candidate) => candidate.stableId === selected.stableId) ?? null;
   const review = controller.review;
   const workflowReview = review === null ? ui.workflowReview : null;
+  const actions = review === null && workflowReview === null && ui.guidedWorkflow !== null
+    ? guidedWorkflowActions()
+    : review === null && workflowReview === null
+      ? rowAndArtifactActions(
+          selectedRow,
+          dataset.canMutate && dataset.connection.state === "live",
+          dataset,
+          ui,
+        )
+      : review === null
+        ? workflowReviewActions(workflowReview as ConsoleWorkflowReview)
+        : reviewActions(review);
+  const baseDetail = selectedRow === null ? null : detailLines(selectedRow);
+  const unavailableActions = actions.filter(
+    (action): action is PresentedAction & { reason: string } =>
+      !action.enabled && action.reason !== undefined,
+  );
+  const detail = baseDetail === null || unavailableActions.length === 0
+    ? baseDetail
+    : {
+        ...baseDetail,
+        lines: [
+          ...baseDetail.lines,
+          ...unavailableActions.map((action) => ({
+            label: `${action.label} unavailable`,
+            value: action.reason,
+          })),
+        ],
+      };
   return {
     mode: responsiveModeFor(viewport),
     connection:
@@ -873,18 +1123,8 @@ export function presentFabricConsole(
               dataset.pages.attention.rows[0].stableId,
             dataset.canMutate && dataset.connection.state === "live",
           ),
-    detail: selectedRow === null ? null : detailLines(selectedRow),
-    actions:
-      review === null && workflowReview === null
-          ? rowAndArtifactActions(
-            selectedRow,
-            dataset.canMutate && dataset.connection.state === "live",
-            dataset,
-            ui,
-          )
-        : review === null
-          ? workflowReviewActions(workflowReview as ConsoleWorkflowReview)
-          : reviewActions(review),
+    detail,
+    actions,
     review:
       review !== null
         ? presentReview(review)

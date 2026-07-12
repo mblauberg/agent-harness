@@ -14,6 +14,7 @@ import {
   createFabricUiState,
   matchesArtifactConfirmation,
   type ArtifactReviewConfirmation,
+  type ConsoleGuidedWorkflowDraft,
   type FabricConsoleUiState,
   type FabricViewport,
 } from "./presenter.js";
@@ -204,7 +205,36 @@ export class FabricConsoleRuntime {
   setInputMode(mode: FabricConsoleUiState["inputMode"]): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
     this.#ui = { ...this.#ui, inputMode: mode, notice: null };
-    this.#setEditorActive?.(mode === "editor" || mode === "palette");
+    this.#setEditorActive?.(
+      mode === "editor" || mode === "palette" || mode === "guided",
+    );
+    return this.repaint();
+  }
+
+  beginGuidedWorkflow(draft: ConsoleGuidedWorkflowDraft): FabricConsoleFrame {
+    if (this.#closed) return this.#frame;
+    this.#ui = {
+      ...this.#ui,
+      guidedWorkflow: draft,
+      inputMode: "guided",
+      draft: "",
+      focusId: null,
+      notice: draft.prompt,
+    };
+    this.#setEditorActive?.(true);
+    return this.repaint();
+  }
+
+  cancelGuidedWorkflow(): FabricConsoleFrame {
+    if (this.#closed) return this.#frame;
+    this.#ui = {
+      ...this.#ui,
+      guidedWorkflow: null,
+      inputMode: "browse",
+      draft: "",
+      notice: null,
+    };
+    this.#setEditorActive?.(false);
     return this.repaint();
   }
 
@@ -217,6 +247,7 @@ export class FabricConsoleRuntime {
     this.#ui = {
       ...this.#ui,
       workflowReview: review,
+      guidedWorkflow: null,
       inputMode: echoInput ? "editor" : "browse",
       draft: echoInput ? "" : this.#ui.draft,
       focusId:
@@ -296,6 +327,10 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "escape") {
+      if (this.#ui.inputMode === "guided") {
+        this.cancelGuidedWorkflow();
+        return;
+      }
       this.#ui = { ...this.#ui, inputMode: "browse", notice: null };
       this.#setEditorActive?.(false);
       this.repaint();
@@ -311,6 +346,26 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "enter") {
+      if (this.#ui.inputMode === "guided") {
+        const guided = this.#ui.guidedWorkflow;
+        if (guided === null) {
+          this.cancelGuidedWorkflow();
+          return;
+        }
+        try {
+          await this.#activate({
+            regionId: "guided:submit",
+            binding: guided.binding,
+            provenance: "keyboard",
+            eventId: this.#eventId(),
+          });
+        } catch (error) {
+          const failure = consoleFailureFromUnknown(error);
+          this.#ui = { ...this.#ui, notice: `Workflow failed: ${failure.code}` };
+        }
+        this.repaint();
+        return;
+      }
       if (this.#ui.inputMode === "palette") {
         this.#ui = {
           ...this.#ui,
@@ -440,7 +495,7 @@ export class FabricConsoleRuntime {
       if (event.text === "?") {
         this.#ui = {
           ...this.#ui,
-          notice: "Help: Alt-1..8 views; [ ] cycle; e draft; : workflow; PgUp/PgDn; q detach",
+          notice: "Help: Alt-1..8 views; [ ] cycle; e draft; : advanced workflow; PgUp/PgDn; Alt-M mouse; q detach",
         };
         this.repaint();
       }

@@ -32,7 +32,7 @@ import type {
   ConsoleProtocolBinding,
   ConsoleProtocolPort,
 } from "../src/protocol-adapter.js";
-import { FABRIC_VIEWS } from "../src/model.js";
+import { FABRIC_VIEWS, revisionFromProtocol } from "../src/model.js";
 import type { ConsoleWorkflowReview } from "../src/workflow.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
@@ -476,7 +476,19 @@ describe("typed Console application bootstrap boundary", () => {
           binding: currentBinding(port, false, null),
           credential,
           projectId,
-          workflowPlanner: { prepare, arm, commit },
+          workflowPlanner: {
+            capabilities: {
+              intake: { state: "available" },
+              gate: { state: "unavailable", reason: "fixture" },
+              launch: { state: "unavailable", reason: "fixture" },
+              git: { state: "unavailable", reason: "fixture" },
+              promotion: { state: "unavailable", reason: "fixture" },
+            },
+            prepare,
+            prepareGuided: vi.fn(async () => review),
+            arm,
+            commit,
+          },
           detach: async () => {},
           close: async () => {},
         }),
@@ -511,6 +523,138 @@ describe("typed Console application bootstrap boundary", () => {
     expect(commit).toHaveBeenCalledOnce();
     expect(application.frame.rows.join("\n")).toContain("REVIEW COMMITTED");
     expect(application.frame.rows.join("\n")).toContain("intake_application");
+    await application.close("operator");
+  });
+
+  it("opens a guided evidence workflow, preserves it across resize, and submits structured input", async () => {
+    const port = protocolPort();
+    const review: ConsoleWorkflowReview = {
+      workflowId: "workflow_guided_application",
+      kind: "intake-revise",
+      source: "local-typed-preview",
+      stage: "review",
+      previewDigest: digest,
+      expectedRevision: revisionFromProtocol(4),
+      consequenceClass: "consequential",
+      confirmationMode: "explicit",
+      summary: "Discuss reviewed evidence",
+      details: [],
+      evidence: [],
+      openedByEventId: "guided-submit",
+      armedByEventId: null,
+      result: null,
+      failure: null,
+    };
+    const prepareGuided = vi.fn(async () => review);
+    const workflowPlanner = {
+      capabilities: {
+        intake: { state: "available" as const },
+        gate: { state: "available" as const },
+        launch: { state: "unavailable" as const, reason: "typed-planner-unregistered" },
+        git: { state: "unavailable" as const, reason: "typed-planner-unregistered" },
+        promotion: { state: "unavailable" as const, reason: "typed-planner-unregistered" },
+      },
+      prepare: vi.fn(async () => review),
+      prepareGuided,
+      arm: vi.fn((current: ConsoleWorkflowReview) => current),
+      commit: vi.fn(async (input: { review: ConsoleWorkflowReview }) => ({
+        review: input.review,
+        reconnectRequired: false,
+      })),
+    };
+    let event = 0;
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: async () => ({
+          status: "connected",
+          binding: currentBinding(port, false, null),
+          credential,
+          projectId,
+          workflowPlanner,
+          detach: async () => {},
+          close: async () => {},
+        }),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => `guided-${String(++event)}`,
+      confirmationId: () => "guided-confirmation",
+      ...runtimeDependencies,
+    });
+    const binding = {
+      view: "evidence" as const,
+      itemId: "evidence-guided",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(1),
+    };
+    application.controller.updateDataset({
+      ...application.dataset,
+      pages: {
+        ...application.dataset.pages,
+        evidence: {
+          ...application.dataset.pages.evidence,
+          rows: [{
+            view: "evidence",
+            stableId: binding.itemId,
+            revision: binding.itemRevision,
+            urgency: "normal",
+            freshness: {
+              state: "live",
+              source: "fabric",
+              revision: binding.itemRevision,
+              observedAt: timestamp,
+              ageMs: 0,
+            },
+            summary: {
+              kind: "evidence",
+              evidenceKind: "artifact",
+              status: "informational",
+              provenance: "agent:chair",
+            },
+            detailRef: {
+              kind: "evidence",
+              evidenceId: binding.itemId,
+              expectedRevision: 7,
+            },
+            actionAvailability: { state: "read-only", reason: "state-ineligible" },
+          }],
+          snapshotRevision: binding.projectionRevision,
+        },
+      },
+    });
+    application.controller.activateView("evidence");
+    application.controller.select("evidence", binding.itemId);
+    application.repaint();
+
+    await application.handleActivation({
+      regionId: "workflow:discuss",
+      binding,
+      provenance: "keyboard",
+      eventId: "guided-open",
+    });
+    expect(application.ui).toMatchObject({
+      inputMode: "guided",
+      guidedWorkflow: { action: "discuss", binding },
+    });
+    expect(prepareGuided).not.toHaveBeenCalled();
+
+    application.resize({ columns: 54, rows: 16 });
+    expect(application.ui).toMatchObject({
+      inputMode: "guided",
+      guidedWorkflow: { action: "discuss", binding },
+    });
+    await application.handleInput({ kind: "paste", text: "intake=intake-guided" });
+    await application.handleInput({ kind: "key", key: "enter" });
+
+    expect(prepareGuided).toHaveBeenCalledWith(expect.objectContaining({
+      action: "discuss",
+      binding,
+      raw: "intake=intake-guided",
+    }));
+    expect(application.ui.workflowReview).toBe(review);
+    expect(application.ui.guidedWorkflow).toBeNull();
     await application.close("operator");
   });
 

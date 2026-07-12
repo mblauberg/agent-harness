@@ -5,6 +5,7 @@ import {
   OPERATION_CODECS,
   type CommandId,
   type IntakeDraftCreateRequest,
+  type Intake,
   type IntakeRevisionRequest,
   type IntakeSubmission,
   type NegotiatedOperatorClient,
@@ -25,8 +26,16 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import { operatorIntentRevision } from "./action-revision.js";
-import { revisionFromProtocol, type Revision } from "./model.js";
-import type { FabricConsoleDataset } from "./protocol-adapter.js";
+import {
+  revisionFromProtocol,
+  type ConsoleWorkflowCapabilities,
+  type GuidedWorkflowAction,
+  type Revision,
+} from "./model.js";
+import type {
+  ConsoleInspectionBinding,
+  FabricConsoleDataset,
+} from "./protocol-adapter.js";
 
 export const CONSOLE_WORKFLOW_KINDS = Object.freeze([
   "project-session-create",
@@ -66,6 +75,7 @@ export type ConsoleWorkflowReview = Readonly<{
 }>;
 
 export type ConsoleWorkflowPlanner = Readonly<{
+  capabilities: ConsoleWorkflowCapabilities;
   prepare(input: Readonly<{
     raw: string;
     dataset: FabricConsoleDataset;
@@ -80,6 +90,23 @@ export type ConsoleWorkflowPlanner = Readonly<{
     review: ConsoleWorkflowReview;
     reconnectRequired: boolean;
   }>>;
+  prepareGuided(input: Readonly<{
+    action: GuidedWorkflowAction;
+    binding: ConsoleInspectionBinding;
+    raw: string;
+    dataset: FabricConsoleDataset;
+    eventId: string;
+    artifactConfirmation?: GuidedArtifactConfirmation;
+  }>): Promise<ConsoleWorkflowReview>;
+}>;
+
+export type GuidedArtifactConfirmation = Readonly<{
+  evidenceId: string;
+  evidenceRevision: number;
+  sourceDigest: string;
+  renderedDigest: string;
+  transformation: "terminal-neutralised";
+  pageCount: number;
 }>;
 
 export type ProductionConsoleWorkflowPlannerOptions = Readonly<{
@@ -88,6 +115,22 @@ export type ProductionConsoleWorkflowPlannerOptions = Readonly<{
   operatorId: OperatorId;
   clientId: OperatorClientId;
   projectId: ProjectId;
+  typedEntryPlanner?: ConsoleTypedEntryPlanner;
+}>;
+
+export type ConsoleTypedEntryKind = "launch" | "git" | "promotion";
+
+export type ConsoleTypedEntryPlanner = Readonly<{
+  capabilities: Pick<ConsoleWorkflowCapabilities, ConsoleTypedEntryKind>;
+  buildIntent(input: Readonly<{
+    kind: ConsoleTypedEntryKind;
+    fields: Readonly<Record<string, string>>;
+    binding: ConsoleInspectionBinding;
+    dataset: FabricConsoleDataset;
+  }>): Promise<Readonly<{
+    intent: OperatorActionIntent;
+    expectedRevision: number;
+  }>>;
 }>;
 
 type WorkflowEnvelope = Readonly<{
@@ -102,6 +145,7 @@ type PreparedWorkflow = Readonly<{
 }>;
 
 const MAX_WORKFLOW_BYTES = 65_536;
+const MAX_GUIDED_INPUT_BYTES = 16_384;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -154,6 +198,97 @@ function workflowEnvelope(raw: string): WorkflowEnvelope {
     }
   }
   return { kind: value.kind as ConsoleWorkflowKind, request: value.request };
+}
+
+function guidedFields(raw: string): Readonly<Record<string, string>> {
+  if (Buffer.byteLength(raw) > MAX_GUIDED_INPUT_BYTES) {
+    throw new TypeError("guided workflow input exceeds 16384 bytes");
+  }
+  const fields: Record<string, string> = {};
+  for (const [index, sourceLine] of raw.split(/\r?\n/u).entries()) {
+    const line = sourceLine.trim();
+    if (line.length === 0) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) {
+      throw new TypeError(`guided workflow line ${String(index + 1)} must be key=value`);
+    }
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!/^[a-z][a-z0-9-]{0,63}$/u.test(key)) {
+      throw new TypeError(`guided workflow field ${key} is invalid`);
+    }
+    if (key in fields) throw new TypeError(`guided workflow field ${key} is duplicated`);
+    if (value.length === 0) throw new TypeError(`guided workflow field ${key} is empty`);
+    if (/credential|capability|token|secret/iu.test(key)) {
+      throw new TypeError(`guided workflow field ${key} is forbidden`);
+    }
+    fields[key] = value;
+  }
+  return fields;
+}
+
+function requiredGuidedField(
+  fields: Readonly<Record<string, string>>,
+  key: string,
+): string {
+  const value = fields[key];
+  if (value === undefined) throw new TypeError(`guided workflow requires ${key}`);
+  return value;
+}
+
+function exactArtifactInspection(
+  dataset: FabricConsoleDataset,
+  binding: ConsoleInspectionBinding,
+  confirmation?: GuidedArtifactConfirmation,
+) {
+  const inspection = dataset.inspection;
+  if (
+    inspection?.kind !== "artifact" ||
+    inspection.state !== "current" ||
+    inspection.binding.view !== binding.view ||
+    inspection.binding.itemId !== binding.itemId ||
+    inspection.binding.itemRevision !== binding.itemRevision ||
+    inspection.binding.projectionRevision !== binding.projectionRevision ||
+    inspection.result.coverage.complete !== true ||
+    inspection.result.coverage.verified !== true ||
+    inspection.result.reviewDisposition === "blocked-redacted"
+  ) {
+    throw new Error("guided evidence decision requires the exact verified artifact view");
+  }
+  if (inspection.result.reviewDisposition === "confirm-terminal-neutralised") {
+    if (
+      confirmation === undefined ||
+      confirmation.evidenceId !== binding.itemId ||
+      confirmation.evidenceRevision !== inspection.result.evidenceRevision ||
+      confirmation.sourceDigest !== inspection.result.artifactRef.digest ||
+      confirmation.renderedDigest !== inspection.result.renderedArtifactDigest ||
+      confirmation.transformation !== inspection.result.transformation ||
+      confirmation.pageCount !== inspection.result.coverage.pageCount
+    ) {
+      throw new Error("guided acceptance requires the exact terminal-neutralised confirmation");
+    }
+  }
+  return inspection;
+}
+
+function appendArtifact(
+  artifacts: readonly Intake["artifactRefs"][number][],
+  artifact: Intake["artifactRefs"][number],
+): readonly Intake["artifactRefs"][number][] {
+  return artifacts.some(
+    (candidate) => candidate.path === artifact.path && candidate.digest === artifact.digest,
+  )
+    ? artifacts
+    : [...artifacts, artifact];
+}
+
+function guidedIntakeState(
+  action: Extract<GuidedWorkflowAction, "discuss" | "accept" | "request-changes" | "defer">,
+): "discussing" | "accepted" | "awaiting-chair" | "deferred" {
+  if (action === "discuss") return "discussing";
+  if (action === "accept") return "accepted";
+  if (action === "request-changes") return "awaiting-chair";
+  return "deferred";
 }
 
 function liveProjectRevision(dataset: FabricConsoleDataset, projectId: ProjectId): number {
@@ -380,6 +515,27 @@ export function createProductionConsoleWorkflowPlanner(
   options: ProductionConsoleWorkflowPlannerOptions,
 ): ConsoleWorkflowPlanner {
   const prepared = new Map<string, PreparedWorkflow>();
+  const typedRevisionOverrides = new Map<string, number>();
+  const capabilities: ConsoleWorkflowCapabilities = {
+    intake: options.client.intakes === undefined
+      ? { state: "unavailable", reason: "intake-protocol-unavailable" }
+      : { state: "available" },
+    gate: options.client.gates === undefined || options.client.console?.gates === undefined
+      ? { state: "unavailable", reason: "gate-protocol-unavailable" }
+      : { state: "available" },
+    launch: options.typedEntryPlanner?.capabilities.launch ?? {
+      state: "unavailable",
+      reason: "typed-planner-unregistered",
+    },
+    git: options.typedEntryPlanner?.capabilities.git ?? {
+      state: "unavailable",
+      reason: "typed-planner-unregistered",
+    },
+    promotion: options.typedEntryPlanner?.capabilities.promotion ?? {
+      state: "unavailable",
+      reason: "typed-planner-unregistered",
+    },
+  };
 
   const prepare = async (input: Readonly<{
     raw: string;
@@ -391,7 +547,13 @@ export function createProductionConsoleWorkflowPlanner(
     if (envelope.kind === "project-session-create" && envelope.request.projectId !== options.projectId) {
       throw new Error("Console workflow request targets another project");
     }
-    const revision = expectedRevision(envelope, input.dataset, options.projectId);
+    const overrideKey = envelope.kind === "operator-action"
+      ? `${input.eventId}\0${sha256(envelope.request.intent)}`
+      : null;
+    const revision = overrideKey === null
+      ? expectedRevision(envelope, input.dataset, options.projectId)
+      : typedRevisionOverrides.get(overrideKey) ??
+        expectedRevision(envelope, input.dataset, options.projectId);
     validateDirectRequest(envelope, options, revision, input.eventId);
     let review: ConsoleWorkflowReview;
     let daemonPreview: OperatorActionPreview | undefined;
@@ -489,6 +651,160 @@ export function createProductionConsoleWorkflowPlanner(
     const armed = { ...review, stage: "confirm" as const, armedByEventId: eventId };
     prepared.set(review.workflowId, { ...stored, review: armed });
     return armed;
+  };
+
+  const prepareGuided = async (input: Readonly<{
+    action: GuidedWorkflowAction;
+    binding: ConsoleInspectionBinding;
+    raw: string;
+    dataset: FabricConsoleDataset;
+    eventId: string;
+    artifactConfirmation?: GuidedArtifactConfirmation;
+  }>): Promise<ConsoleWorkflowReview> => {
+    if (input.dataset.snapshotRevision !== input.binding.projectionRevision) {
+      throw new Error("guided workflow projection revision is stale");
+    }
+    if (
+      input.action === "implement" || input.action === "launch" ||
+      input.action === "git" || input.action === "promotion"
+    ) {
+      const kind: ConsoleTypedEntryKind = input.action === "implement"
+        ? "launch"
+        : input.action;
+      const capability = capabilities[kind];
+      if (capability.state === "unavailable") throw new Error(capability.reason);
+      const typedEntryPlanner = options.typedEntryPlanner;
+      if (typedEntryPlanner === undefined) {
+        throw new Error("typed entry planner is unavailable");
+      }
+      if (
+        (kind === "launch" || kind === "git") &&
+        input.binding.view !== "project" && input.action !== "implement"
+      ) {
+        throw new Error(`${kind} must start from the selected Project row`);
+      }
+      if (input.action === "implement") {
+        exactArtifactInspection(
+          input.dataset,
+          input.binding,
+          input.artifactConfirmation,
+        );
+      }
+      const built = await typedEntryPlanner.buildIntent({
+        kind,
+        fields: guidedFields(input.raw),
+        binding: input.binding,
+        dataset: input.dataset,
+      });
+      if (!Number.isSafeInteger(built.expectedRevision) || built.expectedRevision < 1) {
+        throw new Error(`typed ${kind} planner returned an invalid expected revision`);
+      }
+      const intent = built.intent;
+      const expectedKind = kind === "launch" ? "project-session-launch" : kind;
+      if (intent.kind !== expectedKind) {
+        throw new Error(`typed ${kind} planner returned ${intent.kind}`);
+      }
+      const overrideKey = `${input.eventId}\0${sha256(intent)}`;
+      typedRevisionOverrides.set(overrideKey, built.expectedRevision);
+      try {
+        return await prepare({
+          raw: JSON.stringify({ kind: "operator-action", request: { intent } }),
+          dataset: input.dataset,
+          eventId: input.eventId,
+        });
+      } finally {
+        typedRevisionOverrides.delete(overrideKey);
+      }
+    }
+    if (
+      input.action !== "discuss" && input.action !== "accept" &&
+      input.action !== "request-changes" && input.action !== "defer"
+    ) {
+      throw new Error(`${input.action} typed planner is unavailable`);
+    }
+    if (input.binding.view === "attention" && input.action !== "discuss") {
+      const capability = capabilities.gate;
+      if (capability.state === "unavailable") throw new Error(capability.reason);
+      const fields = guidedFields(input.raw);
+      const gateId = requiredGuidedField(fields, "gate");
+      const status = input.action === "accept"
+        ? "approved"
+        : input.action === "request-changes"
+          ? "rejected"
+          : "deferred";
+      return await prepare({
+        raw: JSON.stringify({
+          kind: "scoped-gate-resolve",
+          request: { gateId, status },
+        }),
+        dataset: input.dataset,
+        eventId: input.eventId,
+      });
+    }
+    const intakes = options.client.intakes;
+    if (intakes === undefined) throw new Error("intake protocol is unavailable");
+    const fields = guidedFields(input.raw);
+    const intakeId = requiredGuidedField(fields, "intake");
+    const intake = await intakes.read({
+      credential: options.credential,
+      intakeId: intakeId as never,
+    });
+    if (intake.projectId !== options.projectId) {
+      throw new Error("guided intake belongs to another project");
+    }
+    if (intake.state === "draft") {
+      throw new Error("guided intake is not bound to a project session");
+    }
+    const session = liveSession(input.dataset);
+    if (intake.projectSessionId !== session.projectSessionId) {
+      throw new Error("guided intake belongs to another project session");
+    }
+    const inspection = input.binding.view === "evidence" && input.action === "accept"
+      ? exactArtifactInspection(
+          input.dataset,
+          input.binding,
+          input.artifactConfirmation,
+        )
+      : input.dataset.inspection?.kind === "artifact" &&
+          input.dataset.inspection.state === "current" &&
+          input.dataset.inspection.binding.itemId === input.binding.itemId &&
+          input.dataset.inspection.binding.itemRevision === input.binding.itemRevision &&
+          input.dataset.inspection.binding.projectionRevision === input.binding.projectionRevision
+        ? input.dataset.inspection
+        : null;
+    if (
+      inspection !== null &&
+      inspection.result.coordinationRunId !== null &&
+      inspection.result.coordinationRunId !== intake.coordinationRunId
+    ) {
+      throw new Error("guided evidence belongs to another coordination run");
+    }
+    const artifactRefs = inspection === null
+      ? intake.artifactRefs
+      : appendArtifact(intake.artifactRefs, inspection.result.artifactRef);
+    const state = guidedIntakeState(input.action);
+    const summary = fields.summary ?? intake.summary;
+    const request = {
+      intakeId: intake.intakeId,
+      projectSessionId: intake.projectSessionId,
+      coordinationRunId: intake.coordinationRunId,
+      expectedRevision: intake.revision,
+      state,
+      summary,
+      artifactRefs,
+      gateIds: intake.gateIds,
+      ...(state === "accepted"
+        ? { acceptedScopeRef: inspection?.result.artifactRef }
+        : {}),
+    };
+    if (state === "accepted" && request.acceptedScopeRef === undefined) {
+      throw new Error("guided acceptance requires an exact reviewed artifact");
+    }
+    return await prepare({
+      raw: JSON.stringify({ kind: "intake-revise", request }),
+      dataset: input.dataset,
+      eventId: input.eventId,
+    });
   };
 
   const commit = async (input: Readonly<{
@@ -639,5 +955,5 @@ export function createProductionConsoleWorkflowPlanner(
     };
   };
 
-  return { prepare, arm, commit };
+  return { capabilities, prepare, prepareGuided, arm, commit };
 }

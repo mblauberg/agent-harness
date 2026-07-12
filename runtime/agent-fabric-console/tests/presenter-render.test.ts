@@ -524,6 +524,313 @@ describe("structured presenter and responsive Fabric renderer", () => {
     ]));
   });
 
+  it("presents the evidence decision ladder and explains unavailable typed entry points", () => {
+    const dataset = richDataset();
+    const evidenceRow = dataset.pages.evidence.rows[0];
+    if (evidenceRow === undefined) throw new Error("evidence fixture unavailable");
+    const reviewable: FabricConsoleDataset = {
+      ...dataset,
+      workflowCapabilities: {
+        intake: { state: "available" },
+        gate: { state: "available" },
+        launch: { state: "unavailable", reason: "typed-planner-unregistered" },
+        git: { state: "unavailable", reason: "typed-planner-unregistered" },
+        promotion: { state: "unavailable", reason: "typed-planner-unregistered" },
+      },
+      pages: {
+        ...dataset.pages,
+        evidence: {
+          ...dataset.pages.evidence,
+          rows: [{
+            ...evidenceRow,
+            detailRef: {
+              kind: "evidence",
+              evidenceId: evidenceRow.stableId,
+              expectedRevision: 7,
+            },
+          }],
+        },
+      },
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding: {
+          view: "evidence",
+          itemId: evidenceRow.stableId,
+          itemRevision: evidenceRow.revision,
+          projectionRevision: revisionFromProtocol(11),
+        },
+        readTransactionId: "artifact-decision-ladder",
+        result: {
+          artifactRef: { path: "docs/spec.md" as never, digest: digestA },
+          evidenceRevision: 7,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair-1",
+          projectSessionId: sessionId,
+          coordinationRunId: "AFAB-004" as never,
+          taskId: null,
+          createdAt: timestamp,
+          mediaType: "text/markdown",
+          content: "reviewed",
+          totalBytes: 8,
+          totalLines: 1,
+          renderedTotalBytes: 8,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: digestA,
+          transformation: "none",
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{ pageIndex: 0, lineFragment: "whole", pageContentDigest: digestA, bytes: 8 }],
+          coverage: { complete: true, verified: true, pageCount: 1 },
+          reviewDisposition: "eligible",
+        },
+      },
+    };
+    const base = controllerState();
+    const controller: ConsoleControllerState = {
+      ...base,
+      activeView: "evidence",
+      selectionByView: {
+        ...base.selectionByView,
+        evidence: { stableId: evidenceRow.stableId, revision: evidenceRow.revision },
+      },
+    };
+
+    const presentation = presentFabricConsole(
+      reviewable,
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "workflow:discuss", label: "Discuss", enabled: true }),
+      expect.objectContaining({ id: "workflow:accept", label: "Accept", enabled: true }),
+      expect.objectContaining({ id: "workflow:request-changes", label: "Request changes", enabled: true }),
+      expect.objectContaining({ id: "workflow:defer", label: "Defer", enabled: true }),
+      expect.objectContaining({
+        id: "workflow:implement",
+        label: "Implement...",
+        enabled: false,
+        reason: "typed-planner-unregistered",
+      }),
+    ]));
+  });
+
+  it("never enables a selected-row action until the production planner can build it", () => {
+    const dataset = richDataset();
+    const run = dataset.pages.runs.rows[0];
+    if (run === undefined || run.summary?.kind !== "run") {
+      throw new Error("run fixture unavailable");
+    }
+    const guarded: FabricConsoleDataset = {
+      ...dataset,
+      productionActionPlanning: true,
+      pages: {
+        ...dataset.pages,
+        runs: {
+          ...dataset.pages.runs,
+          rows: [{
+            ...run,
+            detailRef: {
+              kind: "run",
+              coordinationRunId: "AFAB-004" as never,
+              expectedRevision: 7,
+            },
+            actionAvailability: {
+              state: "available",
+              actions: ["pause", "resume", "cancel", "steer"],
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
+    };
+    const base = controllerState();
+    const controller: ConsoleControllerState = {
+      ...base,
+      activeView: "runs",
+      selectionByView: {
+        ...base.selectionByView,
+        runs: { stableId: run.stableId, revision: run.revision },
+      },
+    };
+
+    const presentation = presentFabricConsole(
+      guarded,
+      controller,
+      createFabricUiState({ draft: "" }),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:pause", enabled: true }),
+      expect.objectContaining({ id: "action:resume", enabled: false, reason: "run-is-not-paused" }),
+      expect.objectContaining({ id: "action:cancel", enabled: false, reason: "enter-a-reason" }),
+      expect.objectContaining({ id: "action:steer", enabled: false, reason: "enter-an-instruction" }),
+    ]));
+  });
+
+  it("keeps typed launch, Git and promotion entry points discoverable with capability reasons", () => {
+    const dataset = richDataset();
+    const project = dataset.pages.project.rows[0];
+    if (project === undefined) throw new Error("project fixture unavailable");
+    const typedEntries: FabricConsoleDataset = {
+      ...dataset,
+      workflowCapabilities: {
+        intake: { state: "available" },
+        gate: { state: "available" },
+        launch: { state: "available" },
+        git: { state: "unavailable", reason: "git-contract-not-negotiated" },
+        promotion: { state: "available" },
+      },
+    };
+    const base = controllerState();
+    const controller: ConsoleControllerState = {
+      ...base,
+      activeView: "project",
+      selectionByView: {
+        ...base.selectionByView,
+        project: { stableId: project.stableId, revision: project.revision },
+      },
+    };
+
+    const presentation = presentFabricConsole(
+      typedEntries,
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "workflow:launch", enabled: true }),
+      expect.objectContaining({
+        id: "workflow:git",
+        enabled: false,
+        reason: "git-contract-not-negotiated",
+      }),
+      expect.objectContaining({ id: "workflow:promotion", enabled: true }),
+    ]));
+  });
+
+  it("offers gate decisions only on judgement-bearing Attention rows", () => {
+    const dataset = richDataset();
+    const withCapabilities: FabricConsoleDataset = {
+      ...dataset,
+      workflowCapabilities: {
+        intake: { state: "available" },
+        gate: { state: "available" },
+        launch: { state: "unavailable", reason: "fixture" },
+        git: { state: "unavailable", reason: "fixture" },
+        promotion: { state: "unavailable", reason: "fixture" },
+      },
+    };
+    const decision = presentFabricConsole(
+      withCapabilities,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(decision.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "workflow:discuss", enabled: true }),
+      expect.objectContaining({ id: "workflow:accept", enabled: true }),
+      expect.objectContaining({ id: "workflow:request-changes", enabled: true }),
+      expect.objectContaining({ id: "workflow:defer", enabled: true }),
+    ]));
+
+    const fyiController = controllerState();
+    const fyi = dataset.pages.attention.rows[1];
+    if (fyi === undefined) throw new Error("FYI fixture unavailable");
+    const fyiPresentation = presentFabricConsole(
+      withCapabilities,
+      {
+        ...fyiController,
+        selectionByView: {
+          ...fyiController.selectionByView,
+          attention: { stableId: fyi.stableId, revision: fyi.revision },
+        },
+      },
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(fyiPresentation.actions.some(({ id }) => id.startsWith("workflow:"))).toBe(false);
+  });
+
+  it("shares the exact drain-receipt parser between stop availability and planning", () => {
+    const dataset = richDataset();
+    const project = dataset.pages.project.rows[0];
+    const snapshot = dataset.snapshot;
+    const session = snapshot?.session;
+    if (
+      project === undefined || snapshot === null ||
+      session?.freshness !== "live" ||
+      session.value === null
+    ) throw new Error("project/session fixture unavailable");
+    const stopping: FabricConsoleDataset = {
+      ...dataset,
+      productionActionPlanning: true,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...session,
+          value: { ...session.value, state: "quiescing" },
+        },
+      },
+      pages: {
+        ...dataset.pages,
+        project: {
+          ...dataset.pages.project,
+          rows: [{
+            ...project,
+            detailRef: {
+              kind: "project",
+              projectId,
+              expectedRevision: 7,
+            },
+            actionAvailability: {
+              state: "available",
+              actions: ["project-session-stop"],
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
+    };
+    const base = controllerState();
+    const controller: ConsoleControllerState = {
+      ...base,
+      activeView: "project",
+      selectionByView: {
+        ...base.selectionByView,
+        project: { stableId: project.stableId, revision: project.revision },
+      },
+    };
+    const invalid = presentFabricConsole(
+      stopping,
+      controller,
+      createFabricUiState({ draft: `../private/drain.json@${digestA}` }),
+      { columns: 80, rows: 24 },
+    );
+    expect(invalid.actions).toContainEqual(expect.objectContaining({
+      id: "action:project-session-stop",
+      enabled: false,
+      reason: "enter-drain-receipt-ref",
+    }));
+    const valid = presentFabricConsole(
+      stopping,
+      controller,
+      createFabricUiState({ draft: `receipts/drain.json@${digestA}` }),
+      { columns: 80, rows: 24 },
+    );
+    expect(valid.actions).toContainEqual(expect.objectContaining({
+      id: "action:project-session-stop",
+      enabled: true,
+    }));
+  });
+
   it("answers the reference questions from canonical facts without inferred progress", () => {
     const presentation = presentFabricConsole(
       richDataset(),

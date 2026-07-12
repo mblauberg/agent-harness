@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import stringWidth from "string-width";
 
 import type {
@@ -25,8 +24,13 @@ import {
   type ConsoleRow,
   type FabricView,
 } from "./model.js";
-import { createFabricUiState, presentFabricConsole } from "./presenter.js";
+import { createFabricUiState } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
+import {
+  FabricConsoleRuntime,
+  type FabricConsoleRuntimeOptions,
+  type FabricRuntimeController,
+} from "./runtime.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digest = (`sha256:${"d".repeat(64)}`) as Sha256Digest;
@@ -131,24 +135,48 @@ export type UsabilityObservation = Readonly<{
   dynamicResizeSafe: boolean;
   artifactReviewSafe: boolean;
   exactViewport: boolean;
+  identificationObserver: "human-recorded" | "automated-proxy";
+  keyboardEventCount: number;
+  mouseEventCount: number;
+  resizeEventCount: number;
 }>;
 
 export type UsabilityEvaluationReport = Readonly<{
   schemaVersion: 1;
   passed: boolean;
+  interactionPassed: boolean;
+  recordedIdentificationPassed: boolean;
+  humanIdentificationPassed: boolean;
   topItemSuccessRate: number;
   fieldSuccessRate: number;
   observations: readonly UsabilityObservation[];
 }>;
 
 export type UsabilityEvaluationDependencies = Readonly<{
-  render: (
-    dataset: FabricConsoleDataset,
-    controller: ConsoleControllerState,
-    ui: ReturnType<typeof createFabricUiState>,
-    viewport: UsabilityManifest["referenceViewport"],
-  ) => FabricConsoleFrame;
+  render: FabricConsoleRuntimeOptions["render"];
+  reducePointer: FabricConsoleRuntimeOptions["reducePointer"];
+  identify(input: Readonly<{
+    fixture: UsabilityFixture;
+    repetition: number;
+    frame: FabricConsoleFrame;
+  }>): Promise<Readonly<{
+    observer: "human-recorded" | "automated-proxy";
+    durationMs: number;
+    topAttentionId: string | null;
+    answers: UsabilityExpectedAnswers;
+  }>>;
 }>;
+
+const VIEW_KEYS = [
+  "alt-1",
+  "alt-2",
+  "alt-3",
+  "alt-4",
+  "alt-5",
+  "alt-6",
+  "alt-7",
+  "alt-8",
+] as const;
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -738,43 +766,160 @@ function controllerState(dataset: FabricConsoleDataset): ConsoleControllerState 
   };
 }
 
-function observe(
+class EvaluationRuntimeController implements FabricRuntimeController {
+  #dataset: FabricConsoleDataset;
+  #state: ConsoleControllerState;
+
+  constructor(dataset: FabricConsoleDataset) {
+    this.#dataset = dataset;
+    this.#state = controllerState(dataset);
+  }
+
+  get dataset(): FabricConsoleDataset {
+    return this.#dataset;
+  }
+
+  get state(): ConsoleControllerState {
+    return this.#state;
+  }
+
+  activateView(view: FabricView): void {
+    this.#state = { ...this.#state, activeView: view };
+  }
+
+  select(view: FabricView, stableId: string): void {
+    const row = this.#dataset.pages[view].rows.find(
+      (candidate) => candidate.stableId === stableId,
+    );
+    if (row === undefined) return;
+    this.#state = {
+      ...this.#state,
+      activeView: view,
+      selectionByView: {
+        ...this.#state.selectionByView,
+        [view]: { stableId, revision: row.revision },
+      },
+    };
+  }
+
+  setScrollAnchor(view: FabricView, stableId: string | null): void {
+    this.#state = {
+      ...this.#state,
+      scrollAnchorByView: {
+        ...this.#state.scrollAnchorByView,
+        [view]: stableId,
+      },
+    };
+  }
+
+  updateDataset(dataset: FabricConsoleDataset): void {
+    this.#dataset = dataset;
+  }
+}
+
+async function observe(
   fixture: UsabilityFixture,
   manifest: UsabilityManifest,
   repetition: number,
   dependencies: UsabilityEvaluationDependencies,
-): UsabilityObservation {
-  const started = performance.now();
+): Promise<UsabilityObservation> {
   const dataset = fixtureDataset(fixture);
-  const controller = controllerState(dataset);
+  const controller = new EvaluationRuntimeController(dataset);
   const top = dataset.pages.attention.rows[0];
   const focusId =
     top === undefined ? "view:attention" : `row:attention:${top.stableId}`;
   const ui = createFabricUiState({ focusId });
-  const presentation = presentFabricConsole(
-    dataset,
+  let eventSequence = 0;
+  let keyboardEventCount = 0;
+  let mouseEventCount = 0;
+  let resizeEventCount = 0;
+  const activations: string[] = [];
+  const runtime = new FabricConsoleRuntime({
     controller,
+    viewport: manifest.referenceViewport,
     ui,
-    manifest.referenceViewport,
-  );
-  const frame: FabricConsoleFrame = dependencies.render(
-    dataset,
-    controller,
-    ui,
-    manifest.referenceViewport,
-  );
-  const durationMs = performance.now() - started;
-  const frameText = frame.rows.join("\n");
+    draw: () => {},
+    detach: async () => {},
+    activate: async ({ regionId }) => {
+      activations.push(regionId);
+    },
+    eventId: () => `evaluation-${fixture.id}-${String(repetition)}-${String(++eventSequence)}`,
+    render: dependencies.render,
+    reducePointer: dependencies.reducePointer,
+  });
+  runtime.repaint();
+
+  const reachedViews = new Set<FabricView>();
+  for (const [index, view] of FABRIC_VIEWS.entries()) {
+    const key = VIEW_KEYS[index];
+    if (key === undefined) throw new Error("usability view key fixture is incomplete");
+    await runtime.handleInput({ kind: "key", key });
+    keyboardEventCount += 1;
+    if (controller.state.activeView === view) reachedViews.add(view);
+  }
+  await runtime.handleInput({ kind: "key", key: "alt-1" });
+  keyboardEventCount += 1;
+  await runtime.handleInput({ kind: "key", key: "tab" });
+  keyboardEventCount += 1;
+  const focusedId = runtime.ui.focusId;
+  const focusVisible = focusedId !== null &&
+    runtime.frame.presentation.focusId === focusedId &&
+    runtime.frame.hitRegions.some(
+      (region) => region.id === focusedId && region.enabled,
+    );
+
+  await runtime.handleInput({ kind: "key", key: "text", text: "e" });
+  keyboardEventCount += 1;
+  const preservedDraft = `fixture=${fixture.id};repetition=${String(repetition)}`;
+  await runtime.handleInput({ kind: "paste", text: preservedDraft });
+  const selectionBeforeResize = controller.state.selectionByView.attention?.stableId ?? null;
   const resizeFrames = [
-    dependencies.render(dataset, controller, ui, { columns: 44, rows: 15 }),
-    dependencies.render(dataset, controller, ui, { columns: 120, rows: 32 }),
+    runtime.resize({ columns: 44, rows: 15 }),
+    runtime.resize(manifest.referenceViewport),
+    runtime.resize({ columns: 120, rows: 32 }),
   ];
+  resizeEventCount += resizeFrames.length;
   const dynamicResizeSafe =
     resizeFrames[0]?.columns === 44 && resizeFrames[0].rows.length === 15 &&
-    resizeFrames[1]?.columns === 120 && resizeFrames[1].rows.length === 32 &&
+    resizeFrames[1]?.columns === manifest.referenceViewport.columns &&
+    resizeFrames[1].rows.length === manifest.referenceViewport.rows &&
+    resizeFrames[2]?.columns === 120 && resizeFrames[2].rows.length === 32 &&
     resizeFrames.every((candidate) => candidate.mode !== "inert") &&
-    controller.activeView === "attention" &&
-    controller.selectionByView.attention?.stableId === top?.stableId;
+    new Set(resizeFrames.map(({ geometryKey }) => geometryKey)).size ===
+      resizeFrames.length &&
+    controller.state.activeView === "attention" &&
+    (controller.state.selectionByView.attention?.stableId ?? null) === selectionBeforeResize &&
+    runtime.ui.draft === preservedDraft &&
+    runtime.ui.focusId === focusedId;
+  await runtime.handleInput({ kind: "key", key: "escape" });
+  keyboardEventCount += 1;
+
+  await runtime.handleInput({ kind: "key", key: "alt-m" });
+  keyboardEventCount += 1;
+  const projectTab = runtime.frame.hitRegions.find(
+    (region) => region.id === "view:project" && region.enabled,
+  );
+  let mousePathWorked = false;
+  if (projectTab !== undefined) {
+    for (const phase of ["press", "release"] as const) {
+      await runtime.handleInput({
+        kind: "mouse",
+        phase,
+        button: "left",
+        x: projectTab.rect.x1,
+        y: projectTab.rect.y1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      });
+      mouseEventCount += 1;
+    }
+    mousePathWorked = controller.state.activeView === "project";
+  }
+  await runtime.handleInput({ kind: "key", key: "alt-1" });
+  keyboardEventCount += 1;
+  const frame = runtime.resize(manifest.referenceViewport);
+  resizeEventCount += 1;
+  const presentation = frame.presentation;
+  const frameText = frame.rows.join("\n");
   let artifactReviewSafe = true;
   const evidenceReview = fixture.evidenceReview;
   if (evidenceReview !== null) {
@@ -782,41 +927,94 @@ function observe(
     if (evidenceRow === undefined) {
       artifactReviewSafe = false;
     } else {
-      const evidenceController: ConsoleControllerState = {
-        ...controller,
-        activeView: "evidence",
-        selectionByView: {
-          ...controller.selectionByView,
-          evidence: {
-            stableId: evidenceRow.stableId,
-            revision: evidenceRow.revision,
-          },
-        },
-      };
+      const evidenceController = new EvaluationRuntimeController(dataset);
       const evidenceUi = createFabricUiState({
         compactPane: "detail",
-        focusId: `detail:evidence:${evidenceRow.stableId}`,
       });
-      const evidencePresentation = presentFabricConsole(
-        dataset,
-        evidenceController,
-        evidenceUi,
-        manifest.referenceViewport,
-      );
+      const evidenceActivations: string[] = [];
+      const evidenceRuntime = new FabricConsoleRuntime({
+        controller: evidenceController,
+        viewport: manifest.referenceViewport,
+        ui: evidenceUi,
+        draw: () => {},
+        detach: async () => {},
+        activate: async ({ regionId }) => {
+          evidenceActivations.push(regionId);
+        },
+        eventId: () => `evaluation-evidence-${String(++eventSequence)}`,
+        render: dependencies.render,
+        reducePointer: dependencies.reducePointer,
+      });
+      evidenceRuntime.repaint();
+      await evidenceRuntime.handleInput({ kind: "key", key: "alt-6" });
+      await evidenceRuntime.handleInput({ kind: "key", key: "home" });
+      keyboardEventCount += 2;
       const evidenceFrames = [
-        dependencies.render(dataset, evidenceController, evidenceUi, { columns: 60, rows: 18 }),
-        dependencies.render(dataset, evidenceController, evidenceUi, manifest.referenceViewport),
-        dependencies.render(dataset, evidenceController, evidenceUi, { columns: 120, rows: 32 }),
+        evidenceRuntime.resize({ columns: 60, rows: 18 }),
+        evidenceRuntime.resize(manifest.referenceViewport),
+        evidenceRuntime.resize({ columns: 120, rows: 32 }),
       ];
+      resizeEventCount += evidenceFrames.length;
+      const evidencePresentation = evidenceRuntime.frame.presentation;
       const evidenceText = evidenceFrames.map(({ rows }) => rows.join("\n")).join("\n");
       const promotion = evidencePresentation.actions.find(({ id }) => id === "action:promotion");
       const confirmation = evidencePresentation.actions.find(
         ({ id }) => id === "artifact:confirm-terminal-neutralised",
       );
+      let confirmationReached = confirmation === undefined;
+      const confirmationRegion = evidenceRuntime.frame.hitRegions.find(
+        (region) => region.id === "artifact:confirm-terminal-neutralised" && region.enabled,
+      );
+      if (confirmationRegion !== undefined) {
+        await evidenceRuntime.handleInput({ kind: "key", key: "alt-m" });
+        keyboardEventCount += 1;
+        await evidenceRuntime.handleInput({
+          kind: "mouse",
+          phase: "press",
+          button: "left",
+          x: confirmationRegion.rect.x1,
+          y: confirmationRegion.rect.y1,
+          modifiers: { shift: false, alt: false, ctrl: false },
+        });
+        mouseEventCount += 1;
+        evidenceRuntime.resize(manifest.referenceViewport);
+        resizeEventCount += 1;
+        await evidenceRuntime.handleInput({
+          kind: "mouse",
+          phase: "release",
+          button: "left",
+          x: confirmationRegion.rect.x1,
+          y: confirmationRegion.rect.y1,
+          modifiers: { shift: false, alt: false, ctrl: false },
+        });
+        mouseEventCount += 1;
+        const recomputedConfirmation = evidenceRuntime.frame.hitRegions.find(
+          (region) => region.id === "artifact:confirm-terminal-neutralised" && region.enabled,
+        );
+        if (
+          evidenceActivations.length === 0 &&
+          recomputedConfirmation !== undefined
+        ) {
+          for (const phase of ["press", "release"] as const) {
+            await evidenceRuntime.handleInput({
+              kind: "mouse",
+              phase,
+              button: "left",
+              x: recomputedConfirmation.rect.x1,
+              y: recomputedConfirmation.rect.y1,
+              modifiers: { shift: false, alt: false, ctrl: false },
+            });
+            mouseEventCount += 1;
+          }
+        }
+        confirmationReached = evidenceActivations.filter(
+          (regionId) => regionId === "artifact:confirm-terminal-neutralised",
+        ).length === 1;
+      }
       artifactReviewSafe =
         promotion?.enabled === false &&
         (evidenceReview.expectedDisposition === "confirm-terminal-neutralised"
-          ? confirmation?.enabled === true
+          ? confirmation?.enabled === true && confirmationReached
           : confirmation === undefined) &&
         evidenceText.includes(evidenceReview.path) &&
         evidenceText.includes("Coverage: 1/1 VERIFIED") &&
@@ -824,8 +1022,15 @@ function observe(
         !/\b(?:afb_|afc_|afop_)/u.test(evidenceText);
     }
   }
-  const visibleAnswer = (value: string): string =>
-    frameText.includes(value) ? value : "not-visible";
+  const identification = await dependencies.identify({ fixture, repetition, frame });
+  if (
+    (identification.observer !== "human-recorded" &&
+      identification.observer !== "automated-proxy") ||
+    !Number.isFinite(identification.durationMs) ||
+    identification.durationMs < 0
+  ) {
+    throw new TypeError("usability identification observation is invalid");
+  }
   const githubUnavailable = fixture.system.some(
     (item) => item.id === "github" && item.freshness === "unavailable",
   );
@@ -834,25 +1039,14 @@ function observe(
   return {
     fixtureId: fixture.id,
     repetition,
-    durationMs,
-    topAttentionId: presentation.masterRows[0]?.stableId ?? null,
-    answers: {
-      project: visibleAnswer(presentation.header.project),
-      run: visibleAnswer(presentation.header.run),
-      phase: visibleAnswer(presentation.header.phase),
-      owner: visibleAnswer(presentation.header.owner),
-      nextMilestone: visibleAnswer(presentation.header.nextMilestone),
-      health: visibleAnswer(presentation.header.health),
-    },
+    durationMs: identification.durationMs,
+    topAttentionId: identification.topAttentionId,
+    answers: identification.answers,
     visibleFreshness:
       presentation.masterRows.length === 0 ||
       frameText.includes(presentation.masterRows[0]?.freshness ?? ""),
-    allViewsReachable:
-      presentation.views.length === FABRIC_VIEWS.length &&
-      FABRIC_VIEWS.every((view) =>
-        frame.hitRegions.some((region) => region.id === `view:${view}`),
-      ),
-    focusVisible: frameText.includes(">"),
+    allViewsReachable: reachedViews.size === FABRIC_VIEWS.length && mousePathWorked,
+    focusVisible,
     containsInferredPercentage: /\b\d+(?:\.\d+)?%/u.test(frameText),
     consequentialReviewRequired:
       top === undefined ||
@@ -877,6 +1071,10 @@ function observe(
       frame.rows.every(
         (row) => stringWidth(row) === manifest.referenceViewport.columns,
       ),
+    identificationObserver: identification.observer,
+    keyboardEventCount,
+    mouseEventCount,
+    resizeEventCount,
   };
 }
 
@@ -889,18 +1087,24 @@ const ANSWER_FIELDS = [
   "health",
 ] as const satisfies readonly (keyof UsabilityExpectedAnswers)[];
 
-export function evaluateUsabilityManifest(
+export async function evaluateUsabilityManifest(
   manifest: UsabilityManifest,
   dependencies: UsabilityEvaluationDependencies,
-): UsabilityEvaluationReport {
+): Promise<UsabilityEvaluationReport> {
   const observations: UsabilityObservation[] = [];
   let correctTop = 0;
   let correctFields = 0;
   let totalFields = 0;
-  let requiredChecksPass = true;
+  let interactionChecksPass = true;
+  let recordedDurationsPass = true;
   for (const fixture of manifest.fixtures) {
     for (let repetition = 1; repetition <= manifest.repetitions; repetition += 1) {
-      const observation = observe(fixture, manifest, repetition, dependencies);
+      const observation = await observe(
+        fixture,
+        manifest,
+        repetition,
+        dependencies,
+      );
       observations.push(observation);
       if (observation.topAttentionId === fixture.expectedTopAttentionId) {
         correctTop += 1;
@@ -911,8 +1115,9 @@ export function evaluateUsabilityManifest(
           correctFields += 1;
         }
       }
-      requiredChecksPass &&=
-        observation.durationMs <= manifest.maximumIdentificationMs &&
+      recordedDurationsPass &&=
+        observation.durationMs <= manifest.maximumIdentificationMs;
+      interactionChecksPass &&=
         observation.visibleFreshness &&
         observation.allViewsReachable &&
         observation.focusVisible &&
@@ -928,12 +1133,22 @@ export function evaluateUsabilityManifest(
   const topItemSuccessRate =
     observations.length === 0 ? 0 : correctTop / observations.length;
   const fieldSuccessRate = totalFields === 0 ? 0 : correctFields / totalFields;
+  const interactionPassed = interactionChecksPass;
+  const recordedIdentificationPassed =
+    recordedDurationsPass &&
+    topItemSuccessRate === 1 &&
+    fieldSuccessRate >= manifest.minimumFieldSuccessRate;
+  const humanIdentificationPassed =
+    recordedIdentificationPassed &&
+    observations.every(
+      ({ identificationObserver }) => identificationObserver === "human-recorded",
+    );
   return {
     schemaVersion: 1,
-    passed:
-      requiredChecksPass &&
-      topItemSuccessRate === 1 &&
-      fieldSuccessRate >= manifest.minimumFieldSuccessRate,
+    passed: interactionPassed && humanIdentificationPassed,
+    interactionPassed,
+    recordedIdentificationPassed,
+    humanIdentificationPassed,
     topItemSuccessRate,
     fieldSuccessRate,
     observations,
