@@ -852,6 +852,33 @@ CREATE TABLE lifecycle_operations (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE lifecycle_rotation_custody (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  command_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  task_revision INTEGER NOT NULL CHECK (task_revision >= 1),
+  checkpoint_sha256 TEXT NOT NULL CHECK (length(checkpoint_sha256) = 64),
+  prior_resume_reference TEXT NOT NULL,
+  next_provider_session_generation INTEGER NOT NULL CHECK (next_provider_session_generation >= 2),
+  precondition_digest TEXT NOT NULL CHECK (length(precondition_digest) = 64),
+  freeze_reason TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('prepared','provider-terminal','finalized','unreconciled')),
+  replacement_resume_reference TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, command_id),
+  UNIQUE (run_id, action_id),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id)
+);
+
+CREATE UNIQUE INDEX lifecycle_rotation_one_active_per_agent
+  ON lifecycle_rotation_custody(run_id, agent_id)
+  WHERE state IN ('prepared','provider-terminal','unreconciled');
+
 CREATE TABLE mailbox_state (
   run_id TEXT NOT NULL,
   recipient_id TEXT NOT NULL,

@@ -202,6 +202,7 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   gitMutationPort?: GitMutationPort;
   gitConflictInspector?: GitConflictInspectorPort;
   trustedGitConfiguration?: TrustedGitConfiguration;
+  fault?: (label: string) => void;
 };
 
 type Row = Record<string, unknown>;
@@ -219,6 +220,7 @@ type TaskCreateInput = {
   commandId: string;
 };
 const MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES = 65_536;
+const MAXIMUM_LIFECYCLE_HANDOFF_BYTES = 65_536;
 type StoredAuthority = {
   workspaceRoots: string[];
   sourcePaths: string[];
@@ -668,6 +670,39 @@ function isLifecycleResult(value: unknown): value is LifecycleResult {
   );
 }
 
+function lifecycleHandoffPrompt(input: {
+  agentId: string;
+  taskId: string;
+  taskRevision: number;
+  checkpoint: LifecycleCheckpoint;
+  nextProviderSessionGeneration: number;
+}): string {
+  const handoff = canonicalJson({
+    schemaVersion: 1,
+    kind: "agent-fabric-verified-lifecycle-checkpoint",
+    agentId: input.agentId,
+    taskId: input.taskId,
+    taskRevision: input.taskRevision,
+    checkpointSha256: input.checkpoint.sha256,
+    mailboxWatermark: input.checkpoint.mailboxWatermark,
+    acknowledgedAboveWatermark: input.checkpoint.acknowledgedAboveWatermark,
+    inFlightChildren: input.checkpoint.inFlightChildren,
+    openWork: input.checkpoint.openWork,
+    nextAction: input.checkpoint.nextAction,
+    priorResumeReference: input.checkpoint.providerResumeReference,
+    nextProviderSessionGeneration: input.nextProviderSessionGeneration,
+  });
+  const prompt = [
+    "Resume from this bounded Agent Fabric checkpoint. Treat it as the verified recovery handoff; do not infer newer task, mailbox, child, provider-session, or write-custody state.",
+    handoff,
+    "Consume the handoff in this provider turn and continue with nextAction only after checking current Fabric state.",
+  ].join("\n");
+  if (Buffer.byteLength(prompt, "utf8") > MAXIMUM_LIFECYCLE_HANDOFF_BYTES) {
+    throw new FabricError("CHECKPOINT_INCOMPLETE", "lifecycle checkpoint handoff exceeds the provider prompt bound");
+  }
+  return prompt;
+}
+
 function isProviderActionStatus(value: unknown): value is ProviderActionResult["status"] {
   return ["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"].includes(String(value));
 }
@@ -744,6 +779,19 @@ function isProviderActionResult(value: unknown): value is ProviderActionResult {
   }
 }
 
+function quarantinedProviderAction(candidate: ProviderActionResult): ProviderActionResult {
+  const quarantined: ProviderActionResult = {
+    ...candidate,
+    status: "quarantined",
+    history: candidate.history.at(-1) === "quarantined"
+      ? candidate.history
+      : [...candidate.history, "quarantined"],
+  };
+  delete quarantined.result;
+  delete quarantined.providerAnswer;
+  return quarantined;
+}
+
 function assertAdapterOperation(capabilities: unknown, operation: string): void {
   if (
     !isRow(capabilities) || capabilities.actionJournal !== true ||
@@ -816,6 +864,7 @@ export class Fabric {
   readonly #maximumConcurrentProviderTurns: number;
   readonly #ownedProviderActions = new Map<string, Promise<void>>();
   readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
+  readonly #lifecycleProviderActions = new Map<string, Promise<ProviderActionResult>>();
   readonly #activeProviderOperations = new Set<Promise<void>>();
   readonly #deferredProviderActions: Array<{
     key: string;
@@ -849,6 +898,7 @@ export class Fabric {
   readonly #typedGit: TypedGitService;
   readonly #trustedGitRegistry: TrustedGitRegistry;
   readonly #trustedRunGitAllowlists: readonly TrustedRunGitAllowlist[];
+  readonly #fault: (label: string) => void;
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -856,6 +906,7 @@ export class Fabric {
       const value = clock();
       return value instanceof Date ? value.getTime() : value;
     };
+    this.#fault = options.fault ?? (() => undefined);
     this.#workspaceRoots = [...new Set(options.workspaceRoots.map(canonicalWorkspaceRoot))].sort();
     if (this.#workspaceRoots.length === 0) {
       throw new FabricError("AUTHORITY_WIDENING", "fabric requires at least one configured workspace root");
@@ -1323,10 +1374,15 @@ export class Fabric {
     if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
     this.#deferredProviderPumpTimer = undefined;
     this.#abandonDeferredProviderActions();
-    while (this.#activeProviderOperations.size > 0 || this.#ownedProviderActions.size > 0) {
+    while (
+      this.#activeProviderOperations.size > 0 ||
+      this.#ownedProviderActions.size > 0 ||
+      this.#lifecycleProviderActions.size > 0
+    ) {
       await Promise.allSettled([
         ...this.#activeProviderOperations,
         ...this.#ownedProviderActions.values(),
+        ...this.#lifecycleProviderActions.values(),
       ]);
       this.#abandonDeferredProviderActions();
     }
@@ -1480,6 +1536,11 @@ export class Fabric {
       SELECT 1 FROM provider_agent_custody WHERE run_id=? AND action_id=?
     `).get(runId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM lifecycle_rotation_custody WHERE run_id=? AND action_id=?
+    `).get(runId, actionId) !== undefined) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "lifecycle provider actions mutate only through lifecycle custody");
     }
     if (this.#database.prepare(`
       SELECT 1 FROM provider_actions
@@ -3388,6 +3449,12 @@ export class Fabric {
   }> {
     const now = this.#clock();
     return this.#database.transaction(() => {
+      const freeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(runId, recipientId);
+      if (isRow(freeze)) {
+        throw new FabricError("CONTEXT_UNRECONCILED", "message delivery is frozen until lifecycle reconciliation");
+      }
       const expiringRequiredMessageIds = this.#database.prepare(`
         SELECT DISTINCT delivery.message_id
           FROM deliveries delivery JOIN messages message USING(message_id)
@@ -4464,6 +4531,23 @@ export class Fabric {
       commandId: string;
     },
   ): Promise<LifecycleResult> {
+    return await this.#trackProviderOperation(
+      async () => await this.#requestLifecycle(runId, actorAgentId, input),
+    );
+  }
+
+  async #requestLifecycle(
+    runId: string,
+    actorAgentId: string,
+    input: {
+      action: "compact" | "rotate" | "completion-ready" | "release";
+      agentId: string;
+      taskId: string;
+      taskRevision: number;
+      checkpoint: LifecycleCheckpoint;
+      commandId: string;
+    },
+  ): Promise<LifecycleResult> {
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isLifecycleResult);
     if (replay !== undefined) return replay;
     assertTaskOperationAdmitted(this.#database, runId, input.taskId);
@@ -4552,49 +4636,143 @@ export class Fabric {
     const current = this.getAgentLifecycle(runId, actorAgentId);
     const generation = current.providerSessionGeneration + 1;
     const adapterId = this.#adapterIdForAgent(runId, actorAgentId);
-    const capabilities = await this.#requestAdapter(adapterId, "capabilities", {});
-    const inPlace = input.action === "compact" && isRow(capabilities) && capabilities.compactInPlace === true;
-    let replacementReference = priorReference;
-    if (!inPlace) {
-      const spawnAction = await this.#executeAdapterOperation({
+    const actionId = `${input.commandId}:spawn`;
+    const prompt = lifecycleHandoffPrompt({
+      agentId: actorAgentId,
+      taskId: input.taskId,
+      taskRevision: input.taskRevision,
+      checkpoint: input.checkpoint,
+      nextProviderSessionGeneration: generation,
+    });
+    const payload = {
+      agentId: actorAgentId,
+      priorResumeReference: priorReference,
+      generation,
+      prompt,
+    };
+    this.#prepareLifecycleRotation({
+      runId,
+      agentId: actorAgentId,
+      commandId: input.commandId,
+      actionId,
+      adapterId,
+      taskId: input.taskId,
+      taskRevision: input.taskRevision,
+      checkpointSha256: input.checkpoint.sha256,
+      priorResumeReference: priorReference,
+      nextProviderSessionGeneration: generation,
+    });
+    this.#fault("lifecycle-rotation:prepared");
+    let spawnAction: ProviderActionResult;
+    try {
+      spawnAction = await this.#executeOrReconcileLifecycleRotationAction({
         runId,
         adapterId,
-        actionId: `${input.commandId}:spawn`,
-        operation: "spawn",
-        method: "spawn",
-        payload: { priorResumeReference: priorReference, generation },
+        actionId,
+        payload,
       });
-      if (!isRow(spawnAction.result) || typeof spawnAction.result.resumeReference !== "string") {
-        throw new Error("adapter returned an invalid replacement session");
-      }
-      replacementReference = spawnAction.result.resumeReference;
-    } else {
-      await this.#executeAdapterOperation({
-        runId,
-        adapterId,
-        actionId: `${input.commandId}:compact`,
-        operation: "compact",
-        method: "compact",
-        payload: { resumeReference: priorReference, generation },
-      });
+    } catch (error: unknown) {
+      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
+      throw error;
     }
-    this.#database
-      .prepare("UPDATE agents SET lifecycle = 'ready', provider_session_ref = ? WHERE run_id = ? AND agent_id = ?")
-      .run(replacementReference, runId, actorAgentId);
-    this.#database.prepare("DELETE FROM delivery_freezes WHERE run_id = ? AND agent_id = ?").run(runId, actorAgentId);
-    this.#database
-      .prepare(
-        "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, NULL, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = NULL, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
-      )
-      .run(runId, actorAgentId, generation, input.checkpoint.sha256);
+    if (
+      spawnAction.status !== "terminal" || spawnAction.effectCount !== 1 ||
+      !isRow(spawnAction.result) || typeof spawnAction.result.resumeReference !== "string"
+    ) {
+      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "replacement provider action is not terminal and proved");
+    }
+    const replacementReference = spawnAction.result.resumeReference;
+    this.#database.prepare(`
+      UPDATE lifecycle_rotation_custody
+         SET state='provider-terminal',replacement_resume_reference=?,updated_at=?
+       WHERE run_id=? AND agent_id=? AND command_id=?
+         AND state IN ('prepared','unreconciled')
+    `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
     const result: LifecycleResult = {
       agentId: actorAgentId,
       lifecycle: "ready",
       providerSessionGeneration: generation,
-      rotation: { kind: inPlace ? "in-place" : "replacement-session", priorResumeReference: priorReference },
+      rotation: { kind: "replacement-session", priorResumeReference: priorReference },
     };
-    this.#recordLifecycleOperation(runId, input, priorReference, replacementReference);
-    this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+    const finalized = this.#database.transaction(() => {
+      const live = rowOrNotFound(this.#database.prepare(`
+        SELECT state,precondition_digest,freeze_reason,action_id,adapter_id,
+               task_id,task_revision,checkpoint_sha256,prior_resume_reference,
+               next_provider_session_generation
+          FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id=? AND command_id=?
+      `).get(runId, actorAgentId, input.commandId), "lifecycle rotation custody");
+      if (
+        live.action_id !== actionId || live.adapter_id !== adapterId ||
+        live.task_id !== input.taskId || live.task_revision !== input.taskRevision ||
+        live.checkpoint_sha256 !== input.checkpoint.sha256 ||
+        live.prior_resume_reference !== priorReference ||
+        live.next_provider_session_generation !== generation ||
+        (live.state !== "prepared" && live.state !== "provider-terminal" && live.state !== "unreconciled") ||
+        live.precondition_digest !== this.#lifecycleRotationPreconditionDigest(runId, actorAgentId, input.taskId)
+      ) return false;
+      const action = rowOrNotFound(this.#database.prepare(`
+        SELECT status,effect_count,result_json FROM provider_actions
+         WHERE run_id=? AND action_id=? AND adapter_id=?
+      `).get(runId, actionId, adapterId), "lifecycle provider action");
+      if (
+        action.status !== "terminal" || action.effect_count !== 1 ||
+        typeof action.result_json !== "string" ||
+        canonicalJson(JSON.parse(action.result_json)) !== canonicalJson(spawnAction.result)
+      ) return false;
+      const principal = rowOrNotFound(this.#database.prepare(`
+        SELECT expires_at,revoked_at FROM capabilities
+         WHERE run_id=? AND agent_id=?
+         ORDER BY principal_generation DESC LIMIT 1
+      `).get(runId, actorAgentId), "lifecycle rotation principal");
+      if (principal.revoked_at !== null || numberField(principal, "expires_at") <= this.#clock()) return false;
+      const agentState = rowOrNotFound(this.#database.prepare(`
+        SELECT lifecycle,provider_session_ref FROM agents WHERE run_id=? AND agent_id=?
+      `).get(runId, actorAgentId), "lifecycle rotation agent");
+      if (
+        (agentState.lifecycle !== "suspended" && agentState.lifecycle !== "context-unreconciled") ||
+        agentState.provider_session_ref !== priorReference
+      ) return false;
+      const ownedFreeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(runId, actorAgentId);
+      if (!isRow(ownedFreeze) || ownedFreeze.reason !== live.freeze_reason) return false;
+      const agentUpdated = this.#database.prepare(`
+        UPDATE agents SET lifecycle='ready',provider_session_ref=?
+         WHERE run_id=? AND agent_id=? AND lifecycle IN ('suspended','context-unreconciled')
+           AND provider_session_ref=?
+      `).run(replacementReference, runId, actorAgentId, priorReference);
+      if (agentUpdated.changes !== 1) return false;
+      const freeze = this.#database.prepare(`
+        DELETE FROM delivery_freezes
+         WHERE run_id=? AND agent_id=? AND reason=?
+      `).run(runId, actorAgentId, stringField(live, "freeze_reason"));
+      if (freeze.changes !== 1) return false;
+      this.#database.prepare(
+        "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, NULL, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = NULL, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
+      ).run(runId, actorAgentId, generation, input.checkpoint.sha256);
+      this.#database.prepare(`
+        UPDATE lifecycle_rotation_custody
+           SET state='finalized',replacement_resume_reference=?,updated_at=?
+         WHERE run_id=? AND agent_id=? AND command_id=?
+      `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
+      this.#recordLifecycleOperation(runId, input, priorReference, replacementReference);
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+      return true;
+    })();
+    if (!finalized) {
+      const concurrentReplay = this.#commandJournal.read(
+        runId,
+        actorAgentId,
+        input.commandId,
+        input,
+        isLifecycleResult,
+      );
+      if (concurrentReplay !== undefined) return concurrentReplay;
+      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle custody changed while the provider effect was in flight");
+    }
     return result;
   }
 
@@ -6630,6 +6808,301 @@ export class Fabric {
       this.#persistProviderAction(input.runId, input.actionId, { idempotencyProven: false }, ambiguous);
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `adapter ${input.operation} result is ambiguous`, { cause: error });
     }
+  }
+
+  #lifecycleRotationPreconditionDigest(runId: string, agentId: string, taskId: string): string {
+    const task = rowOrNotFound(this.#database.prepare(`
+      SELECT task_id,authority_id,state,owner_agent_id,revision,owner_lease_generation
+        FROM tasks WHERE run_id=? AND task_id=?
+    `).get(runId, taskId), "lifecycle task");
+    const mailbox = rowOrNotFound(this.#database.prepare(`
+      SELECT next_sequence,contiguous_watermark
+        FROM mailbox_state WHERE run_id=? AND recipient_id=?
+    `).get(runId, agentId), "lifecycle mailbox");
+    const deliveries = this.#database.prepare(`
+      SELECT delivery_id,message_id,mailbox_sequence,state,attempt_count,claim_deadline,
+             acknowledged_at,resolution_reason,resolved_at
+        FROM deliveries WHERE run_id=? AND recipient_id=?
+       ORDER BY mailbox_sequence,delivery_id
+    `).all(runId, agentId);
+    const children = this.#database.prepare(`
+      SELECT agent_id,lifecycle,provider_session_ref
+        FROM agents WHERE run_id=? AND parent_agent_id=?
+       ORDER BY agent_id
+    `).all(runId, agentId);
+    const childTasks = this.#database.prepare(`
+      SELECT task.task_id,task.state,task.owner_agent_id,task.revision,task.owner_lease_generation
+        FROM tasks task JOIN agents child
+          ON child.run_id=task.run_id AND child.agent_id=task.owner_agent_id
+       WHERE task.run_id=? AND child.parent_agent_id=?
+       ORDER BY task.task_id
+    `).all(runId, agentId);
+    const ownedTasks = this.#database.prepare(`
+      SELECT task_id,state,revision,owner_lease_generation
+        FROM tasks WHERE run_id=? AND owner_agent_id=?
+       ORDER BY task_id
+    `).all(runId, agentId);
+    const provider = rowOrNotFound(this.#database.prepare(`
+      SELECT agent.provider_session_ref,agent.authority_id,binding.adapter_id,binding.contract_version,
+             COALESCE(state.provider_session_generation,1) AS provider_session_generation,
+             state.context_revision,state.reconciled_checkpoint_sha256
+        FROM agents agent LEFT JOIN provider_state state
+          ON state.run_id=agent.run_id AND state.agent_id=agent.agent_id
+        LEFT JOIN agent_adapter_bindings binding
+          ON binding.run_id=agent.run_id AND binding.agent_id=agent.agent_id
+       WHERE agent.run_id=? AND agent.agent_id=?
+    `).get(runId, agentId), "lifecycle provider state");
+    const principals = this.#database.prepare(`
+      SELECT token_hash,principal_generation,expires_at,revoked_at
+        FROM capabilities WHERE run_id=? AND agent_id=?
+       ORDER BY principal_generation,token_hash
+    `).all(runId, agentId);
+    const writeLeases = this.#database.prepare(`
+      SELECT lease_id,kind,generation,status,expires_at,updated_at
+        FROM leases WHERE run_id=? AND holder_agent_id=?
+       ORDER BY lease_id
+    `).all(runId, agentId);
+    const providerTurns = this.#database.prepare(`
+      SELECT provider_session_generation,turn_lease_generation,action_id,status,created_at,updated_at
+        FROM provider_session_turn_leases WHERE run_id=? AND agent_id=?
+       ORDER BY turn_lease_generation
+    `).all(runId, agentId);
+    const bridge = this.#database.prepare(`
+      SELECT bridge_state,provider_session_ref,provider_session_generation,bridge_generation,revision
+        FROM agent_bridge_state WHERE run_id=? AND agent_id=?
+    `).get(runId, agentId) ?? null;
+    return sha256(canonicalJson({
+      task,
+      mailbox,
+      deliveries,
+      children,
+      childTasks,
+      ownedTasks,
+      provider,
+      principals,
+      writeLeases,
+      providerTurns,
+      bridge,
+    }));
+  }
+
+  #prepareLifecycleRotation(input: {
+    runId: string;
+    agentId: string;
+    commandId: string;
+    actionId: string;
+    adapterId: string;
+    taskId: string;
+    taskRevision: number;
+    checkpointSha256: string;
+    priorResumeReference: string;
+    nextProviderSessionGeneration: number;
+  }): void {
+    this.#database.transaction(() => {
+      const sourceAgent = rowOrNotFound(this.#database.prepare(`
+        SELECT lifecycle FROM agents WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId), "lifecycle rotation agent");
+      const sourceLifecycle = stringField(sourceAgent, "lifecycle");
+      const existing = this.#database.prepare(`
+        SELECT action_id,adapter_id,task_id,task_revision,checkpoint_sha256,
+               prior_resume_reference,next_provider_session_generation,
+               precondition_digest,freeze_reason,state
+          FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id=? AND command_id=?
+      `).get(input.runId, input.agentId, input.commandId);
+      if (isRow(existing)) {
+        if (sourceLifecycle !== "suspended" && sourceLifecycle !== "context-unreconciled") {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle rotation has an invalid source state");
+        }
+        if (
+          existing.action_id !== input.actionId || existing.adapter_id !== input.adapterId ||
+          existing.task_id !== input.taskId || existing.task_revision !== input.taskRevision ||
+          existing.checkpoint_sha256 !== input.checkpointSha256 ||
+          existing.prior_resume_reference !== input.priorResumeReference ||
+          existing.next_provider_session_generation !== input.nextProviderSessionGeneration
+        ) throw new FabricError("DEDUPE_CONFLICT", "lifecycle rotation command changed after prepare");
+        const ownedFreeze = this.#database.prepare(`
+          SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+        `).get(input.runId, input.agentId);
+        if (
+          !isRow(ownedFreeze) || ownedFreeze.reason !== existing.freeze_reason ||
+          existing.precondition_digest !== this.#lifecycleRotationPreconditionDigest(
+            input.runId,
+            input.agentId,
+            input.taskId,
+          )
+        ) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle custody changed before replay");
+        }
+        return;
+      }
+      const sourceFreeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId);
+      const sourceFreezeReason = isRow(sourceFreeze) ? stringField(sourceFreeze, "reason") : undefined;
+      const acceptedSource =
+        (sourceLifecycle === "ready" && sourceFreezeReason === undefined) ||
+        (sourceLifecycle === "context-unreconciled" &&
+          (sourceFreezeReason === undefined || sourceFreezeReason === "context-unreconciled")) ||
+        (sourceLifecycle === "suspended" && sourceFreezeReason === "interactive-tui-lost");
+      if (!acceptedSource) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "new lifecycle rotation has an invalid lifecycle or freeze owner");
+      }
+      const active = this.#database.prepare(`
+        SELECT command_id FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id=?
+           AND state IN ('prepared','provider-terminal','unreconciled')
+      `).get(input.runId, input.agentId);
+      if (isRow(active)) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "agent already has an unresolved lifecycle provider action");
+      }
+      const task = rowOrNotFound(this.#database.prepare(`
+        SELECT owner_agent_id,revision FROM tasks WHERE run_id=? AND task_id=?
+      `).get(input.runId, input.taskId), "lifecycle rotation task");
+      if (task.owner_agent_id !== input.agentId || task.revision !== input.taskRevision) {
+        throw new FabricError("TASK_REVISION_CONFLICT", "lifecycle task custody changed before prepare");
+      }
+      const preconditionDigest = this.#lifecycleRotationPreconditionDigest(input.runId, input.agentId, input.taskId);
+      const custodyFreezeReason = `lifecycle-rotation:${sha256(input.actionId).slice(0, 32)}`;
+      if (sourceFreezeReason !== undefined) {
+        this.#database.prepare(`
+          UPDATE delivery_freezes SET reason=?,created_at=? WHERE run_id=? AND agent_id=?
+        `).run(custodyFreezeReason, this.#clock(), input.runId, input.agentId);
+      } else {
+        this.#database.prepare(`
+          INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at) VALUES (?,?,?,?)
+        `).run(input.runId, input.agentId, custodyFreezeReason, this.#clock());
+      }
+      const suspended = this.#database.prepare(`
+        UPDATE agents SET lifecycle='suspended'
+         WHERE run_id=? AND agent_id=? AND lifecycle=?
+      `).run(input.runId, input.agentId, sourceLifecycle);
+      if (suspended.changes !== 1) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle source changed before rotation custody");
+      }
+      const now = this.#clock();
+      this.#database.prepare(`
+        INSERT INTO lifecycle_rotation_custody(
+          run_id,agent_id,command_id,action_id,adapter_id,task_id,task_revision,
+          checkpoint_sha256,prior_resume_reference,next_provider_session_generation,
+          precondition_digest,freeze_reason,state,created_at,updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'prepared',?,?)
+      `).run(
+        input.runId,
+        input.agentId,
+        input.commandId,
+        input.actionId,
+        input.adapterId,
+        input.taskId,
+        input.taskRevision,
+        input.checkpointSha256,
+        input.priorResumeReference,
+        input.nextProviderSessionGeneration,
+        preconditionDigest,
+        custodyFreezeReason,
+        now,
+        now,
+      );
+    })();
+  }
+
+  async #executeOrReconcileLifecycleRotationAction(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    payload: Record<string, unknown>;
+  }): Promise<ProviderActionResult> {
+    const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
+    const existing = this.#lifecycleProviderActions.get(key);
+    if (existing !== undefined) return await existing;
+    const owned = this.#executeOrReconcileLifecycleRotationActionOwned(input);
+    this.#lifecycleProviderActions.set(key, owned);
+    try {
+      return await owned;
+    } finally {
+      if (this.#lifecycleProviderActions.get(key) === owned) this.#lifecycleProviderActions.delete(key);
+    }
+  }
+
+  async #executeOrReconcileLifecycleRotationActionOwned(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    payload: Record<string, unknown>;
+  }): Promise<ProviderActionResult> {
+    const stored = this.#database.prepare(`
+      SELECT status FROM provider_actions WHERE run_id=? AND action_id=?
+    `).get(input.runId, input.actionId);
+    if (!isRow(stored)) {
+      return await this.#executeAdapterOperation({
+        runId: input.runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        operation: "spawn",
+        method: "spawn",
+        payload: input.payload,
+      });
+    }
+    const current = this.getProviderAction(input.runId, input.actionId);
+    if (current.status === "terminal") return current;
+    if (current.status === "quarantined") {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action is quarantined");
+    }
+    if (current.status === "prepared") {
+      const dispatched = this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='dispatched',history_json='["prepared","dispatched"]',
+               execution_count=1,updated_at=?
+         WHERE run_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), input.runId, input.actionId);
+      if (dispatched.changes === 1) {
+        return await this.#completeAdapterOperation({
+          runId: input.runId,
+          adapterId: input.adapterId,
+          actionId: input.actionId,
+          operation: "spawn",
+          method: "spawn",
+          payload: input.payload,
+        });
+      }
+    }
+    let lookup: unknown;
+    try {
+      lookup = await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId });
+    } catch (error: unknown) {
+      this.#persistProviderAction(
+        input.runId,
+        input.actionId,
+        { idempotencyProven: false },
+        quarantinedProviderAction(current),
+      );
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action cannot be reconciled", { cause: error });
+    }
+    const reconciled = providerActionResult(lookup, input.actionId);
+    if (reconciled.status !== "terminal" || reconciled.effectCount !== 1) {
+      this.#persistProviderAction(
+        input.runId,
+        input.actionId,
+        { idempotencyProven: false },
+        quarantinedProviderAction(reconciled),
+      );
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action remains unresolved");
+    }
+    this.#persistProviderAction(input.runId, input.actionId, lookup, reconciled);
+    return reconciled;
+  }
+
+  #markLifecycleRotationUnreconciled(runId: string, agentId: string, commandId: string): void {
+    this.#database.transaction(() => {
+      this.#database.prepare(`
+        UPDATE lifecycle_rotation_custody SET state='unreconciled',updated_at=?
+         WHERE run_id=? AND agent_id=? AND command_id=? AND state<>'finalized'
+      `).run(this.#clock(), runId, agentId, commandId);
+      this.#database.prepare(`
+        UPDATE agents SET lifecycle='context-unreconciled'
+         WHERE run_id=? AND agent_id=? AND lifecycle<>'archived'
+      `).run(runId, agentId);
+    })();
   }
 
   #verifyCheckpoint(

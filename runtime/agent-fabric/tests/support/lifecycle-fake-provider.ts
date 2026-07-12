@@ -25,7 +25,7 @@ type Action = {
 type Journal = {
   schemaVersion: 1;
   actions: Record<string, Action>;
-  sessions: Record<string, { released: boolean; generation: number }>;
+  sessions: Record<string, { released: boolean; generation: number; spawnRequests?: number }>;
 };
 
 type Request = { id: string; method: string; params: Record<string, unknown> };
@@ -115,7 +115,11 @@ input.on("line", (line) => {
     const prior = typeof request.params.priorResumeReference === "string" ? request.params.priorResumeReference : "new";
     const generation = typeof request.params.generation === "number" ? request.params.generation : 1;
     const resumeReference = `${prior}:replacement:g${String(generation)}`;
-    journal.sessions[resumeReference] = { released: false, generation };
+    journal.sessions[resumeReference] = {
+      released: false,
+      generation,
+      spawnRequests: (journal.sessions[resumeReference]?.spawnRequests ?? 0) + 1,
+    };
     const scenario = typeof request.params.scenario === "string" ? request.params.scenario : "terminal";
     if (scenario.startsWith("ambiguous-review-")) {
       const actionId = request.params.actionId;
@@ -148,8 +152,7 @@ input.on("line", (line) => {
       fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the direct response was lost");
       return;
     }
-    saveJournal(journal);
-    const complete = (): void => respond(request.id, {
+    const result = {
       resumeReference,
       generation,
       result: "fake provider review complete",
@@ -168,7 +171,38 @@ input.on("line", (line) => {
             : scenario === "terminal-malformed-usage"
               ? { resourceUsage: "not-a-budget-vector" }
         : {}),
-    });
+    };
+    if (process.env.LIFECYCLE_FAKE_SPAWN_LOOKUP_MISSING === "1") {
+      saveJournal(journal);
+      fail(request.id, "TRANSPORT_RESULT_UNKNOWN", "provider request began but no action lookup record exists");
+      return;
+    }
+    const actionId = request.params.actionId;
+    const unresolved = process.env.LIFECYCLE_FAKE_SPAWN_UNRESOLVED === "1";
+    if (typeof actionId === "string") {
+      journal.actions[actionId] = {
+        actionId,
+        payloadHash: payloadHash(request.params.payload),
+        status: unresolved ? "ambiguous" : "terminal",
+        history: unresolved
+          ? ["prepared", "dispatched", "accepted", "ambiguous"]
+          : ["prepared", "dispatched", "accepted", "terminal"],
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: !unresolved,
+        ...(unresolved ? {} : { result }),
+      };
+    }
+    saveJournal(journal);
+    if (unresolved) {
+      fail(request.id, "PROVIDER_OUTCOME_AMBIGUOUS", "provider effect cannot be reconciled");
+      return;
+    }
+    if (process.env.LIFECYCLE_FAKE_SPAWN_RESULT_LOST === "1") {
+      fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the lifecycle response was lost");
+      return;
+    }
+    const complete = (): void => respond(request.id, result);
     if (Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) setTimeout(complete, spawnDelayMs);
     else complete();
     return;

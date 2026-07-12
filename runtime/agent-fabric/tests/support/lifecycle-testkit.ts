@@ -45,6 +45,7 @@ type Stage3OpenOptions = {
   clock: ManualClock["now"];
   maximumConcurrentProviderTurns?: number;
   adapters: Record<string, { command: string[]; environment: Record<string, string> }>;
+  fault?: (label: string) => void;
 };
 
 export type LifecycleFixture = {
@@ -81,6 +82,10 @@ function adapterOptions(fixture: {
   mandatoryUsageUnits?: boolean;
   maximumConcurrentProviderTurns?: number;
   payloadMaxTurns?: boolean;
+  spawnResultLost?: boolean;
+  spawnUnresolved?: boolean;
+  spawnLookupMissing?: boolean;
+  fault?: (label: string) => void;
 }): Stage3OpenOptions {
   return {
     databasePath: fixture.databasePath,
@@ -103,9 +108,13 @@ function adapterOptions(fixture: {
             : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(fixture.spawnDelayMs) }),
           LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
           LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS: fixture.payloadMaxTurns === true ? "1" : "0",
+          LIFECYCLE_FAKE_SPAWN_RESULT_LOST: fixture.spawnResultLost === true ? "1" : "0",
+          LIFECYCLE_FAKE_SPAWN_UNRESOLVED: fixture.spawnUnresolved === true ? "1" : "0",
+          LIFECYCLE_FAKE_SPAWN_LOOKUP_MISSING: fixture.spawnLookupMissing === true ? "1" : "0",
         },
       },
     },
+    ...(fixture.fault === undefined ? {} : { fault: fixture.fault }),
   };
 }
 
@@ -116,6 +125,10 @@ export async function createLifecycleFixture(
     mandatoryUsageUnits?: boolean;
     maximumConcurrentProviderTurns?: number;
     payloadMaxTurns?: boolean;
+    spawnResultLost?: boolean;
+    spawnUnresolved?: boolean;
+    spawnLookupMissing?: boolean;
+    fault?: (label: string) => void;
   } = {},
 ): Promise<LifecycleFixture> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-lifecycle-"));

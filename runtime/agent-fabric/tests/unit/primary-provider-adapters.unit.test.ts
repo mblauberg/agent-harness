@@ -524,6 +524,38 @@ describe("Claude Agent SDK fabric adapter", () => {
     });
   });
 
+  it("consumes the lifecycle checkpoint prompt in the resumed Claude turn", async () => {
+    const query = vi.fn((input: unknown) => ({
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "result",
+          subtype: "success",
+          session_id: "claude-rotated-session",
+          result: "checkpoint consumed",
+          usage: { input_tokens: 1, output_tokens: 1 },
+          num_turns: 1,
+          total_cost_usd: 0,
+        };
+      },
+      input,
+    }));
+    const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never });
+
+    await expect(boundary.spawn({
+      priorResumeReference: "claude-prior-session",
+      prompt: "verified lifecycle checkpoint handoff",
+      generation: 2,
+    })).resolves.toMatchObject({
+      resumeReference: "claude-rotated-session",
+      result: "checkpoint consumed",
+    });
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "verified lifecycle checkpoint handoff",
+      options: expect.objectContaining({ resume: "claude-prior-session" }),
+    }));
+  });
+
   it.each([undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
     "rejects invalid Claude terminal num_turns evidence %s",
     async (numTurns) => {
@@ -1542,6 +1574,63 @@ describe("installed primary chair recovery boundaries", () => {
 });
 
 describe("Codex app-server response validation", () => {
+  it("consumes a lifecycle handoff in a completed turn after starting or resuming", async () => {
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const connection = {
+      get closed() { return false; },
+      initialize: vi.fn(async () => undefined),
+      setServerRequestHandler: vi.fn(),
+      request: vi.fn(async (method: string, params: Record<string, unknown>) => {
+        requests.push({ method, params });
+        if (method === "thread/resume") return { thread: { id: "codex-lifecycle-thread" } };
+        if (method === "turn/start") return { turn: { id: "codex-lifecycle-turn", status: "inProgress" } };
+        if (method === "thread/read") {
+          return {
+            thread: {
+              id: "codex-lifecycle-thread",
+              turns: [{
+                id: "codex-lifecycle-turn",
+                status: "completed",
+                items: [{ type: "agentMessage", text: "checkpoint consumed" }],
+              }],
+            },
+          };
+        }
+        throw new Error(`unexpected lifecycle method ${method}`);
+      }),
+      waitForNotification: vi.fn(async () => ({
+        threadId: "codex-lifecycle-thread",
+        turn: { id: "codex-lifecycle-turn", status: "completed" },
+      })),
+      close: vi.fn(async () => undefined),
+    };
+    const boundary = new InstalledCodexAppServerBoundary(vi.fn(() => connection) as never);
+
+    await expect(boundary.spawn({
+      priorResumeReference: "codex-lifecycle-thread",
+      prompt: "verified checkpoint handoff",
+      model: "gpt-test",
+    })).resolves.toMatchObject({
+      resumeReference: "codex-lifecycle-thread",
+      turnId: "codex-lifecycle-turn",
+      status: "completed",
+      result: "checkpoint consumed",
+    });
+    expect(requests.map(({ method }) => method)).toEqual([
+      "thread/resume",
+      "turn/start",
+      "thread/read",
+    ]);
+    expect(requests[1]).toMatchObject({
+      method: "turn/start",
+      params: {
+        threadId: "codex-lifecycle-thread",
+        input: [{ type: "text", text: "verified checkpoint handoff" }],
+      },
+    });
+    await boundary.closeAll();
+  });
+
   it("extracts only the final agent message from a completed turn", () => {
     expect(codexCompletedTurnResult({
       id: "turn-1",
@@ -2024,7 +2113,7 @@ describe("Codex app-server fabric adapter", () => {
       permissions: "read-only",
     })).toEqual({ cwd: "/workspace/src", sandbox: "read-only", approvalPolicy: "never" });
   });
-  it("maps fabric turn, steer, compact and release actions to an injected app-server boundary", async () => {
+  it("maps fabric turn, steer and release actions to an injected app-server boundary", async () => {
     const actionJournal = await journal();
     const boundary = codexBoundary();
     const adapter = createCodexAppServerAdapter({ boundary, journal: actionJournal });
@@ -2044,12 +2133,6 @@ describe("Codex app-server fabric adapter", () => {
       }),
     ).resolves.toMatchObject({ status: "terminal" });
     await expect(
-      adapter.request("compact", {
-        actionId: "codex-compact-1",
-        payload: { resumeReference: "codex-thread-1" },
-      }),
-    ).resolves.toEqual({ compacted: true, resumeReference: "codex-thread-1" });
-    await expect(
       adapter.request("release", {
         actionId: "codex-release-1",
         payload: { resumeReference: "codex-thread-1" },
@@ -2058,7 +2141,7 @@ describe("Codex app-server fabric adapter", () => {
 
     expect(boundary.sendTurn).toHaveBeenCalledTimes(1);
     expect(boundary.steer).toHaveBeenCalledTimes(1);
-    expect(boundary.compact).toHaveBeenCalledTimes(1);
+    expect(boundary.compact).not.toHaveBeenCalled();
     expect(boundary.release).toHaveBeenCalledTimes(1);
     actionJournal.close();
   });
@@ -2071,11 +2154,28 @@ describe("Codex app-server fabric adapter", () => {
       adapterId: "codex-app-server",
       controlModes: ["managed"],
       inboxDeliveryModes: ["structured-push"],
-      operations: expect.arrayContaining(["spawn", "attach", "send_turn", "steer", "interrupt", "compact"]),
+      operations: expect.arrayContaining(["spawn", "attach", "send_turn", "steer", "interrupt"]),
+      compactInPlace: false,
     });
     await expect(adapter.request("wakeup", { actionId: "wake-1", payload: {} })).rejects.toMatchObject({
       code: "CAPABILITY_UNAVAILABLE",
     });
+    actionJournal.close();
+  });
+
+  it("advertises compact unavailable until Codex proves a next context generation", async () => {
+    const actionJournal = await journal();
+    const boundary = codexBoundary();
+    const adapter = createCodexAppServerAdapter({ boundary, journal: actionJournal });
+
+    const capabilities = await adapter.request("capabilities", {});
+    expect(capabilities).toMatchObject({ compactInPlace: false });
+    expect((capabilities as { operations: string[] }).operations).not.toContain("compact");
+    await expect(adapter.request("compact", {
+      actionId: "codex-compact-unproved",
+      payload: { resumeReference: "codex-thread-1", generation: 2 },
+    })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+    expect(boundary.compact).not.toHaveBeenCalled();
     actionJournal.close();
   });
 });

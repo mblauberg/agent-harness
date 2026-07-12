@@ -37,7 +37,6 @@ import type { ProviderSessionToolResult } from "./provider-session-fabric-surfac
 
 export type CodexAppServerBoundary = ProviderBoundary & {
   steer(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
-  compact(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 };
 
 export function codexAppServerCommand(executable: string): string[] {
@@ -56,7 +55,6 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     "send_turn",
     "steer",
     "interrupt",
-    "compact",
     "resume_reference",
     "lookup_action",
     "cancel_action",
@@ -70,7 +68,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
   controlModes: ["managed"],
   inboxDeliveryModes: ["structured-push"],
   recoveryOperations: ["resume_reference", "lookup_action"],
-  compactInPlace: true,
+  compactInPlace: false,
   idempotencyEvidence: "per-action-fail-closed",
   chairLaunch: {
     schemaVersion: 1,
@@ -425,8 +423,10 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
         ? await connection.request("thread/start", codexThreadConfiguration(payload))
         : await connection.request("thread/resume", { threadId: prior, ...codexThreadConfiguration(payload) });
       const thread = threadFromResponse(response, prior === undefined ? "thread/start" : "thread/resume");
-      this.#connections.set(String(thread.id), connection);
-      return { resumeReference: thread.id };
+      const resumeReference = String(thread.id);
+      const completed = await this.#completeTurn(connection, resumeReference, payload);
+      this.#connections.set(resumeReference, connection);
+      return completed;
     } catch (error: unknown) {
       await connection.close();
       throw error;
@@ -710,19 +710,6 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     return await (async () => {
       await connection.request("turn/interrupt", { threadId: resumeReference, turnId: turnIdValue });
       return { resumeReference, turnId: turnIdValue, interrupted: true };
-    })();
-  }
-
-  async compact(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const resumeReference = threadId(payload);
-    const connection = await this.#sessionConnection(resumeReference);
-    return await (async () => {
-      await connection.request("thread/compact/start", { threadId: resumeReference });
-      await connection.waitForNotification(
-        "thread/compacted",
-        (params) => params.threadId === resumeReference,
-      );
-      return { resumeReference, compacted: true };
     })();
   }
 

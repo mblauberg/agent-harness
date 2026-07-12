@@ -136,7 +136,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js",
-      "sha256": "3947b730aba5491888952fa921fecaaa0be4ff9bb9f65262b61e771a3f3789bb"
+      "sha256": "af2bb57b70b2eda67f9ce3512a7359969ea1633103f98d1f559af6d2d00d83b5"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/codex-json-rpc.js",
