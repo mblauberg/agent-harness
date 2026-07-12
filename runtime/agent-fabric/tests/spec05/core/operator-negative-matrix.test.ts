@@ -146,6 +146,12 @@ function seedAttestationGate(fixture: ReturnType<typeof setup>): void {
     { path: "evidence/a.json", digest: digestA },
     { path: "evidence/b.json", digest },
   ]));
+  fixture.database.prepare(`
+    INSERT INTO project_session_memberships(
+      project_session_id, coordination_run_id, member_kind, member_id,
+      required, state, revision, created_at, updated_at
+    ) VALUES ('session_01', 'run_01', 'gate', 'gate_01', 1, 'active', 1, 1, 1)
+  `).run();
 }
 
 function attestationRequest(options: {

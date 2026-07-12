@@ -68,7 +68,7 @@ type ScopedGateBase = {
   default?: string;
 };
 
-export type GateResolution = {
+export type HumanGateResolution = {
   operatorId: OperatorId;
   decidedAt: Timestamp;
   evidenceRefs: readonly ArtifactRef[];
@@ -82,10 +82,27 @@ export type GateResolution = {
     }
 );
 
+export type SystemGateSupersession = {
+  kind: "system-supersession";
+  cause:
+    | { kind: "operator-command"; ref: CommandId }
+    | { kind: "chair-bridge-loss"; ref: string }
+    | { kind: "system-recovery"; ref: string };
+  reason: string;
+  decidedAt: Timestamp;
+};
+
+export type GateResolution = HumanGateResolution | SystemGateSupersession;
+
 export type ScopedGate =
   | (ScopedGateBase & { status: "pending" | "deferred"; releaseBinding?: ReleaseBinding })
   | (ScopedGateBase & {
-      status: "approved" | "rejected" | "cancelled" | "superseded";
+      status: "approved" | "rejected" | "cancelled";
+      resolution: HumanGateResolution;
+      releaseBinding?: ReleaseBinding;
+    })
+  | (ScopedGateBase & {
+      status: "superseded";
       resolution: GateResolution;
       releaseBinding?: ReleaseBinding;
     });
@@ -458,6 +475,22 @@ function parseResolution(value: unknown): GateResolution {
     throw new TypeError("scopedGate.resolution must be an object");
   }
   const kind: unknown = Reflect.get(value, "kind");
+  if (kind === "system-supersession") {
+    const record = strictRecord(value, "scopedGate.resolution", ["kind", "cause", "reason", "decidedAt"]);
+    const cause = strictRecord(record.cause, "scopedGate.resolution.cause", ["kind", "ref"]);
+    if (cause.kind !== "operator-command" && cause.kind !== "chair-bridge-loss" && cause.kind !== "system-recovery") {
+      throw new TypeError("scopedGate.resolution.cause.kind is invalid");
+    }
+    return {
+      kind,
+      cause: {
+        kind: cause.kind,
+        ref: parseIdentifier<"SystemGateCauseRef">(cause.ref, "scopedGate.resolution.cause.ref"),
+      } as SystemGateSupersession["cause"],
+      reason: requiredString(record.reason, "scopedGate.resolution.reason"),
+      decidedAt: parseTimestamp(record.decidedAt, "scopedGate.resolution.decidedAt"),
+    };
+  }
   const fields = kind === "typed-console"
     ? ["kind", "operatorId", "confirmationCommandId", "decidedAt", "evidenceRefs"]
     : kind === "attested-input"
@@ -573,7 +606,11 @@ export function parseScopedGate(value: unknown): ScopedGate {
     return { ...base, status, ...(releaseBinding === undefined ? {} : { releaseBinding }) };
   }
   if (status === "approved" || status === "rejected" || status === "cancelled" || status === "superseded") {
-    return { ...base, status, resolution: parseResolution(record.resolution), ...(releaseBinding === undefined ? {} : { releaseBinding }) };
+    const resolution = parseResolution(record.resolution);
+    if (status !== "superseded" && resolution.kind === "system-supersession") {
+      throw new TypeError(`scopedGate system supersession cannot produce ${status} status`);
+    }
+    return { ...base, status, resolution, ...(releaseBinding === undefined ? {} : { releaseBinding }) } as ScopedGate;
   }
   throw new TypeError("scopedGate.status is invalid");
 }

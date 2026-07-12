@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 
 import { ProjectFabricCoreError, type CoreServiceOptions } from "./contracts.js";
+import { membershipSourceDisposition } from "./membership-disposition.js";
 import { integer, isRow, row, text } from "./store-support.js";
 
 export type AutomaticMembershipKind =
@@ -21,6 +22,38 @@ const FROZEN_SESSION_STATES = new Set([
   "closed",
   "cancelled",
 ]);
+
+export function touchProjectSessionMembershipRevision(
+  database: Database.Database,
+  projectSessionId: string,
+  now: number,
+  changes: number,
+): void {
+  if (changes === 0) return;
+  const changed = database.prepare(`
+    UPDATE project_sessions
+       SET membership_revision=membership_revision+1,
+           revision=revision+1,
+           updated_at=?
+     WHERE project_session_id=?
+  `).run(now, projectSessionId);
+  if (changed.changes !== 1) {
+    throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "membership owner session was not found");
+  }
+}
+
+export function touchProjectSessionMembershipRevisionForRun(
+  database: Database.Database,
+  runId: string,
+  now: number,
+  changes: number,
+): void {
+  if (changes === 0) return;
+  const identity = row(database.prepare(`
+    SELECT project_session_id FROM runs WHERE run_id=?
+  `).get(runId), "membership owner run");
+  touchProjectSessionMembershipRevision(database, text(identity, "project_session_id"), now, changes);
+}
 
 export class ProjectSessionMembershipStore {
   readonly #database: Database.Database;
@@ -88,13 +121,28 @@ export class ProjectSessionMembershipStore {
       const now = this.#clock();
       const update = this.#database.prepare(`
         UPDATE project_session_memberships
-           SET state='reconciled', revision=revision+1, updated_at=?
+           SET state=?, abandoned_reason=?, revision=revision+1, updated_at=?
          WHERE project_session_id=? AND coordination_run_id=?
            AND member_kind=? AND member_id=? AND required=1 AND state='active'
       `);
       let changes = 0;
       for (const member of this.#uniqueMembers(members)) {
+        const disposition = membershipSourceDisposition(
+          this.#database,
+          identity.projectSessionId,
+          runId,
+          member.kind,
+          member.memberId,
+        );
+        if (disposition.state === "active") {
+          throw new ProjectFabricCoreError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            `${member.kind} membership source is not terminal`,
+          );
+        }
         changes += update.run(
+          disposition.state,
+          disposition.state === "abandoned" ? disposition.reason : null,
           now,
           identity.projectSessionId,
           runId,
@@ -124,17 +172,7 @@ export class ProjectSessionMembershipStore {
   }
 
   #touchSession(projectSessionId: string, changes: number, now: number): void {
-    if (changes === 0) return;
-    const changed = this.#database.prepare(`
-      UPDATE project_sessions
-         SET membership_revision=membership_revision+1,
-             revision=revision+1,
-             updated_at=?
-       WHERE project_session_id=?
-    `).run(now, projectSessionId);
-    if (changed.changes !== 1) {
-      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "membership owner session was not found");
-    }
+    touchProjectSessionMembershipRevision(this.#database, projectSessionId, now, changes);
   }
 
   #runIdentity(runId: string): { projectSessionId: string; sessionState: string } {

@@ -34,7 +34,10 @@ import {
   timestampToMillis,
   type Row,
 } from "../project-session/store-support.js";
-import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
+import {
+  ProjectSessionMembershipStore,
+  touchProjectSessionMembershipRevision,
+} from "../project-session/membership-store.js";
 import { assertRunAcceptingWork, assertTaskOperationAdmitted } from "../operator/production-action-ports.js";
 import { NotificationOutbox } from "../attention/outbox.js";
 import { assertScopedOperationAllowed } from "../gates/store.js";
@@ -1106,7 +1109,7 @@ export class AtomicDeliveryStore {
     this.#database.prepare(`
       UPDATE task_request_barriers SET state=? WHERE request_id=? AND state='blocked'
     `).run(state, requestId);
-    this.#database.prepare(`
+    const membership = this.#database.prepare(`
       UPDATE project_session_memberships
          SET state=?, revision=revision+1, updated_at=?
        WHERE member_kind='scoped-barrier' AND member_id=? AND state='active'
@@ -1117,6 +1120,12 @@ export class AtomicDeliveryStore {
       text(barrier, "barrier_id"),
       text(barrier, "project_session_id"),
       text(barrier, "run_id"),
+    );
+    touchProjectSessionMembershipRevision(
+      this.#database,
+      text(barrier, "project_session_id"),
+      this.#clock(),
+      membership.changes,
     );
   }
 

@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolv
 import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
 import {
+  GATE_SYSTEM_SUPERSESSION_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   type AgentCustodyResult,
   type EvidenceArtifactRegistration,
@@ -1798,6 +1799,18 @@ export class Fabric {
           required, state, revision, created_at, updated_at
         ) VALUES (?, ?, 'coordination-run', ?, 1, 'active', 1, ?, ?)
       `).run(compatibility.projectSessionId, input.runId, input.runId, now, now);
+      this.#database.prepare(`
+        INSERT INTO project_session_memberships(
+          project_session_id, coordination_run_id, member_kind, member_id,
+          required, state, revision, created_at, updated_at
+        ) VALUES (?, ?, 'lease', ?, 1, 'active', 1, ?, ?)
+      `).run(
+        compatibility.projectSessionId,
+        input.runId,
+        `chair:${input.runId}:1`,
+        now,
+        now,
+      );
       const storedProjectLimits = Object.fromEntries(this.#database.prepare(`
         SELECT unit_key, limit_value FROM resource_dimensions
          WHERE scope_id=? ORDER BY unit_key
@@ -1903,6 +1916,12 @@ export class Fabric {
       if (!definition.principals.includes("agent")) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "operation is not available to agent principals");
       }
+      this.assertCapability(
+        context.principal.runId,
+        context.principal.agentId,
+        context.credentialHash,
+        operation,
+      );
       if (definition.gateOwner !== "scoped-gate") {
         assertScopedOperationAllowed(
           this.#database,
@@ -1940,12 +1959,6 @@ export class Fabric {
           if (request.origin !== "chair") {
             throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding requires chair origin");
           }
-          this.assertCapability(
-            context.principal.runId,
-            context.principal.agentId,
-            context.credentialHash,
-            FABRIC_OPERATIONS.membershipBind,
-          );
           return this.#projectSessions.bindMembership(agent, request);
         }
         case FABRIC_OPERATIONS.intakeRevise: {
@@ -1959,6 +1972,16 @@ export class Fabric {
           const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateCreate];
           if (request.origin !== "chair") {
             throw new FabricError("CAPABILITY_FORBIDDEN", "agent gate creation requires chair origin");
+          }
+          const existing = this.#gates.getGateByDedupe(
+            agent,
+            request.intent.projectSessionId,
+            request.intent.coordinationRunId,
+            request.intent.dedupeKey,
+          );
+          if (existing?.status === "superseded" && existing.resolution.kind === "system-supersession" &&
+            !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+            throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
           }
           return this.#gates.createGate(agent, request);
         }
@@ -2146,7 +2169,22 @@ export class Fabric {
         }
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
-        return this.#gates.createGate(credential.context, request);
+        const existing = this.#gates.getGateByDedupe(
+          credential.context,
+          request.intent.projectSessionId,
+          request.intent.coordinationRunId,
+          request.intent.dedupeKey,
+        );
+        if (existing?.status === "superseded" && existing.resolution.kind === "system-supersession" &&
+          !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+          throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
+        }
+        const gate = this.#gates.createGate(credential.context, request);
+        if (gate.status === "superseded" && gate.resolution.kind === "system-supersession" &&
+          !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+          throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
+        }
+        return gate;
       }
       case FABRIC_OPERATIONS.scopedGateResolve: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.scopedGateResolve];
@@ -2169,6 +2207,10 @@ export class Fabric {
         const gate = this.#gates.getGate(request.gateId);
         if (gate.projectSessionId !== request.projectSessionId) {
           throw new ProjectFabricCoreError("WRONG_PROJECT", "gate is outside the requested session");
+        }
+        if (gate.status === "superseded" && gate.resolution.kind === "system-supersession" &&
+          !context.features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)) {
+          throw new ProjectFabricCoreError("FEATURE_UNAVAILABLE", "gate system-supersession result shape was not negotiated");
         }
         const stateDigest = sha256Digest(canonicalJson(gate)) as never;
         const readTransactionId = `read_${sha256(`${context.connectionNonce}\0${gate.gateId}\0${String(gate.revision)}`).slice(0, 24)}`;

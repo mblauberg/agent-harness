@@ -1,13 +1,16 @@
 # Agent fabric operational hardening
 
 Status: Console daemon-lifecycle extension approved; implementation in progress; final human acceptance pending
-Version: 1.14
+Version: 1.16
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.14 owns integration-principal persistence, public input-attestation
+Version 1.16 owns atomic acceptance exits, run-coupled exceptional lifecycle
+transitions, forward-only legacy membership repair and the binding one-live-run
+independent topology. Version 1.15 owns authoritative final-acceptance lookup and atomic chair-lease
+membership rotation across takeover/recovery. Version 1.14 owns integration-principal persistence, public input-attestation
 dispatch and provider-native provenance conformance. Version 1.13 owns exact scoped-operation target enforcement, unresolved
 operator-effect custody in closure/liveness/recovery and composition of the
 optional Herdr action/presence seam. Version 1.12 owns negotiated native-notification projection compatibility and
@@ -2243,3 +2246,88 @@ Deterministic verification additionally covers:
   and
 - public-tree, SQLite, logs, errors, receipts, projection and rendering scans
   proving no `afi_` bearer fragment survives.
+
+### 9.18 Final acceptance and chair-membership reconciliation
+
+Accepted project-session close recomputes Spec 01 section 32.3's canonical
+final-acceptance reference from `scoped_gates`; caller-supplied digest syntax is
+never authority. The canonical sorted set contains exactly one matching row
+for each run currently awaiting acceptance and no historical terminal run.
+Each row must belong to the exact session/run, be human-required, approved,
+run-scoped, operation-enforced for `fabric.v1.project-session.close`, resolve
+to the current operator under the expected-approver rule and carry one
+persisted explicit-confirmation arm. Lookup and validation occur inside the
+close command transaction before any run, lease, capability, agent or session
+mutation. Zero, missing, extra, duplicate or non-identical matches fail closed.
+The gate resolver applies the same non-final obligation predicate before it may
+write approved final-close status, and requires both session and owning run to
+be quiescing. It excludes only current run/chair membership, other exact final-
+close gates awaiting their resolutions and the owning in-progress project-
+drain custody. Approval while active or after any post-drain new-work canary
+fails with zero gate mutation.
+
+Acceptance preparation classifies every session run from durable state. A
+`quiescing` run must have its exact current chair lease and active run/lease
+memberships, then moves atomically to `awaiting_acceptance`, freezes that lease
+and reconciles those memberships. An already `awaiting_acceptance` run is
+validated without replaying the transition. A historical `closed` run must
+already have reconciled required membership; a terminal `cancelled` or
+`launch_failed` run must have explicit abandoned membership and no active
+current chair lease. Other states fail closed. Reopen and accepted close update
+only `awaiting_acceptance` runs, preserving historical terminal states.
+
+The quiesce-exit/reopen transaction supersedes every gate in the session whose exact
+operation binding names `fabric.v1.project-session.close`, advances those gate
+revisions and reconciles any still-active gate memberships before it restores
+run/lease memberships. New work may then proceed, but the next acceptance
+cycle cannot reach `awaiting_acceptance` or `closed` until a fresh gate per
+affected run is created and explicitly resolved. Crash rollback exposes either
+the entire prior cycle or the entire superseded/new-active lifecycle, never a
+reopened session with a reusable approved gate.
+For `quiescing -> active` it also restores every affected run to active; for a
+reconciliation/recovery/quarantine exit it moves the affected runs to the same
+exceptional state and freezes their current chair leases. Only the exact
+receipt-bound `quiescing -> awaiting_acceptance` path preserves approved close
+gates.
+Every non-close exit from `awaiting_acceptance` uses the same invalidation
+transaction and restores or abandons the exact affected run/current-chair
+memberships according to their new durable source state. Public transition
+cannot enter `quiescing`; only typed project-drain custody may do so.
+Transitions among active, visibility-degraded and exceptional session states
+also CAS the affected run lifecycle and current chair-lease status, and crash
+rollback exposes neither half. A work-admitting target requires exact active
+required run and current-chair membership plus a live current-chair
+capability. A lost launched-chair bridge blocks every generic departure until
+its typed recovery custody commits or abandons the loss. Legacy imports bind
+both memberships, and a forward-only migration repairs earlier task, message
+and chair-lease membership dispositions plus session revisions idempotently.
+Protocol parsing and projection distinguish a human decision from the closed
+system-supersession disposition. Reopen may write the latter only while moving
+a pending/deferred close gate to `superseded`; it never satisfies a gate,
+acceptance receipt or consequential-operation authority check.
+The disposition's cause is a closed `{kind, ref}` union, so an internal chair-
+loss event is never mislabeled as an operator command and every reference names
+an existing durable owner record.
+Daemon dispatch checks the negotiated `gate-system-supersession.v1` result
+feature before returning a gate carrying that arm. Old-client/new-daemon
+fixtures prove read and dedupe replay fail with typed feature unavailability
+and zero mutation, rather than failing later during client decode.
+Gate create, human terminal resolution and reopen supersession update the gate
+row, membership row and owning session membership/session revisions in one
+transaction. Exact command replay returns the committed revisions without a
+second increment; crash rollback exposes none of them.
+
+Every takeover and chair-bridge recovery transaction that increments chair
+generation also revokes the predecessor chair lease, abandons its membership
+with `chair-takeover` or `chair-bridge-recovery`, inserts the successor as the
+sole active required lease member and advances the session membership revision.
+No superseded chair lease remains frozen after the atomic successor commit.
+Generic membership target/disposition validation recognises write, chair and
+task-owner lease tables with exact session/run binding.
+
+Deterministic verification additionally covers arbitrary/stale/cross-session
+acceptance references, non-human and wrong-operation gates, typed and native
+confirmation arms, multi-run terminal history, close/reopen preservation,
+post-reopen work with old-reference rejection and fresh-gate acceptance,
+takeover and bridge-recovery crash rollback, and released/revoked membership
+validation for all three lease owners.

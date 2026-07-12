@@ -10,6 +10,7 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+  AGENT_RESULT_SHAPE_FEATURES,
   NdjsonRpcTransport,
   OPERATION_REGISTRY,
   ProtocolRemoteError,
@@ -38,9 +39,12 @@ export type FabricMcpServerHandle = {
 };
 
 const agentFeatures = Object.freeze([...new Set(
-  [...operationsForPrincipal("agent")]
-    .filter(isDaemonGrantableOperation)
-    .map((operation) => OPERATION_REGISTRY[operation].feature),
+  [
+    ...[...operationsForPrincipal("agent")]
+      .filter(isDaemonGrantableOperation)
+      .map((operation) => OPERATION_REGISTRY[operation].feature),
+    ...AGENT_RESULT_SHAPE_FEATURES,
+  ],
 )].sort()) as readonly ProtocolFeature[];
 
 function errorPayload(error: unknown): { code: string; message: string } {

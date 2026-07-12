@@ -1,6 +1,4 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
-
 import {
   parseOperatorCapabilityGrant,
   type ProjectId,
@@ -11,33 +9,18 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyMigrations, type Migration } from "../../../src/core/migrations.ts";
+import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ProjectSessionStore } from "../../../src/project-session/store.ts";
-import { preflightProjectSessionOperations } from "../../../src/persistence/project-session-preflight.ts";
 
 const databases: Database.Database[] = [];
 const digest = `sha256:${"a".repeat(64)}`;
 const artifact = { path: "docs/spec.md", digest };
 
-function migration(version: number, filename: string, preflight?: Migration["preflight"]): Migration {
-  return {
-    version,
-    name: filename.replace(/^[0-9]+-/u, "").replace(/\.sql$/u, ""),
-    sql: readFileSync(new URL(`../../../migrations/${filename}`, import.meta.url), "utf8"),
-    ...(preflight === undefined ? {} : { preflight }),
-  };
-}
-
 function openDatabase(): Database.Database {
   const database = new Database(":memory:");
   databases.push(database);
-  applyMigrations(database, [
-    migration(1, "0001-core.sql"),
-    migration(2, "0002-observer-event-sequence.sql"),
-    migration(3, "0003-integrity-and-query-plans.sql"),
-    migration(4, "0004-project-session-operations.sql", preflightProjectSessionOperations),
-  ]);
+  applyMigrations(database);
   database.prepare(`
     INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
     VALUES ('project_01', '/project/one', 1, 1, 1, 1)
@@ -199,8 +182,21 @@ describe("project-session store", () => {
       INSERT INTO run_chair_leases(
         project_session_id, run_id, lease_id, holder_agent_id, generation, status, handoff_digest, updated_at
       ) VALUES ('session_takeover', 'run_takeover', 'chair:run_takeover:2', 'chair_old', 2, 'active', NULL, 1);
-      INSERT INTO artifacts(artifact_id, run_id, task_id, publisher_agent_id, relative_path, sha256, created_at)
-      VALUES ('artifact_handoff', 'run_takeover', NULL, 'chair_old', 'handoff.md', '${digest}', 1);
+      INSERT INTO project_session_memberships(
+        project_session_id, coordination_run_id, member_kind, member_id,
+        required, state, revision, created_at, updated_at
+      ) VALUES
+        ('session_takeover', 'run_takeover', 'coordination-run', 'run_takeover', 1, 'active', 1, 1, 1),
+        ('session_takeover', 'run_takeover', 'lease', 'chair:run_takeover:2', 1, 'active', 1, 1, 1);
+      INSERT INTO artifacts(
+        artifact_id, project_id, project_session_id, run_id, task_id,
+        publisher_kind, publisher_ref, publisher_agent_id, source_kind, evidence_kind,
+        relative_path, sha256, registry_state, revision, created_at
+      ) VALUES (
+        'artifact_handoff', 'project_01', 'session_takeover', 'run_takeover', NULL,
+        'agent', 'chair_old', 'chair_old', 'project-file', 'artifact',
+        'handoff.md', '${digest}', 'active', 1, 1
+      );
       INSERT INTO leases(lease_id, run_id, kind, holder_agent_id, generation, status, expires_at, updated_at)
       VALUES ('write_old', 'run_takeover', 'write', 'chair_old', 1, 'active', 9999999999999, 1);
     `);
@@ -282,5 +278,176 @@ describe("project-session store", () => {
     });
     expect(database.prepare("SELECT reason FROM delivery_freezes WHERE run_id='run_takeover' AND agent_id='chair_old'").get())
       .toEqual({ reason: "chair-takeover" });
+    expect(database.prepare(`
+      SELECT lease_id, status FROM run_chair_leases
+       WHERE project_session_id='session_takeover' AND run_id='run_takeover'
+       ORDER BY generation
+    `).all()).toEqual([
+      { lease_id: "chair:run_takeover:2", status: "revoked" },
+      { lease_id: "chair:run_takeover:3", status: "active" },
+    ]);
+    expect(database.prepare(`
+      SELECT member_id, state, abandoned_reason FROM project_session_memberships
+       WHERE project_session_id='session_takeover' AND member_kind='lease'
+       ORDER BY member_id
+    `).all()).toEqual([
+      { member_id: "chair:run_takeover:2", state: "abandoned", abandoned_reason: "chair-takeover" },
+      { member_id: "chair:run_takeover:3", state: "active", abandoned_reason: null },
+    ]);
+    expect(database.prepare(`
+      SELECT revision, generation, membership_revision FROM project_sessions
+       WHERE project_session_id='session_takeover'
+    `).get()).toEqual({ revision: 2, generation: 2, membership_revision: 2 });
+  });
+
+  it("moves session, runs and chair leases together through exceptional lifecycle states", () => {
+    const database = openDatabase();
+    database.exec(`
+      INSERT INTO project_sessions(
+        project_session_id, project_id, mode, state, revision, generation, authority_ref,
+        budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+        origin_kind, origin_operator_id, created_at, updated_at
+      ) VALUES (
+        'session_exceptional', 'project_01', 'coordinated', 'active', 1, 1,
+        '${digest}', 'budget_01', 'docs/spec.md', '${digest}', 1,
+        'operator-launch', 'operator_01', 1, 1
+      );
+      INSERT INTO runs(
+        run_id, chair_agent_id, workspace_root, project_run_directory, created_at,
+        project_session_id, lifecycle_state, revision, chair_generation, chair_lease_id,
+        authority_ref, budget_ref, dependency_revision, topology_slot
+      ) VALUES (
+        'run_exceptional', 'chair_exceptional', '/project/one', NULL, 1,
+        'session_exceptional', 'active', 1, 1, 'chair:run_exceptional:1',
+        '${digest}', 'budget_01', 1, 1
+      );
+      INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
+      VALUES ('authority_exceptional', 'run_exceptional', NULL, '{}', '${"f".repeat(64)}', 1);
+      INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_exceptional', 'chair_exceptional', NULL, 'authority_exceptional', 'provider_exceptional', 'ready');
+      INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
+      VALUES ('capability_exceptional', 'run_exceptional', 'chair_exceptional', 1, 9999999999999);
+      INSERT INTO run_chair_leases(
+        project_session_id, run_id, lease_id, holder_agent_id, generation, status, updated_at
+      ) VALUES (
+        'session_exceptional', 'run_exceptional', 'chair:run_exceptional:1',
+        'chair_exceptional', 1, 'active', 1
+      );
+      INSERT INTO project_session_memberships(
+        project_session_id, coordination_run_id, member_kind, member_id,
+        required, state, revision, created_at, updated_at
+      ) VALUES
+        ('session_exceptional', 'run_exceptional', 'coordination-run', 'run_exceptional', 1, 'active', 1, 1, 1),
+        ('session_exceptional', 'run_exceptional', 'lease', 'chair:run_exceptional:1', 1, 'active', 1, 1, 1);
+    `);
+    const operatorStore = new OperatorStore({ database, clock: () => 1_000 });
+    operatorStore.registerPrincipal({
+      operatorId: "operator_01",
+      projectId: "project_01",
+      authenticatedSubjectHash: "subject-hash",
+      projectAuthorityGeneration: 1,
+    });
+    operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: "cap_exceptional",
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_exceptional",
+      sessionGeneration: 1,
+      actions: ["read", "decide"],
+    }), "exceptional-secret");
+    const context = {
+      operatorId: "operator_01" as OperatorId,
+      projectId: "project_01" as ProjectId,
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    };
+    const request = (
+      commandId: string,
+      expectedRevision: number,
+      to: "active" | "reconciling" | "recovery_required" | "visibility_degraded" | "quiescing",
+    ) => ({
+      command: {
+        credential: { capabilityId: "cap_exceptional", token: "exceptional-secret" },
+        commandId,
+        expectedRevision,
+        actor: "operator_01",
+        provenance: { kind: "console-direct-input", clientId: "console_01", inputEventId: `${commandId}:input` },
+        evidenceRefs: [artifact],
+      },
+      projectSessionId: "session_exceptional",
+      expectedGeneration: 1,
+      transition: { to, reason: "bounded lifecycle test" },
+    }) as unknown as ProjectSessionTransitionRequest;
+
+    const sessions = new ProjectSessionStore({ database, operatorStore, clock: () => 1_000 });
+    const reconciling = sessions.transitionProjectSession(context, request("enter_reconciling", 1, "reconciling"));
+    expect(reconciling).toMatchObject({ state: "reconciling", revision: 2, membershipRevision: 1 });
+    expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run_exceptional'").get())
+      .toEqual({ lifecycle_state: "reconciling", revision: 2 });
+    expect(database.prepare("SELECT status FROM run_chair_leases WHERE lease_id='chair:run_exceptional:1'").get())
+      .toEqual({ status: "frozen" });
+    expect(sessions.transitionProjectSession(context, request("enter_reconciling", 1, "reconciling")))
+      .toEqual(reconciling);
+
+    const active = sessions.transitionProjectSession(context, request("leave_reconciling", 2, "active"));
+    expect(active).toMatchObject({ state: "active", revision: 3, membershipRevision: 1 });
+    expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run_exceptional'").get())
+      .toEqual({ lifecycle_state: "active", revision: 3 });
+    expect(database.prepare("SELECT status FROM run_chair_leases WHERE lease_id='chair:run_exceptional:1'").get())
+      .toEqual({ status: "active" });
+
+    const degraded = sessions.transitionProjectSession(
+      context,
+      request("enter_visibility_degraded", 3, "visibility_degraded"),
+    );
+    expect(degraded).toMatchObject({ state: "visibility_degraded", revision: 4, membershipRevision: 1 });
+    expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run_exceptional'").get())
+      .toEqual({ lifecycle_state: "visibility_degraded", revision: 4 });
+    expect(database.prepare("SELECT status FROM run_chair_leases WHERE lease_id='chair:run_exceptional:1'").get())
+      .toEqual({ status: "active" });
+    const visibleAgain = sessions.transitionProjectSession(
+      context,
+      request("leave_visibility_degraded", 4, "active"),
+    );
+    expect(visibleAgain).toMatchObject({ state: "active", revision: 5, membershipRevision: 1 });
+    expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run_exceptional'").get())
+      .toEqual({ lifecycle_state: "active", revision: 5 });
+
+    expect(() => sessions.transitionProjectSession(
+      context,
+      request("reject_public_quiesce", 5, "quiescing"),
+    )).toThrowError(expect.objectContaining({ code: "LIFECYCLE_PRECONDITION_FAILED" }));
+    expect(database.prepare(`
+      SELECT state, revision FROM project_sessions WHERE project_session_id='session_exceptional'
+    `).get()).toEqual({ state: "active", revision: 5 });
+    expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run_exceptional'").get())
+      .toEqual({ lifecycle_state: "active", revision: 5 });
+
+    const crashing = new ProjectSessionStore({
+      database,
+      operatorStore,
+      clock: () => 1_000,
+      fault: (label) => {
+        if (label === "session:coupled-transition:after-runs") throw new Error("coupled transition crash");
+      },
+    });
+    expect(() => crashing.transitionProjectSession(
+      context,
+      request("enter_recovery_crash", 5, "recovery_required"),
+    )).toThrow("coupled transition crash");
+    expect(database.prepare(`
+      SELECT state, revision, membership_revision FROM project_sessions
+       WHERE project_session_id='session_exceptional'
+    `).get()).toEqual({ state: "active", revision: 5, membership_revision: 1 });
+    expect(database.prepare("SELECT lifecycle_state, revision FROM runs WHERE run_id='run_exceptional'").get())
+      .toEqual({ lifecycle_state: "active", revision: 5 });
+    expect(database.prepare("SELECT status FROM run_chair_leases WHERE lease_id='chair:run_exceptional:1'").get())
+      .toEqual({ status: "active" });
   });
 });

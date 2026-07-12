@@ -28,6 +28,7 @@ import {
   type ChairLaunchProviderResult,
 } from "../adapters/providers/types.js";
 import { ProjectFabricCoreError } from "./contracts.js";
+import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
 
 type Digest = Sha256Digest;
@@ -1438,10 +1439,19 @@ export class LaunchCustodyService {
       const targetAgentId = text(target, "new_chair_agent_id");
       const newChairGeneration = handle.intent.expectedChairGeneration + 1;
       const leaseId = `chair:${handle.intent.coordinationRunId}:${String(newChairGeneration)}:recovery`;
+      const predecessor = row(this.#database.prepare(`
+        SELECT chair_lease_id FROM runs
+         WHERE project_session_id=? AND run_id=? AND chair_generation=?
+      `).get(
+        handle.intent.projectSessionId,
+        handle.intent.coordinationRunId,
+        handle.intent.expectedChairGeneration,
+      ), "recovered predecessor chair lease");
+      const predecessorLeaseId = text(predecessor, "chair_lease_id");
       const revokedLease = this.#database.prepare(`
         UPDATE run_chair_leases SET status='revoked', updated_at=?
-         WHERE project_session_id=? AND run_id=? AND status='frozen'
-      `).run(now, handle.intent.projectSessionId, handle.intent.coordinationRunId);
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND status='frozen'
+      `).run(now, handle.intent.projectSessionId, handle.intent.coordinationRunId, predecessorLeaseId);
       if (revokedLease.changes !== 1) stale("frozen chair lease changed during recovery");
       this.#database.prepare(`
         INSERT INTO run_chair_leases(
@@ -1453,6 +1463,31 @@ export class LaunchCustodyService {
         leaseId,
         targetAgentId,
         newChairGeneration,
+        now,
+      );
+      const retiredMembership = this.#database.prepare(`
+        UPDATE project_session_memberships
+           SET state='abandoned', abandoned_reason='chair-bridge-recovery',
+               revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND coordination_run_id=?
+           AND member_kind='lease' AND member_id=? AND required=1 AND state='active'
+      `).run(
+        now,
+        handle.intent.projectSessionId,
+        handle.intent.coordinationRunId,
+        predecessorLeaseId,
+      );
+      if (retiredMembership.changes !== 1) stale("predecessor chair membership changed during recovery");
+      this.#database.prepare(`
+        INSERT INTO project_session_memberships(
+          project_session_id, coordination_run_id, member_kind, member_id,
+          required, state, revision, abandoned_reason, created_at, updated_at
+        ) VALUES (?, ?, 'lease', ?, 1, 'active', 1, NULL, ?, ?)
+      `).run(
+        handle.intent.projectSessionId,
+        handle.intent.coordinationRunId,
+        leaseId,
+        now,
         now,
       );
       const updatedRun = this.#database.prepare(`
@@ -1472,7 +1507,9 @@ export class LaunchCustodyService {
       if (updatedRun.changes !== 1) stale("run recovery revision changed");
       const updatedSession = this.#database.prepare(`
         UPDATE project_sessions
-           SET state='active', generation=generation+1, revision=revision+1, updated_at=?
+           SET state='active', generation=generation+1,
+               membership_revision=membership_revision+1,
+               revision=revision+1, updated_at=?
          WHERE project_session_id=? AND state='recovery_required'
            AND revision=? AND generation=?
       `).run(
@@ -1844,6 +1881,19 @@ export class LaunchCustodyService {
       bridgeGeneration: input.bridgeGeneration,
       capabilityHash: text(state, "capability_hash"),
     }))}`;
+    const sessionBeforeLoss = row(this.#database.prepare(`
+      SELECT state FROM project_sessions WHERE project_session_id=?
+    `).get(input.projectSessionId), "chair loss project session");
+    const priorSessionState = text(sessionBeforeLoss, "state");
+    const superseded = priorSessionState === "quiescing" || priorSessionState === "awaiting_acceptance"
+      ? supersedeFinalAcceptanceGates({
+          database: this.#database,
+          projectSessionId: input.projectSessionId,
+          cause: { kind: "chair-bridge-loss", ref: lossId },
+          reason: "chair bridge loss exited the acceptance cycle",
+          now,
+        })
+      : { gateChanges: 0, membershipChanges: 0 };
     const evidenceDigest = jsonEvidenceDigest(lossBinding);
     this.#database.prepare(`
       INSERT INTO chair_bridge_losses(
@@ -1908,12 +1958,14 @@ export class LaunchCustodyService {
     `).run(input.runId);
     if (fencedRun.changes !== 1) stale("run state changed during chair loss fencing");
     const fencedSession = this.#database.prepare(`
-      UPDATE project_sessions SET state='recovery_required', revision=revision+1, updated_at=?
+      UPDATE project_sessions
+         SET state='recovery_required', membership_revision=membership_revision+?,
+             revision=revision+1, updated_at=?
        WHERE project_session_id=? AND state IN (
          'active','quiescing','awaiting_acceptance','visibility_degraded',
          'reconciling','quarantined'
        )
-    `).run(now, input.projectSessionId);
+    `).run(superseded.membershipChanges + superseded.gateChanges > 0 ? 1 : 0, now, input.projectSessionId);
     if (fencedSession.changes !== 1) stale("project session state changed during chair loss fencing");
     return true;
   }
@@ -2708,7 +2760,8 @@ export class LaunchCustodyService {
 
     const changed = this.#database.prepare(`
       UPDATE project_sessions
-         SET state='launching', revision=revision+1,
+         SET state='launching', membership_revision=membership_revision+1,
+             revision=revision+1,
              launch_packet_path=?, launch_packet_digest=?, updated_at=?
        WHERE project_session_id=? AND project_id=? AND revision=? AND generation=?
          AND state=?
@@ -3671,7 +3724,9 @@ export class LaunchCustodyService {
       now,
     );
     this.#database.prepare(`
-      UPDATE project_sessions SET state='active', revision=revision+1, updated_at=?
+      UPDATE project_sessions
+         SET state='active', membership_revision=membership_revision+1,
+             revision=revision+1, updated_at=?
        WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')
     `).run(now, text(custody, "project_session_id"));
     this.#database.prepare(`
@@ -3724,7 +3779,9 @@ export class LaunchCustodyService {
       UPDATE agents SET lifecycle='suspended' WHERE run_id=? AND agent_id=?
     `).run(text(custody, "coordination_run_id"), text(custody, "chair_agent_id"));
     this.#database.prepare(`
-      UPDATE project_sessions SET state='launch_failed', revision=revision+1, updated_at=?
+      UPDATE project_sessions
+         SET state='launch_failed', membership_revision=membership_revision+1,
+             revision=revision+1, updated_at=?
        WHERE project_session_id=? AND state IN ('launching','launch_ambiguous')
     `).run(now, text(custody, "project_session_id"));
     this.#database.prepare(`
@@ -3733,7 +3790,15 @@ export class LaunchCustodyService {
     `).run(text(custody, "coordination_run_id"));
     this.#database.prepare(`
       UPDATE project_session_memberships
-         SET state='reconciled', revision=revision+1, updated_at=?
+         SET state=CASE
+               WHEN member_kind IN ('coordination-run','lease') THEN 'abandoned'
+               ELSE 'reconciled'
+             END,
+             abandoned_reason=CASE
+               WHEN member_kind IN ('coordination-run','lease') THEN 'launch-failed'
+               ELSE NULL
+             END,
+             revision=revision+1, updated_at=?
        WHERE project_session_id=? AND coordination_run_id=? AND state='active'
     `).run(now, text(custody, "project_session_id"), text(custody, "coordination_run_id"));
   }

@@ -1,14 +1,17 @@
 # Shared agent fabric
 
 Status: Project-session and operator extension approved; implementation in progress; final human acceptance pending
-Version: 0.18
+Version: 0.20
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.18 closes the acceptance-review-discovered unreachable integration-
+Version 0.20 closes the acceptance-review-discovered lifecycle split-brain,
+legacy membership, acceptance-cycle exit and independent-topology contract
+gaps. Version 0.19 closes the acceptance-review-discovered unbound final-acceptance,
+chair-lease membership rotation and historical-run closure gaps. Version 0.18 closes the acceptance-review-discovered unreachable integration-
 principal and unbound conversational-attestation gap. Version 0.17 closes the implementation-discovered scoped-operation target,
 generic operator-effect custody and optional Herdr composition gaps. Version
 0.16 closes the implementation-discovered notification-projection
@@ -1467,14 +1470,78 @@ reconciled; no active lease, provider action or unresolved operator-effect
 custody remains; every typed Git
 custody/reservation is machine-terminal or has the exact human-resolution
 record in section 32.13; and every applicable scoped barrier is closed.
-`closed` additionally needs the exact acceptance or
-cancel/failure terminal path.
+`closed` additionally needs the exact acceptance or cancel/failure terminal
+path. An accepted path's `acceptance_ref` is not an arbitrary receipt digest:
+it is the canonical digest of the complete sorted set of approved, human-
+required final-acceptance gates in the same project session, exactly one for
+each run currently in `awaiting_acceptance`. Each binding includes gate ID,
+owning run, gate revision, approved status, persisted resolution and evidence
+references. Every gate must be run-scoped, enforce the exact
+`fabric.v1.project-session.close` operation, name the authenticated human
+operator sentinel or the resolving operator, and contain a typed-Console or
+provider-native explicit confirmation. The daemon recomputes the digest from
+current durable state in the close transaction. Missing, stale, substituted,
+duplicate, extra, cross-run, cross-session or non-human acceptance fails
+closed. Historical terminal runs require no new acceptance gate and retain
+their terminal disposition. Thus one run's authority can never accept another
+nonterminal independent run.
+Such a final-close gate may be approved only while its session and owning run
+are `quiescing`, after every task, non-chair lease, provider action, required
+result/message, artifact obligation, non-final gate, barrier and unrelated
+operator effect is settled. Active-session approval fails closed. Quiescing
+forbids new work and new membership,
+so an approved gate cannot outlive a subsequent source mutation; only source-
+valid settlement remains permitted.
 
-Each coordination run has exactly one generation-fenced chair. Coordinated
+Every exit from `quiescing` other than the exact receipt-bound transition to
+`awaiting_acceptance`, and every exit from `awaiting_acceptance` other than
+accepted close, invalidates the current acceptance cycle. Returning
+`quiescing -> active`, reopening `awaiting_acceptance -> active`, or entering a
+reconciliation/recovery/quarantine detour supersedes every prior gate that names
+`fabric.v1.project-session.close`, whether pending, deferred or approved, and
+terminalises any active membership for those gates. A later drain/close
+requires newly created gates and fresh explicit human resolutions. No prior
+acceptance reference or confirmation may authorise work or evidence changed
+after that exit.
+Pending or deferred gates receive a closed `system-supersession` terminal
+disposition containing a typed durable cause (`operator-command`, `chair-
+bridge-loss` or `system-recovery`) with its exact reference, reason and
+timestamp. It carries
+no operator ID, approval or evidence authority and is forbidden for approved
+or rejected status. An already human-resolved gate retains its human resolution
+as historical audit evidence when its status becomes superseded.
+The `system-supersession` result arm is exposed only when the connection
+negotiates `gate-system-supersession.v1`. A peer without that additive result-
+shape feature receives `FEATURE_UNAVAILABLE` before any read/replay response
+would contain the new arm; existing human-resolution v1 shapes remain byte-
+compatible.
+
+Public project-session transition cannot enter `quiescing`; the typed,
+receipt-producing project-drain custody is its sole owner and changes the
+session and every affected run atomically. Public transitions among `active`,
+`visibility_degraded`, `reconciling`, `recovery_required` and `quarantined`
+likewise compare-and-set the session, affected runs and current chair leases in
+one transaction. Work-admitting targets keep the current chair lease active;
+reconciliation, recovery and quarantine freeze it. Reactivation requires a
+live current-chair capability plus exact active required run and current-chair-
+lease membership. A durable lost launched-chair bridge reserves every
+lifecycle departure to chair-recovery custody. Legacy imports create both
+required run and current-chair-lease membership; an additive migration repairs
+earlier source-invalid membership without rewriting migration history.
+
+Each coordination run has exactly one generation-fenced chair. Every chair
+generation change atomically revokes the prior chair lease, abandons its
+membership with the exact takeover/recovery reason and
+binds the successor lease as the sole active required chair-lease membership;
+takeover or bridge recovery cannot leave the new current lease outside project-
+session membership. Coordinated
 mode has exactly one non-terminal coordination run and may contain many
 delivery workstreams under it, but their leads are not additional chairs. A
 concurrent attempt to create a second non-terminal run fails. Independent mode
-may contain several coordination runs, each with its own chair and authority.
+also has exactly one non-terminal coordination run per project session; a
+project view represents concurrent unrelated runs as separate independent
+project sessions, each with its own chair and session authority. Historical
+terminal run rows may remain in either mode without becoming live authority.
 A project session never implies cross-run authority.
 
 Exceptional project-session states are `launch_failed`, `launch_ambiguous`,
@@ -1562,6 +1629,10 @@ scoped_gate:
 ```
 
 Gate creation, dependency changes and resolution are transactional. The daemon
+advances the owning project session's membership revision exactly once whenever
+gate creation adds required membership or terminal gate resolution/supersession
+settles it. A stale membership client cannot remain current across either
+change. The daemon
 rechecks applicable unresolved gates before task claim, start and resume;
 before each named consequential operation; and before the matching scoped
 barrier closes. Dependent descendants block only where the persisted scope and
@@ -1593,6 +1664,43 @@ never approve them. Release-scoped gates additionally bind the exact accepted
 delivery receipt, artifact digest, promotion action and target, directly or by
 a schema-validated release receipt. Broad session or `external-effect`
 authority cannot satisfy that binding.
+
+Final acceptance uses the same gate authority rather than a parallel approval
+record. The public `acceptance_ref` is the digest of the complete sorted array:
+
+```text
+sha256(canonical-json({
+  kind: "project-session-final-acceptance",
+  projectSessionId,
+  gates: [
+    {
+      gateId,
+      coordinationRunId,
+      gateRevision,
+      status: "approved",
+      resolution,
+      evidenceRefs
+    }
+  ]
+}))
+```
+
+The `gates` array is non-empty and sorted by `coordinationRunId`, then
+`gateId`; it contains exactly one binding for every run currently awaiting
+acceptance and no binding for terminal history. Only gates satisfying section
+32.1 may produce that reference. Historical
+terminal runs do not need to be reopened for session acceptance: `closed` run
+memberships are reconciled, `cancelled`/terminal `launch_failed` memberships
+are explicitly abandoned, and only current `quiescing` runs transition to
+`awaiting_acceptance`. Reopen and accepted close mutate only runs currently in
+`awaiting_acceptance`; pre-existing terminal history retains its terminal
+state.
+Reopen supersession increments each affected gate revision, retains its prior
+resolution only as audit evidence, and removes it from the approved candidate
+set; it does not fabricate a replacement approval.
+An approved/rejected human-resolved gate and its later superseded audit row
+remain reconciled history. A cancelled gate, or a pending/deferred gate ended
+by `system-supersession`, is abandoned with an explicit durable reason.
 
 Existing identifier-only task gates migrate to `task`-scoped gates with
 `task-readiness` and `scoped-barrier` enforcement. Migration shall not infer a

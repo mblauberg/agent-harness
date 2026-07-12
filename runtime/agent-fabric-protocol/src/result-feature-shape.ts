@@ -1,3 +1,5 @@
+import { GATE_SYSTEM_SUPERSESSION_FEATURE } from "./features.js";
+import type { ScopedGate } from "./gates.js";
 import { FABRIC_OPERATIONS } from "./operations.js";
 import type {
   AttentionItem,
@@ -83,12 +85,33 @@ function notificationPresence(
   return [];
 }
 
+function gateResult(
+  operation: ProtocolOperation,
+  result: OperationResultMap[ProtocolOperation],
+): ScopedGate | undefined {
+  if (operation === FABRIC_OPERATIONS.scopedGateCreate || operation === FABRIC_OPERATIONS.scopedGateResolve) {
+    return result as ScopedGate;
+  }
+  if (operation === FABRIC_OPERATIONS.scopedGateRead) {
+    return (result as OperationResultMap[typeof FABRIC_OPERATIONS.scopedGateRead]).gate;
+  }
+  return undefined;
+}
+
 /** Restores the negotiated closed result shape after context-free wire decoding. */
 export function assertOperationResultFeatureShape<Operation extends ProtocolOperation>(
   operation: Operation,
   features: readonly string[],
   result: OperationResultMap[Operation],
 ): OperationResultMap[Operation] {
+  const gate = gateResult(operation, result as OperationResultMap[ProtocolOperation]);
+  if (
+    gate?.status === "superseded" &&
+    gate.resolution.kind === "system-supersession" &&
+    !features.includes(GATE_SYSTEM_SUPERSESSION_FEATURE)
+  ) {
+    throw new ProtocolResultShapeError(operation, "unnegotiated-field");
+  }
   const presence = notificationPresence(
     operation,
     result as OperationResultMap[ProtocolOperation],

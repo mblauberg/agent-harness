@@ -2375,7 +2375,7 @@
         },
         "features": {
           "type": "array",
-          "maxItems": 21,
+          "maxItems": 22,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2399,7 +2399,8 @@
               "artifact-registry.v1",
               "artifact-content-read.v1",
               "lifecycle-control.v1",
-              "native-notification-projection.v1"
+              "native-notification-projection.v1",
+              "gate-system-supersession.v1"
             ]
           }
         },
@@ -2823,7 +2824,7 @@
             },
             "features": {
               "type": "array",
-              "maxItems": 21,
+              "maxItems": 22,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2847,7 +2848,8 @@
                   "artifact-registry.v1",
                   "artifact-content-read.v1",
                   "lifecycle-control.v1",
-                  "native-notification-projection.v1"
+                  "native-notification-projection.v1",
+                  "gate-system-supersession.v1"
                 ]
               }
             },
@@ -8457,7 +8459,6 @@
                           "enum": [
                             "draft",
                             "active",
-                            "quiescing",
                             "reconciling",
                             "visibility_degraded",
                             "recovery_required",
@@ -43169,6 +43170,99 @@
                           "maxItems": 128
                         }
                       }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "cause",
+                        "reason",
+                        "decidedAt"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "system-supersession"
+                        },
+                        "cause": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "ref"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "operator-command"
+                                },
+                                "ref": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "ref"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "chair-bridge-loss"
+                                },
+                                "ref": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "ref"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "system-recovery"
+                                },
+                                "ref": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "decidedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     }
                   ]
                 },
@@ -43771,6 +43865,99 @@
                           },
                           "minItems": 0,
                           "maxItems": 128
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "cause",
+                        "reason",
+                        "decidedAt"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "system-supersession"
+                        },
+                        "cause": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "ref"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "operator-command"
+                                },
+                                "ref": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "ref"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "chair-bridge-loss"
+                                },
+                                "ref": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "ref"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "system-recovery"
+                                },
+                                "ref": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 4096
+                        },
+                        "decidedAt": {
+                          "type": "string",
+                          "format": "date-time"
                         }
                       }
                     }
@@ -44564,6 +44751,99 @@
                                   "maxItems": 128
                                 }
                               }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "cause",
+                                "reason",
+                                "decidedAt"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "system-supersession"
+                                },
+                                "cause": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "ref"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "operator-command"
+                                        },
+                                        "ref": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "ref"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "chair-bridge-loss"
+                                        },
+                                        "ref": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "ref"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "system-recovery"
+                                        },
+                                        "ref": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 4096
+                                },
+                                "decidedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
                             }
                           ]
                         },
@@ -45062,6 +45342,99 @@
                                   },
                                   "minItems": 0,
                                   "maxItems": 128
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kind",
+                                "cause",
+                                "reason",
+                                "decidedAt"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "const": "system-supersession"
+                                },
+                                "cause": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "ref"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "operator-command"
+                                        },
+                                        "ref": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "ref"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "chair-bridge-loss"
+                                        },
+                                        "ref": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "kind",
+                                        "ref"
+                                      ],
+                                      "properties": {
+                                        "kind": {
+                                          "const": "system-recovery"
+                                        },
+                                        "ref": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "x-minUtf8Bytes": 1,
+                                          "x-maxUtf8Bytes": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "x-minUtf8Bytes": 1,
+                                  "x-maxUtf8Bytes": 4096
+                                },
+                                "decidedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
                                 }
                               }
                             }

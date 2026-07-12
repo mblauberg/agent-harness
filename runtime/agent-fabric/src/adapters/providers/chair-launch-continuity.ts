@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createConnection } from "node:net";
 
 import {
+  AGENT_RESULT_SHAPE_FEATURES,
   FABRIC_OPERATIONS,
   NdjsonRpcTransport,
   OPERATION_REGISTRY,
@@ -45,8 +46,11 @@ export type ChairLaunchFabricBridgeDependencies = {
 };
 
 const agentFeatures = Object.freeze([...new Set(
-  [...operationsForPrincipal("agent")]
-    .map((operation) => OPERATION_REGISTRY[operation].feature),
+  [
+    ...[...operationsForPrincipal("agent")]
+      .map((operation) => OPERATION_REGISTRY[operation].feature),
+    ...AGENT_RESULT_SHAPE_FEATURES,
+  ],
 )].sort()) as readonly ProtocolFeature[];
 
 const defaultDependencies: ChairLaunchFabricBridgeDependencies = {

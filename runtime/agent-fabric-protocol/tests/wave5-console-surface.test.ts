@@ -389,6 +389,42 @@ describe("negotiated notification result shape", () => {
   });
 });
 
+describe("negotiated gate supersession result shape", () => {
+  it("rejects a system-supersession arm on every gate result when the feature was not negotiated", () => {
+    const base = OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateCreate].result as Record<string, unknown>;
+    const gate = parseOperationResult(FABRIC_OPERATIONS.scopedGateCreate, {
+      ...base,
+      status: "superseded",
+      revision: 2,
+      resolution: {
+        kind: "system-supersession",
+        cause: { kind: "operator-command", ref: "command_01" },
+        reason: "acceptance cycle exited",
+        decidedAt: observedAt,
+      },
+    });
+    const read = parseOperationResult(FABRIC_OPERATIONS.scopedGateRead, {
+      status: "current",
+      gate,
+      readTransactionId: "read_gate_01",
+      stateDigest: digestA,
+    });
+    for (const [operation, result] of [
+      [FABRIC_OPERATIONS.scopedGateCreate, gate],
+      [FABRIC_OPERATIONS.scopedGateResolve, gate],
+      [FABRIC_OPERATIONS.scopedGateRead, read],
+    ] as const) {
+      expect(() => assertOperationResultFeatureShape(operation, [], result as never))
+        .toThrow(expect.objectContaining({ code: "PROTOCOL_INCOMPATIBLE", reason: "unnegotiated-field" }));
+      expect(assertOperationResultFeatureShape(
+        operation,
+        ["gate-system-supersession.v1"],
+        result as never,
+      )).toBe(result);
+    }
+  });
+});
+
 describe("typed operator detail read", () => {
   const detailRef = { kind: "project", projectId: "project_01", expectedRevision: 1 } as const;
 

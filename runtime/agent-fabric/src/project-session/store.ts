@@ -1,9 +1,11 @@
 import {
   assertChairMutationAuthority,
+  deriveFinalAcceptanceRef,
   parseIdentifier,
   parseMembershipBindRequest,
   parseMembershipBindResult,
   parseProjectSession,
+  parseScopedGate,
   type ChairMutationContext,
   type MembershipBindRequest,
   type MembershipBindResult,
@@ -18,18 +20,23 @@ import {
   type ProjectSessionId,
   type ChairTakeoverRequest,
   type ChairTakeoverResult,
+  type FinalAcceptanceGateBinding,
+  type HumanGateResolution,
+  type ScopedGate,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
 import { CommandJournal } from "../application/command-journal.js";
 import { OperatorStore } from "../operator/store.js";
+import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
+import { membershipSourceDisposition } from "./membership-disposition.js";
 import {
   ProjectFabricCoreError,
   type AuthenticatedAgentContext,
   type AuthenticatedOperatorContext,
   type CoreServiceOptions,
 } from "./contracts.js";
-import { canonicalJson, integer, nullableText, row, text, type Row } from "./store-support.js";
+import { canonicalJson, integer, nullableText, row, sha256, text, type Row } from "./store-support.js";
 
 const legalTransitions: Readonly<Record<ProjectSessionState, readonly ProjectSessionState[]>> = {
   draft: ["awaiting_launch", "cancelled"],
@@ -47,6 +54,14 @@ const legalTransitions: Readonly<Record<ProjectSessionState, readonly ProjectSes
   quarantined: ["reconciling", "recovery_required", "cancelled"],
   cancelled: [],
 };
+
+const RUN_COUPLED_SESSION_STATES = new Set<ProjectSessionState>([
+  "active",
+  "visibility_degraded",
+  "reconciling",
+  "recovery_required",
+  "quarantined",
+]);
 
 export class ProjectSessionStore {
   readonly #database: Database.Database;
@@ -148,6 +163,12 @@ export class ProjectSessionStore {
         "public project-session transition cannot enter or leave a launch-custody-owned state",
       );
     }
+    if (targetState === "quiescing") {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "public project-session transition cannot enter the drain-custody-owned state",
+      );
+    }
     return this.#operatorStore.executeCommand(
       context,
       request.command,
@@ -189,6 +210,104 @@ export class ProjectSessionStore {
             current.revision,
             request.expectedGeneration,
           );
+        } else if (request.transition.to === "awaiting_acceptance") {
+          const membershipChanged = this.#prepareAwaitingAcceptance(
+            context,
+            request.projectSessionId,
+            current,
+            request.transition.closureEvidence,
+          );
+          const changed = this.#database.prepare(`
+            UPDATE project_sessions
+               SET state='awaiting_acceptance',
+                   membership_revision=membership_revision+?,
+                   revision=revision+1,
+                   updated_at=?
+             WHERE project_session_id=? AND revision=? AND generation=? AND state='quiescing'
+          `).run(
+            membershipChanged ? 1 : 0,
+            this.#clock(),
+            request.projectSessionId,
+            current.revision,
+            request.expectedGeneration,
+          );
+          if (changed.changes !== 1) {
+            throw new ProjectFabricCoreError("STALE_REVISION", "project-session acceptance transition raced another mutation");
+          }
+        } else if (
+          request.transition.to === "active" &&
+          (current.state === "awaiting_acceptance" || current.state === "quiescing")
+        ) {
+          const membershipChanged = this.#reopenFromAcceptance(
+            request.projectSessionId,
+            request.command.commandId,
+            current.state,
+          );
+          const changed = this.#database.prepare(`
+            UPDATE project_sessions
+               SET state='active', membership_revision=membership_revision+?,
+                   revision=revision+1, updated_at=?
+             WHERE project_session_id=? AND revision=? AND generation=?
+               AND state=?
+          `).run(
+            membershipChanged ? 1 : 0,
+            this.#clock(),
+            request.projectSessionId,
+            current.revision,
+            request.expectedGeneration,
+            current.state,
+          );
+          if (changed.changes !== 1) {
+            throw new ProjectFabricCoreError("STALE_REVISION", "project-session reopen raced another mutation");
+          }
+        } else if (current.state === "quiescing" || current.state === "awaiting_acceptance") {
+          const membershipChanged = this.#divertFromAcceptanceCycle(
+            request.projectSessionId,
+            request.command.commandId,
+            current.state,
+            request.transition.to,
+          );
+          const changed = this.#database.prepare(`
+            UPDATE project_sessions
+               SET state=?, membership_revision=membership_revision+?,
+                   revision=revision+1, updated_at=?
+             WHERE project_session_id=? AND revision=? AND generation=? AND state=?
+          `).run(
+            request.transition.to,
+            membershipChanged ? 1 : 0,
+            this.#clock(),
+            request.projectSessionId,
+            current.revision,
+            request.expectedGeneration,
+            current.state,
+          );
+          if (changed.changes !== 1) {
+            throw new ProjectFabricCoreError("STALE_REVISION", "project-session quiesce exit raced another mutation");
+          }
+        } else if (
+          RUN_COUPLED_SESSION_STATES.has(current.state) &&
+          RUN_COUPLED_SESSION_STATES.has(request.transition.to)
+        ) {
+          this.#transitionCoupledRuns(
+            request.projectSessionId,
+            current.state,
+            request.transition.to,
+          );
+          const changed = this.#database.prepare(`
+            UPDATE project_sessions
+               SET state=?, revision=revision+1, updated_at=?
+             WHERE project_session_id=? AND revision=? AND generation=? AND state=?
+          `).run(
+            request.transition.to,
+            this.#clock(),
+            request.projectSessionId,
+            current.revision,
+            request.expectedGeneration,
+            current.state,
+          );
+          if (changed.changes !== 1) {
+            throw new ProjectFabricCoreError("STALE_REVISION", "exceptional project-session transition raced another mutation");
+          }
         } else {
           this.#database.prepare(`
             UPDATE project_sessions
@@ -237,7 +356,55 @@ export class ProjectSessionStore {
           throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "accepted close requires awaiting acceptance");
         }
         this.#assertClosure(request.projectSessionId);
+        const runs = this.#database.prepare(`
+          SELECT run_id, revision, lifecycle_state FROM runs
+           WHERE project_session_id=? ORDER BY run_id
+        `).all(request.projectSessionId) as Row[];
+        if (request.terminalPath.kind === "accepted") {
+          const awaitingRuns = runs.filter((run) => text(run, "lifecycle_state") === "awaiting_acceptance");
+          if (awaitingRuns.length === 0) {
+            throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "accepted close requires a coordination run");
+          }
+          for (const run of runs) {
+            if (![
+              "awaiting_acceptance",
+              "closed",
+              "cancelled",
+              "launch_failed",
+            ].includes(text(run, "lifecycle_state"))) {
+              throw new ProjectFabricCoreError(
+                "LIFECYCLE_PRECONDITION_FAILED",
+                "accepted close found a nonterminal coordination run outside acceptance",
+              );
+            }
+          }
+          this.#assertFinalAcceptance(context, current.projectId, request.projectSessionId, request.terminalPath.acceptanceRef, awaitingRuns);
+        }
         this.#fault("session:close");
+        for (const run of runs) {
+          if (text(run, "lifecycle_state") !== "awaiting_acceptance") continue;
+          const changedRun = this.#database.prepare(`
+            UPDATE runs SET lifecycle_state='closed', revision=revision+1
+             WHERE run_id=? AND revision=? AND lifecycle_state='awaiting_acceptance'
+          `).run(text(run, "run_id"), integer(run, "revision"));
+          if (changedRun.changes !== 1) {
+            throw new ProjectFabricCoreError("STALE_REVISION", "coordination run changed during project close");
+          }
+        }
+        this.#fault("session:close:after-runs");
+        this.#database.prepare(`
+          UPDATE run_chair_leases SET status='revoked', updated_at=?
+           WHERE project_session_id=? AND status IN ('active','frozen')
+        `).run(this.#clock(), request.projectSessionId);
+        this.#database.prepare(`
+          UPDATE capabilities SET revoked_at=?
+           WHERE run_id IN (SELECT run_id FROM runs WHERE project_session_id=?)
+             AND revoked_at IS NULL
+        `).run(this.#clock(), request.projectSessionId);
+        this.#database.prepare(`
+          UPDATE agents SET lifecycle='archived'
+           WHERE run_id IN (SELECT run_id FROM runs WHERE project_session_id=?)
+        `).run(request.projectSessionId);
         this.#database.prepare(`
           UPDATE project_sessions
              SET state='closed', terminal_path_json=?, revision=revision+1, updated_at=?
@@ -321,12 +488,18 @@ export class ProjectSessionStore {
   #applyMembership(request: MembershipBindRequest): MembershipBindResult {
     const session = this.#sessionIdentity(request.projectSessionId);
     if (
-      session.state === "quiescing" ||
       session.state === "awaiting_acceptance" ||
       session.state === "closed" ||
       session.state === "cancelled"
     ) {
       throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "project-session membership is frozen");
+    }
+    const settlingWhileQuiescing = session.state === "quiescing";
+    if (settlingWhileQuiescing && request.members.some((member) => member.state === "active")) {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "quiescing permits settlement of existing membership only",
+      );
     }
     if (session.membershipRevision !== request.expectedMembershipRevision) {
       throw new ProjectFabricCoreError("STALE_REVISION", "membership revision changed");
@@ -334,28 +507,52 @@ export class ProjectSessionStore {
     this.#assertRun(request.projectSessionId, request.coordinationRunId);
     for (const member of request.members) {
       this.#assertMemberTarget(request.projectSessionId, request.coordinationRunId, member);
+      this.#assertMemberDisposition(request.projectSessionId, request.coordinationRunId, member);
       const disposition = member.state === "terminal" ? "reconciled" : member.state;
       const timestamp = this.#clock();
-      this.#database.prepare(`
-        INSERT INTO project_session_memberships(
-          project_session_id, coordination_run_id, member_kind, member_id,
-          required, state, revision, abandoned_reason, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 1, ?, 1, ?, ?, ?)
-        ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id)
-        DO UPDATE SET state=excluded.state,
-                      revision=project_session_memberships.revision+1,
-                      abandoned_reason=excluded.abandoned_reason,
-                      updated_at=excluded.updated_at
-      `).run(
-        request.projectSessionId,
-        request.coordinationRunId,
-        member.kind,
-        this.#memberId(member),
-        disposition,
-        member.state === "abandoned" ? member.reason : null,
-        timestamp,
-        timestamp,
-      );
+      if (settlingWhileQuiescing) {
+        const settled = this.#database.prepare(`
+          UPDATE project_session_memberships
+             SET state=?, revision=revision+1, abandoned_reason=?, updated_at=?
+           WHERE project_session_id=? AND coordination_run_id=?
+             AND member_kind=? AND member_id=? AND required=1 AND state='active'
+        `).run(
+          disposition,
+          member.state === "abandoned" ? member.reason : null,
+          timestamp,
+          request.projectSessionId,
+          request.coordinationRunId,
+          member.kind,
+          this.#memberId(member),
+        );
+        if (settled.changes !== 1) {
+          throw new ProjectFabricCoreError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "quiescing membership settlement requires one existing active member",
+          );
+        }
+      } else {
+        this.#database.prepare(`
+          INSERT INTO project_session_memberships(
+            project_session_id, coordination_run_id, member_kind, member_id,
+            required, state, revision, abandoned_reason, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 1, ?, 1, ?, ?, ?)
+          ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id)
+          DO UPDATE SET state=excluded.state,
+                        revision=project_session_memberships.revision+1,
+                        abandoned_reason=excluded.abandoned_reason,
+                        updated_at=excluded.updated_at
+        `).run(
+          request.projectSessionId,
+          request.coordinationRunId,
+          member.kind,
+          this.#memberId(member),
+          disposition,
+          member.state === "abandoned" ? member.reason : null,
+          timestamp,
+          timestamp,
+        );
+      }
     }
     this.#fault("session:membership");
     const changed = this.#database.prepare(`
@@ -401,8 +598,24 @@ export class ProjectSessionStore {
       () => this.#sessionRevision(request.projectSessionId),
       () => {
         const currentSession = this.#sessionIdentity(request.projectSessionId);
+        if (["quiescing", "awaiting_acceptance", "closed", "cancelled"].includes(currentSession.state)) {
+          throw new ProjectFabricCoreError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "chair takeover requires reopening the project session",
+          );
+        }
         if (currentSession.generation !== request.expectedSessionGeneration) {
           throw new ProjectFabricCoreError("STALE_GENERATION", "project-session generation changed");
+        }
+        if (this.#database.prepare(`
+          SELECT 1 FROM launched_chair_bridge_state
+           WHERE project_session_id=? AND coordination_run_id=? AND state IN ('active','lost')
+           LIMIT 1
+        `).get(request.projectSessionId, request.runId) !== undefined) {
+          throw new ProjectFabricCoreError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "launched-chair takeover is owned by typed chair-bridge recovery custody",
+          );
         }
         const run = row(this.#database.prepare(`
           SELECT chair_agent_id, chair_generation, chair_lease_id, revision
@@ -501,7 +714,8 @@ export class ProjectSessionStore {
         );
         this.#database.prepare(`
           UPDATE project_sessions
-             SET generation=generation+1, revision=revision+1, updated_at=?
+             SET generation=generation+1, membership_revision=membership_revision+1,
+                 revision=revision+1, updated_at=?
            WHERE project_session_id=? AND generation=? AND revision=?
         `).run(
           this.#clock(),
@@ -521,6 +735,47 @@ export class ProjectSessionStore {
           request.successorChairAgentId,
           nextGeneration,
           request.handoffRef.digest,
+          this.#clock(),
+        );
+        const revokedPredecessor = this.#database.prepare(`
+          UPDATE run_chair_leases SET status='revoked', updated_at=?
+           WHERE project_session_id=? AND run_id=? AND lease_id=?
+             AND generation=? AND status='frozen'
+        `).run(
+          this.#clock(),
+          request.projectSessionId,
+          request.runId,
+          text(run, "chair_lease_id"),
+          request.expectedChairGeneration,
+        );
+        if (revokedPredecessor.changes !== 1) {
+          throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "predecessor chair lease changed during takeover");
+        }
+        const retiredMembership = this.#database.prepare(`
+          UPDATE project_session_memberships
+             SET state='abandoned', abandoned_reason='chair-takeover',
+                 revision=revision+1, updated_at=?
+           WHERE project_session_id=? AND coordination_run_id=?
+             AND member_kind='lease' AND member_id=? AND required=1 AND state='active'
+        `).run(
+          this.#clock(),
+          request.projectSessionId,
+          request.runId,
+          text(run, "chair_lease_id"),
+        );
+        if (retiredMembership.changes !== 1) {
+          throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "predecessor chair membership was not active");
+        }
+        this.#database.prepare(`
+          INSERT INTO project_session_memberships(
+            project_session_id, coordination_run_id, member_kind, member_id,
+            required, state, revision, abandoned_reason, created_at, updated_at
+          ) VALUES (?, ?, 'lease', ?, 1, 'active', 1, NULL, ?, ?)
+        `).run(
+          request.projectSessionId,
+          request.runId,
+          nextLeaseId,
+          this.#clock(),
           this.#clock(),
         );
         return {
@@ -605,6 +860,674 @@ export class ProjectSessionStore {
       return parseProjectSession({ ...base, state, terminalPath: JSON.parse(terminal) });
     }
     return parseProjectSession({ ...base, state });
+  }
+
+  #assertFinalAcceptance(
+    context: AuthenticatedOperatorContext,
+    projectId: string,
+    projectSessionId: string,
+    acceptanceRef: string,
+    awaitingRuns: readonly Row[],
+  ): void {
+    const candidates = this.#database.prepare(`
+      SELECT gate.*
+        FROM scoped_gates gate
+        JOIN runs run
+          ON run.project_session_id=gate.project_session_id
+         AND run.run_id=gate.coordination_run_id
+       WHERE gate.project_session_id=?
+         AND run.lifecycle_state='awaiting_acceptance'
+         AND gate.scope_kind='run'
+         AND gate.status='approved'
+         AND gate.human_required=1
+         AND EXISTS (
+           SELECT 1 FROM scoped_gate_operations operation
+            WHERE operation.gate_id=gate.gate_id
+              AND operation.operation_id='fabric.v1.project-session.close'
+         )
+       ORDER BY gate.coordination_run_id, gate.gate_id
+    `).all(projectSessionId) as Row[];
+    const expectedRunIds = awaitingRuns.map((run) => text(run, "run_id")).sort();
+    if (candidates.length !== expectedRunIds.length || candidates.length === 0) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "final acceptance requires exactly one approved human gate per awaiting run",
+      );
+    }
+    const bindings: FinalAcceptanceGateBinding[] = [];
+    for (const [index, stored] of candidates.entries()) {
+      const gate = this.#acceptanceGateFromRow(stored);
+      if (gate.coordinationRunId !== expectedRunIds[index]) {
+        throw new ProjectFabricCoreError(
+          "CAPABILITY_FORBIDDEN",
+          "final acceptance gate set does not cover the exact awaiting runs",
+        );
+      }
+      if (
+        gate.expectedApproverRef !== "authenticated-human-operator" &&
+        gate.expectedApproverRef !== context.operatorId
+      ) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "final acceptance gate has another approver");
+      }
+      if (
+        gate.resolution.operatorId !== context.operatorId ||
+        !gate.enforcementPoints.includes("operation") ||
+        !gate.blockedOperationIds.includes("fabric.v1.project-session.close")
+      ) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "final acceptance gate authority does not match close");
+      }
+      const runRevision = row(this.#database.prepare(`
+        SELECT dependency_revision FROM runs
+         WHERE project_session_id=? AND run_id=? AND lifecycle_state='awaiting_acceptance'
+      `).get(projectSessionId, gate.coordinationRunId), "final acceptance run binding");
+      if (integer(runRevision, "dependency_revision") !== gate.dependencyRevision) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "final acceptance dependency binding changed");
+      }
+      if (gate.resolution.kind === "typed-console") {
+        const commandValue = this.#database.prepare(`
+          SELECT provenance_json FROM operator_commands
+           WHERE operator_id=? AND command_id=? AND project_id=? AND project_session_id=?
+             AND operation='decide' AND status='committed'
+        `).get(
+          context.operatorId,
+          gate.resolution.confirmationCommandId,
+          projectId,
+          projectSessionId,
+        );
+        if (commandValue === undefined) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed final acceptance confirmation was not persisted");
+        }
+        const provenance: unknown = JSON.parse(text(row(commandValue, "final acceptance command"), "provenance_json"));
+        if (
+          typeof provenance !== "object" || provenance === null || Array.isArray(provenance) ||
+          Reflect.get(provenance, "kind") !== "console-direct-input"
+        ) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "final acceptance was not direct Console input");
+        }
+      } else {
+        const attestationValue = this.#database.prepare(`
+          SELECT operator_id, project_id, project_session_id, coordination_run_id,
+                 gate_id, expected_gate_revision, integration_id,
+                 integration_generation, interpreted_decision
+            FROM operator_input_attestations WHERE attestation_id=?
+        `).get(gate.resolution.attestationId);
+        if (attestationValue === undefined) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "native final acceptance attestation was not persisted");
+        }
+        const attestation = row(attestationValue, "final acceptance attestation");
+        if (
+          text(attestation, "operator_id") !== context.operatorId ||
+          text(attestation, "project_id") !== projectId ||
+          text(attestation, "project_session_id") !== projectSessionId ||
+          text(attestation, "coordination_run_id") !== gate.coordinationRunId ||
+          text(attestation, "gate_id") !== gate.gateId ||
+          integer(attestation, "expected_gate_revision") + 1 !== gate.revision ||
+          text(attestation, "integration_id") !== gate.resolution.integrationId ||
+          integer(attestation, "integration_generation") !== gate.resolution.integrationGeneration ||
+          text(attestation, "interpreted_decision") !== "approve"
+        ) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "native final acceptance binding changed");
+        }
+      }
+      bindings.push({
+        gateId: gate.gateId,
+        coordinationRunId: gate.coordinationRunId,
+        gateRevision: gate.revision,
+        status: "approved",
+        resolution: gate.resolution,
+        evidenceRefs: gate.evidenceRefs,
+      });
+    }
+    const authoritative = deriveFinalAcceptanceRef({
+      projectSessionId: projectSessionId as Parameters<typeof deriveFinalAcceptanceRef>[0]["projectSessionId"],
+      gates: bindings,
+    });
+    if (authoritative !== acceptanceRef) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "final acceptance reference is not authoritative");
+    }
+  }
+
+  #acceptanceGateFromRow(
+    stored: Row,
+  ): ScopedGate & { status: "approved"; resolution: HumanGateResolution } {
+    const affectedTaskIds = this.#database.prepare(`
+      SELECT task_id FROM scoped_gate_tasks WHERE gate_id=? ORDER BY task_id
+    `).all(text(stored, "gate_id")).map((value) => text(row(value, "gate task binding"), "task_id"));
+    const deadline = stored.deadline === null
+      ? undefined
+      : new Date(integer(stored, "deadline")).toISOString();
+    const defaultAction = nullableText(stored, "default_action");
+    const release = nullableText(stored, "release_binding_json");
+    const resolution = nullableText(stored, "resolution_json");
+    const gate = parseScopedGate({
+      gateId: text(stored, "gate_id"),
+      projectSessionId: text(stored, "project_session_id"),
+      coordinationRunId: text(stored, "coordination_run_id"),
+      scope: { kind: "run" },
+      affectedTaskIds,
+      dependencyRevision: integer(stored, "dependency_revision"),
+      blockedOperationIds: JSON.parse(text(stored, "blocked_operation_ids_json")),
+      enforcementPoints: JSON.parse(text(stored, "enforcement_points_json")),
+      question: text(stored, "question"),
+      reason: text(stored, "reason"),
+      options: JSON.parse(text(stored, "options_json")),
+      recommendation: text(stored, "recommendation"),
+      consequences: JSON.parse(text(stored, "consequences_json")),
+      evidenceRefs: JSON.parse(text(stored, "evidence_refs_json")),
+      revision: integer(stored, "revision"),
+      createdByRef: text(stored, "created_by_ref"),
+      expectedApproverRef: text(stored, "expected_approver_ref"),
+      ...(deadline === undefined ? {} : { deadline }),
+      ...(defaultAction === null ? {} : { default: defaultAction }),
+      status: text(stored, "status"),
+      ...(resolution === null ? {} : { resolution: JSON.parse(resolution) }),
+      ...(release === null ? {} : { releaseBinding: JSON.parse(release) }),
+    });
+    if (gate.status !== "approved") {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "final acceptance gate is not approved");
+    }
+    return gate as ScopedGate & { status: "approved"; resolution: HumanGateResolution };
+  }
+
+  #prepareAwaitingAcceptance(
+    context: AuthenticatedOperatorContext,
+    projectSessionId: string,
+    current: { projectId: string; revision: number; generation: number },
+    closureEvidence: { path: string; digest: string },
+  ): boolean {
+    const receiptValue = this.#database.prepare(`
+      SELECT * FROM operator_lifecycle_receipts
+       WHERE relative_path=? AND sha256=? AND kind='project-session-drain'
+    `).get(closureEvidence.path, closureEvidence.digest);
+    if (receiptValue === undefined) {
+      throw new ProjectFabricCoreError("NOT_FOUND", "project-session drain receipt was not found");
+    }
+    const receipt = row(receiptValue, "project-session drain receipt");
+    if (
+      text(receipt, "operator_id") !== context.operatorId ||
+      text(receipt, "project_id") !== current.projectId ||
+      text(receipt, "authority_session_id") !== projectSessionId ||
+      text(receipt, "project_session_id") !== projectSessionId ||
+      integer(receipt, "session_revision") !== current.revision ||
+      integer(receipt, "session_generation") !== current.generation ||
+      `sha256:${sha256(text(receipt, "receipt_json"))}` !== closureEvidence.digest
+    ) {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "closure evidence does not bind the current drained project session",
+      );
+    }
+    const runs = this.#database.prepare(`
+      SELECT run_id, revision, chair_lease_id, chair_generation, lifecycle_state
+        FROM runs WHERE project_session_id=? ORDER BY run_id
+    `).all(projectSessionId) as Row[];
+    if (runs.length === 0) {
+      throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "acceptance requires a coordination run");
+    }
+    for (const run of runs) {
+      const runId = text(run, "run_id");
+      const lifecycle = text(run, "lifecycle_state");
+      if (!["quiescing", "awaiting_acceptance", "closed", "cancelled", "launch_failed"].includes(lifecycle)) {
+        throw new ProjectFabricCoreError(
+          "LIFECYCLE_PRECONDITION_FAILED",
+          "coordination run is neither acceptance-ready nor terminal history",
+        );
+      }
+      const leaseValue = this.#database.prepare(`
+        SELECT status FROM run_chair_leases
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+      `).get(
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        integer(run, "chair_generation"),
+      );
+      if (leaseValue === undefined) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "current chair lease is unavailable for terminal reconciliation");
+      }
+      const leaseStatus = text(row(leaseValue, "coordination run chair lease"), "status");
+      if (lifecycle === "quiescing" && !["active", "frozen"].includes(leaseStatus)) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "quiescing run chair lease is not current");
+      }
+      if (lifecycle === "awaiting_acceptance" && leaseStatus !== "frozen") {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "acceptance run chair lease is not frozen");
+      }
+      if (["closed", "cancelled", "launch_failed"].includes(lifecycle) && ["active", "frozen"].includes(leaseStatus)) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "historical run retains a live chair lease");
+      }
+      const expectedMembershipState = lifecycle === "quiescing"
+        ? "active"
+        : lifecycle === "awaiting_acceptance" || lifecycle === "closed"
+          ? "reconciled"
+          : "abandoned";
+      for (const [kind, memberId] of [
+        ["coordination-run", runId],
+        ["lease", text(run, "chair_lease_id")],
+      ] as const) {
+        const membership = this.#database.prepare(`
+          SELECT state, abandoned_reason FROM project_session_memberships
+           WHERE project_session_id=? AND coordination_run_id=?
+             AND member_kind=? AND member_id=? AND required=1
+        `).get(projectSessionId, runId, kind, memberId);
+        if (membership === undefined) {
+          throw new ProjectFabricCoreError("RECOVERY_REQUIRED", `required ${kind} membership was not found`);
+        }
+        const value = row(membership, `${kind} membership`);
+        if (
+          text(value, "state") !== expectedMembershipState ||
+          (expectedMembershipState === "abandoned" && nullableText(value, "abandoned_reason") === null)
+        ) {
+          throw new ProjectFabricCoreError(
+            "RECOVERY_REQUIRED",
+            `required ${kind} membership has the wrong terminal disposition`,
+          );
+        }
+      }
+      if (lifecycle === "quiescing" && this.#database.prepare(`
+        SELECT 1 FROM run_chair_leases
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+           AND status IN ('active','frozen')
+      `).get(
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        integer(run, "chair_generation"),
+      ) === undefined) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "current chair lease is unavailable for terminal reconciliation");
+      }
+    }
+    const blockers: ReadonlyArray<readonly [string, string]> = [
+      ["task", `SELECT 1 FROM tasks task JOIN runs run ON run.run_id=task.run_id
+        WHERE run.project_session_id=? AND task.state NOT IN ('complete','cancelled','degraded') LIMIT 1`],
+      ["write lease", `SELECT 1 FROM leases lease JOIN runs run ON run.run_id=lease.run_id
+        WHERE run.project_session_id=? AND lease.status IN ('active','quarantined') LIMIT 1`],
+      ["task-owner lease", `SELECT 1 FROM task_owner_leases
+        WHERE project_session_id=? AND status IN ('active','frozen') LIMIT 1`],
+      ["provider action", `SELECT 1 FROM provider_actions action JOIN runs run ON run.run_id=action.run_id
+        WHERE run.project_session_id=? AND action.status IN ('prepared','dispatched','accepted','ambiguous','quarantined') LIMIT 1`],
+      ["required result", `SELECT 1 FROM result_deliveries
+        WHERE project_session_id=? AND required=1 AND state NOT IN ('consumed','abandoned') LIMIT 1`],
+      ["gate", `SELECT 1 FROM scoped_gates
+        WHERE project_session_id=? AND status IN ('pending','deferred') LIMIT 1`],
+      ["barrier", `SELECT 1 FROM barriers barrier JOIN runs run ON run.run_id=barrier.run_id
+        WHERE run.project_session_id=? AND barrier.state<>'closed' LIMIT 1`],
+      ["artifact obligation", `SELECT 1 FROM task_expected_artifacts expected
+        JOIN runs run ON run.run_id=expected.run_id
+        JOIN tasks task ON task.run_id=expected.run_id AND task.task_id=expected.task_id
+        WHERE run.project_session_id=? AND task.state NOT IN ('cancelled','degraded') AND NOT EXISTS (
+          SELECT 1 FROM artifacts artifact WHERE artifact.run_id=expected.run_id
+            AND artifact.task_id=expected.task_id AND artifact.relative_path=expected.relative_path
+        ) LIMIT 1`],
+      ["agent context", `SELECT 1 FROM agents agent JOIN runs run ON run.run_id=agent.run_id
+        WHERE run.project_session_id=? AND agent.lifecycle='context-unreconciled' LIMIT 1`],
+    ];
+    for (const [label, sql] of blockers) {
+      if (this.#database.prepare(sql).get(projectSessionId) !== undefined) {
+        throw new ProjectFabricCoreError(
+          "BARRIER_PRECONDITION_FAILED",
+          `${label} remains unresolved before project acceptance`,
+        );
+      }
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM project_session_memberships membership
+       WHERE membership.project_session_id=? AND membership.required=1 AND membership.state='active'
+         AND NOT (
+           membership.member_kind='coordination-run' AND membership.member_id=membership.coordination_run_id
+         )
+         AND NOT (
+           membership.member_kind='lease' AND EXISTS (
+             SELECT 1 FROM runs run
+              WHERE run.project_session_id=membership.project_session_id
+                AND run.run_id=membership.coordination_run_id
+                AND run.chair_lease_id=membership.member_id
+           )
+         )
+       LIMIT 1
+    `).get(projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "required project-session membership remains active");
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM operator_effect_custody
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
+       LIMIT 1
+    `).get(projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unresolved operator-effect custody remains active");
+    }
+
+    const now = this.#clock();
+    for (const run of runs) {
+      if (text(run, "lifecycle_state") !== "quiescing") continue;
+      const runId = text(run, "run_id");
+      const changed = this.#database.prepare(`
+        UPDATE runs SET lifecycle_state='awaiting_acceptance', revision=revision+1
+         WHERE run_id=? AND revision=? AND lifecycle_state='quiescing'
+      `).run(runId, integer(run, "revision"));
+      if (changed.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "coordination run changed during acceptance preparation");
+      }
+      const frozen = this.#database.prepare(`
+        UPDATE run_chair_leases SET status='frozen', updated_at=?
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+           AND status IN ('active','frozen')
+      `).run(
+        now,
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        integer(run, "chair_generation"),
+      );
+      if (frozen.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "chair lease changed during acceptance preparation");
+      }
+    }
+    this.#fault("session:acceptance:after-runs");
+    const membership = this.#database.prepare(`
+      UPDATE project_session_memberships
+         SET state='reconciled', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND required=1 AND state='active' AND (
+         (member_kind='coordination-run' AND member_id=coordination_run_id) OR
+         (member_kind='lease' AND EXISTS (
+           SELECT 1 FROM runs run
+            WHERE run.project_session_id=project_session_memberships.project_session_id
+              AND run.run_id=project_session_memberships.coordination_run_id
+              AND run.chair_lease_id=project_session_memberships.member_id
+              AND run.lifecycle_state='awaiting_acceptance'
+         ))
+       )
+    `).run(now, projectSessionId);
+    this.#fault("session:acceptance:after-memberships");
+    this.#assertClosure(projectSessionId);
+    return membership.changes > 0;
+  }
+
+  #reopenFromAcceptance(
+    projectSessionId: string,
+    commandId: string,
+    sourceState: "quiescing" | "awaiting_acceptance",
+  ): boolean {
+    const runs = this.#database.prepare(`
+      SELECT run_id, revision, chair_lease_id, chair_generation, lifecycle_state
+        FROM runs WHERE project_session_id=? ORDER BY run_id
+    `).all(projectSessionId) as Row[];
+    if (runs.length === 0) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "project session has no coordination run to reopen");
+    }
+    const now = this.#clock();
+    const sourceRuns = runs.filter((run) => text(run, "lifecycle_state") === sourceState);
+    if (sourceRuns.length === 0) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "project session has no acceptance-cycle run to resume");
+    }
+    for (const run of runs) {
+      if (![sourceState, "closed", "cancelled", "launch_failed"].includes(text(run, "lifecycle_state"))) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "project session has a nonterminal run outside acceptance");
+      }
+    }
+    const superseded = supersedeFinalAcceptanceGates({
+      database: this.#database,
+      projectSessionId,
+      cause: { kind: "operator-command", ref: commandId },
+      reason: "project session exited its acceptance cycle",
+      now,
+    });
+    this.#fault("session:reopen:after-gates");
+    for (const run of runs) {
+      if (text(run, "lifecycle_state") !== sourceState) continue;
+      const runId = text(run, "run_id");
+      const changed = this.#database.prepare(`
+        UPDATE runs SET lifecycle_state='active', revision=revision+1
+         WHERE run_id=? AND revision=? AND lifecycle_state=?
+      `).run(runId, integer(run, "revision"), sourceState);
+      if (changed.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "coordination run changed during project reopen");
+      }
+      const activated = this.#database.prepare(`
+        UPDATE run_chair_leases SET status='active', updated_at=?
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+           AND status IN ('active','frozen')
+      `).run(
+        now,
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        integer(run, "chair_generation"),
+      );
+      if (activated.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "chair lease changed during project reopen");
+      }
+    }
+    this.#fault("session:reopen:after-runs");
+    const memberships = this.#database.prepare(`
+      UPDATE project_session_memberships
+         SET state='active', revision=revision+1, updated_at=?
+       WHERE project_session_id=? AND required=1 AND state='reconciled' AND (
+         (member_kind='coordination-run' AND member_id=coordination_run_id) OR
+         (member_kind='lease' AND EXISTS (
+           SELECT 1 FROM runs run
+            WHERE run.project_session_id=project_session_memberships.project_session_id
+              AND run.run_id=project_session_memberships.coordination_run_id
+              AND run.chair_lease_id=project_session_memberships.member_id
+              AND run.lifecycle_state='active'
+         ))
+       )
+    `).run(now, projectSessionId);
+    this.#fault("session:reopen:after-memberships");
+    return memberships.changes + superseded.membershipChanges + superseded.gateChanges > 0;
+  }
+
+  #divertFromAcceptanceCycle(
+    projectSessionId: string,
+    commandId: string,
+    sourceState: "quiescing" | "awaiting_acceptance",
+    targetState: ProjectSessionState,
+  ): boolean {
+    const now = this.#clock();
+    const superseded = supersedeFinalAcceptanceGates({
+      database: this.#database,
+      projectSessionId,
+      cause: { kind: "operator-command", ref: commandId },
+      reason: `project session diverted from ${sourceState} to ${targetState}`,
+      now,
+    });
+    const runs = this.#database.prepare(`
+      SELECT run_id, revision, chair_lease_id, chair_generation, lifecycle_state
+        FROM runs WHERE project_session_id=? ORDER BY run_id
+    `).all(projectSessionId) as Row[];
+    const affectedRuns = runs.filter((run) => text(run, "lifecycle_state") === sourceState);
+    if (affectedRuns.length === 0) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "project session has no acceptance-cycle run to divert");
+    }
+    for (const run of runs) {
+      if (![sourceState, "closed", "cancelled", "launch_failed"].includes(text(run, "lifecycle_state"))) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "project session has an incompatible run during diversion");
+      }
+    }
+    let membershipChanges = superseded.membershipChanges + superseded.gateChanges;
+    for (const run of affectedRuns) {
+      const runId = text(run, "run_id");
+      const changed = this.#database.prepare(`
+        UPDATE runs SET lifecycle_state=?, revision=revision+1
+         WHERE run_id=? AND revision=? AND lifecycle_state=?
+      `).run(targetState, runId, integer(run, "revision"), sourceState);
+      if (changed.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "coordination run changed during acceptance diversion");
+      }
+      const leaseStatus = targetState === "cancelled" ? "revoked" : "frozen";
+      const frozen = this.#database.prepare(`
+        UPDATE run_chair_leases SET status=?, updated_at=?
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+           AND status IN ('active','frozen')
+      `).run(
+        leaseStatus,
+        now,
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        integer(run, "chair_generation"),
+      );
+      if (frozen.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "chair lease changed during acceptance diversion");
+      }
+      membershipChanges += this.#syncAcceptanceRunMemberships(
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        sourceState,
+        now,
+      );
+    }
+    this.#fault("session:quiesce-exit:after-runs");
+    return membershipChanges > 0;
+  }
+
+  #syncAcceptanceRunMemberships(
+    projectSessionId: string,
+    runId: string,
+    chairLeaseId: string,
+    sourceState: "quiescing" | "awaiting_acceptance",
+    now: number,
+  ): number {
+    const expectedSourceState = sourceState === "quiescing" ? "active" : "reconciled";
+    let changes = 0;
+    for (const [kind, memberId] of [
+      ["coordination-run", runId],
+      ["lease", chairLeaseId],
+    ] as const) {
+      const membership = row(this.#database.prepare(`
+        SELECT state, revision FROM project_session_memberships
+         WHERE project_session_id=? AND coordination_run_id=?
+           AND member_kind=? AND member_id=? AND required=1
+      `).get(projectSessionId, runId, kind, memberId), `${kind} membership`);
+      if (text(membership, "state") !== expectedSourceState) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", `${kind} membership is outside the acceptance cycle`);
+      }
+      const disposition = membershipSourceDisposition(
+        this.#database,
+        projectSessionId,
+        runId,
+        kind,
+        memberId,
+      );
+      if (disposition.state === expectedSourceState) continue;
+      const changed = this.#database.prepare(`
+        UPDATE project_session_memberships
+           SET state=?, abandoned_reason=?, revision=revision+1, updated_at=?
+         WHERE project_session_id=? AND coordination_run_id=?
+           AND member_kind=? AND member_id=? AND required=1 AND revision=? AND state=?
+      `).run(
+        disposition.state,
+        disposition.state === "abandoned" ? disposition.reason : null,
+        now,
+        projectSessionId,
+        runId,
+        kind,
+        memberId,
+        integer(membership, "revision"),
+        expectedSourceState,
+      );
+      if (changed.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_REVISION", `${kind} membership changed during acceptance diversion`);
+      }
+      changes += 1;
+    }
+    return changes;
+  }
+
+  #transitionCoupledRuns(
+    projectSessionId: string,
+    sourceState: ProjectSessionState,
+    targetState: ProjectSessionState,
+  ): void {
+    if (this.#database.prepare(`
+      SELECT 1 FROM launched_chair_bridge_state
+       WHERE project_session_id=? AND state='lost'
+       LIMIT 1
+    `).get(projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError(
+        "RECOVERY_REQUIRED",
+        "lost chair bridge lifecycle is owned by chair-recovery custody",
+      );
+    }
+    const runs = this.#database.prepare(`
+      SELECT run_id, revision, chair_lease_id, chair_generation, lifecycle_state
+        FROM runs WHERE project_session_id=? ORDER BY run_id
+    `).all(projectSessionId) as Row[];
+    const sourceRunStates = sourceState === "visibility_degraded"
+      ? new Set<ProjectSessionState>(["visibility_degraded", "active"])
+      : new Set<ProjectSessionState>([sourceState]);
+    const affected = runs.filter((run) => sourceRunStates.has(text(run, "lifecycle_state") as ProjectSessionState));
+    if (affected.length === 0) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "exceptional session has no run owned by its state");
+    }
+    const allowedUnaffected = new Set(["active", "closed", "cancelled", "launch_failed"]);
+    for (const run of runs) {
+      const lifecycle = text(run, "lifecycle_state");
+      if (!sourceRunStates.has(lifecycle as ProjectSessionState) && !allowedUnaffected.has(lifecycle)) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "exceptional session contains an incompatible run state");
+      }
+    }
+    const now = this.#clock();
+    for (const run of affected) {
+      const runId = text(run, "run_id");
+      if ((targetState === "active" || targetState === "visibility_degraded") && this.#database.prepare(`
+        SELECT 1 FROM capabilities capability JOIN runs current ON current.run_id=capability.run_id
+         WHERE capability.run_id=? AND capability.agent_id=current.chair_agent_id
+           AND capability.revoked_at IS NULL AND capability.expires_at>?
+         LIMIT 1
+      `).get(runId, now) === undefined) {
+        throw new ProjectFabricCoreError(
+          "RECOVERY_REQUIRED",
+          "exceptional run has no live current-chair capability",
+        );
+      }
+      if ((targetState === "active" || targetState === "visibility_degraded") && this.#database.prepare(`
+        SELECT 1
+          FROM project_session_memberships run_membership
+          JOIN project_session_memberships lease_membership
+            ON lease_membership.project_session_id=run_membership.project_session_id
+           AND lease_membership.coordination_run_id=run_membership.coordination_run_id
+         WHERE run_membership.project_session_id=?
+           AND run_membership.coordination_run_id=?
+           AND run_membership.member_kind='coordination-run'
+           AND run_membership.member_id=?
+           AND run_membership.required=1 AND run_membership.state='active'
+           AND lease_membership.member_kind='lease'
+           AND lease_membership.member_id=?
+           AND lease_membership.required=1 AND lease_membership.state='active'
+         LIMIT 1
+      `).get(projectSessionId, runId, runId, text(run, "chair_lease_id")) === undefined) {
+        throw new ProjectFabricCoreError(
+          "RECOVERY_REQUIRED",
+          "exceptional run is missing active run or current-chair membership",
+        );
+      }
+      const changed = this.#database.prepare(`
+        UPDATE runs SET lifecycle_state=?, revision=revision+1
+         WHERE run_id=? AND revision=? AND lifecycle_state=?
+      `).run(targetState, runId, integer(run, "revision"), text(run, "lifecycle_state"));
+      if (changed.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "exceptional coordination run changed");
+      }
+      const leaseStatus = targetState === "active" || targetState === "visibility_degraded"
+        ? "active"
+        : "frozen";
+      const lease = this.#database.prepare(`
+        UPDATE run_chair_leases SET status=?, updated_at=?
+         WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=?
+           AND status IN ('active','frozen')
+      `).run(
+        leaseStatus,
+        now,
+        projectSessionId,
+        runId,
+        text(run, "chair_lease_id"),
+        integer(run, "chair_generation"),
+      );
+      if (lease.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_LEASE_GENERATION", "exceptional chair lease changed");
+      }
+    }
+    this.#fault("session:coupled-transition:after-runs");
   }
 
   #assertClosure(projectSessionId: string): void {
@@ -717,68 +1640,37 @@ export class ProjectSessionStore {
     runId: string,
     member: ProjectSessionMember,
   ): void {
-    let exists: unknown;
-    switch (member.kind) {
-      case "coordination-run":
-        exists = this.#database.prepare(`
-          SELECT 1 FROM runs WHERE project_session_id=? AND run_id=?
-        `).get(projectSessionId, member.runId);
-        break;
-      case "workstream":
-        exists = this.#database.prepare(`
-          SELECT 1 FROM workstreams
-           WHERE project_session_id=? AND coordination_run_id=? AND workstream_id=?
-        `).get(projectSessionId, runId, member.workstreamId);
-        break;
-      case "task":
-        exists = this.#database.prepare("SELECT 1 FROM tasks WHERE run_id=? AND task_id=?")
-          .get(runId, member.taskId);
-        break;
-      case "lease":
-        exists = this.#database.prepare("SELECT 1 FROM leases WHERE run_id=? AND lease_id=?")
-          .get(runId, member.leaseId);
-        break;
-      case "provider-action":
-        exists = this.#database.prepare("SELECT 1 FROM provider_actions WHERE run_id=? AND action_id=?")
-          .get(runId, member.providerActionId);
-        break;
-      case "required-message":
-        exists = this.#database.prepare("SELECT 1 FROM messages WHERE run_id=? AND message_id=?")
-          .get(runId, member.messageId);
-        break;
-      case "artifact-obligation":
-        exists = this.#database.prepare("SELECT 1 FROM artifacts WHERE run_id=? AND artifact_id=?")
-          .get(runId, member.artifactObligationId);
-        break;
-      case "gate":
-        exists = this.#database.prepare(`
-          SELECT 1 FROM scoped_gates
-           WHERE project_session_id=? AND coordination_run_id=? AND gate_id=?
-        `).get(projectSessionId, runId, member.gateId);
-        break;
-      case "scoped-barrier":
-        exists = this.#database.prepare(`
-          SELECT 1
-            FROM task_request_barriers b
-            JOIN task_requests r ON r.request_id=b.request_id
-           WHERE r.project_session_id=? AND r.run_id=? AND b.barrier_id=?
-          UNION ALL
-          SELECT 1
-            FROM scoped_gate_barriers b
-            JOIN scoped_gates g ON g.gate_id=b.gate_id
-           WHERE g.project_session_id=? AND g.coordination_run_id=? AND b.barrier_id=?
-          LIMIT 1
-        `).get(
-          projectSessionId,
-          runId,
-          member.barrierId,
-          projectSessionId,
-          runId,
-          member.barrierId,
-        );
-        break;
+    try {
+      membershipSourceDisposition(this.#database, projectSessionId, runId, member.kind, this.#memberId(member));
+    } catch (error: unknown) {
+      if (
+        (error instanceof ProjectFabricCoreError && error.code === "NOT_FOUND") ||
+        (error instanceof Error && !(error instanceof ProjectFabricCoreError) && / was not found$/u.test(error.message))
+      ) {
+        throw new ProjectFabricCoreError("NOT_FOUND", `${member.kind} membership target was not found`);
+      }
+      throw error;
     }
-    if (exists === undefined) throw new ProjectFabricCoreError("NOT_FOUND", `${member.kind} membership target was not found`);
+  }
+
+  #assertMemberDisposition(
+    projectSessionId: string,
+    runId: string,
+    member: ProjectSessionMember,
+  ): void {
+    const source = membershipSourceDisposition(
+      this.#database,
+      projectSessionId,
+      runId,
+      member.kind,
+      this.#memberId(member),
+    );
+    const expected = member.state === "terminal" ? "reconciled" : member.state;
+    if (source.state === expected) return;
+    throw new ProjectFabricCoreError(
+      "LIFECYCLE_PRECONDITION_FAILED",
+      `${member.kind} membership disposition does not match its durable source state`,
+    );
   }
 
   #memberId(member: ProjectSessionMember): string {

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   parseArtifactRef,
   parseIdentifier,
@@ -6,11 +8,13 @@ import {
   strictRecord,
   type ArtifactRef,
   type CoordinationRunId,
+  type GateId,
   type OperatorId,
   type ProjectId,
   type ProjectSessionId,
   type Sha256Digest,
 } from "./primitives.js";
+import type { HumanGateResolution } from "./gates.js";
 import type { OperatorMutationContext } from "./operator.js";
 
 export const PROJECT_SESSION_STATES = [
@@ -41,6 +45,55 @@ export type ProjectSessionTerminalPath =
   | { kind: "accepted"; acceptanceRef: Sha256Digest }
   | { kind: "cancelled"; reason: string }
   | { kind: "failed"; reason: string; failureRef: Sha256Digest };
+
+export type FinalAcceptanceGateBinding = {
+  gateId: GateId;
+  coordinationRunId: CoordinationRunId;
+  gateRevision: number;
+  status: "approved";
+  resolution: HumanGateResolution;
+  evidenceRefs: readonly ArtifactRef[];
+};
+
+export type FinalAcceptanceReceipt = {
+  projectSessionId: ProjectSessionId;
+  gates: readonly FinalAcceptanceGateBinding[];
+};
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  throw new TypeError("final acceptance binding is not JSON-compatible");
+}
+
+export function deriveFinalAcceptanceRef(receipt: FinalAcceptanceReceipt): Sha256Digest {
+  if (receipt.gates.length === 0) throw new TypeError("final acceptance receipt must contain at least one gate");
+  let previousRun = "";
+  let previousKey = "";
+  for (const gate of receipt.gates) {
+    const key = `${gate.coordinationRunId}\0${gate.gateId}`;
+    if (previousKey !== "" && key <= previousKey) {
+      throw new TypeError("final acceptance gates must be strictly sorted by run and gate ID");
+    }
+    if (gate.coordinationRunId === previousRun) {
+      throw new TypeError("final acceptance receipt must contain exactly one gate per run");
+    }
+    previousRun = gate.coordinationRunId;
+    previousKey = key;
+  }
+  const payload = {
+    kind: "project-session-final-acceptance",
+    projectSessionId: receipt.projectSessionId,
+    gates: receipt.gates,
+  };
+  return `sha256:${createHash("sha256").update(canonicalJson(payload)).digest("hex")}` as Sha256Digest;
+}
 
 type ProjectSessionBase = {
   projectSessionId: ProjectSessionId;
@@ -113,6 +166,7 @@ export type ProjectSessionTransitionRequest = {
           | "launching"
           | "launch_failed"
           | "launch_ambiguous"
+          | "quiescing"
         >;
         reason: string;
       }

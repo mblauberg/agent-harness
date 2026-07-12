@@ -12029,6 +12029,84 @@
                     "$ref": "#/$defs/generated_1"
                   }
                 }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "cause",
+                  "reason",
+                  "decidedAt"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "system-supersession"
+                  },
+                  "cause": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "ref"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "operator-command"
+                          },
+                          "ref": {
+                            "$ref": "#/$defs/generated_5"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "ref"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "chair-bridge-loss"
+                          },
+                          "ref": {
+                            "$ref": "#/$defs/generated_5"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "ref"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "system-recovery"
+                          },
+                          "ref": {
+                            "$ref": "#/$defs/generated_5"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 4096
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
               }
             ]
           },
@@ -12130,7 +12208,7 @@
         }
       },
       "inputCodecDigest": "sha256:973f0bcb56d6ad651e0cebc8e3c6806717057f6858d21797e260675fc44153c9",
-      "outputCodecDigest": "sha256:32d143b94b062880b03ba675e7ae97905cc7e72789206a9efbc2969e0475c9e7"
+      "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {
       "operation": "fabric.v1.subtree-barrier.close",

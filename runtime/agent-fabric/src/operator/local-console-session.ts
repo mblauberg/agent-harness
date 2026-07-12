@@ -5,6 +5,7 @@ import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 
 import {
+  GATE_SYSTEM_SUPERSESSION_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   NdjsonRpcTransport,
   ProtocolRemoteError,
@@ -66,6 +67,7 @@ export const STRICT_V1_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.fr
 ] as const satisfies readonly ProtocolFeature[]);
 const OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  GATE_SYSTEM_SUPERSESSION_FEATURE,
   ...STRICT_V1_OPTIONAL_FEATURES,
 ]);
 

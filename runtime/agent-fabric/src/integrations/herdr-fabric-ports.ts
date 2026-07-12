@@ -16,6 +16,7 @@ import type {
 import type Database from "better-sqlite3";
 
 import { canonicalJson, integer, isRow, nullableText, row, text } from "../project-session/store-support.js";
+import { touchProjectSessionMembershipRevision } from "../project-session/membership-store.js";
 
 export type HerdrFabricPortsOptions = Readonly<{
   database: Database.Database;
@@ -248,11 +249,21 @@ export class HerdrFabricPorts {
         expectedRevision,
       );
       if (changed.changes !== 1) throw new TypeError("Herdr action completion compare-and-set failed");
-      this.#database.prepare(`
+      const binding = row(this.#database.prepare(`
+        SELECT project_session_id FROM project_session_memberships
+         WHERE member_kind='provider-action' AND member_id=? AND state='active'
+      `).get(parsedActionId), "Herdr action membership");
+      const membership = this.#database.prepare(`
         UPDATE project_session_memberships
            SET state='reconciled', revision=revision+1, updated_at=?
          WHERE member_kind='provider-action' AND member_id=? AND state='active'
       `).run(this.#clock(), parsedActionId);
+      touchProjectSessionMembershipRevision(
+        this.#database,
+        text(binding, "project_session_id"),
+        this.#clock(),
+        membership.changes,
+      );
       return requiredAction(this.#readAction(parsedActionId), parsedActionId);
     })();
   }
@@ -493,12 +504,18 @@ export class HerdrFabricPorts {
       canonicalJson(input.payload),
       this.#clock(),
     );
-    this.#database.prepare(`
+    const membership = this.#database.prepare(`
       INSERT INTO project_session_memberships(
         project_session_id, coordination_run_id, member_kind, member_id,
         required, state, revision, abandoned_reason, created_at, updated_at
       ) VALUES (?, ?, 'provider-action', ?, 1, 'active', 1, NULL, ?, ?)
     `).run(input.projectSessionId, input.runId, input.actionId, this.#clock(), this.#clock());
+    touchProjectSessionMembershipRevision(
+      this.#database,
+      input.projectSessionId,
+      this.#clock(),
+      membership.changes,
+    );
     return requiredAction(this.#readAction(input.actionId), input.actionId);
   }
 

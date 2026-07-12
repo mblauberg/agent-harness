@@ -31,7 +31,11 @@ describe("public protocol credential routing", () => {
             agentId: "chair",
             authority: {
               ...ROOT_AUTHORITY,
-              actions: [...ROOT_AUTHORITY.actions, FABRIC_OPERATIONS.scopedGateCheck],
+              actions: [
+                ...ROOT_AUTHORITY.actions,
+                FABRIC_OPERATIONS.scopedGateCheck,
+                FABRIC_OPERATIONS.scopedGateCreate,
+              ],
             },
           },
         });
@@ -78,10 +82,64 @@ describe("public protocol credential routing", () => {
             projectSessionId: principal.projectSessionId,
             coordinationRunId: principal.runId as never,
             dependencyRevision: 1,
-            enforcementPoint: "task-readiness",
-            taskId: "unknown_task" as never,
+            enforcementPoint: "operation",
+            operationId: FABRIC_OPERATIONS.getRunStatus,
+            operationTarget: { kind: "run" },
           },
         )).resolves.toEqual({ allowed: true, checkedGateRevisions: {} });
+        const database = new Database(databasePath);
+        const before = database.prepare(`
+          SELECT
+            (SELECT COUNT(*) FROM scoped_gates) AS gates,
+            (SELECT COUNT(*) FROM commands) AS commands
+        `).get();
+        database.prepare("UPDATE capabilities SET revoked_at=1 WHERE token_hash=?")
+          .run(context.credentialHash);
+        database.close();
+        await expect(fabric.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.getRunStatus,
+          { runId: "run_protocol_credential" },
+        )).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+        await expect(fabric.dispatchPublicProtocol(
+          context,
+          FABRIC_OPERATIONS.scopedGateCreate,
+          {
+            origin: "chair",
+            command: {
+              commandId: "revoked_gate_create",
+              agentId: "chair",
+              projectSessionId: principal.projectSessionId,
+              coordinationRunId: principal.runId,
+              principalGeneration: principal.principalGeneration,
+              chairLeaseId: `chair:${principal.runId}:1`,
+              chairLeaseGeneration: 1,
+              expectedRunRevision: 1,
+              expectedRevision: 1,
+            },
+            intent: {
+              projectSessionId: principal.projectSessionId,
+              coordinationRunId: principal.runId,
+              dedupeKey: "revoked-gate-create",
+              scope: { kind: "run" },
+              blockedOperationIds: [],
+              enforcementPoints: ["scoped-barrier"],
+              question: "Must not be created",
+              reason: "Capability was revoked after connection",
+              options: ["cancel"],
+              recommendation: "cancel",
+              consequences: [],
+              evidenceRefs: [],
+            },
+          } as never,
+        )).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+        const verify = new Database(databasePath, { readonly: true });
+        expect(verify.prepare(`
+          SELECT
+            (SELECT COUNT(*) FROM scoped_gates) AS gates,
+            (SELECT COUNT(*) FROM commands) AS commands
+        `).get()).toEqual(before);
+        verify.close();
       } finally {
         await fabric.close();
       }

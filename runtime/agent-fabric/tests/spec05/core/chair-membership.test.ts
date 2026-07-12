@@ -243,6 +243,39 @@ afterEach(async () => {
 });
 
 describe("chair project-session membership", () => {
+  it("recognises the exact current chair lease as a membership target", async () => {
+    const fixture = await setup();
+    const request = parseMembershipBindRequest({
+      origin: "chair",
+      command: {
+        commandId: "command_bind_chair_lease",
+        agentId: "chair_membership",
+        projectSessionId: fixture.projectSessionId,
+        coordinationRunId: "run_membership",
+        principalGeneration: 1,
+        chairLeaseId: fixture.chairLeaseId,
+        chairLeaseGeneration: 1,
+        expectedRunRevision: fixture.runRevision,
+        expectedRevision: 1,
+      },
+      projectSessionId: fixture.projectSessionId,
+      coordinationRunId: "run_membership",
+      expectedMembershipRevision: 1,
+      members: [{
+        kind: "lease",
+        membershipId: "membership_chair_lease",
+        coordinationRunId: "run_membership",
+        leaseId: fixture.chairLeaseId,
+        state: "active",
+      }],
+    });
+    await expect(fixture.fabric.dispatchPublicProtocol(
+      fixture.chairContext,
+      FABRIC_OPERATIONS.membershipBind,
+      request,
+    )).resolves.toMatchObject({ membershipRevision: 2 });
+  });
+
   it("binds every existing member kind through the authenticated chair public protocol", async () => {
     const fixture = await setup();
     const request = fullRequest(fixture);
@@ -269,6 +302,7 @@ describe("chair project-session membership", () => {
         { member_kind: "artifact-obligation", member_id: "artifact_membership", state: "reconciled" },
         { member_kind: "coordination-run", member_id: "run_membership", state: "active" },
         { member_kind: "gate", member_id: "gate_membership", state: "active" },
+        { member_kind: "lease", member_id: "chair:run_membership:1", state: "active" },
         { member_kind: "lease", member_id: "lease_membership", state: "active" },
         { member_kind: "provider-action", member_id: "action_membership", state: "active" },
         { member_kind: "required-message", member_id: "message_membership", state: "active" },
@@ -328,6 +362,62 @@ describe("chair project-session membership", () => {
       `).get()).toEqual({ count: 1 });
     } finally {
       database.close();
+    }
+  });
+
+  it("permits only source-valid settlement of an existing member while quiescing", async () => {
+    const fixture = await setup();
+    await fixture.fabric.dispatchPublicProtocol(
+      fixture.chairContext,
+      FABRIC_OPERATIONS.membershipBind,
+      fullRequest(fixture),
+    );
+    const writer = new Database(fixture.databasePath);
+    try {
+      writer.prepare("UPDATE tasks SET state='complete', revision=revision+1 WHERE run_id='run_membership' AND task_id='task_membership'").run();
+      writer.prepare("UPDATE project_sessions SET state='quiescing', revision=revision+1 WHERE project_session_id=?")
+        .run(fixture.projectSessionId);
+    } finally {
+      writer.close();
+    }
+    const settle = parseMembershipBindRequest({
+      origin: "chair",
+      command: {
+        commandId: "command_settle_during_quiesce",
+        agentId: "chair_membership",
+        projectSessionId: fixture.projectSessionId,
+        coordinationRunId: "run_membership",
+        principalGeneration: 1,
+        chairLeaseId: fixture.chairLeaseId,
+        chairLeaseGeneration: 1,
+        expectedRunRevision: fixture.runRevision,
+        expectedRevision: 2,
+      },
+      projectSessionId: fixture.projectSessionId,
+      coordinationRunId: "run_membership",
+      expectedMembershipRevision: 2,
+      members: [{
+        kind: "task",
+        membershipId: "membership_task",
+        coordinationRunId: "run_membership",
+        taskId: "task_membership",
+        state: "terminal",
+      }],
+    });
+    await expect(fixture.fabric.dispatchPublicProtocol(
+      fixture.chairContext,
+      FABRIC_OPERATIONS.membershipBind,
+      settle,
+    )).resolves.toMatchObject({ membershipRevision: 3 });
+
+    const reader = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(reader.prepare(`
+        SELECT state, abandoned_reason FROM project_session_memberships
+         WHERE project_session_id=? AND member_kind='task' AND member_id='task_membership'
+      `).get(fixture.projectSessionId)).toEqual({ state: "reconciled", abandoned_reason: null });
+    } finally {
+      reader.close();
     }
   });
 
@@ -431,6 +521,57 @@ describe("chair project-session membership", () => {
       FABRIC_OPERATIONS.membershipBind,
       stale,
     )).rejects.toMatchObject({ code: "STALE_REVISION" });
+  });
+
+  it("cannot falsify terminal membership while the source run or task is still active", async () => {
+    const fixture = await setup();
+    const base = fullRequest(fixture);
+    if (base.origin !== "chair") throw new Error("expected chair membership request");
+    for (const [suffix, member] of [
+      ["run", {
+        kind: "coordination-run",
+        membershipId: "membership_run_terminal_forgery",
+        coordinationRunId: "run_membership",
+        runId: "run_membership",
+        state: "terminal",
+      }],
+      ["task", {
+        kind: "task",
+        membershipId: "membership_task_abandon_forgery",
+        coordinationRunId: "run_membership",
+        taskId: "task_membership",
+        state: "abandoned",
+        reason: "caller assertion is not source truth",
+      }],
+    ] as const) {
+      const request = parseMembershipBindRequest({
+        ...base,
+        command: { ...base.command, commandId: `command_membership_forged_${suffix}` },
+        members: [member],
+      });
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.chairContext,
+        FABRIC_OPERATIONS.membershipBind,
+        request,
+      )).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    }
+
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(database.prepare(`
+        SELECT membership_revision FROM project_sessions WHERE project_session_id=?
+      `).get(fixture.projectSessionId)).toEqual({ membership_revision: 1 });
+      expect(database.prepare(`
+        SELECT member_kind, member_id, state
+          FROM project_session_memberships WHERE project_session_id=?
+          ORDER BY member_kind, member_id
+      `).all(fixture.projectSessionId)).toEqual([
+        { member_kind: "coordination-run", member_id: "run_membership", state: "active" },
+        { member_kind: "lease", member_id: "chair:run_membership:1", state: "active" },
+      ]);
+    } finally {
+      database.close();
+    }
   });
 
   it("does not add membership to a terminal cancelled project session", async () => {

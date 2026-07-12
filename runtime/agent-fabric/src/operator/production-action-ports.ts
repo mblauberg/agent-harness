@@ -18,7 +18,12 @@ import type {
 } from "./external-effect-service.js";
 import { ExternalEffectService } from "./external-effect-service.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
+import { supersedeFinalAcceptanceGates } from "../project-session/acceptance-cycle.js";
 import { canonicalJson, sha256 } from "../project-session/store-support.js";
+import {
+  touchProjectSessionMembershipRevision,
+  touchProjectSessionMembershipRevisionForRun,
+} from "../project-session/membership-store.js";
 import { readGlobalLiveness, type QuiesceToken } from "../daemon/global-liveness.js";
 
 type Row = Record<string, unknown>;
@@ -1362,11 +1367,17 @@ class ProductionOperatorActions {
       action.runId,
       action.sourceActionId,
     );
-    this.#database.prepare(`
+    const membership = this.#database.prepare(`
       UPDATE project_session_memberships
          SET state='reconciled', revision=revision+1, updated_at=?
        WHERE coordination_run_id=? AND member_kind='provider-action' AND member_id=? AND state='active'
     `).run(this.#clock(), action.runId, action.sourceActionId);
+    touchProjectSessionMembershipRevisionForRun(
+      this.#database,
+      action.runId,
+      this.#clock(),
+      membership.changes,
+    );
   }
 
   #quarantine(action: StoredControlAction): void {
@@ -1507,6 +1518,12 @@ class ProductionOperatorActions {
            WHERE coordination_run_id=? AND task_id=? AND state='paused'
         `).run(this.#clock(), task.runId, task.taskId);
       }
+      touchProjectSessionMembershipRevision(
+        this.#database,
+        target.projectSessionId,
+        this.#clock(),
+        cancelledTasks,
+      );
       outcome = { status: "committed", afterState: { lifecycleState: "cancelled", cancelledTasks } };
       this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, outcome);
     })();
@@ -1791,6 +1808,13 @@ class ProductionOperatorActions {
         integer(session, "generation") !== intent.expectedSessionGeneration ||
         text(session, "state") !== "quiescing"
       ) throw new ProjectFabricCoreError("STALE_GENERATION", "project stop authority changed");
+      const superseded = supersedeFinalAcceptanceGates({
+        database: this.#database,
+        projectSessionId: intent.projectSessionId,
+        cause: { kind: "operator-command", ref: request.commandId },
+        reason: "project session stopped from quiescing",
+        now: this.#clock(),
+      });
       const runs = this.#database.prepare(`
         SELECT run_id, revision FROM runs WHERE project_session_id=? AND lifecycle_state='quiescing'
       `).all(intent.projectSessionId) as Row[];
@@ -1823,7 +1847,7 @@ class ProductionOperatorActions {
          WHERE run_id IN (SELECT run_id FROM runs WHERE project_session_id=?)
       `).run(intent.projectSessionId);
       const stopReason = `operator stop ${request.commandId}`;
-      this.#database.prepare(`
+      const membership = this.#database.prepare(`
         UPDATE project_session_memberships
            SET state='abandoned', abandoned_reason=?, revision=revision+1, updated_at=?
          WHERE project_session_id=? AND state='active' AND (
@@ -1839,10 +1863,13 @@ class ProductionOperatorActions {
       const terminalPath = canonicalJson({ kind: "cancelled", reason: stopReason });
       const changed = this.#database.prepare(`
         UPDATE project_sessions
-           SET state='cancelled', terminal_path_json=?, revision=revision+1, updated_at=?
+           SET state='cancelled', terminal_path_json=?,
+               membership_revision=membership_revision+?,
+               revision=revision+1, updated_at=?
          WHERE project_session_id=? AND revision=? AND generation=? AND state='quiescing'
       `).run(
         terminalPath,
+        membership.changes + superseded.membershipChanges + superseded.gateChanges > 0 ? 1 : 0,
         this.#clock(),
         intent.projectSessionId,
         intent.expectedSessionRevision,

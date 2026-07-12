@@ -31,6 +31,13 @@ export const OPERATION_FEATURES = [
 
 export const RESULT_SHAPE_FEATURES = [
   "native-notification-projection.v1",
+  "gate-system-supersession.v1",
+] as const;
+
+export const GATE_SYSTEM_SUPERSESSION_FEATURE = "gate-system-supersession.v1" as const;
+
+export const AGENT_RESULT_SHAPE_FEATURES = [
+  GATE_SYSTEM_SUPERSESSION_FEATURE,
 ] as const;
 
 export const PROTOCOL_FEATURES = [

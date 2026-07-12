@@ -11,8 +11,11 @@ import {
   parseProjectSessionLaunchIntent,
   parseSha256Digest,
   type ChairBridgeRecoveryIntent,
+  type OperatorId,
   type OperatorActionCommitRequest,
   type OperatorActionPreviewRequest,
+  type ProjectId,
+  type ProjectSessionTransitionRequest,
   type Sha256Digest,
 } from "@local/agent-fabric-protocol";
 
@@ -39,6 +42,7 @@ import {
   parseLaunchAdapterContract,
   type LaunchCustodyIntent,
 } from "../../../src/project-session/launch-custody.ts";
+import { ProjectSessionStore } from "../../../src/project-session/store.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 
 const databases: Database.Database[] = [];
@@ -797,6 +801,76 @@ describe("launch custody", () => {
     expect(fixture.database.prepare(`
       SELECT reason FROM delivery_freezes WHERE run_id='run_launch_01' AND agent_id='chair_launch_01'
     `).get()).toMatchObject({ reason: expect.stringMatching(/^chair-bridge-loss:/u) });
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at
+      ) VALUES (
+        'operator_cap_recovery_transition', ?, 'operator_01', 'project_01',
+        'session_launch_01', 1, 1, 1, 'session', '["read","decide"]', ?, ?
+      )
+    `).run(sha256("recovery-transition-secret"), now - 1, now + 60_000);
+    const before = fixture.database.prepare(`
+      SELECT
+        (SELECT state FROM project_sessions WHERE project_session_id='session_launch_01') AS session_state,
+        (SELECT revision FROM project_sessions WHERE project_session_id='session_launch_01') AS session_revision,
+        (SELECT lifecycle_state FROM runs WHERE run_id='run_launch_01') AS run_state,
+        (SELECT revision FROM runs WHERE run_id='run_launch_01') AS run_revision,
+        (SELECT status FROM run_chair_leases WHERE run_id='run_launch_01') AS lease_status,
+        (SELECT state FROM launched_chair_bridge_state WHERE coordination_run_id='run_launch_01') AS bridge_state,
+        (SELECT COUNT(*) FROM chair_bridge_losses WHERE coordination_run_id='run_launch_01') AS losses,
+        (SELECT COUNT(*) FROM chair_bridge_recovery_custody recovery
+          JOIN chair_bridge_losses loss ON loss.loss_id=recovery.loss_id
+          WHERE loss.coordination_run_id='run_launch_01') AS recoveries,
+        (SELECT COUNT(*) FROM operator_commands WHERE project_session_id='session_launch_01') AS commands
+    `).get();
+    const sessionRevision = (before as { session_revision: number }).session_revision;
+    const sessions = new ProjectSessionStore({
+      database: fixture.database,
+      operatorStore: new OperatorStore({ database: fixture.database, clock: () => now }),
+      clock: () => now,
+    });
+    for (const target of ["reconciling", "quarantined"] as const) {
+      expect(() => sessions.transitionProjectSession({
+        operatorId: "operator_01" as OperatorId,
+        projectId: "project_01" as ProjectId,
+        projectAuthorityGeneration: 1,
+        principalGeneration: 1,
+      }, {
+        command: {
+          credential: { capabilityId: "operator_cap_recovery_transition", token: "recovery-transition-secret" },
+          commandId: `forbidden_lost_bridge_${target}`,
+          expectedRevision: sessionRevision,
+          actor: "operator_01",
+          provenance: {
+            kind: "console-direct-input",
+            clientId: "console_recovery",
+            inputEventId: `input_${target}`,
+          },
+          evidenceRefs: [],
+        },
+        projectSessionId: "session_launch_01",
+        expectedGeneration: 1,
+        transition: { to: target, reason: "generic transition must not steal recovery custody" },
+      } as unknown as ProjectSessionTransitionRequest)).toThrowError(
+        expect.objectContaining({ code: "RECOVERY_REQUIRED" }),
+      );
+      expect(fixture.database.prepare(`
+        SELECT
+          (SELECT state FROM project_sessions WHERE project_session_id='session_launch_01') AS session_state,
+          (SELECT revision FROM project_sessions WHERE project_session_id='session_launch_01') AS session_revision,
+          (SELECT lifecycle_state FROM runs WHERE run_id='run_launch_01') AS run_state,
+          (SELECT revision FROM runs WHERE run_id='run_launch_01') AS run_revision,
+          (SELECT status FROM run_chair_leases WHERE run_id='run_launch_01') AS lease_status,
+          (SELECT state FROM launched_chair_bridge_state WHERE coordination_run_id='run_launch_01') AS bridge_state,
+          (SELECT COUNT(*) FROM chair_bridge_losses WHERE coordination_run_id='run_launch_01') AS losses,
+          (SELECT COUNT(*) FROM chair_bridge_recovery_custody recovery
+            JOIN chair_bridge_losses loss ON loss.loss_id=recovery.loss_id
+            WHERE loss.coordination_run_id='run_launch_01') AS recoveries,
+          (SELECT COUNT(*) FROM operator_commands WHERE project_session_id='session_launch_01') AS commands
+      `).get()).toEqual(before);
+    }
     expect(() => fixture.database.prepare(`
       INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
       VALUES ('forbidden-after-chair-loss', 'run_launch_01', 'chair_launch_01', 2, ${now + 60_000})

@@ -154,6 +154,9 @@ export class ScopedGateStore {
         if (gate.status !== "pending" && gate.status !== "deferred") {
           throw new ProjectFabricCoreError("CONFLICT", "gate is already resolved");
         }
+        if (request.status === "approved" && this.#isFinalCloseGate(gate)) {
+          this.#assertFinalCloseReady(gate);
+        }
         const resolution = this.#resolution(context, request, gate);
         const remainsOpen = request.status === "deferred";
         this.#fault("gates:resolve:before-update");
@@ -171,12 +174,25 @@ export class ScopedGateStore {
           gate.revision,
         );
         if (!remainsOpen) {
-          this.#database.prepare(`
+          const membershipState = request.status === "cancelled" ? "abandoned" : "reconciled";
+          const abandonmentReason = request.status === "cancelled" ? "gate source status cancelled" : null;
+          const membership = this.#database.prepare(`
             UPDATE project_session_memberships
-               SET state='reconciled', revision=revision+1, updated_at=?
+               SET state=?, abandoned_reason=?, revision=revision+1, updated_at=?
              WHERE project_session_id=? AND coordination_run_id=?
                AND member_kind='gate' AND member_id=? AND state='active'
-          `).run(this.#clock(), gate.projectSessionId, gate.coordinationRunId, gate.gateId);
+          `).run(
+            membershipState,
+            abandonmentReason,
+            this.#clock(),
+            gate.projectSessionId,
+            gate.coordinationRunId,
+            gate.gateId,
+          );
+          if (membership.changes !== 1) {
+            throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "terminal gate membership was not active");
+          }
+          this.#touchSessionMembership(gate.projectSessionId, 1);
         }
         return this.getGate(request.gateId);
       },
@@ -185,6 +201,20 @@ export class ScopedGateStore {
 
   getGate(gateId: string): ScopedGate {
     return this.#gateFromRow(this.#gateRow(gateId));
+  }
+
+  getGateByDedupe(
+    context: AuthenticatedAgentContext | AuthenticatedOperatorContext,
+    projectSessionId: string,
+    coordinationRunId: string,
+    dedupeKey: string,
+  ): ScopedGate | undefined {
+    this.#assertRequestContext(context, projectSessionId, coordinationRunId);
+    const value = this.#database.prepare(`
+      SELECT * FROM scoped_gates
+       WHERE project_session_id=? AND coordination_run_id=? AND dedupe_key=?
+    `).get(projectSessionId, coordinationRunId, dedupeKey);
+    return isRow(value) ? this.#gateFromRow(value as GateRow) : undefined;
   }
 
   check(
@@ -299,6 +329,7 @@ export class ScopedGateStore {
       { commandId: request.commandId, expectedRevision: request.expectedGateRevision },
       { operation: "scoped-gate:bind-barrier", payload: request },
       () => {
+        this.#assertGateTopologyMutable(text(gate, "coordination_run_id"));
         const current = this.getGate(request.gateId);
         if (current.revision !== request.expectedGateRevision) {
           throw new ProjectFabricCoreError("STALE_REVISION", "gate revision changed");
@@ -327,6 +358,7 @@ export class ScopedGateStore {
       { operation: "dependencies:replace", payload: request.edges },
       () => {
         const identity = this.#runIdentity(context.coordinationRunId);
+        this.#assertGateTopologyMutable(context.coordinationRunId);
         if (identity.dependencyRevision !== request.expectedRevision) {
           throw new ProjectFabricCoreError("STALE_REVISION", "dependency graph revision changed");
         }
@@ -432,6 +464,7 @@ export class ScopedGateStore {
       },
       () => {
         const identity = this.#runIdentity(context.coordinationRunId);
+        this.#assertGateTopologyMutable(context.coordinationRunId);
         if (identity.dependencyRevision !== request.expectedDependencyRevision) {
           throw new ProjectFabricCoreError("STALE_REVISION", "dependency graph revision changed");
         }
@@ -505,6 +538,7 @@ export class ScopedGateStore {
       return gate;
     }
     const identity = this.#runIdentity(intent.coordinationRunId);
+    this.#assertGateTopologyMutable(intent.coordinationRunId);
     const expectedRevision = request.command.expectedRevision;
     if (identity.dependencyRevision !== expectedRevision) {
       throw new ProjectFabricCoreError("STALE_REVISION", "gate dependency revision changed");
@@ -559,13 +593,17 @@ export class ScopedGateStore {
         INSERT INTO scoped_gate_operations(gate_id, operation_id) VALUES (?, ?)
       `).run(gateId, operationId);
     }
-    this.#database.prepare(`
+    const membership = this.#database.prepare(`
       INSERT INTO project_session_memberships(
         project_session_id, coordination_run_id, member_kind, member_id,
         required, state, revision, created_at, updated_at
       ) VALUES (?, ?, 'gate', ?, 1, 'active', 1, ?, ?)
       ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id) DO NOTHING
     `).run(intent.projectSessionId, intent.coordinationRunId, gateId, now, now);
+    if (membership.changes !== 1) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "new gate membership was not inserted");
+    }
+    this.#touchSessionMembership(intent.projectSessionId, 1);
     this.#fault("gates:create:after-bindings");
     return this.getGate(gateId);
   }
@@ -817,9 +855,11 @@ export class ScopedGateStore {
     projectSessionId: string;
     sessionGeneration: number;
     dependencyRevision: number;
+    sessionState: string;
   } {
     const value = row(this.#database.prepare(`
-      SELECT s.project_id, s.project_session_id, s.generation, r.dependency_revision
+      SELECT s.project_id, s.project_session_id, s.generation, s.state,
+             r.dependency_revision
         FROM runs r JOIN project_sessions s ON s.project_session_id=r.project_session_id
        WHERE r.run_id=?
     `).get(runId), "coordination run");
@@ -828,7 +868,18 @@ export class ScopedGateStore {
       projectSessionId: text(value, "project_session_id"),
       sessionGeneration: integer(value, "generation"),
       dependencyRevision: integer(value, "dependency_revision"),
+      sessionState: text(value, "state"),
     };
+  }
+
+  #assertGateTopologyMutable(runId: string): void {
+    const identity = this.#runIdentity(runId);
+    if (["quiescing", "awaiting_acceptance", "closed", "cancelled"].includes(identity.sessionState)) {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "project-session gate and dependency topology is frozen",
+      );
+    }
   }
 
   #gateRow(gateId: string): GateRow {
@@ -884,6 +935,121 @@ export class ScopedGateStore {
     return parsed;
   }
 
+  #touchSessionMembership(projectSessionId: string, changes: number): void {
+    if (changes === 0) return;
+    const updated = this.#database.prepare(`
+      UPDATE project_sessions
+         SET membership_revision=membership_revision+1,
+             revision=revision+1,
+             updated_at=?
+       WHERE project_session_id=?
+    `).run(this.#clock(), projectSessionId);
+    if (updated.changes !== 1) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "gate membership owner session was not found");
+    }
+  }
+
+  #isFinalCloseGate(gate: ScopedGate): boolean {
+    return gate.scope.kind === "run" &&
+      gate.enforcementPoints.includes("operation") &&
+      gate.blockedOperationIds.includes("fabric.v1.project-session.close");
+  }
+
+  #assertFinalCloseReady(gate: ScopedGate): void {
+    const lifecycle = row(this.#database.prepare(`
+      SELECT session.state AS session_state, run.lifecycle_state AS run_state,
+             run.dependency_revision
+        FROM project_sessions session
+        JOIN runs run ON run.project_session_id=session.project_session_id
+       WHERE session.project_session_id=? AND run.run_id=?
+    `).get(gate.projectSessionId, gate.coordinationRunId), "final-close lifecycle");
+    if (text(lifecycle, "session_state") !== "quiescing" || text(lifecycle, "run_state") !== "quiescing") {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "final-close approval requires a quiescing session and run",
+      );
+    }
+    if (integer(lifecycle, "dependency_revision") !== gate.dependencyRevision) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "final-close gate dependency binding changed");
+    }
+    const blockers: ReadonlyArray<readonly [string, string]> = [
+      ["task", `SELECT 1 FROM tasks task JOIN runs run ON run.run_id=task.run_id
+        WHERE run.project_session_id=? AND task.state NOT IN ('complete','cancelled','degraded') LIMIT 1`],
+      ["write lease", `SELECT 1 FROM leases lease JOIN runs run ON run.run_id=lease.run_id
+        WHERE run.project_session_id=? AND lease.status IN ('active','quarantined') LIMIT 1`],
+      ["task-owner lease", `SELECT 1 FROM task_owner_leases
+        WHERE project_session_id=? AND status IN ('active','frozen') LIMIT 1`],
+      ["provider action", `SELECT 1 FROM provider_actions action JOIN runs run ON run.run_id=action.run_id
+        WHERE run.project_session_id=? AND action.status IN ('prepared','dispatched','accepted','ambiguous','quarantined') LIMIT 1`],
+      ["required result", `SELECT 1 FROM result_deliveries
+        WHERE project_session_id=? AND required=1 AND state NOT IN ('consumed','abandoned') LIMIT 1`],
+      ["non-final gate", `SELECT 1 FROM scoped_gates gate
+        WHERE gate.project_session_id=? AND gate.status IN ('pending','deferred')
+          AND NOT EXISTS (
+            SELECT 1 FROM scoped_gate_operations operation
+             WHERE operation.gate_id=gate.gate_id
+               AND operation.operation_id='fabric.v1.project-session.close'
+          ) LIMIT 1`],
+      ["barrier", `SELECT 1 FROM barriers barrier JOIN runs run ON run.run_id=barrier.run_id
+        WHERE run.project_session_id=? AND barrier.state<>'closed' LIMIT 1`],
+      ["artifact obligation", `SELECT 1 FROM task_expected_artifacts expected
+        JOIN runs run ON run.run_id=expected.run_id
+        JOIN tasks task ON task.run_id=expected.run_id AND task.task_id=expected.task_id
+        WHERE run.project_session_id=? AND task.state NOT IN ('cancelled','degraded') AND NOT EXISTS (
+          SELECT 1 FROM artifacts artifact WHERE artifact.run_id=expected.run_id
+            AND artifact.task_id=expected.task_id AND artifact.relative_path=expected.relative_path
+        ) LIMIT 1`],
+      ["agent context", `SELECT 1 FROM agents agent JOIN runs run ON run.run_id=agent.run_id
+        WHERE run.project_session_id=? AND agent.lifecycle='context-unreconciled' LIMIT 1`],
+    ];
+    for (const [label, sql] of blockers) {
+      if (this.#database.prepare(sql).get(gate.projectSessionId) !== undefined) {
+        throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", `${label} blocks final-close approval`);
+      }
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM project_session_memberships membership
+       WHERE membership.project_session_id=? AND membership.required=1 AND membership.state='active'
+         AND NOT (
+           membership.member_kind='coordination-run' AND membership.member_id=membership.coordination_run_id
+         )
+         AND NOT (
+           membership.member_kind='lease' AND EXISTS (
+             SELECT 1 FROM runs run
+              WHERE run.project_session_id=membership.project_session_id
+                AND run.run_id=membership.coordination_run_id
+                AND run.chair_lease_id=membership.member_id
+           )
+         )
+         AND NOT (
+           membership.member_kind='gate' AND EXISTS (
+             SELECT 1 FROM scoped_gates final_gate
+              WHERE final_gate.project_session_id=membership.project_session_id
+                AND final_gate.coordination_run_id=membership.coordination_run_id
+                AND final_gate.gate_id=membership.member_id
+                AND final_gate.scope_kind='run'
+                AND final_gate.status IN ('pending','deferred')
+                AND EXISTS (
+                  SELECT 1 FROM scoped_gate_operations operation
+                   WHERE operation.gate_id=final_gate.gate_id
+                     AND operation.operation_id='fabric.v1.project-session.close'
+                )
+           )
+         )
+       LIMIT 1
+    `).get(gate.projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "required non-final membership blocks close approval");
+    }
+    if (this.#database.prepare(`
+      SELECT 1 FROM operator_effect_custody
+       WHERE project_session_id=? AND state IN ('prepared','dispatching','ambiguous','failed')
+         AND operation<>'project-session-drain'
+       LIMIT 1
+    `).get(gate.projectSessionId) !== undefined) {
+      throw new ProjectFabricCoreError("BARRIER_PRECONDITION_FAILED", "unrelated operator effect blocks close approval");
+    }
+  }
+
   #sameIntent(gate: ScopedGate, intent: ScopedGateCreateRequest["intent"]): boolean {
     const projected = {
       projectSessionId: gate.projectSessionId,
@@ -931,6 +1097,9 @@ export class ScopedGateStore {
       evidenceRefs: request.command.evidenceRefs,
     };
     if (request.decisionEvidence.kind === "typed-console") {
+      if (request.decisionEvidence.confirmationCommandId !== request.command.commandId) {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed gate confirmation must bind the resolving command");
+      }
       if (request.command.provenance.kind !== "console-direct-input") {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "typed gate resolution requires direct Console input");
       }

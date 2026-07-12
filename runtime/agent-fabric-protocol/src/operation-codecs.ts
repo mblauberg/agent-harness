@@ -689,7 +689,6 @@ const projectSessionTransitionInputCodec = objectCodec({
       to: enumeration([
         "draft",
         "active",
-        "quiescing",
         "reconciling",
         "visibility_degraded",
         "recovery_required",
@@ -2091,7 +2090,21 @@ const attestedGateResolutionCodec = objectCodec({
   decidedAt: timestamp,
   evidenceRefs: artifactRefsCodec,
 });
-const gateResolutionCodec = unionOf([typedGateResolutionCodec, attestedGateResolutionCodec]);
+const systemGateSupersessionCodec = objectCodec({
+  kind: literal("system-supersession"),
+  cause: unionOf([
+    objectCodec({ kind: literal("operator-command"), ref: identifier }),
+    objectCodec({ kind: literal("chair-bridge-loss"), ref: identifier }),
+    objectCodec({ kind: literal("system-recovery"), ref: identifier }),
+  ]),
+  reason: text,
+  decidedAt: timestamp,
+});
+const gateResolutionCodec = unionOf([
+  typedGateResolutionCodec,
+  attestedGateResolutionCodec,
+  systemGateSupersessionCodec,
+]);
 
 const projectIdentityCodec = objectCodec({ projectId: identifier, canonicalRoot: text });
 const projectViewItemCodec = objectCodec({

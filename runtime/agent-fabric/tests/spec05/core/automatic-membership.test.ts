@@ -35,6 +35,17 @@ function membership(
   `).get(kind, memberId) as { state: string; revision: number } | undefined;
 }
 
+function membershipDisposition(
+  database: Database.Database,
+  kind: "task" | "required-message" | "lease",
+  memberId: string,
+): { state: string; revision: number; abandoned_reason: string | null } | undefined {
+  return database.prepare(`
+    SELECT state, revision, abandoned_reason FROM project_session_memberships
+     WHERE coordination_run_id='run-stage1' AND member_kind=? AND member_id=?
+  `).get(kind, memberId) as { state: string; revision: number; abandoned_reason: string | null } | undefined;
+}
+
 describe("automatic project-session membership", () => {
   it("binds generic tasks, required messages, and write leases in their source transactions", async () => {
     const fixture = await fixtureWithReader();
@@ -125,6 +136,31 @@ describe("automatic project-session membership", () => {
       .toEqual({ state: "reconciled", revision: 2 });
   });
 
+  it("abandons cancelled task membership with a durable source reason", async () => {
+    const fixture = await fixtureWithReader();
+    await fixture.chair.createTask({
+      taskId: "task_abandoned_membership",
+      authorityId: fixture.authorities.alice,
+      eligibleAgentIds: ["alice"],
+      objective: "Cancel with an explicit durable disposition.",
+      baseRevision: "base-abandoned-membership",
+      commandId: "membership:task:abandoned:create",
+    });
+    await fixture.alice.claimTask({
+      taskId: "task_abandoned_membership",
+      expectedRevision: 1,
+      commandId: "membership:task:abandoned:claim",
+    });
+    await fixture.alice.updateTask({
+      taskId: "task_abandoned_membership",
+      expectedRevision: 2,
+      state: "cancelled",
+      commandId: "membership:task:abandoned:cancel",
+    });
+    expect(membershipDisposition(fixture.reader, "task", "task_abandoned_membership"))
+      .toEqual({ state: "abandoned", revision: 2, abandoned_reason: "task source state cancelled" });
+  });
+
   it("reconciles expiry and abandonment only after the required message is fully settled", async () => {
     const fixture = await fixtureWithReader();
     const expiring = await fixture.chair.sendMessage({
@@ -137,8 +173,12 @@ describe("automatic project-session membership", () => {
     });
     fixture.clock.advance(1_001);
     expect(await fixture.alice.receiveMessages({ limit: 1, visibilityTimeoutMs: 5_000 })).toEqual([]);
-    expect(membership(fixture.reader, "required-message", expiring.messageId))
-      .toEqual({ state: "reconciled", revision: 2 });
+    expect(membershipDisposition(fixture.reader, "required-message", expiring.messageId))
+      .toEqual({
+        state: "abandoned",
+        revision: 2,
+        abandoned_reason: "required-message source delivery expired or abandoned",
+      });
 
     const abandoned = await fixture.chair.sendMessage({
       audience: { kind: "agents", agentIds: ["bob"] },
@@ -156,8 +196,12 @@ describe("automatic project-session membership", () => {
     };
     await fixture.chair.abandonDelivery(abandon);
     await fixture.chair.abandonDelivery(abandon);
-    expect(membership(fixture.reader, "required-message", abandoned.messageId))
-      .toEqual({ state: "reconciled", revision: 2 });
+    expect(membershipDisposition(fixture.reader, "required-message", abandoned.messageId))
+      .toEqual({
+        state: "abandoned",
+        revision: 2,
+        abandoned_reason: "required-message source delivery expired or abandoned",
+      });
   });
 
   it("cannot create an orphan source after quiescing and closure remains blocked by an active member", async () => {
