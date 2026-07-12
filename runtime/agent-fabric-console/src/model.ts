@@ -112,12 +112,6 @@ export type ConsoleWorkflowCapabilities = Readonly<{
   promotion: ConsoleWorkflowCapability;
 }>;
 
-export const CONSOLE_MISSING_SURFACES = Object.freeze({
-  chairRequestPreparation: "daemon-chair-request-preparation-unavailable",
-  runControlState: "run-control-state-projection-unavailable",
-  attentionGateBinding: "attention-gate-binding-projection-unavailable",
-} as const);
-
 export type ConsoleNativeNotification =
   | Readonly<NativeNotificationDeliverySummary & { kind: "daemon-journal" }>
   | Readonly<{

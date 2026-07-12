@@ -202,6 +202,40 @@ function operatorRevisionWithChairRequest(): Extract<IntakeRevisionRequest, { or
   return parsed;
 }
 
+function persistedChairRequest(conversationId = "conversation_intake") {
+  return {
+    commandId: "command_chair_request_01",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    task: {
+      taskId: "task_discuss_01",
+      taskRevision: 1,
+      objective: "Discuss intake 01",
+      baseRevision: "base_revision_01",
+      expectedArtifactPaths: ["docs/spec.md"],
+    },
+    request: {
+      requestRevision: 1,
+      messageId: "message_intake_01",
+      conversationId,
+      targetAgentId: "chair_01",
+      targetProviderSessionRef: "provider_chair_01",
+      requiresAck: true as const,
+      dedupeKey: "intake-request-one",
+      responseDeadline: "2099-01-01T00:00:00.000Z",
+      callbackId: "callback_intake_01",
+      callbackGeneration: 1,
+      dependentBarrierId: "barrier_intake_01",
+      intakeBinding: {
+        intakeId: "intake_01",
+        intakeRevision: 2,
+        gateIds: ["gate_01"],
+        artifactDigests: [digestA],
+      },
+    },
+  };
+}
+
 function chairRevision(): Extract<IntakeRevisionRequest, { origin: "chair" }> {
   const parsed = parseIntakeRevisionRequest({
     origin: "chair",
@@ -325,6 +359,42 @@ describe("intake revision", () => {
     expect(fixture.database.prepare(`
       SELECT chair_request_id, chair_request_revision FROM intakes WHERE intake_id='intake_01'
     `).get()).toEqual({ chair_request_id: "message_intake_02", chair_request_revision: 1 });
+  });
+
+  it("reads a current chair-bound seed for the next atomic discussion request", () => {
+    const fixture = setupStore();
+    fixture.database.prepare(`
+      INSERT INTO message_contexts(message_id, context_json) VALUES (?, ?)
+    `).run("message_intake_01", JSON.stringify(persistedChairRequest()));
+
+    expect(fixture.store.get("intake_01")).toMatchObject({
+      chairRequestSeed: {
+        conversationId: "conversation_intake",
+        targetAgentId: "chair_01",
+        targetProviderSessionRef: "provider_chair_01",
+        baseRevision: "base_revision_01",
+      },
+    });
+  });
+
+  it("omits chair request preparation when durable request context is absent", () => {
+    const fixture = setupStore();
+
+    expect(fixture.store.get("intake_01")).not.toHaveProperty("chairRequestSeed");
+  });
+
+  it("fails closed when durable chair request context changes conversation", () => {
+    const fixture = setupStore();
+    fixture.database.prepare(`
+      INSERT INTO message_contexts(message_id, context_json) VALUES (?, ?)
+    `).run(
+      "message_intake_01",
+      JSON.stringify(persistedChairRequest("conversation_other")),
+    );
+
+    expect(() => fixture.store.get("intake_01")).toThrowError(
+      expect.objectContaining({ code: "RECOVERY_REQUIRED" }),
+    );
   });
 
   it("rejects a revised chair request that changes the persisted discussion conversation", () => {

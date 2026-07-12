@@ -31,6 +31,12 @@ import {
   type TypedGitAdministrativeRequest,
   type TypedGitEffectRequest,
 } from "./typed-git-service.js";
+import {
+  readControlActiveTurns,
+  readControlEligibility,
+  type ActiveTurn,
+  type ResolvedControlTarget,
+} from "./control-eligibility.js";
 
 type Row = Record<string, unknown>;
 
@@ -146,34 +152,6 @@ export function assertRunAcceptingWork(database: Database.Database, runId: strin
     throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "coordination run is paused by the operator");
   }
 }
-
-type ResolvedControlTarget = {
-  scopeKind: "task" | "subtree" | "run" | "session";
-  revision: number;
-  projectSessionId: string;
-  sessionGeneration: number;
-  runs: readonly string[];
-  tasks: readonly {
-    runId: string;
-    taskId: string;
-    revision: number;
-    state: string;
-    ownerAgentId: string | null;
-    ownerLeaseGeneration: number;
-  }[];
-  agents: readonly { runId: string; agentId: string; lifecycle: string }[];
-};
-
-type ActiveTurn = {
-  runId: string;
-  agentId: string;
-  actionId: string;
-  adapterId: string;
-  providerSessionGeneration: number;
-  turnLeaseGeneration: number;
-  sourcePayloadHash: string;
-  turnId: string | null;
-};
 
 type EffectScope = {
   operatorId: string;
@@ -336,32 +314,12 @@ class ProductionOperatorActions {
     }
     if (intent.kind !== "control") unsupported();
     const target = this.#resolveControlTarget(intent);
-    const tasksPaused = target.tasks.length > 0 && target.tasks.every((task) => isRow(this.#database.prepare(`
-      SELECT 1 FROM operator_control_fences
-       WHERE coordination_run_id=? AND task_id=? AND state='paused'
-    `).get(task.runId, task.taskId)));
-    const agentsPaused = target.tasks.length === 0 && target.agents.length > 0 && target.agents.every((agent) => {
-      const freeze = this.#database.prepare(`
-        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-      `).get(agent.runId, agent.agentId);
-      return isRow(freeze) && typeof freeze.reason === "string" && freeze.reason.startsWith("operator-pause:");
-    });
-    const paused = tasksPaused || agentsPaused;
-    const terminal = target.tasks.length > 0 && target.tasks.every((task) =>
-      ["complete", "cancelled", "degraded"].includes(task.state));
     const activeTurns = this.#activeTurns(target);
-    const activeTurn = activeTurns.length > 0;
+    const eligibility = readControlEligibility(this.#database, target, activeTurns);
     return Promise.resolve({
       kind: "control",
       revision: target.revision,
-      lifecycleState: terminal ? "terminal" : paused ? "paused" : "active",
-      eligibleActions: terminal
-        ? []
-        : paused
-        ? ["resume", "cancel"]
-        : activeTurn
-          ? ["pause", "cancel", "steer"]
-          : ["pause", "cancel"],
+      ...eligibility,
       binding: this.#controlBinding(target, activeTurns),
     });
   }
@@ -1042,37 +1000,7 @@ class ProductionOperatorActions {
   }
 
   #activeTurns(target: ResolvedControlTarget): readonly ActiveTurn[] {
-    const turns: ActiveTurn[] = [];
-    for (const agent of target.agents) {
-      const value = this.#database.prepare(`
-        SELECT lease.action_id, lease.provider_session_generation, lease.turn_lease_generation,
-               action.adapter_id, action.payload_hash, action.payload_json, action.result_json
-          FROM provider_session_turn_leases lease
-          JOIN provider_actions action ON action.run_id=lease.run_id AND action.action_id=lease.action_id
-         WHERE lease.run_id=? AND lease.agent_id=? AND lease.status='active'
-      `).get(agent.runId, agent.agentId);
-      if (!isRow(value)) continue;
-      const payload: unknown = JSON.parse(text(value, "payload_json"));
-      const sourceResult: unknown = value.result_json === null
-        ? null
-        : JSON.parse(text(value, "result_json"));
-      const attributedTaskId = isRow(payload) && typeof payload.taskId === "string" ? payload.taskId : null;
-      if (
-        (target.scopeKind === "task" || target.scopeKind === "subtree") &&
-        (attributedTaskId === null || !target.tasks.some((task) => task.runId === agent.runId && task.taskId === attributedTaskId))
-      ) continue;
-      turns.push({
-        runId: agent.runId,
-        agentId: agent.agentId,
-        actionId: text(value, "action_id"),
-        adapterId: text(value, "adapter_id"),
-        providerSessionGeneration: integer(value, "provider_session_generation"),
-        turnLeaseGeneration: integer(value, "turn_lease_generation"),
-        sourcePayloadHash: text(value, "payload_hash"),
-        turnId: isRow(sourceResult) && typeof sourceResult.turnId === "string" ? sourceResult.turnId : null,
-      });
-    }
-    return turns;
+    return readControlActiveTurns(this.#database, target);
   }
 
   #controlBinding(target: ResolvedControlTarget, activeTurns: readonly ActiveTurn[]): JsonValue {

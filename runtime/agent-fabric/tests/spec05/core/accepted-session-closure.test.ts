@@ -21,6 +21,7 @@ import { OperatorStore } from "../../../src/operator/store.ts";
 import { ProjectSessionStore } from "../../../src/project-session/store.ts";
 import { ScopedGateStore } from "../../../src/gates/store.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
+import { NotificationOutbox } from "../../../src/attention/outbox.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 const now = Date.parse("2027-01-01T00:00:00Z");
@@ -183,6 +184,36 @@ describe("accepted project-session closure", () => {
       INSERT INTO scoped_gate_operations(gate_id, operation_id)
       VALUES ('gate_final_acceptance', 'fabric.v1.project-session.close');
     `);
+    const acceptanceNotifications = new NotificationOutbox({ database, clock: () => now });
+    const acceptanceAttention = acceptanceNotifications.upsertAttention({
+      producerId: "operator:operator_01",
+      projectId: "project_01",
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      principalGeneration: 1,
+    }, {
+      dedupeKey: "scoped-gate:gate_final_acceptance",
+      kind: "consequential-gate",
+      severity: "critical",
+      payload: {
+        gateId: "gate_final_acceptance",
+        title: "Accept this run?",
+        summary: "Final acceptance",
+        priority: "critical-path",
+        duplicateCount: 1,
+      },
+    });
+    acceptanceNotifications.enqueue({
+      producerId: "operator:operator_01",
+      projectId: "project_01",
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      principalGeneration: 1,
+    }, {
+      itemId: acceptanceAttention.itemId,
+      expectedItemRevision: acceptanceAttention.revision,
+      targetIntegration: "native-desktop",
+    });
     const operatorStore = new OperatorStore({ database, clock: () => now });
     operatorStore.registerPrincipal({
       operatorId: "operator_01",

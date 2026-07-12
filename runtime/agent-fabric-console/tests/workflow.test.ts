@@ -525,7 +525,7 @@ describe("typed Console workflow planner", () => {
     expect(buildIntent).toHaveBeenCalledTimes(1);
   });
 
-  it("fails guided Attention decisions before read without an exact gate-row binding", async () => {
+  it("previews and commits a revision-bound Attention request-changes decision", async () => {
     const gate = sessionBoundFixture(
       OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateResolve].result,
     ) as ScopedGate;
@@ -558,46 +558,244 @@ describe("typed Console workflow planner", () => {
       itemRevision: revisionFromProtocol(1),
       projectionRevision: revisionFromProtocol(11),
     };
+    const selected = dataset();
+    const attentionDataset: FabricConsoleDataset = {
+      ...selected,
+      pages: {
+        ...selected.pages,
+        attention: {
+          ...selected.pages.attention,
+          rows: [{
+            view: "attention",
+            stableId: binding.itemId,
+            revision: binding.itemRevision,
+            urgency: "safety-integrity",
+            freshness: {
+              state: "live",
+              source: "fabric",
+              revision: binding.itemRevision,
+              observedAt,
+              ageMs: 0,
+            },
+            summary: {
+              kind: "attention",
+              label: "Decision",
+              priority: "safety-integrity",
+              title: gate.question,
+              gateBinding: {
+                gateId: gate.gateId,
+                gateRevision: gate.revision,
+                coordinationRunId: gate.coordinationRunId,
+              },
+              nativeNotification: {
+                kind: "feature-unavailable",
+                status: "unavailable",
+                reason: "feature-not-negotiated",
+              },
+            } as never,
+            detailRef: {
+              kind: "run",
+              projectSessionId,
+              coordinationRunId: gate.coordinationRunId,
+              expectedRevision: 1,
+            },
+            actionAvailability: { state: "read-only", reason: "state-ineligible" },
+          }],
+          snapshotRevision: revisionFromProtocol(11),
+          readTransactionId: "guided-attention-page",
+        },
+      },
+    };
 
-    await expect(planner.prepareGuided({
+    const review = await planner.prepareGuided({
       action: "request-changes",
       binding,
-      raw: `gate=${String(gate.gateId)}`,
-      dataset: dataset(),
+      raw: "",
+      dataset: attentionDataset,
       eventId: "guided-gate-request-changes",
-    })).rejects.toThrow("attention-gate-binding-projection-unavailable");
+    });
 
-    expect(readGate).not.toHaveBeenCalled();
+    expect(readGate).toHaveBeenCalledWith(expect.objectContaining({
+      gateId: gate.gateId,
+      expectedRevision: gate.revision,
+    }));
     expect(resolve).not.toHaveBeenCalled();
+    expect(review).toMatchObject({
+      kind: "scoped-gate-resolve",
+      stage: "review",
+      expectedRevision: String(gate.revision),
+    });
+
+    await planner.commit({
+      review: planner.arm(review, "guided-gate-arm"),
+      eventId: "guided-gate-confirm",
+    });
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      gateId: gate.gateId,
+      status: "rejected",
+      command: expect.objectContaining({ expectedRevision: gate.revision }),
+    }));
+
+    readGate.mockResolvedValueOnce({
+      status: "changed",
+      expectedRevision: gate.revision,
+      gate: { ...gate, revision: gate.revision + 1 } as never,
+      readTransactionId: "guided-gate-changed",
+      stateDigest: digest,
+    } as never);
+    await expect(planner.prepareGuided({
+      action: "accept",
+      binding,
+      raw: "",
+      dataset: attentionDataset,
+      eventId: "guided-gate-stale",
+    })).rejects.toThrow("gate binding is stale");
+
+    readGate.mockResolvedValueOnce({
+      status: "current",
+      gate: { ...gate, coordinationRunId: "run_other" } as never,
+      readTransactionId: "guided-gate-wrong-run",
+      stateDigest: digest,
+    });
+    await expect(planner.prepareGuided({
+      action: "defer",
+      binding,
+      raw: "",
+      dataset: attentionDataset,
+      eventId: "guided-gate-wrong-run",
+    })).rejects.toThrow("gate binding is stale");
+    expect(resolve).toHaveBeenCalledTimes(1);
   });
 
   it.each(["discuss", "request-changes"] as const)(
-    "fails guided %s before intake read without daemon chair-request preparation",
+    "previews and commits guided %s with an atomic successor chair request",
     async (action) => {
-      const read = vi.fn();
+      const intake = {
+        intakeId: "intake_discussion" as never,
+        projectId,
+        projectSessionId,
+        coordinationRunId: "run_discussion" as never,
+        revision: 4,
+        state: "awaiting-human" as const,
+        dedupeKey: "discussion",
+        summary: "Review the current plan",
+        artifactRefs: [{ path: "docs/spec.md" as never, digest }],
+        gateIds: ["gate_discussion" as never],
+        chairRequestSeed: {
+          conversationId: "conversation_discussion",
+          targetAgentId: "chair_discussion",
+          targetProviderSessionRef: "provider_discussion",
+          baseRevision: "base_revision",
+        },
+      } as unknown as Intake;
+      const read = vi.fn(async () => intake);
+      const revise = vi.fn(async (request) => ({ ...intake, ...request, revision: 5 } as never));
       const planner = createProductionConsoleWorkflowPlanner({
         client: client({
-          intakes: { createDraft: vi.fn(), read, submit: vi.fn(), revise: vi.fn() },
+          intakes: { createDraft: vi.fn(), read, submit: vi.fn(), revise },
         }),
         credential,
         operatorId: "operator_workflow" as never,
         clientId: "console_workflow" as never,
         projectId,
       });
-
-      await expect(planner.prepareGuided({
-        action,
-        binding: {
-          view: "evidence",
-          itemId: "evidence_discussion_blocked",
-          itemRevision: revisionFromProtocol(1),
-          projectionRevision: revisionFromProtocol(11),
+      const selectedDigest = (`sha256:${"b".repeat(64)}`) as Sha256Digest;
+      const selectedArtifactRef = {
+        path: "reports/review.md" as never,
+        digest: selectedDigest,
+      };
+      const binding = {
+        view: "evidence" as const,
+        itemId: "evidence_discussion_blocked",
+        itemRevision: revisionFromProtocol(1),
+        projectionRevision: revisionFromProtocol(11),
+      };
+      const selectedDataset: FabricConsoleDataset = {
+        ...dataset(),
+        inspection: {
+          kind: "artifact",
+          state: "current",
+          binding,
+          readTransactionId: "discussion-artifact-read",
+          result: {
+            artifactRef: selectedArtifactRef,
+            evidenceRevision: 1,
+            evidenceKind: "artifact",
+            sourceKind: "project-file",
+            publisherKind: "agent",
+            publisherRef: "chair-discussion",
+            projectSessionId,
+            coordinationRunId: "run_discussion" as never,
+            taskId: null,
+            createdAt: observedAt,
+            mediaType: "text/markdown",
+            content: "review notes",
+            totalBytes: 12,
+            totalLines: 1,
+            renderedTotalBytes: 12,
+            renderedTotalLines: 1,
+            renderedArtifactDigest: selectedDigest,
+            transformation: "none",
+            terminalNeutralised: true,
+            capabilityValuesRedacted: true,
+            credentialValuesRedacted: true,
+            pages: [{
+              pageIndex: 0,
+              lineFragment: "whole",
+              pageContentDigest: selectedDigest,
+              bytes: 12,
+            }],
+            coverage: { complete: true, verified: true, pageCount: 1 },
+            reviewDisposition: "eligible",
+          },
         },
-        raw: "intake=intake_discussion_blocked",
-        dataset: dataset(),
-        eventId: `guided-${action}-blocked`,
-      })).rejects.toThrow("daemon-chair-request-preparation-unavailable");
-      expect(read).not.toHaveBeenCalled();
+      };
+
+      const review = await planner.prepareGuided({
+        action,
+        binding,
+        raw: `intake=intake_discussion\nsummary=${action === "discuss" ? "Discuss the plan" : "Revise the plan"}`,
+        dataset: selectedDataset,
+        eventId: `guided-${action}-open`,
+      });
+
+      expect(read).toHaveBeenCalledWith({ credential, intakeId: "intake_discussion" });
+      expect(revise).not.toHaveBeenCalled();
+      expect(review).toMatchObject({
+        kind: "intake-revise",
+        stage: "review",
+        expectedRevision: "4",
+      });
+      await planner.commit({
+        review: planner.arm(review, `guided-${action}-arm`),
+        eventId: `guided-${action}-confirm`,
+      });
+      expect(revise).toHaveBeenCalledWith(expect.objectContaining({
+        intakeId: "intake_discussion",
+        expectedRevision: 4,
+        state: action === "discuss" ? "discussing" : "awaiting-chair",
+        artifactRefs: [intake.artifactRefs[0], selectedArtifactRef],
+        chairRequest: expect.objectContaining({
+          projectSessionId,
+          coordinationRunId: "run_discussion",
+          task: expect.objectContaining({
+            taskRevision: 1,
+            expectedArtifactPaths: ["docs/spec.md", "reports/review.md"],
+          }),
+          request: expect.objectContaining({
+            requestRevision: 1,
+            conversationId: "conversation_discussion",
+            targetAgentId: "chair_discussion",
+            targetProviderSessionRef: "provider_discussion",
+            intakeBinding: {
+              intakeId: "intake_discussion",
+              intakeRevision: 5,
+              gateIds: ["gate_discussion"],
+              artifactDigests: [digest, selectedDigest],
+            },
+          }),
+        }),
+      }));
     },
   );
 

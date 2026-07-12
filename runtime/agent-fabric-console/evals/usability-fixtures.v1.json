@@ -14,6 +14,7 @@
         {
           "id": "run-empty",
           "session": "session-empty",
+          "controlState": "paused",
           "phase": "observe",
           "owner": "chair-empty",
           "nextMilestone": "Await new work",
@@ -48,6 +49,7 @@
         {
           "id": "run-primary",
           "session": "session-concurrent-primary",
+          "controlState": "active-turn",
           "phase": "implement",
           "owner": "chair-primary",
           "nextMilestone": "Merge isolated worktrees",
@@ -56,6 +58,7 @@
         {
           "id": "run-evaluation",
           "session": "session-concurrent-evaluation",
+          "controlState": "paused",
           "phase": "evaluate",
           "owner": "chair-evaluation",
           "nextMilestone": "Complete three repetitions",
@@ -119,6 +122,7 @@
         {
           "id": "run-gated",
           "session": "session-gated",
+          "controlState": "terminal",
           "phase": "awaiting_acceptance",
           "owner": "chair-gated",
           "nextMilestone": "Resolve release-bound gate",
@@ -135,6 +139,11 @@
           "ageMs": 500,
           "duplicateCount": 1,
           "consequential": true,
+          "gateBinding": {
+            "gateId": "gate-accepted-artifact",
+            "gateRevision": 4,
+            "coordinationRunId": "run-gated"
+          },
           "nativeNotification": {
             "status": "stale",
             "journalState": "ambiguous",
@@ -206,6 +215,7 @@
         {
           "id": "run-optional",
           "session": "session-optional",
+          "controlState": "active",
           "phase": "observe",
           "owner": "chair-optional",
           "nextMilestone": "Continue without desktop notifications",

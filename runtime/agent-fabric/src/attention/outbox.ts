@@ -84,6 +84,13 @@ type AttentionUpsertRequest = Readonly<{
   payload: unknown;
 }>;
 
+type AttentionSettleRequest = Readonly<{
+  itemId: string;
+  expectedRevision: number;
+  state: "resolved" | "cancelled";
+  reason: string;
+}>;
+
 const NOTIFICATION_ACTIVE_SESSION_STATES = [
   "awaiting_launch",
   "launching",
@@ -211,6 +218,42 @@ export class NotificationOutbox {
     return execute();
   }
 
+  settleAttention(
+    context: AttentionProducerContext,
+    request: AttentionSettleRequest,
+  ): AttentionItemRecord {
+    const execute = this.#database.transaction((): AttentionItemRecord => {
+      this.#assertProducerContext(context);
+      const item = this.#attentionRow(request.itemId);
+      this.#assertItemContext(context, item);
+      if (integer(item, "revision") !== request.expectedRevision) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "attention revision changed before settlement");
+      }
+      if (text(item, "state") !== "open" && text(item, "state") !== "acknowledged") {
+        throw new ProjectFabricCoreError("CONFLICT", "only open Attention may be settled");
+      }
+      this.#requiredText(request.reason, "attention settlement reason");
+      const now = this.#clock();
+      this.#database.prepare(`
+        UPDATE notification_deliveries
+           SET state='deduplicated', updated_at=?
+         WHERE item_id=? AND state='pending'
+      `).run(now, request.itemId);
+      this.#fault("attention:settle:after-deliveries");
+      const updated = this.#database.prepare(`
+        UPDATE attention_items
+           SET state=?, revision=revision+1, updated_at=?
+         WHERE item_id=? AND revision=? AND state IN ('open','acknowledged')
+      `).run(request.state, now, request.itemId, request.expectedRevision);
+      if (updated.changes !== 1) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "attention changed during settlement");
+      }
+      this.#fault("attention:settle:after-item");
+      return this.getAttention(request.itemId);
+    });
+    return execute();
+  }
+
   enqueue(
     context: AttentionProducerContext,
     request: NotificationEnqueueRequest,
@@ -221,6 +264,9 @@ export class NotificationOutbox {
       this.#assertItemContext(context, item);
       if (integer(item, "revision") !== request.expectedItemRevision) {
         throw new ProjectFabricCoreError("STALE_REVISION", "attention revision changed before notification enqueue");
+      }
+      if (text(item, "state") !== "open") {
+        throw new ProjectFabricCoreError("CONFLICT", "notification enqueue requires open Attention");
       }
       const integration = this.#requiredText(request.targetIntegration, "target integration");
       const existing = this.#database.prepare(`
@@ -302,6 +348,9 @@ export class NotificationOutbox {
       const item = this.#attentionRow(text(delivery, "item_id"));
       if (integer(item, "revision") !== request.expectedItemRevision) {
         throw new ProjectFabricCoreError("STALE_REVISION", "notification no longer targets the current attention revision");
+      }
+      if (text(item, "state") !== "open") {
+        throw new ProjectFabricCoreError("CONFLICT", "notification claim requires open Attention");
       }
       if (deadline <= this.#clock()) {
         throw new ProjectFabricCoreError("DEADLINE_EXCEEDED", "notification claim deadline is expired");
@@ -417,6 +466,13 @@ export class NotificationOutbox {
       this.#assertWorkerContext(context);
       const delivery = this.#deliveryRow(request.notificationId);
       this.#assertTargetIntegration(context, delivery);
+      const item = this.#attentionRow(text(delivery, "item_id"));
+      if (
+        text(item, "state") !== "open" ||
+        integer(item, "revision") !== integer(delivery, "item_revision")
+      ) {
+        throw new ProjectFabricCoreError("CONFLICT", "notification retry requires current open Attention");
+      }
       const reason = this.#requiredText(request.reason, "notification retry reason");
       if (integer(delivery, "claim_generation") !== request.expectedClaimGeneration) {
         throw new ProjectFabricCoreError("STALE_GENERATION", "notification retry generation changed");

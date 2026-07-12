@@ -3548,9 +3548,36 @@ END;
 
 CREATE TRIGGER notification_cannot_mutate_attention BEFORE UPDATE OF state ON attention_items
 WHEN NEW.state<>OLD.state AND EXISTS (
-  SELECT 1 FROM notification_deliveries d WHERE d.item_id=OLD.item_id AND d.state IN ('pending','claimed')
+  SELECT 1 FROM notification_deliveries d WHERE d.item_id=OLD.item_id AND d.state='pending'
 )
 BEGIN SELECT RAISE(ABORT, 'AFAB_0004_NOTIFICATION_NOT_AUTHORITY'); END;
+
+CREATE TRIGGER scoped_gate_terminal_settles_attention
+AFTER UPDATE OF status ON scoped_gates
+WHEN OLD.status IN ('pending','deferred')
+ AND NEW.status IN ('approved','rejected','cancelled','superseded')
+BEGIN
+  UPDATE notification_deliveries
+     SET state='deduplicated', updated_at=NEW.updated_at
+   WHERE item_id=(
+     SELECT item.item_id FROM attention_items item
+      WHERE item.project_session_id=NEW.project_session_id
+        AND item.coordination_run_id=NEW.coordination_run_id
+        AND item.dedupe_key='scoped-gate:' || NEW.gate_id
+        AND json_extract(item.payload_json,'$.gateId')=NEW.gate_id
+   ) AND state='pending';
+  UPDATE attention_items
+     SET state=CASE WHEN NEW.status IN ('cancelled','superseded') THEN 'cancelled' ELSE 'resolved' END,
+         revision=revision+1,
+         updated_at=NEW.updated_at
+   WHERE project_session_id=NEW.project_session_id
+     AND coordination_run_id=NEW.coordination_run_id
+     AND dedupe_key='scoped-gate:' || NEW.gate_id
+     AND json_extract(payload_json,'$.gateId')=NEW.gate_id
+     AND state IN ('open','acknowledged');
+  SELECT CASE WHEN changes()<>1
+    THEN RAISE(ABORT,'AFAB_0005_GATE_ATTENTION_MISSING') END;
+END;
 
 CREATE TRIGGER objective_check_status_insert BEFORE INSERT ON task_objective_checks
 WHEN NEW.status NOT IN ('pending','pass','fail') BEGIN SELECT RAISE(ABORT, 'INVARIANT_objective_check_status'); END;

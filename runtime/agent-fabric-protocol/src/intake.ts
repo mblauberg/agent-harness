@@ -5,11 +5,14 @@ import {
   safeInteger,
   strictRecord,
   type ArtifactRef,
+  type AgentId,
+  type ConversationId,
   type CoordinationRunId,
   type GateId,
   type IntakeId,
   type ProjectId,
   type ProjectSessionId,
+  type ProviderSessionRef,
 } from "./primitives.js";
 import {
   parseChairMutationContext,
@@ -48,7 +51,15 @@ export type IntakeDraft = IntakeBase & { state: "draft" };
 type BoundIntakeBase = IntakeBase & {
   projectSessionId: ProjectSessionId;
   coordinationRunId: CoordinationRunId;
+  chairRequestSeed?: IntakeChairRequestSeed;
 };
+
+export type IntakeChairRequestSeed = Readonly<{
+  conversationId: ConversationId;
+  targetAgentId: AgentId;
+  targetProviderSessionRef: ProviderSessionRef;
+  baseRevision: string;
+}>;
 
 export type BoundIntake = BoundIntakeBase & (
   | { state: "accepted"; acceptedScopeRef: ArtifactRef }
@@ -56,6 +67,30 @@ export type BoundIntake = BoundIntakeBase & (
 );
 
 export type Intake = IntakeDraft | BoundIntake;
+
+function parseChairRequestSeed(value: unknown): IntakeChairRequestSeed {
+  const record = strictRecord(value, "intake.chairRequestSeed", [
+    "conversationId",
+    "targetAgentId",
+    "targetProviderSessionRef",
+    "baseRevision",
+  ]);
+  return {
+    conversationId: parseIdentifier<"ConversationId">(
+      record.conversationId,
+      "intake.chairRequestSeed.conversationId",
+    ),
+    targetAgentId: parseIdentifier<"AgentId">(
+      record.targetAgentId,
+      "intake.chairRequestSeed.targetAgentId",
+    ),
+    targetProviderSessionRef: parseIdentifier<"ProviderSessionRef">(
+      record.targetProviderSessionRef,
+      "intake.chairRequestSeed.targetProviderSessionRef",
+    ),
+    baseRevision: requiredString(record.baseRevision, "intake.chairRequestSeed.baseRevision"),
+  };
+}
 
 export type IntakeDraftCreateRequest = {
   command: OperatorMutationContext;
@@ -133,6 +168,7 @@ export function parseIntake(value: unknown): Intake {
         "summary",
         "artifactRefs",
         "gateIds",
+        "chairRequestSeed",
         ...(state === "accepted" ? ["acceptedScopeRef"] : []),
       ];
   const record = strictRecord(value, "intake", fields);
@@ -158,6 +194,9 @@ export function parseIntake(value: unknown): Intake {
       "intake.coordinationRunId",
     ),
     state: boundState,
+    ...(record.chairRequestSeed === undefined
+      ? {}
+      : { chairRequestSeed: parseChairRequestSeed(record.chairRequestSeed) }),
   };
   if (boundState === "accepted") {
     return { ...bound, state: boundState, acceptedScopeRef: parseArtifactRef(record.acceptedScopeRef, "intake.acceptedScopeRef") };

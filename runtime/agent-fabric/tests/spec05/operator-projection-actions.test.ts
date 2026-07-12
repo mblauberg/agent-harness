@@ -35,6 +35,7 @@ import {
 } from "../../src/operator/action-store.ts";
 import { OperatorProjectionStore } from "../../src/operator/projection-store.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
+import { ScopedGateStore } from "../../src/gates/store.ts";
 import type { AuthenticatedOperatorContext } from "../../src/project-session/contracts.ts";
 
 const databases: Database.Database[] = [];
@@ -146,7 +147,7 @@ function setupProjection(): {
     kind: "session",
     projectSessionId: "session_01",
     sessionGeneration: 1,
-    actions: ["read", "pause", "resume", "cancel", "steer", "drain", "stop", "git", "external-effect"],
+    actions: ["read", "decide", "pause", "resume", "cancel", "steer", "drain", "stop", "git", "external-effect"],
   });
   operatorStore.issueCapability(grant, "session-secret");
   return {
@@ -164,6 +165,49 @@ function setupProjection(): {
       token: "session-secret",
     },
   };
+}
+
+function createProjectedGate(
+  fixture: ReturnType<typeof setupProjection>,
+  suffix: string,
+  question: string,
+) {
+  const store = new ScopedGateStore({
+    database: fixture.database,
+    operatorStore: fixture.operatorStore,
+    clock: () => now,
+  });
+  const commandId = `create_projected_gate_${suffix}`;
+  const gate = store.createGate(fixture.context, {
+    origin: "operator",
+    command: {
+      credential: fixture.credential,
+      commandId,
+      expectedRevision: 1,
+      actor: "operator_01",
+      provenance: {
+        kind: "console-direct-input",
+        clientId: "console_projection",
+        inputEventId: `${commandId}:input`,
+      },
+      evidenceRefs: [],
+    },
+    intent: {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      dedupeKey: `projection-gate:${suffix}`,
+      scope: { kind: "run" },
+      blockedOperationIds: ["fabric.v1.provider-action.dispatch"],
+      enforcementPoints: ["operation"],
+      question,
+      reason: "Review required.",
+      options: ["approve", "request changes", "defer"],
+      recommendation: "defer",
+      consequences: ["The run remains blocked."],
+      evidenceRefs: [],
+    },
+  } as never);
+  return { gate, store };
 }
 
 afterEach(() => {
@@ -361,6 +405,11 @@ describe("operator projection store", () => {
 
   it("pages v2 attention rows at one snapshot and resolves an exact revision-bound detail", () => {
     const fixture = setupProjection();
+    const { gate } = createProjectedGate(fixture, "positive", "Approve result?");
+    const attention = fixture.database.prepare(`
+      SELECT item_id FROM attention_items
+       WHERE json_extract(payload_json, '$.gateId')=?
+    `).get(gate.gateId) as { item_id: string };
     const projectId = identifier<"ProjectId">("project_01");
     const projectSessionId = identifier<"ProjectSessionId">("session_01");
     const snapshot = fixture.projections.snapshot({
@@ -383,17 +432,22 @@ describe("operator projection store", () => {
       status: "page",
       view: "attention",
       rows: [{
-        itemId: "attention_01",
-        itemRevision: 2,
+        itemId: attention.item_id,
+        itemRevision: 1,
         fact: {
           freshness: "live",
           source: "fabric",
           value: {
             summary: {
               kind: "attention",
-              label: "Approval",
-              priority: "safety-integrity",
-              title: "Approve result",
+              label: "Decision",
+              priority: "critical-path",
+              title: "Approve result?",
+              gateBinding: {
+                gateId: gate.gateId,
+                gateRevision: 1,
+                coordinationRunId: "run_01",
+              },
             },
             detailRef: { kind: "run", coordinationRunId: "run_01", expectedRevision: 4 },
             actionAvailability: { state: "available", requiresPreview: true },
@@ -401,7 +455,7 @@ describe("operator projection store", () => {
         },
       }],
       nextCursor: 1,
-      hasMore: false,
+      hasMore: true,
       snapshotRevision: snapshot.snapshotRevision,
     });
     if (page.status !== "page") throw new Error("expected an attention page");
@@ -443,6 +497,144 @@ describe("operator projection store", () => {
       view: "attention",
       reason: "snapshot-mismatch",
     });
+  });
+
+  it("projects only exact active, paused and terminal run-control actions and invalidates stale pages", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshotRevision = () => fixture.projections.snapshot(
+      { credential: fixture.credential, projectId, projectSessionId },
+      "include",
+    ).snapshotRevision;
+    const request: OperatorViewPageRequest<"runs"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshotRevision(),
+      cursor: 0,
+      limit: 1,
+    };
+    const controlActions = () => {
+      const page = fixture.projections.viewPage(request, "include");
+      if (page.status !== "page" || page.rows[0]?.fact.freshness !== "live") {
+        throw new Error("expected one live run row");
+      }
+      const availability = page.rows[0].fact.value.actionAvailability;
+      if (availability.state !== "available") return [];
+      return availability.actions.filter(
+        (action) => action === "pause" || action === "resume" || action === "cancel" || action === "steer",
+      );
+    };
+    const nonControlActions = () => {
+      const page = fixture.projections.viewPage(request, "include");
+      if (page.status !== "page" || page.rows[0]?.fact.freshness !== "live") {
+        throw new Error("expected one live run row");
+      }
+      const availability = page.rows[0].fact.value.actionAvailability;
+      if (availability.state !== "available") return [];
+      return availability.actions.filter(
+        (action) => action !== "pause" && action !== "resume" && action !== "cancel" && action !== "steer",
+      );
+    };
+
+    expect(controlActions()).toStrictEqual(["pause", "cancel"]);
+    expect(nonControlActions()).toEqual(expect.arrayContaining([
+      "project-session-drain",
+      "project-session-stop",
+      "git",
+      "registered-external-effect",
+      "promotion",
+    ]));
+    fixture.database.prepare(`
+      INSERT INTO operator_control_fences(
+        fence_id, project_session_id, coordination_run_id, task_id, scope_kind,
+        target_revision, session_generation, command_id, state, created_at, released_at
+      ) VALUES (
+        'fence_projection_run', 'session_01', 'run_01', 'task_01', 'run',
+        4, 1, 'pause_projection_run', 'paused', ?, NULL
+      )
+    `).run(now);
+    expect(fixture.projections.viewPage(request, "include")).toMatchObject({
+      status: "resnapshot-required",
+      reason: "snapshot-mismatch",
+    });
+    request.snapshotRevision = snapshotRevision();
+    expect(controlActions()).toStrictEqual(["resume", "cancel"]);
+    expect(nonControlActions()).toEqual(expect.arrayContaining(["git", "promotion"]));
+
+    fixture.database.prepare(`
+      UPDATE operator_control_fences SET state='released', released_at=?
+       WHERE fence_id='fence_projection_run'
+    `).run(now + 1);
+    fixture.database.prepare(`
+      UPDATE tasks SET state='complete', revision=revision+1
+       WHERE run_id='run_01' AND task_id='task_01'
+    `).run();
+    request.snapshotRevision = snapshotRevision();
+    expect(controlActions()).toStrictEqual([]);
+    expect(nonControlActions()).toEqual(expect.arrayContaining(["git", "promotion"]));
+  });
+
+  it("omits Attention gate actions when the persisted gate is closed or outside the item run", () => {
+    const fixture = setupProjection();
+    const first = createProjectedGate(fixture, "negative", "Proceed?");
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({ credential: fixture.credential, projectId, projectSessionId }, "include");
+    const request: OperatorViewPageRequest<"attention"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "attention",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 1,
+    };
+    const summary = () => {
+      const page = fixture.projections.viewPage(request, "include");
+      if (page.status !== "page" || page.rows[0]?.fact.freshness !== "live") {
+        throw new Error("expected a live Attention row");
+      }
+      return page.rows[0].fact.value.summary;
+    };
+
+    expect(summary()).toHaveProperty("gateBinding.gateId", first.gate.gateId);
+    const resolveCommandId = "resolve_projected_gate_negative";
+    first.store.resolveGate(fixture.context, {
+      command: {
+        credential: fixture.credential,
+        commandId: resolveCommandId,
+        expectedRevision: first.gate.revision,
+        actor: "operator_01",
+        provenance: {
+          kind: "console-direct-input",
+          clientId: "console_projection",
+          inputEventId: `${resolveCommandId}:input`,
+        },
+        evidenceRefs: [],
+      },
+      gateId: first.gate.gateId,
+      status: "rejected",
+      decisionEvidence: { kind: "typed-console", confirmationCommandId: resolveCommandId },
+    } as never);
+    request.snapshotRevision = fixture.projections.snapshot(
+      { credential: fixture.credential, projectId, projectSessionId },
+      "include",
+    ).snapshotRevision;
+    expect(summary()).not.toHaveProperty("gateBinding");
+
+    const second = createProjectedGate(fixture, "wrong-run", "Proceed elsewhere?");
+    fixture.database.prepare(`
+      UPDATE attention_items SET coordination_run_id=NULL
+       WHERE json_extract(payload_json, '$.gateId')=?
+    `).run(second.gate.gateId);
+    request.snapshotRevision = fixture.projections.snapshot(
+      { credential: fixture.credential, projectId, projectSessionId },
+      "include",
+    ).snapshotRevision;
+    expect(summary()).not.toHaveProperty("gateBinding");
   });
 
   it.each([

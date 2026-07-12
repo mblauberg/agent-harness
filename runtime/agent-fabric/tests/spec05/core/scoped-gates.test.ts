@@ -5,8 +5,11 @@ import type {
   ScopedGateCheckResult,
   ScopedGateCreateRequest,
 } from "@local/agent-fabric-protocol";
+import { parseOperatorCapabilityGrant } from "@local/agent-fabric-protocol";
 
 import { ScopedGateStore } from "../../../src/gates/store.ts";
+import { OperatorStore } from "../../../src/operator/store.ts";
+import type { AuthenticatedOperatorContext } from "../../../src/project-session/contracts.ts";
 import { chairContext, openSpec05Database } from "./restart-recovery-fixtures.ts";
 
 const databases: Database.Database[] = [];
@@ -56,6 +59,136 @@ function check(store: ScopedGateStore, request: unknown): ScopedGateCheckResult 
 }
 
 describe("scoped gate service", () => {
+  it("creates and retires the exact gate Attention item in the gate transaction", () => {
+    const database = open();
+    const gateStore = new ScopedGateStore({ database, clock: () => 1_000 });
+    const gate = gateStore.createGate(chairContext, {
+      origin: "chair",
+      command: {
+        commandId: "command_attention_gate",
+        agentId: "chair_01",
+        projectSessionId: "session_01",
+        coordinationRunId: "run_01",
+        principalGeneration: 1,
+        chairLeaseId: "chair:run_01:1",
+        chairLeaseGeneration: 1,
+        expectedRunRevision: 1,
+        expectedRevision: 1,
+      },
+      intent: {
+        projectSessionId: "session_01",
+        coordinationRunId: "run_01",
+        dedupeKey: "gate:attention-lifecycle",
+        scope: { kind: "run" },
+        blockedOperationIds: ["fabric.v1.provider-action.dispatch"],
+        enforcementPoints: ["operation"],
+        question: "Continue this run?",
+        reason: "Human judgement is required.",
+        options: ["approve", "reject", "defer"],
+        recommendation: "defer",
+        consequences: ["The run remains blocked."],
+        evidenceRefs: [],
+      },
+    } as unknown as ScopedGateCreateRequest);
+    expect(database.prepare(`
+      SELECT kind, severity, revision, state, dedupe_key,
+             json_extract(payload_json, '$.gateId') AS gate_id,
+             json_extract(payload_json, '$.title') AS title
+        FROM attention_items
+       WHERE project_session_id='session_01' AND coordination_run_id='run_01'
+         AND json_extract(payload_json, '$.gateId')=?
+    `).get(gate.gateId)).toEqual({
+      kind: "consequential-gate",
+      severity: "critical",
+      revision: 1,
+      state: "open",
+      dedupe_key: `scoped-gate:${gate.gateId}`,
+      gate_id: gate.gateId,
+      title: "Continue this run?",
+    });
+    expect(database.prepare(`
+      SELECT state FROM notification_deliveries
+       WHERE item_id=(SELECT item_id FROM attention_items
+                       WHERE json_extract(payload_json, '$.gateId')=?)
+    `).get(gate.gateId)).toEqual({ state: "pending" });
+
+    const operatorStore = new OperatorStore({ database, clock: () => 2_000 });
+    operatorStore.registerPrincipal({
+      operatorId: "operator_01",
+      projectId: "project_01",
+      authenticatedSubjectHash: "subject-hash",
+      projectAuthorityGeneration: 1,
+    });
+    operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: "cap_gate_attention",
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_01",
+      sessionGeneration: 1,
+      actions: ["read", "decide"],
+    }), "gate-attention-secret");
+    const operatorContext: AuthenticatedOperatorContext = {
+      operatorId: "operator_01" as never,
+      projectId: "project_01" as never,
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    };
+    const commandId = "resolve_attention_gate";
+    const resolution = {
+      command: {
+        credential: { capabilityId: "cap_gate_attention", token: "gate-attention-secret" },
+        commandId,
+        expectedRevision: gate.revision,
+        actor: "operator_01",
+        provenance: {
+          kind: "console-direct-input",
+          clientId: "console_gate_attention",
+          inputEventId: "input_gate_attention",
+        },
+        evidenceRefs: [],
+      },
+      gateId: gate.gateId,
+      status: "approved",
+      decisionEvidence: { kind: "typed-console", confirmationCommandId: commandId },
+    } as const;
+    const crashing = new ScopedGateStore({
+      database,
+      operatorStore,
+      clock: () => 2_000,
+      fault: (label) => {
+        if (label === "gates:resolve:after-attention") throw new Error("crash after Attention retirement");
+      },
+    });
+    expect(() => crashing.resolveGate(operatorContext, resolution as never)).toThrow(
+      "crash after Attention retirement",
+    );
+    expect(gateStore.getGate(gate.gateId)).toMatchObject({ status: "pending", revision: 1 });
+    expect(database.prepare(`
+      SELECT state, revision FROM attention_items
+       WHERE json_extract(payload_json, '$.gateId')=?
+    `).get(gate.gateId)).toEqual({ state: "open", revision: 1 });
+    expect(database.prepare("SELECT state FROM notification_deliveries").get())
+      .toEqual({ state: "pending" });
+
+    const resolving = new ScopedGateStore({ database, operatorStore, clock: () => 3_000 });
+    expect(resolving.resolveGate(operatorContext, resolution as never)).toMatchObject({
+      status: "approved",
+      revision: 2,
+    });
+    expect(database.prepare(`
+      SELECT state, revision FROM attention_items
+       WHERE json_extract(payload_json, '$.gateId')=?
+    `).get(gate.gateId)).toEqual({ state: "resolved", revision: 2 });
+    expect(database.prepare("SELECT state FROM notification_deliveries").get())
+      .toEqual({ state: "deduplicated" });
+  });
+
   it("rebinds descendants atomically and enforces only the affected task, operation, and barrier", () => {
     const database = open();
     const store = new ScopedGateStore({ database, clock: () => 1_000 });

@@ -101,6 +101,11 @@ const rowCases = [
     label: "Decision",
     priority: "critical-path",
     title: "Choose",
+    gateBinding: {
+      gateId: "gate_01",
+      gateRevision: 3,
+      coordinationRunId: "run_01",
+    },
     nativeNotification,
   }, { kind: "task", taskId: "task_01", expectedRevision: 1 }],
   ["project", { kind: "project", goal: "Ship", acceptedScopeRef: null, repositoryRevision: "revision_01" }, { kind: "project", projectId: "project_01", expectedRevision: 1 }],
@@ -172,6 +177,22 @@ describe("rich operator projection v2", () => {
         }),
       ),
     ).toThrowError(/nativeNotification.status/u);
+  });
+
+  it("rejects an Attention gate binding without an exact positive gate revision", () => {
+    const [, validSummary, detailRef] = rowCases[0];
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.projectionViewPage, {
+      status: "page",
+      view: "attention",
+      rows: [row({
+        ...validSummary,
+        gateBinding: { ...validSummary.gateBinding, gateRevision: 0 },
+      }, detailRef)],
+      nextCursor: 1,
+      hasMore: false,
+      snapshotRevision: 4,
+      readTransactionId: "read_tx_gate_invalid",
+    })).toThrowError(/gateRevision/u);
   });
 
   it("rejects a row whose stable item revision differs from its fact revision", () => {

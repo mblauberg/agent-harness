@@ -2958,16 +2958,16 @@
             ],
             "properties": {
               "intakeId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "projectId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "projectSessionId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "coordinationRunId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "revision": {
                 "type": "integer",
@@ -3002,6 +3002,9 @@
                   "deferred",
                   "cancelled"
                 ]
+              },
+              "chairRequestSeed": {
+                "$ref": "#/$defs/generated_3"
               }
             }
           },
@@ -3023,16 +3026,16 @@
             ],
             "properties": {
               "intakeId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "projectId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "projectSessionId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "coordinationRunId": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_5"
               },
               "revision": {
                 "type": "integer",
@@ -3062,6 +3065,9 @@
                 "const": "accepted"
               },
               "acceptedScopeRef": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "chairRequestSeed": {
                 "$ref": "#/$defs/generated_3"
               }
             }
@@ -3071,7 +3077,7 @@
           "generated_1": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_3"
+              "$ref": "#/$defs/generated_4"
             },
             "minItems": 0,
             "maxItems": 128
@@ -3079,7 +3085,7 @@
           "generated_2": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_4"
+              "$ref": "#/$defs/generated_5"
             },
             "minItems": 0,
             "maxItems": 256,
@@ -3089,12 +3095,40 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "conversationId",
+              "targetAgentId",
+              "targetProviderSessionRef",
+              "baseRevision"
+            ],
+            "properties": {
+              "conversationId": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "targetAgentId": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "targetProviderSessionRef": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "baseRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
+              }
+            }
+          },
+          "generated_4": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
               "path",
               "digest"
             ],
             "properties": {
               "path": {
-                "$ref": "#/$defs/generated_5"
+                "$ref": "#/$defs/generated_6"
               },
               "digest": {
                 "type": "string",
@@ -3102,7 +3136,7 @@
               }
             }
           },
-          "generated_4": {
+          "generated_5": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -3110,7 +3144,7 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_5": {
+          "generated_6": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
@@ -3119,7 +3153,7 @@
         }
       },
       "inputCodecDigest": "sha256:e75a4f28ac1afe116279ed70236bf5175f090b47f62faed4a5808c8c529ac843",
-      "outputCodecDigest": "sha256:a983be49ad166462a44df3506dbd15613c764aab401e1a641afd1bf90f11b186"
+      "outputCodecDigest": "sha256:60e7cebead7ed0fab5d19333a4c59a73a6d20570182508d88b2d34d636193c90"
     },
     {
       "operation": "fabric.v1.launch.attest",

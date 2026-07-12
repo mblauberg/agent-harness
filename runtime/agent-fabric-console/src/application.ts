@@ -249,14 +249,19 @@ export function guidedWorkflowPrompt(
   action: GuidedWorkflowAction,
   binding: ConsoleInspectionBinding,
 ): string {
-  if (binding.view === "attention" || action === "promotion") {
+  if (binding.view === "attention") {
+    return `GUIDED ${action}: selected gate is revision-bound; Enter reviews; Esc cancels`;
+  }
+  if (action === "promotion") {
     return `GUIDED ${action}: enter gate=<stable-id>; Enter reviews; Esc cancels`;
   }
   if (
     action === "discuss" || action === "accept" ||
     action === "request-changes" || action === "defer"
   ) {
-    return `GUIDED ${action}: enter intake=<stable-id>; optional summary=<text>; Enter reviews; Esc cancels`;
+    return action === "request-changes"
+      ? `GUIDED ${action}: enter intake=<stable-id> and summary=<requested change>; Enter reviews; Esc cancels`
+      : `GUIDED ${action}: enter intake=<stable-id>; optional summary=<text>; Enter reviews; Esc cancels`;
   }
   return `GUIDED ${action}: enter named key=value fields; projection values are supplied by the typed planner; Enter reviews; Esc cancels`;
 }

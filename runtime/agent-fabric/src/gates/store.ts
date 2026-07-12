@@ -16,6 +16,7 @@ import {
 import type Database from "better-sqlite3";
 
 import { OperatorStore } from "../operator/store.js";
+import { NotificationOutbox } from "../attention/outbox.js";
 import {
   assertExactGateAttestationDigests,
   canonicalGateAttestationDigests,
@@ -72,6 +73,7 @@ type GateRow = Row & { gate_id: string };
 export class ScopedGateStore {
   readonly #database: Database.Database;
   readonly #operatorStore: OperatorStore | undefined;
+  readonly #notifications: NotificationOutbox;
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
 
@@ -80,6 +82,11 @@ export class ScopedGateStore {
     this.#operatorStore = options.operatorStore;
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
+    this.#notifications = new NotificationOutbox({
+      database: this.#database,
+      clock: this.#clock,
+      fault: this.#fault,
+    });
   }
 
   createGate(
@@ -103,7 +110,7 @@ export class ScopedGateStore {
           commandPayload: { origin: request.origin, intent: request.intent },
         },
         () => ({ revision: identity.dependencyRevision, value: { dependencyRevision: identity.dependencyRevision } }),
-        () => this.#insertGate(`operator:${context.operatorId}`, request),
+        () => this.#insertGate(`operator:${context.operatorId}`, context.principalGeneration, request),
       );
     }
     if (!("agentId" in context)) {
@@ -113,7 +120,7 @@ export class ScopedGateStore {
       context,
       request.command,
       { operation: "scoped-gate:create", payload: request },
-      () => this.#insertGate(`agent:${context.agentId}`, request),
+      () => this.#insertGate(`agent:${context.agentId}`, context.principalGeneration, request),
     );
   }
 
@@ -165,6 +172,7 @@ export class ScopedGateStore {
           request.gateId,
           gate.revision,
         );
+        this.#fault("gates:resolve:after-attention");
         if (!remainsOpen) {
           const membershipState = request.status === "cancelled" ? "abandoned" : "reconciled";
           const abandonmentReason = request.status === "cancelled" ? "gate source status cancelled" : null;
@@ -437,8 +445,13 @@ export class ScopedGateStore {
     });
   }
 
-  #insertGate(createdByRef: string, request: ScopedGateCreateRequest): ScopedGate {
+  #insertGate(
+    createdByRef: string,
+    principalGeneration: number,
+    request: ScopedGateCreateRequest,
+  ): ScopedGate {
     const intent = request.intent;
+    const identity = this.#runIdentity(intent.coordinationRunId);
     const existing = this.#database.prepare(`
       SELECT * FROM scoped_gates
        WHERE project_session_id=? AND coordination_run_id=? AND dedupe_key=?
@@ -448,9 +461,11 @@ export class ScopedGateStore {
       if (!this.#sameIntent(gate, intent)) {
         throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "gate dedupe key was reused with changed intent");
       }
+      if (gate.status === "pending" || gate.status === "deferred") {
+        this.#ensureGateAttention(createdByRef, principalGeneration, identity, intent, gate.gateId);
+      }
       return gate;
     }
-    const identity = this.#runIdentity(intent.coordinationRunId);
     this.#assertGateTopologyMutable(intent.coordinationRunId);
     const expectedRevision = request.command.expectedRevision;
     if (identity.dependencyRevision !== expectedRevision) {
@@ -517,8 +532,43 @@ export class ScopedGateStore {
       throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "new gate membership was not inserted");
     }
     this.#touchSessionMembership(intent.projectSessionId, 1);
+    this.#ensureGateAttention(createdByRef, principalGeneration, identity, intent, gateId);
+    this.#fault("gates:create:after-attention");
     this.#fault("gates:create:after-bindings");
     return this.getGate(gateId);
+  }
+
+  #ensureGateAttention(
+    createdByRef: string,
+    principalGeneration: number,
+    identity: { projectId: string },
+    intent: ScopedGateCreateRequest["intent"],
+    gateId: string,
+  ): void {
+    const producer = {
+      producerId: createdByRef,
+      projectId: identity.projectId,
+      projectSessionId: intent.projectSessionId,
+      coordinationRunId: intent.coordinationRunId,
+      principalGeneration,
+    } as const;
+    const attention = this.#notifications.upsertAttention(producer, {
+      dedupeKey: `scoped-gate:${gateId}`,
+      kind: "consequential-gate",
+      severity: "critical",
+      payload: {
+        gateId,
+        title: intent.question,
+        priority: intent.scope.kind === "release" ? "safety-integrity" : "critical-path",
+        duplicateCount: 1,
+        summary: intent.reason,
+      },
+    });
+    this.#notifications.enqueue(producer, {
+      itemId: attention.itemId,
+      expectedItemRevision: attention.revision,
+      targetIntegration: "native-desktop",
+    });
   }
 
   #insertGateTaskBindings(

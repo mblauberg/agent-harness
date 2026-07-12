@@ -2,6 +2,7 @@ import type {
   ChairMutationContext,
   ArtifactRef,
   Intake,
+  IntakeChairRequestSeed,
   IntakeDraft,
   IntakeDraftCreateRequest,
   IntakeRevisionRequest,
@@ -14,6 +15,7 @@ import {
   parseIdentifier,
   parseIntake,
   parseIntakeRevisionRequest,
+  parseTaskRequest,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
@@ -140,10 +142,12 @@ export class IntakeStore {
              AND artifact.registry_state='active'
         `).get(intakeId), "accepted intake scope")
       : undefined;
+    const chairRequestSeed = this.#chairRequestSeed(stored);
     return parseIntake({
       ...common,
       projectSessionId: text(stored, "project_session_id"),
       coordinationRunId: text(stored, "coordination_run_id"),
+      ...(chairRequestSeed === undefined ? {} : { chairRequestSeed }),
       ...(acceptedScope === undefined ? {} : {
         acceptedScopeRef: {
           path: text(acceptedScope, "relative_path"),
@@ -151,6 +155,44 @@ export class IntakeStore {
         },
       }),
     });
+  }
+
+  #chairRequestSeed(stored: ReturnType<typeof row>): IntakeChairRequestSeed | undefined {
+    const requestId = nullableText(stored, "chair_request_id");
+    if (requestId === null) return undefined;
+    const priorValue = this.#database.prepare(`
+      SELECT message.conversation_id, context.context_json
+        FROM messages message
+        LEFT JOIN message_contexts context ON context.message_id=message.message_id
+       WHERE message.message_id=? AND message.run_id=?
+    `).get(requestId, text(stored, "coordination_run_id"));
+    if (!isRow(priorValue) || typeof priorValue.context_json !== "string") return undefined;
+    const prior = parseTaskRequest(JSON.parse(text(priorValue, "context_json")));
+    if (prior.request.conversationId !== text(priorValue, "conversation_id")) {
+      throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "persisted intake discussion correlation changed");
+    }
+    const chairValue = this.#database.prepare(`
+      SELECT run.chair_agent_id, agent.provider_session_ref
+        FROM runs run
+        JOIN agents agent
+          ON agent.run_id=run.run_id AND agent.agent_id=run.chair_agent_id
+       WHERE run.run_id=? AND run.project_session_id=?
+    `).get(text(stored, "coordination_run_id"), text(stored, "project_session_id"));
+    if (!isRow(chairValue)) return undefined;
+    const providerSessionRef = nullableText(chairValue, "provider_session_ref");
+    if (providerSessionRef === null) return undefined;
+    return {
+      conversationId: prior.request.conversationId,
+      targetAgentId: parseIdentifier<"AgentId">(
+        text(chairValue, "chair_agent_id"),
+        "intake.chairRequestSeed.targetAgentId",
+      ),
+      targetProviderSessionRef: parseIdentifier<"ProviderSessionRef">(
+        providerSessionRef,
+        "intake.chairRequestSeed.targetProviderSessionRef",
+      ),
+      baseRevision: prior.task.baseRevision,
+    };
   }
 
   submit(context: AuthenticatedOperatorContext, request: IntakeSubmission): Intake {

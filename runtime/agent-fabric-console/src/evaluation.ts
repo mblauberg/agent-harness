@@ -47,6 +47,7 @@ export type UsabilityExpectedAnswers = Readonly<{
 export type UsabilityRun = Readonly<{
   id: string;
   session: string;
+  controlState: "active" | "active-turn" | "paused" | "terminal";
   phase: string;
   owner: string;
   nextMilestone: string;
@@ -67,6 +68,11 @@ export type UsabilityAttention = Readonly<{
   ageMs: number;
   duplicateCount: number;
   consequential: boolean;
+  gateBinding: Readonly<{
+    gateId: string;
+    gateRevision: number;
+    coordinationRunId: string;
+  }> | null;
   nativeNotification: Readonly<{
     status: "available" | "unavailable" | "stale";
     journalState:
@@ -250,6 +256,11 @@ function parseRun(value: unknown, path: string): UsabilityRun {
   return {
     id: string(item.id, `${path}.id`),
     session: string(item.session, `${path}.session`),
+    controlState: choice(
+      item.controlState,
+      ["active", "active-turn", "paused", "terminal"],
+      `${path}.controlState`,
+    ),
     phase: string(item.phase, `${path}.phase`),
     owner: string(item.owner, `${path}.owner`),
     nextMilestone: string(item.nextMilestone, `${path}.nextMilestone`),
@@ -267,6 +278,13 @@ function parseAttention(value: unknown, path: string): UsabilityAttention {
     item.nativeNotification,
     `${path}.nativeNotification`,
   );
+  const consequential = item.consequential === true;
+  const gate = item.gateBinding === undefined
+    ? null
+    : record(item.gateBinding, `${path}.gateBinding`);
+  if (consequential && gate === null) {
+    throw new TypeError(`${path}.gateBinding is required for consequential attention`);
+  }
   return {
     id: string(item.id, `${path}.id`),
     label: choice(
@@ -297,7 +315,17 @@ function parseAttention(value: unknown, path: string): UsabilityAttention {
       `${path}.duplicateCount`,
       1,
     ),
-    consequential: item.consequential === true,
+    consequential,
+    gateBinding: gate === null
+      ? null
+      : {
+          gateId: string(gate.gateId, `${path}.gateBinding.gateId`),
+          gateRevision: integer(gate.gateRevision, `${path}.gateBinding.gateRevision`, 1),
+          coordinationRunId: string(
+            gate.coordinationRunId,
+            `${path}.gateBinding.coordinationRunId`,
+          ),
+        },
     nativeNotification: {
       status: choice(
         notification.status,
@@ -513,6 +541,15 @@ function attentionRow(
               item.duplicateCount > 1
                 ? `${item.title} (${String(item.duplicateCount)} grouped)`
                 : item.title,
+            ...(item.gateBinding === null
+              ? {}
+              : {
+                  gateBinding: {
+                    gateId: item.gateBinding.gateId as never,
+                    gateRevision: item.gateBinding.gateRevision,
+                    coordinationRunId: item.gateBinding.coordinationRunId as never,
+                  },
+                }),
             nativeNotification: notificationProjection === "daemon-journal"
               ? notificationSummary(item)
               : {
@@ -524,11 +561,14 @@ function attentionRow(
     detailRef:
       item.freshness === "unavailable" || item.freshness === "conflict"
         ? null
-        : { kind: "system", componentId: item.id, expectedRevision: 7 },
-    actionAvailability:
-      item.freshness === "live" && item.consequential
-        ? { state: "available", actions: ["resume"], requiresPreview: true }
-        : { state: "read-only", reason: "state-ineligible" },
+        : item.gateBinding === null
+          ? { kind: "system", componentId: item.id, expectedRevision: 7 }
+          : {
+              kind: "run",
+              coordinationRunId: item.gateBinding.coordinationRunId as never,
+              expectedRevision: 11,
+            },
+    actionAvailability: { state: "read-only", reason: "state-ineligible" },
   };
 }
 
@@ -657,7 +697,16 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       requiresPreview: true,
     },
   }];
-  const runRows: readonly ConsoleRow<"runs">[] = runs.map((run) => ({
+  const runRows: readonly ConsoleRow<"runs">[] = runs.map((run, index) => {
+    const controlState = fixture.runs[index]?.controlState;
+    const actions = controlState === "paused"
+      ? ["resume", "cancel"] as const
+      : controlState === "active-turn"
+        ? ["pause", "cancel", "steer"] as const
+        : controlState === "active"
+          ? ["pause", "cancel"] as const
+          : [];
+    return {
     view: "runs",
     stableId: run.runId,
     revision: revisionFromProtocol(revision),
@@ -682,12 +731,11 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       coordinationRunId: run.runId,
       expectedRevision: revision,
     },
-    actionAvailability: {
-      state: "available",
-      actions: ["pause", "resume", "cancel", "steer"],
-      requiresPreview: true,
-    },
-  }));
+    actionAvailability: actions.length === 0
+      ? { state: "read-only", reason: "state-ineligible" }
+      : { state: "available", actions, requiresPreview: true },
+    };
+  });
   const workRows: readonly ConsoleRow<"work">[] = runs.map((run, index) => ({
     view: "work",
     stableId: `task-evaluation-${String(index + 1)}-${run.runId}`,
@@ -1448,12 +1496,18 @@ async function observe(
     allViewsReachable: reachedViews.size === FABRIC_VIEWS.length && mousePathWorked,
     focusVisible,
     containsInferredPercentage: /\b\d+(?:\.\d+)?%/u.test(frameText),
-    consequentialReviewRequired:
-      top === undefined ||
-      !fixture.attention.find((item) => item.id === top.stableId)?.consequential ||
-      presentation.actions.every(
-        (action) => !action.enabled && action.reason !== undefined,
-      ),
+    consequentialReviewRequired: (() => {
+      const topFixture = top === undefined
+        ? undefined
+        : fixture.attention.find((item) => item.id === top.stableId);
+      if (topFixture?.consequential !== true) return true;
+      if (top?.summary?.kind !== "attention" || top.summary.gateBinding === undefined) {
+        return false;
+      }
+      return ["workflow:accept", "workflow:request-changes", "workflow:defer"].every(
+        (id) => presentation.actions.some((action) => action.id === id && action.enabled),
+      );
+    })(),
     optionalIntegrationIndependent:
       !githubUnavailable ||
       (dataset.connection.state === "live" && presentation.connection === "LIVE"),

@@ -151,6 +151,50 @@ describe("durable attention and native-notification outbox", () => {
     });
   });
 
+  it("settles authoritative Attention while an already-claimed notification finishes honestly", () => {
+    const database = open();
+    const outbox = new NotificationOutbox({ database, clock: () => 1_000 });
+    const item = outbox.upsertAttention(producer, attention());
+    const delivery = outbox.enqueue(producer, {
+      itemId: item.itemId,
+      expectedItemRevision: item.revision,
+      targetIntegration: "native-desktop",
+    });
+    outbox.setIntegrationAvailability(nativeWorker, {
+      state: "available",
+      discoveredContract: {},
+    });
+    const claimed = outbox.claim(nativeWorker, {
+      notificationId: delivery.notificationId,
+      expectedItemRevision: item.revision,
+      expectedClaimGeneration: 0,
+      claimDeadline: "2099-01-01T00:00:00.000Z",
+    });
+
+    expect(outbox.settleAttention(producer, {
+      itemId: item.itemId,
+      expectedRevision: item.revision,
+      state: "resolved",
+      reason: "gate-approved",
+    })).toMatchObject({ state: "resolved", revision: 2 });
+    expect(outbox.get(delivery.notificationId)).toMatchObject({
+      state: "claimed",
+      claimGeneration: 1,
+    });
+    expect(outbox.recordOutcome(nativeWorker, {
+      notificationId: delivery.notificationId,
+      claimGeneration: claimed.claimGeneration,
+      outcome: "sent",
+      effectIdentityHash: claimed.effectIdentityHash,
+      detail: { receipt: "native-receipt-after-resolution" },
+    })).toMatchObject({ state: "sent" });
+    expect(() => outbox.enqueue(producer, {
+      itemId: item.itemId,
+      expectedItemRevision: 2,
+      targetIntegration: "native-desktop",
+    })).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
+  });
+
   it.each(["unavailable", "stale"] as const)("keeps delivery pending when integration is %s", (state) => {
     const database = open();
     const outbox = new NotificationOutbox({ database, clock: () => 1_000 });

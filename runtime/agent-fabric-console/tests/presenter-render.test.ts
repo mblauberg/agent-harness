@@ -118,6 +118,11 @@ function richDataset(
           label: "Approval",
           priority: "safety-integrity",
           title: "Approve quarantine recovery",
+          gateBinding: {
+            gateId: "gate_quarantine_recovery" as never,
+            gateRevision: 3,
+            coordinationRunId: "AFAB-004" as never,
+          },
           nativeNotification: {
             kind: "daemon-journal",
             targetIntegration: "native-desktop",
@@ -611,15 +616,13 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect.objectContaining({
         id: "workflow:discuss",
         label: "Discuss",
-        enabled: false,
-        reason: "daemon-chair-request-preparation-unavailable",
+        enabled: true,
       }),
       expect.objectContaining({ id: "workflow:accept", label: "Accept", enabled: true }),
       expect.objectContaining({
         id: "workflow:request-changes",
         label: "Request changes",
-        enabled: false,
-        reason: "daemon-chair-request-preparation-unavailable",
+        enabled: true,
       }),
       expect.objectContaining({ id: "workflow:defer", label: "Defer", enabled: true }),
       expect.objectContaining({
@@ -631,7 +634,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
     ]));
   });
 
-  it("never enables a selected-row action until the production planner can build it", () => {
+  it("enables only the selected run's exact projected control eligibility", () => {
     const dataset = richDataset();
     const run = dataset.pages.runs.rows[0];
     if (run === undefined || run.summary?.kind !== "run") {
@@ -653,7 +656,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
             },
             actionAvailability: {
               state: "available",
-              actions: ["pause", "resume", "cancel", "steer"],
+              actions: ["pause", "cancel"],
               requiresPreview: true,
             },
           }],
@@ -680,16 +683,13 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(presentation.actions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: "action:pause",
-        enabled: false,
-        reason: "run-control-state-projection-unavailable",
-      }),
-      expect.objectContaining({
-        id: "action:resume",
-        enabled: false,
-        reason: "run-control-state-projection-unavailable",
+        enabled: true,
       }),
       expect.objectContaining({ id: "action:cancel", enabled: false, reason: "enter-a-reason" }),
-      expect.objectContaining({ id: "action:steer", enabled: false, reason: "enter-an-instruction" }),
+    ]));
+    expect(presentation.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:resume" }),
+      expect.objectContaining({ id: "action:steer" }),
     ]));
   });
 
@@ -800,22 +800,19 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect.objectContaining({
         id: "workflow:discuss",
         enabled: false,
-        reason: "daemon-chair-request-preparation-unavailable",
+        reason: "attention-intake-binding-unavailable",
       }),
       expect.objectContaining({
         id: "workflow:accept",
-        enabled: false,
-        reason: "attention-gate-binding-projection-unavailable",
+        enabled: true,
       }),
       expect.objectContaining({
         id: "workflow:request-changes",
-        enabled: false,
-        reason: "attention-gate-binding-projection-unavailable",
+        enabled: true,
       }),
       expect.objectContaining({
         id: "workflow:defer",
-        enabled: false,
-        reason: "attention-gate-binding-projection-unavailable",
+        enabled: true,
       }),
     ]));
 

@@ -1247,6 +1247,12 @@ const intakeDraftCodec = objectCodec({
   artifactRefs: artifactRefsCodec,
   gateIds: stringList,
 });
+const intakeChairRequestSeedCodec = objectCodec({
+  conversationId: identifier,
+  targetAgentId: identifier,
+  targetProviderSessionRef: identifier,
+  baseRevision: text,
+});
 const boundIntakeCommonFields = {
   intakeId: identifier,
   projectId: identifier,
@@ -1262,12 +1268,12 @@ const boundIntakeCodec = unionOf([
   objectCodec({
     ...boundIntakeCommonFields,
     state: enumeration(["awaiting-chair", "discussing", "awaiting-human", "deferred", "cancelled"]),
-  }),
+  }, { chairRequestSeed: intakeChairRequestSeedCodec }),
   objectCodec({
     ...boundIntakeCommonFields,
     state: literal("accepted"),
     acceptedScopeRef: artifactRefCodec,
-  }),
+  }, { chairRequestSeed: intakeChairRequestSeedCodec }),
 ]);
 const intakeCodec = unionOf([intakeDraftCodec, boundIntakeCodec]);
 const intakeDraftCreateBaseCodec = objectCodec({
@@ -2319,7 +2325,14 @@ const attentionSummaryCodec = objectCodec({
   label: enumeration(["Decision", "Approval", "Blocked", "FYI"]),
   priority: enumeration(["safety-integrity", "critical-path", "expiring-authority", "acceptance-ready", "advisory"]),
   title: text,
-}, { nativeNotification: nativeNotificationDeliverySummaryCodec });
+}, {
+  gateBinding: objectCodec({
+    gateId: identifier,
+    gateRevision: positiveInteger,
+    coordinationRunId: identifier,
+  }),
+  nativeNotification: nativeNotificationDeliverySummaryCodec,
+});
 const projectSummaryCodec = objectCodec(
   { kind: literal("project"), goal: text, acceptedScopeRef: nullable(artifactRefCodec), repositoryRevision: text },
   { repository: gitRepositorySummaryCodec },

@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   parseIntakeSubmission,
+  parseIntake,
   parseResourceReservationRequest,
   parseScopedGate,
 } from "../src/index.js";
@@ -69,6 +70,33 @@ const intakeSubmission = {
 } as const;
 
 describe("revisioned intake schema", () => {
+  it("parses the exact current chair seed used to prepare a successor discussion request", () => {
+    const intake = {
+      intakeId: "intake_01",
+      projectId: "project_01",
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      revision: 2,
+      state: "discussing",
+      dedupeKey: "intake-01",
+      summary: "Discuss the plan.",
+      artifactRefs: [artifact],
+      gateIds: ["gate_scope_01"],
+      chairRequestSeed: {
+        conversationId: "conversation_intake_01",
+        targetAgentId: "agent_chair",
+        targetProviderSessionRef: "session_chair",
+        baseRevision: "c2fc623",
+      },
+    } as const;
+
+    expect(parseIntake(intake)).toStrictEqual(intake);
+    expect(() => parseIntake({
+      ...intake,
+      chairRequestSeed: { ...intake.chairRequestSeed, targetProviderSessionRef: "" },
+    })).toThrowError(/targetProviderSessionRef/u);
+  });
+
   it("accepts one intake whose correlated request binds its exact revision and evidence", () => {
     expect(parseIntakeSubmission(intakeSubmission)).toStrictEqual(intakeSubmission);
   });

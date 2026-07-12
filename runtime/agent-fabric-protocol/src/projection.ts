@@ -4,6 +4,7 @@ import type {
   AgentId,
   ArtifactRef,
   CoordinationRunId,
+  GateId,
   JsonValue,
   MessageId,
   ProjectId,
@@ -437,6 +438,11 @@ export type OperatorViewSummaryMap = {
     label: AttentionItem["label"];
     priority: AttentionItem["priority"];
     title: string;
+    gateBinding?: {
+      gateId: GateId;
+      gateRevision: number;
+      coordinationRunId: CoordinationRunId;
+    };
     nativeNotification?: NativeNotificationDeliverySummary;
   };
   project: {

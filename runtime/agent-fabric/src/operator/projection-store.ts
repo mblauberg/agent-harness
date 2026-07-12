@@ -26,6 +26,7 @@ import type {
   ProjectSessionId,
   OperatorViewPageRequest,
   OperatorViewPageResult,
+  OperatorViewSummaryMap,
   ProjectDiscoveryRequest,
   ProjectDiscoveryResult,
   ProjectionEventsRequest,
@@ -49,6 +50,7 @@ import { digest, integer, isRow, nullableText, row, text, type Row } from "../pr
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
 import { renderSafeMessageBody } from "./message-safety.js";
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
+import { readControlEligibility, type ResolvedControlTarget } from "./control-eligibility.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -1076,6 +1078,7 @@ export class OperatorProjectionStore {
       const priority = attentionPriority(payload.priority, text(item, "severity"));
       const title = typeof payload.title === "string" ? payload.title : text(item, "kind");
       const revision = integer(item, "revision");
+      const gateBinding = this.#attentionGateBinding(item, payload, runId);
       return {
         itemId: text(item, "item_id"),
         itemRevision: revision,
@@ -1085,6 +1088,7 @@ export class OperatorProjectionStore {
             label,
             priority,
             title,
+            ...(gateBinding === undefined ? {} : { gateBinding }),
             ...(nativeNotificationProjection === "include"
               ? { nativeNotification: this.#nativeNotification(item) }
               : {}),
@@ -1094,6 +1098,32 @@ export class OperatorProjectionStore {
         }),
       };
     });
+  }
+
+  #attentionGateBinding(
+    item: Row,
+    payload: Row,
+    runId: string | null,
+  ): OperatorViewSummaryMap["attention"]["gateBinding"] | undefined {
+    if (typeof payload.gateId !== "string" || runId === null) return undefined;
+    const value = this.#database.prepare(`
+      SELECT gate_id, project_session_id, coordination_run_id, revision, status
+        FROM scoped_gates WHERE gate_id=?
+    `).get(payload.gateId);
+    if (!isRow(value)) return undefined;
+    if (
+      text(value, "project_session_id") !== text(item, "project_session_id") ||
+      text(value, "coordination_run_id") !== runId ||
+      (text(value, "status") !== "pending" && text(value, "status") !== "deferred")
+    ) return undefined;
+    return {
+      gateId: parseIdentifier<"GateId">(text(value, "gate_id"), "attention.gateBinding.gateId"),
+      gateRevision: integer(value, "revision"),
+      coordinationRunId: parseIdentifier<"CoordinationRunId">(
+        runId,
+        "attention.gateBinding.coordinationRunId",
+      ),
+    };
   }
 
   #sessionRevision(projectSessionId: string): number {
@@ -1188,6 +1218,12 @@ export class OperatorProjectionStore {
         text(run, "project_session_id"),
         "runRow.projectSessionId",
       );
+      const controlAvailability = this.#runControlAvailability(
+        runId,
+        runProjectSessionId,
+        revision,
+        authenticated,
+      );
       return {
         itemId: runId,
         itemRevision: revision,
@@ -1209,10 +1245,56 @@ export class OperatorProjectionStore {
             coordinationRunId: runId,
             expectedRevision: revision,
           },
-          actionAvailability: actionAvailability(authenticated),
+          actionAvailability: controlAvailability,
         }),
       };
     });
+  }
+
+  #runControlAvailability(
+    runId: string,
+    projectSessionId: string,
+    revision: number,
+    authenticated: AuthenticatedOperatorCredential,
+  ): OperatorActionAvailability {
+    const session = row(this.#database.prepare(`
+      SELECT generation FROM project_sessions WHERE project_session_id=?
+    `).get(projectSessionId), "run control session");
+    const tasks = this.#database.prepare(`
+      SELECT run_id, task_id, revision, state, owner_agent_id, owner_lease_generation
+        FROM tasks WHERE run_id=? ORDER BY task_id
+    `).all(runId).map((value) => row(value, "run control task"));
+    const agents = this.#database.prepare(`
+      SELECT run_id, agent_id, lifecycle FROM agents WHERE run_id=? ORDER BY agent_id
+    `).all(runId).map((value) => row(value, "run control agent"));
+    const target: ResolvedControlTarget = {
+      scopeKind: "run",
+      revision,
+      projectSessionId,
+      sessionGeneration: integer(session, "generation"),
+      runs: [runId],
+      tasks: tasks.map((task) => ({
+        runId: text(task, "run_id"),
+        taskId: text(task, "task_id"),
+        revision: integer(task, "revision"),
+        state: text(task, "state"),
+        ownerAgentId: nullableText(task, "owner_agent_id"),
+        ownerLeaseGeneration: integer(task, "owner_lease_generation"),
+      })),
+      agents: agents.map((agent) => ({
+        runId: text(agent, "run_id"),
+        agentId: text(agent, "agent_id"),
+        lifecycle: text(agent, "lifecycle"),
+      })),
+    };
+    const baseAvailability = actionAvailability(authenticated);
+    if (baseAvailability.state !== "available") return baseAvailability;
+    const eligible = new Set(readControlEligibility(this.#database, target).eligibleActions);
+    const actions = baseAvailability.actions.filter((action) =>
+      (action !== "pause" && action !== "resume" && action !== "cancel" && action !== "steer") ||
+      eligible.has(action));
+    if (actions.length > 0) return { state: "available", actions, requiresPreview: true };
+    return { state: "read-only", reason: "state-ineligible" };
   }
 
   #workRows(
@@ -1837,7 +1919,7 @@ function jsonObject(serialized: string, label: string): Row {
 
 function attentionLabel(kind: string): AttentionItem["label"] {
   if (kind === "approval") return "Approval";
-  if (kind === "decision") return "Decision";
+  if (kind === "decision" || kind === "consequential-gate") return "Decision";
   if (kind === "blocked" || kind === "quarantine") return "Blocked";
   return "FYI";
 }

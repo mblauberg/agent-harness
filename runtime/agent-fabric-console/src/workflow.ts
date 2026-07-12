@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import {
   FABRIC_OPERATIONS,
   OPERATION_CODECS,
+  parseIdentifier,
+  parseTimestamp,
   type CommandId,
   type IntakeDraftCreateRequest,
   type Intake,
@@ -24,11 +26,11 @@ import {
   type ProjectSessionId,
   type ProjectSessionTransitionRequest,
   type ScopedGateResolveRequest,
+  type TaskRequest,
 } from "@local/agent-fabric-protocol";
 
 import { operatorIntentRevision } from "./action-revision.js";
 import {
-  CONSOLE_MISSING_SURFACES,
   revisionFromProtocol,
   type ConsoleWorkflowCapabilities,
   type GuidedWorkflowAction,
@@ -118,6 +120,7 @@ export type ProductionConsoleWorkflowPlannerOptions = Readonly<{
   clientId: OperatorClientId;
   projectId: ProjectId;
   typedEntryPlanner?: ConsoleTypedEntryPlanner;
+  now?: () => number;
 }>;
 
 export type ConsoleTypedEntryKind = "launch" | "git" | "promotion";
@@ -148,6 +151,7 @@ type PreparedWorkflow = Readonly<{
 
 const MAX_WORKFLOW_BYTES = 65_536;
 const MAX_GUIDED_INPUT_BYTES = 16_384;
+const DISCUSSION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 
 export class ConsoleGuidedInputError extends TypeError {
   readonly code: string;
@@ -328,6 +332,116 @@ function guidedIntakeState(
   if (action === "accept") return "accepted";
   if (action === "request-changes") return "awaiting-chair";
   return "deferred";
+}
+
+function assertGuidedIntakeFields(
+  fields: Readonly<Record<string, string>>,
+  action: Extract<GuidedWorkflowAction, "discuss" | "accept" | "request-changes" | "defer">,
+): void {
+  const allowed = new Set(["intake", "summary"]);
+  const unexpected = Object.keys(fields).filter((field) => !allowed.has(field));
+  if (unexpected.length > 0) {
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_INTAKE_FIELDS_INVALID",
+      `guided ${action} does not accept ${unexpected.sort().join(",")}`,
+    );
+  }
+  if (action === "request-changes" && fields.summary === undefined) {
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_REQUIRES_SUMMARY",
+      "guided request-changes requires summary=<requested change>",
+    );
+  }
+}
+
+function exactGuidedRow(
+  dataset: FabricConsoleDataset,
+  binding: ConsoleInspectionBinding,
+) {
+  if (dataset.snapshotRevision !== binding.projectionRevision) {
+    throw new Error("guided workflow projection revision is stale");
+  }
+  const row = dataset.pages[binding.view].rows.find(
+    (candidate) => candidate.stableId === binding.itemId,
+  );
+  if (
+    row === undefined ||
+    row.revision !== binding.itemRevision ||
+    row.freshness.state !== "live"
+  ) {
+    throw new Error("guided workflow row binding is stale");
+  }
+  return row;
+}
+
+function successorChairRequest(input: Readonly<{
+  intake: Exclude<Intake, { state: "draft" }>;
+  artifactRefs: Intake["artifactRefs"];
+  summary: string;
+  clientId: OperatorClientId;
+  eventId: string;
+  nowMs: number;
+}>): TaskRequest {
+  const seed = input.intake.chairRequestSeed;
+  if (seed === undefined) {
+    throw new Error("intake-chair-request-seed-unavailable");
+  }
+  const nextRevision = input.intake.revision + 1;
+  const identity = [
+    input.clientId,
+    input.eventId,
+    input.intake.intakeId,
+    String(nextRevision),
+  ] as const;
+  return {
+    commandId: parseIdentifier<"CommandId">(
+      stableId("intake_request", ...identity),
+      "guided.chairRequest.commandId",
+    ),
+    projectSessionId: input.intake.projectSessionId,
+    coordinationRunId: input.intake.coordinationRunId,
+    task: {
+      taskId: parseIdentifier<"TaskId">(
+        stableId("intake_task", ...identity),
+        "guided.chairRequest.task.taskId",
+      ),
+      taskRevision: 1,
+      objective: input.summary,
+      baseRevision: seed.baseRevision,
+      expectedArtifactPaths: [...new Set(input.artifactRefs.map(({ path }) => path))],
+    },
+    request: {
+      requestRevision: 1,
+      messageId: parseIdentifier<"MessageId">(
+        stableId("intake_message", ...identity),
+        "guided.chairRequest.request.messageId",
+      ),
+      conversationId: seed.conversationId,
+      targetAgentId: seed.targetAgentId,
+      targetProviderSessionRef: seed.targetProviderSessionRef,
+      requiresAck: true,
+      dedupeKey: stableId("intake_dedupe", ...identity),
+      responseDeadline: parseTimestamp(
+        new Date(input.nowMs + DISCUSSION_DEADLINE_MS).toISOString(),
+        "guided.chairRequest.request.responseDeadline",
+      ),
+      callbackId: parseIdentifier<"CallbackId">(
+        stableId("intake_callback", ...identity),
+        "guided.chairRequest.request.callbackId",
+      ),
+      callbackGeneration: 1,
+      dependentBarrierId: parseIdentifier<"BarrierId">(
+        stableId("intake_barrier", ...identity),
+        "guided.chairRequest.request.dependentBarrierId",
+      ),
+      intakeBinding: {
+        intakeId: input.intake.intakeId,
+        intakeRevision: nextRevision,
+        gateIds: input.intake.gateIds,
+        artifactDigests: input.artifactRefs.map(({ digest }) => digest),
+      },
+    },
+  };
 }
 
 function liveProjectRevision(dataset: FabricConsoleDataset, projectId: ProjectId): number {
@@ -555,6 +669,11 @@ export function createProductionConsoleWorkflowPlanner(
 ): ConsoleWorkflowPlanner {
   const prepared = new Map<string, PreparedWorkflow>();
   const typedRevisionOverrides = new Map<string, number>();
+  const gateBindingOverrides = new Map<string, Readonly<{
+    revision: number;
+    coordinationRunId: string;
+  }>>();
+  const now = options.now ?? Date.now;
   const capabilities: ConsoleWorkflowCapabilities = {
     intake: options.client.intakes === undefined
       ? { state: "unavailable", reason: "intake-protocol-unavailable" }
@@ -599,6 +718,7 @@ export function createProductionConsoleWorkflowPlanner(
     if (envelope.kind === "scoped-gate-resolve") {
       const gateId = envelope.request.gateId;
       if (typeof gateId !== "string") throw new TypeError("scoped-gate-resolve requires gateId");
+      const gateBinding = gateBindingOverrides.get(`${input.eventId}\0${gateId}`);
       const session = liveSession(input.dataset);
       const gateRead = options.client.console?.gates.read;
       if (gateRead === undefined) throw new Error("scoped gate read is unavailable");
@@ -607,6 +727,7 @@ export function createProductionConsoleWorkflowPlanner(
         projectId: options.projectId,
         projectSessionId: session.projectSessionId,
         gateId: gateId as never,
+        ...(gateBinding === undefined ? {} : { expectedRevision: gateBinding.revision }),
       });
       const gate = current.gate;
       if (gate.projectSessionId !== session.projectSessionId) {
@@ -614,6 +735,16 @@ export function createProductionConsoleWorkflowPlanner(
       }
       if (gate.status !== "pending" && gate.status !== "deferred") {
         throw new Error("scoped gate is no longer open");
+      }
+      if (
+        gateBinding !== undefined &&
+        (
+          current.status !== "current" ||
+          gate.revision !== gateBinding.revision ||
+          gate.coordinationRunId !== gateBinding.coordinationRunId
+        )
+      ) {
+        throw new Error("guided Attention gate binding is stale");
       }
       review = {
         ...directPreview(envelope, gate.revision, input.eventId),
@@ -704,14 +835,50 @@ export function createProductionConsoleWorkflowPlanner(
       throw new Error("guided workflow projection revision is stale");
     }
     if (input.binding.view === "attention") {
-      throw new Error(
-        input.action === "discuss"
-          ? CONSOLE_MISSING_SURFACES.chairRequestPreparation
-          : CONSOLE_MISSING_SURFACES.attentionGateBinding,
-      );
-    }
-    if (input.action === "discuss" || input.action === "request-changes") {
-      throw new Error(CONSOLE_MISSING_SURFACES.chairRequestPreparation);
+      const selectedRow = exactGuidedRow(input.dataset, input.binding);
+      if (input.action === "discuss") {
+        throw new Error("attention-intake-binding-unavailable");
+      }
+      if (
+        input.action !== "accept" &&
+        input.action !== "request-changes" &&
+        input.action !== "defer"
+      ) {
+        throw new Error(`${input.action} is unavailable for Attention`);
+      }
+      if (selectedRow.summary?.kind !== "attention" || selectedRow.summary.gateBinding === undefined) {
+        throw new Error("attention-gate-binding-unavailable");
+      }
+      const fields = guidedFields(input.raw);
+      if (Object.keys(fields).length > 0) {
+        throw new ConsoleGuidedInputError(
+          "CONSOLE_GUIDED_ATTENTION_FIELDS_INVALID",
+          "guided Attention decisions use the selected gate and accept no fields",
+        );
+      }
+      const gateBinding = selectedRow.summary.gateBinding;
+      const status = input.action === "accept"
+        ? "approved"
+        : input.action === "defer"
+          ? "deferred"
+          : "rejected";
+      const overrideKey = `${input.eventId}\0${gateBinding.gateId}`;
+      gateBindingOverrides.set(overrideKey, {
+        revision: gateBinding.gateRevision,
+        coordinationRunId: gateBinding.coordinationRunId,
+      });
+      try {
+        return await prepare({
+          raw: JSON.stringify({
+            kind: "scoped-gate-resolve",
+            request: { gateId: gateBinding.gateId, status },
+          }),
+          dataset: input.dataset,
+          eventId: input.eventId,
+        });
+      } finally {
+        gateBindingOverrides.delete(overrideKey);
+      }
     }
     if (
       input.action === "implement" || input.action === "launch" ||
@@ -765,12 +932,18 @@ export function createProductionConsoleWorkflowPlanner(
         typedRevisionOverrides.delete(overrideKey);
       }
     }
-    if (input.action !== "accept" && input.action !== "defer") {
+    if (
+      input.action !== "discuss" &&
+      input.action !== "accept" &&
+      input.action !== "request-changes" &&
+      input.action !== "defer"
+    ) {
       throw new Error(`${input.action} typed planner is unavailable`);
     }
     const intakes = options.client.intakes;
     if (intakes === undefined) throw new Error("intake protocol is unavailable");
     const fields = guidedFields(input.raw);
+    assertGuidedIntakeFields(fields, input.action);
     const intakeId = requiredGuidedField(fields, "intake");
     const intake = await intakes.read({
       credential: options.credential,
@@ -811,6 +984,16 @@ export function createProductionConsoleWorkflowPlanner(
       : appendArtifact(intake.artifactRefs, inspection.result.artifactRef);
     const state = guidedIntakeState(input.action);
     const summary = fields.summary ?? intake.summary;
+    const chairRequest = input.action === "discuss" || input.action === "request-changes"
+      ? successorChairRequest({
+          intake,
+          artifactRefs,
+          summary,
+          clientId: options.clientId,
+          eventId: input.eventId,
+          nowMs: now(),
+        })
+      : undefined;
     const request = {
       intakeId: intake.intakeId,
       projectSessionId: intake.projectSessionId,
@@ -820,6 +1003,7 @@ export function createProductionConsoleWorkflowPlanner(
       summary,
       artifactRefs,
       gateIds: intake.gateIds,
+      ...(chairRequest === undefined ? {} : { chairRequest }),
       ...(state === "accepted"
         ? { acceptedScopeRef: inspection?.result.artifactRef }
         : {}),

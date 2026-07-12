@@ -12,7 +12,6 @@ import type {
 } from "./controller.js";
 import {
   FABRIC_VIEWS,
-  CONSOLE_MISSING_SURFACES,
   revisionFromProtocol,
   type ConsoleFreshness,
   type ConsoleRow,
@@ -609,9 +608,7 @@ function productionActionUnavailableReason(
     if (row.detailRef?.kind !== "run" && row.detailRef?.kind !== "session") {
       return "selected-row-has-no-control-target";
     }
-    if (action === "pause" || action === "resume") {
-      return CONSOLE_MISSING_SURFACES.runControlState;
-    }
+    if (action === "pause" || action === "resume") return null;
     if (action === "cancel" && ui.draft.trim().length === 0) {
       return "enter-a-reason";
     }
@@ -689,7 +686,7 @@ function evidenceWorkflowActions(
     ? capabilityReason(capabilities.intake)
     : "operator-mutation-unavailable";
   const discussionReason = canMutate
-    ? CONSOLE_MISSING_SURFACES.chairRequestPreparation
+    ? capabilityReason(capabilities.intake)
     : "operator-mutation-unavailable";
   const inspection = dataset.inspection;
   const currentArtifact = inspection?.kind === "artifact" &&
@@ -763,9 +760,10 @@ function attentionWorkflowActions(
   if (capabilities === undefined) return [];
   const mutationReason = canMutate ? null : "operator-mutation-unavailable";
   const discussionReason = mutationReason ??
-    CONSOLE_MISSING_SURFACES.chairRequestPreparation;
+    capabilityReason(capabilities.intake) ?? "attention-intake-binding-unavailable";
   const gateReason = mutationReason ??
-    CONSOLE_MISSING_SURFACES.attentionGateBinding;
+    capabilityReason(capabilities.gate) ??
+    (row.summary.gateBinding === undefined ? "attention-gate-binding-unavailable" : null);
   return [
     guidedAction("discuss", discussionReason),
     guidedAction("accept", gateReason),

@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../../../src/core/migrations.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ScopedGateStore } from "../../../src/gates/store.ts";
+import { NotificationOutbox } from "../../../src/attention/outbox.ts";
 import type { AuthenticatedOperatorContext } from "../../../src/project-session/contracts.ts";
 
 const databases: Database.Database[] = [];
@@ -136,6 +137,36 @@ function seedAttestationGate(fixture: ReturnType<typeof setup>): void {
       required, state, revision, created_at, updated_at
     ) VALUES ('session_01', 'run_01', 'gate', 'gate_01', 1, 'active', 1, 1, 1)
   `).run();
+  const notifications = new NotificationOutbox({ database: fixture.database, clock: () => 1 });
+  const attention = notifications.upsertAttention({
+    producerId: "policy:spec",
+    projectId: "project_01",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    principalGeneration: 1,
+  }, {
+    dedupeKey: "scoped-gate:gate_01",
+    kind: "consequential-gate",
+    severity: "critical",
+    payload: {
+      gateId: "gate_01",
+      title: "Proceed?",
+      summary: "Human decision",
+      priority: "critical-path",
+      duplicateCount: 1,
+    },
+  });
+  notifications.enqueue({
+    producerId: "policy:spec",
+    projectId: "project_01",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    principalGeneration: 1,
+  }, {
+    itemId: attention.itemId,
+    expectedItemRevision: attention.revision,
+    targetIntegration: "native-desktop",
+  });
 }
 
 function attestationRequest(options: {
