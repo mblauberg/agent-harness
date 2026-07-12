@@ -458,8 +458,19 @@ describe("Fabric Console runtime routing", () => {
           availableAction: null,
         },
       ] as const;
+      const rows = [...frame.rows];
+      const focusMarkerColumn = ui.focusId === actions[0].id
+        ? 0
+        : ui.focusId === actions[1].id
+          ? 13
+          : null;
+      const actionRow = rows[y - 1];
+      if (focusMarkerColumn !== null && actionRow !== undefined) {
+        rows[y - 1] = `${actionRow.slice(0, focusMarkerColumn)}>${actionRow.slice(focusMarkerColumn + 1)}`;
+      }
       return {
         ...frame,
+        rows,
         presentation: { ...frame.presentation, actions, focusId: ui.focusId },
         hitRegions: [
           ...frame.hitRegions.filter(({ kind }) => kind !== "action"),
@@ -649,6 +660,31 @@ describe("Fabric Console runtime routing", () => {
     expectEnabledVisibleFocus(runtime, opener);
   });
 
+  it("moves focus when a workflow Review opener is invalidated after close", () => {
+    const controller = stateBoundControlController();
+    const opener = "action:resume";
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: opener }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "workflow-post-close-focus-reconciliation",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    runtime.setWorkflowReview(shortWorkflowReview("committed"));
+    runtime.setWorkflowReview(null);
+    expectEnabledVisibleFocus(runtime, opener);
+
+    runtime.updateDataset({ ...controller.dataset, canMutate: false });
+
+    expect(runtime.ui.focusId).not.toBe(opener);
+    expectEnabledVisibleFocus(runtime);
+  });
+
   it("carries a guided workflow opener through Review and restores it on cancel", () => {
     const opener = "row:attention:attention:1";
     const runtime = new FabricConsoleRuntime({
@@ -738,6 +774,33 @@ describe("Fabric Console runtime routing", () => {
     runtime.repaint();
 
     expect(runtime.ui.focusId).not.toBe("action:resume");
+    expectEnabledVisibleFocus(runtime);
+  });
+
+  it("moves focus when a direct Review opener is invalidated after close", () => {
+    const controller = stateBoundControlController();
+    const opener = "action:resume";
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: opener }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "direct-post-close-focus-reconciliation",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    controller.state = { ...controller.state, review: directReview("committed") };
+    runtime.repaint();
+    controller.state = { ...controller.state, review: null };
+    runtime.repaint();
+    expectEnabledVisibleFocus(runtime, opener);
+
+    runtime.updateDataset({ ...controller.dataset, canMutate: false });
+
+    expect(runtime.ui.focusId).not.toBe(opener);
     expectEnabledVisibleFocus(runtime);
   });
 
@@ -1014,7 +1077,11 @@ describe("Fabric Console runtime routing", () => {
       "inert",
       "reference",
     ]);
-    expect(runtime.ui).toStrictEqual(beforeUi);
+    expect(runtime.ui).toStrictEqual({
+      ...beforeUi,
+      focusId: runtime.ui.focusId,
+    });
+    expectEnabledVisibleFocus(runtime);
     expect(controller.state).toStrictEqual(beforeController);
     expect(activate).not.toHaveBeenCalled();
     expect(detach).not.toHaveBeenCalled();
@@ -1277,6 +1344,41 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.focusId).toBe("splitter:master-detail");
   });
 
+  it("retains splitter restoration when projection refresh invalidates its surrogate", () => {
+    const controller = new FakeController();
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId: "splitter:master-detail" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-splitter-projection-refresh",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    runtime.resize({ columns: 60, rows: 18 });
+    const firstSurrogate = runtime.ui.focusId;
+    expect(firstSurrogate).not.toBe("splitter:master-detail");
+
+    runtime.updateDataset({
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        attention: {
+          ...controller.dataset.pages.attention,
+          rows: [],
+        },
+      },
+    });
+    expect(runtime.ui.focusId).not.toBe(firstSurrogate);
+    expectEnabledVisibleFocus(runtime);
+
+    runtime.resize({ columns: 80, rows: 24 });
+    expectEnabledVisibleFocus(runtime, "splitter:master-detail");
+  });
+
   it("keeps a splitter surrogate visible through chained compact, strip and inert resizes", () => {
     const runtime = new FabricConsoleRuntime({
       controller: new FakeController(),
@@ -1334,6 +1436,28 @@ describe("Fabric Console runtime routing", () => {
 
     expect(runtime.frame.hitRegions.find(({ id }) => id === "review:continue"))
       .toMatchObject({ enabled: true });
+  });
+
+  it("falls back from an enabled browse target with no visible focus marker", () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-unmarked-focus-fallback",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(longBoundReview("Git"));
+    expect(runtime.frame.hitRegions).toContainEqual(
+      expect.objectContaining({ enabled: true, id: "review:scroll" }),
+    );
+
+    runtime.setFocus("review:scroll");
+
+    expect(runtime.ui.focusId).not.toBe("review:scroll");
+    expectEnabledVisibleFocus(runtime);
   });
 
   it("makes every enabled 80x24 target keyboard reachable with visible focus", async () => {

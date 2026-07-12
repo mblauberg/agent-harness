@@ -1,3 +1,6 @@
+import stringWidth from "string-width";
+import { splitGraphemes } from "unicode-segmenter/grapheme";
+
 import type { TerminalInputEvent } from "./input.js";
 import {
   consoleFailureFromUnknown,
@@ -98,6 +101,18 @@ function nextView(view: FabricView, delta: -1 | 1): FabricView {
   return FABRIC_VIEWS[index] ?? "attention";
 }
 
+function cellSlice(value: string, start: number, end: number): string {
+  let column = 0;
+  let output = "";
+  for (const grapheme of splitGraphemes(value)) {
+    const nextColumn = column + stringWidth(grapheme);
+    if (nextColumn > start && column < end) output += grapheme;
+    column = nextColumn;
+    if (column >= end) break;
+  }
+  return output;
+}
+
 export class FabricConsoleRuntime {
   readonly #controller: FabricRuntimeController;
   readonly #draw: (frame: FabricConsoleFrame) => void;
@@ -155,7 +170,7 @@ export class FabricConsoleRuntime {
   }
 
   repaint(): FabricConsoleFrame {
-    this.#frame = this.#reconcileReviewFocus(this.#renderCurrentFrame());
+    this.#frame = this.#reconcileFocus(this.#renderCurrentFrame());
     if (!this.#closed) {
       this.#draw(this.#frame);
       this.#recordReviewCoverage(this.#frame);
@@ -193,11 +208,11 @@ export class FabricConsoleRuntime {
     }
   }
 
-  #reconcileReviewFocus(frame: FabricConsoleFrame): FabricConsoleFrame {
+  #reconcileFocus(frame: FabricConsoleFrame): FabricConsoleFrame {
     const review = frame.presentation.review;
     if (review === null) {
       const session = this.#reviewFocusSession;
-      if (session === null) return frame;
+      if (session === null) return this.#reconcileBrowseFocus(frame);
       this.#reviewFocusSession = null;
       const openerVisible =
         session.openerFocusId !== null && frame.hitRegions.some(
@@ -206,9 +221,11 @@ export class FabricConsoleRuntime {
       const restoredFocusId = openerVisible
         ? session.openerFocusId
         : this.#visibleSafeFocus(frame);
-      if (this.#ui.focusId === restoredFocusId) return frame;
+      if (this.#ui.focusId === restoredFocusId) {
+        return this.#reconcileBrowseFocus(frame);
+      }
       this.#ui = { ...this.#ui, focusId: restoredFocusId };
-      return this.#renderCurrentFrame();
+      return this.#reconcileBrowseFocus(this.#renderCurrentFrame());
     }
 
     if (this.#reviewFocusSession === null) {
@@ -237,7 +254,7 @@ export class FabricConsoleRuntime {
         ({ enabled, id }) => enabled && id === this.#ui.focusId,
       )
     ) {
-      return frame;
+      return this.#reconcileBrowseFocus(frame);
     }
 
     const preferredId =
@@ -257,9 +274,51 @@ export class FabricConsoleRuntime {
       ({ enabled, id, kind }) =>
         enabled && kind === "action" && id.startsWith("review:"),
     )?.id ?? this.#visibleSafeFocus(frame);
-    if (this.#ui.focusId === reviewFocusId) return frame;
+    if (this.#ui.focusId === reviewFocusId) {
+      return this.#reconcileBrowseFocus(frame);
+    }
     this.#ui = { ...this.#ui, focusId: reviewFocusId };
+    return this.#reconcileBrowseFocus(this.#renderCurrentFrame());
+  }
+
+  #reconcileBrowseFocus(frame: FabricConsoleFrame): FabricConsoleFrame {
+    if (
+      frame.mode === "inert" ||
+      this.#ui.inputMode !== "browse" ||
+      this.#hasEnabledVisibleFocus(frame)
+    ) {
+      return frame;
+    }
+    const previousFocusId = this.#ui.focusId;
+    const currentFocusEnabled = frame.hitRegions.some(
+      ({ enabled, id }) => enabled && id === previousFocusId,
+    );
+    const nextFocusId = this.#visibleSafeFocus(
+      frame,
+      currentFocusEnabled ? previousFocusId : null,
+    );
+    this.#ui = { ...this.#ui, focusId: nextFocusId };
+    if (
+      this.#restorableSplitterFocus?.migratedFocusId === previousFocusId
+    ) {
+      this.#restorableSplitterFocus = {
+        ...this.#restorableSplitterFocus,
+        migratedFocusId: nextFocusId,
+      };
+    }
     return this.#renderCurrentFrame();
+  }
+
+  #hasEnabledVisibleFocus(frame: FabricConsoleFrame): boolean {
+    const focusId = this.#ui.focusId;
+    if (focusId === null || frame.presentation.focusId !== focusId) return false;
+    const region = frame.hitRegions.find(
+      ({ enabled, id }) => enabled && id === focusId,
+    );
+    if (region === undefined) return false;
+    const firstRow = frame.rows[region.rect.y1 - 1];
+    return firstRow !== undefined &&
+      cellSlice(firstRow, region.rect.x1 - 1, region.rect.x1) === ">";
   }
 
   resize(viewport: FabricViewport): FabricConsoleFrame {
@@ -304,13 +363,16 @@ export class FabricConsoleRuntime {
         frame = this.#renderCurrentFrame();
       }
     }
-    this.#frame = this.#reconcileReviewFocus(frame);
+    this.#frame = this.#reconcileFocus(frame);
     this.#draw(this.#frame);
     this.#recordReviewCoverage(this.#frame);
     return this.#frame;
   }
 
-  #visibleSafeFocus(frame: FabricConsoleFrame): string | null {
+  #visibleSafeFocus(
+    frame: FabricConsoleFrame,
+    excludedFocusId: string | null = null,
+  ): string | null {
     const preferredKinds = frame.mode === "compact"
       ? this.#ui.compactPane === "master"
         ? ["row", "session", "tab", "action", "detach"] as const
@@ -318,11 +380,16 @@ export class FabricConsoleRuntime {
       : ["row", "session", "pager", "tab", "action", "detach"] as const;
     for (const kind of preferredKinds) {
       const region = frame.hitRegions.find(
-        (candidate) => candidate.enabled && candidate.kind === kind,
+        (candidate) =>
+          candidate.enabled &&
+          candidate.id !== excludedFocusId &&
+          candidate.kind === kind,
       );
       if (region !== undefined) return region.id;
     }
-    return frame.hitRegions.find(({ enabled }) => enabled)?.id ?? null;
+    return frame.hitRegions.find(
+      ({ enabled, id }) => enabled && id !== excludedFocusId,
+    )?.id ?? null;
   }
 
   updateDataset(dataset: FabricConsoleDataset): FabricConsoleFrame {
