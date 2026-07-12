@@ -9,16 +9,15 @@ Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
 Version 0.30 closes the implementation-review gaps in v0.29 without widening
-scope. The daemon now freezes verified artifact bytes and publication-time
-publisher lineage before route admission, binds the content-addressed review
-packet and final prompt digest to the action, and separately snapshots the
-current chair family/generation. Router admission is bounded, side-effect-free
-and process-tree-cancelled with keyed in-process single-flight; only durable
-replay is exactly-once. Review output is a strict CLEAN/P0-P2 record: raw answer
-bytes remain daemon-private, while every public read/operator/receipt surface carries
-only exact answer/result digests, safe findings and immutable lineage. Closed
-route/review projections, typed agent reads and operator Evidence details let
-the Console use only operator authority. Version 0.29 closes the provider-review lineage gap already covered by
+scope. The daemon builds a complete content-addressed review bundle from a
+sealed delivery basis and clean base/head state, snapshots proved
+publication-time session lineage plus the exact chair/profile, and admits one
+linear action/evidence head per slot. Router admission is structural, bounded,
+side-effect-free and stable-key single-flight. Raw answers and errors remain
+private; public surfaces carry safe result/failure, bundle/coverage, route and
+lineage digests. One recovery owner safely settles every certifying action,
+including route-integrity custody, and rotate/compact uses asynchronous
+suspended lifecycle custody with ABA-safe identity/bridge generations. Version 0.29 closes the provider-review lineage gap already covered by
 FR-015, FR-016A, AC-014 and Spec 05 v1.4. A task-bound answer-bearing spawn
 now carries one strict route request. At new-action admission the daemon invokes
 the trusted existing model router, verifies the resolved adapter, model,
@@ -953,28 +952,42 @@ evidence. It does not own human acceptance, delivery completion or the final
 gate. The chair-owned `.agent-run/<run-id>/RUN.json`, using `contract:
 delivery-run` and `schema_version: 1`, remains authoritative. It declares the
 fabric receipt as an evidence artifact with a workspace-relative path and
-SHA-256 digest; no second run-receipt shape is adopted.
+SHA-256 digest; no second run-receipt shape is adopted. Fabric receipt schema
+version 2 is the only current codec. No v1 decoder/import/projection exists;
+non-current files are preserved but rejected as protocol evidence.
 
 The fabric receipt records observed coordination facts:
 
 ```yaml
 receipt:
-  run_id: stable-id
+  schemaVersion: 2
+  runId: stable-id
   chair: agent-and-provider
-  stage_owners: []
+  taskOwners: []
   agents: []
-  execution_profile: name
-  direct_input_provenance: complete-or-partial-or-unavailable
-  currentReviewTarget: null-or-current-artifact/packet-digests
+  executionProfile: name
+  directInputProvenance: complete-or-partial-or-unavailable
+  currentReviewTarget: null-or-current-artifact/bundle/coverage/profile-digests
+  reviewCompletion: exact-reviewCompletionV1-with-four-heads/blockers
   providerRoutes: []
-  task_and_write_leases: []
-  messages_sent_received_abandoned: counts
-  objective_checks: []
   providerReviews: []
-  provider_failures_and_substitutions: []
-  operator_interventions: []
-  compactions_and_rotations: []
+  routeIntegrityRecoveries: []
+  taskAndWriteLeases: []
+  messageAndDeliveryCounts: explicit-state-counts
+  objectiveChecks: []
+  providerFailuresAndSubstitutions: []
+  operatorInterventions: []
+  compactionsAndRotations: []
+  eventWatermark: committed-event-watermark
+  counts: closed-summary-counts
+  stateHash: sha256-prefixed-canonical-snapshot-digest
 ```
+
+That top-level field set is closed. `reviewCompletion` is the exact safe
+reviewCompletionV1 reducer result including all four slot heads and blockers;
+`routeIntegrityRecoveries` contains safe recovery identities, dispositions and
+digests only. Neither field contains private answers, diagnostics, usage,
+bundle bytes, prompt content or capability material.
 
 Herdr panes show provider, model family, role, task, lifecycle, context pressure,
 unread message count and current lease generation where integrations permit.
@@ -1247,9 +1260,10 @@ And no side-effecting action is replayed without reconciliation.
 
 Given the chair owns or participates in one active review task and delegates a
 read-only externally disclosable authority envelope
-When it dispatches `operation: spawn` to an activated compatible adapter with
-an exact current review target/packet, strict route request, explicit admitted
-model/family/applicable effort, review instruction and exact task ID
+When it dispatches `operation: spawn` as the current target chair to an
+activated certifying-review-packet-only.v1 adapter with an exact current
+target/slot/head, structural
+route request, resolved profile, complete bundle/coverage and exact task ID
 Then Fabric persists one action and returns either its durable `prepared` or
 `dispatched`
 receipt or the terminal answer digest and safe parsed CLEAN/P0-P2 result
@@ -1262,9 +1276,10 @@ And exact replay returns that same route and action, while a missing task,
 stale task scope, forbidden disclosure, route/payload mismatch, changed route
 request, duplicate changed action or unsupported adapter fails before provider
 work
-And the current chair may record review evidence only by referencing that exact
-terminal action, target/packet, route, task, result/answer digests and reviewed
-artifact; Fabric derives safe result, model identity and both independence states
+And the current chair may record review evidence only by CAS-referencing that
+exact terminal action, target/head/bundle, route, task, result/answer digests
+and reviewed artifact; Fabric derives safe result, model identity, open findings
+and both independence states
 And no retained agent identity, capability or hidden direct-CLI result path is
 created.
 
@@ -1713,7 +1728,8 @@ agent or chair. An operator capability is revocable and binds:
 - one operator, project, optional project session and principal generation;
 - an explicit subset of `read`, `decide`, `steer`, `pause`, `resume`,
   `cancel`, `drain`, `stop`, `launch`, `takeover`, `git`, `git-authorise`,
-  `git-custody-resolve` and `external-effect` operations;
+  `git-custody-resolve`, `agent-lifecycle-recovery-issue` and
+  `external-effect` operations;
 - issue and expiry times no later than the project session;
 - the current project/session generation; and
 - for takeover, the handoff digest, old chair generation, expected run and
@@ -1725,7 +1741,11 @@ and generation. Possession of `decide` does not imply `launch`, `takeover` or
 `external-effect`. `git` admits an already-authorised typed mutation;
 `git-authorise` may issue or revoke a narrower Git grant but cannot execute one.
 `git-custody-resolve` may adjudicate only an eligible unprovable Git custody and
-cannot execute Git or issue a grant. None implies another.
+cannot execute Git or issue a grant. `agent-lifecycle-recovery-issue` is a
+session-bound local-control action only: it may issue the exact narrow
+fresh-rotate capability in section 32.20 after its bound consequential gate,
+but cannot rotate, call a provider, take over a chair or abandon an agent.
+None implies another.
 
 Every operator mutation carries the capability, stable command ID, expected
 revision, actor and provenance. The daemon derives project and actor identity
@@ -3837,10 +3857,11 @@ provider-turn capacity is available. `provider-action.read` observes that same a
 until terminal evidence supplies the bounded non-review answer or, for a
 certifying review, the answer digest and safe parsed result plus result digest.
 Connection closure, protocol timeout and exact command/action replay do not
-cancel or duplicate the effect. Live reconciliation observes locally owned
-prepared/dispatched work without lookup or quarantine. Daemon shutdown drains
-tracked work before closing its adapter and
-closes SQLite; restart uses lookup/reconciliation rather than blind replay.
+cancel or duplicate the effect. For ordinary noncertifying actions, live
+reconciliation observes locally owned prepared/dispatched work without lookup
+or quarantine. Every certifying action instead uses the sole recovery owner in
+section 32.19.8. Daemon shutdown drains tracked work before closing its adapter
+and closes SQLite; restart uses its typed recovery rather than blind replay.
 
 Terminal evidence settles every dimension exactly once: proven usage is
 consumed, unused reservation is released, concurrency is released, and an
@@ -3851,6 +3872,9 @@ unknown values with exact adapter evidence and unfreeze a dimension when no
 other unknown owner remains. Restart applies the same transitions from the
 persisted action binding and cannot release or spend twice. Delegation computes
 available capacity as granted minus reserved minus consumed.
+Section 32.19 is the closed certifying-review exception: every proved-effect
+terminal settles exact authenticated usage or conservatively charges the
+remaining reservation, so it never enters generic usage-unknown recovery.
 
 The closed Attention summary may include `gateBinding` only as this shape:
 
@@ -3896,508 +3920,1138 @@ Acceptance additionally requires:
   field. Console review/confirm tests then resolve/revise only those exact
   bindings.
 
-### 32.19 Admission-bound provider routes and review lineage
+### 32.19 Admission-bound provider routes and certifying review
 
-FR-015 already requires the existing model router and Spec 05 v1.4 already
-requires fresh external reviews to be answer-bearing Fabric tasks. For a
-task-bound answer-bearing `spawn`, the route is therefore action-admission
-input, not an artifact that the caller may publish after the action. The
-current chair first calls `fabric.v1.review-target.prepare` with command ID,
-review task, exact artifact ref and expected current target generation. That
-operation verifies/snapshots bytes and publication lineage, atomically
-supersedes the prior target and returns this closed current target:
+This amendment closes the current Spec 05 review path. It does not add a
+continuity router, automatic context-pressure controller, Pareto selector,
+native-routing mode or capability-snapshot policy. The existing trusted model
+router remains a structural resolver; Fabric owns review currency, immutable
+source custody and certification.
 
-```yaml
+#### 32.19.1 Publication-time publisher custody
+
+Every artifact registration receives one immutable publication-lineage
+snapshot in the registration transaction. For an agent publisher, the only
+proved provider join is:
+
+~~~text
+authenticated publishing agent + principal generation
+  -> one current active retained bridge generation
+  -> one immutable active provider-session lineage
+       -> launched-chair bridge + project-session launch custody
+       or retained-child bridge + provider-agent custody
+  -> exact provider-session generation
+  -> activated adapter ID/contract + admitted family/model + route when owned
+~~~
+
+The daemon derives the bridge and action from the authenticated connection.
+The publish request carries no custody, family, model, route or independence
+claim. The complete closed snapshot is:
+
+~~~yaml
+artifactPublicationLineageV1:
+  schemaVersion: 1
+  artifactId: exact-registration
+  artifactRevision: positive-publication-revision
+  publisherKind: agent-or-operator-or-fabric-or-project
+  publisherRef: exact-registration-publisher
+  publisherAgentId: null-or-exact-agent
+  publisherPrincipalGeneration: null-or-positive-generation
+  publisherBridgeGeneration: null-or-positive-active-generation
+  providerCustodyRef:
+    oneOf:
+      - null
+      - ownerKind: launched-chair-or-retained-child
+        adapterId: exact-activated-adapter
+        actionId: exact-provider-agent-custody-action
+        providerSessionGeneration: positive-generation
+        adapterContractDigest: sha256-prefixed-digest
+        routeReceiptDigest: null-or-sha256-prefixed-owned-route
+        modelFamily: canonical-family
+        model: exact-admitted-model
+  state: proved-or-unproved
+  reason: proved-or-non-agent-or-no-active-bridge-or-no-session-lineage-or-ambiguous-session-lineage-or-crossed-generation
+  lineageDigest: sha256-prefixed-canonical-snapshot-digest
+~~~
+
+A proved row requires one exact same-run, same-agent,
+same-principal-generation and same-provider-session join. Chair activation
+writes its session-lineage row from launched-chair bridge plus launch custody;
+child activation writes the same closed row from retained-child bridge plus
+provider-agent custody. Adapter contract, family and model are mandatory. Route
+digest is mandatory only when that custody owns a route and is otherwise null;
+independence requires proved family, not an invented route. Zero, multiple,
+stale or crossed joins are unproved. Later bridge rotation, provider action,
+route, registry revision or artifact-kind change cannot rewrite the snapshot.
+
+A certifying Spec 05 target is eligible only when its root evidence registration
+is an agent-published project-file or run-file of kind
+implementation-delivery-manifest, its lineage is proved, and its publisher
+family equals the target chair family. Operator-, Fabric- and project-published
+artifacts and git-private-diff registrations retain honest unproved lineage.
+They may be covered objects in a review bundle but cannot be the root target
+for a profile that requires publisher independence.
+
+#### 32.19.2 Complete review bundle and current target
+
+The current chair prepares a target with
+fabric.v1.review-target.prepare under provider-review-evidence.v1. The request
+names only a stable command ID, exact review task, expected target generation
+and one current registered implementation-delivery-manifest. It accepts no
+summary, changed-file list, packet bytes, provider identity, route, prompt,
+profile override or lineage assertion.
+
+The daemon resolves the manifest to one sealed delivery review basis. That
+basis binds the delivery run, accepted scope, requirement/acceptance mapping,
+required pre-review checks and evidence, and a clean canonical Git state:
+repository/object format, base object, head object, head tree, index tree,
+worktree-clean marker and their canonical source-state digest. Review evidence
+itself does not advance the review-basis revision. Any source, base/head,
+index/worktree, accepted-scope, required-check, evaluation, load or pre-review
+evidence change does.
+
+From the trusted Git and evidence services, the daemon constructs the complete
+closed review-bundle.v1. The caller cannot omit an entry. The manifest contains:
+
+~~~yaml
+reviewBundleV1:
+  schemaVersion: 1
+  bundleGeneration: positive-run-generation
+  delivery:
+    deliveryRunId: exact-run
+    reviewBasisRevision: positive-revision
+    reviewBasisDigest: sha256-prefixed-digest
+    deliveryManifestRef: exact-eligible-artifact
+  repository:
+    objectFormat: exact-registered-format
+    baseObjectId: full-object-id
+    headObjectId: full-object-id
+    headTreeId: full-object-id
+    indexTreeId: exact-head-tree-id
+    worktreeState: clean
+    sourceStateDigest: sha256-prefixed-digest
+  changedFiles:
+    - path: canonical-relative-path
+      status: added-or-modified-or-deleted-or-renamed-or-mode-changed
+      oldPath: null-or-canonical-relative-path
+      beforeObjectDigest: null-or-sha256-prefixed-bundle-object
+      afterObjectDigest: null-or-sha256-prefixed-bundle-object
+      diffObjectDigest: sha256-prefixed-bundle-object
+  requiredEvidence:
+    - role: accepted-scope-or-spec-or-adr-or-test-or-evaluation-or-load-or-migration-or-generated-contract-or-receipt
+      evidenceRef: exact-current-registration
+      objectDigest: sha256-prefixed-bundle-object
+  carriedFindings:
+    - findingDigest: sha256-prefixed-safe-finding-digest
+      findingId: exact-safe-id
+      severity: P0-or-P1-or-P2
+      summary: bounded-safe-text
+      evidence: bounded-safe-text
+      originTargetGeneration: positive-generation
+      originActionRef: exact-adapter/action
+      originResultDigest: sha256-prefixed-digest
+      originArtifactRevision: positive-revision
+      originRepositorySourceStateDigest: sha256-prefixed-digest
+      objectDigest: sha256-prefixed-required-bundle-object
+  objects:
+    - objectDigest: sha256-prefixed-exact-object-bytes
+      mediaType: closed-media-type
+      byteLength: nonnegative-integer
+      chunkDigests: ordered-sha256-digests
+  manifestPages: ordered-sha256-digests
+  bundleSearchIndexDigest: sha256-prefixed-immutable-index
+  riskReadMapDigest: sha256-prefixed-checked-in-rules/output
+  mandatoryReadSetDigest: sha256-prefixed-root/pages/specs/gates/findings/risk-sample-set
+  mandatoryReadCount: positive-bounded-count
+  mandatoryReadBytes: positive-bounded-count
+  coverageDigest: sha256-prefixed-canonical-delivery-repository-coverage-digest
+  manifestDigest: sha256-prefixed-canonical-manifest-digest
+  manifestRootDigest: sha256-prefixed-bounded-root-digest
+  bundleDigest: sha256-prefixed-canonical-bundle-digest
+~~~
+
+The receipt role means one immutable pre-review coordination/gate snapshot
+sealed in the delivery review basis. It excludes the four review actions,
+evidence heads and final review completion fields. The final
+fabric-receipt.json is exported after completion and never retroactively
+changes that basis or its target.
+
+Changed-file coverage is the complete sorted base-to-head Git change set.
+Added, deleted, renamed and modified paths include the exact applicable before,
+after and deterministic diff objects. Required-evidence coverage is the
+complete sorted set derived from the sealed delivery review basis. The daemon
+rejects a duplicate, omission, unexpected entry, dirty index/worktree,
+unsupported Git state, unavailable object or evidence revision, or any
+coverage-digest mismatch. It never substitutes a prose summary or truncated
+diff.
+
+carriedFindings contains the full immutable safe record for every open finding
+from the predecessor slot heads, including origin action/result. These are
+required bundle objects; an opaque digest alone is insufficient. Every provider
+P0-P2 finding is repair-required automatically. Chair adjudication cannot
+remove, downgrade or make one same-target-resolvable.
+When any carried finding is repair-required, successor target preparation must
+prove both a later delivery/artifact revision and a repository source-state
+digest different from that finding's origin. Repreparing identical bytes cannot
+make it resolvable.
+
+Each object is split into ordered content-addressed chunks of 1 through 65,536
+bytes; an empty object has no chunks. Object digest is over exact source bytes,
+and each chunk digest is over its exact bytes. The canonical logical manifest
+is split at entry boundaries into at most 32 immutable pages of at most 65,536
+bytes. A root of at most 49,152 bytes lists their ordered digests, logical
+manifest digest/length and coverage digest. V1 limits are 4,096 changed paths,
+512 required-evidence entries, 2,048 objects, 8,192 chunks, 8 MiB per object,
+16 MiB total object bytes and 1 MiB total manifest-page bytes. Certification
+requires the root and every manifest page, every carried-finding object and all
+required accepted-scope/spec/ADR/gate-decision objects. That mandatory set is
+limited to 128 complete reads and 4 MiB exact bytes; target preparation rejects
+a delivery exceeding either bound. Complete changed-file diffs, before/after
+objects, checks, evaluations, load evidence and generated contracts remain
+available but are not all byte-mandatory for a large delivery.
+
+The daemon builds a content-addressed bundle-search.v1 index and applies the
+checked-in review-risk-map.v1 to the complete manifest. Closed nonempty groups
+are security/auth, protocol/schema, persistence/migration, provider/adapter,
+Console/UI, tests/evaluations, documentation and generated/other. The checked-
+in rules score by evidence kind/path/operation sensitivity, sort by descending
+score then canonical path/digest, and select exact diff chunks from the highest-
+risk changed objects in every nonempty group. The combined deterministic sample
+is at most 64 chunks/4 MiB and joins the mandatory read set; caller/provider
+cannot choose it. Target prepare fails if it cannot form one sample per group
+inside the bound.
+
+The action-bound portal additionally accepts only literal substring or token search over that index:
+at most 256 query bytes, 100 results, 65,536 result bytes and 250 ms CPU. It
+returns exact object digests/offsets/snippets plus a result digest. Search has
+no regex, live path or caller-selected index. Search supports deeper exploration
+but does not replace the mandatory deterministic sample. The target stores the
+exact risk/sample map and achievable read/byte budgets.
+Exceeding a limit is bundle-too-large and requires a smaller complete delivery,
+not a partial bundle.
+
+Manifest, objects and chunks are written create-exclusive beneath the
+daemon-private content-addressed review store, fsynced, re-read and digest
+verified before target commit. Existing same-digest content is byte-verified.
+A collision is an integrity failure. The two-phase no-follow source checks from
+section 32.14 apply, and the delivery basis, Git state, registrations and
+publication lineage are rechecked in the target transaction.
+
+The action-only review-bundle.portal.v1 exposes the immutable manifest root,
+manifest pages and exact object chunks. Its capability is bound to one action,
+target, bundle, coverage digest and expiry. A read names the root, one listed
+page, or exact object and chunk digests; the daemon verifies the complete parent
+chain and returns at most 65,536 bytes plus the returned byte digest. It accepts
+only that closed bundle-search query, never an arbitrary command, caller path/
+root, glob, URL or mutable cursor. Every
+successful read is journalled by digest. Cross-bundle, reordered, missing or
+substituted pages/chunks fail closed.
+
+The adapter prompt is a bounded envelope containing the fixed review rubric,
+review instruction, target generation, slot, prior open-finding digests,
+bundle/coverage/profile digests and portal contract. It contains no
+caller-selected source summary. It binds the complete carried-finding set and,
+where bounded, includes its safe text; otherwise those records are mandatory
+reads. Its exact UTF-8 bytes remain at most 65,536 and
+its digest is action-bound; bundle content remains behind the portal, so source
+size cannot overflow the prompt. The strict provider result repeats the target
+generation and coverage digest. A partial or stale summary therefore cannot
+masquerade as complete bundle review, and every source read is digest-bound.
+The portal journal must prove the mandatory set including every deterministic
+risk sample, then derives readCoverageDigest and one coverage summary. Zero or
+insufficient mandatory reads are noncertifying insufficient-read-coverage. A
+syntactic CLEAN becomes public UNUSABLE and resolves nothing; a safely parsed
+FINDINGS remains visible/noncertifying, resolves nothing and adds every new
+P0-P2 to open repair-required state. Provider repetition of coverageDigest is
+not consumption proof. Complete means complete bundle availability and
+manifest awareness, not byte-for-byte review. The daemon declares every unread
+object group/count/set digest as a coverage gap; neither provider nor chair can
+hide it.
+
+The committed target is:
+
+~~~yaml
 reviewTargetV1:
   schemaVersion: 1
   targetGeneration: positive-run-CAS-generation
-  completionProfile: spec05-four-slot-v1
   taskId: exact-review-task
-  reviewedArtifactRef: exact-artifact-id/revision/path/sha256
-  publicationLineageDigest: exact-registration-snapshot-digest
-  reviewPacketRef: exact-content-addressed-packet-ref
-```
+  reviewedArtifactRef: exact-eligible-delivery-manifest
+  publicationLineageDigest: exact-registration-snapshot
+  deliveryReviewBasisRevision: positive-revision
+  deliveryReviewBasisDigest: sha256-prefixed-digest
+  repositorySourceStateDigest: sha256-prefixed-digest
+  reviewBundleRef:
+    bundleGeneration: positive-generation
+    bundleDigest: sha256-prefixed-digest
+    manifestDigest: sha256-prefixed-digest
+    manifestRootDigest: sha256-prefixed-digest
+    coverageDigest: sha256-prefixed-digest
+    bundleSearchIndexDigest: sha256-prefixed-digest
+    riskReadMapDigest: sha256-prefixed-digest
+    mandatoryReadSetDigest: sha256-prefixed-digest
+    mandatoryReadCount: positive-count-at-most-128
+    mandatoryReadBytes: positive-count-at-most-4194304
+    objectCount: bounded-count
+    chunkCount: bounded-count
+    totalObjectBytes: bounded-count
+  targetChair:
+    agentId: exact-current-chair
+    principalGeneration: positive-generation
+    chairLeaseGeneration: positive-generation
+    adapterId: exact-current-chair-adapter
+    modelFamily: openai-or-anthropic
+    model: exact-current-chair-model
+    routeReceiptDigest: null-or-sha256-prefixed-current-chair-route
+  completionProfile:
+    profileId: spec05-four-slot-v1
+    profileSchemaDigest: sha256-prefixed-checked-in-schema
+    resolvedProfileDigest: sha256-prefixed-target-snapshot
+    slots: exact-four-resolved-slots
+~~~
 
-The operation is negotiated under `provider-review-evidence.v1`, is available
-only to an agent principal holding the current chair lease/generation, and
-accepts no packet bytes, prompt, provider identity or lineage assertion.
-Exact prepare replay returns the same target. A changed request or stale target
-generation conflicts. One current target per run defines review currency; no
-latest-row, file-mtime or Console-local heuristic may substitute.
+The prepare transaction supersedes the former target and creates four slot
+heads. Exact command replay returns the immutable target. Changed replay or a
+stale expected generation conflicts. A delivery review-basis/source-state
+advance, root artifact advance, target-chair principal/lease generation or
+family change, or any resolved adapter-contract/profile change supersedes the
+target logically. Reads derive stale-target without mutation. A dispatch or
+annotation mutation rejects it without changing target state. The daemon's
+terminal evidence transaction remains action-bound and always settles/persists
+even when target currency changed. Only a new prepare
+atomically supersedes the prior row while committing its successor. No read
+advances global revision. A later chair never reinterprets the old target; it
+prepares a new one.
 
-`provider-action.dispatch` requires the following closed `routeRequest` for
-that operation only. `reviewedArtifactRef` is closed optional input represented
-explicitly as `null` for non-review answer-bearing work; both fields are
-rejected for every other provider action:
+#### 32.19.3 Owned four-slot profile
 
-```yaml
+The protocol package owns
+schemas/spec05-four-slot-v1.schema.json and the checked-in profile document
+config/review-profiles/spec05-four-slot-v1.json. Both are closed and
+digest-bound. The profile has exactly these rules:
+
+| Slot | Adapter class and ID | Family/model rule | Publisher independence | Chair independence |
+| --- | --- | --- | --- | --- |
+| native | primary-native; codex-app-server for OpenAI chair, claude-agent-sdk for Anthropic chair | exact activated native review route; family equals target chair | exempt | exempt |
+| other-primary | equal-primary; claude-agent-sdk for OpenAI chair, codex-app-server for Anthropic chair | exact activated equal primary distinct from target chair | required | required |
+| cursor-grok | cursor; cursor-agent | family xai; exact activated model grok-4.5-xhigh | required | required |
+| agy-gemini | agy; agy | family google; exact activated model Gemini 3.1 Pro (High) | required | required |
+
+The target chair and eligible publisher must be OpenAI or Anthropic and have the
+same family. The resolved snapshot names, for every slot, exact adapter class,
+adapter ID, adapter contract digest, model family, model, requested/effective
+effort policy, source mode, provider-turn/internal-step ceiling, maximum read
+operations/bytes, mandatory-read/risk-map digests, route aliases and the two
+independence requirements. Missing or
+ambiguous resolution rejects target preparation. The native exemption is
+profile data, not reducer prose. For a Codex/OpenAI target, other-primary
+therefore resolves to Claude/Anthropic; after any chair rotation the old target
+is superseded and the whole matrix is resolved again.
+
+Every resolved adapter must advertise activated
+certifying-review-packet-only.v1 under the exact adapter contract digest. That
+capability proves:
+
+- model-visible source is limited to the action-bound Fabric portal. A provider
+  without native portal MCP uses one pinned local portal helper named in its
+  non-secret synthetic config; Seatbelt permits only that helper executable and
+  passes its action capability out-of-band;
+- the adapter receives a daemon-built minimal auth/config capsule when its CLI
+  requires one: a per-action 0700 synthetic HOME containing only exact 0600
+  adapter auth/config bytes. Its path/value is outside the model-visible
+  filesystem/tool namespace; model-visible env/cwd contain only non-secret
+  action and bundle bindings, never inherited real HOME/user/project state;
+- outer OS confinement and canary transcripts deny every user/project/auth file
+  read outside portal-returned bundle objects plus all workspace-index, shell, edit/write,
+  browser, arbitrary-network and provider-source effects; and
+- every adapter/helper/CLI child belongs to one action process group; deadline
+  sends TERM to that group and, after 250 ms, KILL, then proves no descendant,
+  portal or credential capsule remains; output bounds, portal teardown and
+  credential separation are contract-tested.
+
+The trusted adapter transport may contact its fixed provider endpoint outside
+the model tool sandbox; it cannot expose a general network tool. Claude/Codex
+use direct portal MCP. Cursor/Agy use the pinned helper exception and create no
+source workspace. MCP discovery must return exactly that portal
+server/tool set and no resources or other tools. A provider may advertise an
+inert web tool only when every invocation is hard-rejected before effect and
+the transcript proves no-effect. Any extra MCP surface/resource, successful web
+effect or outside-portal source read invalidates the action. Hardened wrappers
+must add outer confinement and fail-closed stream/hook evidence; stock/tool-
+policy-only CLI cannot certify.
+The Agy contract uses deny read_url(*), execute_url(*), command(*), mcp(*) and
+write_file(*) plus PreToolUse hard-deny hooks, allowing only portal reads. The
+Cursor contract permits only portal Read and denies Write/Shell; its current-
+build canary must additionally prove WebSearch/WebFetch has no effect, MCP
+discovery is empty/inert and auth remains adapter-internal (for example
+Keychain), never a model-readable capsule file.
+Unsupported adapters/platforms advertise the capability false. Missing
+activation, contract-digest mismatch or unenforceable sandbox returns
+CERTIFYING_REVIEW_CAPABILITY_UNAVAILABLE before router/provider I/O, action or
+budget reservation. It never falls back to a noncertifying provider call.
+
+Direct-portal slots reserve at most 128 provider turns, 128 portal operations
+and 8 MiB portal bytes. Portal-helper slots reserve one Fabric provider turn,
+at most 128 adapter-internal portal calls and 8 MiB portal bytes. The resolved profile
+chooses exact values at least as large as the target mandatory-read count/bytes
+and atomically reserves turns, provider calls, concurrency, review_read_ops and
+review_read_bytes. Claude/Codex use direct-portal; Cursor/Agy use portal-helper.
+A slot may narrow these maxima only while the target mandatory/risk predicate remains
+reachable.
+
+#### 32.19.4 Structural routing and admission
+
+The shared model-route.v1 codec contains only closed structural routing data:
+
+~~~yaml
 routeRequest:
   schemaVersion: 1
   adapterAlias: configured-nonempty-alias
   modelAlias: configured-nonempty-alias
-  explicitModel: null-or-exact-allowlisted-model
+  explicitModel: null-or-structurally-valid-model
   role: configured-route-role
   leadFamily: canonical-nonempty-model-family
   requireDistinct: true-or-false
-  providerEffort: null-or-explicit-provider-effort
-reviewTargetGeneration: null-or-positive-current-target-generation
-reviewedArtifactRef:
+  providerEffort: null-or-structurally-valid-effort
+~~~
+
+It rejects unknown fields and malformed values but performs no database,
+artifact, target, effort-applicability, adapter-activation, model-policy or
+currency read. Null effort requests the configured route default. The Python
+router and TypeScript daemon validate the same checked-in schema.
+
+A certifying provider-action.dispatch additionally carries this separate closed
+binding; non-review work carries null:
+
+~~~yaml
+certifyingReview:
   oneOf:
     - null
-    - artifactId: exact-active-artifact
-      revision: positive-current-revision
-      path: canonical-relative-path
-      sha256: sha256-prefixed-source-digest
-```
+    - targetGeneration: exact-current-target
+      slot: native-or-other-primary-or-cursor-grok-or-agy-gemini
+      expectedSlotHeadGeneration: nonnegative-CAS-generation
+~~~
 
-The codec rejects additional fields, unconfigured aliases/roles, an explicit
-model outside the router's allow-list, an effort value unsupported by the
-selected adapter/model and any non-null artifact outside the exact project or
-current active registry revision. A spawn intended to certify review requires
-the exact artifact form and current target generation, both byte-identical to
-`reviewTargetV1`; another answer-bearing worker uses explicit `null` for both.
-`providerEffort` is required when the selected provider/model exposes an effort
-choice and is `null` otherwise. The caller cannot select the router executable,
-catalogue, capability source or configuration path.
+Existing durable command/action replay and immutable input-digest comparison
+run first. For a new certifying action, the authenticated caller must hold the
+current chair lease/generation and equal the target chair snapshot. Ordinary
+answer-bearing work retains its existing task authority.
 
-Review-target prepare builds one private, content-addressed
-`review-packet.v1` from the bound artifact:
+The trusted resolver is side-effect-free, reads only pinned routing inputs,
+writes nothing, performs no provider/network call and emits bounded output. One
+5,000 ms deadline covers spawn, parse and validation; timeout/overflow kills
+the process group with TERM then KILL after 250 ms. It leaves no action, route,
+command result or budget reservation.
 
-```yaml
-reviewPacket:
+Single-flight uses the stable key run ID, authenticated actor ID and action ID;
+input digest is never part of the mutex key. The owner stores the canonical
+input digest. An exact concurrent retry joins that flight. A different digest
+waits for the owner and then returns ACTION_INPUT_CONFLICT before any router
+call, even if the owner failed before commit. A later exact retry may safely
+rerun the side-effect-free router after a pre-commit crash.
+
+After a successful router result, one admission transaction rechecks task and
+authority, complete budget, current target/chair/profile/head generations,
+delivery/source/artifact currency, certifying-review-packet-only.v1 capability/contract, route
+aliases, effort applicability, resolved adapter/family/model/effort and
+lead-family/distinctness. The route must equal the resolved slot snapshot.
+These are database admission rules, not codec rules. It then commits action,
+canonical request/receipt and digests, target/bundle/coverage/profile/head/chair
+snapshots, final-prompt digest, complete budget reservation and command receipt
+before provider I/O.
+
+That transaction also CAS-increments the slot head's attempt generation and
+reserves the exact target, slot and evidence-head generation for this action.
+A partial unique constraint permits one nonterminal attempt for that tuple. Two
+concurrent actions from one head cannot both commit or reach the provider; a
+later attempt starts only from the returned current attempt/head state.
+
+Dispatch and read expose one closed providerRouteProjectionV1 containing those
+exact immutable values. No later router/configuration, chair, target or
+registry change rewrites it.
+
+#### 32.19.5 Terminal review results and provider failures
+
+The provider answer must be exact valid UTF-8 and no larger than 65,536 bytes.
+Its strict review-result.v1 object is:
+
+~~~yaml
+reviewResultV1:
   schemaVersion: 1
-  artifactRef: exact-reviewedArtifactRef
-  publicationLineageDigest: exact-registration-lineage-digest
-  mediaType: text/markdown-or-application/json-or-text/x-diff-or-text/plain
-  sourceByteLength: integer-at-most-49152
-  contentEncoding: utf8-json-string
-  content: exact-verified-source-bytes-as-one-JSON-string
-reviewPacketRef:
-  packetDigest: sha256-prefixed-canonical-packet-digest
-  sourceSha256: exact-reviewed-artifact-sha256
-  sourceByteLength: exact-packet-source-length
-```
+  targetGeneration: exact-action-target
+  coverageDigest: exact-action-coverage-digest
+  verdict: CLEAN-or-FINDINGS
+  resolvedFindingDigests: ordered-unique-subset-of-prior-open-findings
+  findings:
+    - findingId: unique-safe-id
+      severity: P0-or-P1-or-P2
+      summary: bounded-safe-text
+      evidence: bounded-safe-text
+~~~
 
-UTF-8 decode/JSON escaping is reversible and performs no BOM, newline, Unicode
-or trailing-whitespace normalisation; re-encoding `content` must reproduce the
-registered source bytes and SHA-256 exactly.
+CLEAN requires no new findings and resolves every prior open finding.
+FINDINGS requires one through 32 new findings and may resolve any subset of
+prior open findings. Unknown/duplicate fields or IDs, inconsistent target or
+coverage, malformed JSON, controls, credentials, capabilities or unsafe text
+produce UNUSABLE. The reject-only safety classifier and immutable secret-set
+identity remain as defined in section 32.14. Raw answer and raw adapter result
+stay daemon-private.
 
-The daemon captures the registration and publication-lineage snapshot in phase
-A, no-follow reads the exact regular file outside SQLite, verifies its source
-digest and strict UTF-8, writes/fsyncs the canonical packet under its digest,
-then in phase B rechecks the registration revision, path, digest, publisher and
-lineage before target commit. Change before or during those phases returns
-`stale` with no route, action, command or budget row. Change afterwards cannot
-alter the packet used by the provider. Source bytes above 49,152 or a composed
-prompt above the existing 65,536-byte ceiling fail closed and require a newly
-published bounded review-bundle artifact.
+A provider may terminate with a proved failure and no answer, including
+max-turns-exhausted, provider-rejected, terminal-no-answer or
+adapter-terminal-failure. This is not effect ambiguity. Fabric commits terminal
+state, the closed failure code and a digest of bounded normalised private
+diagnostics; it exposes no raw error or fabricated answer. Every proved-effect
+terminal kind -- safe answer, unusable answer or provider-terminal-failure --
+settles authenticated complete usage exactly. If that usage is absent or
+partial, the same terminal transaction conservatively consumes the full
+remaining spendable reservation. In either case it releases terminal
+concurrency capacity. Proved terminal-no-effect releases the reservation;
+ambiguity retains it. The action is never redispatched. Ambiguous means only
+that provider effect/outcome is not proved.
 
-For a certifying review, caller `payload.prompt` is only a bounded review
-instruction. The daemon composes the actual adapter prompt from a fixed
-`review-result.v1` rubric, that instruction and the canonical packet bytes, and
-hashes the final exact UTF-8 prompt. The adapter receives that prompt plus no
-mutable-workspace source tool: a provider that needs tools is confined to a
-read-only portal serving only the packet digest. The packet digest and final
-prompt digest join the action identity and route projection. A response cannot
-certify review of a live path, later registry revision or different prompt.
+The closed terminalReview arm is exactly one of safe-answer, unusable-answer,
+provider-terminal-failure, terminal-no-effect, integrity-terminal or
+retired-unknown. terminal-no-effect proves no provider review effect;
+integrity-terminal proves terminal effect/settlement but cannot verify the
+route/bundle chain; retired-unknown is the direct-human retirement of a
+permanently ambiguous effect after full-ceiling charge. None certifies except a
+safe-answer whose verdict is CLEAN or FINDINGS. resultDigest is SHA-256 of
+canonical JSON over the applicable immutable identity:
 
-One checked-in `model-route.v1` closed schema in the shared protocol package is
-the sole request/receipt shape owner. The TypeScript daemon and Python router
-both validate directly against that same versioned artifact; neither maintains
-a hand-written permissive copy. Its version is a constant, unknown fields fail,
-and request/receipt parity fixtures are shared across both runtimes. This
-current FR-015 refactor adds no capability snapshot, evidence selector,
-Pareto/native routing mode or other continuity-policy input.
+A safe-answer also carries daemon-derived readCoverageDigest and the closed
+coverage summary: mode manifest-complete-risk-directed, mandatory predicate,
+per-risk-group total/read/unread counts and unread object-set digests, and
+byteComplete:false unless every object was fully read. Coverage gaps are
+therefore explicit and cannot be provider/chair-edited. Certification never
+claims byte-for-byte review.
 
-For a new action identity, the daemon invokes the trusted, harness-root-owned
-`scripts/model-route` resolver with that exact request. The router is a pure
-bounded resolver: it may read only pinned routing/configuration inputs, writes
-nothing, performs no network/provider call and emits at most 65,536 bytes of
-stdout plus bounded diagnostics. One 5,000 ms admission deadline covers spawn,
-parse and validation; timeout or overflow terminates the whole process group,
-uses TERM then KILL after 250 ms. It leaves no provider action, route, command
-result or budget reservation; the separately committed current target/packet
-remains unchanged. A successful receipt
-must use schema version 1 and status `ok`; echo the adapter alias, model alias,
-role, lead family and requested effort; satisfy `requireDistinct`; and resolve
-to the action's admitted adapter plus the provider payload's exact `model`,
-`modelFamily` and effective `effort`. An explicit model must resolve to that
-same model. The adapter compatibility identity in the receipt must equal the
-activated adapter contract. Any missing, extra, malformed, rejected,
-substituted-but-unreflected or conflicting value fails before provider I/O.
-When the artifact's publication-time snapshot proves one publisher family, the
-route's `leadFamily` must equal it in the admission transaction; a mismatch
-fails before provider I/O. Unproved lineage remains representable but cannot
-later prove cross-family independence.
+Mandatory-read failure is classified before the public terminal arm is
+committed. A syntactically valid CLEAN with insufficient coverage becomes
+unusable-answer and reports/accepts no resolution. A safely parsed FINDINGS
+remains a safe-answer with its safe findings and reported resolution set, but
+is noncertifying, accepts no resolution and adds every new P0-P2 finding. Raw
+unsafe or unparseable output is unusable-answer. Provider repetition of a
+coverage digest is never read proof.
 
-Durable command/action replay is checked before final-prompt composition or router
-spawn. Exact replay returns the stored action and closed route projection even
-after chair rotation; changed input conflicts. Concurrent exact retries use one
-in-process single-flight keyed by run, actor, command, action and canonical
-input digest. A different digest for the same action serialises behind that key
-and then conflicts. Process crash before commit may safely regenerate the
-packet and rerun the side-effect-free router; the contract claims no impossible
-cross-process exactly-once execution.
+- answer: schemaVersion, actionId, terminalState, providerAnswerDigest,
+  reviewResultDigest or null, answerSafety and readCoverageDigest;
+- provider failure: schemaVersion, actionId, terminalState,
+  providerFailureCode, providerFailureDigest, providerAnswerDigest null and
+  reviewResultDigest null.
+- no-effect/integrity/retired: schemaVersion, actionId, exact closed terminal
+  kind, evidence-or-retirement digest, providerAnswerDigest null and
+  reviewResultDigest null.
 
-The daemon canonicalises the strict route request and complete router receipt,
-computes a `sha256:` digest for each, and commits them with the immutable action,
-review-target generation, packet/final-prompt digests, publication-lineage digest, complete budget
-reservation, command receipt and current chair snapshot in one transaction
-before queuing adapter I/O. The chair snapshot contains exact chair agent,
-generation and provider family/model/route when provable; it never follows a
-later takeover. The canonical null-or-exact artifact reference is part of the
-same action identity. Router/configuration drift never rewrites admission.
+Usage, cost, timestamps, history, lookup attempts and settlement are excluded.
+A later usage reconciliation cannot change either digest.
 
-A task-bound answer-bearing action in `prepared`, `dispatched`, `accepted`,
-`ambiguous` or `terminal` with a missing/conflicting route is quarantined and
-never redispatched. Its complete budget reservation remains held and every
-route-qualified unit freezes; a prepared action may release only after durable
-zero-dispatch proof terminalises it as no-effect. A terminal adapter result may
-settle independently proved units, but it cannot certify review. Recovery uses
-pair-keyed lookup only for an action whose dispatch may have begun and never
-reconstructs route, packet, prompt or lineage from caller bytes or a new router
-run.
+The immutable route and terminal read shapes are closed and shared by agent,
+operator and Console projections:
 
-Both `provider-action.dispatch` and `provider-action.read` return the same
-closed route projection when a route exists:
-
-```yaml
+~~~yaml
 providerRouteProjectionV1:
   schemaVersion: 1
-  routeRequestDigest: sha256-prefixed-request-digest
-  routeReceiptDigest: sha256-prefixed-receipt-digest
-  adapterId: exact-admitted-adapter
-  providerFamily: exact-resolved-family
-  resolvedModel: exact-resolved-model
-  requestedEffort: null-or-exact-requested-effort
-  effectiveEffort: null-or-exact-effective-effort
-  leadFamily: exact-request-lead-family
-  requireDistinct: true-or-false
-  distinctFromLead: true-or-false
-  reviewTargetGeneration: null-or-exact-current-at-admission-generation
-  reviewedArtifactRef: null-or-exact-action-artifact
-  publicationLineageDigest: null-or-exact-publication-lineage-digest
-  reviewPacketDigest: null-or-exact-packet-digest
-  finalPromptDigest: null-or-exact-prompt-digest
-  chairAgentId: exact-admission-chair
-  chairGeneration: exact-admission-generation
-  chairFamily: null-or-proved-admission-chair-family
-  chairModel: null-or-proved-admission-chair-model
-  chairRouteReceiptDigest: null-or-proved-admission-chair-route
-```
+  routeRequestDigest: sha256-prefixed-digest
+  routeReceiptDigest: sha256-prefixed-digest
+  adapterId: exact-adapter
+  adapterContractDigest: sha256-prefixed-digest
+  providerFamily: canonical-family
+  resolvedModel: exact-model
+  requestedEffort: null-or-exact-effort
+  effectiveEffort: exact-effort
+  targetGeneration: null-or-positive-generation
+  slot: null-or-native-or-other-primary-or-cursor-grok-or-agy-gemini
+  reviewedArtifactRef: null-or-exact-artifact-revision
+  publicationLineageDigest: null-or-sha256-prefixed-digest
+  bundleDigest: null-or-sha256-prefixed-digest
+  manifestRootDigest: null-or-sha256-prefixed-digest
+  coverageDigest: null-or-sha256-prefixed-digest
+  bundleSearchIndexDigest: null-or-sha256-prefixed-digest
+  riskReadMapDigest: null-or-sha256-prefixed-digest
+  mandatoryReadSetDigest: null-or-sha256-prefixed-digest
+  finalPromptDigest: null-or-sha256-prefixed-digest
+  targetChair:
+    oneOf:
+      - null
+      - agentId: exact-agent
+        principalGeneration: positive-generation
+        chairLeaseGeneration: positive-generation
+        adapterId: exact-adapter
+        modelFamily: canonical-family
+        model: exact-model
+        routeReceiptDigest: null-or-sha256-prefixed-digest
+  profileDigest: null-or-sha256-prefixed-digest
+  slotHeadGeneration: null-or-nonnegative-generation
+  attemptGeneration: null-or-positive-generation
 
-The closed certifying-review action response is:
-
-```yaml
-providerReviewActionResultV1:
+providerActionTerminalProjectionV1:
   schemaVersion: 1
   actionId: exact-action
-  status: prepared-or-dispatched-or-accepted-or-terminal-or-ambiguous-or-quarantined
-  history: bounded-closed-state-history
-  executionCount: nonnegative-integer
-  effectCount: nonnegative-integer
-  route: exact-providerRouteProjectionV1
+  status: prepared-or-dispatched-or-accepted-or-ambiguous-or-terminal
+  originalDispatchReceiptDigest: sha256-prefixed-immutable-digest
+  route: providerRouteProjectionV1
   terminalReview:
     oneOf:
-    - null
-    - providerAnswerDigest: sha256-prefixed-exact-answer-digest
-      resultDigest: sha256-prefixed-usage-independent-result-digest
-      answerSafety: safe-or-unusable
-      reviewResultDigest: null-or-sha256-prefixed-safe-result-digest
-      verdict: CLEAN-or-FINDINGS-or-UNUSABLE
-      findings: bounded-safe-findings-with-digests
-      safetyClassifierVersion: exact-terminal-version
-      runtimeSecretSelectorVersion: exact-terminal-version
-```
+      - null
+      - kind: safe-answer-or-unusable-answer-or-provider-terminal-failure-or-terminal-no-effect-or-integrity-terminal-or-retired-unknown
+        terminalResultDigest: sha256-prefixed-digest
+        providerAnswerDigest: null-or-sha256-prefixed-digest
+        reviewResultDigest: null-or-sha256-prefixed-digest
+        verdict: null-or-CLEAN-or-FINDINGS-or-UNUSABLE
+        failureCode: null-or-closed-provider-failure-code
+        readCoverageDigest: null-or-sha256-prefixed-digest
+        coverageSummaryDigest: null-or-sha256-prefixed-digest
+        certifying: true-or-false
+  evidenceMutationReceipt: null-or-reviewEvidenceMutationReceiptV1
+~~~
 
-Nonterminal dispatch may return only action state plus this route. Terminal
-read of a certifying review action returns only the answer digest, safety state
-and safe parsed result; raw answer bytes remain daemon-private and absent from
-all public protocol, operator and receipt/export responses. A non-review
-answer-bearing read retains its existing bounded answer contract. The daemon validates the
-exact, untrimmed UTF-8 answer bytes, requires at least one non-whitespace code
-point and computes `providerAnswerDigest` over those bytes. That digest and the
-review result exclude usage/cost fields, which remain independently
-reconcilable budget evidence.
+The original dispatch projection never morphs. Only provider-action.read joins
+the immutable dispatch projection to the current terminal projection. Kind
+invariants reject irrelevant non-null fields: only safe/UNUSABLE answers may
+carry answer/coverage/evidence; only provider-terminal-failure carries a
+failure code; no-effect/integrity/retired carry their safe terminal evidence
+digest as terminalResultDigest. Only a current sufficient safe answer can set
+certifying true.
 
-A certifying review answer parses as one strict `review-result.v1` JSON object:
+#### 32.19.6 Linear slot heads and immutable mutation receipts
 
-```yaml
-schemaVersion: 1
-verdict: CLEAN-or-FINDINGS
-findings:
-  - findingId: unique-safe-id
-    severity: P0-or-P1-or-P2
-    summary: bounded-safe-text
-    evidence: bounded-safe-text
-```
+Each target owns exactly four review_slot_heads keyed by run, target generation
+and slot. A new target creates generation-zero heads with no current evidence
+and carries forward the predecessor's complete open finding records and
+repair-required set. Head and attempt generations are contiguous.
 
-`CLEAN` requires an empty list; `FINDINGS` requires one to 32 findings. Unknown
-or duplicate keys/IDs, invalid UTF-8/JSON, inconsistency, control/terminal
-bytes, capability or credential material, more than 65,536 structured bytes or
-an out-of-contract severity makes the answer `unusable`. Safety uses the one
-versioned `artifact-content-safety.v1` scanner in reject-only mode: C0/C1,
-escape and bidirectional-format controls; Fabric bearer prefixes; PEM private
-keys; Authorization headers; URL userinfo; the checked-in provider-token and
-secret-assignment expressions; and every current runtime-known secret of at
-least four characters are exact rejection canaries. No redaction may turn an
-unsafe answer into certifying evidence. JSON framing may use space, tab, CR and
-LF; decoded string values may not contain those controls. The exact raw bytes
-and digest remain private for diagnosis; a diagnostic evidence row may expose
-only `UNUSABLE` plus digests and receives no safe findings or completion credit.
-Otherwise the daemon canonicalises the safe
-object and each finding, returning their digests plus verdict and counts.
+Certifying dispatch atomically reserves the exact target/slot/head generation,
+increments its attempt generation and snapshots prior evidence/open findings
+into the action/prompt. One nonterminal attempt may own that tuple. Target
+prepare rejects while any prior-target attempt is nonterminal; it cannot
+leapfrog a late result. Provider failure/no-effect/integrity retirement closes
+the attempt without advancing evidence, after which a later action may reserve
+the same evidence head under the next attempt generation.
 
-`resultDigest` is SHA-256 of canonical JSON over exactly
-`{schemaVersion:1, actionId, terminalState, providerAnswerDigest,
-reviewResultDigest:null|sha256, answerSafety}`. It excludes usage, cost,
-timestamps, history, lookup attempts and budget settlement, so later authenticated usage
-reconciliation cannot change it.
+A safe or UNUSABLE provider terminal transaction is different: it
+automatically creates one daemon-derived immutable evidence ID and
+reviewEvidenceMutationReceiptV1 and CAS-advances exactly that slot head before
+the terminal result becomes visible. There is no terminal-unrecorded state and
+no chair choice to discard an adverse result. The transaction validates
+provider-reportedResolvedFindingDigests against the action's complete prior set.
+It stores both that reported set and daemon-acceptedResolvedFindingDigests.
+The accepted set equals the reported set only when the answer is safe, the
+mandatory-read predicate is satisfied, the target/source/delivery/chair/profile
+snapshot is still current at terminalisation, and each finding is eligible for
+resolution on this successor target. Otherwise it is empty. In particular an
+in-flight result against a logically stale target, an insufficient-coverage
+result and a same-target repair-required finding resolve nothing. The daemon
+computes:
 
-Answer digest, safety state, safe result/finding digests, classifier version,
-runtime-secret selector version and a daemon-keyed HMAC of the sorted selected
-secret set commit atomically with terminal action state. Review-evidence record
-reads that frozen classification; secret rotation or a later classifier version
-never reclassifies historical bytes.
+~~~text
+new open set =
+  sorted unique((prior open set - daemon-accepted-resolved set)
+                + new safe finding digests)
+~~~
 
-`fabric.v1.review-evidence.record`, negotiated as
-`provider-review-evidence.v1`, is an agent-principal operation whose mutation
-path additionally requires the current chair lease and generation. Its closed
-request is:
+UNUSABLE resolves none. Insufficient-coverage CLEAN is UNUSABLE;
+insufficient-coverage FINDINGS remains visible FINDINGS/noncertifying and adds
+all safe findings while accepting no resolution. Every safe P0-P2 finding
+enters the repair-required set automatically and cannot resolve on the same
+target. A stale-target terminal result is still settled, recorded and head-
+advancing against its reserved tuple; its currency is stale/noncertifying, its
+accepted resolution set is empty and its safe new findings remain open for the
+successor bundle. The record/receipt carry prior/new head and attempt
+generations, prior evidence, complete prior open records, reported and accepted
+resolved subsets, current findings, complete new open records,
+readCoverageDigest and immutable gap summary. A second FINDINGS action begins
+from the returned head and advances normally. A repaired target carries the
+full safe ID/severity/summary/evidence plus origin target/action/result and lets
+a fresh current, sufficient-coverage CLEAN resolve their digests.
 
-```yaml
-review_evidence_record_v1:
+~~~yaml
+reviewEvidenceMutationReceiptV1:
   schemaVersion: 1
-  evidenceId: stable-id
-  commandId: stable-chair-command
-  providerActionRef:
-    adapterId: exact-admitted-adapter
-    actionId: exact-terminal-action
-  taskId: exact-action-task
-  routeReceiptDigest: sha256-prefixed-route-receipt-digest
-  resultDigest: sha256-prefixed-terminal-result-digest
-  reviewTargetGeneration: exact-action-target-generation
-  reviewPacketDigest: sha256-prefixed-action-packet-digest
-  providerAnswerDigest: sha256-prefixed-exact-answer-digest
-  reviewResultDigest: null-or-sha256-prefixed-safe-result-digest
-  reviewedArtifactRef:
-    artifactId: exact-action-reviewed-artifact
-    revision: positive-current-revision
-    path: canonical-relative-path
-    sha256: sha256-prefixed-source-digest
-  supersedesEvidenceId: null-or-prior-same-slot-evidence
-  supersededFindingDigests: ordered-unique-prior-finding-digests
-  adjudicationDisposition: none-or-findings-substantiated-or-findings-unsubstantiated-or-findings-mixed-or-unusable-noted
-  substantiatedFindingDigests: ordered-unique-subset-of-derived-findings
-```
+  evidenceId: exact-daemon-derived-id
+  actionId: exact-action
+  targetGeneration: positive-generation
+  slot: exact-profile-slot
+  attemptGeneration: positive-generation
+  priorHeadGeneration: nonnegative-generation
+  newHeadGeneration: positive-generation
+  priorEvidenceId: null-or-exact-id
+  terminalResultDigest: sha256-prefixed-digest
+  terminalInputDigest: sha256-prefixed-private-journal-digest
+  reportedResolvedSetDigest: sha256-prefixed-digest
+  acceptedResolvedSetDigest: sha256-prefixed-digest
+  findingSetDigest: sha256-prefixed-digest
+  newOpenSetDigest: sha256-prefixed-digest
+  repairRequiredSetDigest: sha256-prefixed-digest
+  readCoverageDigest: sha256-prefixed-digest
+  coverageSummaryDigest: sha256-prefixed-digest
+  mutationReceiptDigest: sha256-prefixed-canonical-receipt-digest
+~~~
 
-The request supplies equality preconditions and one bounded chair
-adjudication annotation; it has no reviewer-agent, provider-family, model,
-verdict, finding, safety, currency or independence field. Existing command and
-evidence identity is classified first: exact replay returns the immutable
-record before any live-chair fence, while changed replay conflicts. A new
-insert requires the current chair lease/generation.
-`findings-substantiated` requires the complete derived finding-digest set,
-`findings-mixed` a nonempty proper subset, and every other disposition an empty
-set. This annotation never alters the provider result.
+The receipt contains no live currency, usage, raw answer or mutable annotation.
 
-For a new record the daemon requires one terminal, task-bound, answer-bearing
-ephemeral spawn with no retained target agent and matches task, route, result,
-packet, answer, safe-result and originally bound artifact. It uses the action-
-bound packet and publication-lineage snapshots even if the artifact registry
-has since advanced; that makes the record valid historical evidence, not
-current completion evidence. It derives family, model, effort, verdict,
-findings, safety, answer/result digests and complete route from immutable rows.
-An unusable answer may be recorded only as non-certifying diagnostic history.
+fabric.v1.review-evidence.annotate is the current chair's optional non-gating
+annotation of an already automatic evidence record. It
+supplies exact evidence/result/head equality plus disposition text from the
+closed annotation vocabulary; it cannot create evidence, change the head,
+verdict, findings, repair-required set, independence or completion. Exact
+command replay returns its immutable annotation receipt before any live-chair
+check; changed replay conflicts.
 
-Structural independence is daemon-derived from the artifact's immutable
-publication-time snapshot, not live agent rows. It emits one publisher state:
+The original dispatch command receipt never changes: exact dispatch replay
+always returns its committed prepared/dispatched receipt. Terminalisation uses
+the internal idempotency key action/target/slot/attempt-generation and stores a
+separate immutable terminal journal plus a canonical terminal-input digest over
+the terminal discriminator, private answer/adapter-result digests,
+authenticated usage and read-coverage journal digest. An exact duplicate
+returns the stored terminal projection. A changed live-callback/lookup input
+digest is an integrity conflict: it appends a quarantine record, cannot
+overwrite terminal result, evidence, head or settlement, and makes the reducer
+emit integrity-failure. provider-action.read exposes the terminal result plus
+automatic evidence mutation receipt. Neither that nor annotation
+receipt contains currency. review-evidence.read/list return immutable record
+plus fresh reviewEvidenceCurrencyV1. No command replay calls that reducer.
 
-- `proved-distinct-publisher-family` only when the publisher's provider family is
-  uniquely durable, equals the route's lead family, differs from the review
-  route family, and the stored request/receipt prove required distinctness;
-- `same-publisher-family` when the durable publisher and reviewer families are
-  equal; or
-- `unproved` when the publisher is non-agent, its provider lineage is absent or
-  ambiguous, or any required lineage link cannot be proved.
+Only target prepare supersedes a target, and it first proves every old-target
+attempt terminal and every safe/UNUSABLE terminal already atomically reflected
+in its head. It then carries the complete open records forward in the successor
+bundle. A source change can never launder a late finding.
+#### 32.19.7 Completion reducer and deterministic blockers
 
-Fabric separately compares the review route family with the immutable
-admission-chair family/generation and emits
-`proved-distinct-chair-primary`, `same-chair-family` or `unproved-chair-family`.
-A risk-required other-primary gate accepts only the first chair state; it is
-not inferred from publisher independence. These are structural routing claims,
-not claims that the answer is correct or that models share no training data.
-No retained provider-reviewer agent is needed because the terminal action and
-route are its identity.
+fabric.v1.review-completion.read is the sole agent/operator reducer. It reads
+the one current target, its resolved profile and the four slot heads, not
+unsuperseded timestamps or a latest-row guess. Operator calls require exact
+project/session/run read authority. The Console receives the same result
+through Evidence/System projection.
 
-`other-primary` is a derived slot, never a fixed vendor: it must resolve to the
-configured equal primary distinct from the immutable admission-chair family
-(Anthropic when an OpenAI primary chairs, OpenAI when an Anthropic primary
-chairs). `native` resolves to the chair harness's native review route and makes
-no cross-family claim; its actual adapter/family remain explicit in evidence.
+The result names target/chair/bundle/coverage/profile digests and one row per
+slot. A slot is clean only when its head names one current terminal safe
+certifying CLEAN evidence record, its complete open-finding set is empty and
+every profile requirement matches. A proved provider terminal failure is
+noncertifying and yields provider-terminal-failure; it is never ambiguous.
 
-The closed record/read response is:
+review-evidence.read/list return this closed shape (list repeats entries under
+one page envelope); completion returns the same immutable identities rather
+than a lossy Console-only model:
 
-```yaml
-reviewEvidenceV1:
+~~~yaml
+reviewEvidenceReadV1:
   schemaVersion: 1
-  evidenceId: stable-id
-  taskId: exact-action-task
-  providerActionRef: {adapterId: exact-adapter, actionId: exact-action}
-  route: exact-providerRouteProjectionV1
-  reviewSlot: native-or-other-primary-or-cursor-grok-or-agy-gemini-or-other
-  reviewedArtifactRef: exact-action-artifact
-  reviewTargetGeneration: exact-action-target-generation
-  reviewPacketDigest: exact-action-packet-digest
-  finalPromptDigest: exact-action-prompt-digest
-  providerAnswerDigest: exact-untrimmed-answer-digest
-  resultDigest: exact-usage-independent-result-digest
-  reviewResultDigest: null-or-exact-safe-result-digest
-  safetyClassifierVersion: exact-terminal-classifier-version
-  runtimeSecretSelectorVersion: exact-terminal-selector-version
-  answerSafety: safe-or-unusable
-  verdict: CLEAN-or-FINDINGS-or-UNUSABLE
-  findings: bounded-safe-findings-with-digests
-  certifying: true-or-false
-  publisherIndependence: proved-distinct-publisher-family-or-same-publisher-family-or-unproved
-  chairIndependence: proved-distinct-chair-primary-or-same-chair-family-or-unproved-chair-family
-  publicationLineageDigest: exact-action-snapshot-digest
-  adjudicationDisposition: closed-non-gating-annotation
-  substantiatedFindingDigests: ordered-unique-subset-of-findings
-  supersedesEvidenceId: null-or-prior-same-slot-evidence
-  supersededFindingDigests: ordered-unique-prior-digests
-  currency: current-or-superseded
-```
+  record:
+    evidenceId: exact-immutable-id
+    targetGeneration: positive-generation
+    slot: exact-profile-slot
+    actionId: exact-action
+    resultDigest: sha256-prefixed-digest
+    routeReceiptDigest: sha256-prefixed-digest
+    bundleDigest: sha256-prefixed-digest
+    coverageDigest: sha256-prefixed-digest
+    profileDigest: sha256-prefixed-digest
+    priorHeadGeneration: nonnegative-generation
+    newHeadGeneration: positive-generation
+    attemptGeneration: positive-generation
+    priorEvidenceId: null-or-exact-id
+    priorOpenFindings: ordered-complete-safe-records
+    reportedResolvedFindingDigests: ordered-unique-digests
+    acceptedResolvedFindingDigests: ordered-unique-digests
+    findings: ordered-safe-records
+    newOpenFindings: ordered-complete-safe-records
+    repairRequiredFindingDigests: ordered-unique-digests
+    readCoverageDigest: sha256-prefixed-digest
+    coverageSummary: exact-immutable-gap-summary
+    mutationReceiptDigest: sha256-prefixed-digest
+  currency:
+    target: current-or-stale-or-superseded
+    source: current-or-stale
+    chair: current-or-stale
+    profile: current-or-stale
+    certifying: true-or-false
+    blockerCodes: ordered-closed-codes
 
-`fabric.v1.review-evidence.read` returns one exact record and
-`fabric.v1.review-evidence.list` returns at most 100 records under a daemon
-cursor. They are typed agent-principal reads scoped to the authenticated run;
-record, read and list share `provider-review-evidence.v1`. Neither exposes raw
-answer, packet content, final prompt content, private adapter result or usage.
-
-```yaml
-reviewEvidenceReadRequestV1: {schemaVersion: 1, evidenceId: exact-id}
-reviewEvidenceListRequestV1:
-  schemaVersion: 1
-  taskId: null-or-exact-task
-  currency: any-or-current-or-superseded
-  cursor: null-or-daemon-cursor
-  limit: integer-1-through-100
-reviewEvidenceListResultV1:
-  items: ordered-reviewEvidenceV1-records
-  nextCursor: null-or-daemon-cursor
-```
-
-`fabric.v1.review-completion.read` is the single read-only derived completion
-query under the same feature. Agent callers are scoped to their authenticated
-run; operator callers require exact project/session/run `read` authority. It
-returns no authority and performs no acknowledgement or mutation:
-
-```yaml
 reviewCompletionV1:
   schemaVersion: 1
-  completionProfile: spec05-four-slot-v1
-  targetGeneration: null-or-current-generation
-  reviewedArtifactRef: null-or-current-artifact
-  reviewPacketDigest: null-or-current-packet
-  finalReviewComplete: true-or-false
+  targetGeneration: null-or-positive-generation
+  targetChair: null-or-exact-target-chair-snapshot
+  reviewedArtifactRef: null-or-exact-artifact-revision
+  publicationLineageDigest: null-or-sha256-prefixed-digest
+  bundleDigest: null-or-sha256-prefixed-digest
+  manifestRootDigest: null-or-sha256-prefixed-digest
+  coverageDigest: null-or-sha256-prefixed-digest
+  riskReadMapDigest: null-or-sha256-prefixed-digest
+  mandatoryReadSetDigest: null-or-sha256-prefixed-digest
+  profileDigest: null-or-sha256-prefixed-digest
   slots:
-    - slot: native-or-other-primary-or-cursor-grok-or-agy-gemini
-      requiredAdapter: exact-profile-adapter-class
-      requiredFamily: exact-profile-family
-      evidenceId: null-or-current-evidence
-      state: clean-or-blocked
-      blockers: ordered-unique-closed-blockers
-```
+    - slot: exact-profile-slot
+      headGeneration: nonnegative-generation
+      attemptGeneration: nonnegative-generation
+      actionId: null-or-exact-action
+      evidenceId: null-or-exact-evidence
+      verdict: null-or-CLEAN-or-FINDINGS-or-UNUSABLE
+      resultDigest: null-or-sha256-prefixed-digest
+      routeReceiptDigest: null-or-sha256-prefixed-digest
+      adapterId: exact-resolved-adapter
+      providerFamily: exact-resolved-family
+      model: exact-resolved-model
+      readCoverageDigest: null-or-sha256-prefixed-digest
+      publisherIndependence: exempt-or-proved-or-failed
+      chairIndependence: exempt-or-proved-or-failed
+      certifying: true-or-false
+      openFindings: ordered-complete-safe-records
+      blockers: ordered-closed-codes
+  finalReviewComplete: true-or-false
+~~~
 
-The blocker vocabulary is `missing-target`, `stale-target`, `missing-evidence`,
-`nonterminal-action`, `ambiguous-action`, `noncertifying`, `findings`,
-`unusable`, `superseded`, `wrong-artifact`, `wrong-packet`, `wrong-route`,
-`wrong-provider`, `wrong-model`, `wrong-chair-generation`, `publisher-independence`,
-`chair-independence`, `open-findings` or `integrity-failure`. Zero or multiple
-current evidence rows is `missing-evidence` or `integrity-failure`; it is never
-resolved by latest timestamp.
+Blockers are an ordered unique subset of this closed precedence list:
 
-The existing operator Evidence projection/page/detail schemas add an exact
-review variant. Its row contains evidence ID, slot, answer-safety/verdict, finding counts,
-certifying/currency states, provider family/model, both independence states,
-artifact/packet/answer/result digests and supersession ID. Detail adds exact
-task/action refs, safe findings/digests, route projection, final-prompt digest,
-publication-lineage digest, safety/selector versions and adjudication annotation. Every field is derived
-under the operator's exact project/session/run `read` authority; agent
-credentials are rejected. The Console uses only this operator variant.
-The operator System detail and Evidence view header additionally carry the
-exact `reviewCompletionV1` object; no summary boolean may appear without its
-target generation and per-slot blockers.
+1. missing-target
+2. stale-target
+3. profile-unavailable
+4. missing-evidence
+5. nonterminal-action
+6. ambiguous-action
+7. provider-terminal-failure
+8. terminal-no-effect
+9. retired-unknown
+10. route-integrity
+11. insufficient-read-coverage
+12. noncertifying
+13. unusable
+14. superseded
+15. wrong-artifact
+16. wrong-bundle
+17. wrong-route
+18. wrong-provider
+19. wrong-model
+20. wrong-chair-generation
+21. publisher-independence
+22. chair-independence
+23. open-findings
+24. integrity-failure
 
-A new clean record may supersede one prior same-slot record and names every
-open prior finding digest it closes. The prior row and findings remain
-immutable history. When the prior substantiated-finding set is nonempty, the
-successor must bind a different artifact revision and packet; otherwise the
-insert fails. Other adjudication values never turn a
-provider `FINDINGS` verdict into `CLEAN` and never affect completion. A fresh
-clean action is always required; unsubstantiated findings may be re-reviewed on
-the same packet. Read-time currency compares the action-bound packet/artifact
-with current canonical review scope and supersession state; registry advance
-does not invalidate historical evidence, but it makes it non-current.
+open-findings is emitted if and only if the slot head's complete open set is
+nonempty; findings is not a blocker value. Zero/multiple target or head rows,
+a broken CAS chain or contradictory immutable joins emit integrity-failure,
+never missing-evidence. Target-wide blockers appear on all four rows in the
+same order. finalReviewComplete is true only when the current target exists and
+all four blocker arrays are empty.
 
-`fabric-receipt.json` exports admitted routes under `providerRoutes` and safe
-review records under `providerReviews`, including exact references, digests,
-safe verdict/findings, both independence states, immutable publication lineage
-and supersession. It never contains raw `providerAnswer`, packet content,
-prompt content or private adapter result. The squashed protocol/schema has no
-`model_routing_receipts`, `cross_family_reviews`, `modelRoutingReceipts`,
-`crossFamilyReviews`, `recordModelRoutingEvidence` or
-`recordCrossFamilyReviewEvidence` shape/API. A direct provider CLI result is a
-visibly degraded ordinary artifact only; it cannot be imported or satisfy a
-review gate.
+The operator Evidence row/detail and fabric-receipt.json expose exact safe
+records, slot heads, route, target, chair, bundle/coverage/profile and recovery
+digests. Raw answer, provider error, private diagnostics, bundle objects/chunks,
+prompt content, secret-set HMAC, adapter result and usage are absent.
 
-Added requirements are:
+#### 32.19.8 Certifying-action and route-integrity recovery owner
 
-- **FR-053:** A review spawn shall bind one daemon-verified immutable review
-  packet and final prompt digest before provider I/O.
-- **FR-054:** The current chair alone may create typed provider-review evidence,
-  and Fabric shall derive its safe result, route, answer/result digests and both
-  publisher/primary independence states from immutable custody.
-- **FR-055:** Artifact registration shall snapshot and digest publication-time
-  provider lineage without later rebinding.
-- **FR-056:** Provider dispatch/read, typed review read/list and operator
-  Evidence projection/detail shall expose their closed route/review schemas
-  under the correct principal and scope.
-- **FR-057:** Raw provider review answers shall remain absent from every public
-  protocol/operator/receipt surface; unsafe or unparseable output shall be
-  non-certifying.
-- **FR-058:** Route admission shall be bounded and side-effect-free; durable
-  replay shall precede keyed single-flight and router execution.
-- **FR-059:** One generation-fenced review target and one shared read-only
-  completion reducer shall own current-artifact review currency per run.
+ProviderRouteIntegrityRecoveryService is the only startup and ambiguity owner
+of every certifying action, including an otherwise intact dispatched action
+whose provider effect is unknown and an action whose route, target, bundle,
+prompt, profile or lineage join is missing or contradictory. Every certifying
+route/action is excluded from generic provider-action recovery and prepared-
+action re-enqueue. Its daemon-internal operation
+fabric.internal.provider-route-integrity.reconcile runs under the current
+daemon recovery generation; no agent/operator/chair may invoke it or repair a
+route.
+
+Its durable state machine is:
+
+~~~text
+detected -> inspecting
+  -> terminal-proved-no-effect
+  -> terminal-proved-usage
+  -> awaiting-human-retire -> terminal-retired-unknown
+~~~
+
+The row records a closed reason: intact-effect-ambiguity or one exact broken-
+binding reason. Detection fences further provider I/O, marks the action
+noncertifying while unresolved and freezes only its reservation dimensions. If
+durable preparation and the dispatch journal prove dispatch never began,
+recovery terminalises no-effect and releases the reservation. A dispatched or
+accepted action receives at most one bounded pair-keyed lookup when its adapter
+contract can identify it. An exact safe/unusable/failure terminal result flows
+through the ordinary action-bound terminaliser and its canonical terminal-input
+digest; complete authenticated usage settles exactly and absent/partial usage
+charges the remaining spendable reservation. An authenticated closed no-effect
+lookup releases the reservation. A terminal effect with an unverifiable
+binding becomes integrity-terminal and conservatively settles. Absent, timed-
+out, malformed, conflicting or permanently unavailable lookup never proves no
+effect and enters awaiting-human-retire with the reservation retained.
+
+The only retirement path is a typed provider-route-integrity-retire intent
+through fabric.v1.operator-action.preview/commit. It requires an operator with
+external-effect authority, the exact action/recovery generation and reservation
+digest, a persisted consequential gate and independently attested direct-human
+confirmation. Confirmed Commit performs no provider call. It consumes the full
+remaining spendable reservation, releases only terminal concurrency capacity,
+records terminal-retired-unknown and terminalises the action noncertifying.
+This cannot overbook, fabricate outcome or leave an unresolvable route freeze.
+
+Every terminal branch commits action, reservation, authority-unknown flags,
+recovery evidence digest and run recovery-state exit in one transaction.
+Dimensions unfreeze when no other unknown owner remains. Recovery never
+reconstructs a route/bundle/prompt, dispatches or redispatches the provider, or
+converts a no-effect/integrity/retired action into review evidence. A valid
+answer is evidence only through the ordinary automatic terminal transaction.
+Store/catalogue corruption that
+prevents identifying the reservation follows the existing store-corruption
+stop; it is not silently represented as a route freeze.
+
+#### 32.19.9 Requirements and acceptance
+
+- **FR-053:** Certifying review shall bind a daemon-generated complete
+  review-bundle, coverage digest, current target/chair/profile snapshot and
+  action-only content-addressed portal before provider I/O.
+- **FR-054:** New certifying dispatch and optional evidence annotation shall
+  require the current target chair, while the action-bound safe/UNUSABLE
+  terminal transaction shall always settle, create evidence and advance its
+  reserved head despite later currency drift; exact immutable replay precedes
+  live fences.
+- **FR-055:** Publication lineage shall bind the authenticated publishing
+  principal generation to one exact active bridge/provider custody/route at
+  publication; unproved source owners shall remain ineligible where
+  independence is required.
+- **FR-056:** One checked-in four-slot profile and one linear per-target/slot
+  head shall own provider requirements, independence, evidence order and open
+  findings.
+- **FR-057:** Raw review answers and terminal provider diagnostics shall remain
+  private; safe results, proved failures and digests alone are public.
+- **FR-058:** Route resolution shall remain structural, bounded and
+  side-effect-free; durable replay and stable-key single-flight shall precede
+  router execution.
+- **FR-059:** One recovery service shall own every certifying action before
+  generic recovery and close intact ambiguity or route-integrity budget custody
+  by proved release, exact-or-conservative proved-effect settlement, or exact
+  direct-human full-ceiling retirement without route reconstruction or provider
+  replay.
+- **FR-060:** Mutation receipts shall remain immutable; live review currency
+  shall appear only on read/list/projection results.
 
 Acceptance additionally requires:
 
-- **AC-043:** Real-router/fake-provider fixtures cover alias and explicit-model
-  routing, applicable explicit effort, required distinctness, exact payload
-  agreement, 5-second timeout/process-tree kill, stdout overflow, side-effect
-  denial, concurrent exact single-flight, changed concurrent input, durable
-  replay without router invocation and crash-before-commit safe rerun.
-- **AC-044:** Chair-only review-evidence fixtures accept one exact terminal
-  action and derive its safe result, answer/result digests, family/model and
-  both independence states. Existing exact replay succeeds after chair rotation;
-  a new/stale-chair insert, crossed reference, retained-agent substitution,
-  nonterminal action and changed replay fail closed.
-- **AC-045:** Packet fixtures mutate source before, during and after snapshot;
-  only the content-addressed verified bytes reach the final prompt. Oversize,
-  stale, symlink, digest, UTF-8, packet-only portal and final-prompt mismatches
-  fail before provider I/O, budget or action commit.
-- **AC-046:** CLEAN/FINDINGS parsing covers duplicate/unknown fields, every
-  P0-P2 severity, control/credential/capability canaries, exact untrimmed answer
-  digesting and usage reconciliation without result-digest drift. Unsafe raw
-  output remains private and cannot certify or export.
-- **AC-047:** Publication-time lineage, lead-family mismatch, same/unproved
-  publisher, same/unproved chair, registry advance, current/superseded reads and
-  substantiated-finding repair linkage are deterministic. Prior evidence remains
-  immutable and a non-current packet never completes current review.
-- **AC-048:** Agent record/read/list and operator Evidence row/detail enforce
-  exact principal/run/project/session scope and closed fields. Receipt export
-  contains only safe structured review lineage; the shared completion reducer
-  returns target generation, exact boolean and per-slot blockers; and every
-  predecessor table, API, schema and field name is absent.
+- **AC-043:** bundle fixtures prove complete changed-file and required-evidence
+  derivation, exact base/head/clean-state binding, all object/chunk/coverage
+  digests, size/count limits, portal isolation and source/delivery/chair/profile
+  supersession. Omissions, truncation and stale summaries cannot certify.
+- **AC-044:** profile fixtures prove exact Codex/Claude primary mapping,
+  cursor-agent/xAI and agy/Google routes, native independence exemption,
+  publisher eligibility and target reprepare after every chair generation or
+  family change.
+- **AC-045:** router fixtures prove structural codec purity, post-router
+  transactional effort/currency/adapter/model checks, five-second process-tree
+  cancellation, stable-key exact single-flight, concurrent changed-input
+  conflict and durable replay without router execution.
+- **AC-046:** adapter fixtures bind certifying-review-packet-only.v1 to each
+  contract digest and prove no mutable cwd, inherited HOME/environment,
+  workspace/source/shell/browser/network tool or cross-bundle portal read for
+  Claude, Cursor and Agy. Cursor/Agy remain capability=false until their pinned
+  helper, outer sandbox, exact portal discovery and TERM/250-ms/KILL canaries
+  pass on the activated build.
+- **AC-047:** terminal fixtures distinguish safe CLEAN/FINDINGS, UNUSABLE,
+  proved max-turn/provider/no-answer failure and effect ambiguity; settle exact
+  authenticated usage or conservatively charge every proved-effect terminal,
+  release proved no-effect, retain true ambiguity, expose only closed
+  digests/blockers and never redispatch. Insufficient CLEAN becomes UNUSABLE;
+  insufficient FINDINGS remains visible/noncertifying with zero accepted
+  resolutions. A stale in-flight answer still settles and advances its reserved
+  head with zero accepted resolutions and all safe new findings carried.
+- **AC-048:** head-CAS fixtures cover first and second FINDINGS, UNUSABLE,
+  concurrent forks, carry-forward repair findings, repaired-target CLEAN and
+  exact replay, including identical versus conflicting terminal-input digests.
+  Reducer fixtures prove the closed blocker precedence and read heads only.
+- **AC-049:** recovery fixtures cover every unresolved action state, optional
+  pair lookup, proved zero-effect release, exact-or-conservative terminal
+  settlement and direct-human full-reservation retirement with no permanent
+  freeze, route reconstruction or provider dispatch. They prove all certifying
+  actions are excluded from generic recovery. Wrong authority/gate/generation
+  and unconfirmed retirement change nothing.
+- **AC-050:** agent action/read/evidence/completion and operator Evidence/System
+  projections enforce exact scope, immutable-receipt versus live-currency
+  separation and safe receipt export. The current baseline contains no
+  model_routing_receipts, cross_family_reviews, modelRoutingReceipts,
+  crossFamilyReviews, recordModelRoutingEvidence or
+  recordCrossFamilyReviewEvidence or fabric.v1.review-evidence.record table,
+  field or API.
+
+### 32.20 Asynchronous lifecycle rotation custody
+
+This closes FR-013 and AC-009. It does not add an automatic context-pressure
+controller, successor selector or Spec 06 routing mode.
+
+requestLifecycle with rotate or compact executes inside the caller's existing
+lifecycle/tool turn and carries no caller-turn ID. After committing delivery
+claim-expiry/reclaim and membership/delivery-watermark housekeeping, the daemon
+derives exactly one active
+provider_session_turn_lease from the authenticated capability, current live
+bridge generation and provider-session generation. Zero, multiple, foreign or
+quarantined candidates reject; any other active/quarantined predecessor lease
+also rejects. released and revoked are the only terminal turn states;
+quarantined is not. The delivery-claim path performs the same housekeeping and
+rechecks lifecycle freeze immediately before its claim CAS. A stranded agent
+cannot authenticate a synthetic self-rotation.
+
+One request transaction first quarantines every active agent-owned write lease,
+then validates and snapshots the exact daemon-validated checkpoint, task,
+children, mailbox, open-work and ordered predecessor-turn revisions. It
+rechecks the post-housekeeping freeze/lease set, fences new delivery/provider
+turns, suspends the agent, reserves replacement generations, inserts custody in
+awaiting-boundary and commits an immutable accepted LifecycleResult whose
+lifecycle is suspended. No adapter I/O occurs. Accepted acknowledges durable
+custody only; exact replay always returns that receipt. getAgentLifecycle is
+the separate current-state read.
+
+Durable delivery enqueue may continue while suspended, but claim and
+acknowledgement are denied. Enqueue advances the mailbox/checkpoint revision and
+therefore makes the captured checkpoint stale rather than entering the staged
+session invisibly. The captured caller turn is the sole in-band exception: its
+old capability may finish only this lifecycle call and bounded lifecycle reads.
+It cannot start another turn, mutate task/mailbox/authority, acquire a write
+lease or close a barrier. The staged capability may invoke only the existing
+grant-scoped launch.attest descriptor for action-bound activation, challenge
+response and exact checkpoint-vector acknowledgement. Every other mutation,
+turn, write or barrier operation fails while lifecycle custody owns the agent.
+
+Each custody reservation increments durable per-run/agent global provider- and
+principal-generation high-water marks plus a per-run/agent/bridge-owner bridge-
+generation high-water mark. Each stored target is exactly its corresponding
+predecessor high-water plus one, even when an earlier staged attempt was
+superseded or quarantined; a generation is never reused. Only the bridge
+sequence is distinct for chair versus child. Custody also snapshots the exact
+source provider-session reference, capability hash, custody action, adapter and
+contract, bridge row/revision and, for a chair, project-session/run/chair-lease
+generations. Final adoption must CAS and revoke those exact source rows while
+installing the reserved targets. Skipped, reused, crossed-owner or source-plus-
+one substitutions reject.
+
+The complete state/disposition edges are:
+
+| From | Required proof/event | To | Terminal disposition |
+| --- | --- | --- | --- |
+| awaiting-boundary | captured caller and every predecessor turn terminal at the recorded generation | prepared | none |
+| awaiting-boundary or prepared | durable journal proves zero dispatch | finalized | no-effect |
+| awaiting-boundary or prepared | checkpoint/source drift before dispatch | finalized | superseded |
+| prepared | action and one-time volatile handoff durably marked before I/O | dispatched | none |
+| dispatched | authenticated provider acceptance, but not terminal outcome | accepted | none |
+| dispatched or accepted | bounded observation cannot prove outcome/effect | ambiguous | none |
+| dispatched, accepted or ambiguous | authenticated terminal activation/checkpoint or adapter-advertised closed no-effect proof | provider-terminal | none |
+| provider-terminal | exact adoption preconditions remain current | committing | none |
+| committing | atomic generation/bridge/capability CAS succeeds | finalized | adopted |
+| provider-terminal or committing | checkpoint/source CAS drift | finalized | superseded |
+| provider-terminal | authenticated closed post-dispatch no-effect proof | finalized | no-effect |
+| any nonfinal state | malformed, crossed or conflicting evidence | finalized | quarantined |
+| any nonfinal state | confirmed agent-lifecycle-recovery abandon | finalized | abandoned |
+
+No other edge or disposition is legal. In particular, absence/timing alone
+cannot produce post-dispatch no-effect; the activated adapter contract must
+advertise and return its authenticated closed no-effect proof. `revoked` is a
+terminal capability/turn-lease status, not a custody disposition.
+
+awaiting-boundary becomes prepared only after the in-band caller turn is
+released and every captured predecessor is terminal at its recorded
+generation. An operator-created fresh rotation has no caller-turn exception and
+cannot enter awaiting-boundary until every predecessor turn is terminal. It
+binds an exact replacement adapter, activated contract, new action ID, current
+validated checkpoint row and reserved high-water targets.
+
+After dispatch the replacement session must use launch.attest to return the
+grant challenge and exact checkpoint/task/mailbox/child vector. The daemon
+verifies and retains that successor volatile bridge before database adoption.
+The final transaction rechecks custody and source/high-water/CAS bindings,
+persists the session, swaps child custody through agent_bridge_state or chair
+custody through launched_chair_bridge_state, activates the staged capability,
+revokes the predecessor and returns the agent to ready. Only after commit does
+the daemon best-effort retire the exact old volatile bridge; its revoked
+capability makes a crash-safe leftover powerless. Existing write leases remain
+quarantined and require explicit recovery or reacquisition.
+
+Checkpoint identity never floats. A provider acknowledgement of A cannot adopt
+B. A becomes finalized/superseded, its staged capability/bridge is revoked and
+its reserved generations remain spent. B needs a new custody, action,
+capability, challenge, high-water reservation and acknowledgement.
+
+LifecycleRotationRecoveryService runs before all generic provider/bridge
+scans, and every lifecycle-linked action/bridge is excluded from those generic
+owners. awaiting-boundary/prepared uses only durable zero-dispatch proof;
+restart loss of the predecessor volatile bridge never restores ready.
+dispatched/accepted/ambiguous performs at most pair-keyed lookup. It adopts only
+exact activation/checkpoint evidence, accepts no-effect only under the closed
+proof above, supersedes drift and quarantines absent/malformed/crossed/conflict.
+It never dispatches, redispatches, reconstructs a secret or treats a resume
+reference as continuity.
+
+Lifecycle custody is the sole owner even when the rotating agent is the true
+chair. ChairBridgeLossRecoveryService excludes any chair with nonfinal custody
+or a finalized nonadopted lifecycle-recovery marker; no chair_bridge_loss row is
+created for that bridge. Ownership ends only at lifecycle adoption or confirmed
+abandon. Child custody cannot promote a chair, and generic Resume cannot own
+either case.
+
+A stranded suspended/context-unreconciled agent has one reachable operator
+surface: the closed agent-lifecycle-recovery intent on
+fabric.v1.operator-action.preview/commit/status/reconcile. Before Preview, the
+private local control plane may issue an
+agent-lifecycle-recovery-takeover capability only to the same authenticated
+local operator holding an exact current session capability containing
+agent-lifecycle-recovery-issue and one independently attested consequential
+gate bound to this recovery. Its immutable issuance row binds operator/project/
+session/run/agent, session/run revisions and generations, old custody/action/
+revision, current validated checkpoint digest, exact source session/capability/
+action/adapter/contract/bridge-row identity and revisions, provider/principal/
+bridge generations, current chair-lease generation when applicable, bridge-
+owner kind, fresh-rotate only, gate, issue/expiry and capability hash. Status is
+active, consumed, revoked or expired. Neither a generic session grant nor broad
+takeover reaches fresh-rotate Commit directly.
+
+The intent additionally binds one closed path:
+
+- fresh-rotate requires that narrow active capability and binds the replacement
+  adapter, activated contract digest, distinct new action ID and the exact
+  current daemon-validated checkpoint row/vector. Commit consumes the issue,
+  reserves new high-water targets and creates one distinct awaiting-boundary
+  custody/capability/challenge with an empty caller-turn exception and immutable
+  recovery-from link. If the old custody is nonfinal, Commit may take its legal
+  superseded edge; if it is already finalized no-effect/quarantined/superseded,
+  its row/disposition remains unchanged. It calls neither old nor new provider;
+  the lifecycle owner dispatches later after the boundary.
+- abandon requires exact session cancel authority plus consequential-gate and
+  independently attested destructive direct-human confirmation. In one
+  transaction it moves a nonfinal custody through its legal abandoned edge, or
+  preserves an already-final custody and appends a distinct immutable lifecycle-
+  recovery-retirement row; archives the agent; revokes old and staged
+  capabilities, principal and bridge; terminally revokes turn leases;
+  changes quarantined write leases to revoked-abandoned without a write;
+  terminally abandons every owned or sole-recipient ready/claimed delivery,
+  task owner lease, required result obligation and agent/task/run membership
+  with reason; advances their message/delivery membership watermarks; and
+  terminalises dependent owned barriers as abandoned-failure, never success.
+  It appends revocations for active grants without mutating immutable authority
+  envelopes and clears only freeze contributions whose exact owned rows are now
+  terminal. No delivery or barrier is orphaned. Child abandon leaves unrelated
+  run work intact and makes any affected parent explicitly failed/recovery-
+  required; chair abandon enters the existing explicit run/session cancel-
+  failure terminal path in the same transaction.
+
+Preview performs no lifecycle/provider mutation. Status returns the current
+intent, issuance and custody state. Reconcile uses pair lookup only for a new
+action that may have dispatched. Wrong/stale checkpoint, adapter/contract,
+action, source/high-water, capability issue or confirmation changes nothing.
+
+- **FR-061:** rotate/compact shall return immutable accepted-suspended after
+  durable boundary fencing; asynchronous custody alone may swap
+  provider/principal/bridge generations.
+- **NFR-031:** nonterminal custody shall restrict predecessor/staged
+  capabilities as above, quarantine writes before checkpoint binding, wait for
+  every captured turn and recover as the sole owner before generic scans
+  without replay.
+- **AC-051:** crash tests cover awaiting-boundary, every provider/custody state,
+  every legal edge/disposition, unique caller inference, terminal predecessor
+  ordering, private handoff, launch.attest attribution, pre-CAS retained bridge,
+  child/true-chair owner swap and post-commit old-bridge retirement. They prove
+  accepted-versus-current-read separation, durable high-water-plus-one targets
+  across A-to-B supersession, global identity versus owner-scoped bridge
+  sequences, exact source-row/reserved-generation CAS, enqueue-stales-
+  checkpoint, pre/post-dispatch no-effect distinction, retained write
+  quarantine and generic-recovery exclusion. Operator fixtures prove reachable
+  parent-grant/gate and narrow-capability fresh-rotate with distinct custody/
+  action/adapter/contract, empty caller boundary and finalized-predecessor
+  immutability; confirmed abandon proves exact delivery/watermark/barrier and
+  other owner-row terminal transitions without orphaning required work;
+  self-rotate, generic resume and chair-loss recovery cannot bypass the sole
+  lifecycle owner.

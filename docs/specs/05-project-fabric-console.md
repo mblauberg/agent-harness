@@ -10,14 +10,16 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.8 binds final review to the exact immutable bytes and current
-artifact revision. One clean native review and clean Fabric evidence for
-Claude/Anthropic, Cursor Grok/xAI and Agy Gemini/Google must all reference the
-current daemon-generated review packet. Provider answers use a strict
-CLEAN/P0-P2 result contract; raw output is never rendered or exported, chair
-adjudication cannot downgrade a finding, and repaired artifacts require fresh
-superseding evidence while history remains visible. The Console reads closed
-review state only through its operator Evidence projection. Version 1.7 closes the already-binding v1.4 external-review lineage gap. Fresh
+Version 1.8 binds final review to a daemon-generated complete immutable
+review bundle over the sealed delivery basis, clean base/head Git state and all
+required evidence. A target snapshots its chair and closed four-slot profile;
+linear slot heads carry complete open findings, and any source or chair advance
+requires reprepare. One clean native review and clean Fabric evidence for
+Claude/Anthropic, Cursor Grok/xAI and Agy Gemini/Google must bind that current
+bundle/coverage digest. Raw answers/errors remain private, proved terminal
+provider failure is not ambiguity, and one bounded recovery owner closes route
+and intact certifying-action budget custody without replay. The Console reads only the operator Evidence
+projection. Version 1.7 closes the already-binding v1.4 external-review lineage gap. Fresh
 provider review dispatch now includes an exact reviewed-artifact reference and
 strict router request; the daemon binds its trusted-router receipt to the
 answer-bearing action before provider I/O. After the terminal answer, the chair
@@ -90,8 +92,9 @@ project/run/session projection and evidence-review features. It presents a
 typed protocol/schema cutover-required state for an obsolete daemon or
 database; it shall not retry a vintage profile, translate legacy projection
 shapes or infer/import a session from an old run. The runtime leaves rejected
-state untouched. Current independently optional integrations remain negotiated
-and visibly unavailable when absent.
+state untouched. Fabric receipt schema version 2 is likewise the sole current
+receipt; no v1 decoder/import/projection is retained. Current independently
+optional integrations remain negotiated and visibly unavailable when absent.
 
 The Console is local and project-scoped. GitHub is an optional project adapter,
 not a prerequisite or authority store. No browser application is included in
@@ -383,46 +386,134 @@ receiving owner to reopen them. It shall not paste large artifacts into the
 prompt.
 
 Fresh external implementation review is a Fabric review task, not an
-unattributed provider transcript. The chair shall register the exact immutable
-artifact to be reviewed and create the review task. The daemon then verifies
-the registered bytes, publication-time lineage and revision, creates one
-bounded content-addressed `review-packet.v1`, and injects that exact packet into
-the final prompt. Source mutation before/during capture fails admission;
-mutation afterwards cannot change the packet. Oversize scope requires a newly
-published bounded review-bundle artifact. Every certifying slot must bind that
-same packet and current artifact revision.
+unattributed provider transcript. The chair shall publish one
+`implementation-delivery-manifest` from its authenticated active provider
+bridge and create the review task. Fabric proves the publication-time
+principal/bridge/provider-custody lineage; an operator-, Fabric-, project- or
+Git-published root remains honestly unproved and cannot satisfy this profile.
+Git diffs and other evidence remain valid covered inputs.
 
-The chair dispatches route-bound ephemeral actions through the strict shared
-`model-route.v1` schema. The daemon invokes the trusted router, snapshots the
-current chair family/generation, and binds route request/receipt, packet and
-final-prompt digests before provider I/O. The four derived slots are
-`native` (the chair harness's native reviewer), `other-primary` (the primary
-family distinct from the admission chair),
-`cursor-grok` (Cursor/Grok/xAI) and `agy-gemini` (Agy/Gemini/Google). Adapter,
-family and model must match the activated route; the Console exposes no
-capability/evidence selector or continuity-routing mode.
+`review-target.prepare` seals the delivery review basis and clean canonical Git
+base/head state, derives the complete changed-file and required-evidence set,
+and builds one bounded `review-bundle.v1`. Exact before/after/diff/evidence
+objects are content-addressed and chunked; a coverage digest proves the complete
+manifest. The request accepts no summary or caller-selected file list.
+Omission, truncation, dirty or changed source/evidence fails. Source, delivery,
+chair-generation or adapter-contract advance supersedes the target and requires
+reprepare.
 
-Terminal review reads expose only exact answer/result digests and the safe
-parsed `review-result.v1` verdict/findings. Raw provider answer, packet and final
-prompt content never enter the Console. The chair may create typed evidence by
-supplying exact equality refs/digests plus a bounded non-gating adjudication
-annotation. Fabric derives safety, slot, family/model/effort, publication
-lineage, `publisherIndependence`, `chairIndependence`, findings, supersession
-and current/superseded state. No editable family, verdict or independence
-control exists. A retained provider-reviewer agent is not required.
+Bundle bytes stay behind the action-only digest-bound portal, so the fixed
+rubric/target/profile envelope fits the prompt limit. Every portal read names
+the exact bundle, root/page, object and chunk digest. Mandatory consumption is
+the complete manifest/read map, required scope/spec/ADR/gate records and every
+full carried finding. A daemon-owned immutable bundle search/risk map then
+selects exact highest-risk diff chunks from every nonempty group by checked-in
+score/path rules; that bounded caller/provider-independent sample is mandatory.
+Zero/insufficient reads cannot certify. Literal bundle search and all other
+diff/before/after objects remain available for deeper review.
+`certifying-review-packet-only.v1`
+binds each activated adapter contract. A daemon-built per-action 0700 synthetic
+HOME may contain only exact 0600 adapter auth/config bytes outside the model
+read/tool namespace; the model sees only the exact portal. Claude/Codex use it
+directly; Cursor/Agy synthetic config names one pinned local portal helper whose
+action capability is delivered out-of-band and whose executable alone is
+Seatbelt-allowed. Agy deny
+policy/hooks and Cursor Read-only plus WebSearch/WebFetch canaries must attest
+outer confinement and current no-effect enforcement. Synthetic config has no
+unrelated plugins/MCP: discovery returns exactly the portal server/tools and no
+resources/other tools. Offered inert web tools are acceptable only when the
+transcript proves hard-rejected/no-effect. Any extra MCP surface, successful web
+effect or outside-portal/auth-file read invalidates the action.
+Missing enforcement advertises false, fails before provider I/O and never
+falls back. The exact helper/CLI process group receives TERM at its deadline and
+KILL after 250 ms; a passing canary proves no child, portal or auth capsule
+remains. Stock Cursor/Agy routes remain capability=false until the pinned helper
+and outer confinement pass every current-build canary.
 
-The Console reads review evidence only through its exactly scoped operator
-Evidence row/detail projection, never an agent capability. The row shows slot,
-current/superseded, certifying, answer safety, CLEAN/FINDINGS/UNUSABLE, P0-P2 counts, provider/
-model, both independence states, artifact/packet/answer/result digests and
-supersession. Detail adds task/action, safe finding/digest, route/final-prompt
-and publication-lineage references. Unavailable or malformed fields fail the
-whole review variant rather than being inferred.
+The target snapshots the exact chair agent/principal/lease generation and the
+resolved checked-in `spec05-four-slot-v1` profile. Its slots are `native`,
+`other-primary`, `cursor-grok` and `agy-gemini`; for an OpenAI chair they
+resolve respectively to the native Codex route, Claude/Anthropic,
+cursor-agent/`grok-4.5-xhigh`/xAI and
+Agy/`Gemini 3.1 Pro (High)`/Google. Native is explicitly exempt from
+publisher/chair independence. Each external slot requires both. Any chair
+rotation supersedes the target instead of reinterpreting prior evidence.
+
+The resolved profile jointly bounds a reachable review. Direct-portal primaries
+may reserve at most 128 provider turns and 128 reads/8 MiB; portal-helper
+Cursor/Agy reserve one Fabric turn plus at most 128 instrumented helper calls/
+8 MiB. The mandatory set is at most 128 reads and 4 MiB. Turns, reads and
+bytes are reserved before provider I/O; an adapter or delivery that cannot meet
+the mandatory/risk predicate is unavailable, not silently one-shot or falsely
+byte-complete.
+
+Only the current target chair may dispatch a new certifying action. The shared
+`model-route.v1` codec validates structural routing data only; effort
+applicability, artifact/target currency and exact adapter/family/model/profile
+agreement are rechecked transactionally after the bounded side-effect-free
+router. One per-target/slot action-attempt CAS prevents concurrent actions from
+running against one evidence head.
+
+Terminal review reads expose safe CLEAN/FINDINGS/UNUSABLE result digests only.
+A proved max-turn, provider-rejected or no-answer terminal failure is distinct
+from effect ambiguity. Every proved-effect safe/UNUSABLE/failure terminal
+settles complete authenticated usage exactly or conservatively consumes the
+remaining reservation when usage is absent/partial; proved no-effect releases,
+while true ambiguity retains. It exposes only the closed result/failure digest
+and is never redispatched. Raw answers, errors, bundle objects and final prompts
+never enter the Console.
+
+The other terminal noncertifying states are proved no-effect, route-integrity
+terminal and retired-unknown. Permanent provider-effect ambiguity remains
+ambiguous with its reservation held until an exact consequential
+provider-route-integrity-retire Preview/Commit receives direct-human
+confirmation. Retirement performs no provider call, charges the full remaining
+ceiling and exposes retired-unknown; it never fabricates no-effect. This is a
+genuine human gate and is the only route-budget escape from unprovable effect.
+
+Every CLEAN, FINDINGS or UNUSABLE provider terminal transaction automatically
+inserts evidence and linearly CAS-advances one per-target/slot head before the
+result is visible. There is no chair-skippable terminal result. It names the
+prior head, separately reports provider-reported and daemon-accepted resolution
+sets, and carries complete prior/new open sets. Insufficient-read CLEAN becomes
+UNUSABLE and resolves nothing. Safely parsed insufficient-read FINDINGS stays
+visible/noncertifying, resolves nothing and adds every safe finding. An in-
+flight answer whose target becomes stale still settles and advances its
+reserved head; it resolves nothing, is stale/noncertifying and carries safe new
+findings into the successor target. Concurrent attempts
+conflict; a second FINDINGS action advances from the returned head. Every safe
+P0-P2 is automatically repair-required; no chair annotation can downgrade it.
+A repaired target carries full safe ID/severity/summary/evidence plus origin
+action/result in mandatory bundle objects, then CLEAN resolves the digests.
+Target reprepare rejects an unresolved old action. Optional chair annotation is
+non-gating. The mutation receipt is immutable; currency appears only on fresh
+read/list/operator projection.
+
+The Console reads review state only through its scoped operator Evidence
+row/detail projection. Rows show slot/head, target chair/profile,
+current/superseded, certifying, answer safety or terminal-failure code,
+CLEAN/FINDINGS/UNUSABLE, P0-P2/open counts, provider/model, independence and
+artifact/bundle/coverage/answer/result digests. Detail adds task/action, safe
+findings, route/final-prompt and publication lineage. Malformed fields reject
+the whole variant.
 
 The Evidence header displays the exact `reviewCompletionV1` response as
-`Final review: Complete` or `Blocked`, its target generation/artifact/packet and
-one row per required slot with the daemon's closed blockers. The Console does
-not recompute the boolean, choose a latest record or hide a blocker.
+`Final review: Complete` or `Blocked`, including target chair, artifact,
+bundle/coverage/profile digests and one slot-head row with the daemon's ordered
+closed blockers. `open-findings` is the only finding blocker;
+`provider-terminal-failure`, `terminal-no-effect` and `retired-unknown` are
+distinct from `ambiguous-action`. The Console
+does not recompute, choose a latest timestamp or hide a blocker.
+
+Every certifying action is recovery-owned before generic provider recovery.
+Prepared zero-dispatch proof closes no-effect; dispatched/accepted ambiguity
+gets at most one pair lookup; valid answers use the same automatic terminal
+transaction. Unresolved effect reaches the direct-human retirement gate above.
+The Console never offers a generic retry/resume for that custody.
+The schema-v2 Fabric receipt exports this same reducer under
+`reviewCompletion` and safe recovery digests under
+`routeIntegrityRecoveries`; the Console does not invent alternate receipt
+fields.
 
 A direct Claude, Cursor, Gemini or other provider CLI may be used only when
 Fabric is unavailable and the chair records the degraded reason. Its output may
@@ -763,34 +854,34 @@ schema belongs to the protocol/delivery contract, not to any UI package.
 For this approved AFAB-004 delivery, `finalReviewComplete` is one daemon query,
 not a chair assertion. It is true only when:
 
-1. the run has exactly one `current` review target naming the current immutable
-   implementation artifact ID/revision/path/SHA-256, publication-lineage digest
-   and content-addressed review-packet digest;
-2. exactly one unsuperseded, current, terminal, safe, certifying `CLEAN` record
-   exists for each derived slot: `native` through Codex/OpenAI,
-   `other-primary` through Claude/Anthropic, `cursor-grok` through Cursor/Grok/
-   xAI and `agy-gemini` through Agy/Gemini/Google;
-3. all four records bind that target generation, artifact revision, packet and
-   their exact task/action/route/result/answer/final-prompt digests; route
-   adapter/family/model/effort agree with the activated receipt, every route
-   snapshots the same current run-chair generation, and no action is ambiguous,
-   quarantined or `UNUSABLE`;
-4. each external provider slot has `proved-distinct-publisher-family` and
-   `proved-distinct-chair-primary`; the `other-primary` record additionally
-   names the immutable AFAB-004 Codex/OpenAI chair generation, so Anthropic is
-   required for this run without hard-coding another run's equal primary; and
-5. the `native` record is a fresh Fabric task/action over the same packet. It
-   reports its honest same/distinct family states but makes no cross-family
-   claim.
+1. one current target binds the current eligible implementation-delivery
+   manifest, proved publication lineage, sealed delivery review basis, clean
+   base/head source-state digest, complete review bundle/coverage digest, exact
+   target-chair generation and one resolved `spec05-four-slot-v1` snapshot;
+2. its four linear slot heads each name one current terminal safe certifying
+   CLEAN evidence record and an empty complete open-finding set;
+3. every head/action/evidence record binds that target, chair, artifact,
+   bundle, coverage, profile, task, route, answer/result and final-prompt digest,
+   and its route equals the activated adapter/family/model/effort snapshot;
+4. `native` satisfies its explicit profile exemption, while `other-primary`,
+   `cursor-grok` and `agy-gemini` each prove both distinct publisher and chair
+   family; and
+5. every slot blocker array is empty. A nonterminal, ambiguous, route-integrity,
+   insufficient-read, stale, UNUSABLE or proved terminal provider-failure
+   action cannot complete a slot.
 
-The daemon derives `CLEAN` by strict `review-result.v1` parsing. Chair
-adjudication is displayed but ignored by this predicate and cannot downgrade a
-P0-P2 finding. A `FINDINGS` or `UNUSABLE` record keeps its slot incomplete until
-a fresh safe `CLEAN` action explicitly supersedes it and links every open
-finding digest. When any finding was annotated substantiated, the successor
-must review a repaired artifact revision and new packet; prior evidence remains
-historical. An artifact/target advance makes earlier evidence `superseded`
-without invalidating its immutable action-bound snapshot.
+For the current Codex/OpenAI target the resolved matrix requires native Codex,
+Claude/Anthropic, Cursor/Grok/xAI and Agy/Gemini/Google. This is a target
+snapshot, not a permanent vendor interpretation: any chair generation/family
+change supersedes the target and resolves all four slots again.
+
+The daemon derives CLEAN by strict review-result.v1 parsing over the exact
+target generation and coverage digest. Chair adjudication is displayed but
+ignored by completion and cannot downgrade P0-P2. FINDINGS/UNUSABLE advance one
+head but leave deterministic blockers. A later safe CLEAN must resolve the
+complete prior open set. Every safe P0-P2 finding carries into a repaired target
+and new bundle; immutable prior evidence remains historical. Live currency is
+read-derived and never changes the original mutation receipt.
 
 Implementation is accepted only when objective tests demonstrate:
 
@@ -895,8 +986,9 @@ Implementation is accepted only when objective tests demonstrate:
     cover every configured dimension and the Console projects remaining or
     unknown capacity honestly.
 33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
-    The exact `finalReviewComplete` predicate above also proves current clean
-    Cursor Grok and Agy Gemini slots; direct CLI evidence cannot satisfy it.
+    The exact head-based `finalReviewComplete` predicate above also proves
+    current clean Cursor Grok and Agy Gemini slots against one complete bundle;
+    direct CLI evidence cannot satisfy it.
 34. A real scoping intake registers a spec, ADR, decision/finding and Git diff;
     Project/Evidence row and detail preserve exact accepted scope, kind,
     revision, provenance and source digest. Multi-page content continues without
@@ -912,20 +1004,48 @@ Implementation is accepted only when objective tests demonstrate:
     selects its secondary client, `s` returns to the retained project selector,
     and `--session` selects an exact stable ID for interactive or export use.
     A peer without `run-session-projection.v1` is explicitly incompatible.
-36. Provider-review routing performs durable replay before bounded keyed router
-    single-flight, binds canonical route, publication lineage, current target,
-    verified packet and final prompt before provider I/O, and safely reruns only
-    after a pre-commit process crash. Timeout, process-tree leak, source
-    mutation and every route/payload/lineage mismatch leave no action or budget.
-37. Chair-only review evidence accepts the exact terminal action/task/route/
-    packet/result/artifact tuple and derives safety, safe result, both
-    independence states, supersession and currency. Exact replay survives chair
-    rotation; a new insert requires the current generation. Agent and operator
-    read/list/detail schemas leak no raw answer, packet, prompt or credentials.
-38. Terminal classification is frozen with classifier/secret-set identity;
-    later secret or usage reconciliation does not change review/result digests.
-    Source-before/during/after mutation, CLEAN/P0-P2 grammar, unsafe canaries,
-    four-slot completion and repaired-artifact supersession tests all pass.
+36. Provider-review routing performs immutable replay before stable
+    run/actor/action single-flight, uses a structural shared codec, and performs
+    effort/currency/adapter/model admission after the bounded router. It binds
+    current target chair, exact resolved profile, complete bundle/coverage,
+    publication lineage and final prompt before provider I/O. Concurrent changed
+    input conflicts before a second router; timeout/process-tree/source/route
+    failure leaves no action or budget.
+37. Current-chair certifying dispatch accepts the exact target/head/action/task/
+    route/bundle/artifact tuple. Every CLEAN/FINDINGS/UNUSABLE terminal
+    transaction atomically creates immutable evidence and advances one linear
+    head with complete open findings before visibility; concurrent forks fail,
+    old-target reprepare cannot leapfrog and second FINDINGS remains recoverable.
+    Stale or insufficient terminal input accepts zero resolutions but still
+    settles and retains safe new findings. Chair annotation is separate/non-
+    gating; currency appears only on reads.
+38. Terminal classification is frozen with classifier/secret-set identity.
+    Proved max-turn/provider/no-answer failure is terminal/noncertifying rather
+    than ambiguous; every proved-effect terminal settles exact usage or
+    conservatively consumes its reservation, while no-effect releases and true
+    ambiguity retains. The terminal-input digest makes exact callback/lookup
+    replay idempotent and changed input an integrity quarantine. It exposes no
+    raw error and never redispatches. Bundle/source mutation, CLEAN/P0-P2
+    grammar, unsafe canaries, profile independence, all-certifying-action
+    recovery/generic exclusion, four-slot completion and repaired-target carry-
+    forward all pass.
+39. Rotate/compact returns an immutable accepted-suspended receipt after
+    unique caller inference, pre-digest write quarantine, durable checkpoint,
+    delivery and predecessor-turn fencing. Replacement is asynchronous; each
+    provider/principal target is its global run/agent durable high-water plus
+    one and bridge target its chair-or-child bridge high-water plus one, never
+    reused; only provider-originated launch.attest over the exact checkpoint and
+    exact source-row snapshot may atomically swap the proper bridge owner at
+    those reserved generations. Current state is read through lifecycle read; enqueue
+    may stale the checkpoint, claims/acks are blocked, write leases remain
+    quarantined, and startup adopt/no-effect/quarantine/supersede recovery owns
+    every lifecycle row before generic scans without replay. A stranded agent
+    cannot self-rotate: exact narrow-capability `agent-lifecycle-recovery`
+    fresh-rotate binds distinct custody/action/adapter/contract and an empty
+    caller boundary without rewriting a finalized predecessor, or destructive-
+    confirmed abandon performs the exact delivery/watermark/barrier and owner-
+    row terminal transitions without orphaning work. Lifecycle is sole owner for a rotating chair;
+    generic Resume and chair-loss recovery cannot substitute.
 
 ## 16. Implementation gate
 
@@ -943,7 +1063,9 @@ required action remains an implementation placeholder. Version 1.6 binds those
 review tasks to durable dispatch/read completion within the existing public
 protocol deadline. Version 1.7 binds trusted-router admission and daemon-derived
 review lineage to those same tasks without adding Spec 06 continuity modes.
-Version 1.8 binds those reviews to one current immutable packet, frozen safe
-results and the exact four-slot completion/supersession predicate above.
+Version 1.8 binds those reviews to one current complete immutable bundle,
+linear slot heads, frozen safe results and the exact four-slot completion
+predicate above. It also closes the existing asynchronous lifecycle-rotation
+custody contract without adding automatic Spec 06 routing policy.
 Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.
