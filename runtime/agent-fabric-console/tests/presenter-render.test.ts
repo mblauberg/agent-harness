@@ -31,6 +31,7 @@ import {
 import { presentFabricConsole } from "../src/presenter.js";
 import type { FabricConsoleDataset } from "../src/protocol-adapter.js";
 import { renderConsoleSnapshot } from "../src/snapshot.js";
+import type { ConsoleWorkflowReview } from "../src/workflow.js";
 
 const timestamp = "2026-07-11T12:00:00.000Z" as Timestamp;
 const digestA = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
@@ -283,6 +284,64 @@ function richDataset(
     pages,
     loadedAtMs: Date.parse(timestamp),
     canMutate: true,
+  };
+}
+
+function datasetWithHeader(
+  overrides: Readonly<{
+    project?: ProjectId;
+    session?: ProjectSessionId;
+    run?: RunProjection["runId"];
+    phase?: string;
+    owner?: AgentId;
+    nextMilestone?: string;
+  }>,
+): FabricConsoleDataset {
+  const dataset = richDataset();
+  const snapshot = dataset.snapshot;
+  if (
+    snapshot === null ||
+    !("value" in snapshot.project) ||
+    !("value" in snapshot.session) ||
+    snapshot.session.value === null ||
+    !("value" in snapshot.runs)
+  ) {
+    throw new Error("live header fixture unavailable");
+  }
+  const run = snapshot.runs.value[0];
+  if (run === undefined) throw new Error("run header fixture unavailable");
+  return {
+    ...dataset,
+    snapshotRevision: revisionFromProtocol(Number.MAX_SAFE_INTEGER),
+    snapshot: {
+      ...snapshot,
+      snapshotRevision: Number.MAX_SAFE_INTEGER,
+      project: {
+        ...snapshot.project,
+        value: {
+          ...snapshot.project.value,
+          projectId: overrides.project ?? snapshot.project.value.projectId,
+        },
+      },
+      session: {
+        ...snapshot.session,
+        value: {
+          ...snapshot.session.value,
+          projectSessionId:
+            overrides.session ?? snapshot.session.value.projectSessionId,
+        },
+      },
+      runs: {
+        ...snapshot.runs,
+        value: [{
+          ...run,
+          runId: overrides.run ?? run.runId,
+          phase: overrides.phase ?? run.phase,
+          chairAgentId: overrides.owner ?? run.chairAgentId,
+          nextMilestone: overrides.nextMilestone ?? run.nextMilestone,
+        }],
+      },
+    },
   };
 }
 
@@ -1365,6 +1424,110 @@ describe("structured presenter and responsive Fabric renderer", () => {
     }
   });
 
+  it("allocates every mandatory 80x24 header field before clipping its value", () => {
+    const frame = renderFabricConsoleFrame(
+      datasetWithHeader({
+        project: "project-".repeat(20) as ProjectId,
+        session: "session-".repeat(20) as ProjectSessionId,
+        run: "run-".repeat(20) as RunProjection["runId"],
+        phase: "phase-".repeat(20),
+        owner: "owner-".repeat(20) as AgentId,
+        nextMilestone: "next-".repeat(30),
+      }),
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    const [identity = "", lifecycle = "", next = ""] = frame.rows;
+
+    expect(identity.slice(0, 18)).toMatch(/^P:.*~$/u);
+    expect(identity.slice(19, 35)).toMatch(/^S:.*~$/u);
+    expect(identity.slice(36, 50)).toMatch(/^R:.*~$/u);
+    expect(identity.slice(51, 72)).toMatch(/^r9007199254740991/u);
+    expect(identity.slice(73, 80)).toBe("LIVE   ");
+    expect([identity[18], identity[35], identity[50], identity[72]])
+      .toStrictEqual(["|", "|", "|", "|"]);
+
+    expect(lifecycle.slice(0, 25)).toMatch(/^Phase:.*~$/u);
+    expect(lifecycle.slice(26, 45)).toMatch(/^Owner:.*~$/u);
+    expect(lifecycle.slice(46, 64)).toMatch(/^Health:/u);
+    expect(lifecycle.slice(65, 72)).toMatch(/^Attn:/u);
+    expect(lifecycle.slice(73, 80)).toMatch(/^Runs:/u);
+    expect([lifecycle[25], lifecycle[45], lifecycle[64], lifecycle[72]])
+      .toStrictEqual(["|", "|", "|", "|"]);
+
+    expect(next.slice(0, 52)).toMatch(/^Next:.*~$/u);
+    expect(next.slice(53, 80)).toMatch(/^Capacity:/u);
+    expect(next[52]).toBe("|");
+  });
+
+  it("keeps every responsive hit region visible, bounded, and non-overlapping", () => {
+    const dataset = richDataset();
+    const state = controllerState();
+    const ui = createFabricUiState();
+    const viewports = [
+      { columns: 140, rows: 36 },
+      { columns: 80, rows: 24 },
+      { columns: 60, rows: 18 },
+      { columns: 30, rows: 6 },
+      { columns: 8, rows: 1 },
+      { columns: 0, rows: 0 },
+    ] as const;
+
+    for (const viewport of viewports) {
+      const frame = renderFabricConsoleFrame(dataset, state, ui, viewport);
+      for (const region of frame.hitRegions) {
+        expect(region.rect.x1).toBeGreaterThanOrEqual(1);
+        expect(region.rect.y1).toBeGreaterThanOrEqual(1);
+        expect(region.rect.x2).toBeLessThanOrEqual(viewport.columns);
+        expect(region.rect.y2).toBeLessThanOrEqual(viewport.rows);
+        const visible = frame.rows
+          .slice(region.rect.y1 - 1, region.rect.y2)
+          .map((line) => line.slice(region.rect.x1 - 1, region.rect.x2))
+          .join("\n");
+        expect(visible.trim(), `${frame.mode}:${region.id}`).not.toBe("");
+      }
+      for (const [index, region] of frame.hitRegions.entries()) {
+        for (const other of frame.hitRegions.slice(index + 1)) {
+          const overlaps =
+            region.rect.x1 <= other.rect.x2 &&
+            other.rect.x1 <= region.rect.x2 &&
+            region.rect.y1 <= other.rect.y2 &&
+            other.rect.y1 <= region.rect.y2;
+          expect(overlaps, `${frame.mode}:${region.id}:${other.id}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("terminal-neutralises hostile projected chrome in the canonical renderer", () => {
+    const frame = renderFabricConsoleFrame(
+      datasetWithHeader({
+        project: "p\u001b" as ProjectId,
+        session: "s\u009b" as ProjectSessionId,
+        run: "r\u202e" as RunProjection["runId"],
+        phase: "ph\u2066",
+        owner: "o\u0007" as AgentId,
+        nextMilestone: "n\u007f",
+      }),
+      controllerState(),
+      createFabricUiState(),
+      { columns: 140, rows: 36 },
+    );
+    const output = frame.rows.join("\n");
+
+    expect(output).not.toContain("\u001b");
+    expect(output).not.toContain("\u009b");
+    expect(output).not.toContain("\u202e");
+    expect(output).not.toContain("\u2066");
+    expect(output).toContain("<ESC>");
+    expect(output).toContain("<C1-9B>");
+    expect(output).toContain("<BIDI-U+202E>");
+    expect(output).toContain("<BIDI-U+2066>");
+    expect(output).toContain("<BEL>");
+    expect(output).toContain("<DEL>");
+  });
+
   it("retains the authoritative top attention item in strip mode from every view", () => {
     const state = { ...controllerState(), activeView: "system" as const };
     const frame = renderFabricConsoleFrame(
@@ -1423,49 +1586,92 @@ describe("structured presenter and responsive Fabric renderer", () => {
     });
   });
 
-  it("keeps strip review context visible and withholds confirmation until it fits", () => {
+  it("withholds strip confirmation at widths 30 and 39 until exact context fits", () => {
     const dataset = richDataset();
     const state = controllerState(review("confirm"));
-    const short = renderFabricConsoleFrame(
-      dataset,
-      state,
-      createFabricUiState({ focusId: "review:confirm" }),
-      { columns: 30, rows: 5 },
-    );
-    const tall = renderFabricConsoleFrame(
+    const width30 = renderFabricConsoleFrame(
       dataset,
       state,
       createFabricUiState({ focusId: "review:confirm" }),
       { columns: 30, rows: 8 },
     );
-    const scrolled = renderFabricConsoleFrame(
+    const width39 = renderFabricConsoleFrame(
       dataset,
       state,
-      createFabricUiState({
-        focusId: "review:confirm",
-        reviewScrollOffset: 5,
-      }),
-      { columns: 30, rows: 8 },
+      createFabricUiState({ focusId: "review:confirm" }),
+      { columns: 39, rows: 8 },
+    );
+    const reference = renderFabricConsoleFrame(
+      dataset,
+      state,
+      createFabricUiState({ focusId: "review:confirm" }),
+      { columns: 80, rows: 24 },
     );
 
-    expect(short.rows.join("\n")).toContain("REVIEW CONFIRM");
-    expect(short.rows.join("\n")).toContain("Revision");
-    expect(short.hitRegions.some(({ id }) => id === "review:confirm")).toBe(false);
-    expect(short.hitRegions.some(({ kind }) => kind === "row" || kind === "tab" || kind === "splitter")).toBe(false);
-
-    const visible = tall.rows.join("\n");
-    expect(visible).toContain("REVIEW CONFIRM");
-    expect(visible).toContain("Revisions:");
-    expect(visible).toContain("Scope:");
-    expect(visible).toContain("Consequence:");
-    expect(visible).toContain("Evidence:");
-    expect(tall.hitRegions.find(({ id }) => id === "review:confirm")).toMatchObject({
+    for (const frame of [width30, width39]) {
+      expect(frame.rows.join("\n")).toContain("REVIEW CONFIRM");
+      expect(frame.hitRegions.some(({ id }) => id === "review:confirm"))
+        .toBe(false);
+      expect(frame.hitRegions.some(
+        ({ kind }) => kind === "row" || kind === "tab" || kind === "splitter",
+      )).toBe(false);
+    }
+    const visibleReference = reference.rows.join("\n");
+    expect(visibleReference).toContain("Evidence:");
+    expect(visibleReference).toContain("Question: Resume quarantined task?");
+    expect(visibleReference).toContain("Reason: Replacement evidence passed.");
+    expect(visibleReference).toContain("Recommendation: approve");
+    expect(visibleReference).toContain(`Preview:${digestA}`);
+    expect(visibleReference).toContain(`Intent:${digestB}`);
+    expect(visibleReference).toContain(`Before:${digestA}`);
+    expect(visibleReference).toContain("Confirmation: explicit");
+    expect(reference.hitRegions.find(({ id }) => id === "review:confirm"))
+      .toMatchObject({
       kind: "action",
       enabled: true,
     });
-    expect(tall.hitRegions.some(({ kind }) => kind === "row" || kind === "tab" || kind === "splitter")).toBe(false);
-    expect(scrolled.hitRegions.some(({ id }) => id === "review:confirm")).toBe(false);
-    expect(scrolled.rows.join("\n")).not.toContain("Revisions:");
+  });
+
+  it("counts every workflow intent line before enabling review continuation", () => {
+    const workflow: ConsoleWorkflowReview = {
+      workflowId: "workflow-intent-visibility",
+      kind: "project-session-transition",
+      source: "daemon-preview",
+      stage: "review",
+      previewDigest: "sha256:preview",
+      expectedRevision: revisionFromProtocol(11),
+      consequenceClass: "consequential",
+      confirmationMode: "explicit",
+      summary: "Transition the exact session",
+      details: [
+        { label: "Session", value: "session-1" },
+        { label: "Expected revision", value: "11" },
+      ],
+      evidence: ["evidence/session-transition.json"],
+      openedByEventId: "event-workflow-open",
+      armedByEventId: null,
+      result: null,
+      failure: null,
+    };
+    const short = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ workflowReview: workflow }),
+      { columns: 200, rows: 12 },
+    );
+    const complete = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ workflowReview: workflow }),
+      { columns: 200, rows: 18 },
+    );
+
+    expect(short.rows.join("\n")).not.toContain("Intent Expected revision:11");
+    expect(short.hitRegions.some(({ id }) => id === "review:continue"))
+      .toBe(false);
+    expect(complete.rows.join("\n")).toContain("Intent Expected revision:11");
+    expect(complete.hitRegions.find(({ id }) => id === "review:continue"))
+      .toMatchObject({ enabled: true });
   });
 
   it.each(["editor", "guided", "palette"] as const)(

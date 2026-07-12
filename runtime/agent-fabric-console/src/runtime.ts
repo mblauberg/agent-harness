@@ -804,7 +804,7 @@ export class FabricConsoleRuntime {
 
   #moveFocus(direction: -1 | 1): void {
     const regions = this.#frame.hitRegions.filter(
-      (region) => region.enabled && region.kind !== "splitter",
+      (region) => region.enabled,
     );
     if (regions.length === 0) return;
     const current = regions.findIndex((region) => region.id === this.#ui.focusId);

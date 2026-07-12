@@ -1227,6 +1227,7 @@ describe("typed Console application bootstrap boundary", () => {
 
     staleMessage = true;
     await application.handleInput({ kind: "key", key: "shift-tab" });
+    await application.handleInput({ kind: "key", key: "shift-tab" });
     await application.handleInput({ kind: "key", key: "enter" });
     expect(application.dataset.inspection).toMatchObject({
       kind: "message",
@@ -1456,6 +1457,7 @@ describe("typed Console application bootstrap boundary", () => {
 
     selectedWorktree = "/repo/.worktrees/selected";
     await application.handleInput({ kind: "key", key: "shift-tab" });
+    await application.handleInput({ kind: "key", key: "shift-tab" });
     await application.handleInput({ kind: "key", key: "enter" });
     expect(readRepository).toHaveBeenLastCalledWith({
       credential,
@@ -1473,6 +1475,7 @@ describe("typed Console application bootstrap boundary", () => {
     const repositoryReadCount = readRepository.mock.calls.length;
     corruptDetailIdentity = true;
     await application.handleInput({ kind: "key", key: "shift-tab" });
+    await application.handleInput({ kind: "key", key: "shift-tab" });
     await application.handleInput({ kind: "key", key: "enter" });
     expect(readRepository).toHaveBeenCalledTimes(repositoryReadCount);
     expect(application.dataset.inspection).toMatchObject({
@@ -1483,6 +1486,7 @@ describe("typed Console application bootstrap boundary", () => {
 
     corruptDetailIdentity = false;
     repositoryResnapshotRequired = true;
+    await application.handleInput({ kind: "key", key: "shift-tab" });
     await application.handleInput({ kind: "key", key: "shift-tab" });
     await application.handleInput({ kind: "key", key: "enter" });
     expect(application.dataset.inspection).toMatchObject({

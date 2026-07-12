@@ -883,6 +883,54 @@ describe("Fabric Console runtime routing", () => {
     expect(activate).not.toHaveBeenCalled();
   });
 
+  it("makes every enabled 80x24 target keyboard reachable with visible focus", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "event-focus-traversal",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const expected = runtime.frame.hitRegions
+      .filter(({ enabled }) => enabled)
+      .map(({ id }) => id);
+    expect(expected).toContain("splitter:master-detail");
+
+    const visited = new Set<string>();
+    for (let index = 0; index < expected.length; index += 1) {
+      await runtime.handleInput({ kind: "key", key: "tab" });
+      const focusId = runtime.ui.focusId;
+      expect(focusId).not.toBeNull();
+      if (focusId === null) continue;
+      visited.add(focusId);
+
+      const region = runtime.frame.hitRegions.find(
+        ({ enabled, id }) => enabled && id === focusId,
+      );
+      expect(region).toBeDefined();
+      if (region === undefined) continue;
+      const focusedText = runtime.frame.rows
+        .slice(region.rect.y1 - 1, region.rect.y2)
+        .map((line) => line.slice(region.rect.x1 - 1, region.rect.x2))
+        .join("\n");
+      expect(focusedText, focusId).toContain(">");
+
+      if (focusId === "splitter:master-detail") {
+        const ratio = runtime.ui.splitterRatio;
+        await runtime.handleInput({ kind: "key", key: "enter" });
+        await runtime.handleInput({ kind: "key", key: "space" });
+        expect(runtime.ui.splitterRatio).toBe(ratio);
+        expect(activate).not.toHaveBeenCalled();
+      }
+    }
+
+    expect(visited).toStrictEqual(new Set(expected));
+  });
+
   it("keeps compact master and detail reachable without hiding state", async () => {
     const runtime = new FabricConsoleRuntime({
       controller: new FakeController(),
