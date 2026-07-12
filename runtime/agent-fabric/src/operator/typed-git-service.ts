@@ -477,24 +477,36 @@ export class TypedGitService {
         evidenceRefs: [],
       });
     }
-    const claimed = this.#database.transaction(() => {
-      this.#assertPointOfUse(request, binding);
-      this.#assertFourOwnerState(custodyId, "prepared", "prepared", "authorised", "reserved");
-      this.#database.prepare("UPDATE operator_git_effect_bindings SET state='dispatching',state_revision=state_revision+1,updated_at=? WHERE custody_id=? AND state='prepared'")
-        .run(this.#clock(), custodyId);
-      this.#database.prepare("UPDATE operator_effect_custody SET state='dispatching',updated_at=? WHERE custody_id=? AND state='prepared'")
-        .run(this.#clock(), custodyId);
-      this.#database.prepare("UPDATE operation_admissions SET state='executing',revision=revision+1 WHERE operation_id=? AND state='authorised'")
-        .run(text(binding, "operation_id"));
-      this.#database.prepare("UPDATE git_mutation_reservations SET state='dispatching',updated_at=? WHERE custody_id=? AND generation=? AND state='reserved'")
-        .run(this.#clock(), custodyId, integer(binding, "mutation_reservation_generation"));
-      return true;
-    })();
-    if (!claimed) return this.#ambiguousOutcome(custodyId, this.#binding(custodyId));
+    let claimed = false;
+    const pointOfUse = (): void => {
+      if (claimed) throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "typed Git mutation port reused point-of-use authority");
+      binding = this.#binding(custodyId);
+      this.#database.transaction(() => {
+        this.#assertPointOfUse(request, binding);
+        this.#assertFourOwnerState(custodyId, "prepared", "prepared", "authorised", "reserved");
+        this.#database.prepare("UPDATE operator_git_effect_bindings SET state='dispatching',state_revision=state_revision+1,updated_at=? WHERE custody_id=? AND state='prepared'")
+          .run(this.#clock(), custodyId);
+        this.#database.prepare("UPDATE operator_effect_custody SET state='dispatching',updated_at=? WHERE custody_id=? AND state='prepared'")
+          .run(this.#clock(), custodyId);
+        this.#database.prepare("UPDATE operation_admissions SET state='executing',revision=revision+1 WHERE operation_id=? AND state='authorised'")
+          .run(text(binding, "operation_id"));
+        this.#database.prepare("UPDATE git_mutation_reservations SET state='dispatching',updated_at=? WHERE custody_id=? AND generation=? AND state='reserved'")
+          .run(this.#clock(), custodyId, integer(binding, "mutation_reservation_generation"));
+      })();
+      claimed = true;
+    };
     let inspection: GitMutationInspection;
     try {
-      inspection = await this.#gitPort.dispatch(request.intent, { remoteTarget: this.#remoteTarget(binding) });
-    } catch {
+      inspection = await this.#gitPort.dispatch(
+        request.intent,
+        { remoteTarget: this.#remoteTarget(binding) },
+        pointOfUse,
+      );
+      if (!claimed) {
+        throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "typed Git mutation port returned without point-of-use authority");
+      }
+    } catch (error: unknown) {
+      if (!claimed) throw error;
       inspection = {
         outcome: "incomplete",
         repository: await this.#gitPort.observe(request.intent.repository.repositoryRoot, request.intent.repository.worktreePath),

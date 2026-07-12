@@ -31,6 +31,7 @@ export { FixedGitMutationPort } from "./operator/fixed-git-mutation-port.js";
 export type {
   GitMutationDispatchContext,
   GitMutationInspection,
+  GitMutationPointOfUse,
   GitMutationPort,
 } from "./operator/fixed-git-mutation-port.js";
 export {
@@ -44,6 +45,7 @@ export {
   TrustedGitRegistry,
   deriveTrustedGitExecutionProfileDigest,
   deriveTrustedGitRemoteTargetDigest,
+  deriveTrustedRunGitAllowlistDigest,
 } from "./operator/trusted-git-registry.js";
 export type {
   TrustedGitConfiguration,

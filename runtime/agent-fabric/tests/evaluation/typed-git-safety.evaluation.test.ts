@@ -7,16 +7,15 @@ import { FixedGitMutationPort } from "../../src/operator/fixed-git-mutation-port
 describe("Spec 05 typed Git fail-closed evaluation", () => {
   it("admits only variants with a verified native first-mutation fence", () => {
     const port = new FixedGitMutationPort({ privateStateRoot: "/tmp/agent-fabric-evaluation" });
-    const supported = [
-      "stage", "unstage", "commit", "branch-create",
-      "worktree-create-detached", "worktree-create-new-branch", "worktree-create-existing-branch",
-    ] satisfies GitOperationVariant[];
+    const supported: GitOperationVariant[] = [];
     const unavailable = [
       "fetch", "pull-fast-forward-only", "pull-merge-commit-start", "pull-rebase-start",
+      "stage", "unstage", "commit",
       "merge-fast-forward-only-start", "merge-commit-start", "merge-continue", "merge-abort",
       "rebase-current-branch-no-autostash-start", "rebase-continue", "rebase-abort",
-      "push-fast-forward-only", "push-force-with-lease", "branch-rename", "branch-delete-merged-only",
+      "push-fast-forward-only", "push-force-with-lease", "branch-create", "branch-rename", "branch-delete-merged-only",
       "branch-delete-force", "worktree-move", "worktree-remove-clean", "worktree-remove-force",
+      "worktree-create-detached", "worktree-create-new-branch", "worktree-create-existing-branch",
       "upstream-set", "upstream-unset",
     ] satisfies GitOperationVariant[];
     expect([...supported, ...unavailable].sort()).toEqual([...GIT_OPERATION_VARIANTS].sort());

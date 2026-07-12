@@ -8,6 +8,9 @@ import {
   TrustedGitRegistry,
   deriveTrustedGitExecutionProfileDigest,
   deriveTrustedGitRemoteTargetDigest,
+  deriveTrustedRunGitAllowlistDigest,
+  type TrustedGitConfiguration,
+  type TrustedRunGitAllowlist,
 } from "../../../src/operator/trusted-git-registry.ts";
 
 const databases: Database.Database[] = [];
@@ -22,25 +25,6 @@ describe("trusted Git production registry", () => {
     const database = new Database(":memory:");
     databases.push(database);
     applyMigrations(database);
-    database.exec(`
-      INSERT INTO projects(project_id,canonical_root,trust_record_digest,revision,authority_generation,created_at,updated_at)
-      VALUES('project_01','/repo','${sha("1")}',1,1,1,1);
-      INSERT INTO project_sessions(
-        project_session_id,project_id,mode,state,revision,generation,authority_ref,budget_ref,
-        launch_packet_path,launch_packet_digest,membership_revision,origin_kind,origin_operator_id,created_at,updated_at
-      ) VALUES('session_01','project_01','coordinated','active',2,1,'${sha("2")}','budget_01',
-        'launch.json','${sha("3")}',1,'operator-launch','operator_01',1,1);
-      INSERT INTO runs(
-        run_id,chair_agent_id,workspace_root,project_run_directory,created_at,project_session_id,lifecycle_state,
-        revision,chair_generation,chair_lease_id,authority_ref,budget_ref,dependency_revision,topology_slot,
-        project_run_directory_basis,authority_revision,git_allowlist_epoch,git_allowlist_digest
-      ) VALUES('run_01','chair_01','/repo','.agent-run/current',1,'session_01','active',4,1,'chair:run_01:1',
-        '${sha("2")}','budget_01',1,1,'project-relative',1,1,'${sha("4")}');
-      INSERT INTO run_authority_revisions(
-        project_session_id,coordination_run_id,authority_revision,authority_ref,git_allowlist_epoch,
-        git_allowlist_digest,activated_at_run_revision,created_at
-      ) VALUES('session_01','run_01',1,'${sha("2")}',1,'${sha("4")}',4,1);
-    `);
     const profileWithoutDigest = {
       profileId: "sealed-git-v1",
       revision: 1,
@@ -83,26 +67,54 @@ describe("trusted Git production registry", () => {
       adapterId: remote.adapterId,
       adapterContractDigest: remote.adapterContractDigest,
     };
+    const allowlistWithoutDigest = {
+      projectSessionId: "session_01",
+      coordinationRunId: "run_01",
+      authorityRevision: 1,
+      gitAllowlistEpoch: 1,
+      allowWorktreeCreation: false,
+      maximumExpiry: Date.parse("2027-01-01T00:00:00Z"),
+      operationVariants: ["stage" as const, "commit" as const],
+      profiles: [{ profileId: profile.profileId, revision: profile.revision, digest: profile.profileDigest }],
+      remotes: [remoteBinding],
+      refs: ["refs/heads/main"],
+      paths: [{ repositoryRoot: "/repo", worktreePath: "/repo", canonicalPrefix: "src" }],
+    } satisfies Omit<TrustedRunGitAllowlist, "gitAllowlistDigest">;
+    const gitAllowlistDigest = deriveTrustedRunGitAllowlistDigest(allowlistWithoutDigest);
+    const currentAllowlist = {
+      ...allowlistWithoutDigest,
+      gitAllowlistDigest,
+    } satisfies TrustedRunGitAllowlist;
     const configuration = {
       executionProfiles: [profile],
       remoteRegistrations: [remote],
-      runAllowlists: [{
-        projectSessionId: "session_01",
-        coordinationRunId: "run_01",
-        authorityRevision: 1,
-        gitAllowlistEpoch: 1,
-        gitAllowlistDigest: sha("4"),
-        allowWorktreeCreation: false,
-        maximumExpiry: Date.parse("2027-01-01T00:00:00Z"),
-        operationVariants: ["stage" as const, "commit" as const],
-        profiles: [{ profileId: profile.profileId, revision: profile.revision, digest: profile.profileDigest }],
-        remotes: [remoteBinding],
-        refs: ["refs/heads/main"],
-        paths: [{ repositoryRoot: "/repo", worktreePath: "/repo", canonicalPrefix: "src" }],
-      }],
-    };
+      runAllowlists: [currentAllowlist],
+    } satisfies TrustedGitConfiguration;
+    database.exec(`
+      INSERT INTO projects(project_id,canonical_root,trust_record_digest,revision,authority_generation,created_at,updated_at)
+      VALUES('project_01','/repo','${sha("1")}',1,1,1,1);
+      INSERT INTO project_sessions(
+        project_session_id,project_id,mode,state,revision,generation,authority_ref,budget_ref,
+        launch_packet_path,launch_packet_digest,membership_revision,origin_kind,origin_operator_id,created_at,updated_at
+      ) VALUES('session_01','project_01','coordinated','active',2,1,'${sha("2")}','budget_01',
+        'launch.json','${sha("3")}',1,'operator-launch','operator_01',1,1);
+      INSERT INTO runs(
+        run_id,chair_agent_id,workspace_root,project_run_directory,created_at,project_session_id,lifecycle_state,
+        revision,chair_generation,chair_lease_id,authority_ref,budget_ref,dependency_revision,topology_slot,
+        project_run_directory_basis,authority_revision,git_allowlist_epoch,git_allowlist_digest
+      ) VALUES('run_01','chair_01','/repo','.agent-run/current',1,'session_01','active',4,1,'chair:run_01:1',
+        '${sha("2")}','budget_01',1,1,'project-relative',1,1,'${gitAllowlistDigest}');
+      INSERT INTO run_authority_revisions(
+        project_session_id,coordination_run_id,authority_revision,authority_ref,git_allowlist_epoch,
+        git_allowlist_digest,activated_at_run_revision,created_at
+      ) VALUES('session_01','run_01',1,'${sha("2")}',1,'${gitAllowlistDigest}',4,1);
+    `);
     const registry = new TrustedGitRegistry(database, () => 10);
 
+    expect(() => registry.materialize({
+      ...configuration,
+      runAllowlists: [{ ...currentAllowlist, refs: ["refs/heads/unapproved"] }],
+    })).toThrow(/allow-list digest/iu);
     expect(registry.materialize(configuration)).toEqual({ profiles: 1, remotes: 1, runAllowlists: 1 });
     expect(registry.materialize(configuration)).toEqual({ profiles: 1, remotes: 1, runAllowlists: 1 });
     expect(database.prepare("SELECT state,profile_digest FROM git_execution_profiles").get())
@@ -153,5 +165,33 @@ describe("trusted Git production registry", () => {
         targetDigest: deriveTrustedGitRemoteTargetDigest(credentialedRemoteWithoutDigest),
       }],
     })).toThrow(/secret-free/iu);
+
+    const rotatedAllowlistWithoutDigest = {
+      ...allowlistWithoutDigest,
+      authorityRevision: 2,
+      gitAllowlistEpoch: 2,
+      refs: ["refs/heads/main", "refs/heads/reviewed"],
+    } satisfies Omit<TrustedRunGitAllowlist, "gitAllowlistDigest">;
+    const rotatedGitAllowlistDigest = deriveTrustedRunGitAllowlistDigest(rotatedAllowlistWithoutDigest);
+    database.transaction(() => {
+      database.prepare(`
+        INSERT INTO run_authority_revisions(
+          project_session_id,coordination_run_id,authority_revision,authority_ref,git_allowlist_epoch,
+          git_allowlist_digest,activated_at_run_revision,created_at
+        ) VALUES('session_01','run_01',2,?,2,?,5,2)
+      `).run(sha("b"), rotatedGitAllowlistDigest);
+      database.prepare(`
+        UPDATE runs SET revision=5,authority_ref=?,authority_revision=2,git_allowlist_epoch=2,git_allowlist_digest=?
+         WHERE project_session_id='session_01' AND run_id='run_01'
+      `).run(sha("b"), rotatedGitAllowlistDigest);
+    })();
+
+    expect(registry.materialize({
+      runAllowlists: [
+        currentAllowlist,
+        { ...rotatedAllowlistWithoutDigest, gitAllowlistDigest: rotatedGitAllowlistDigest },
+      ],
+    })).toEqual({ profiles: 0, remotes: 0, runAllowlists: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM run_git_allowlists").get()).toEqual({ count: 2 });
   });
 });

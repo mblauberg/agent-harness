@@ -33,9 +33,11 @@ afterEach(() => {
 });
 
 class FakeGitPort implements GitMutationPort {
+  dispatchAttemptCount = 0;
   dispatchCount = 0;
   inspectCount = 0;
   onObserve: (() => void) | null = null;
+  onBeforePointOfUse: (() => void) | null = null;
   observation: GitRepositoryBinding;
   outcome: GitMutationInspection;
 
@@ -58,7 +60,15 @@ class FakeGitPort implements GitMutationPort {
     return Promise.resolve(this.observation);
   }
 
-  dispatch(_intent: OperatorGitIntent, _context: GitMutationDispatchContext): Promise<GitMutationInspection> {
+  dispatch(
+    _intent: OperatorGitIntent,
+    _context: GitMutationDispatchContext,
+    pointOfUse: () => void,
+  ): Promise<GitMutationInspection> {
+    this.dispatchAttemptCount += 1;
+    this.onBeforePointOfUse?.();
+    this.onBeforePointOfUse = null;
+    pointOfUse();
     this.dispatchCount += 1;
     return Promise.resolve(this.outcome);
   }
@@ -317,6 +327,7 @@ describe("typed Git effect custody", () => {
 
     await expect(value.service.dispatch(value.request)).resolves.toMatchObject({ status: "committed" });
     await expect(value.service.dispatch(value.request)).resolves.toMatchObject({ status: "committed" });
+    expect(value.port.dispatchAttemptCount).toBe(1);
     expect(value.port.dispatchCount).toBe(1);
     expect(value.database.prepare(`
       SELECT b.state AS binding_state,c.state AS custody_state,a.state AS admission_state,r.state AS reservation_state
@@ -353,6 +364,33 @@ describe("typed Git effect custody", () => {
     };
 
     await expect(value.service.dispatch(value.request)).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    expect(value.port.dispatchCount).toBe(0);
+    expect(value.database.prepare(`
+      SELECT b.state AS binding_state,c.state AS custody_state,a.state AS admission_state,r.state AS reservation_state
+        FROM operator_git_effect_bindings b
+        JOIN operator_effect_custody c ON c.custody_id=b.custody_id
+        JOIN operation_admissions a ON a.operation_id=b.operation_id
+        JOIN git_mutation_reservations r ON r.custody_id=b.custody_id
+    `).get()).toEqual({
+      binding_state: "prepared",
+      custody_state: "prepared",
+      admission_state: "authorised",
+      reservation_state: "reserved",
+    });
+  });
+
+  it("claims authority only from the mutation port point-of-use boundary", async () => {
+    const value = fixture();
+    value.service.prepare(value.request);
+    value.port.onBeforePointOfUse = () => {
+      value.database.prepare(`
+        UPDATE operator_git_grants SET state='revoked',revoked_at=?
+         WHERE grant_id='grant_01' AND revision=1
+      `).run(now);
+    };
+
+    await expect(value.service.dispatch(value.request)).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    expect(value.port.dispatchAttemptCount).toBe(1);
     expect(value.port.dispatchCount).toBe(0);
     expect(value.database.prepare(`
       SELECT b.state AS binding_state,c.state AS custody_state,a.state AS admission_state,r.state AS reservation_state

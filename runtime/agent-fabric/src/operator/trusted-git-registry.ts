@@ -76,6 +76,15 @@ export function deriveTrustedGitRemoteTargetDigest(
   });
 }
 
+export function deriveTrustedRunGitAllowlistDigest(
+  allowlist: Omit<TrustedRunGitAllowlist, "gitAllowlistDigest">,
+): Sha256Digest {
+  return digest({
+    domain: "trusted-run-git-allowlist-v1",
+    allowlist: canonicalAllowlist(allowlist),
+  });
+}
+
 /** Trusted daemon-composition boundary. No public protocol operation reaches this owner. */
 export class TrustedGitRegistry {
   readonly #database: Database.Database;
@@ -202,15 +211,9 @@ export class TrustedGitRegistry {
 
   #materializeAllowlist(allowlist: TrustedRunGitAllowlist): void {
     assertDigest(allowlist.gitAllowlistDigest, "trusted Git allow-list digest");
-    const run = row(this.#database.prepare(`
-      SELECT authority_revision,git_allowlist_epoch,git_allowlist_digest
-        FROM runs WHERE project_session_id=? AND run_id=?
-    `).get(allowlist.projectSessionId, allowlist.coordinationRunId), "trusted Git allow-list run");
-    if (
-      integer(run, "authority_revision") !== allowlist.authorityRevision ||
-      integer(run, "git_allowlist_epoch") !== allowlist.gitAllowlistEpoch ||
-      nullableText(run, "git_allowlist_digest") !== allowlist.gitAllowlistDigest
-    ) throw new ProjectFabricCoreError("STALE_GENERATION", "trusted Git allow-list is not the run's approved current authority tuple");
+    if (deriveTrustedRunGitAllowlistDigest(stripAllowlistDigest(allowlist)) !== allowlist.gitAllowlistDigest) {
+      throw new ProjectFabricCoreError("CONFLICT", "trusted Git allow-list digest is invalid");
+    }
     const constraintsJson = canonicalJson({
       operationVariants: sortedUnique(allowlist.operationVariants),
       profiles: sortedUnique(allowlist.profiles.map((value) => canonicalJson(value))),
@@ -235,6 +238,15 @@ export class TrustedGitRegistry {
       ) throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "trusted Git allow-list tuple changed");
       return;
     }
+    const run = row(this.#database.prepare(`
+      SELECT authority_revision,git_allowlist_epoch,git_allowlist_digest
+        FROM runs WHERE project_session_id=? AND run_id=?
+    `).get(allowlist.projectSessionId, allowlist.coordinationRunId), "trusted Git allow-list run");
+    if (
+      integer(run, "authority_revision") !== allowlist.authorityRevision ||
+      integer(run, "git_allowlist_epoch") !== allowlist.gitAllowlistEpoch ||
+      nullableText(run, "git_allowlist_digest") !== allowlist.gitAllowlistDigest
+    ) throw new ProjectFabricCoreError("STALE_GENERATION", "trusted Git allow-list is not the run's approved current authority tuple");
     this.#database.prepare(`
       INSERT INTO run_git_allowlists(
         project_session_id,coordination_run_id,authority_revision,git_allowlist_epoch,
@@ -275,6 +287,32 @@ export class TrustedGitRegistry {
       );
     }
   }
+}
+
+function canonicalAllowlist(
+  allowlist: Omit<TrustedRunGitAllowlist, "gitAllowlistDigest">,
+): Record<string, unknown> {
+  const sorted = (values: readonly string[]): string[] => [...values].sort();
+  return {
+    projectSessionId: allowlist.projectSessionId,
+    coordinationRunId: allowlist.coordinationRunId,
+    authorityRevision: allowlist.authorityRevision,
+    gitAllowlistEpoch: allowlist.gitAllowlistEpoch,
+    allowWorktreeCreation: allowlist.allowWorktreeCreation,
+    maximumExpiry: allowlist.maximumExpiry,
+    operationVariants: sorted(allowlist.operationVariants),
+    profiles: sorted(allowlist.profiles.map(canonicalJson)),
+    remotes: sorted(allowlist.remotes.map(canonicalJson)),
+    refs: sorted(allowlist.refs),
+    paths: sorted(allowlist.paths.map(canonicalJson)),
+  };
+}
+
+function stripAllowlistDigest(
+  allowlist: TrustedRunGitAllowlist,
+): Omit<TrustedRunGitAllowlist, "gitAllowlistDigest"> {
+  const { gitAllowlistDigest: _digest, ...value } = allowlist;
+  return value;
 }
 
 function stripProfileDigest(profile: TrustedGitExecutionProfile): Omit<TrustedGitExecutionProfile, "profileDigest"> {
