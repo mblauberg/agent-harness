@@ -374,12 +374,14 @@ async function loadInstalledFabric(): Promise<unknown> {
 function unavailableReason(error: unknown):
   | "configuration-missing"
   | "start-failed"
+  | "schema-cutover-required"
   | "authority-unavailable" {
   if (isRecord(error)) {
     const reason = error.reason;
     if (
       reason === "configuration-missing" ||
       reason === "start-failed" ||
+      reason === "schema-cutover-required" ||
       reason === "authority-unavailable"
     ) return reason;
   }
@@ -396,25 +398,6 @@ function protocolIncompatibleResult(
     typeof primaryValue.code !== "string" ||
     typeof primaryValue.message !== "string"
   ) return null;
-  const retryValue = error.retry;
-  const retry = isRecord(retryValue) &&
-      (retryValue.status === "succeeded" || retryValue.status === "failed") &&
-      retryValue.profile === "strict-v1"
-    ? {
-        status: retryValue.status as "succeeded" | "failed",
-        profile: "strict-v1" as const,
-        ...(isRecord(retryValue.failure) &&
-          typeof retryValue.failure.code === "string" &&
-          typeof retryValue.failure.message === "string"
-          ? {
-              failure: {
-                code: retryValue.failure.code,
-                message: retryValue.failure.message,
-              },
-            }
-          : {}),
-      }
-    : undefined;
   const resultValue = error.result;
   const result = isRecord(resultValue) &&
       typeof resultValue.code === "string" &&
@@ -429,7 +412,6 @@ function protocolIncompatibleResult(
   return {
     status: "protocol-incompatible",
     primary: { code: primaryValue.code, message: primaryValue.message },
-    ...(retry === undefined ? {} : { retry }),
     ...(result === undefined ? {} : { result }),
   };
 }

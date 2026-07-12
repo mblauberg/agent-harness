@@ -106,7 +106,7 @@ export type UsabilityFixture = Readonly<{
   attention: readonly UsabilityAttention[];
   system: readonly UsabilitySystem[];
   evidenceReview: UsabilityEvidenceReview | null;
-  notificationProjection: "daemon-journal" | "legacy-fallback";
+  notificationProjection: "daemon-journal" | "feature-unavailable";
   expectedTopAttentionId: string | null;
   expectedAnswers: UsabilityExpectedAnswers;
 }>;
@@ -409,7 +409,7 @@ function parseFixture(value: unknown, path: string): UsabilityFixture {
       : parseEvidenceReview(fixture.evidenceReview, `${path}.evidenceReview`),
     notificationProjection: choice(
       fixture.notificationProjection ?? "daemon-journal",
-      ["daemon-journal", "legacy-fallback"],
+      ["daemon-journal", "feature-unavailable"],
       `${path}.notificationProjection`,
     ),
     expectedTopAttentionId: expectedTop,
@@ -516,7 +516,7 @@ function attentionRow(
             nativeNotification: notificationProjection === "daemon-journal"
               ? notificationSummary(item)
               : {
-                  kind: "legacy-fallback",
+                  kind: "feature-unavailable",
                   status: "unavailable",
                   reason: "feature-not-negotiated",
                 },
@@ -761,12 +761,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       : {}),
   }));
   return {
-    connection: fixture.notificationProjection === "daemon-journal"
-      ? { state: "live", compatibility: { mode: "current" } }
-      : {
-          state: "live",
-          compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
-        },
+    connection: { state: "live", compatibility: { mode: "current" } },
     snapshot: {
       schemaVersion: 1,
       snapshotRevision: revision,
@@ -1464,7 +1459,7 @@ async function observe(
       (dataset.connection.state === "live" && presentation.connection === "LIVE"),
     nativeNotificationVisible:
       topNotification === null ||
-      (topNotification.kind === "legacy-fallback"
+      (topNotification.kind === "feature-unavailable"
         ? frameText.includes("unavailable | feature-not-negotiated")
         : frameText.includes(
             `${topNotification.status} | journal ${topNotification.journalState}`,

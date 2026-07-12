@@ -117,7 +117,7 @@ export type ConsoleProtocolBinding =
       port: ConsoleProtocolPort;
       readOnly: boolean;
       actions: OperatorActionClient | null;
-      nativeNotificationProjection: "daemon-journal" | "legacy-fallback";
+      nativeNotificationProjection: "daemon-journal" | "feature-unavailable";
       runSessionProjection: "exact";
       compatibility: ConsoleProtocolCompatibility;
     }>
@@ -126,27 +126,15 @@ export type ConsoleProtocolBinding =
       missingFeatures: readonly string[];
     }>;
 
-export type ConsoleProtocolCompatibility =
-  | Readonly<{ mode: "current" }>
-  | Readonly<{
-      mode: "legacy-compatibility";
-      profile: "strict-v1";
-      primary?: Readonly<{ code: string; message: string }>;
-    }>;
+export type ConsoleProtocolCompatibility = Readonly<{ mode: "current" }>;
 
-export type ConsoleSessionCompatibility =
-  | Readonly<{ mode: "current" }>
-  | Readonly<{
-      mode: "legacy-compatibility";
-      primary: Readonly<{ code: string; message: string }>;
-      retry: Readonly<{ status: "succeeded"; profile: "strict-v1" }>;
-    }>;
+export type ConsoleSessionCompatibility = Readonly<{ mode: "current" }>;
 
 export function bindConsoleProtocolClient(
   client: NegotiatedOperatorClient,
   sessionCompatibility?: ConsoleSessionCompatibility,
 ): ConsoleProtocolBinding {
-  if (sessionCompatibility?.mode === "legacy-compatibility") {
+  if (sessionCompatibility !== undefined && sessionCompatibility.mode !== "current") {
     return { ok: false, missingFeatures: ["current-protocol-baseline"] };
   }
   const available = new Set<string>(client.features);
@@ -173,7 +161,7 @@ export function bindConsoleProtocolClient(
   const consoleClient = client.console;
   const nativeNotificationProjection = client.features.includes(
     NATIVE_NOTIFICATION_PROJECTION_FEATURE,
-  ) ? "daemon-journal" : "legacy-fallback";
+  ) ? "daemon-journal" : "feature-unavailable";
   const compatibility: ConsoleProtocolCompatibility = { mode: "current" };
   const artifacts = client.artifacts;
   const artifactRead: ArtifactContentClient["readContent"] =
@@ -222,11 +210,6 @@ export type ConsoleConnection =
       operation: string | null;
       closedReason: string | null;
       primary: Readonly<{ code: string; message: string }>;
-      retry?: Readonly<{
-        status: "succeeded" | "failed";
-        profile: "strict-v1";
-        failure?: Readonly<{ code: string; message: string }>;
-      }>;
     }>;
 
 export type ConsoleInspectionBinding = Readonly<{
@@ -413,6 +396,7 @@ export type BootstrapUnavailableReason =
   | "feature-unavailable"
   | "configuration-missing"
   | "start-failed"
+  | "schema-cutover-required"
   | "authority-unavailable";
 
 export function createBootstrapUnavailableDataset(
@@ -466,11 +450,6 @@ export function createBootstrapUnavailableDataset(
 export function createProtocolIncompatibleDataset(
   input: Readonly<{
     primary: Readonly<{ code: string; message: string }>;
-    retry?: Readonly<{
-      status: "succeeded" | "failed";
-      profile: "strict-v1";
-      failure?: Readonly<{ code: string; message: string }>;
-    }>;
     result?: Readonly<{
       operation?: string;
       closedReason?: string;
@@ -487,7 +466,6 @@ export function createProtocolIncompatibleDataset(
       operation: input.result?.operation ?? null,
       closedReason: input.result?.closedReason ?? null,
       primary: input.primary,
-      ...(input.retry === undefined ? {} : { retry: input.retry }),
     },
     snapshot: null,
     snapshotRevision: null,
@@ -1130,25 +1108,6 @@ export class ConsoleProtocolAdapter {
             code,
             message: error instanceof Error ? error.message : "protocol result is incompatible",
           };
-      const retryValue = isRecord(error) && isRecord(error.retry) ? error.retry : null;
-      const retry = retryValue !== null &&
-          (retryValue.status === "succeeded" || retryValue.status === "failed") &&
-          retryValue.profile === "strict-v1"
-        ? {
-            status: retryValue.status as "succeeded" | "failed",
-            profile: "strict-v1" as const,
-            ...(isRecord(retryValue.failure) &&
-              typeof retryValue.failure.code === "string" &&
-              typeof retryValue.failure.message === "string"
-              ? {
-                  failure: {
-                    code: retryValue.failure.code,
-                    message: retryValue.failure.message,
-                  },
-                }
-              : {}),
-          }
-        : undefined;
       return {
         connection: {
           state: "protocol-incompatible",
@@ -1157,7 +1116,6 @@ export class ConsoleProtocolAdapter {
           operation: typeof operation === "string" ? operation : null,
           closedReason: typeof closedReason === "string" ? closedReason : null,
           primary,
-          ...(retry === undefined ? {} : { retry }),
         },
         snapshot: null,
         snapshotRevision: null,

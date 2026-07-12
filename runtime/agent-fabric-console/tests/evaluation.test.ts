@@ -47,7 +47,7 @@ describe("versioned Console usability evaluation", () => {
       "empty-healthy-work",
       "concurrent-multi-run",
       "gate-degraded-stale-conflict",
-      "legacy-notification-compatibility",
+      "optional-notification-unavailable",
     ]);
     expect(report).toMatchObject({
       schemaVersion: 1,
@@ -126,7 +126,7 @@ describe("versioned Console usability evaluation", () => {
         },
       });
     expect(report.observations
-      .filter(({ fixtureId }) => fixtureId === "legacy-notification-compatibility")
+      .filter(({ fixtureId }) => fixtureId === "optional-notification-unavailable")
       .every(({ nativeNotificationVisible }) => nativeNotificationVisible)).toBe(true);
     expect(
       manifest.fixtures

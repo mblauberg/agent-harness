@@ -144,31 +144,31 @@ describe("structured Console model", () => {
     expect(JSON.stringify(row)).not.toMatch(/percent|percentage/i);
   });
 
-  it("creates only the explicit unavailable fallback for a valid legacy Attention row", () => {
+  it("creates only the explicit unavailable state when the current optional feature is absent", () => {
     const extended = attentionRow(
-      { itemId: "attention:legacy", itemRevision: 3 },
+      { itemId: "attention:optional", itemRevision: 3 },
       "critical-path",
     );
     if (extended.fact.freshness !== "live") throw new Error("expected a live fixture row");
-    const { nativeNotification: _notification, ...legacySummary } = extended.fact.value.summary;
-    const legacy: OperatorViewRow<"attention"> = {
+    const { nativeNotification: _notification, ...unavailableSummary } = extended.fact.value.summary;
+    const withoutOptionalFeature: OperatorViewRow<"attention"> = {
       ...extended,
       fact: {
         ...extended.fact,
-        value: { ...extended.fact.value, summary: legacySummary },
+        value: { ...extended.fact.value, summary: unavailableSummary },
       },
     };
 
     const row = mapProtocolRow(
       "attention",
-      legacy,
+      withoutOptionalFeature,
       Date.parse(observedAt),
-      "legacy-fallback",
+      "feature-unavailable",
     );
     expect(row.summary?.kind).toBe("attention");
     if (row.summary?.kind !== "attention") throw new Error("expected Attention summary");
     expect(row.summary.nativeNotification).toStrictEqual({
-      kind: "legacy-fallback",
+      kind: "feature-unavailable",
       status: "unavailable",
       reason: "feature-not-negotiated",
     });

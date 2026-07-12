@@ -76,11 +76,6 @@ export type ConsoleBootstrapResult =
   | Readonly<{
       status: "protocol-incompatible";
       primary: Readonly<{ code: string; message: string }>;
-      retry?: Readonly<{
-        status: "succeeded" | "failed";
-        profile: "strict-v1";
-        failure?: Readonly<{ code: string; message: string }>;
-      }>;
       result?: Readonly<{
         code: string;
         message: string;

@@ -399,7 +399,7 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
   }
   switch (summary.kind) {
     case "attention":
-      if (summary.nativeNotification.kind === "legacy-fallback") {
+      if (summary.nativeNotification.kind === "feature-unavailable") {
         return [
           summary.title,
           `${summary.label} | ${summary.priority} | notify unavailable/feature-not-negotiated`,
@@ -417,10 +417,11 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
           : `scope ${summary.acceptedScopeRef.path}@${summary.acceptedScopeRef.digest} | repository ${summary.repositoryRevision}`,
       ];
     case "run":
+      if (summary.projectSessionId === undefined) {
+        throw new TypeError("exact run projection has no project-session identity");
+      }
       return [
-        summary.projectSessionId === undefined
-          ? summary.phase
-          : `${summary.projectSessionId} | ${summary.phase}`,
+        `${summary.projectSessionId} | ${summary.phase}`,
         `${summary.health} | next ${summary.nextMilestone}`,
       ];
     case "work":
@@ -469,7 +470,7 @@ function detailLines(row: ConsoleRow): PresentedDetail {
   ];
   if (row.summary?.kind === "attention") {
     const notification = row.summary.nativeNotification;
-    if (notification.kind === "legacy-fallback") {
+    if (notification.kind === "feature-unavailable") {
       lines.push({
         label: "Native notification",
         value: "unavailable | feature-not-negotiated",
@@ -513,9 +514,12 @@ function detailLines(row: ConsoleRow): PresentedDetail {
     });
   }
   if (row.summary?.kind === "run") {
+    if (row.summary.projectSessionId === undefined) {
+      throw new TypeError("exact run projection has no project-session identity");
+    }
     lines.push({
       label: "Project session",
-      value: row.summary.projectSessionId ?? "unavailable on this peer",
+      value: row.summary.projectSessionId,
     });
   }
   return { stableId: row.stableId, revision: row.revision, lines };
@@ -529,11 +533,15 @@ function actionLabel(action: OperatorAvailableAction): string {
     steer: "Steer",
     "project-session-launch": "Launch run",
     "chair-bridge-recovery": "Recover chair bridge",
+    "chair-live-handoff": "Handoff chair",
     "project-session-drain": "Drain session",
     "project-session-stop": "Stop session",
     "daemon-drain": "Drain daemon",
     "daemon-stop": "Stop daemon",
     git: "Git operation",
+    "git-authorise": "Git authority",
+    "git-operation-draft": "Git draft",
+    "git-custody-resolve": "Resolve Git custody",
     "registered-external-effect": "External effect",
     promotion: "Promote release",
   };
@@ -860,16 +868,52 @@ function presentIntent(
     ];
   }
   if (intent.kind === "git") {
+    const remote = "remote" in intent.operation ? intent.operation.remote : null;
     return [
-      { label: "Kind", value: `git:${intent.operation.effect}` },
+      { label: "Kind", value: `git:${intent.operation.variant}` },
       { label: "Repository", value: intent.repository.repositoryRoot },
       { label: "Worktree", value: intent.repository.worktreePath },
-      { label: "Remote", value: intent.repository.remoteName },
-      { label: "Expected HEAD", value: intent.repository.expectedHeadDigest },
-      { label: "Expected index", value: intent.repository.expectedIndexDigest },
-      { label: "Expected worktree", value: intent.repository.expectedWorktreeDigest },
-      { label: "Expected remote", value: intent.repository.expectedRemoteDigest },
+      { label: "Common directory", value: intent.repository.gitCommonDir },
+      { label: "Expected state", value: intent.repository.repositoryStateDigest },
+      { label: "Expected HEAD", value: intent.repository.headDigest },
+      { label: "Expected index", value: intent.repository.indexDigest },
+      { label: "Expected worktree", value: intent.repository.worktreeDigest },
+      { label: "Expected remote state", value: intent.repository.remoteStateDigest },
+      ...(remote === null ? [] : [{ label: "Remote", value: remote.remoteName }]),
       { label: "Operation", value: JSON.stringify(intent.operation) },
+    ];
+  }
+  if (intent.kind === "git-authorise") {
+    return [
+      { label: "Kind", value: `${intent.kind}:${intent.action}` },
+      { label: "Session", value: intent.projectSessionId },
+      { label: "Run", value: intent.coordinationRunId },
+      { label: "Authority", value: intent.authorityRef },
+      { label: "Allow-list", value: intent.gitAllowlistDigest },
+    ];
+  }
+  if (intent.kind === "git-operation-draft") {
+    return intent.action === "create"
+      ? [
+          { label: "Kind", value: `${intent.kind}:create` },
+          { label: "Draft request", value: intent.draftRequestId },
+          { label: "Binding", value: intent.binding.kind },
+          { label: "Expires", value: intent.expiresAt },
+        ]
+      : [
+          { label: "Kind", value: `${intent.kind}:cancel` },
+          { label: "Draft", value: `${intent.draftId}@r${String(intent.expectedDraftRevision)}` },
+          { label: "Session", value: intent.projectSessionId },
+          { label: "Run", value: intent.coordinationRunId },
+        ];
+  }
+  if (intent.kind === "git-custody-resolve") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Custody", value: intent.custodyId },
+      { label: "Expected state", value: intent.expectedCustodyState },
+      { label: "Adjudication", value: intent.adjudication },
+      { label: "Gate", value: `${intent.gateId}@r${String(intent.expectedGateRevision)}` },
     ];
   }
   if (intent.kind === "project-session-launch") {
@@ -919,6 +963,17 @@ function presentIntent(
       { label: "Recovery manifest digest", value: intent.recoveryManifestDigest },
     ];
   }
+  if (intent.kind === "chair-live-handoff") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Session", value: intent.projectSessionId },
+      { label: "Run", value: intent.coordinationRunId },
+      { label: "Predecessor", value: intent.predecessorAgentId },
+      { label: "Successor", value: intent.successorAgentId },
+      { label: "Handoff", value: `${intent.handoffRef.path}@${intent.handoffRef.digest}` },
+      { label: "Expected chair generation", value: String(intent.expectedChairGeneration) },
+    ];
+  }
   if (intent.kind === "promotion") {
     const release = intent.releaseBinding;
     return [
@@ -938,17 +993,20 @@ function presentIntent(
       { label: "Promotion target", value: release.target },
     ];
   }
-  return [
-    { label: "Kind", value: intent.kind },
-    {
-      label: "Expected revision",
-      value:
-        intent.kind === "project-session-drain" ||
-        intent.kind === "project-session-stop"
-          ? String(intent.expectedSessionRevision)
-          : String(intent.expectedGlobalStateRevision),
-    },
-  ];
+  if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Expected revision", value: String(intent.expectedSessionRevision) },
+    ];
+  }
+  if (intent.kind === "daemon-drain" || intent.kind === "daemon-stop") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Expected revision", value: String(intent.expectedGlobalStateRevision) },
+    ];
+  }
+  const exhaustive: never = intent;
+  throw new TypeError(`unsupported operator intent: ${JSON.stringify(exhaustive)}`);
 }
 
 function presentReview(review: ActionReview): PresentedReview {
@@ -1133,12 +1191,9 @@ export function presentFabricConsole(
       };
   return {
     mode: responsiveModeFor(viewport),
-    connection:
-      dataset.connection.state === "live"
-        ? dataset.connection.compatibility.mode === "legacy-compatibility"
-          ? "LEGACY-COMPATIBILITY"
-          : "LIVE"
-        : dataset.connection.state.toUpperCase(),
+    connection: dataset.connection.state === "live"
+      ? "LIVE"
+      : dataset.connection.state.toUpperCase(),
     header: presentHeader(dataset),
     views: FABRIC_VIEWS.map((view, index) => ({
       view,

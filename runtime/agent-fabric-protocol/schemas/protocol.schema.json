@@ -2383,7 +2383,7 @@
         },
         "features": {
           "type": "array",
-          "maxItems": 24,
+          "maxItems": 25,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2837,7 +2837,7 @@
             },
             "features": {
               "type": "array",
-              "maxItems": 24,
+              "maxItems": 25,
               "uniqueItems": true,
               "items": {
                 "enum": [

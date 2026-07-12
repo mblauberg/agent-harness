@@ -164,6 +164,7 @@ function richDataset(
     runs: [
       row("runs", "AFAB-004", {
         kind: "run",
+        projectSessionId: "session-1" as never,
         phase: "implement",
         health: "blocked",
         nextMilestone: "Console GREEN",
@@ -1028,44 +1029,40 @@ describe("structured presenter and responsive Fabric renderer", () => {
     },
   );
 
-  it("renders and exports legacy notification state without synthetic journal observations", () => {
+  it("renders and exports an unavailable optional notification without synthetic journal observations", () => {
     const dataset = richDataset();
     const first = dataset.pages.attention.rows[0];
     if (first?.summary?.kind !== "attention") throw new Error("expected Attention fixture");
-    const legacyRow: ConsoleRow<"attention"> = {
+    const unavailableRow: ConsoleRow<"attention"> = {
       ...first,
       summary: {
         ...first.summary,
         nativeNotification: {
-          kind: "legacy-fallback",
+          kind: "feature-unavailable",
           status: "unavailable",
           reason: "feature-not-negotiated",
         },
       },
     };
-    const legacy: FabricConsoleDataset = {
+    const unavailable: FabricConsoleDataset = {
       ...dataset,
       connection: {
         state: "live",
-        compatibility: {
-          mode: "legacy-compatibility",
-          profile: "strict-v1",
-          primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
-        },
+        compatibility: { mode: "current" },
       },
       pages: {
         ...dataset.pages,
         attention: {
           ...dataset.pages.attention,
-          rows: [legacyRow, ...dataset.pages.attention.rows.slice(1)],
+          rows: [unavailableRow, ...dataset.pages.attention.rows.slice(1)],
         },
       },
     };
     const state = controllerState();
     const ui = createFabricUiState();
-    const presentation = presentFabricConsole(legacy, state, ui, { columns: 80, rows: 24 });
+    const presentation = presentFabricConsole(unavailable, state, ui, { columns: 80, rows: 24 });
 
-    expect(presentation.connection).toBe("LEGACY-COMPATIBILITY");
+    expect(presentation.connection).toBe("LIVE");
     expect(presentation.masterRows[0]?.secondary).toContain(
       "notify unavailable/feature-not-negotiated",
     );
@@ -1076,7 +1073,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(presentation.detail?.lines.some((line) => line.label === "Notification basis")).toBe(false);
 
     const exported = JSON.parse(renderConsoleSnapshot({
-      dataset: legacy,
+      dataset: unavailable,
       controller: state,
       ui,
       viewport: { columns: 80, rows: 24 },
@@ -1085,13 +1082,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
       connectionDetail: FabricConsoleDataset["connection"];
       views: { attention: { rows: readonly { secondary: string }[]; detail: { lines: readonly { label: string; value: string }[] } } };
     };
-    expect(exported.connection).toBe("LEGACY-COMPATIBILITY");
+    expect(exported.connection).toBe("LIVE");
     expect(exported.connectionDetail).toMatchObject({
       state: "live",
-      compatibility: {
-        mode: "legacy-compatibility",
-        primary: { code: "PROTOCOL_INVALID" },
-      },
+      compatibility: { mode: "current" },
     });
     expect(exported.views.attention.rows[0]?.secondary).toContain("feature-not-negotiated");
     const notificationLines = exported.views.attention.detail.lines.filter((line) =>

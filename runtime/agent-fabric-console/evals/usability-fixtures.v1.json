@@ -197,24 +197,24 @@
       }
     },
     {
-      "id": "legacy-notification-compatibility",
-      "description": "Pre-notification daemon with an explicit unavailable compatibility projection.",
-      "project": "proj-legacy",
-      "session": "session-legacy",
-      "notificationProjection": "legacy-fallback",
+      "id": "optional-notification-unavailable",
+      "description": "Current daemon with the optional native-notification integration unavailable.",
+      "project": "proj-optional",
+      "session": "session-optional",
+      "notificationProjection": "feature-unavailable",
       "runs": [
         {
-          "id": "run-legacy",
-          "session": "session-legacy",
+          "id": "run-optional",
+          "session": "session-optional",
           "phase": "observe",
-          "owner": "chair-legacy",
-          "nextMilestone": "Upgrade daemon",
+          "owner": "chair-optional",
+          "nextMilestone": "Continue without desktop notifications",
           "health": "healthy"
         }
       ],
       "attention": [
         {
-          "id": "attention-legacy",
+          "id": "attention-optional",
           "label": "FYI",
           "priority": "advisory",
           "title": "Notification status is not negotiated",
@@ -236,13 +236,13 @@
           "detail": "optional adapter ready"
         }
       ],
-      "expectedTopAttentionId": "attention-legacy",
+      "expectedTopAttentionId": "attention-optional",
       "expectedAnswers": {
-        "project": "proj-legacy",
-        "run": "run-legacy",
+        "project": "proj-optional",
+        "run": "run-optional",
         "phase": "observe",
-        "owner": "chair-legacy",
-        "nextMilestone": "Upgrade daemon",
+        "owner": "chair-optional",
+        "nextMilestone": "Continue without desktop notifications",
         "health": "healthy"
       }
     }

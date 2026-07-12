@@ -19,7 +19,7 @@ import {
   type FabricDaemonHandle,
 } from "../../../src/index.ts";
 import {
-  STRICT_V1_OPTIONAL_FEATURES,
+  CURRENT_CONSOLE_OPTIONAL_FEATURES,
   openLocalOperatorConsoleSession,
 } from "../../../src/operator/local-console-session.ts";
 import { runWorkspaceTrust } from "../../../src/cli/workspace-trust.ts";
@@ -217,10 +217,10 @@ describe("public local operator Console session", () => {
           revision, state, dedupe_key, payload_json, created_at, updated_at
         ) VALUES (?, ?, NULL, 'approval', 'critical', 1, 'open', ?, ?, ?, ?)
       `).run(
-        "attention_console_compatibility_01",
+        "attention_console_optional_01",
         "session_console_existing_01",
-        "attention:console:compatibility:01",
-        JSON.stringify({ title: "Compatibility status" }),
+        "attention:console:optional:01",
+        JSON.stringify({ title: "Optional notification status" }),
         Date.parse("2027-01-01T00:00:00Z"),
         Date.parse("2027-01-01T00:00:00Z"),
       );
@@ -265,40 +265,40 @@ describe("public local operator Console session", () => {
     });
     expect(currentSnapshot?.attention).toMatchObject({
       value: [{
-        itemId: "attention_console_compatibility_01",
+        itemId: "attention_console_optional_01",
         nativeNotification: expect.any(Object),
       }],
     });
 
-    const legacyTransport = await NdjsonRpcTransport.connect(
+    const optionalTransport = await NdjsonRpcTransport.connect(
       createConnection(paths.socketPath),
       {
         protocolVersion: 1,
-        client: { name: "frozen-pre-notification-client", version: "af548f8" },
+        client: { name: "current-console-without-notifications", version: "0.1.0" },
         authentication: {
           scheme: "capability",
           credential: first.credential.token,
-          clientNonce: "legacy_client_new_daemon_nonce_01",
+          clientNonce: "optional_client_current_daemon_nonce_01",
         },
         expectedPrincipalKind: "operator",
         requiredFeatures: ["operator-control.v1", "operator-projection.v1"],
-        optionalFeatures: STRICT_V1_OPTIONAL_FEATURES,
+        optionalFeatures: CURRENT_CONSOLE_OPTIONAL_FEATURES,
       },
     );
     try {
-      const legacyClient = createOperatorClient(legacyTransport);
-      const legacySnapshot = await legacyClient.projection?.snapshot({
+      const optionalClient = createOperatorClient(optionalTransport);
+      const optionalSnapshot = await optionalClient.projection?.snapshot({
         credential: first.credential,
         projectId: first.projectId,
         projectSessionId: selectedSessionId,
       });
-      expect(legacySnapshot?.attention).toMatchObject({
-        value: [{ itemId: "attention_console_compatibility_01" }],
+      expect(optionalSnapshot?.attention).toMatchObject({
+        value: [{ itemId: "attention_console_optional_01" }],
       });
-      expect(legacySnapshot).not.toHaveProperty("attention.value.0.nativeNotification");
-      await legacyClient.close();
+      expect(optionalSnapshot).not.toHaveProperty("attention.value.0.nativeNotification");
+      await optionalClient.close();
     } finally {
-      await legacyTransport.close();
+      await optionalTransport.close();
     }
     await Promise.all([first.close(), replay.close()]);
     await expectSecretsAbsent(

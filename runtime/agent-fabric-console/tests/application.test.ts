@@ -343,7 +343,6 @@ describe("typed Console application bootstrap boundary", () => {
       startOrAttach: vi.fn(async (): Promise<ConsoleBootstrapResult> => ({
         status: "protocol-incompatible",
         primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
-        retry: { status: "succeeded", profile: "strict-v1" },
         result: {
           code: "PROTOCOL_INCOMPATIBLE",
           message: "unnegotiated notification field",
@@ -371,7 +370,6 @@ describe("typed Console application bootstrap boundary", () => {
       operation: "fabric.v1.operator-projection.snapshot",
       closedReason: "unnegotiated-field",
       primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
-      retry: { status: "succeeded", profile: "strict-v1" },
     });
     expect(application.dataset.pages.attention.rows).toStrictEqual([]);
     expect(application.dataset.canMutate).toBe(false);

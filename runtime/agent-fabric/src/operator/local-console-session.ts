@@ -1,5 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
@@ -56,7 +55,7 @@ const REQUIRED_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   RUN_SESSION_PROJECTION_FEATURE,
   "artifact-content-read.v1",
 ] as const satisfies readonly ProtocolFeature[]);
-export const STRICT_V1_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
+export const CURRENT_CONSOLE_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "project-sessions.v1",
   "operator-projection.v2",
   "scoped-gate-read.v1",
@@ -71,58 +70,49 @@ export const STRICT_V1_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.fr
 const OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   GATE_SYSTEM_SUPERSESSION_FEATURE,
-  ...STRICT_V1_OPTIONAL_FEATURES,
+  ...CURRENT_CONSOLE_OPTIONAL_FEATURES,
 ]);
 
 export type LocalOperatorConsoleUnavailableReason =
   | "configuration-missing"
   | "start-failed"
+  | "schema-cutover-required"
   | "authority-unavailable";
 
 export class LocalOperatorConsoleUnavailableError extends Error {
   readonly code:
     | "CONSOLE_CONFIGURATION_UNAVAILABLE"
     | "CONSOLE_START_FAILED"
+    | "SCHEMA_CUTOVER_REQUIRED"
     | "CONSOLE_AUTHORITY_UNAVAILABLE";
   readonly reason: LocalOperatorConsoleUnavailableReason;
 
   constructor(reason: LocalOperatorConsoleUnavailableReason) {
-    super(`local Console ${reason}`);
+    super(reason === "schema-cutover-required"
+      ? "CUTOVER REQUIRED — existing database preserved"
+      : `local Console ${reason}`);
     this.name = "LocalOperatorConsoleUnavailableError";
     this.reason = reason;
     this.code = reason === "configuration-missing"
       ? "CONSOLE_CONFIGURATION_UNAVAILABLE"
       : reason === "start-failed"
         ? "CONSOLE_START_FAILED"
-        : "CONSOLE_AUTHORITY_UNAVAILABLE";
+        : reason === "schema-cutover-required"
+          ? "SCHEMA_CUTOVER_REQUIRED"
+          : "CONSOLE_AUTHORITY_UNAVAILABLE";
   }
 }
 
-export type LocalOperatorConsoleCompatibility =
-  | Readonly<{ mode: "current" }>
-  | Readonly<{
-      mode: "legacy-compatibility";
-      primary: ProtocolFailureAnnotation;
-      retry: Readonly<{ status: "succeeded"; profile: "strict-v1" }>;
-    }>;
+export type LocalOperatorConsoleCompatibility = Readonly<{ mode: "current" }>;
 
 export type ProtocolFailureAnnotation = Readonly<{
   code: string;
   message: string;
 }>;
 
-type CompatibilityRetryAnnotation =
-  | Readonly<{ status: "succeeded"; profile: "strict-v1" }>
-  | Readonly<{
-      status: "failed";
-      profile: "strict-v1";
-      failure: ProtocolFailureAnnotation;
-    }>;
-
 export class LocalOperatorConsoleProtocolIncompatibleError extends Error {
   readonly code = "CONSOLE_PROTOCOL_INCOMPATIBLE" as const;
   readonly primary: ProtocolFailureAnnotation;
-  readonly retry: CompatibilityRetryAnnotation | undefined;
   readonly result: (ProtocolFailureAnnotation & {
     operation?: string;
     closedReason?: string;
@@ -130,14 +120,12 @@ export class LocalOperatorConsoleProtocolIncompatibleError extends Error {
 
   constructor(input: Readonly<{
     primary: ProtocolFailureAnnotation;
-    retry?: CompatibilityRetryAnnotation;
     result?: ProtocolFailureAnnotation & { operation?: string; closedReason?: string };
     cause: Error;
   }>) {
     super(`local Console protocol incompatible: ${input.primary.message}`, { cause: input.cause });
     this.name = "LocalOperatorConsoleProtocolIncompatibleError";
     this.primary = input.primary;
-    this.retry = input.retry;
     this.result = input.result;
   }
 }
@@ -196,14 +184,6 @@ function positiveDuration(
   return selected;
 }
 
-function legacyCredentialDirectory(
-  stateDirectory: string,
-  canonicalRoot: string,
-): string {
-  const projectKey = createHash("sha256").update(canonicalRoot).digest("hex").slice(0, 32);
-  return join(stateDirectory, "console-operators", projectKey);
-}
-
 function isoTimestamp(milliseconds: number): Timestamp {
   return new Date(milliseconds).toISOString() as Timestamp;
 }
@@ -217,15 +197,10 @@ function assertFuture(expiresAt: string, now: number): void {
 
 async function projectCredential(
   privateClient: FabricDaemonClient,
-  stateDirectory: string,
   identity: Awaited<ReturnType<typeof trustedWorkspaceIdentity>>,
   now: number,
   credentialLifetimeMs: number,
 ): ReturnType<FabricDaemonClient["openLocalOperatorConsoleCapability"]> {
-  await rm(legacyCredentialDirectory(stateDirectory, identity.canonicalRoot), {
-    recursive: true,
-    force: true,
-  });
   return await privateClient.openLocalOperatorConsoleCapability({
     canonicalRoot: identity.canonicalRoot,
     trustRecordDigest: identity.trustRecordDigest,
@@ -337,7 +312,6 @@ export async function connectLocalOperatorConsoleClient(input: Readonly<{
 
 function resultProtocolIncompatible(
   error: ProtocolTransportError,
-  compatibility: LocalOperatorConsoleCompatibility | undefined,
 ): LocalOperatorConsoleProtocolIncompatibleError {
   const shape = error.cause instanceof ProtocolResultShapeError ? error.cause : undefined;
   const result = {
@@ -345,10 +319,7 @@ function resultProtocolIncompatible(
     ...(shape === undefined ? {} : { operation: shape.operation, closedReason: shape.reason }),
   };
   return new LocalOperatorConsoleProtocolIncompatibleError({
-    primary: compatibility?.mode === "legacy-compatibility"
-      ? compatibility.primary
-      : protocolFailureAnnotation(error),
-    ...(compatibility?.mode === "legacy-compatibility" ? { retry: compatibility.retry } : {}),
+    primary: protocolFailureAnnotation(error),
     result,
     cause: error,
   });
@@ -550,14 +521,19 @@ export async function openLocalOperatorConsoleSession(
         ? defaultDaemonOptions(paths, options.agentsHome)
         : { ...paths, ...options.daemon }),
     });
-  } catch {
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" && error !== null &&
+      "code" in error && error.code === "SCHEMA_CUTOVER_REQUIRED"
+    ) {
+      throw new LocalOperatorConsoleUnavailableError("schema-cutover-required");
+    }
     throw new LocalOperatorConsoleUnavailableError("start-failed");
   }
 
   let privateClient: FabricDaemonClient | undefined;
   let projectClient: NegotiatedOperatorClient | undefined;
   let sessionClient: NegotiatedOperatorClient | undefined;
-  let publicCompatibility: LocalOperatorConsoleCompatibility | undefined;
   try {
     privateClient = await FabricDaemonClient.connect(
       daemon.address.path,
@@ -565,7 +541,6 @@ export async function openLocalOperatorConsoleSession(
     );
     const project = await projectCredential(
       privateClient,
-      paths.stateDirectory,
       identity,
       now(),
       credentialLifetimeMs,
@@ -577,7 +552,6 @@ export async function openLocalOperatorConsoleSession(
     });
     projectClient = projectConnection.client;
     const projectCompatibility = projectConnection.compatibility;
-    publicCompatibility = projectCompatibility;
     let attachableProjectSessions = await discoverAttachableSessions({
       client: projectClient,
       credential: project.credential as OperatorCapabilityCredential,
@@ -612,7 +586,6 @@ export async function openLocalOperatorConsoleSession(
         surface: options.surface,
       });
       sessionClient = sessionConnection.client;
-      publicCompatibility = sessionConnection.compatibility;
       activeCompatibility = sessionConnection.compatibility;
       activeCredential = issued.credential as OperatorCapabilityCredential;
       activeProjectSessionId = selected.projectSessionId;
@@ -730,7 +703,6 @@ export async function openLocalOperatorConsoleSession(
         }
         const previous = sessionClient;
         sessionClient = connection.client;
-        publicCompatibility = connection.compatibility;
         activeCompatibility = connection.compatibility;
         activeCredential = issued.credential as OperatorCapabilityCredential;
         activeProjectSessionId = projectSessionId;
@@ -805,7 +777,7 @@ export async function openLocalOperatorConsoleSession(
       error instanceof LocalOperatorConsoleProtocolIncompatibleError
     ) throw error;
     if (error instanceof ProtocolTransportError && error.code === "PROTOCOL_INCOMPATIBLE") {
-      throw resultProtocolIncompatible(error, publicCompatibility);
+      throw resultProtocolIncompatible(error);
     }
     throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
   }

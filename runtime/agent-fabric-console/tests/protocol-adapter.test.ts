@@ -138,7 +138,7 @@ function binding(port: ConsoleProtocolPort): ConsoleProtocolBinding {
 }
 
 describe("public protocol adapter", () => {
-  it("maps a valid legacy Attention page to the Console-only unavailable branch", async () => {
+  it("maps a current Attention page without the optional notification feature to unavailable", async () => {
     const port = fakePort({
       viewPage: vi.fn(async (request): Promise<OperatorViewPageResult> => {
         if (request.view !== "attention") {
@@ -148,7 +148,7 @@ describe("public protocol adapter", () => {
           status: "page",
           view: "attention",
           rows: [{
-            itemId: "attention-legacy",
+            itemId: "attention-optional",
             itemRevision: 1,
             fact: {
               freshness: "live",
@@ -160,7 +160,7 @@ describe("public protocol adapter", () => {
                   kind: "attention",
                   label: "FYI",
                   priority: "advisory",
-                  title: "Legacy notification state",
+                  title: "Optional notification state",
                 },
                 detailRef: { kind: "system", componentId: "native", expectedRevision: 1 },
                 actionAvailability: { state: "read-only", reason: "state-ineligible" },
@@ -170,7 +170,7 @@ describe("public protocol adapter", () => {
           nextCursor: 1,
           hasMore: false,
           snapshotRevision: request.snapshotRevision,
-          readTransactionId: "legacy-page",
+          readTransactionId: "optional-page",
         };
       }),
     });
@@ -180,9 +180,9 @@ describe("public protocol adapter", () => {
         port,
         readOnly: true,
         actions: null,
-        nativeNotificationProjection: "legacy-fallback",
+        nativeNotificationProjection: "feature-unavailable",
         runSessionProjection: "exact",
-        compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
+        compatibility: { mode: "current" },
       },
       credential,
       projectId,
@@ -191,11 +191,11 @@ describe("public protocol adapter", () => {
     const loaded = await adapter.open();
     expect(loaded.connection).toStrictEqual({
       state: "live",
-      compatibility: { mode: "legacy-compatibility", profile: "strict-v1" },
+      compatibility: { mode: "current" },
     });
     expect(loaded.pages.attention.rows[0]?.summary).toMatchObject({
       nativeNotification: {
-        kind: "legacy-fallback",
+        kind: "feature-unavailable",
         status: "unavailable",
         reason: "feature-not-negotiated",
       },

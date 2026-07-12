@@ -121,7 +121,7 @@ export const CONSOLE_MISSING_SURFACES = Object.freeze({
 export type ConsoleNativeNotification =
   | Readonly<NativeNotificationDeliverySummary & { kind: "daemon-journal" }>
   | Readonly<{
-      kind: "legacy-fallback";
+      kind: "feature-unavailable";
       status: "unavailable";
       reason: "feature-not-negotiated";
     }>;
@@ -140,7 +140,7 @@ export type ConsoleViewSummaryMap = {
 
 export type NativeNotificationProjectionMode =
   | "daemon-journal"
-  | "legacy-fallback";
+  | "feature-unavailable";
 
 export type ConsoleRow<View extends FabricView = FabricView> = Readonly<{
   view: View;
@@ -206,6 +206,12 @@ function consoleSummary<View extends FabricView>(
   summary: OperatorViewSummaryMap[View],
   nativeNotificationProjection: NativeNotificationProjectionMode,
 ): ConsoleViewSummaryMap[View] {
+  if (
+    view === "runs" &&
+    (summary as OperatorViewSummaryMap["runs"]).projectSessionId === undefined
+  ) {
+    throw new TypeError("exact run projection has no project-session identity");
+  }
   if (view !== "attention") return summary as ConsoleViewSummaryMap[View];
   const attention = summary as OperatorViewSummaryMap["attention"];
   if (nativeNotificationProjection === "daemon-journal") {
@@ -221,12 +227,12 @@ function consoleSummary<View extends FabricView>(
     } as ConsoleViewSummaryMap[View];
   }
   if (attention.nativeNotification !== undefined) {
-    throw new TypeError("legacy Attention row unexpectedly has a native notification summary");
+    throw new TypeError("unnegotiated Attention row unexpectedly has a native notification summary");
   }
   return {
     ...attention,
     nativeNotification: {
-      kind: "legacy-fallback",
+      kind: "feature-unavailable",
       status: "unavailable",
       reason: "feature-not-negotiated",
     },

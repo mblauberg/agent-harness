@@ -756,6 +756,7 @@ describe("production Console package-root bootstrap", () => {
   it.each([
     ["configuration-missing", "configuration-missing"],
     ["start-failed", "start-failed"],
+    ["schema-cutover-required", "schema-cutover-required"],
     ["authority-unavailable", "authority-unavailable"],
   ] as const)("renders %s as an explicit read-only unavailable reason", async (reason, expected) => {
     const bootstrap = createProductionConsoleBootstrap({
@@ -772,14 +773,13 @@ describe("production Console package-root bootstrap", () => {
     })).resolves.toStrictEqual({ status: "unavailable", reason: expected });
   });
 
-  it("preserves protocol incompatibility and retry evidence as a connection-level bootstrap result", async () => {
+  it("preserves current protocol incompatibility as a connection-level bootstrap result", async () => {
     const bootstrap = createProductionConsoleBootstrap({
       loadFabric: async () => ({
         openLocalOperatorConsoleSession: async () => {
           throw Object.assign(new Error("Console protocol incompatible"), {
             code: "CONSOLE_PROTOCOL_INCOMPATIBLE",
             primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
-            retry: { status: "succeeded", profile: "strict-v1" },
             result: {
               code: "PROTOCOL_INCOMPATIBLE",
               message: "unnegotiated notification field",
@@ -797,7 +797,6 @@ describe("production Console package-root bootstrap", () => {
     })).resolves.toStrictEqual({
       status: "protocol-incompatible",
       primary: { code: "PROTOCOL_INVALID", message: "unknown optional feature" },
-      retry: { status: "succeeded", profile: "strict-v1" },
       result: {
         code: "PROTOCOL_INCOMPATIBLE",
         message: "unnegotiated notification field",
@@ -831,17 +830,13 @@ describe("production Console package-root bootstrap", () => {
     expect(closeCount).toBe(1);
   });
 
-  it("rejects and closes a pre-release legacy-compatibility session", async () => {
+  it("rejects and closes a session that does not identify the current baseline", async () => {
     let closeCount = 0;
     const bootstrap = createProductionConsoleBootstrap({
       loadFabric: async () => ({
         openLocalOperatorConsoleSession: async () => ({
           client: {},
-          compatibility: {
-            mode: "legacy-compatibility",
-            primary: { code: "PROTOCOL_INVALID", message: "obsolete peer" },
-            retry: { status: "succeeded", profile: "strict-v1" },
-          },
+          compatibility: { mode: "obsolete" },
           credential,
           projectId,
           operatorId: "operator_console_production",
