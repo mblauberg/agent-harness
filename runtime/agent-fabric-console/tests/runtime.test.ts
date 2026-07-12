@@ -876,7 +876,74 @@ describe("Fabric Console runtime routing", () => {
     await Promise.all([first, repeated]);
 
     expect(activations).toStrictEqual(["review:continue"]);
+    expect(activations).not.toContain("review:confirm");
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
     expectEnabledVisibleFocus(runtime, "review:cancel");
+  });
+
+  it("binds numbered Review actions to the stage in which they were received", async () => {
+    const activations: string[] = [];
+    let runtime: FabricConsoleRuntime;
+    runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async ({ regionId }) => {
+        activations.push(regionId);
+        if (regionId === "review:continue") {
+          runtime.setWorkflowReview(shortWorkflowReview("confirm"));
+        }
+      },
+      eventId: () => "stable-review-shortcuts",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("review"));
+    expect(runtime.frame.rows.join("\n")).toContain("[1 Continue to confirmation]");
+    expect(runtime.frame.rows.join("\n")).toContain("[2 Cancel Review]");
+
+    const continueInput = runtime.handleInput({ kind: "key", key: "text", text: "1" });
+    const queuedCancel = runtime.handleInput({ kind: "key", key: "text", text: "2" });
+    const queuedUnseenConfirm = runtime.handleInput({
+      kind: "key",
+      key: "text",
+      text: "3",
+    });
+    await Promise.all([continueInput, queuedCancel, queuedUnseenConfirm]);
+
+    expect(activations).toStrictEqual(["review:continue"]);
+    expect(activations).not.toContain("review:confirm");
+    expect(runtime.ui.notice).toContain("Stale Review input ignored");
+    expect(runtime.frame.rows.join("\n")).toContain("[2 Cancel Review]");
+    expect(runtime.frame.rows.join("\n")).toContain("[3 Confirm workflow]");
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "3" });
+    expect(activations).toStrictEqual(["review:continue", "review:confirm"]);
+  });
+
+  it("blocks ambient confirmation keys only on Confirm, not safe controls", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "confirm-safe-controls",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(shortWorkflowReview("confirm"));
+    expectEnabledVisibleFocus(runtime, "review:cancel");
+
+    await runtime.handleInput({ kind: "key", key: "space" });
+    expect(activate).toHaveBeenCalledWith(expect.objectContaining({
+      regionId: "review:cancel",
+    }));
+    runtime.setFocus("review:confirm");
+    await runtime.handleInput({ kind: "key", key: "space" });
+    expect(activate).toHaveBeenCalledTimes(1);
     expect(runtime.ui.notice).toContain("explicit numbered confirmation");
   });
 
@@ -956,7 +1023,7 @@ describe("Fabric Console runtime routing", () => {
 
     expect(runtime.frame.rows.join("\n")).toMatch(/R\d+% LOCK Home\+PgDn/u);
     await runtime.handleInput({ kind: "key", key: "end" });
-    expect(runtime.frame.rows.join("\n")).toMatch(/R\d+% LOCK Home\+PgDn/u);
+    expect(runtime.frame.rows.join("\n")).toContain("End previews only");
     expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
       .toBe(false);
   });
@@ -984,7 +1051,7 @@ describe("Fabric Console runtime routing", () => {
       .toMatchObject({ enabled: true });
     expect(runtime.frame.hitRegions.find(({ id }) => id === "review:confirm"))
       .toMatchObject({ enabled: true });
-    await runtime.handleInput({ kind: "key", key: "text", text: "2" });
+    await runtime.handleInput({ kind: "key", key: "text", text: "3" });
     expect(activate).toHaveBeenCalledOnce();
     expect(activate).toHaveBeenCalledWith(expect.objectContaining({
       regionId: "review:confirm",

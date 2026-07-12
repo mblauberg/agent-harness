@@ -310,4 +310,78 @@ describe("standalone Console executable", () => {
     await expect(running).resolves.toBeUndefined();
     expect(terminalClose).toHaveBeenCalledOnce();
   });
+
+  it("delivers same-chunk input to the application at receipt time", async () => {
+    let data: ((chunk: Buffer) => void) | undefined;
+    let releaseContinue!: () => void;
+    const continuePending = new Promise<void>((resolvePromise) => {
+      releaseContinue = resolvePromise;
+    });
+    let stage: "review" | "confirm" = "review";
+    let closed = false;
+    const received: Array<Readonly<{ text: string; stage: "review" | "confirm" }>> = [];
+    const application = {
+      get closed() { return closed; },
+      repaint: vi.fn(),
+      refresh: vi.fn(async () => undefined),
+      resize: vi.fn(),
+      handleInput: vi.fn((event: Readonly<{ kind: string; key?: string; text?: string }>) => {
+        const text = event.kind === "key" && event.key === "text"
+          ? event.text ?? ""
+          : event.kind === "key" && event.key === "q"
+            ? "q"
+            : "";
+        received.push({ text, stage });
+        if (text === "1") {
+          return continuePending.then(() => { stage = "confirm"; });
+        }
+        if (text === "q") closed = true;
+        return Promise.resolve();
+      }),
+      close: vi.fn(async () => { closed = true; }),
+    };
+    const running = runConsoleCli([], {
+      input: {
+        isTTY: true,
+        isRaw: false,
+        readableFlowing: false,
+        setRawMode: () => {},
+        resume: () => {},
+        pause: () => {},
+        on: (_event, listener) => { data = listener; },
+        off: () => {},
+      },
+      output: {
+        isTTY: true,
+        columns: 80,
+        rows: 24,
+        write: () => true,
+        on: () => {},
+        removeListener: () => {},
+      },
+      startApplication: (async () => application) as never,
+      createTerminal: (() => ({
+        close: () => {},
+        setMouseCapture: () => {},
+        setEditorActive: () => {},
+      })) as never,
+    });
+
+    await vi.waitFor(() => expect(data).toBeDefined());
+    data?.(Buffer.from("13", "utf8"));
+    await vi.waitFor(() => expect(application.handleInput).toHaveBeenCalledTimes(2));
+    expect(received.slice(0, 2)).toStrictEqual([
+      { text: "1", stage: "review" },
+      { text: "3", stage: "review" },
+    ]);
+
+    releaseContinue();
+    await vi.waitFor(() => expect(stage).toBe("confirm"));
+    data?.(Buffer.from("3", "utf8"));
+    await vi.waitFor(() => expect(application.handleInput).toHaveBeenCalledTimes(3));
+    expect(received[2]).toStrictEqual({ text: "3", stage: "confirm" });
+
+    data?.(Buffer.from("q", "utf8"));
+    await expect(running).resolves.toBeUndefined();
+  });
 });
