@@ -28,7 +28,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/shared.js",
-      "sha256": "2f60585984f93a6a2898a45866811d23e6ad3e925c7b33dce203896fd4864427"
+      "sha256": "9c83fe39b2ee52f1e64630e962c1642edbaba43dc2d6bbdf19457174f0714e3b"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/server.js",

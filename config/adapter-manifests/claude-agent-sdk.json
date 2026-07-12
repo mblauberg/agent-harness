@@ -64,7 +64,7 @@
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operation-codecs.js",
-      "sha256": "f3f50e53495b5576f1fb2d69b37d05f00a2ed70e733e4a37aac0fefcbef69c5f"
+      "sha256": "b5522ecfd0ac46236afca810c8942f790229b5feb5d7c5ac74ab9f283d01e7f2"
     },
     {
       "path": "runtime/agent-fabric-protocol/dist/operations.js",
@@ -136,7 +136,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
-      "sha256": "56cc851b9c1a936d459ffe6533b8885de780b907181d49ed260a9c44f8fc3c38"
+      "sha256": "7d81b7ae7cadd2ec91361c51a83211082587df796bfe0e233aa67c91a5a546e7"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
