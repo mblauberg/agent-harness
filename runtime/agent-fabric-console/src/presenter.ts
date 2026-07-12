@@ -52,9 +52,16 @@ export type FabricConsoleUiState = Readonly<{
   notice: string | null;
   splitterRatio: number;
   reviewScrollOffset: number;
+  reviewCoverage: FabricReviewCoverageState | null;
   workflowReview: ConsoleWorkflowReview | null;
   artifactConfirmation: ArtifactReviewConfirmation | null;
   guidedWorkflow: ConsoleGuidedWorkflowDraft | null;
+}>;
+
+export type FabricReviewCoverageState = Readonly<{
+  reviewKey: string;
+  coveredThrough: number;
+  requiredEnd: number;
 }>;
 
 export type ConsoleGuidedWorkflowDraft = Readonly<{
@@ -95,6 +102,7 @@ export function createFabricUiState(
       !Number.isSafeInteger(overrides.reviewScrollOffset)
         ? 0
         : Math.max(0, overrides.reviewScrollOffset),
+    reviewCoverage: overrides.reviewCoverage ?? null,
     workflowReview: overrides.workflowReview ?? null,
     artifactConfirmation: overrides.artifactConfirmation ?? null,
     guidedWorkflow: overrides.guidedWorkflow ?? null,
@@ -262,6 +270,7 @@ export type FabricConsolePresentation = Readonly<{
   notice: string | null;
   failureCode: string | null;
   reviewScrollOffset: number;
+  reviewCoverage: FabricReviewCoverageState | null;
 }>;
 
 function titleCase(view: FabricView): string {
@@ -1242,5 +1251,6 @@ export function presentFabricConsole(
     notice: ui.notice,
     failureCode: controller.lastFailure?.code ?? null,
     reviewScrollOffset: ui.reviewScrollOffset,
+    reviewCoverage: ui.reviewCoverage,
   };
 }

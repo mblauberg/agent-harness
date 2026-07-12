@@ -113,6 +113,10 @@ export class FabricConsoleRuntime {
   #ui: FabricConsoleUiState;
   #frame: FabricConsoleFrame;
   #pointer: FabricPointerState = { pressed: null };
+  #restorableSplitterFocus: Readonly<{
+    splitterId: string;
+    migratedFocusId: string | null;
+  }> | null = null;
   #closed = false;
   #closePromise: Promise<void> | null = null;
   #inputTail: Promise<void> = Promise.resolve();
@@ -130,12 +134,7 @@ export class FabricConsoleRuntime {
     this.#render = options.render;
     this.#reducePointer = options.reducePointer;
     this.#maxDraftBytes = maxDraftBytes(options.maxDraftBytes);
-    this.#frame = this.#render(
-      this.#controller.dataset,
-      this.#controller.state,
-      this.#ui,
-      this.#viewport,
-    );
+    this.#frame = this.#renderCurrentFrame();
   }
 
   get ui(): FabricConsoleUiState {
@@ -151,21 +150,105 @@ export class FabricConsoleRuntime {
   }
 
   repaint(): FabricConsoleFrame {
-    this.#frame = this.#render(
+    this.#frame = this.#renderCurrentFrame();
+    if (!this.#closed) {
+      this.#draw(this.#frame);
+      this.#recordReviewCoverage(this.#frame);
+    }
+    return this.#frame;
+  }
+
+  #renderCurrentFrame(): FabricConsoleFrame {
+    return this.#render(
       this.#controller.dataset,
       this.#controller.state,
       this.#ui,
       this.#viewport,
     );
-    if (!this.#closed) this.#draw(this.#frame);
-    return this.#frame;
+  }
+
+  #recordReviewCoverage(frame: FabricConsoleFrame): void {
+    const observation = frame.reviewCoverage;
+    const nextCoverage = frame.presentation.review === null
+      ? null
+      : observation === undefined || observation === null
+        ? this.#ui.reviewCoverage
+        : {
+            reviewKey: observation.reviewKey,
+            coveredThrough: observation.coveredThrough,
+            requiredEnd: observation.requiredEnd,
+          };
+    const current = this.#ui.reviewCoverage;
+    if (
+      current?.reviewKey !== nextCoverage?.reviewKey ||
+      current?.coveredThrough !== nextCoverage?.coveredThrough ||
+      current?.requiredEnd !== nextCoverage?.requiredEnd
+    ) {
+      this.#ui = { ...this.#ui, reviewCoverage: nextCoverage };
+    }
   }
 
   resize(viewport: FabricViewport): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
+    const previousFocus = this.#ui.focusId;
     this.#viewport = viewport;
     this.#pointer = { pressed: null };
-    return this.repaint();
+    let frame = this.#renderCurrentFrame();
+    if (
+      previousFocus?.startsWith("splitter:") === true &&
+      !frame.hitRegions.some(({ enabled, id }) => enabled && id === previousFocus)
+    ) {
+      const migratedFocusId = this.#visibleSafeFocus(frame);
+      this.#ui = { ...this.#ui, focusId: migratedFocusId };
+      this.#restorableSplitterFocus = {
+        splitterId: previousFocus,
+        migratedFocusId,
+      };
+      frame = this.#renderCurrentFrame();
+    } else if (
+      this.#restorableSplitterFocus !== null
+    ) {
+      const restorable = this.#restorableSplitterFocus;
+      const splitterVisible = frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === restorable.splitterId,
+      );
+      if (splitterVisible) {
+        this.#restorableSplitterFocus = null;
+        if (this.#ui.focusId === restorable.migratedFocusId) {
+          this.#ui = { ...this.#ui, focusId: restorable.splitterId };
+          frame = this.#renderCurrentFrame();
+        }
+      } else if (!frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === this.#ui.focusId,
+      )) {
+        const migratedFocusId = this.#visibleSafeFocus(frame);
+        this.#ui = { ...this.#ui, focusId: migratedFocusId };
+        this.#restorableSplitterFocus = {
+          ...restorable,
+          migratedFocusId,
+        };
+        frame = this.#renderCurrentFrame();
+      }
+    }
+    this.#frame = frame;
+    this.#draw(this.#frame);
+    this.#recordReviewCoverage(this.#frame);
+    return this.#frame;
+  }
+
+  #visibleSafeFocus(frame: FabricConsoleFrame): string | null {
+    const preferredKinds = frame.mode === "compact"
+      ? this.#ui.compactPane === "master"
+        ? ["row", "session", "tab", "action", "detach"] as const
+        : ["pager", "action", "tab", "detach"] as const
+      : ["row", "session", "pager", "tab", "action", "detach"] as const;
+    for (const kind of preferredKinds) {
+      const region = frame.hitRegions.find(
+        (candidate) => candidate.enabled && candidate.kind === kind,
+      );
+      if (region !== undefined) return region.id;
+    }
+    return frame.hitRegions.find(({ enabled }) => enabled)?.id ?? null;
   }
 
   updateDataset(dataset: FabricConsoleDataset): FabricConsoleFrame {
@@ -269,6 +352,7 @@ export class FabricConsoleRuntime {
 
   setFocus(focusId: string | null): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
+    this.#restorableSplitterFocus = null;
     this.#ui = { ...this.#ui, focusId };
     return this.repaint();
   }
@@ -290,6 +374,7 @@ export class FabricConsoleRuntime {
   }
 
   async #handleInput(event: TerminalInputEvent): Promise<void> {
+    this.#restorableSplitterFocus = null;
     if (event.kind === "fatal") {
       await this.close("safety");
       return;
@@ -706,11 +791,13 @@ export class FabricConsoleRuntime {
 
   #page(direction: -1 | 1, regionId: string | null = null): void {
     if (this.#frame.presentation.review !== null) {
+      const visibleLineCount = this.#frame.reviewCoverage?.visibleLineCount ?? 2;
+      const stride = Math.max(1, visibleLineCount - 1);
       this.#ui = {
         ...this.#ui,
         reviewScrollOffset: Math.min(
           10_000,
-          Math.max(0, this.#ui.reviewScrollOffset + direction * 5),
+          Math.max(0, this.#ui.reviewScrollOffset + direction * stride),
         ),
         notice: null,
       };

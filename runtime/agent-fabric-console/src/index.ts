@@ -222,18 +222,64 @@ function composeFields(
     .join("|");
 }
 
-function writeFixedCells(
+export function writeFixedCells(
   row: string,
   start: number,
   width: number,
   value: string,
 ): string {
-  if (start < 1 || width < 1 || start > cellWidth(row)) {
+  const rowWidth = cellWidth(row);
+  if (start < 1 || width < 1 || start > rowWidth) {
     return row;
   }
-  const fitted = fitCells(value, width);
-  const startIndex = start - 1;
-  return `${row.slice(0, startIndex)}${fitted}${row.slice(startIndex + width)}`;
+  const replacementWidth = Math.min(width, rowWidth - start + 1);
+  const cells: Array<string | null> = Array.from(
+    { length: rowWidth },
+    () => " ",
+  );
+  const place = (text: string, firstCell: number): void => {
+    let cursor = firstCell;
+    for (const grapheme of graphemes(text)) {
+      const graphemeWidth = cellWidth(grapheme);
+      if (graphemeWidth <= 0) {
+        for (let previous = cursor - 1; previous >= firstCell; previous -= 1) {
+          const valueAtCell = cells[previous];
+          if (valueAtCell !== null) {
+            cells[previous] = `${valueAtCell}${grapheme}`;
+            break;
+          }
+        }
+        continue;
+      }
+      if (cursor < 0 || cursor + graphemeWidth > cells.length) break;
+      cells[cursor] = grapheme;
+      for (let continuation = 1; continuation < graphemeWidth; continuation += 1) {
+        cells[cursor + continuation] = null;
+      }
+      cursor += graphemeWidth;
+    }
+  };
+  place(row, 0);
+
+  const replacementStart = start - 1;
+  const replacementEnd = replacementStart + replacementWidth;
+  for (let cell = 0; cell < cells.length;) {
+    const grapheme = cells[cell];
+    if (grapheme === null || grapheme === undefined) {
+      cell += 1;
+      continue;
+    }
+    const graphemeWidth = Math.max(1, cellWidth(grapheme));
+    const graphemeEnd = cell + graphemeWidth;
+    if (cell < replacementEnd && graphemeEnd > replacementStart) {
+      for (let occupied = cell; occupied < graphemeEnd; occupied += 1) {
+        cells[occupied] = " ";
+      }
+    }
+    cell = graphemeEnd;
+  }
+  place(fitCells(value, replacementWidth), replacementStart);
+  return cells.filter((cell): cell is string => cell !== null).join("");
 }
 
 export type FabricHitBinding = Readonly<{
@@ -260,6 +306,16 @@ export type FabricConsoleFrame = Readonly<{
   geometryKey: string;
   hitRegions: readonly FabricHitRegion[];
   presentation: FabricConsolePresentation;
+  reviewCoverage?: FabricReviewCoverageObservation | null;
+}>;
+
+export type FabricReviewCoverageObservation = Readonly<{
+  reviewKey: string;
+  coveredThrough: number;
+  requiredEnd: number;
+  visibleStart: number;
+  visibleEnd: number;
+  visibleLineCount: number;
 }>;
 
 function fabricDimensions(viewport: FabricViewport): Readonly<{
@@ -479,7 +535,12 @@ function renderFabricMaster(
       } else {
         const existing = rows[y - 1] ?? " ".repeat(columns);
         const leftWidth = bounds.x2 - bounds.x1 + 1;
-        rows[y - 1] = `${fitCells(chromeText(text), leftWidth)}${existing.slice(bounds.x2)}`;
+        rows[y - 1] = writeFixedCells(
+          existing,
+          bounds.x1,
+          leftWidth,
+          chromeText(text),
+        );
       }
       hitRegions.push({
         id,
@@ -499,8 +560,12 @@ function renderFabricMaster(
     } else {
       const existing = rows[y - 1] ?? " ".repeat(columns);
       const leftWidth = bounds.x2 - bounds.x1 + 1;
-      const right = existing.slice(bounds.x2);
-      rows[y - 1] = `${fitCells(chromeText(text), leftWidth)}${right}`;
+      rows[y - 1] = writeFixedCells(
+        existing,
+        bounds.x1,
+        leftWidth,
+        chromeText(text),
+      );
     }
     hitRegions.push({
       id,
@@ -516,8 +581,12 @@ function renderFabricMaster(
     if (bounds.x1 === 1 && bounds.x2 === columns) {
       setFabricRow(rows, bounds.y1, columns, message);
     } else {
-      const rightWidth = columns - bounds.x2;
-      rows[bounds.y1 - 1] = `${fitCells(message, bounds.x2)}${" ".repeat(rightWidth)}`;
+      rows[bounds.y1 - 1] = writeFixedCells(
+        rows[bounds.y1 - 1] ?? " ".repeat(columns),
+        bounds.x1,
+        bounds.x2 - bounds.x1 + 1,
+        message,
+      );
     }
   }
 }
@@ -661,8 +730,12 @@ function renderFabricDetail(
     if (bounds.x1 === 1 && bounds.x2 === columns) {
       setFabricRow(rows, y, columns, displayed);
     } else {
-      const left = (rows[y - 1] ?? " ".repeat(columns)).slice(0, bounds.x1 - 1);
-      rows[y - 1] = `${left}${fitCells(chromeText(displayed), bounds.x2 - bounds.x1 + 1)}`;
+      rows[y - 1] = writeFixedCells(
+        rows[y - 1] ?? " ".repeat(columns),
+        bounds.x1,
+        bounds.x2 - bounds.x1 + 1,
+        chromeText(displayed),
+      );
     }
   }
   if (selected !== undefined && detailId !== null) {
@@ -847,27 +920,65 @@ function reviewLines(presentation: FabricConsolePresentation): FabricReviewConte
   };
 }
 
-function wrapFabricReviewLine(
-  value: string,
+type WrappedFabricReviewLine = Readonly<{
+  value: string;
+  start: number;
+  end: number;
+}>;
+
+function wrapFabricReviewContent(
+  content: FabricReviewContent,
   columns: number,
-): readonly string[] {
-  if (columns <= 0) return [];
-  const safe = chromeText(value);
-  const wrapped: string[] = [];
-  let line = "";
-  let width = 0;
-  for (const grapheme of graphemes(safe)) {
-    const graphemeWidth = cellWidth(grapheme);
-    if (line !== "" && width + graphemeWidth > columns) {
-      wrapped.push(line);
-      line = "";
-      width = 0;
+): Readonly<{ lines: readonly WrappedFabricReviewLine[]; requiredEnd: number }> {
+  if (columns <= 0) return { lines: [], requiredEnd: 0 };
+  const lines: WrappedFabricReviewLine[] = [];
+  let cursor = 0;
+  let requiredEnd = 0;
+  for (const [lineIndex, value] of content.lines.entries()) {
+    const safe = chromeText(value);
+    const clusters = [...graphemes(safe)];
+    let segment = "";
+    let segmentWidth = 0;
+    let segmentStart = cursor;
+    for (const [clusterIndex, cluster] of clusters.entries()) {
+      const clusterWidth = cellWidth(cluster);
+      if (segment !== "" && segmentWidth + clusterWidth > columns) {
+        lines.push({
+          value: segment,
+          start: segmentStart,
+          end: cursor + clusterIndex,
+        });
+        segment = "";
+        segmentWidth = 0;
+        segmentStart = cursor + clusterIndex;
+      }
+      segment += cluster;
+      segmentWidth += clusterWidth;
     }
-    line += grapheme;
-    width += graphemeWidth;
+    const logicalEnd = cursor + clusters.length + 1;
+    lines.push({ value: segment, start: segmentStart, end: logicalEnd });
+    cursor = logicalEnd;
+    if (lineIndex + 1 === content.requiredContextLineCount) {
+      requiredEnd = cursor;
+    }
   }
-  wrapped.push(line);
-  return wrapped;
+  return { lines, requiredEnd };
+}
+
+function reviewCoverageKey(presentation: FabricConsolePresentation): string {
+  const review = presentation.review;
+  if (review === null) return "";
+  return JSON.stringify([
+    review.stage,
+    review.workflowId,
+    review.itemId,
+    review.itemRevision,
+    review.projectionRevision,
+    review.previewRevision,
+    review.previewDigest,
+    review.intentDigest,
+    review.beforeStateDigest,
+  ]);
 }
 
 function renderFabricReview(
@@ -878,15 +989,13 @@ function renderFabricReview(
   geometryKey: string,
   hitRegions: FabricHitRegion[],
   pointerEnabled: boolean,
-): Readonly<{ contextVisible: boolean }> {
+): Readonly<{
+  contextVisible: boolean;
+  coverage: FabricReviewCoverageObservation;
+}> {
   const content = reviewLines(presentation);
-  const lines = content.lines.flatMap((line) =>
-    wrapFabricReviewLine(line, columns)
-  );
-  const requiredContextLineCount = content.lines
-    .slice(0, content.requiredContextLineCount)
-    .flatMap((line) => wrapFabricReviewLine(line, columns))
-    .length;
+  const wrapped = wrapFabricReviewContent(content, columns);
+  const lines = wrapped.lines;
   const visibleCount = bounds.y2 - bounds.y1 + 1;
   const offset = Math.min(
     presentation.reviewScrollOffset,
@@ -895,7 +1004,7 @@ function renderFabricReview(
   for (const [index, line] of lines
     .slice(offset, offset + visibleCount)
     .entries()) {
-    setFabricRow(rows, bounds.y1 + index, columns, line);
+    setFabricRow(rows, bounds.y1 + index, columns, line.value);
   }
   const scrollMaximum = Math.max(0, lines.length - visibleCount);
   if (pointerEnabled && scrollMaximum > 0) {
@@ -909,9 +1018,32 @@ function renderFabricReview(
       scrollMaximum,
     });
   }
+  const visible = lines.slice(offset, offset + visibleCount);
+  const visibleStart = visible[0]?.start ?? 0;
+  const visibleEnd = visible.at(-1)?.end ?? 0;
+  const reviewKey = reviewCoverageKey(presentation);
+  const previous = presentation.reviewCoverage;
+  let coveredThrough =
+    previous?.reviewKey === reviewKey &&
+      previous.requiredEnd === wrapped.requiredEnd
+      ? Math.min(previous.coveredThrough, wrapped.requiredEnd)
+      : 0;
+  if (visibleStart <= coveredThrough) {
+    coveredThrough = Math.max(
+      coveredThrough,
+      Math.min(visibleEnd, wrapped.requiredEnd),
+    );
+  }
   return {
-    contextVisible:
-      offset === 0 && visibleCount >= requiredContextLineCount,
+    contextVisible: coveredThrough >= wrapped.requiredEnd,
+    coverage: {
+      reviewKey,
+      coveredThrough,
+      requiredEnd: wrapped.requiredEnd,
+      visibleStart,
+      visibleEnd,
+      visibleLineCount: visible.length,
+    },
   };
 }
 
@@ -1056,7 +1188,7 @@ function renderFabricStrip(
   dataset: FabricConsoleDataset,
   geometryKey: string,
   hitRegions: FabricHitRegion[],
-): void {
+): FabricReviewCoverageObservation | null {
   const header = presentation.header;
   const inputModal = presentation.inputMode !== "browse";
   const footerRow = rows.length;
@@ -1102,7 +1234,7 @@ function renderFabricStrip(
       geometryKey,
       hitRegions,
     );
-    return;
+    return reviewState.coverage;
   }
 
   const selected = presentation.masterRows.find((row) => row.selected);
@@ -1204,6 +1336,7 @@ function renderFabricStrip(
     geometryKey,
     hitRegions,
   );
+  return null;
 }
 
 export function renderFabricConsoleFrame(
@@ -1264,7 +1397,7 @@ export function renderFabricConsoleFrame(
     };
   }
   if (mode === "strip") {
-    renderFabricStrip(
+    const reviewCoverage = renderFabricStrip(
       rows,
       dimensions.columns,
       presentation,
@@ -1279,6 +1412,7 @@ export function renderFabricConsoleFrame(
       geometryKey,
       hitRegions,
       presentation,
+      reviewCoverage,
     };
   }
 
@@ -1320,8 +1454,9 @@ export function renderFabricConsoleFrame(
     y2: Math.max(5, actionRow - 1),
   };
   let reviewContextVisible = true;
+  let reviewCoverage: FabricReviewCoverageObservation | null = null;
   if (presentation.review !== null) {
-    reviewContextVisible = renderFabricReview(
+    const reviewState = renderFabricReview(
       rows,
       dimensions.columns,
       presentation,
@@ -1329,7 +1464,9 @@ export function renderFabricConsoleFrame(
       geometryKey,
       hitRegions,
       !inputModal,
-    ).contextVisible;
+    );
+    reviewContextVisible = reviewState.contextVisible;
+    reviewCoverage = reviewState.coverage;
   } else if (mode === "wide") {
     const masterWidth = Math.min(
       dimensions.columns - 32,
@@ -1483,6 +1620,7 @@ export function renderFabricConsoleFrame(
     geometryKey,
     hitRegions,
     presentation,
+    reviewCoverage,
   };
 }
 

@@ -13,8 +13,10 @@ import type {
 import {
   cellWidth,
   createFabricUiState,
+  graphemes,
   renderFabricConsoleFrame,
   reduceFabricPointer,
+  writeFixedCells,
   type FabricPointerState,
 } from "../src/index.js";
 import type {
@@ -38,6 +40,16 @@ const digestA = (`sha256:${"a".repeat(64)}`) as Sha256Digest;
 const digestB = (`sha256:${"b".repeat(64)}`) as Sha256Digest;
 const projectId = "project-1" as ProjectId;
 const sessionId = "session-1" as ProjectSessionId;
+
+function cellAt(value: string, target: number): string | null {
+  let offset = 1;
+  for (const grapheme of graphemes(value)) {
+    const width = cellWidth(grapheme);
+    if (target >= offset && target < offset + width) return grapheme;
+    offset += width;
+  }
+  return null;
+}
 
 function row(
   view: FabricView,
@@ -1498,6 +1510,65 @@ describe("structured presenter and responsive Fabric renderer", () => {
         }
       }
     }
+  });
+
+  it("composes wide CJK and emoji master/detail rows around cell-bound splitters", () => {
+    const dataset = richDataset();
+    const attention = dataset.pages.attention.rows[0];
+    if (attention?.summary?.kind !== "attention") {
+      throw new Error("attention fixture unavailable");
+    }
+    const wideDataset: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        attention: {
+          ...dataset.pages.attention,
+          rows: [{
+            ...attention,
+            summary: {
+              ...attention.summary,
+              title: `👩‍💻 ${"界漢".repeat(30)} 🧑🏽‍🚀`,
+            },
+          }, ...dataset.pages.attention.rows.slice(1)],
+        },
+      },
+    };
+    const frame = renderFabricConsoleFrame(
+      wideDataset,
+      controllerState(),
+      createFabricUiState({ focusId: "splitter:master-detail", splitterRatio: 0.45 }),
+      { columns: 140, rows: 36 },
+    );
+    const splitter = frame.hitRegions.find(({ id }) => id === "splitter:master-detail");
+    const master = frame.hitRegions.find(({ id }) => id === "row:attention:attention:safety");
+    const detail = frame.hitRegions.find(({ id }) => id === "detail:attention:attention:safety");
+
+    expect(splitter).toBeDefined();
+    expect(master).toBeDefined();
+    expect(detail).toBeDefined();
+    if (splitter === undefined || master === undefined || detail === undefined) return;
+    expect(frame.rows.every((row) => cellWidth(row) === 140)).toBe(true);
+    expect(cellAt(frame.rows[splitter.rect.y1 - 1] ?? "", splitter.rect.x1)).toBe(">");
+    expect(master.rect.x2 + 1).toBe(splitter.rect.x1);
+    expect(splitter.rect.x2 + 1).toBe(detail.rect.x1);
+    expect(frame.rows.join("\n")).toContain("界");
+    expect(frame.rows.join("\n")).toContain("漢");
+  });
+
+  it("blanks a whole wide grapheme when fixed-cell replacement intersects it", () => {
+    const source = "A界B👩‍💻C ";
+    const cjkIntersection = writeFixedCells(source, 3, 1, "|");
+    const emojiIntersection = writeFixedCells(source, 6, 1, "|");
+
+    expect(cellWidth(cjkIntersection)).toBe(cellWidth(source));
+    expect(cellAt(cjkIntersection, 2)).toBe(" ");
+    expect(cellAt(cjkIntersection, 3)).toBe("|");
+    expect(cellWidth(emojiIntersection)).toBe(cellWidth(source));
+    expect(cellAt(emojiIntersection, 5)).toBe(" ");
+    expect(cellAt(emojiIntersection, 6)).toBe("|");
+    expect(cjkIntersection).not.toContain("界");
+    expect(emojiIntersection).not.toContain("👩‍💻");
   });
 
   it("terminal-neutralises hostile projected chrome in the canonical renderer", () => {

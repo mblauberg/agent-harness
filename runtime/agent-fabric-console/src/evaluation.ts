@@ -1324,7 +1324,12 @@ async function observe(
     controller.state.activeView === "attention" &&
     (controller.state.selectionByView.attention?.stableId ?? null) === selectionBeforeResize &&
     runtime.ui.draft === preservedDraft &&
-    runtime.ui.focusId === focusedId;
+    (runtime.ui.focusId === focusedId ||
+      (focusedId?.startsWith("splitter:") === true &&
+        runtime.ui.focusId !== null &&
+        resizeFrames[2]?.hitRegions.some(
+          ({ enabled, id }) => enabled && id === runtime.ui.focusId,
+        ) === true));
   await runtime.handleInput({ kind: "key", key: "escape" });
   keyboardEventCount += 1;
 

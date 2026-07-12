@@ -22,6 +22,7 @@ import {
 } from "../src/model.js";
 import { createFabricUiState } from "../src/presenter.js";
 import type { FabricConsoleDataset } from "../src/protocol-adapter.js";
+import type { ConsoleWorkflowReview } from "../src/workflow.js";
 import {
   reduceFabricPointer,
   renderFabricConsoleFrame,
@@ -44,6 +45,33 @@ const available: OperatorActionAvailability = {
   actions: ["resume"],
   requiresPreview: true,
 };
+
+function longBoundReview(
+  label: "Git" | "Launch" | "Promotion",
+  previewDigest: string = digest,
+  stage: "review" | "confirm" = "review",
+): ConsoleWorkflowReview {
+  return {
+    workflowId: `workflow-${label.toLowerCase()}`,
+    kind: "operator-action",
+    source: "daemon-preview",
+    stage,
+    previewDigest,
+    expectedRevision: revisionFromProtocol(7),
+    consequenceClass: label === "Promotion" ? "promotion" : "consequential",
+    confirmationMode: "explicit",
+    summary: `${label} exact typed operation`,
+    details: Array.from({ length: 18 }, (_, index) => ({
+      label: `${label} binding ${String(index + 1)}`,
+      value: `${label.toLowerCase()}-${String(index + 1)}-${"bound".repeat(18)}`,
+    })),
+    evidence: [`evidence/${label.toLowerCase()}-preview.json@${previewDigest}`],
+    openedByEventId: `event-${label.toLowerCase()}-open`,
+    armedByEventId: null,
+    result: null,
+    failure: null,
+  };
+}
 
 function fixtureDataset(revision = 11): FabricConsoleDataset {
   const row: ConsoleRow<"attention"> = {
@@ -480,6 +508,90 @@ describe("Fabric Console runtime routing", () => {
     expect(setEditorActive).toHaveBeenLastCalledWith(false);
   });
 
+  it.each([
+    ["Git", "review", "review:continue"],
+    ["Git", "confirm", "review:confirm"],
+    ["Launch", "review", "review:continue"],
+    ["Launch", "confirm", "review:confirm"],
+    ["Promotion", "review", "review:continue"],
+    ["Promotion", "confirm", "review:confirm"],
+  ] as const)(
+    "unlocks a rich 80x24 %s %s only after contiguous overlapping pages were displayed",
+    async (label, stage, actionId) => {
+      const runtime = new FabricConsoleRuntime({
+        controller: new FakeController(),
+        viewport: { columns: 80, rows: 24 },
+        draw: () => {},
+        detach: async () => {},
+        activate: async () => {},
+        eventId: () => `event-${label.toLowerCase()}-coverage`,
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+      runtime.setWorkflowReview(longBoundReview(label, digest, stage));
+
+      expect(runtime.frame.hitRegions.some(({ id }) => id === actionId))
+        .toBe(false);
+      await runtime.handleInput({ kind: "key", key: "end" });
+      expect(runtime.frame.hitRegions.some(({ id }) => id === actionId))
+        .toBe(false);
+      await runtime.handleInput({ kind: "key", key: "home" });
+
+      for (let page = 0; page < 80; page += 1) {
+        if (runtime.frame.hitRegions.some(({ id, enabled }) =>
+          id === actionId && enabled
+        )) break;
+        await runtime.handleInput({ kind: "key", key: "page-down" });
+      }
+
+      expect(runtime.frame.hitRegions.find(({ id }) => id === actionId))
+        .toMatchObject({ enabled: true });
+      const completed = runtime.ui.reviewCoverage;
+      runtime.repaint();
+      runtime.resize({ columns: 96, rows: 28 });
+      expect(runtime.ui.reviewCoverage).toStrictEqual(completed);
+      expect(runtime.frame.hitRegions.find(({ id }) => id === actionId))
+        .toMatchObject({ enabled: true });
+    },
+  );
+
+  it.each(["revision", "digest"] as const)(
+    "resets cumulative review coverage when a stale %s is replaced",
+    async (changedBinding) => {
+      const runtime = new FabricConsoleRuntime({
+        controller: new FakeController(),
+        viewport: { columns: 80, rows: 24 },
+        draw: () => {},
+        detach: async () => {},
+        activate: async () => {},
+        eventId: () => "event-stale-review-coverage",
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+      const current = longBoundReview("Git");
+      runtime.setWorkflowReview(current);
+      for (let page = 0; page < 80; page += 1) {
+        if (runtime.frame.hitRegions.some(({ id }) => id === "review:continue")) break;
+        await runtime.handleInput({ kind: "key", key: "page-down" });
+      }
+      expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
+        .toBe(true);
+
+      runtime.setWorkflowReview({
+        ...current,
+        ...(changedBinding === "digest"
+          ? { previewDigest: `sha256:${"b".repeat(64)}` }
+          : { expectedRevision: revisionFromProtocol(8) }),
+      });
+
+      expect(runtime.ui.reviewCoverage?.coveredThrough).toBeLessThan(
+        runtime.ui.reviewCoverage?.requiredEnd ?? 0,
+      );
+      expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
+        .toBe(false);
+    },
+  );
+
   it("keeps bounded raw drafts, makes paste inert for actions and surfaces input drops", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({
@@ -881,6 +993,114 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.splitterRatio).toBeGreaterThan(keyboardRatio);
     expect(runtime.ui.draft).toBe("split-safe");
     expect(activate).not.toHaveBeenCalled();
+  });
+
+  it("migrates hidden splitter focus into compact mode and restores it only without interaction", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({
+        focusId: "splitter:master-detail",
+        splitterRatio: 0.45,
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-compact-splitter-focus",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    runtime.resize({ columns: 60, rows: 18 });
+    expect(runtime.frame.mode).toBe("compact");
+    expect(runtime.ui.focusId).not.toBe("splitter:master-detail");
+    expect(runtime.frame.hitRegions.some(({ id }) => id === runtime.ui.focusId))
+      .toBe(true);
+    const ratio = runtime.ui.splitterRatio;
+    await runtime.handleInput({ kind: "key", key: "up" });
+    expect(runtime.ui.splitterRatio).toBe(ratio);
+    runtime.resize({ columns: 80, rows: 24 });
+    expect(runtime.ui.focusId).not.toBe("splitter:master-detail");
+
+    runtime.setFocus("splitter:master-detail");
+    runtime.resize({ columns: 60, rows: 18 });
+    const migratedFocus = runtime.ui.focusId;
+    runtime.resize({ columns: 80, rows: 24 });
+    expect(migratedFocus).not.toBe("splitter:master-detail");
+    expect(runtime.ui.focusId).toBe("splitter:master-detail");
+
+    runtime.resize({ columns: 30, rows: 6 });
+    expect(runtime.frame.mode).toBe("strip");
+    expect(runtime.ui.focusId).not.toBe("splitter:master-detail");
+    expect(runtime.frame.hitRegions.some(({ id }) => id === runtime.ui.focusId))
+      .toBe(true);
+    runtime.resize({ columns: 80, rows: 24 });
+    expect(runtime.ui.focusId).toBe("splitter:master-detail");
+
+    runtime.resize({ columns: 8, rows: 1 });
+    expect(runtime.frame.mode).toBe("inert");
+    expect(runtime.ui.focusId).toBe("detach");
+    runtime.resize({ columns: 80, rows: 24 });
+    expect(runtime.ui.focusId).toBe("splitter:master-detail");
+  });
+
+  it("keeps a splitter surrogate visible through chained compact, strip and inert resizes", () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 140, rows: 36 },
+      ui: createFabricUiState({
+        compactPane: "detail",
+        focusId: "splitter:master-detail",
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-chained-resize-focus",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    for (const viewport of [
+      { columns: 60, rows: 18, mode: "compact" },
+      { columns: 30, rows: 6, mode: "strip" },
+      { columns: 8, rows: 1, mode: "inert" },
+    ] as const) {
+      runtime.resize(viewport);
+      expect(runtime.frame.mode).toBe(viewport.mode);
+      expect(runtime.ui.focusId).not.toBe("splitter:master-detail");
+      expect(runtime.frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === runtime.ui.focusId,
+      )).toBe(true);
+    }
+
+    runtime.resize({ columns: 140, rows: 36 });
+    expect(runtime.ui.focusId).toBe("splitter:master-detail");
+  });
+
+  it("advances a long 30x6 review with overlapping strip pages", async () => {
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 30, rows: 6 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "event-strip-review-coverage",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.setWorkflowReview(longBoundReview("Git"));
+    expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
+      .toBe(false);
+
+    for (let page = 0; page < 300; page += 1) {
+      if (runtime.frame.hitRegions.some(
+        ({ enabled, id }) => enabled && id === "review:continue",
+      )) break;
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+    }
+
+    expect(runtime.frame.hitRegions.find(({ id }) => id === "review:continue"))
+      .toMatchObject({ enabled: true });
   });
 
   it("makes every enabled 80x24 target keyboard reachable with visible focus", async () => {
