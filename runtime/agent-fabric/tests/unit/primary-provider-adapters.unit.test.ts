@@ -504,6 +504,7 @@ describe("Claude Agent SDK fabric adapter", () => {
             cache_read_input_tokens: 3,
             output_tokens: 5,
           },
+          num_turns: 1,
           total_cost_usd: 0.0000001,
         };
       },
@@ -518,9 +519,35 @@ describe("Claude Agent SDK fabric adapter", () => {
         "cost:USD": 1,
         "input_tokens:anthropic": 12,
         "output_tokens:anthropic": 5,
+        turns: 1,
       },
     });
   });
+
+  it.each([undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid Claude terminal num_turns evidence %s",
+    async (numTurns) => {
+      const query = vi.fn(() => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "result",
+            subtype: "success",
+            session_id: "claude-invalid-turns-session",
+            result: "bounded answer",
+            usage: { input_tokens: 1, output_tokens: 1 },
+            ...(numTurns === undefined ? {} : { num_turns: numTurns }),
+            total_cost_usd: 0,
+          };
+        },
+      }));
+      const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never });
+
+      await expect(boundary.spawn({ prompt: "review", maxTurns: 2 })).rejects.toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+      });
+    },
+  );
 
   it("allows only path-bounded read tools for a delegated review root", async () => {
     const root = await mkdtemp(join(tmpdir(), "claude-review-root-"));

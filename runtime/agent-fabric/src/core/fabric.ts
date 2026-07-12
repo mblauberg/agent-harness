@@ -6626,7 +6626,7 @@ export class Fabric {
       } else if (result.effectCount === 0) {
         settlement[unit] = 0;
       } else if (unit === "turns") {
-        settlement[unit] = reserved;
+        settlement[unit] = reported[unit] ?? (reserved === 1 ? 1 : "unknown");
       } else if (unit === "provider_calls") {
         settlement[unit] = 1;
       } else if (unit === "concurrent_turns") {

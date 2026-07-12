@@ -84,7 +84,9 @@ input.on("line", (line) => {
       actionJournal: true,
       ephemeralWorker: true,
       answerBearingSpawn: true,
-      answerBearingSpawnTurns: "one-shot",
+      answerBearingSpawnTurns: process.env.LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS === "1"
+        ? "payload-max-turns"
+        : "one-shot",
       ...(process.env.LIFECYCLE_FAKE_MANDATORY_USAGE === "1"
         ? { answerBearingUsageUnits: ["cost:USD", "input_tokens:fake", "output_tokens:fake"] }
         : {}),
@@ -97,8 +99,17 @@ input.on("line", (line) => {
     return;
   }
   if (request.method === "spawn") {
-    if (typeof request.params.taskId === "string" && request.params.maxTurns !== 1) {
-      fail(request.id, "INVALID_PARAMS", "task-bound fake spawn requires maxTurns=1");
+    const taskBoundMaxTurns = request.params.maxTurns;
+    if (
+      typeof request.params.taskId === "string" &&
+      (
+        typeof taskBoundMaxTurns !== "number" ||
+        !Number.isSafeInteger(taskBoundMaxTurns) ||
+        taskBoundMaxTurns < 1 ||
+        (process.env.LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS !== "1" && taskBoundMaxTurns !== 1)
+      )
+    ) {
+      fail(request.id, "INVALID_PARAMS", "task-bound fake spawn requires its advertised turn ceiling");
       return;
     }
     const prior = typeof request.params.priorResumeReference === "string" ? request.params.priorResumeReference : "new";
@@ -142,6 +153,12 @@ input.on("line", (line) => {
       result: "fake provider review complete",
       ...(scenario === "terminal-exact-usage"
         ? { resourceUsage: { "cost:USD": 5, "input_tokens:fake": 3, "output_tokens:fake": 4 } }
+        : scenario === "terminal-partial-turn-usage"
+          ? { resourceUsage: { turns: 1 } }
+        : scenario === "terminal-malformed-turn-usage"
+          ? { resourceUsage: { turns: -1 } }
+        : scenario === "terminal-over-turn-usage"
+          ? { resourceUsage: { turns: 3 } }
         : scenario === "terminal-unreserved-usage"
           ? { resourceUsage: { "output_tokens:other": 1 } }
           : scenario === "terminal-over-cap-usage"

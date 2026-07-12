@@ -265,7 +265,7 @@ async function consumeQuery(
   active: Query,
   onSession?: (sessionId: string) => void,
   onMessage?: (message: SDKMessage) => void,
-): Promise<{ resumeReference: string; result: string; usage: unknown; costUsd: number }> {
+): Promise<{ resumeReference: string; result: string; usage: unknown; costUsd: number; numTurns: unknown }> {
   let sessionId: string | undefined;
   let terminal: SDKResultMessage | undefined;
   try {
@@ -292,12 +292,14 @@ async function consumeQuery(
     result: terminal.result,
     usage: terminal.usage,
     costUsd: terminal.total_cost_usd,
+    numTurns: terminal.num_turns,
   };
 }
 
 function claudeResourceUsage(completed: {
   usage: unknown;
   costUsd: number;
+  numTurns: unknown;
 }): Record<string, number> {
   if (!isRecord(completed.usage)) {
     throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Claude Agent SDK omitted token usage");
@@ -311,6 +313,7 @@ function claudeResourceUsage(completed: {
     typeof cacheCreationInputTokens !== "number" || !Number.isSafeInteger(cacheCreationInputTokens) || cacheCreationInputTokens < 0 ||
     typeof cacheReadInputTokens !== "number" || !Number.isSafeInteger(cacheReadInputTokens) || cacheReadInputTokens < 0 ||
     typeof outputTokens !== "number" || !Number.isSafeInteger(outputTokens) || outputTokens < 0 ||
+    typeof completed.numTurns !== "number" || !Number.isSafeInteger(completed.numTurns) || completed.numTurns < 1 ||
     typeof completed.costUsd !== "number" || !Number.isFinite(completed.costUsd) || completed.costUsd < 0
   ) {
     throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Claude Agent SDK returned invalid resource usage");
@@ -324,6 +327,7 @@ function claudeResourceUsage(completed: {
     "cost:USD": costMicrounits,
     "input_tokens:anthropic": inputTokens,
     "output_tokens:anthropic": outputTokens,
+    turns: completed.numTurns,
   };
 }
 

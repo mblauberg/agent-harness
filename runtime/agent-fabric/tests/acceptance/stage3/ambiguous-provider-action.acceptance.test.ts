@@ -161,6 +161,144 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
   });
 
+  it("settles the provider-reported turns and releases an unused multi-turn reservation", async () => {
+    const fixture = await createLifecycleFixture({ payloadMaxTurns: true });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 2 },
+      },
+      commandId: "provider-review-partial-turns:authority",
+    });
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-partial-turns:first",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Use one turn within a two-turn ceiling.",
+        maxTurns: 2,
+        cwd: "src/leader",
+        scenario: "terminal-partial-turn-usage",
+      },
+      commandId: "provider-review-partial-turns:first:dispatch",
+    })).resolves.toMatchObject({ status: "terminal" });
+
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
+    });
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-partial-turns:second",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Use the released turn.",
+        maxTurns: 1,
+        cwd: "src/leader",
+        scenario: "terminal-partial-turn-usage",
+      },
+      commandId: "provider-review-partial-turns:second:dispatch",
+    })).resolves.toMatchObject({ status: "terminal" });
+  });
+
+  it("keeps an unreported multi-turn usage reservation unknown", async () => {
+    const fixture = await createLifecycleFixture({ payloadMaxTurns: true });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 2 },
+      },
+      commandId: "provider-review-missing-turns:authority",
+    });
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-missing-turns:spawn",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Omit actual multi-turn usage.",
+        maxTurns: 2,
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-missing-turns:dispatch",
+    })).resolves.toMatchObject({ status: "terminal" });
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { granted: 2, reserved: 2, consumed: 0, usageUnknown: true },
+    });
+  });
+
+  it.each(["terminal-malformed-turn-usage", "terminal-over-turn-usage"] as const)(
+    "quarantines %s against the admitted multi-turn ceiling",
+    async (scenario) => {
+      const fixture = await createLifecycleFixture({ payloadMaxTurns: true });
+      cleanup.push(async () => {
+        await fixture.fabric.close();
+        await rm(fixture.directory, { recursive: true, force: true });
+      });
+      const reviewAuthority = await fixture.chair.delegateAuthority({
+        parentAuthorityId: fixture.chairAuthorityId,
+        authority: {
+          ...fixture.rootAuthority,
+          sourcePaths: ["src/leader"],
+          actions: [...fixture.rootAuthority.actions],
+          budget: { turns: 2 },
+        },
+        commandId: `provider-review-invalid-turns:${scenario}:authority`,
+      });
+      const actionId = `provider-review-invalid-turns:${scenario}:spawn`;
+
+      await expect(fixture.chair.dispatchProviderAction({
+        adapterId: "fake-lifecycle",
+        actionId,
+        operation: "spawn",
+        authorityId: reviewAuthority.authorityId,
+        payload: {
+          taskId: fixture.leaderTask.taskId,
+          model: "fake-reviewer-v1",
+          modelFamily: "fake",
+          prompt: "Return invalid actual turn usage.",
+          maxTurns: 2,
+          cwd: "src/leader",
+          scenario,
+        },
+        commandId: `provider-review-invalid-turns:${scenario}:dispatch`,
+      })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+      await expect(fixture.chair.reconcileProviderAction({
+        actionId,
+        commandId: `provider-review-invalid-turns:${scenario}:reconcile`,
+      })).resolves.toMatchObject({ status: "quarantined" });
+      expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+        turns: { granted: 2, reserved: 2, consumed: 0, usageUnknown: true },
+      });
+    },
+  );
+
   it.each([
     "terminal-unreserved-usage",
     "terminal-over-cap-usage",

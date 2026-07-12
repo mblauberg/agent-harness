@@ -80,6 +80,7 @@ function adapterOptions(fixture: {
   spawnDelayMs?: number;
   mandatoryUsageUnits?: boolean;
   maximumConcurrentProviderTurns?: number;
+  payloadMaxTurns?: boolean;
 }): Stage3OpenOptions {
   return {
     databasePath: fixture.databasePath,
@@ -101,6 +102,7 @@ function adapterOptions(fixture: {
             ? {}
             : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(fixture.spawnDelayMs) }),
           LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
+          LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS: fixture.payloadMaxTurns === true ? "1" : "0",
         },
       },
     },
@@ -113,6 +115,7 @@ export async function createLifecycleFixture(
     spawnDelayMs?: number;
     mandatoryUsageUnits?: boolean;
     maximumConcurrentProviderTurns?: number;
+    payloadMaxTurns?: boolean;
   } = {},
 ): Promise<LifecycleFixture> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-lifecycle-"));
