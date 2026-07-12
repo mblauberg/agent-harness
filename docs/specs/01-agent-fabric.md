@@ -1,14 +1,27 @@
 # Shared agent fabric
 
-Status: Current protocol, provider-task and seat-generation extensions approved; implementation in progress; final human acceptance pending
-Version: 0.26
+Status: Current protocol, provider-task, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
+Version: 0.27
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.26 binds every locally provisioned MCP roster to one daemon-owned
+Version 0.27 binds task-bound provider work and every applicable hard provider
+dimension to one delegated authority-budget custody, and closes the Console
+decision projections. An ephemeral spawn atomically reserves its enforceable
+turn/call/concurrency ceiling plus each configured cost, token or wall-clock
+dimension in the same transaction that creates the immutable provider action.
+Exact terminal usage consumes and releases the reservation once; ambiguity
+retains it; unprovable usage freezes only the affected dimensions until an
+authenticated reconciliation proves them. Terminal tasks admit no new
+ephemeral work. Attention may carry only a
+daemon-derived, revisioned, same-session/run open-gate binding, while a bound
+intake may carry only the durable prior chair-request correlation and current
+chair target needed to prepare a successor request. These strict projections
+give Pause/Resume, Attention decisions and Discuss/Request-changes real typed
+paths without making the Console an authority store. Version 0.26 binds every locally provisioned MCP roster to one daemon-owned
 active generation. Replacement is an exact predecessor/replacement CAS that
 atomically revokes the prior roster; private filesystem publication uses the
 same generation CAS, so a delayed writer cannot restore an older roster.
@@ -3732,3 +3745,78 @@ Acceptance additionally requires:
   command provenance and restart all fail closed. Durable and rendered output
   contains no `afi_` fragment, and disabled provider integration leaves typed
   Console resolution available.
+
+### 32.18 Budgeted ephemeral review and revision-bound Console decisions
+
+A task-bound ephemeral `provider-action.dispatch` spawn requires a delegated
+authority with a hard `turns` dimension. The admitted turn reservation is the
+positive safe-integer `maxTurns`, defaulting to one and injected into the
+provider payload before identity/persistence. Every shipped adapter must prove
+that ceiling at point of use: Claude receives the SDK cap; a one-shot adapter
+accepts exactly one and rejects a larger value. Provider calls and concurrent
+turns reserve one when configured. Each configured cost, provider-qualified
+token or wall-clock dimension is also reserved under its exact unit. Dimensions
+that the operation cannot consume, such as descendants, message bytes or
+artifact bytes, are neither debited nor fabricated as provider usage.
+
+The daemon rechecks the task's non-terminal state, atomically reserves the
+complete applicable vector and inserts an immutable provider action bound to
+the exact authority and task. Failure of any predicate or ledger change rolls
+back all of them before provider work. While that action is open, the task
+cannot commit a terminal transition. Existing-action identity/replay is checked
+first, so an exact replay still returns its committed result after the task has
+later become terminal; a new action does not.
+
+Terminal evidence settles every dimension exactly once: proven usage is
+consumed, unused reservation is released, concurrency is released, and an
+unreported applicable dimension becomes usage-unknown. Ambiguity retains the
+reservation while lookup may still prove the result. Quarantine freezes only
+unproved dimensions. An authenticated action reconciliation may later replace
+unknown values with exact adapter evidence and unfreeze a dimension when no
+other unknown owner remains. Restart applies the same transitions from the
+persisted action binding and cannot release or spend twice. Delegation computes
+available capacity as granted minus reserved minus consumed.
+
+The closed Attention summary may include `gateBinding` only as this shape:
+
+```yaml
+gateBinding:
+  gateId: exact-scoped-gate
+  gateRevision: positive-current-revision
+  coordinationRunId: exact-row-run
+```
+
+The daemon derives it from an existing pending/deferred scoped gate whose
+project session and coordination run equal the Attention row. Missing, closed,
+cross-session or cross-run candidates omit the binding; the Console cannot
+parse an item title or accept operator text as a substitute.
+
+A bound intake read may include `chairRequestSeed` containing only the durable
+prior request's conversation ID/base revision and the exact current run chair's
+agent/provider-session target. It is omitted when that correlation or current
+target cannot be proved. A successor `Discuss` or `Request changes` operation
+uses the normal revision-CAS intake-revise request with a new task request
+bound to the successor intake revision, existing gates and artifact digests.
+No projection itself mutates state or transfers authority.
+
+Added requirements are:
+
+- **FR-051:** Ephemeral provider review shall atomically reserve, durably bind,
+  settle, release or freeze every applicable delegated provider-budget
+  dimension across concurrency and restart.
+- **FR-052:** Attention gate and intake chair-request projections shall be
+  strict, daemon-derived, revision-bound and incapable of conferring authority.
+
+Acceptance additionally requires:
+
+- **AC-041:** Concurrent bounded spawns cannot overbook any applicable unit;
+  every adapter enforces the admitted turn ceiling; terminal lookup settles
+  once after restart; ambiguity retains; invalid/unprovable lookup freezes only
+  affected units; later exact reconciliation unfreezes them; exact replay adds
+  no reservation and survives later task completion; exhausted/unknown budgets,
+  task-completion races and all terminal task states reject new provider work.
+- **AC-042:** Projection fixtures prove a live same-session/run gate and a
+  durably correlated current-chair intake seed, while closed, missing, stale,
+  malformed and cross-boundary candidates fail closed or omit the optional
+  field. Console review/confirm tests then resolve/revise only those exact
+  bindings.

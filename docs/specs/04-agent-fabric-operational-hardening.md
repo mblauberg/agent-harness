@@ -1,13 +1,21 @@
 # Agent fabric operational hardening
 
-Status: Console daemon-lifecycle, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.22
+Status: Console daemon-lifecycle, provider-budget, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
+Version: 1.23
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.22 completes the current MCP seat cutover as a database and
+Version 1.23 makes vector-valued ephemeral provider-budget custody durable in
+the current SQLite baseline, derives Console gate/intake bindings from
+authoritative rows, and confines Claude review tooling to `Read`, `Glob` and
+`Grep` beneath the trusted realpath of the admitted working root. Recovery
+retains validated answer-bearing terminal results, settles exact usage once
+from terminal evidence and freezes only unprovable dimensions on quarantine
+until authenticated reconciliation. No adapter
+may widen the read root, follow a symlink outside it or gain Bash, edit or
+network authority from a review prompt. Version 1.22 completes the current MCP seat cutover as a database and
 filesystem compare-and-swap rather than a client-side pointer convention. The
 daemon owns immutable generation/member records and one active project pointer;
 activation transactionally revokes the prior roster. Every private and public
@@ -2411,3 +2419,54 @@ the whole result before the client consumes it. When unnegotiated those fields
 are omitted from the generic protocol shape. The pre-release Console requires
 the feature during initialise and performs no retry or identity
 inference. A peer that cannot negotiate it is explicitly incompatible.
+
+### 9.20 Provider-budget custody and Console decision projections
+
+The current baseline gives each task-bound ephemeral provider action an
+immutable authority, task and canonical reservation vector. A normalized
+dimension row names the recognised unit, reserved amount, optional exact
+consumption and closed `reserved | consumed | usage-unknown` state. SQLite
+triggers validate same-run authority/task ownership, non-terminal task state,
+available `granted - reserved - consumed` capacity and complete vector shape,
+then couple every insert/state transition to `authority_budget`. They reject
+direct contradictory writes, rebinding, reversal, status mismatch, negative
+capacity and task terminal transition while a bound action remains open.
+
+Fabric injects default `maxTurns: 1` before hashing or dispatch. Claude maps it
+to the SDK's native turn cap. One-shot Agy and Cursor review boundaries require
+exactly one and reject any larger request rather than silently ignoring it.
+The custody reserves `turns`, one `provider_calls` and one
+`concurrent_turns` when configured, plus each delegated cost,
+provider-qualified token and wall-clock dimension. It does not debit unrelated
+descendant, message or artifact capacity.
+
+Terminal adapter evidence moves exact usage to consumed and releases unused
+and concurrency reservation. A missing applicable usage value becomes unknown;
+an ambiguous action retains its reservation. Recovery validates an
+answer-bearing terminal lookup or replay before settlement. Empty, oversized
+or malformed answer evidence is quarantined, removes the public answer and
+freezes unproved dimensions. A later authenticated reconciliation may retry
+the adapter's stable lookup and move unknown dimensions to exact settlement;
+clearing the authority-level unknown flag requires no other unknown owner.
+
+Operator projection joins an Attention gate only by exact gate ID, project
+session and coordination run, and exposes only pending/deferred rows. Intake
+read reconstructs a successor-request seed from stored message context and the
+current chair row; changed conversation correlation is recovery-required, and
+missing provider-session continuity yields no seed. Both paths use strict
+current protocol schemas and add no Console-owned state.
+
+The Claude answer-bearing review adapter receives a trusted absolute
+`readOnlyRoot` from Fabric composition. Its only source tools are `Read`,
+`Glob` and `Grep`; every requested path is realpath-resolved and must remain
+beneath that root. Absolute/outside paths, traversal, symlink escape, missing
+trust binding and a caller-selected root fail closed. Bash, edit/write and
+network tools are not admitted. Explicit `opus` effort `max` does not change
+those bounds.
+
+Deterministic verification additionally covers conditional vector-reserve
+races, task-completion races, crash/restart settlement, direct-SQL invariant
+attacks, immutable action/budget binding, replay after task completion,
+adapter turn-cap enforcement, mixed exact/unknown usage and later
+reconciliation, recovered-answer validation, gate/intake positive and negative
+projections, and Claude traversal/absolute/symlink/tool-denial fixtures.

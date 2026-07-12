@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.4
+Version: 1.5
 Date: 12 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,6 +10,13 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
+Version 1.5 closes the implementation-review placeholders for Pause/Resume,
+Attention decisions and evidence Discuss/Request changes. Run control uses the
+existing revision-bound operator preview/commit path. Attention actions read
+and resolve only the exact daemon-projected open gate and revision. Discussion
+and requested changes read the exact intake then commit one atomic revision
+with a correlated successor chair request derived from daemon-owned state; the
+Console never guesses a chair, provider session, conversation or authority.
 Version 1.4 records the implementation instruction that fresh Claude, Cursor
 and Gemini reviews remain answer-bearing Fabric work. The chair creates an
 exact review task and uses the current task-bound ephemeral provider action;
@@ -809,5 +816,9 @@ context, authorised the local implementation and later clarified dynamic
 terminal resizing in v1.1. Version 1.2 records the review-required Console
 evidence UX needed to implement that approved artifact-review outcome without
 changing effect authority. Version 1.3 records exact multi-session selection
-without changing the one-live-run-per-session topology. Final human acceptance remains pending; Git push,
+without changing the one-live-run-per-session topology. Version 1.4 binds
+fresh external reviews to answer-bearing Fabric tasks. Version 1.5 makes every
+shipped Pause/Resume, Attention decision and evidence discussion/request-
+changes affordance execute its typed revision-bound review/confirm path; no
+required action remains an implementation placeholder. Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.
