@@ -321,6 +321,17 @@ rmSync(socketPath, { force: true });
 const sockets = new Set<Socket>();
 let completeQueuedDaemonStop: (commandId: string) => void = () => undefined;
 let totalInFlight = 0;
+const inFlightDrainers = new Set<() => void>();
+const releaseInFlight = (): void => {
+  totalInFlight -= 1;
+  if (totalInFlight !== 0) return;
+  for (const resolvePromise of inFlightDrainers) resolvePromise();
+  inFlightDrainers.clear();
+};
+const waitForInFlight = async (): Promise<void> => {
+  if (totalInFlight === 0) return;
+  await new Promise<void>((resolvePromise) => inFlightDrainers.add(resolvePromise));
+};
 const servePrivateControlConnection = (socket: Socket): void => {
   const writer = new BoundedNdjsonWriter(socket, {
     maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
@@ -349,7 +360,7 @@ const servePrivateControlConnection = (socket: Socket): void => {
       await writer.write({ id, error: { name, code, message } }).catch(() => socket.destroy());
     } finally {
       connectionInFlight -= 1;
-      totalInFlight -= 1;
+      releaseInFlight();
     }
   };
 
@@ -501,7 +512,7 @@ const servePublicConnection = (socket: Socket): void => {
       try {
         return await fabric.dispatchPublicProtocol(context, operation, input);
       } finally {
-        totalInFlight -= 1;
+        releaseInFlight();
       }
     },
     afterResponse: ({ context, operation, input, result }) => {
@@ -619,10 +630,11 @@ const markProductionTerminal = async (
 };
 
 const stopElection = new BootstrapElection({ runtimeDirectory });
-const closeServingSocket = async (): Promise<void> => await new Promise<void>((resolve) => {
-  server.close(() => resolve());
+const closeServingSocket = async (): Promise<void> => {
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
   for (const active of sockets) active.end();
-});
+  await Promise.all([closed, waitForInFlight()]);
+};
 
 const finishProcess = async (input: {
   signal: NodeJS.Signals | null;

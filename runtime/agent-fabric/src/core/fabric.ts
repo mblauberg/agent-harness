@@ -693,7 +693,7 @@ function isTaskBoundEphemeralProviderPayload(value: unknown): value is Record<st
     typeof value.prompt === "string";
 }
 
-function providerActionResult(value: unknown): ProviderActionResult {
+function providerActionResult(value: unknown, expectedActionId?: string): ProviderActionResult {
   if (
     !isRow(value) ||
     typeof value.actionId !== "string" ||
@@ -703,6 +703,9 @@ function providerActionResult(value: unknown): ProviderActionResult {
     typeof value.effectCount !== "number"
   ) {
     throw new Error("provider returned an invalid action result");
+  }
+  if (expectedActionId !== undefined && value.actionId !== expectedActionId) {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider action evidence belongs to another action");
   }
   return {
     actionId: value.actionId,
@@ -718,8 +721,9 @@ function providerActionResult(value: unknown): ProviderActionResult {
 function providerActionResultWithRequiredAnswer(
   value: unknown,
   answerBearing: boolean,
+  expectedActionId?: string,
 ): ProviderActionResult {
-  const result = providerActionResult(value);
+  const result = providerActionResult(value, expectedActionId);
   if (!answerBearing || result.status !== "terminal") return result;
   return {
     ...result,
@@ -790,6 +794,15 @@ function isBudgetResult(value: unknown): value is BudgetResult {
   );
 }
 
+type ProviderActionDispatchRequest = {
+  adapterId: string;
+  actionId: string;
+  operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
+  authorityId?: string;
+  payload: Record<string, unknown>;
+  commandId: string;
+};
+
 export class Fabric {
   readonly #database: Database.Database;
   readonly #workspaceRoots: string[];
@@ -802,6 +815,7 @@ export class Fabric {
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #maximumConcurrentProviderTurns: number;
   readonly #ownedProviderActions = new Map<string, Promise<void>>();
+  readonly #activeProviderOperations = new Set<Promise<void>>();
   readonly #deferredProviderActions: Array<{
     key: string;
     runId: string;
@@ -810,6 +824,8 @@ export class Fabric {
     settle: () => void;
   }> = [];
   #pumpingDeferredProviderActions = false;
+  #deferredProviderPumpTimer: ReturnType<typeof setTimeout> | undefined;
+  #closing = false;
   readonly #operatorStore: OperatorStore;
   readonly #operatorProjections: OperatorProjectionStore;
   readonly #gitRepositoryReads: GitRepositoryReadService;
@@ -1237,7 +1253,15 @@ export class Fabric {
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled([...this.#ownedProviderActions.values()]);
+    this.#closing = true;
+    while (this.#activeProviderOperations.size > 0 || this.#ownedProviderActions.size > 0) {
+      await Promise.allSettled([
+        ...this.#activeProviderOperations,
+        ...this.#ownedProviderActions.values(),
+      ]);
+    }
+    if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
+    this.#deferredProviderPumpTimer = undefined;
     await this.#adapterSupervisor.close();
     if (this.#database.open) {
       this.#database.pragma("wal_checkpoint(TRUNCATE)");
@@ -1248,6 +1272,23 @@ export class Fabric {
   async #requestAdapter(adapterId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
     this.#adapter(adapterId);
     return await this.#adapterSupervisor.request(adapterId, method, params);
+  }
+
+  async #trackProviderOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#closing) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider operation cannot start while Fabric is closing");
+    }
+    let settle = (): void => undefined;
+    const tracked = new Promise<void>((resolvePromise) => {
+      settle = resolvePromise;
+    });
+    this.#activeProviderOperations.add(tracked);
+    try {
+      return await operation();
+    } finally {
+      this.#activeProviderOperations.delete(tracked);
+      settle();
+    }
   }
 
   #providerActionOwnershipKey(runId: string, actionId: string): string {
@@ -1281,7 +1322,8 @@ export class Fabric {
           (SELECT COUNT(*) FROM provider_session_turn_leases
             WHERE status IN ('active','quarantined')) +
           (SELECT COUNT(*) FROM provider_actions
-            WHERE budget_authority_id IS NOT NULL AND status='dispatched') AS count
+            WHERE budget_authority_id IS NOT NULL
+              AND status IN ('dispatched','ambiguous','quarantined')) AS count
       `).get(), "active provider turn count");
       if (numberField(active, "count") >= this.#maximumConcurrentProviderTurns) return "blocked";
       const claimed = this.#database.prepare(`
@@ -1319,7 +1361,22 @@ export class Fabric {
       }
     } finally {
       this.#pumpingDeferredProviderActions = false;
+      this.#scheduleDeferredProviderPump();
     }
+  }
+
+  #scheduleDeferredProviderPump(): void {
+    if (this.#deferredProviderActions.length === 0) {
+      if (this.#deferredProviderPumpTimer !== undefined) clearTimeout(this.#deferredProviderPumpTimer);
+      this.#deferredProviderPumpTimer = undefined;
+      return;
+    }
+    if (this.#deferredProviderPumpTimer !== undefined) return;
+    this.#deferredProviderPumpTimer = setTimeout(() => {
+      this.#deferredProviderPumpTimer = undefined;
+      this.#pumpDeferredProviderActions();
+    }, 100);
+    this.#deferredProviderPumpTimer.unref();
   }
 
   #settleProviderTurnAndPump(
@@ -4489,14 +4546,17 @@ export class Fabric {
   async dispatchProviderAction(
     runId: string,
     actorAgentId: string,
-    input: {
-      adapterId: string;
-      actionId: string;
-      operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
-      authorityId?: string;
-      payload: Record<string, unknown>;
-      commandId: string;
-    },
+    input: ProviderActionDispatchRequest,
+  ): Promise<ProviderActionResult> {
+    return await this.#trackProviderOperation(
+      async () => await this.#dispatchProviderAction(runId, actorAgentId, input),
+    );
+  }
+
+  async #dispatchProviderAction(
+    runId: string,
+    actorAgentId: string,
+    input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
     this.#assertGenericProviderAction(runId, input.actionId);
@@ -4742,6 +4802,9 @@ export class Fabric {
           payload: input,
         },
         revalidateAdmission: () => {
+          if (this.#closing) {
+            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider admission changed while Fabric was closing");
+          }
           this.#assertChair(runId, actorAgentId);
           this.#assertProviderPrincipalActive(runId, actorAgentId);
           const reboundTaskId = resolveTaskBindingForActiveWork(
@@ -4825,7 +4888,7 @@ export class Fabric {
       .run(this.#clock(), runId, input.actionId);
     try {
       const response = await this.#requestAdapter(input.adapterId, "dispatch", { actionId: input.actionId, operation: input.operation, payload: providerPayload });
-      const result = providerActionResult(response);
+      const result = providerActionResult(response, input.actionId);
       this.#persistProviderAction(runId, input.actionId, response, result);
       this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
@@ -4846,6 +4909,16 @@ export class Fabric {
   }
 
   async reconcileProviderAction(
+    runId: string,
+    actorAgentId: string,
+    input: { actionId: string; commandId: string },
+  ): Promise<ProviderActionResult> {
+    return await this.#trackProviderOperation(
+      async () => await this.#reconcileProviderAction(runId, actorAgentId, input),
+    );
+  }
+
+  async #reconcileProviderAction(
     runId: string,
     actorAgentId: string,
     input: { actionId: string; commandId: string },
@@ -4909,7 +4982,7 @@ export class Fabric {
         .run(this.#clock(), runId, input.actionId);
       try {
         const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
-        result = providerActionResultWithRequiredAnswer(response, answerBearing);
+        result = providerActionResultWithRequiredAnswer(response, answerBearing, input.actionId);
         this.#persistProviderAction(runId, input.actionId, response, result);
       } catch {
         result = {
@@ -4953,7 +5026,7 @@ export class Fabric {
     }
     let lookedUp: ProviderActionResult;
     try {
-      lookedUp = providerActionResultWithRequiredAnswer(lookup, answerBearing);
+      lookedUp = providerActionResultWithRequiredAnswer(lookup, answerBearing, input.actionId);
     } catch {
       if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
       return quarantine(result);
@@ -4976,7 +5049,7 @@ export class Fabric {
       }
       const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
       try {
-        result = providerActionResultWithRequiredAnswer(replayed, answerBearing);
+        result = providerActionResultWithRequiredAnswer(replayed, answerBearing, input.actionId);
       } catch {
         return quarantine(result);
       }

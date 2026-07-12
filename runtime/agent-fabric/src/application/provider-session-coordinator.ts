@@ -461,7 +461,8 @@ export class ProviderSessionCoordinator {
           (SELECT COUNT(*) FROM provider_session_turn_leases
             WHERE status IN ('active','quarantined')) +
           (SELECT COUNT(*) FROM provider_actions
-            WHERE budget_authority_id IS NOT NULL AND status='dispatched') AS count
+            WHERE budget_authority_id IS NOT NULL
+              AND status IN ('dispatched','ambiguous','quarantined')) AS count
       `).get(), "provider turn count");
       if (typeof unresolvedCount.count !== "number" || unresolvedCount.count >= this.#maximumConcurrentTurns) {
         throw new FabricError("PROVIDER_TURN_ACTIVE", "maximum concurrent provider turns reached");

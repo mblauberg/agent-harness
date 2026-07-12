@@ -123,7 +123,7 @@ input.on("line", (line) => {
         fail(request.id, "INVALID_PARAMS", "actionId is required");
         return;
       }
-      const answer = scenario === "ambiguous-review-valid"
+      const answer = scenario === "ambiguous-review-valid" || scenario === "ambiguous-review-wrong-action-id"
         ? "recovered provider review"
         : scenario === "ambiguous-review-usage-late"
           ? "recovered provider review with late usage"
@@ -242,7 +242,9 @@ input.on("line", (line) => {
         }
         saveJournal(journal);
       }
-      respond(request.id, action);
+      respond(request.id, action.scenario === "ambiguous-review-wrong-action-id"
+        ? { ...action, actionId: `${action.actionId}:wrong` }
+        : action);
     }
     return;
   }

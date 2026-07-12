@@ -604,6 +604,47 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     }
   });
 
+  it("fences delayed provider admission before closing Fabric", async () => {
+    const fixture = await createLifecycleFixture({ capabilitiesDelayMs: 200 });
+    cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-close-race:authority",
+    });
+    const actionId = "provider-review-close-race:spawn";
+    const dispatch = fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Do not start while Fabric closes.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-close-race:dispatch",
+    });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    const close = fixture.fabric.close();
+
+    await expect(dispatch).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await close;
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(database.prepare(`SELECT 1 FROM provider_actions WHERE action_id=?`).get(actionId)).toBeUndefined();
+    } finally {
+      database.close();
+    }
+  });
+
   it("blocks task terminalisation while its provider action remains unresolved", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => {
@@ -750,6 +791,143 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     await expect(waitForProviderAction(fixture.chair, "provider-review-queue:one"))
       .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
     await expect(waitForProviderAction(fixture.chair, "provider-review-queue:two"))
+      .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
+  });
+
+  it("keeps ambiguous answer-bearing work inside the shared provider-turn ceiling", async () => {
+    const fixture = await createLifecycleFixture({ maximumConcurrentProviderTurns: 1 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-ambiguous-cap:authority",
+    });
+    const secondAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-ambiguous-cap:second-authority",
+    });
+    const dispatch = async (suffix: string, authorityId: string, scenario?: string) => await fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: `provider-review-ambiguous-cap:${suffix}`,
+      operation: "spawn",
+      authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: `Ambiguous capacity review ${suffix}.`,
+        cwd: "src/leader",
+        ...(scenario === undefined ? {} : { scenario }),
+      },
+      commandId: `provider-review-ambiguous-cap:${suffix}:dispatch`,
+    });
+
+    await expect(dispatch("one", reviewAuthority.authorityId, "ambiguous-review-valid"))
+      .resolves.toMatchObject({ status: "prepared" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-ambiguous-cap:one"))
+      .resolves.toMatchObject({ status: "ambiguous" });
+    await expect(dispatch("two", secondAuthority.authorityId)).resolves.toMatchObject({ status: "prepared" });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+    await expect(fixture.chair.getProviderAction({ actionId: "provider-review-ambiguous-cap:two" }))
+      .resolves.toMatchObject({ status: "prepared", executionCount: 0 });
+
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId: "provider-review-ambiguous-cap:one",
+      commandId: "provider-review-ambiguous-cap:one:reconcile",
+    })).resolves.toMatchObject({ status: "terminal" });
+    await expect(waitForProviderAction(fixture.chair, "provider-review-ambiguous-cap:two"))
+      .resolves.toMatchObject({ status: "terminal" });
+  });
+
+  it("wakes queued review work after out-of-band turn-lease release", async () => {
+    const fixture = await createLifecycleFixture({ maximumConcurrentProviderTurns: 1 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const now = fixture.clock.now().getTime();
+    const database = new Database(fixture.databasePath);
+    try {
+      database.exec(`
+        INSERT INTO provider_actions(
+          run_id,action_id,adapter_id,operation,target_agent_id,
+          provider_session_generation,turn_lease_generation,identity_hash,
+          payload_hash,payload_json,status,history_json,execution_count,
+          effect_count,idempotency_proven,updated_at
+        ) VALUES (
+          '${fixture.runId}','provider-review-capacity-sentinel','fake-lifecycle','send_turn','leader',
+          1,1,'${"a".repeat(64)}','${"b".repeat(64)}','{"taskId":"${fixture.leaderTask.taskId}"}',
+          'dispatched','["prepared","dispatched"]',1,0,0,${now}
+        );
+        INSERT INTO provider_session_turn_leases(
+          run_id,agent_id,provider_session_generation,turn_lease_generation,
+          action_id,status,created_at,updated_at
+        ) VALUES (
+          '${fixture.runId}','leader',1,1,'provider-review-capacity-sentinel','active',${now},${now}
+        );
+      `);
+    } finally {
+      database.close();
+    }
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-external-capacity:authority",
+    });
+    const actionId = "provider-review-external-capacity:spawn";
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Start after external turn capacity is released.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-external-capacity:dispatch",
+    })).resolves.toMatchObject({ status: "prepared" });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+    await expect(fixture.chair.getProviderAction({ actionId }))
+      .resolves.toMatchObject({ status: "prepared", executionCount: 0 });
+
+    const release = new Database(fixture.databasePath);
+    try {
+      release.transaction(() => {
+        release.prepare(`
+          UPDATE provider_session_turn_leases SET status='released',updated_at=?
+           WHERE run_id=? AND action_id=?
+        `).run(now + 1, fixture.runId, "provider-review-capacity-sentinel");
+        release.prepare(`
+          UPDATE provider_actions SET status='terminal',history_json='["prepared","dispatched","terminal"]',
+                 effect_count=1,updated_at=? WHERE run_id=? AND action_id=?
+        `).run(now + 1, fixture.runId, "provider-review-capacity-sentinel");
+      })();
+    } finally {
+      release.close();
+    }
+    await expect(waitForProviderAction(fixture.chair, actionId))
       .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
   });
 
@@ -1098,7 +1276,11 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       providerAnswer: "recovered provider review",
     });
 
-    for (const scenario of ["ambiguous-review-empty", "ambiguous-review-oversized"] as const) {
+    for (const scenario of [
+      "ambiguous-review-empty",
+      "ambiguous-review-oversized",
+      "ambiguous-review-wrong-action-id",
+    ] as const) {
       const invalidAuthority = await fixture.chair.delegateAuthority({
         parentAuthorityId: fixture.chairAuthorityId,
         authority: {
