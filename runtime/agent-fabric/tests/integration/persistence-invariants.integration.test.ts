@@ -103,8 +103,8 @@ describe("additive persistence invariants", () => {
       ["INVARIANT_deliveries_recipient_same_run", "INSERT INTO deliveries VALUES ('delivery-x','message-a','run-a','chair-b',2,'ready',0,NULL,NULL,NULL,NULL)", "UPDATE deliveries SET recipient_id='chair-b' WHERE delivery_id='delivery-a'"],
       ["INVARIANT_leases_values", "INSERT INTO leases VALUES ('lease-x','run-a','other','worker-a',1,'active',9,1)", "UPDATE leases SET status='bad' WHERE lease_id='lease-a'"],
       ["INVARIANT_leases_holder_same_run", "INSERT INTO leases VALUES ('lease-x','run-a','write','chair-b',1,'active',9,1)", "UPDATE leases SET holder_agent_id='chair-b' WHERE lease_id='lease-a'"],
-      ["INVARIANT_provider_actions_values", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','worker-a',1,1,'i','p','{}','bad','[]',0,0,0,NULL,1,1)", "UPDATE provider_actions SET status='bad' WHERE action_id='action-a'"],
-      ["INVARIANT_provider_actions_target_same_run", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','chair-b',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1)", "UPDATE provider_actions SET target_agent_id='chair-b' WHERE action_id='action-a'"],
+      ["INVARIANT_provider_actions_values", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','worker-a',1,1,'i','p','{}','bad','[]',0,0,0,NULL,1,1,NULL,NULL,NULL)", "UPDATE provider_actions SET status='bad' WHERE action_id='action-a'"],
+      ["INVARIANT_provider_actions_target_same_run", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','chair-b',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1,NULL,NULL,NULL)", "UPDATE provider_actions SET target_agent_id='chair-b' WHERE action_id='action-a'"],
       ["INVARIANT_authority_budget_boolean", "INSERT INTO authority_budget VALUES ('authority-a','other',1,0,0,2)", "UPDATE authority_budget SET usage_unknown=2 WHERE authority_id='authority-a'"],
       ["INVARIANT_capabilities_generation", "INSERT INTO capabilities VALUES ('token-x','run-a','worker-a',0,9,NULL)", "UPDATE capabilities SET principal_generation=0 WHERE token_hash='token-a'"],
       ["INVARIANT_provider_state_generation", "INSERT INTO provider_state VALUES ('run-a','chair-a',0,NULL,NULL)", "UPDATE provider_state SET provider_session_generation=0 WHERE agent_id='worker-a'"],
@@ -136,7 +136,7 @@ describe("additive persistence invariants", () => {
           INSERT INTO leases VALUES ('lease-a','run-a','write','worker-a',1,'active',9,1);
           INSERT INTO capabilities VALUES ('token-a','run-a','worker-a',1,9,NULL);
           INSERT INTO provider_state VALUES ('run-a','worker-a',1,NULL,NULL);
-          INSERT INTO provider_actions VALUES ('run-a','action-a','a','turn','worker-a',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1);
+          INSERT INTO provider_actions VALUES ('run-a','action-a','a','turn','worker-a',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1,NULL,NULL,NULL);
           INSERT INTO events VALUES ('event-a','run-a','x','worker-a','{}',1);
           INSERT INTO barriers VALUES ('run-a','run','','closed',1,'hash');
           INSERT INTO teams VALUES ('run-a','team-a',NULL,1,'chair-a','chair-a',NULL,'task-a','authority-a','budget-a','active',1,NULL,1);

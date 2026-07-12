@@ -141,7 +141,8 @@ CREATE TABLE authority_budget (
   reserved INTEGER NOT NULL DEFAULT 0 CHECK (reserved >= 0 AND reserved <= granted),
   consumed INTEGER NOT NULL DEFAULT 0 CHECK (consumed >= 0 AND consumed <= granted),
   usage_unknown INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (authority_id, unit_key)
+  PRIMARY KEY (authority_id, unit_key),
+  CHECK (reserved + consumed <= granted)
 );
 
 CREATE TABLE barriers (
@@ -1523,8 +1524,19 @@ CREATE TABLE provider_actions (
   effect_count INTEGER NOT NULL,
   idempotency_proven INTEGER NOT NULL DEFAULT 0,
   result_json TEXT,
-  updated_at INTEGER NOT NULL, journal_revision INTEGER NOT NULL DEFAULT 1 CHECK (journal_revision >= 1),
-  PRIMARY KEY (run_id, action_id)
+  updated_at INTEGER NOT NULL,
+  journal_revision INTEGER NOT NULL DEFAULT 1 CHECK (journal_revision >= 1),
+  budget_authority_id TEXT REFERENCES authorities(authority_id),
+  budget_reserved_turns INTEGER CHECK (budget_reserved_turns IS NULL OR budget_reserved_turns >= 1),
+  budget_state TEXT CHECK (budget_state IS NULL OR budget_state IN ('reserved','consumed','usage-unknown')),
+  PRIMARY KEY (run_id, action_id),
+  CHECK (
+    (budget_authority_id IS NULL AND budget_reserved_turns IS NULL AND budget_state IS NULL) OR
+    (budget_authority_id IS NOT NULL AND budget_reserved_turns IS NOT NULL AND budget_state IS NOT NULL
+      AND operation='spawn' AND target_agent_id IS NULL)
+  ),
+  CHECK (budget_state<>'consumed' OR status='terminal'),
+  CHECK (budget_state<>'usage-unknown' OR status='quarantined')
 );
 
 CREATE TABLE provider_agent_custody (
@@ -3663,14 +3675,34 @@ CREATE TRIGGER provider_actions_values_insert BEFORE INSERT ON provider_actions 
     THEN RAISE(ABORT, 'INVARIANT_provider_actions_values') END;
   SELECT CASE WHEN NEW.operation NOT IN ('spawn','attach') AND NEW.target_agent_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.agent_id=NEW.target_agent_id AND a.run_id=NEW.run_id)
     THEN RAISE(ABORT, 'INVARIANT_provider_actions_target_same_run') END;
+  SELECT CASE WHEN NEW.budget_authority_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM authorities authority
+     WHERE authority.authority_id=NEW.budget_authority_id AND authority.run_id=NEW.run_id
+  ) THEN RAISE(ABORT, 'INVARIANT_provider_actions_budget_authority_same_run') END;
 END;
 
-CREATE TRIGGER provider_actions_values_update BEFORE UPDATE OF status,execution_count,effect_count,idempotency_proven,provider_session_generation,turn_lease_generation,target_agent_id,run_id ON provider_actions BEGIN
+CREATE TRIGGER provider_actions_values_update BEFORE UPDATE OF status,execution_count,effect_count,idempotency_proven,provider_session_generation,turn_lease_generation,target_agent_id,run_id,budget_authority_id ON provider_actions BEGIN
   SELECT CASE WHEN NEW.status NOT IN ('prepared','dispatched','accepted','terminal','ambiguous','quarantined') OR NEW.execution_count < 0 OR NEW.effect_count < 0 OR NEW.idempotency_proven NOT IN (0,1) OR (NEW.provider_session_generation IS NOT NULL AND NEW.provider_session_generation < 1) OR (NEW.turn_lease_generation IS NOT NULL AND NEW.turn_lease_generation < 1)
     THEN RAISE(ABORT, 'INVARIANT_provider_actions_values') END;
   SELECT CASE WHEN NEW.operation NOT IN ('spawn','attach') AND NEW.target_agent_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.agent_id=NEW.target_agent_id AND a.run_id=NEW.run_id)
     THEN RAISE(ABORT, 'INVARIANT_provider_actions_target_same_run') END;
+  SELECT CASE WHEN NEW.budget_authority_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM authorities authority
+     WHERE authority.authority_id=NEW.budget_authority_id AND authority.run_id=NEW.run_id
+  ) THEN RAISE(ABORT, 'INVARIANT_provider_actions_budget_authority_same_run') END;
 END;
+
+CREATE TRIGGER provider_actions_budget_binding_immutable
+BEFORE UPDATE OF budget_authority_id,budget_reserved_turns ON provider_actions
+WHEN NEW.budget_authority_id IS NOT OLD.budget_authority_id
+  OR NEW.budget_reserved_turns IS NOT OLD.budget_reserved_turns
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_provider_actions_budget_binding_immutable'); END;
+
+CREATE TRIGGER provider_actions_budget_state_cas
+BEFORE UPDATE OF budget_state ON provider_actions
+WHEN NEW.budget_state IS NOT OLD.budget_state
+ AND NOT (OLD.budget_state='reserved' AND NEW.budget_state IN ('consumed','usage-unknown'))
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_provider_actions_budget_state_cas'); END;
 
 CREATE TRIGGER provider_agent_custody_immutable_delete
 BEFORE DELETE ON provider_agent_custody

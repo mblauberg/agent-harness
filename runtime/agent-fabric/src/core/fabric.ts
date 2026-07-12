@@ -2690,11 +2690,14 @@ export class Fabric {
       for (const [unitKey, requested] of Object.entries(child.budget)) {
         const row = rowOrNotFound(
           this.#database
-            .prepare("SELECT granted, reserved, usage_unknown FROM authority_budget WHERE authority_id = ? AND unit_key = ?")
+            .prepare("SELECT granted, reserved, consumed, usage_unknown FROM authority_budget WHERE authority_id = ? AND unit_key = ?")
             .get(input.parentAuthorityId, unitKey),
           `budget ${unitKey}`,
         );
-        if (numberField(row, "usage_unknown") !== 0 || numberField(row, "granted") - numberField(row, "reserved") < requested) {
+        if (
+          numberField(row, "usage_unknown") !== 0 ||
+          numberField(row, "granted") - numberField(row, "reserved") - numberField(row, "consumed") < requested
+        ) {
           throw new FabricError("BUDGET_EXCEEDED", `insufficient available budget for ${unitKey}`);
         }
       }
@@ -4399,6 +4402,7 @@ export class Fabric {
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const ephemeralSpawn = input.operation === "spawn";
+    let ephemeralAuthorityBudget: Readonly<{ authorityId: string; reservedTurns: number }> | undefined;
     const target = ephemeralSpawn
       ? undefined
       : this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
@@ -4416,6 +4420,15 @@ export class Fabric {
       if (input.authorityId === undefined) {
         throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn requires delegated authority");
       }
+      const reservedTurns = input.payload.maxTurns === undefined ? 1 : input.payload.maxTurns;
+      if (
+        typeof reservedTurns !== "number" ||
+        !Number.isSafeInteger(reservedTurns) ||
+        reservedTurns < 1
+      ) {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn maxTurns must be a positive safe integer");
+      }
+      ephemeralAuthorityBudget = { authorityId: input.authorityId, reservedTurns };
       if (
         typeof input.payload.model !== "string" || input.payload.model.trim().length === 0 ||
         typeof input.payload.modelFamily !== "string" || input.payload.modelFamily.trim().length === 0 ||
@@ -4438,6 +4451,18 @@ export class Fabric {
         taskValue,
       )
       : undefined;
+    if (ephemeralSpawn && taskId !== undefined) {
+      const task = rowOrNotFound(
+        this.#database.prepare("SELECT state FROM tasks WHERE run_id=? AND task_id=?").get(runId, taskId),
+        "ephemeral provider task",
+      );
+      if (["complete", "cancelled", "degraded"].includes(stringField(task, "state"))) {
+        throw new ProjectFabricCoreError(
+          "LIFECYCLE_PRECONDITION_FAILED",
+          "terminal task cannot admit an ephemeral provider spawn",
+        );
+      }
+    }
     const operationTarget = taskId === undefined
       ? { kind: "run" as const }
       : { kind: "task" as const, taskId: taskId as never };
@@ -4518,6 +4543,7 @@ export class Fabric {
       operation: input.operation,
       targetAgentId: target?.agentId ?? null,
       providerSessionGeneration: target?.providerSessionGeneration ?? null,
+      ...(ephemeralSpawn ? { authorityId: input.authorityId } : {}),
       payload: admittedInputPayload,
     }));
     const existing = this.#providerSessions.assertActionIdentity({
@@ -4543,6 +4569,9 @@ export class Fabric {
       });
     }
     if (ephemeralSpawn) {
+      if (ephemeralAuthorityBudget === undefined) {
+        throw new Error("validated ephemeral provider budget is unavailable");
+      }
       const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
       assertAdapterOperation(capabilities, "spawn");
       if (
@@ -4560,6 +4589,7 @@ export class Fabric {
         method: "spawn",
         payload: admittedInputPayload,
         requireProviderAnswer: true,
+        authorityBudget: ephemeralAuthorityBudget,
       });
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
@@ -4666,9 +4696,12 @@ export class Fabric {
         status: "quarantined",
       };
       delete quarantined.providerAnswer;
-      this.#database
-        .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.actionId);
+      this.#database.transaction(() => {
+        this.#database
+          .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
+          .run(this.#clock(), runId, input.actionId);
+        this.#settleProviderAuthorityBudget(runId, input.actionId, "usage-unknown");
+      })();
       this.#providerSessions.settleTurn(runId, input.actionId, "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
       return quarantined;
@@ -5932,6 +5965,10 @@ export class Fabric {
     method: string;
     payload: Record<string, unknown>;
     requireProviderAnswer?: true;
+    authorityBudget?: Readonly<{
+      authorityId: string;
+      reservedTurns: number;
+    }>;
   }): Promise<ProviderActionResult> {
     const payloadJson = canonicalJson(input.payload);
     const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
@@ -5943,6 +5980,7 @@ export class Fabric {
       operation: input.operation,
       targetAgentId: targetAgentId ?? null,
       providerSessionGeneration: providerSessionGeneration ?? null,
+      ...(input.authorityBudget === undefined ? {} : { authorityId: input.authorityBudget.authorityId }),
       payload: input.payload,
     }));
     const existing = this.#providerSessions.assertActionIdentity({
@@ -5957,22 +5995,53 @@ export class Fabric {
     if (existing) {
       return this.getProviderAction(input.runId, input.actionId);
     }
-    this.#database
-      .prepare(
-        "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'dispatched', '[\"prepared\",\"dispatched\"]', 1, 0, 0, ?)",
-      )
-      .run(
-        input.runId,
-        input.actionId,
-        input.adapterId,
-        input.operation,
-        targetAgentId ?? null,
-        providerSessionGeneration ?? null,
-        identityHash,
-        sha256(payloadJson),
-        payloadJson,
-        this.#clock(),
-      );
+    this.#database.transaction(() => {
+      if (input.authorityBudget !== undefined) {
+        const budget = this.#database.prepare(`
+          SELECT granted,reserved,consumed,usage_unknown
+            FROM authority_budget
+           WHERE authority_id=? AND unit_key='turns'
+        `).get(input.authorityBudget.authorityId);
+        if (!isRow(budget)) {
+          throw new FabricError("BUDGET_EXCEEDED", "delegated provider authority has no turns budget");
+        }
+        if (numberField(budget, "usage_unknown") === 1) {
+          throw new FabricError("BUDGET_USAGE_UNKNOWN", "delegated provider turn usage is unknown");
+        }
+        const changed = this.#database.prepare(`
+          UPDATE authority_budget
+             SET reserved=reserved+?
+           WHERE authority_id=? AND unit_key='turns' AND usage_unknown=0
+             AND granted-reserved-consumed>=?
+        `).run(
+          input.authorityBudget.reservedTurns,
+          input.authorityBudget.authorityId,
+          input.authorityBudget.reservedTurns,
+        );
+        if (changed.changes !== 1) {
+          throw new FabricError("BUDGET_EXCEEDED", "delegated provider turn budget is exhausted");
+        }
+      }
+      this.#database
+        .prepare(
+          "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at, budget_authority_id, budget_reserved_turns, budget_state) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'dispatched', '[\"prepared\",\"dispatched\"]', 1, 0, 0, ?, ?, ?, ?)",
+        )
+        .run(
+          input.runId,
+          input.actionId,
+          input.adapterId,
+          input.operation,
+          targetAgentId ?? null,
+          providerSessionGeneration ?? null,
+          identityHash,
+          sha256(payloadJson),
+          payloadJson,
+          this.#clock(),
+          input.authorityBudget?.authorityId ?? null,
+          input.authorityBudget?.reservedTurns ?? null,
+          input.authorityBudget === undefined ? null : "reserved",
+        );
+    })();
     try {
       const response = await this.#requestAdapter(input.adapterId, input.method, { ...input.payload, actionId: input.actionId, payload: input.payload });
       const providerAnswer = input.requireProviderAnswer === true
@@ -6133,21 +6202,74 @@ export class Fabric {
     result: ProviderActionResult,
   ): void {
     const idempotencyProven = isRow(raw) && raw.idempotencyProven === true ? 1 : 0;
-    this.#database
-      .prepare(
-        "UPDATE provider_actions SET status = ?, history_json = ?, execution_count = ?, effect_count = ?, idempotency_proven = ?, result_json = ?, updated_at = ? WHERE run_id = ? AND action_id = ?",
-      )
-      .run(
-        result.status,
-        canonicalJson(result.history),
-        result.executionCount,
-        result.effectCount,
-        idempotencyProven,
-        result.result === undefined ? null : canonicalJson(result.result),
-        this.#clock(),
-        runId,
-        actionId,
-      );
+    this.#database.transaction(() => {
+      this.#database
+        .prepare(
+          "UPDATE provider_actions SET status = ?, history_json = ?, execution_count = ?, effect_count = ?, idempotency_proven = ?, result_json = ?, updated_at = ? WHERE run_id = ? AND action_id = ?",
+        )
+        .run(
+          result.status,
+          canonicalJson(result.history),
+          result.executionCount,
+          result.effectCount,
+          idempotencyProven,
+          result.result === undefined ? null : canonicalJson(result.result),
+          this.#clock(),
+          runId,
+          actionId,
+        );
+      if (result.status === "terminal") {
+        this.#settleProviderAuthorityBudget(runId, actionId, "consumed");
+      } else if (result.status === "quarantined") {
+        this.#settleProviderAuthorityBudget(runId, actionId, "usage-unknown");
+      }
+    })();
+  }
+
+  #settleProviderAuthorityBudget(
+    runId: string,
+    actionId: string,
+    settlement: "consumed" | "usage-unknown",
+  ): void {
+    const binding = this.#database.prepare(`
+      SELECT budget_authority_id,budget_reserved_turns,budget_state
+        FROM provider_actions
+       WHERE run_id=? AND action_id=?
+    `).get(runId, actionId);
+    if (!isRow(binding) || binding.budget_authority_id === null) return;
+    const authorityId = stringField(binding, "budget_authority_id");
+    const reservedTurns = numberField(binding, "budget_reserved_turns");
+    const current = stringField(binding, "budget_state");
+    if (current === settlement) return;
+    if (current !== "reserved") {
+      throw new Error(`provider action budget cannot transition from ${current} to ${settlement}`);
+    }
+    if (settlement === "consumed") {
+      const changed = this.#database.prepare(`
+        UPDATE authority_budget
+           SET reserved=reserved-?, consumed=consumed+?
+         WHERE authority_id=? AND unit_key='turns' AND reserved>=?
+           AND consumed+?<=granted
+      `).run(reservedTurns, reservedTurns, authorityId, reservedTurns, reservedTurns);
+      if (changed.changes !== 1) {
+        throw new Error("provider action turn settlement conflicts with its authority budget");
+      }
+    } else {
+      const changed = this.#database.prepare(`
+        UPDATE authority_budget SET usage_unknown=1
+         WHERE authority_id=? AND unit_key='turns' AND reserved>=?
+      `).run(authorityId, reservedTurns);
+      if (changed.changes !== 1) {
+        throw new Error("provider action unknown usage conflicts with its authority budget");
+      }
+    }
+    const settled = this.#database.prepare(`
+      UPDATE provider_actions SET budget_state=?
+       WHERE run_id=? AND action_id=? AND budget_state='reserved'
+    `).run(settlement, runId, actionId);
+    if (settled.changes !== 1) {
+      throw new Error("provider action budget settlement lost its action binding");
+    }
   }
 
 }
