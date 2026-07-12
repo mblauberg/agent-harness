@@ -1,4 +1,4 @@
-import type { LegacyAuthorityInput } from "./baseline-contracts.js";
+import type { AuthorityInput } from "./baseline-contracts.js";
 import type { ChairMutationContext } from "./operator.js";
 import type {
   AgentId,
@@ -11,7 +11,7 @@ import type {
 
 export type WorkstreamAgentDefinition = Readonly<{
   agentId: AgentId;
-  authority: LegacyAuthorityInput;
+  authority: AuthorityInput;
 }>;
 
 export type WorkstreamCreateRequest = Readonly<{

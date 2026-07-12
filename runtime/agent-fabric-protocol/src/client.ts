@@ -37,7 +37,6 @@ import {
 import type {
   ChairTakeoverRequest,
   IntegrationInputAttestationRequest,
-  OperatorCommandAudit,
   OperatorInputAttestation,
 } from "./operator.js";
 import type {
@@ -56,7 +55,6 @@ import type {
   GitRepositoryReadResult,
   OperatorAttachRequest,
   OperatorAttachment,
-  OperatorCommandRequest,
   OperatorDetachRequest,
   OperatorHeartbeatRequest,
   OperatorProjectionSnapshot,
@@ -140,8 +138,6 @@ export interface OperatorControlClient {
   attach(input: OperatorAttachRequest): Promise<OperatorAttachment>;
   detach(input: OperatorDetachRequest): Promise<{ detached: true; revision: number }>;
   heartbeat(input: OperatorHeartbeatRequest): Promise<OperatorAttachment>;
-  /** @deprecated Legacy generic surface. New Console clients use the closed two-phase action service. */
-  command?(input: OperatorCommandRequest): Promise<OperatorCommandAudit>;
 }
 
 export interface IntakeClient {
@@ -325,9 +321,6 @@ function operatorControl(transport: ProtocolRpcTransport): OperatorControlClient
     attach: (input) => transport.call(FABRIC_OPERATIONS.operatorAttach, input),
     detach: (input) => transport.call(FABRIC_OPERATIONS.operatorDetach, input),
     heartbeat: (input) => transport.call(FABRIC_OPERATIONS.operatorHeartbeat, input),
-    ...(hasOperation(transport, FABRIC_OPERATIONS.operatorCommand)
-      ? { command: (input: OperatorCommandRequest) => transport.call(FABRIC_OPERATIONS.operatorCommand, input) }
-      : {}),
   };
 }
 

@@ -109,7 +109,6 @@ const DEFINITIONS = defineOperations({
   operatorAttach: { operation: "fabric.v1.operator.attach", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
   operatorDetach: { operation: "fabric.v1.operator.detach", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
   operatorHeartbeat: { operation: "fabric.v1.operator.heartbeat", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
-  operatorCommand: { operation: "fabric.v1.operator.command", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
   integrationInputAttest: { operation: "fabric.v1.integration.input-attest", feature: "input-attestation.v1", principals: ["integration"], kind: "extension" },
   intakeDraftCreate: { operation: "fabric.v1.intake.draft.create", feature: "intakes.v1", principals: ["operator"], kind: "extension" },
   intakeRead: { operation: "fabric.v1.intake.read", feature: "intakes.v1", principals: ["operator"], kind: "extension" },

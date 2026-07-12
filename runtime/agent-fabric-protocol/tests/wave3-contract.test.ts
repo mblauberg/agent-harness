@@ -336,7 +336,7 @@ describe("bounded JSON and path parity", () => {
   });
 
   it("publishes and enforces JSON array limits", () => {
-    const operation = FABRIC_OPERATIONS.operatorCommand;
+    const operation = FABRIC_OPERATIONS.dispatchProviderAction;
     const fixture = OPERATION_CONTRACT_FIXTURES[operation];
     const input = { ...(fixture.input as Record<string, unknown>), payload: new Array(257).fill(null) };
     expect(() => parseOperationInput(operation, input)).toThrowError(/array.*256/iu);

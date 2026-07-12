@@ -469,20 +469,6 @@
                       "const": "forbidden"
                     }
                   }
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "local",
-                      "approved-provider",
-                      "external"
-                    ]
-                  },
-                  "minItems": 0,
-                  "maxItems": 3,
-                  "uniqueItems": true
                 }
               ]
             },
@@ -1405,7 +1391,6 @@
         "fabric.v1.operator.attach",
         "fabric.v1.operator.detach",
         "fabric.v1.operator.heartbeat",
-        "fabric.v1.operator.command",
         "fabric.v1.integration.input-attest",
         "fabric.v1.intake.draft.create",
         "fabric.v1.intake.read",
@@ -1510,7 +1495,6 @@
         "fabric.v1.operator.attach",
         "fabric.v1.operator.detach",
         "fabric.v1.operator.heartbeat",
-        "fabric.v1.operator.command",
         "fabric.v1.integration.input-attest",
         "fabric.v1.intake.draft.create",
         "fabric.v1.intake.read",
@@ -2412,7 +2396,7 @@
         },
         "allowedOperations": {
           "type": "array",
-          "maxItems": 100,
+          "maxItems": 99,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -2478,7 +2462,6 @@
               "fabric.v1.operator.attach",
               "fabric.v1.operator.detach",
               "fabric.v1.operator.heartbeat",
-              "fabric.v1.operator.command",
               "fabric.v1.integration.input-attest",
               "fabric.v1.intake.draft.create",
               "fabric.v1.intake.read",
@@ -2866,7 +2849,7 @@
             },
             "allowedOperations": {
               "type": "array",
-              "maxItems": 100,
+              "maxItems": 99,
               "uniqueItems": true,
               "items": {
                 "enum": [
@@ -2932,7 +2915,6 @@
                   "fabric.v1.operator.attach",
                   "fabric.v1.operator.detach",
                   "fabric.v1.operator.heartbeat",
-                  "fabric.v1.operator.command",
                   "fabric.v1.integration.input-attest",
                   "fabric.v1.intake.draft.create",
                   "fabric.v1.intake.read",
@@ -3367,20 +3349,6 @@
                               "uniqueItems": true
                             }
                           }
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "enum": [
-                              "local",
-                              "approved-provider",
-                              "external"
-                            ]
-                          },
-                          "minItems": 0,
-                          "maxItems": 3,
-                          "uniqueItems": true
                         }
                       ]
                     },
@@ -4326,20 +4294,6 @@
                   "uniqueItems": true
                 },
                 "objectiveChecks": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 128,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "minItems": 0,
-                  "maxItems": 256,
-                  "uniqueItems": true
-                },
-                "humanGates": {
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -5850,21 +5804,35 @@
               "const": "fabric.v1.team.create"
             },
             "input": {
-              "oneOf": [
-                {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "teamId",
+                "leader",
+                "rootTask",
+                "initialMembers",
+                "discussionGroups",
+                "reservedBudget",
+                "commandId"
+              ],
+              "properties": {
+                "teamId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "leader": {
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "teamId",
-                    "leader",
-                    "rootTask",
-                    "initialMembers",
-                    "discussionGroups",
-                    "reservedBudget",
-                    "commandId"
+                    "agentId",
+                    "authority"
                   ],
                   "properties": {
-                    "teamId": {
+                    "agentId": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 128,
@@ -5872,228 +5840,196 @@
                       "x-maxUtf8Bytes": 128,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
-                    "leader": {
+                    "authority": {
                       "type": "object",
                       "additionalProperties": false,
                       "required": [
-                        "agentId",
-                        "authority"
+                        "workspaceRoots",
+                        "sourcePaths",
+                        "artifactPaths",
+                        "actions",
+                        "disclosure",
+                        "expiresAt",
+                        "budget"
                       ],
                       "properties": {
-                        "agentId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "authority": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "workspaceRoots",
-                            "sourcePaths",
-                            "artifactPaths",
-                            "actions",
-                            "disclosure",
-                            "expiresAt",
-                            "budget"
-                          ],
-                          "properties": {
-                            "workspaceRoots": {
-                              "type": "array",
-                              "items": {
-                                "oneOf": [
-                                  {
-                                    "const": "."
-                                  },
-                                  {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 4096,
-                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                  }
-                                ]
+                        "workspaceRoots": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "const": "."
                               },
-                              "minItems": 1,
-                              "maxItems": 64,
-                              "uniqueItems": true
-                            },
-                            "sourcePaths": {
-                              "type": "array",
-                              "items": {
-                                "oneOf": [
-                                  {
-                                    "const": "."
-                                  },
-                                  {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 4096,
-                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                  }
-                                ]
-                              },
-                              "minItems": 0,
-                              "maxItems": 256,
-                              "uniqueItems": true
-                            },
-                            "artifactPaths": {
-                              "type": "array",
-                              "items": {
-                                "oneOf": [
-                                  {
-                                    "const": "."
-                                  },
-                                  {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 4096,
-                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                  }
-                                ]
-                              },
-                              "minItems": 0,
-                              "maxItems": 256,
-                              "uniqueItems": true
-                            },
-                            "actions": {
-                              "type": "array",
-                              "items": {
+                              {
                                 "type": "string",
-                                "enum": [
-                                  "fabric.v1.agent.attach",
-                                  "fabric.v1.agent.list",
-                                  "fabric.v1.agent.register",
-                                  "fabric.v1.agent.spawn",
-                                  "fabric.v1.artifact.publish",
-                                  "fabric.v1.authority.delegate",
-                                  "fabric.v1.barrier.close",
-                                  "fabric.v1.budget.read",
-                                  "fabric.v1.budget.release",
-                                  "fabric.v1.budget.reserve",
-                                  "fabric.v1.budget.usage.reconcile",
-                                  "fabric.v1.budget.usage.record",
-                                  "fabric.v1.capability.revoke",
-                                  "fabric.v1.capability.rotate",
-                                  "fabric.v1.delivery.abandon",
-                                  "fabric.v1.delivery.acknowledge",
-                                  "fabric.v1.discussion-group.create",
-                                  "fabric.v1.events.observe",
-                                  "fabric.v1.evidence.publish",
-                                  "fabric.v1.intake.revise",
-                                  "fabric.v1.launch.attest",
-                                  "fabric.v1.lease.revocation-proof.record",
-                                  "fabric.v1.lifecycle.read",
-                                  "fabric.v1.lifecycle.request",
-                                  "fabric.v1.mailbox.read",
-                                  "fabric.v1.message.receive",
-                                  "fabric.v1.message.send",
-                                  "fabric.v1.operator-intervention.record",
-                                  "fabric.v1.project-session.membership.bind",
-                                  "fabric.v1.provider-action.dispatch",
-                                  "fabric.v1.provider-action.read",
-                                  "fabric.v1.provider-action.reconcile",
-                                  "fabric.v1.provider-state.report",
-                                  "fabric.v1.receipt.export",
-                                  "fabric.v1.receipt.list",
-                                  "fabric.v1.resource.reconcile",
-                                  "fabric.v1.resource.release",
-                                  "fabric.v1.resource.reserve",
-                                  "fabric.v1.result-delivery.abandon",
-                                  "fabric.v1.result-delivery.claim",
-                                  "fabric.v1.result-delivery.consume",
-                                  "fabric.v1.result-delivery.reassign",
-                                  "fabric.v1.result-delivery.retry",
-                                  "fabric.v1.run-status.read",
-                                  "fabric.v1.scoped-gate.check",
-                                  "fabric.v1.scoped-gate.create",
-                                  "fabric.v1.subtree-barrier.close",
-                                  "fabric.v1.subtree.adopt",
-                                  "fabric.v1.subtree.freeze",
-                                  "fabric.v1.task.claim",
-                                  "fabric.v1.task.complete-with-reply",
-                                  "fabric.v1.task.create",
-                                  "fabric.v1.task.handoff.acknowledge",
-                                  "fabric.v1.task.list",
-                                  "fabric.v1.task.objective-check.record",
-                                  "fabric.v1.task.owner-recovery-proof.record",
-                                  "fabric.v1.task.owner.recover",
-                                  "fabric.v1.task.read",
-                                  "fabric.v1.task.readiness.refresh",
-                                  "fabric.v1.task.request",
-                                  "fabric.v1.task.update",
-                                  "fabric.v1.team.create",
-                                  "fabric.v1.team.read",
-                                  "fabric.v1.visibility-failure.record",
-                                  "fabric.v1.workstream.create",
-                                  "fabric.v1.workstream.settle",
-                                  "fabric.v1.write-lease.acquire",
-                                  "fabric.v1.write-lease.read",
-                                  "fabric.v1.write-lease.recover",
-                                  "fabric.v1.write-lease.release",
-                                  "fabric.v1.write-lease.renew"
-                                ]
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              }
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "uniqueItems": true
+                        },
+                        "sourcePaths": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "const": "."
                               },
-                              "minItems": 0,
-                              "maxItems": 256,
-                              "uniqueItems": true
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              }
+                            ]
+                          },
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
+                        },
+                        "artifactPaths": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "const": "."
+                              },
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              }
+                            ]
+                          },
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
+                        },
+                        "actions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "fabric.v1.agent.attach",
+                              "fabric.v1.agent.list",
+                              "fabric.v1.agent.register",
+                              "fabric.v1.agent.spawn",
+                              "fabric.v1.artifact.publish",
+                              "fabric.v1.authority.delegate",
+                              "fabric.v1.barrier.close",
+                              "fabric.v1.budget.read",
+                              "fabric.v1.budget.release",
+                              "fabric.v1.budget.reserve",
+                              "fabric.v1.budget.usage.reconcile",
+                              "fabric.v1.budget.usage.record",
+                              "fabric.v1.capability.revoke",
+                              "fabric.v1.capability.rotate",
+                              "fabric.v1.delivery.abandon",
+                              "fabric.v1.delivery.acknowledge",
+                              "fabric.v1.discussion-group.create",
+                              "fabric.v1.events.observe",
+                              "fabric.v1.evidence.publish",
+                              "fabric.v1.intake.revise",
+                              "fabric.v1.launch.attest",
+                              "fabric.v1.lease.revocation-proof.record",
+                              "fabric.v1.lifecycle.read",
+                              "fabric.v1.lifecycle.request",
+                              "fabric.v1.mailbox.read",
+                              "fabric.v1.message.receive",
+                              "fabric.v1.message.send",
+                              "fabric.v1.operator-intervention.record",
+                              "fabric.v1.project-session.membership.bind",
+                              "fabric.v1.provider-action.dispatch",
+                              "fabric.v1.provider-action.read",
+                              "fabric.v1.provider-action.reconcile",
+                              "fabric.v1.provider-state.report",
+                              "fabric.v1.receipt.export",
+                              "fabric.v1.receipt.list",
+                              "fabric.v1.resource.reconcile",
+                              "fabric.v1.resource.release",
+                              "fabric.v1.resource.reserve",
+                              "fabric.v1.result-delivery.abandon",
+                              "fabric.v1.result-delivery.claim",
+                              "fabric.v1.result-delivery.consume",
+                              "fabric.v1.result-delivery.reassign",
+                              "fabric.v1.result-delivery.retry",
+                              "fabric.v1.run-status.read",
+                              "fabric.v1.scoped-gate.check",
+                              "fabric.v1.scoped-gate.create",
+                              "fabric.v1.subtree-barrier.close",
+                              "fabric.v1.subtree.adopt",
+                              "fabric.v1.subtree.freeze",
+                              "fabric.v1.task.claim",
+                              "fabric.v1.task.complete-with-reply",
+                              "fabric.v1.task.create",
+                              "fabric.v1.task.handoff.acknowledge",
+                              "fabric.v1.task.list",
+                              "fabric.v1.task.objective-check.record",
+                              "fabric.v1.task.owner-recovery-proof.record",
+                              "fabric.v1.task.owner.recover",
+                              "fabric.v1.task.read",
+                              "fabric.v1.task.readiness.refresh",
+                              "fabric.v1.task.request",
+                              "fabric.v1.task.update",
+                              "fabric.v1.team.create",
+                              "fabric.v1.team.read",
+                              "fabric.v1.visibility-failure.record",
+                              "fabric.v1.workstream.create",
+                              "fabric.v1.workstream.settle",
+                              "fabric.v1.write-lease.acquire",
+                              "fabric.v1.write-lease.read",
+                              "fabric.v1.write-lease.recover",
+                              "fabric.v1.write-lease.release",
+                              "fabric.v1.write-lease.renew"
+                            ]
+                          },
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
+                        },
+                        "disclosure": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "level"
+                              ],
+                              "properties": {
+                                "level": {
+                                  "const": "allowed"
+                                }
+                              }
                             },
-                            "disclosure": {
-                              "oneOf": [
-                                {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "required": [
-                                    "level"
-                                  ],
-                                  "properties": {
-                                    "level": {
-                                      "const": "allowed"
-                                    }
-                                  }
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "level"
+                              ],
+                              "properties": {
+                                "level": {
+                                  "const": "forbidden"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "level",
+                                "scopes"
+                              ],
+                              "properties": {
+                                "level": {
+                                  "const": "scoped"
                                 },
-                                {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "required": [
-                                    "level"
-                                  ],
-                                  "properties": {
-                                    "level": {
-                                      "const": "forbidden"
-                                    }
-                                  }
-                                },
-                                {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "required": [
-                                    "level",
-                                    "scopes"
-                                  ],
-                                  "properties": {
-                                    "level": {
-                                      "const": "scoped"
-                                    },
-                                    "scopes": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "local",
-                                          "approved-provider",
-                                          "external"
-                                        ]
-                                      },
-                                      "minItems": 1,
-                                      "maxItems": 3,
-                                      "uniqueItems": true
-                                    }
-                                  }
-                                },
-                                {
+                                "scopes": {
                                   "type": "array",
                                   "items": {
                                     "type": "string",
@@ -6103,411 +6039,397 @@
                                       "external"
                                     ]
                                   },
-                                  "minItems": 0,
+                                  "minItems": 1,
                                   "maxItems": 3,
                                   "uniqueItems": true
                                 }
-                              ]
-                            },
-                            "expiresAt": {
-                              "type": "string",
-                              "format": "date-time"
-                            },
-                            "budget": {
-                              "type": "object",
-                              "minProperties": 0,
-                              "maxProperties": 128,
-                              "propertyNames": {
-                                "oneOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": [
-                                      "turns",
-                                      "provider_calls",
-                                      "concurrent_turns",
-                                      "descendants",
-                                      "message_bytes",
-                                      "artifact_bytes",
-                                      "wall_clock_milliseconds"
-                                    ]
-                                  },
-                                  {
-                                    "type": "string",
-                                    "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
-                                  }
-                                ]
-                              },
-                              "additionalProperties": {
-                                "type": "integer",
-                                "minimum": 0
                               }
-                            },
-                            "deniedPaths": {
-                              "type": "array",
-                              "items": {
-                                "oneOf": [
-                                  {
-                                    "const": "."
-                                  },
-                                  {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 4096,
-                                    "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                  }
-                                ]
-                              },
-                              "minItems": 0,
-                              "maxItems": 256,
-                              "uniqueItems": true
-                            },
-                            "deniedActions": {
-                              "type": "array",
-                              "items": {
+                            }
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "budget": {
+                          "type": "object",
+                          "minProperties": 0,
+                          "maxProperties": 128,
+                          "propertyNames": {
+                            "oneOf": [
+                              {
                                 "type": "string",
                                 "enum": [
-                                  "fabric.v1.agent.attach",
-                                  "fabric.v1.agent.list",
-                                  "fabric.v1.agent.register",
-                                  "fabric.v1.agent.spawn",
-                                  "fabric.v1.artifact.publish",
-                                  "fabric.v1.authority.delegate",
-                                  "fabric.v1.barrier.close",
-                                  "fabric.v1.budget.read",
-                                  "fabric.v1.budget.release",
-                                  "fabric.v1.budget.reserve",
-                                  "fabric.v1.budget.usage.reconcile",
-                                  "fabric.v1.budget.usage.record",
-                                  "fabric.v1.capability.revoke",
-                                  "fabric.v1.capability.rotate",
-                                  "fabric.v1.delivery.abandon",
-                                  "fabric.v1.delivery.acknowledge",
-                                  "fabric.v1.discussion-group.create",
-                                  "fabric.v1.events.observe",
-                                  "fabric.v1.evidence.publish",
-                                  "fabric.v1.intake.revise",
-                                  "fabric.v1.launch.attest",
-                                  "fabric.v1.lease.revocation-proof.record",
-                                  "fabric.v1.lifecycle.read",
-                                  "fabric.v1.lifecycle.request",
-                                  "fabric.v1.mailbox.read",
-                                  "fabric.v1.message.receive",
-                                  "fabric.v1.message.send",
-                                  "fabric.v1.operator-intervention.record",
-                                  "fabric.v1.project-session.membership.bind",
-                                  "fabric.v1.provider-action.dispatch",
-                                  "fabric.v1.provider-action.read",
-                                  "fabric.v1.provider-action.reconcile",
-                                  "fabric.v1.provider-state.report",
-                                  "fabric.v1.receipt.export",
-                                  "fabric.v1.receipt.list",
-                                  "fabric.v1.resource.reconcile",
-                                  "fabric.v1.resource.release",
-                                  "fabric.v1.resource.reserve",
-                                  "fabric.v1.result-delivery.abandon",
-                                  "fabric.v1.result-delivery.claim",
-                                  "fabric.v1.result-delivery.consume",
-                                  "fabric.v1.result-delivery.reassign",
-                                  "fabric.v1.result-delivery.retry",
-                                  "fabric.v1.run-status.read",
-                                  "fabric.v1.scoped-gate.check",
-                                  "fabric.v1.scoped-gate.create",
-                                  "fabric.v1.subtree-barrier.close",
-                                  "fabric.v1.subtree.adopt",
-                                  "fabric.v1.subtree.freeze",
-                                  "fabric.v1.task.claim",
-                                  "fabric.v1.task.complete-with-reply",
-                                  "fabric.v1.task.create",
-                                  "fabric.v1.task.handoff.acknowledge",
-                                  "fabric.v1.task.list",
-                                  "fabric.v1.task.objective-check.record",
-                                  "fabric.v1.task.owner-recovery-proof.record",
-                                  "fabric.v1.task.owner.recover",
-                                  "fabric.v1.task.read",
-                                  "fabric.v1.task.readiness.refresh",
-                                  "fabric.v1.task.request",
-                                  "fabric.v1.task.update",
-                                  "fabric.v1.team.create",
-                                  "fabric.v1.team.read",
-                                  "fabric.v1.visibility-failure.record",
-                                  "fabric.v1.workstream.create",
-                                  "fabric.v1.workstream.settle",
-                                  "fabric.v1.write-lease.acquire",
-                                  "fabric.v1.write-lease.read",
-                                  "fabric.v1.write-lease.recover",
-                                  "fabric.v1.write-lease.release",
-                                  "fabric.v1.write-lease.renew"
+                                  "turns",
+                                  "provider_calls",
+                                  "concurrent_turns",
+                                  "descendants",
+                                  "message_bytes",
+                                  "artifact_bytes",
+                                  "wall_clock_milliseconds"
                                 ]
                               },
-                              "minItems": 0,
-                              "maxItems": 256,
-                              "uniqueItems": true
-                            }
+                              {
+                                "type": "string",
+                                "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                              }
+                            ]
+                          },
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0
                           }
+                        },
+                        "deniedPaths": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "const": "."
+                              },
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                              }
+                            ]
+                          },
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
+                        },
+                        "deniedActions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "fabric.v1.agent.attach",
+                              "fabric.v1.agent.list",
+                              "fabric.v1.agent.register",
+                              "fabric.v1.agent.spawn",
+                              "fabric.v1.artifact.publish",
+                              "fabric.v1.authority.delegate",
+                              "fabric.v1.barrier.close",
+                              "fabric.v1.budget.read",
+                              "fabric.v1.budget.release",
+                              "fabric.v1.budget.reserve",
+                              "fabric.v1.budget.usage.reconcile",
+                              "fabric.v1.budget.usage.record",
+                              "fabric.v1.capability.revoke",
+                              "fabric.v1.capability.rotate",
+                              "fabric.v1.delivery.abandon",
+                              "fabric.v1.delivery.acknowledge",
+                              "fabric.v1.discussion-group.create",
+                              "fabric.v1.events.observe",
+                              "fabric.v1.evidence.publish",
+                              "fabric.v1.intake.revise",
+                              "fabric.v1.launch.attest",
+                              "fabric.v1.lease.revocation-proof.record",
+                              "fabric.v1.lifecycle.read",
+                              "fabric.v1.lifecycle.request",
+                              "fabric.v1.mailbox.read",
+                              "fabric.v1.message.receive",
+                              "fabric.v1.message.send",
+                              "fabric.v1.operator-intervention.record",
+                              "fabric.v1.project-session.membership.bind",
+                              "fabric.v1.provider-action.dispatch",
+                              "fabric.v1.provider-action.read",
+                              "fabric.v1.provider-action.reconcile",
+                              "fabric.v1.provider-state.report",
+                              "fabric.v1.receipt.export",
+                              "fabric.v1.receipt.list",
+                              "fabric.v1.resource.reconcile",
+                              "fabric.v1.resource.release",
+                              "fabric.v1.resource.reserve",
+                              "fabric.v1.result-delivery.abandon",
+                              "fabric.v1.result-delivery.claim",
+                              "fabric.v1.result-delivery.consume",
+                              "fabric.v1.result-delivery.reassign",
+                              "fabric.v1.result-delivery.retry",
+                              "fabric.v1.run-status.read",
+                              "fabric.v1.scoped-gate.check",
+                              "fabric.v1.scoped-gate.create",
+                              "fabric.v1.subtree-barrier.close",
+                              "fabric.v1.subtree.adopt",
+                              "fabric.v1.subtree.freeze",
+                              "fabric.v1.task.claim",
+                              "fabric.v1.task.complete-with-reply",
+                              "fabric.v1.task.create",
+                              "fabric.v1.task.handoff.acknowledge",
+                              "fabric.v1.task.list",
+                              "fabric.v1.task.objective-check.record",
+                              "fabric.v1.task.owner-recovery-proof.record",
+                              "fabric.v1.task.owner.recover",
+                              "fabric.v1.task.read",
+                              "fabric.v1.task.readiness.refresh",
+                              "fabric.v1.task.request",
+                              "fabric.v1.task.update",
+                              "fabric.v1.team.create",
+                              "fabric.v1.team.read",
+                              "fabric.v1.visibility-failure.record",
+                              "fabric.v1.workstream.create",
+                              "fabric.v1.workstream.settle",
+                              "fabric.v1.write-lease.acquire",
+                              "fabric.v1.write-lease.read",
+                              "fabric.v1.write-lease.recover",
+                              "fabric.v1.write-lease.release",
+                              "fabric.v1.write-lease.renew"
+                            ]
+                          },
+                          "minItems": 0,
+                          "maxItems": 256,
+                          "uniqueItems": true
                         }
                       }
+                    }
+                  }
+                },
+                "rootTask": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "taskId",
+                    "objective",
+                    "baseRevision"
+                  ],
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                     },
-                    "rootTask": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "taskId",
-                        "objective",
-                        "baseRevision"
-                      ],
-                      "properties": {
-                        "taskId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "objective": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 4096,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 4096
-                        },
-                        "baseRevision": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 4096,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 4096
-                        }
-                      }
+                    "objective": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
                     },
-                    "initialMembers": {
-                      "type": "array",
-                      "items": {
+                    "baseRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "x-minUtf8Bytes": 1,
+                      "x-maxUtf8Bytes": 4096
+                    }
+                  }
+                },
+                "initialMembers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "agentId",
+                      "authority"
+                    ],
+                    "properties": {
+                      "agentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "authority": {
                         "type": "object",
                         "additionalProperties": false,
                         "required": [
-                          "agentId",
-                          "authority"
+                          "workspaceRoots",
+                          "sourcePaths",
+                          "artifactPaths",
+                          "actions",
+                          "disclosure",
+                          "expiresAt",
+                          "budget"
                         ],
                         "properties": {
-                          "agentId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "x-minUtf8Bytes": 1,
-                            "x-maxUtf8Bytes": 128,
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                          },
-                          "authority": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "workspaceRoots",
-                              "sourcePaths",
-                              "artifactPaths",
-                              "actions",
-                              "disclosure",
-                              "expiresAt",
-                              "budget"
-                            ],
-                            "properties": {
-                              "workspaceRoots": {
-                                "type": "array",
-                                "items": {
-                                  "oneOf": [
-                                    {
-                                      "const": "."
-                                    },
-                                    {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 4096,
-                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                    }
-                                  ]
+                          "workspaceRoots": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "const": "."
                                 },
-                                "minItems": 1,
-                                "maxItems": 64,
-                                "uniqueItems": true
-                              },
-                              "sourcePaths": {
-                                "type": "array",
-                                "items": {
-                                  "oneOf": [
-                                    {
-                                      "const": "."
-                                    },
-                                    {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 4096,
-                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                    }
-                                  ]
-                                },
-                                "minItems": 0,
-                                "maxItems": 256,
-                                "uniqueItems": true
-                              },
-                              "artifactPaths": {
-                                "type": "array",
-                                "items": {
-                                  "oneOf": [
-                                    {
-                                      "const": "."
-                                    },
-                                    {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 4096,
-                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                    }
-                                  ]
-                                },
-                                "minItems": 0,
-                                "maxItems": 256,
-                                "uniqueItems": true
-                              },
-                              "actions": {
-                                "type": "array",
-                                "items": {
+                                {
                                   "type": "string",
-                                  "enum": [
-                                    "fabric.v1.agent.attach",
-                                    "fabric.v1.agent.list",
-                                    "fabric.v1.agent.register",
-                                    "fabric.v1.agent.spawn",
-                                    "fabric.v1.artifact.publish",
-                                    "fabric.v1.authority.delegate",
-                                    "fabric.v1.barrier.close",
-                                    "fabric.v1.budget.read",
-                                    "fabric.v1.budget.release",
-                                    "fabric.v1.budget.reserve",
-                                    "fabric.v1.budget.usage.reconcile",
-                                    "fabric.v1.budget.usage.record",
-                                    "fabric.v1.capability.revoke",
-                                    "fabric.v1.capability.rotate",
-                                    "fabric.v1.delivery.abandon",
-                                    "fabric.v1.delivery.acknowledge",
-                                    "fabric.v1.discussion-group.create",
-                                    "fabric.v1.events.observe",
-                                    "fabric.v1.evidence.publish",
-                                    "fabric.v1.intake.revise",
-                                    "fabric.v1.launch.attest",
-                                    "fabric.v1.lease.revocation-proof.record",
-                                    "fabric.v1.lifecycle.read",
-                                    "fabric.v1.lifecycle.request",
-                                    "fabric.v1.mailbox.read",
-                                    "fabric.v1.message.receive",
-                                    "fabric.v1.message.send",
-                                    "fabric.v1.operator-intervention.record",
-                                    "fabric.v1.project-session.membership.bind",
-                                    "fabric.v1.provider-action.dispatch",
-                                    "fabric.v1.provider-action.read",
-                                    "fabric.v1.provider-action.reconcile",
-                                    "fabric.v1.provider-state.report",
-                                    "fabric.v1.receipt.export",
-                                    "fabric.v1.receipt.list",
-                                    "fabric.v1.resource.reconcile",
-                                    "fabric.v1.resource.release",
-                                    "fabric.v1.resource.reserve",
-                                    "fabric.v1.result-delivery.abandon",
-                                    "fabric.v1.result-delivery.claim",
-                                    "fabric.v1.result-delivery.consume",
-                                    "fabric.v1.result-delivery.reassign",
-                                    "fabric.v1.result-delivery.retry",
-                                    "fabric.v1.run-status.read",
-                                    "fabric.v1.scoped-gate.check",
-                                    "fabric.v1.scoped-gate.create",
-                                    "fabric.v1.subtree-barrier.close",
-                                    "fabric.v1.subtree.adopt",
-                                    "fabric.v1.subtree.freeze",
-                                    "fabric.v1.task.claim",
-                                    "fabric.v1.task.complete-with-reply",
-                                    "fabric.v1.task.create",
-                                    "fabric.v1.task.handoff.acknowledge",
-                                    "fabric.v1.task.list",
-                                    "fabric.v1.task.objective-check.record",
-                                    "fabric.v1.task.owner-recovery-proof.record",
-                                    "fabric.v1.task.owner.recover",
-                                    "fabric.v1.task.read",
-                                    "fabric.v1.task.readiness.refresh",
-                                    "fabric.v1.task.request",
-                                    "fabric.v1.task.update",
-                                    "fabric.v1.team.create",
-                                    "fabric.v1.team.read",
-                                    "fabric.v1.visibility-failure.record",
-                                    "fabric.v1.workstream.create",
-                                    "fabric.v1.workstream.settle",
-                                    "fabric.v1.write-lease.acquire",
-                                    "fabric.v1.write-lease.read",
-                                    "fabric.v1.write-lease.recover",
-                                    "fabric.v1.write-lease.release",
-                                    "fabric.v1.write-lease.renew"
-                                  ]
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                }
+                              ]
+                            },
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "uniqueItems": true
+                          },
+                          "sourcePaths": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "const": "."
                                 },
-                                "minItems": 0,
-                                "maxItems": 256,
-                                "uniqueItems": true
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                }
+                              ]
+                            },
+                            "minItems": 0,
+                            "maxItems": 256,
+                            "uniqueItems": true
+                          },
+                          "artifactPaths": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "const": "."
+                                },
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                }
+                              ]
+                            },
+                            "minItems": 0,
+                            "maxItems": 256,
+                            "uniqueItems": true
+                          },
+                          "actions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "fabric.v1.agent.attach",
+                                "fabric.v1.agent.list",
+                                "fabric.v1.agent.register",
+                                "fabric.v1.agent.spawn",
+                                "fabric.v1.artifact.publish",
+                                "fabric.v1.authority.delegate",
+                                "fabric.v1.barrier.close",
+                                "fabric.v1.budget.read",
+                                "fabric.v1.budget.release",
+                                "fabric.v1.budget.reserve",
+                                "fabric.v1.budget.usage.reconcile",
+                                "fabric.v1.budget.usage.record",
+                                "fabric.v1.capability.revoke",
+                                "fabric.v1.capability.rotate",
+                                "fabric.v1.delivery.abandon",
+                                "fabric.v1.delivery.acknowledge",
+                                "fabric.v1.discussion-group.create",
+                                "fabric.v1.events.observe",
+                                "fabric.v1.evidence.publish",
+                                "fabric.v1.intake.revise",
+                                "fabric.v1.launch.attest",
+                                "fabric.v1.lease.revocation-proof.record",
+                                "fabric.v1.lifecycle.read",
+                                "fabric.v1.lifecycle.request",
+                                "fabric.v1.mailbox.read",
+                                "fabric.v1.message.receive",
+                                "fabric.v1.message.send",
+                                "fabric.v1.operator-intervention.record",
+                                "fabric.v1.project-session.membership.bind",
+                                "fabric.v1.provider-action.dispatch",
+                                "fabric.v1.provider-action.read",
+                                "fabric.v1.provider-action.reconcile",
+                                "fabric.v1.provider-state.report",
+                                "fabric.v1.receipt.export",
+                                "fabric.v1.receipt.list",
+                                "fabric.v1.resource.reconcile",
+                                "fabric.v1.resource.release",
+                                "fabric.v1.resource.reserve",
+                                "fabric.v1.result-delivery.abandon",
+                                "fabric.v1.result-delivery.claim",
+                                "fabric.v1.result-delivery.consume",
+                                "fabric.v1.result-delivery.reassign",
+                                "fabric.v1.result-delivery.retry",
+                                "fabric.v1.run-status.read",
+                                "fabric.v1.scoped-gate.check",
+                                "fabric.v1.scoped-gate.create",
+                                "fabric.v1.subtree-barrier.close",
+                                "fabric.v1.subtree.adopt",
+                                "fabric.v1.subtree.freeze",
+                                "fabric.v1.task.claim",
+                                "fabric.v1.task.complete-with-reply",
+                                "fabric.v1.task.create",
+                                "fabric.v1.task.handoff.acknowledge",
+                                "fabric.v1.task.list",
+                                "fabric.v1.task.objective-check.record",
+                                "fabric.v1.task.owner-recovery-proof.record",
+                                "fabric.v1.task.owner.recover",
+                                "fabric.v1.task.read",
+                                "fabric.v1.task.readiness.refresh",
+                                "fabric.v1.task.request",
+                                "fabric.v1.task.update",
+                                "fabric.v1.team.create",
+                                "fabric.v1.team.read",
+                                "fabric.v1.visibility-failure.record",
+                                "fabric.v1.workstream.create",
+                                "fabric.v1.workstream.settle",
+                                "fabric.v1.write-lease.acquire",
+                                "fabric.v1.write-lease.read",
+                                "fabric.v1.write-lease.recover",
+                                "fabric.v1.write-lease.release",
+                                "fabric.v1.write-lease.renew"
+                              ]
+                            },
+                            "minItems": 0,
+                            "maxItems": 256,
+                            "uniqueItems": true
+                          },
+                          "disclosure": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "level"
+                                ],
+                                "properties": {
+                                  "level": {
+                                    "const": "allowed"
+                                  }
+                                }
                               },
-                              "disclosure": {
-                                "oneOf": [
-                                  {
-                                    "type": "object",
-                                    "additionalProperties": false,
-                                    "required": [
-                                      "level"
-                                    ],
-                                    "properties": {
-                                      "level": {
-                                        "const": "allowed"
-                                      }
-                                    }
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "level"
+                                ],
+                                "properties": {
+                                  "level": {
+                                    "const": "forbidden"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "level",
+                                  "scopes"
+                                ],
+                                "properties": {
+                                  "level": {
+                                    "const": "scoped"
                                   },
-                                  {
-                                    "type": "object",
-                                    "additionalProperties": false,
-                                    "required": [
-                                      "level"
-                                    ],
-                                    "properties": {
-                                      "level": {
-                                        "const": "forbidden"
-                                      }
-                                    }
-                                  },
-                                  {
-                                    "type": "object",
-                                    "additionalProperties": false,
-                                    "required": [
-                                      "level",
-                                      "scopes"
-                                    ],
-                                    "properties": {
-                                      "level": {
-                                        "const": "scoped"
-                                      },
-                                      "scopes": {
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string",
-                                          "enum": [
-                                            "local",
-                                            "approved-provider",
-                                            "external"
-                                          ]
-                                        },
-                                        "minItems": 1,
-                                        "maxItems": 3,
-                                        "uniqueItems": true
-                                      }
-                                    }
-                                  },
-                                  {
+                                  "scopes": {
                                     "type": "array",
                                     "items": {
                                       "type": "string",
@@ -6517,451 +6439,246 @@
                                         "external"
                                       ]
                                     },
-                                    "minItems": 0,
+                                    "minItems": 1,
                                     "maxItems": 3,
                                     "uniqueItems": true
                                   }
-                                ]
-                              },
-                              "expiresAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "budget": {
-                                "type": "object",
-                                "minProperties": 0,
-                                "maxProperties": 128,
-                                "propertyNames": {
-                                  "oneOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        "turns",
-                                        "provider_calls",
-                                        "concurrent_turns",
-                                        "descendants",
-                                        "message_bytes",
-                                        "artifact_bytes",
-                                        "wall_clock_milliseconds"
-                                      ]
-                                    },
-                                    {
-                                      "type": "string",
-                                      "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
-                                    }
-                                  ]
-                                },
-                                "additionalProperties": {
-                                  "type": "integer",
-                                  "minimum": 0
                                 }
-                              },
-                              "deniedPaths": {
-                                "type": "array",
-                                "items": {
-                                  "oneOf": [
-                                    {
-                                      "const": "."
-                                    },
-                                    {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 4096,
-                                      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                                    }
-                                  ]
-                                },
-                                "minItems": 0,
-                                "maxItems": 256,
-                                "uniqueItems": true
-                              },
-                              "deniedActions": {
-                                "type": "array",
-                                "items": {
+                              }
+                            ]
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "budget": {
+                            "type": "object",
+                            "minProperties": 0,
+                            "maxProperties": 128,
+                            "propertyNames": {
+                              "oneOf": [
+                                {
                                   "type": "string",
                                   "enum": [
-                                    "fabric.v1.agent.attach",
-                                    "fabric.v1.agent.list",
-                                    "fabric.v1.agent.register",
-                                    "fabric.v1.agent.spawn",
-                                    "fabric.v1.artifact.publish",
-                                    "fabric.v1.authority.delegate",
-                                    "fabric.v1.barrier.close",
-                                    "fabric.v1.budget.read",
-                                    "fabric.v1.budget.release",
-                                    "fabric.v1.budget.reserve",
-                                    "fabric.v1.budget.usage.reconcile",
-                                    "fabric.v1.budget.usage.record",
-                                    "fabric.v1.capability.revoke",
-                                    "fabric.v1.capability.rotate",
-                                    "fabric.v1.delivery.abandon",
-                                    "fabric.v1.delivery.acknowledge",
-                                    "fabric.v1.discussion-group.create",
-                                    "fabric.v1.events.observe",
-                                    "fabric.v1.evidence.publish",
-                                    "fabric.v1.intake.revise",
-                                    "fabric.v1.launch.attest",
-                                    "fabric.v1.lease.revocation-proof.record",
-                                    "fabric.v1.lifecycle.read",
-                                    "fabric.v1.lifecycle.request",
-                                    "fabric.v1.mailbox.read",
-                                    "fabric.v1.message.receive",
-                                    "fabric.v1.message.send",
-                                    "fabric.v1.operator-intervention.record",
-                                    "fabric.v1.project-session.membership.bind",
-                                    "fabric.v1.provider-action.dispatch",
-                                    "fabric.v1.provider-action.read",
-                                    "fabric.v1.provider-action.reconcile",
-                                    "fabric.v1.provider-state.report",
-                                    "fabric.v1.receipt.export",
-                                    "fabric.v1.receipt.list",
-                                    "fabric.v1.resource.reconcile",
-                                    "fabric.v1.resource.release",
-                                    "fabric.v1.resource.reserve",
-                                    "fabric.v1.result-delivery.abandon",
-                                    "fabric.v1.result-delivery.claim",
-                                    "fabric.v1.result-delivery.consume",
-                                    "fabric.v1.result-delivery.reassign",
-                                    "fabric.v1.result-delivery.retry",
-                                    "fabric.v1.run-status.read",
-                                    "fabric.v1.scoped-gate.check",
-                                    "fabric.v1.scoped-gate.create",
-                                    "fabric.v1.subtree-barrier.close",
-                                    "fabric.v1.subtree.adopt",
-                                    "fabric.v1.subtree.freeze",
-                                    "fabric.v1.task.claim",
-                                    "fabric.v1.task.complete-with-reply",
-                                    "fabric.v1.task.create",
-                                    "fabric.v1.task.handoff.acknowledge",
-                                    "fabric.v1.task.list",
-                                    "fabric.v1.task.objective-check.record",
-                                    "fabric.v1.task.owner-recovery-proof.record",
-                                    "fabric.v1.task.owner.recover",
-                                    "fabric.v1.task.read",
-                                    "fabric.v1.task.readiness.refresh",
-                                    "fabric.v1.task.request",
-                                    "fabric.v1.task.update",
-                                    "fabric.v1.team.create",
-                                    "fabric.v1.team.read",
-                                    "fabric.v1.visibility-failure.record",
-                                    "fabric.v1.workstream.create",
-                                    "fabric.v1.workstream.settle",
-                                    "fabric.v1.write-lease.acquire",
-                                    "fabric.v1.write-lease.read",
-                                    "fabric.v1.write-lease.recover",
-                                    "fabric.v1.write-lease.release",
-                                    "fabric.v1.write-lease.renew"
+                                    "turns",
+                                    "provider_calls",
+                                    "concurrent_turns",
+                                    "descendants",
+                                    "message_bytes",
+                                    "artifact_bytes",
+                                    "wall_clock_milliseconds"
                                   ]
                                 },
-                                "minItems": 0,
-                                "maxItems": 256,
-                                "uniqueItems": true
-                              }
+                                {
+                                  "type": "string",
+                                  "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                                },
+                                {
+                                  "type": "string",
+                                  "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                                }
+                              ]
+                            },
+                            "additionalProperties": {
+                              "type": "integer",
+                              "minimum": 0
                             }
-                          }
-                        }
-                      },
-                      "minItems": 0,
-                      "maxItems": 5
-                    },
-                    "discussionGroups": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "groupId",
-                          "memberAgentIds"
-                        ],
-                        "properties": {
-                          "groupId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "x-minUtf8Bytes": 1,
-                            "x-maxUtf8Bytes": 128,
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                           },
-                          "memberAgentIds": {
+                          "deniedPaths": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "const": "."
+                                },
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4096,
+                                  "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+                                }
+                              ]
+                            },
+                            "minItems": 0,
+                            "maxItems": 256,
+                            "uniqueItems": true
+                          },
+                          "deniedActions": {
                             "type": "array",
                             "items": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                              "enum": [
+                                "fabric.v1.agent.attach",
+                                "fabric.v1.agent.list",
+                                "fabric.v1.agent.register",
+                                "fabric.v1.agent.spawn",
+                                "fabric.v1.artifact.publish",
+                                "fabric.v1.authority.delegate",
+                                "fabric.v1.barrier.close",
+                                "fabric.v1.budget.read",
+                                "fabric.v1.budget.release",
+                                "fabric.v1.budget.reserve",
+                                "fabric.v1.budget.usage.reconcile",
+                                "fabric.v1.budget.usage.record",
+                                "fabric.v1.capability.revoke",
+                                "fabric.v1.capability.rotate",
+                                "fabric.v1.delivery.abandon",
+                                "fabric.v1.delivery.acknowledge",
+                                "fabric.v1.discussion-group.create",
+                                "fabric.v1.events.observe",
+                                "fabric.v1.evidence.publish",
+                                "fabric.v1.intake.revise",
+                                "fabric.v1.launch.attest",
+                                "fabric.v1.lease.revocation-proof.record",
+                                "fabric.v1.lifecycle.read",
+                                "fabric.v1.lifecycle.request",
+                                "fabric.v1.mailbox.read",
+                                "fabric.v1.message.receive",
+                                "fabric.v1.message.send",
+                                "fabric.v1.operator-intervention.record",
+                                "fabric.v1.project-session.membership.bind",
+                                "fabric.v1.provider-action.dispatch",
+                                "fabric.v1.provider-action.read",
+                                "fabric.v1.provider-action.reconcile",
+                                "fabric.v1.provider-state.report",
+                                "fabric.v1.receipt.export",
+                                "fabric.v1.receipt.list",
+                                "fabric.v1.resource.reconcile",
+                                "fabric.v1.resource.release",
+                                "fabric.v1.resource.reserve",
+                                "fabric.v1.result-delivery.abandon",
+                                "fabric.v1.result-delivery.claim",
+                                "fabric.v1.result-delivery.consume",
+                                "fabric.v1.result-delivery.reassign",
+                                "fabric.v1.result-delivery.retry",
+                                "fabric.v1.run-status.read",
+                                "fabric.v1.scoped-gate.check",
+                                "fabric.v1.scoped-gate.create",
+                                "fabric.v1.subtree-barrier.close",
+                                "fabric.v1.subtree.adopt",
+                                "fabric.v1.subtree.freeze",
+                                "fabric.v1.task.claim",
+                                "fabric.v1.task.complete-with-reply",
+                                "fabric.v1.task.create",
+                                "fabric.v1.task.handoff.acknowledge",
+                                "fabric.v1.task.list",
+                                "fabric.v1.task.objective-check.record",
+                                "fabric.v1.task.owner-recovery-proof.record",
+                                "fabric.v1.task.owner.recover",
+                                "fabric.v1.task.read",
+                                "fabric.v1.task.readiness.refresh",
+                                "fabric.v1.task.request",
+                                "fabric.v1.task.update",
+                                "fabric.v1.team.create",
+                                "fabric.v1.team.read",
+                                "fabric.v1.visibility-failure.record",
+                                "fabric.v1.workstream.create",
+                                "fabric.v1.workstream.settle",
+                                "fabric.v1.write-lease.acquire",
+                                "fabric.v1.write-lease.read",
+                                "fabric.v1.write-lease.recover",
+                                "fabric.v1.write-lease.release",
+                                "fabric.v1.write-lease.renew"
+                              ]
                             },
-                            "minItems": 2,
-                            "maxItems": 64,
+                            "minItems": 0,
+                            "maxItems": 256,
                             "uniqueItems": true
                           }
                         }
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 5
+                },
+                "discussionGroups": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "groupId",
+                      "memberAgentIds"
+                    ],
+                    "properties": {
+                      "groupId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "x-minUtf8Bytes": 1,
+                        "x-maxUtf8Bytes": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                       },
-                      "minItems": 0,
-                      "maxItems": 64
-                    },
-                    "reservedBudget": {
-                      "type": "object",
-                      "minProperties": 1,
-                      "maxProperties": 128,
-                      "propertyNames": {
-                        "oneOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "turns",
-                              "provider_calls",
-                              "concurrent_turns",
-                              "descendants",
-                              "message_bytes",
-                              "artifact_bytes",
-                              "wall_clock_milliseconds"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
-                          },
-                          {
-                            "type": "string",
-                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
-                          }
+                      "memberAgentIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "minItems": 2,
+                        "maxItems": 64,
+                        "uniqueItems": true
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 64
+                },
+                "reservedBudget": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "maxProperties": 128,
+                  "propertyNames": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "turns",
+                          "provider_calls",
+                          "concurrent_turns",
+                          "descendants",
+                          "message_bytes",
+                          "artifact_bytes",
+                          "wall_clock_milliseconds"
                         ]
                       },
-                      "additionalProperties": {
-                        "type": "integer",
-                        "minimum": 0
+                      {
+                        "type": "string",
+                        "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
                       }
-                    },
-                    "commandId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "parentTeamId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    }
+                    ]
+                  },
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "teamId",
-                    "leaderAgentId",
-                    "rootTaskId",
-                    "commandId"
-                  ],
-                  "properties": {
-                    "teamId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "leaderAgentId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "rootTaskId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "commandId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "parentTeamId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "ownedTaskIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128,
-                        "x-minUtf8Bytes": 1,
-                        "x-maxUtf8Bytes": 128,
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                      },
-                      "minItems": 0,
-                      "maxItems": 256,
-                      "uniqueItems": true
-                    },
-                    "memberAgentIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128,
-                        "x-minUtf8Bytes": 1,
-                        "x-maxUtf8Bytes": 128,
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                      },
-                      "minItems": 0,
-                      "maxItems": 256,
-                      "uniqueItems": true
-                    },
-                    "initialMemberAgentIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128,
-                        "x-minUtf8Bytes": 1,
-                        "x-maxUtf8Bytes": 128,
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                      },
-                      "minItems": 0,
-                      "maxItems": 256,
-                      "uniqueItems": true
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "budget": {
-                      "type": "object",
-                      "minProperties": 0,
-                      "maxProperties": 128,
-                      "propertyNames": {
-                        "oneOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "turns",
-                              "provider_calls",
-                              "concurrent_turns",
-                              "descendants",
-                              "message_bytes",
-                              "artifact_bytes",
-                              "wall_clock_milliseconds"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
-                          },
-                          {
-                            "type": "string",
-                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
-                          }
-                        ]
-                      },
-                      "additionalProperties": {
-                        "type": "integer",
-                        "minimum": 0
-                      }
-                    },
-                    "reservedBudget": {
-                      "type": "object",
-                      "minProperties": 0,
-                      "maxProperties": 128,
-                      "propertyNames": {
-                        "oneOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "turns",
-                              "provider_calls",
-                              "concurrent_turns",
-                              "descendants",
-                              "message_bytes",
-                              "artifact_bytes",
-                              "wall_clock_milliseconds"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
-                          },
-                          {
-                            "type": "string",
-                            "pattern": "^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
-                          }
-                        ]
-                      },
-                      "additionalProperties": {
-                        "type": "integer",
-                        "minimum": 0
-                      }
-                    },
-                    "discussionGroups": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "groupId",
-                          "memberAgentIds"
-                        ],
-                        "properties": {
-                          "groupId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "x-minUtf8Bytes": 1,
-                            "x-maxUtf8Bytes": 128,
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                          },
-                          "memberAgentIds": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            },
-                            "minItems": 2,
-                            "maxItems": 64,
-                            "uniqueItems": true
-                          }
-                        }
-                      },
-                      "minItems": 0,
-                      "maxItems": 64
-                    }
-                  }
+                "commandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "parentTeamId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                 }
-              ]
+              }
             }
           }
         },
@@ -12136,213 +11853,6 @@
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
             },
             "operation": {
-              "const": "fabric.v1.operator.command"
-            },
-            "input": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "command",
-                "action",
-                "payload"
-              ],
-              "properties": {
-                "command": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "credential",
-                    "commandId",
-                    "expectedRevision",
-                    "actor",
-                    "provenance",
-                    "evidenceRefs"
-                  ],
-                  "properties": {
-                    "credential": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "capabilityId",
-                        "token"
-                      ],
-                      "properties": {
-                        "capabilityId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "token": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 4096,
-                          "x-minUtf8Bytes": 16,
-                          "x-maxUtf8Bytes": 4096,
-                          "x-agent-fabric-sensitive": true
-                        }
-                      }
-                    },
-                    "commandId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "actor": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "x-minUtf8Bytes": 1,
-                      "x-maxUtf8Bytes": 128,
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "provenance": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "clientId",
-                            "inputEventId"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "console-direct-input"
-                            },
-                            "clientId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            },
-                            "inputEventId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            }
-                          }
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "kind",
-                            "attestationId",
-                            "integrationId",
-                            "integrationGeneration"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "const": "attested-provider-input"
-                            },
-                            "attestationId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            },
-                            "integrationId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128,
-                              "x-minUtf8Bytes": 1,
-                              "x-maxUtf8Bytes": 128,
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            },
-                            "integrationGeneration": {
-                              "type": "integer",
-                              "minimum": 1
-                            }
-                          }
-                        }
-                      ]
-                    },
-                    "evidenceRefs": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "path",
-                          "digest"
-                        ],
-                        "properties": {
-                          "path": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4096,
-                            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                          },
-                          "digest": {
-                            "type": "string",
-                            "pattern": "^sha256:[a-f0-9]{64}$"
-                          }
-                        }
-                      },
-                      "minItems": 0,
-                      "maxItems": 128
-                    }
-                  }
-                },
-                "action": {
-                  "type": "string",
-                  "enum": [
-                    "decide",
-                    "steer",
-                    "pause",
-                    "resume",
-                    "cancel",
-                    "launch",
-                    "git",
-                    "external-effect"
-                  ]
-                },
-                "payload": {
-                  "$ref": "#/$defs/boundedJsonValue"
-                },
-                "targetTaskId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "id",
-            "operation",
-            "input"
-          ],
-          "properties": {
-            "id": {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-            },
-            "operation": {
               "const": "fabric.v1.integration.input-attest"
             },
             "input": {
@@ -15554,7 +15064,6 @@
                               "fabric.v1.operator.attach",
                               "fabric.v1.operator.detach",
                               "fabric.v1.operator.heartbeat",
-                              "fabric.v1.operator.command",
                               "fabric.v1.integration.input-attest",
                               "fabric.v1.intake.draft.create",
                               "fabric.v1.intake.read",
@@ -16010,7 +15519,6 @@
                               "fabric.v1.operator.attach",
                               "fabric.v1.operator.detach",
                               "fabric.v1.operator.heartbeat",
-                              "fabric.v1.operator.command",
                               "fabric.v1.integration.input-attest",
                               "fabric.v1.intake.draft.create",
                               "fabric.v1.intake.read",
@@ -16621,7 +16129,6 @@
                         "fabric.v1.operator.attach",
                         "fabric.v1.operator.detach",
                         "fabric.v1.operator.heartbeat",
-                        "fabric.v1.operator.command",
                         "fabric.v1.integration.input-attest",
                         "fabric.v1.intake.draft.create",
                         "fabric.v1.intake.read",
@@ -18562,20 +18069,6 @@
                                       "uniqueItems": true
                                     }
                                   }
-                                },
-                                {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string",
-                                    "enum": [
-                                      "local",
-                                      "approved-provider",
-                                      "external"
-                                    ]
-                                  },
-                                  "minItems": 0,
-                                  "maxItems": 3,
-                                  "uniqueItems": true
                                 }
                               ]
                             },
@@ -18976,20 +18469,6 @@
                                         "uniqueItems": true
                                       }
                                     }
-                                  },
-                                  {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string",
-                                      "enum": [
-                                        "local",
-                                        "approved-provider",
-                                        "external"
-                                      ]
-                                    },
-                                    "minItems": 0,
-                                    "maxItems": 3,
-                                    "uniqueItems": true
                                   }
                                 ]
                               },
@@ -41834,8 +41313,14 @@
                   "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
                 },
                 "schemaVersion": {
-                  "type": "integer",
-                  "minimum": 0
+                  "oneOf": [
+                    {
+                      "const": 1
+                    },
+                    {
+                      "const": 2
+                    }
+                  ]
                 },
                 "sha256": {
                   "type": "string",
@@ -46255,307 +45740,6 @@
             },
             "operation": {
               "const": "fabric.v1.operator.heartbeat"
-            },
-            "ok": {
-              "const": false
-            },
-            "error": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "code",
-                "message",
-                "retryable"
-              ],
-              "properties": {
-                "code": {
-                  "type": "string",
-                  "enum": [
-                    "PROTOCOL_INVALID",
-                    "PROTOCOL_INCOMPATIBLE",
-                    "PROTOCOL_UNSUPPORTED",
-                    "FEATURE_UNAVAILABLE",
-                    "AUTHENTICATION_FAILED",
-                    "AUTHORITY_WIDENING",
-                    "ARTIFACT_DIGEST_INVALID",
-                    "ARTIFACT_PATH_FORBIDDEN",
-                    "ADAPTER_ARTIFACT_MISSING",
-                    "ADAPTER_COMPATIBILITY_INVALID",
-                    "ADAPTER_DISABLED",
-                    "ADAPTER_HASH_MISMATCH",
-                    "ADAPTER_PIN_UNRESOLVED",
-                    "ADAPTER_MODEL_REQUIRED",
-                    "ADAPTER_FAMILY_FORBIDDEN",
-                    "BARRIER_PRECONDITION_FAILED",
-                    "BUDGET_EXCEEDED",
-                    "CAPABILITY_FORBIDDEN",
-                    "CAPABILITY_UNAVAILABLE",
-                    "CAPABILITY_EXPIRED",
-                    "CAPABILITY_REVOKED",
-                    "CONFIG_UNTRUSTED_FIELD",
-                    "CONFIG_WIDENING_FORBIDDEN",
-                    "DEDUPE_CONFLICT",
-                    "DELIVERY_ALREADY_RESOLVED",
-                    "DELIVERY_REASON_REQUIRED",
-                    "LEASE_NOT_EXPIRED",
-                    "LEASE_EXPIRED",
-                    "LEASE_QUARANTINED",
-                    "CHECKPOINT_INCOMPLETE",
-                    "CONTEXT_UNRECONCILED",
-                    "LIFECYCLE_PRECONDITION_FAILED",
-                    "MODEL_REQUIRED",
-                    "MODEL_NOT_ALLOWED",
-                    "MODEL_FAMILY_NOT_ALLOWED",
-                    "MESSAGE_RELATIONSHIP_FORBIDDEN",
-                    "MESSAGE_HOP_LIMIT_EXCEEDED",
-                    "MESSAGE_QUOTA_EXCEEDED",
-                    "NOT_FOUND",
-                    "PROVIDER_TURN_ACTIVE",
-                    "STALE_LEASE_GENERATION",
-                    "STALE_PRINCIPAL_GENERATION",
-                    "TASK_NOT_OWNER",
-                    "TASK_DEPENDENCY_BLOCKED",
-                    "TASK_SUBTREE_CONFLICT",
-                    "TASK_REVISION_CONFLICT",
-                    "TEAM_DEPTH_EXCEEDED",
-                    "STALE_TEAM_GENERATION",
-                    "BUDGET_USAGE_UNKNOWN",
-                    "WRITE_SCOPE_CONFLICT",
-                    "WRITE_SCOPE_RECOVERY_REQUIRED",
-                    "WRITE_SCOPE_QUARANTINED",
-                    "WRONG_PROJECT",
-                    "STALE_GENERATION",
-                    "STALE_REVISION",
-                    "GATE_BLOCKED",
-                    "RESOURCE_EXHAUSTED",
-                    "RESOURCE_USAGE_UNKNOWN",
-                    "OVERLOADED",
-                    "DEADLINE_EXCEEDED",
-                    "CONFLICT",
-                    "RECOVERY_REQUIRED",
-                    "PROJECTION_RESNAPSHOT_REQUIRED"
-                  ]
-                },
-                "message": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 4096
-                },
-                "retryable": {
-                  "type": "boolean"
-                },
-                "details": {
-                  "$ref": "#/$defs/boundedJsonValue"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "id",
-            "operation",
-            "ok",
-            "result"
-          ],
-          "properties": {
-            "id": {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-            },
-            "operation": {
-              "const": "fabric.v1.operator.command"
-            },
-            "ok": {
-              "const": true
-            },
-            "result": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "commandId",
-                "actor",
-                "provenance",
-                "operation",
-                "expectedRevision",
-                "committedRevision",
-                "before",
-                "after",
-                "evidenceRefs",
-                "committedAt"
-              ],
-              "properties": {
-                "commandId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "actor": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-minUtf8Bytes": 1,
-                  "x-maxUtf8Bytes": 128,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "provenance": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "kind",
-                        "clientId",
-                        "inputEventId"
-                      ],
-                      "properties": {
-                        "kind": {
-                          "const": "console-direct-input"
-                        },
-                        "clientId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "inputEventId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "kind",
-                        "attestationId",
-                        "integrationId",
-                        "integrationGeneration"
-                      ],
-                      "properties": {
-                        "kind": {
-                          "const": "attested-provider-input"
-                        },
-                        "attestationId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "integrationId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128,
-                          "x-minUtf8Bytes": 1,
-                          "x-maxUtf8Bytes": 128,
-                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                        },
-                        "integrationGeneration": {
-                          "type": "integer",
-                          "minimum": 1
-                        }
-                      }
-                    }
-                  ]
-                },
-                "operation": {
-                  "type": "string",
-                  "enum": [
-                    "read",
-                    "decide",
-                    "steer",
-                    "pause",
-                    "resume",
-                    "cancel",
-                    "drain",
-                    "stop",
-                    "launch",
-                    "takeover",
-                    "git",
-                    "external-effect"
-                  ]
-                },
-                "expectedRevision": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "committedRevision": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "before": {
-                  "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
-                },
-                "after": {
-                  "type": "string",
-                  "pattern": "^sha256:[a-f0-9]{64}$"
-                },
-                "evidenceRefs": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "path",
-                      "digest"
-                    ],
-                    "properties": {
-                      "path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096,
-                        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
-                      },
-                      "digest": {
-                        "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
-                      }
-                    }
-                  },
-                  "minItems": 0,
-                  "maxItems": 128
-                },
-                "committedAt": {
-                  "type": "string",
-                  "format": "date-time"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "id",
-            "operation",
-            "ok",
-            "error"
-          ],
-          "properties": {
-            "id": {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-            },
-            "operation": {
-              "const": "fabric.v1.operator.command"
             },
             "ok": {
               "const": false

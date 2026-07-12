@@ -98,5 +98,6 @@ describe("standalone package boundary", () => {
       .map((entry) => readFileSync(join(root, "src", entry), "utf8"));
 
     expect(sources.join("\n")).not.toMatch(/agent-fabric\/src|\.\.\/agent-fabric|\/daemon\//u);
+    expect(sources.join("\n")).not.toMatch(/\bLegacy[A-Z]|\blegacy[A-Z]\w*Codec\b/u);
   });
 });

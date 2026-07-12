@@ -100,7 +100,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.acknowledgeDelivery]: object(["deliveryId"]),
   [FABRIC_OPERATIONS.abandonDelivery]: object(["deliveryId", "reason", "commandId"]),
   [FABRIC_OPERATIONS.getMailboxState]: object([]),
-  [FABRIC_OPERATIONS.createTask]: object(["taskId", "authorityId", "eligibleAgentIds", "objective", "baseRevision", "commandId"], ["proposedOwnerAgentId", "participantAgentIds", "dependencies", "expectedArtifacts", "objectiveChecks", "humanGates"]),
+  [FABRIC_OPERATIONS.createTask]: object(["taskId", "authorityId", "eligibleAgentIds", "objective", "baseRevision", "commandId"], ["proposedOwnerAgentId", "participantAgentIds", "dependencies", "expectedArtifacts", "objectiveChecks"]),
   [FABRIC_OPERATIONS.claimTask]: object(["taskId", "expectedRevision", "commandId"]),
   [FABRIC_OPERATIONS.refreshTaskReadiness]: object(["taskId", "expectedRevision", "commandId"]),
   [FABRIC_OPERATIONS.recordObjectiveCheck]: object(["taskId", "checkId", "status", "evidence", "commandId"]),
@@ -125,7 +125,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.getProviderAction]: object(["actionId"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["source", "directInputProvenance", "taskRevision", "summary", "commandId"]),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: object(["kind", "agentId", "commandId"]),
-  [FABRIC_OPERATIONS.createTeam]: object(["teamId", "commandId"], ["parentTeamId", "leader", "rootTask", "initialMembers", "discussionGroups", "reservedBudget", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "initialMemberAgentIds", "authorityId", "budget"]),
+  [FABRIC_OPERATIONS.createTeam]: object(["teamId", "leader", "rootTask", "initialMembers", "discussionGroups", "reservedBudget", "commandId"], ["parentTeamId"]),
   [FABRIC_OPERATIONS.getTeam]: object(["teamId"]),
   [FABRIC_OPERATIONS.freezeSubtree]: object(["teamId", "expectedGeneration", "reason", "commandId"]),
   [FABRIC_OPERATIONS.adoptSubtree]: object(["teamId", "successorAgentId", "expectedGeneration", "handoffEvidence", "commandId"]),
@@ -152,7 +152,6 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.operatorAttach]: object(["command", "projectId", "requestedExpiresAt"], ["projectSessionId", "expectedAttachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["command", "attachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorHeartbeat]: object(["command", "attachmentGeneration", "extendUntil"]),
-  [FABRIC_OPERATIONS.operatorCommand]: object(["command", "action", "payload"], ["targetTaskId"]),
   [FABRIC_OPERATIONS.integrationInputAttest]: object(["context", "attestation"]),
   [FABRIC_OPERATIONS.intakeDraftCreate]: object(["command", "intakeId", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
   [FABRIC_OPERATIONS.intakeRead]: object(["credential", "intakeId"]),
@@ -287,7 +286,6 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.operatorAttach]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["detached", "revision"]),
   [FABRIC_OPERATIONS.operatorHeartbeat]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
-  [FABRIC_OPERATIONS.operatorCommand]: object(["commandId", "actor", "provenance", "operation", "expectedRevision", "committedRevision", "before", "after", "evidenceRefs", "committedAt"]),
   [FABRIC_OPERATIONS.integrationInputAttest]: object(["attestationId", "integrationId", "integrationGeneration", "operatorId", "projectId", "projectSessionId", "providerEvent", "humanUtterance", "gateBinding", "recordedAt"]),
   [FABRIC_OPERATIONS.intakeDraftCreate]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
   [FABRIC_OPERATIONS.intakeRead]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"], ["projectSessionId", "coordinationRunId", "acceptedScopeRef"]),
@@ -587,7 +585,6 @@ const disclosureCodec = unionOf([
       unique: true,
     }),
   }),
-  arrayOf(enumeration(["local", "approved-provider", "external"]), { maximum: 3, unique: true }),
 ]);
 const authorityPathCodec = unionOf([literal("."), relativePath]);
 const authorityCodec = objectCodec({
@@ -2847,7 +2844,7 @@ const discoveredSessionsCodec = projectionFact(objectCodec({
   hasMore: boolean,
 }));
 
-const legacyMessageCodec = objectCodec({
+const messageCodec = objectCodec({
   audience: messageAudienceCodec,
   kind: enumeration(["request", "response", "event", "steer", "cancel", "escalate", "ack"]),
   body: boundedString({ maxBytes: 4096 }),
@@ -2870,22 +2867,6 @@ const teamCreateStructuredCodec = objectCodec({
   reservedBudget: nonEmptyNumberRecord,
   commandId: identifier,
 }, { parentTeamId: identifier });
-const teamCreateLegacyCodec = objectCodec({
-  teamId: identifier,
-  leaderAgentId: identifier,
-  rootTaskId: identifier,
-  commandId: identifier,
-}, {
-  parentTeamId: identifier,
-  ownedTaskIds: stringList,
-  memberAgentIds: stringList,
-  initialMemberAgentIds: stringList,
-  authorityId: identifier,
-  budget: numberRecord,
-  reservedBudget: numberRecord,
-  discussionGroups: arrayOf(discussionGroupCodec, { maximum: 64 }),
-});
-const teamCreateCodec = unionOf([teamCreateStructuredCodec, teamCreateLegacyCodec]);
 
 const agentListResultCodec = objectCodec({
   agents: arrayOf(objectCodec({
@@ -2966,14 +2947,8 @@ function enumField(operation: ProtocolOperation, field: string, direction: Codec
   if (field === "operation" && operation === FABRIC_OPERATIONS.dispatchProviderAction) {
     return enumeration(["send_turn", "wakeup", "release", "steer"]);
   }
-  if (field === "operation" && operation === FABRIC_OPERATIONS.operatorCommand) {
-    return enumeration(["read", "decide", "steer", "pause", "resume", "cancel", "drain", "stop", "launch", "takeover", "git", "external-effect"]);
-  }
   if (field === "action" && operation === FABRIC_OPERATIONS.requestLifecycle) {
     return enumeration(["compact", "rotate", "completion-ready", "release"]);
-  }
-  if (field === "action" && operation === FABRIC_OPERATIONS.operatorCommand) {
-    return enumeration(["decide", "steer", "pause", "resume", "cancel", "launch", "git", "external-effect"]);
   }
   if (field === "origin" && operation === FABRIC_OPERATIONS.intakeRevise && direction === "input") {
     return enumeration(["operator", "chair"]);
@@ -3115,6 +3090,9 @@ function semanticFieldCodec(
   if (field === "artifactRefs" || field === "evidenceRefs") return artifactRefsCodec;
   if (["launchPacketRef", "handoffRef", "consequencePreviewRef", "drainReceiptRef"].includes(field)) return artifactRefCodec;
   if (field === "relativePath") return relativePath;
+  if (field === "schemaVersion" && operation === FABRIC_OPERATIONS.exportReceipt && direction === "result") {
+    return unionOf([literal(1), literal(2)]);
+  }
   if (
     field === "sha256" &&
     (operation === FABRIC_OPERATIONS.publishArtifact || operation === FABRIC_OPERATIONS.exportReceipt)
@@ -3133,7 +3111,7 @@ function semanticFieldCodec(
   if (field.endsWith("Ids")) return stringList;
   if ([
     "dependencies", "eligibleAgentIds", "participantAgentIds", "ownedTaskIds", "memberAgentIds",
-    "initialMemberAgentIds", "objectiveChecks", "humanGates", "blockingGateIds", "affectedTaskIds",
+    "initialMemberAgentIds", "objectiveChecks", "blockingGateIds", "affectedTaskIds",
   ].includes(field)) return stringList;
   if (field === "expectedArtifacts") return arrayOf(relativePath, { maximum: 128, unique: true });
   if (field === "enforcementPoints") return arrayOf(enumeration(["task-readiness", "operation", "scoped-barrier"]), { minimum: 1, maximum: 3, unique: true });
@@ -3274,8 +3252,8 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.evidencePublish) return evidencePublishInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadInputCodec;
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationInputCodec;
-  if (operation === FABRIC_OPERATIONS.sendMessage) return legacyMessageCodec;
-  if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateCodec;
+  if (operation === FABRIC_OPERATIONS.sendMessage) return messageCodec;
+  if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateStructuredCodec;
   if (operation === FABRIC_OPERATIONS.workstreamCreate) return workstreamCreateCodec;
   if (operation === FABRIC_OPERATIONS.workstreamSettle) return workstreamSettleCodec;
   if (operation === FABRIC_OPERATIONS.intakeDraftCreate) return intakeDraftCreateCodec;

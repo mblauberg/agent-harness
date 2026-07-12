@@ -639,9 +639,3 @@ export type OperatorAttachRequest = {
 };
 export type OperatorDetachRequest = { command: OperatorMutationContext; attachmentGeneration: number };
 export type OperatorHeartbeatRequest = OperatorDetachRequest & { extendUntil: Timestamp };
-export type OperatorCommandRequest = {
-  command: OperatorMutationContext;
-  action: "decide" | "steer" | "pause" | "resume" | "cancel" | "launch" | "git" | "external-effect";
-  targetTaskId?: TaskId;
-  payload: JsonValue;
-};

@@ -28,7 +28,6 @@ import { FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
 import type {
   ChairTakeoverRequest,
   IntegrationInputAttestationRequest,
-  OperatorCommandAudit,
   OperatorInputAttestation,
 } from "./operator.js";
 import type {
@@ -47,7 +46,6 @@ import type {
   GitRepositoryReadResult,
   OperatorAttachRequest,
   OperatorAttachment,
-  OperatorCommandRequest,
   OperatorDetachRequest,
   OperatorHeartbeatRequest,
   OperatorProjectionSnapshot,
@@ -178,7 +176,6 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.operatorAttach]: OperatorAttachRequest;
   [FABRIC_OPERATIONS.operatorDetach]: OperatorDetachRequest;
   [FABRIC_OPERATIONS.operatorHeartbeat]: OperatorHeartbeatRequest;
-  [FABRIC_OPERATIONS.operatorCommand]: OperatorCommandRequest;
   [FABRIC_OPERATIONS.integrationInputAttest]: IntegrationInputAttestationRequest;
   [FABRIC_OPERATIONS.intakeDraftCreate]: IntakeDraftCreateRequest;
   [FABRIC_OPERATIONS.intakeRead]: IntakeReadRequest;
@@ -251,7 +248,6 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.operatorAttach]: OperatorAttachment;
   [FABRIC_OPERATIONS.operatorDetach]: { detached: true; revision: number };
   [FABRIC_OPERATIONS.operatorHeartbeat]: OperatorAttachment;
-  [FABRIC_OPERATIONS.operatorCommand]: OperatorCommandAudit;
   [FABRIC_OPERATIONS.integrationInputAttest]: OperatorInputAttestation;
   [FABRIC_OPERATIONS.intakeDraftCreate]: IntakeDraft;
   [FABRIC_OPERATIONS.intakeRead]: Intake;

@@ -947,20 +947,6 @@
                         "uniqueItems": true
                       }
                     }
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "local",
-                        "approved-provider",
-                        "external"
-                      ]
-                    },
-                    "minItems": 0,
-                    "maxItems": 3,
-                    "uniqueItems": true
                   }
                 ]
               },
@@ -1151,7 +1137,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:1c568fc8920f1cbef00d3b51dba79a5c14fddaa00cb1e2c6fab5b83725d744bf",
+      "inputCodecDigest": "sha256:d8a582f3530b48826c8be2ef9c663146fd1e620236dcd54b116bd2938bbb864d",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -6186,8 +6172,14 @@
             "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           },
           "schemaVersion": {
-            "type": "integer",
-            "minimum": 0
+            "oneOf": [
+              {
+                "const": 1
+              },
+              {
+                "const": 2
+              }
+            ]
           },
           "sha256": {
             "type": "string",
@@ -6200,7 +6192,7 @@
         }
       },
       "inputCodecDigest": "sha256:8b52b2e0f540748634d0c7e6be8ee08edd6c26e69bc9d6cfb08646487b2cf99c",
-      "outputCodecDigest": "sha256:a458cbf41eee7843faa8ff300af543e16ed982262e9ff2a17bd64d878b572119"
+      "outputCodecDigest": "sha256:39225268b608f8e1d98beae735fce90cce7e9986fb38d1c6fda1b0c9e05c5761"
     },
     {
       "operation": "fabric.v1.receipt.list",
@@ -11230,7 +11222,6 @@
                   "fabric.v1.operator.attach",
                   "fabric.v1.operator.detach",
                   "fabric.v1.operator.heartbeat",
-                  "fabric.v1.operator.command",
                   "fabric.v1.integration.input-attest",
                   "fabric.v1.intake.draft.create",
                   "fabric.v1.intake.read",
@@ -11381,7 +11372,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:e8b80d188c0b64c936d1531f140aef213f3973b3a1ea2e3f2b772c5f148234c6",
+      "inputCodecDigest": "sha256:a265ce0246b6d9d07bf1f276022ae48efc9f32dc9ede59995cf43279f075f702",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -11608,7 +11599,6 @@
                     "fabric.v1.operator.attach",
                     "fabric.v1.operator.detach",
                     "fabric.v1.operator.heartbeat",
-                    "fabric.v1.operator.command",
                     "fabric.v1.integration.input-attest",
                     "fabric.v1.intake.draft.create",
                     "fabric.v1.intake.read",
@@ -12225,7 +12215,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:2f39b6654fde9b1e3c277f28263c33ad0a3a44ff38958e698d4614b654e95b7b",
+      "inputCodecDigest": "sha256:ed57e0e52860565327bb5deaf151be77c3e569e63ba66b4042e4b880300d6fa0",
       "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {
@@ -13780,9 +13770,6 @@
           },
           "objectiveChecks": {
             "$ref": "#/$defs/generated_1"
-          },
-          "humanGates": {
-            "$ref": "#/$defs/generated_1"
           }
         },
         "$defs": {
@@ -13877,7 +13864,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:c35e44d6d88e1fd5a5b2e8a9626e7b5deb2219079c53c5703a601ac31b3f75b5",
+      "inputCodecDigest": "sha256:0d05b017d5aad20bcfb820d2df862083dded36b3668b3fe6195b64b4b2afb157",
       "outputCodecDigest": "sha256:0089437c829ad1ed0b22d94b3e5756fa6cd85b2a42720ee769447d0a2a4b3df1"
     },
     {
@@ -14897,134 +14884,105 @@
       "receiptRenderer": "generic-v1",
       "inputSchema": {
         "type": "object",
-        "oneOf": [
-          {
+        "additionalProperties": false,
+        "required": [
+          "teamId",
+          "leader",
+          "rootTask",
+          "initialMembers",
+          "discussionGroups",
+          "reservedBudget",
+          "commandId"
+        ],
+        "properties": {
+          "teamId": {
+            "$ref": "#/$defs/generated_16"
+          },
+          "leader": {
+            "$ref": "#/$defs/generated_8"
+          },
+          "rootTask": {
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "teamId",
-              "leader",
-              "rootTask",
-              "initialMembers",
-              "discussionGroups",
-              "reservedBudget",
-              "commandId"
+              "taskId",
+              "objective",
+              "baseRevision"
             ],
             "properties": {
-              "teamId": {
-                "$ref": "#/$defs/generated_21"
+              "taskId": {
+                "$ref": "#/$defs/generated_16"
               },
-              "leader": {
-                "$ref": "#/$defs/generated_12"
+              "objective": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
               },
-              "rootTask": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "taskId",
-                  "objective",
-                  "baseRevision"
-                ],
-                "properties": {
-                  "taskId": {
-                    "$ref": "#/$defs/generated_21"
-                  },
-                  "objective": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 4096
-                  },
-                  "baseRevision": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096,
-                    "x-minUtf8Bytes": 1,
-                    "x-maxUtf8Bytes": 4096
-                  }
-                }
-              },
-              "initialMembers": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/generated_12"
-                },
-                "minItems": 0,
-                "maxItems": 5
-              },
-              "discussionGroups": {
-                "$ref": "#/$defs/generated_6"
-              },
-              "reservedBudget": {
-                "type": "object",
-                "minProperties": 1,
-                "maxProperties": 128,
-                "propertyNames": {
-                  "$ref": "#/$defs/generated_3"
-                },
-                "additionalProperties": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              },
-              "commandId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "parentTeamId": {
-                "$ref": "#/$defs/generated_21"
+              "baseRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 4096
               }
             }
           },
-          {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "teamId",
-              "leaderAgentId",
-              "rootTaskId",
-              "commandId"
-            ],
-            "properties": {
-              "teamId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "leaderAgentId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "rootTaskId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "commandId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "parentTeamId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "ownedTaskIds": {
-                "$ref": "#/$defs/generated_10"
-              },
-              "memberAgentIds": {
-                "$ref": "#/$defs/generated_10"
-              },
-              "initialMemberAgentIds": {
-                "$ref": "#/$defs/generated_10"
-              },
-              "authorityId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "budget": {
-                "$ref": "#/$defs/generated_18"
-              },
-              "reservedBudget": {
-                "$ref": "#/$defs/generated_18"
-              },
-              "discussionGroups": {
-                "$ref": "#/$defs/generated_6"
+          "initialMembers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_8"
+            },
+            "minItems": 0,
+            "maxItems": 5
+          },
+          "discussionGroups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "groupId",
+                "memberAgentIds"
+              ],
+              "properties": {
+                "groupId": {
+                  "$ref": "#/$defs/generated_16"
+                },
+                "memberAgentIds": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/generated_16"
+                  },
+                  "minItems": 2,
+                  "maxItems": 64,
+                  "uniqueItems": true
+                }
               }
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "reservedBudget": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 128,
+            "propertyNames": {
+              "$ref": "#/$defs/generated_3"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
             }
+          },
+          "commandId": {
+            "$ref": "#/$defs/generated_16"
+          },
+          "parentTeamId": {
+            "$ref": "#/$defs/generated_16"
           }
-        ],
+        },
         "$defs": {
           "generated_1": {
             "oneOf": [
@@ -15032,33 +14990,30 @@
                 "const": "."
               },
               {
-                "$ref": "#/$defs/generated_22"
+                "$ref": "#/$defs/generated_17"
               }
             ]
           },
           "generated_2": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_15"
+                "$ref": "#/$defs/generated_10"
               },
               {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_11"
               },
               {
-                "$ref": "#/$defs/generated_14"
-              },
-              {
-                "$ref": "#/$defs/generated_8"
+                "$ref": "#/$defs/generated_9"
               }
             ]
           },
           "generated_3": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_20"
+                "$ref": "#/$defs/generated_15"
               },
               {
-                "$ref": "#/$defs/generated_23"
+                "$ref": "#/$defs/generated_18"
               },
               {
                 "type": "string",
@@ -15087,35 +15042,13 @@
           "generated_6": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_13"
-            },
-            "minItems": 0,
-            "maxItems": 64
-          },
-          "generated_7": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/generated_19"
+              "$ref": "#/$defs/generated_14"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
           },
-          "generated_8": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "local",
-                "approved-provider",
-                "external"
-              ]
-            },
-            "minItems": 0,
-            "maxItems": 3,
-            "uniqueItems": true
-          },
-          "generated_9": {
+          "generated_7": {
             "type": "array",
             "items": {
               "type": "string",
@@ -15129,25 +15062,7 @@
             "maxItems": 3,
             "uniqueItems": true
           },
-          "generated_10": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/generated_21"
-            },
-            "minItems": 0,
-            "maxItems": 256,
-            "uniqueItems": true
-          },
-          "generated_11": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/generated_21"
-            },
-            "minItems": 2,
-            "maxItems": 64,
-            "uniqueItems": true
-          },
-          "generated_12": {
+          "generated_8": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -15156,30 +15071,14 @@
             ],
             "properties": {
               "agentId": {
-                "$ref": "#/$defs/generated_21"
+                "$ref": "#/$defs/generated_16"
               },
               "authority": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_12"
               }
             }
           },
-          "generated_13": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "groupId",
-              "memberAgentIds"
-            ],
-            "properties": {
-              "groupId": {
-                "$ref": "#/$defs/generated_21"
-              },
-              "memberAgentIds": {
-                "$ref": "#/$defs/generated_11"
-              }
-            }
-          },
-          "generated_14": {
+          "generated_9": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -15191,11 +15090,11 @@
                 "const": "scoped"
               },
               "scopes": {
-                "$ref": "#/$defs/generated_9"
+                "$ref": "#/$defs/generated_7"
               }
             }
           },
-          "generated_15": {
+          "generated_10": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -15207,7 +15106,7 @@
               }
             }
           },
-          "generated_16": {
+          "generated_11": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -15219,7 +15118,7 @@
               }
             }
           },
-          "generated_17": {
+          "generated_12": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -15242,7 +15141,7 @@
                 "$ref": "#/$defs/generated_4"
               },
               "actions": {
-                "$ref": "#/$defs/generated_7"
+                "$ref": "#/$defs/generated_6"
               },
               "disclosure": {
                 "$ref": "#/$defs/generated_2"
@@ -15252,17 +15151,17 @@
                 "format": "date-time"
               },
               "budget": {
-                "$ref": "#/$defs/generated_18"
+                "$ref": "#/$defs/generated_13"
               },
               "deniedPaths": {
                 "$ref": "#/$defs/generated_4"
               },
               "deniedActions": {
-                "$ref": "#/$defs/generated_7"
+                "$ref": "#/$defs/generated_6"
               }
             }
           },
-          "generated_18": {
+          "generated_13": {
             "type": "object",
             "minProperties": 0,
             "maxProperties": 128,
@@ -15274,7 +15173,7 @@
               "minimum": 0
             }
           },
-          "generated_19": {
+          "generated_14": {
             "type": "string",
             "enum": [
               "fabric.v1.agent.attach",
@@ -15350,7 +15249,7 @@
               "fabric.v1.write-lease.renew"
             ]
           },
-          "generated_20": {
+          "generated_15": {
             "type": "string",
             "enum": [
               "turns",
@@ -15362,7 +15261,7 @@
               "wall_clock_milliseconds"
             ]
           },
-          "generated_21": {
+          "generated_16": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -15370,13 +15269,13 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_22": {
+          "generated_17": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
             "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           },
-          "generated_23": {
+          "generated_18": {
             "type": "string",
             "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
@@ -15597,7 +15496,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:9ab8130acda2cf01d1580c8e2133683ec3e7e39c84915b2891d3fe0b9994c01b",
+      "inputCodecDigest": "sha256:4ea9df4d4264daec0dee2ba2d7e24430b5ab32fa41078937f0b613ecb8d14f64",
       "outputCodecDigest": "sha256:8aa83937ef68ab3f6c8965a180666c94d4b0c6c1825d2d075f854440fca047c5"
     },
     {
@@ -15940,23 +15839,23 @@
             ],
             "properties": {
               "commandId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "agentId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "projectSessionId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "coordinationRunId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "principalGeneration": {
                 "type": "integer",
                 "minimum": 1
               },
               "chairLeaseId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "chairLeaseGeneration": {
                 "type": "integer",
@@ -15981,10 +15880,10 @@
             "minimum": 1
           },
           "workstreamId": {
-            "$ref": "#/$defs/generated_17"
+            "$ref": "#/$defs/generated_16"
           },
           "deliveryRunId": {
-            "$ref": "#/$defs/generated_17"
+            "$ref": "#/$defs/generated_16"
           },
           "launchPacketRef": {
             "type": "object",
@@ -15995,7 +15894,7 @@
             ],
             "properties": {
               "path": {
-                "$ref": "#/$defs/generated_18"
+                "$ref": "#/$defs/generated_17"
               },
               "digest": {
                 "type": "string",
@@ -16016,10 +15915,10 @@
             ],
             "properties": {
               "teamId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "leader": {
-                "$ref": "#/$defs/generated_9"
+                "$ref": "#/$defs/generated_8"
               },
               "rootTask": {
                 "type": "object",
@@ -16031,7 +15930,7 @@
                 ],
                 "properties": {
                   "taskId": {
-                    "$ref": "#/$defs/generated_17"
+                    "$ref": "#/$defs/generated_16"
                   },
                   "objective": {
                     "type": "string",
@@ -16052,7 +15951,7 @@
               "initialMembers": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/$defs/generated_9"
+                  "$ref": "#/$defs/generated_8"
                 },
                 "minItems": 0,
                 "maxItems": 5
@@ -16068,12 +15967,12 @@
                   ],
                   "properties": {
                     "groupId": {
-                      "$ref": "#/$defs/generated_17"
+                      "$ref": "#/$defs/generated_16"
                     },
                     "memberAgentIds": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/$defs/generated_17"
+                        "$ref": "#/$defs/generated_16"
                       },
                       "minItems": 2,
                       "maxItems": 64,
@@ -16085,7 +15984,7 @@
                 "maxItems": 64
               },
               "reservedBudget": {
-                "$ref": "#/$defs/generated_14"
+                "$ref": "#/$defs/generated_13"
               }
             }
           },
@@ -16100,13 +15999,13 @@
             ],
             "properties": {
               "runScopeId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "teamScopeId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "teamLimits": {
-                "$ref": "#/$defs/generated_14"
+                "$ref": "#/$defs/generated_13"
               },
               "agentScopes": {
                 "type": "array",
@@ -16120,13 +16019,13 @@
                   ],
                   "properties": {
                     "agentId": {
-                      "$ref": "#/$defs/generated_17"
+                      "$ref": "#/$defs/generated_16"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_17"
+                      "$ref": "#/$defs/generated_16"
                     },
                     "limits": {
-                      "$ref": "#/$defs/generated_14"
+                      "$ref": "#/$defs/generated_13"
                     }
                   }
                 },
@@ -16143,33 +16042,30 @@
                 "const": "."
               },
               {
-                "$ref": "#/$defs/generated_18"
+                "$ref": "#/$defs/generated_17"
               }
             ]
           },
           "generated_2": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_11"
-              },
-              {
-                "$ref": "#/$defs/generated_12"
-              },
-              {
                 "$ref": "#/$defs/generated_10"
               },
               {
-                "$ref": "#/$defs/generated_7"
+                "$ref": "#/$defs/generated_11"
+              },
+              {
+                "$ref": "#/$defs/generated_9"
               }
             ]
           },
           "generated_3": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_15"
               },
               {
-                "$ref": "#/$defs/generated_19"
+                "$ref": "#/$defs/generated_18"
               },
               {
                 "type": "string",
@@ -16198,7 +16094,7 @@
           "generated_6": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_15"
+              "$ref": "#/$defs/generated_14"
             },
             "minItems": 0,
             "maxItems": 256,
@@ -16214,25 +16110,11 @@
                 "external"
               ]
             },
-            "minItems": 0,
-            "maxItems": 3,
-            "uniqueItems": true
-          },
-          "generated_8": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "local",
-                "approved-provider",
-                "external"
-              ]
-            },
             "minItems": 1,
             "maxItems": 3,
             "uniqueItems": true
           },
-          "generated_9": {
+          "generated_8": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -16241,14 +16123,14 @@
             ],
             "properties": {
               "agentId": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_16"
               },
               "authority": {
-                "$ref": "#/$defs/generated_13"
+                "$ref": "#/$defs/generated_12"
               }
             }
           },
-          "generated_10": {
+          "generated_9": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -16260,11 +16142,11 @@
                 "const": "scoped"
               },
               "scopes": {
-                "$ref": "#/$defs/generated_8"
+                "$ref": "#/$defs/generated_7"
               }
             }
           },
-          "generated_11": {
+          "generated_10": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -16276,7 +16158,7 @@
               }
             }
           },
-          "generated_12": {
+          "generated_11": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -16288,7 +16170,7 @@
               }
             }
           },
-          "generated_13": {
+          "generated_12": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -16321,7 +16203,7 @@
                 "format": "date-time"
               },
               "budget": {
-                "$ref": "#/$defs/generated_14"
+                "$ref": "#/$defs/generated_13"
               },
               "deniedPaths": {
                 "$ref": "#/$defs/generated_4"
@@ -16331,7 +16213,7 @@
               }
             }
           },
-          "generated_14": {
+          "generated_13": {
             "type": "object",
             "minProperties": 0,
             "maxProperties": 128,
@@ -16343,7 +16225,7 @@
               "minimum": 0
             }
           },
-          "generated_15": {
+          "generated_14": {
             "type": "string",
             "enum": [
               "fabric.v1.agent.attach",
@@ -16419,7 +16301,7 @@
               "fabric.v1.write-lease.renew"
             ]
           },
-          "generated_16": {
+          "generated_15": {
             "type": "string",
             "enum": [
               "turns",
@@ -16431,7 +16313,7 @@
               "wall_clock_milliseconds"
             ]
           },
-          "generated_17": {
+          "generated_16": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -16439,13 +16321,13 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_18": {
+          "generated_17": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
             "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           },
-          "generated_19": {
+          "generated_18": {
             "type": "string",
             "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
@@ -16529,7 +16411,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:e8e165f30c7dd04dbcdcf71a55169cfd271536f579fa9eb526d82dcac57e30e9",
+      "inputCodecDigest": "sha256:6282c1b47829d27285ec846ef1d71043fe643b8b279640e119aa00464f75f71f",
       "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {

@@ -100,7 +100,7 @@ describe("negotiated operator client", () => {
     }]);
   });
 
-  it("exposes attachment lifecycle without requiring the deprecated generic command", () => {
+  it("exposes only the current attachment lifecycle controls", () => {
     const transport = new RecordingTransport(
       ["operator-control.v1"],
       {},
@@ -119,7 +119,7 @@ describe("negotiated operator client", () => {
       detach: expect.any(Function),
       heartbeat: expect.any(Function),
     });
-    expect(client.operatorControl?.command).toBeUndefined();
+    expect(Object.hasOwn(client.operatorControl ?? {}, "command")).toBe(false);
   });
 
   it("exposes artifact content only with the exact negotiated operation", async () => {

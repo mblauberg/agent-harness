@@ -23,7 +23,6 @@ describe("public operation vocabulary", () => {
       operatorAttach: "fabric.v1.operator.attach",
       operatorDetach: "fabric.v1.operator.detach",
       operatorHeartbeat: "fabric.v1.operator.heartbeat",
-      operatorCommand: "fabric.v1.operator.command",
       integrationInputAttest: "fabric.v1.integration.input-attest",
       intakeSubmit: "fabric.v1.intake.submit",
       intakeRevise: "fabric.v1.intake.revise",
@@ -50,6 +49,7 @@ describe("public operation vocabulary", () => {
     });
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.scoped-gate.rebind");
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.operator.input-attest");
+    expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.operator.command");
   });
 });
 

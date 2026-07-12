@@ -1,4 +1,4 @@
-import type { LegacyAuthorityInput, LegacyDisclosurePolicy } from "./baseline-contracts.js";
+import type { AuthorityInput, DisclosurePolicy } from "./baseline-contracts.js";
 import {
   arrayOf,
   defineCodec,
@@ -52,7 +52,7 @@ export type LaunchPacketV1 = {
   topologyMode: "coordinated" | "independent";
   budgetRef: string;
   resourcePlanRef: ArtifactRef;
-  chairAuthority: LegacyAuthorityInput;
+  chairAuthority: AuthorityInput;
   provider: {
     adapterId: string;
     actionId: ProviderActionId;
@@ -204,10 +204,6 @@ const scopedDisclosureCodec = objectCodec({
   }, "local", parseDisclosureTarget), { minimum: 1, maximum: 3, unique: true }),
 });
 const forbiddenDisclosureCodec = objectCodec({ level: literal("forbidden") });
-const disclosureTargetsCodec = arrayOf(defineCodec({
-  type: "string",
-  enum: ["local", "approved-provider", "external"],
-}, "local", parseDisclosureTarget), { maximum: 3, unique: true });
 const resourceAmountsCodec = recordOf(integer(), {
   maximum: 128,
   keyPattern: RESOURCE_UNIT_PATTERN,
@@ -229,7 +225,6 @@ const chairAuthorityCodec = objectCodec({
       disclosureCodec.schema,
       scopedDisclosureCodec.schema,
       forbiddenDisclosureCodec.schema,
-      disclosureTargetsCodec.schema,
     ],
   }, { level: "forbidden" }, parseDisclosure),
   expiresAt: timestamp,
@@ -897,8 +892,7 @@ function parseDisclosureTarget(value: unknown, path: string): "local" | "approve
   throw new TypeError(`${path} must be local, approved-provider or external`);
 }
 
-function parseDisclosure(value: unknown, path: string): LegacyDisclosurePolicy | readonly string[] {
-  if (Array.isArray(value)) return parseUniqueArray(value, path, 0, 3, parseDisclosureTarget);
+function parseDisclosure(value: unknown, path: string): DisclosurePolicy {
   const record = strictRecord(value, path, ["level", "scopes"]);
   if (record.level === "allowed" || record.level === "forbidden") {
     if (record.scopes !== undefined) throw new TypeError(`${path}.scopes is forbidden for ${record.level}`);
@@ -910,7 +904,7 @@ function parseDisclosure(value: unknown, path: string): LegacyDisclosurePolicy |
   throw new TypeError(`${path}.level is invalid`);
 }
 
-function parseChairAuthority(value: unknown, path: string): LegacyAuthorityInput {
+function parseChairAuthority(value: unknown, path: string): AuthorityInput {
   const record = strictRecord(value, path, [
     "workspaceRoots",
     "sourcePaths",
@@ -922,7 +916,7 @@ function parseChairAuthority(value: unknown, path: string): LegacyAuthorityInput
     "expiresAt",
     "budget",
   ]);
-  const authority: LegacyAuthorityInput = {
+  const authority: AuthorityInput = {
     workspaceRoots: parseUniqueArray(record.workspaceRoots, `${path}.workspaceRoots`, 1, 64, parseChairAuthorityPath),
     sourcePaths: parseUniqueArray(record.sourcePaths, `${path}.sourcePaths`, 0, 256, parseChairAuthorityPath),
     artifactPaths: parseUniqueArray(record.artifactPaths, `${path}.artifactPaths`, 0, 256, parseChairAuthorityPath),

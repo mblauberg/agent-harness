@@ -226,19 +226,6 @@ export type IntegrationInputAttestationRequest = {
   attestation: OperatorInputAttestation;
 };
 
-export type OperatorCommandAudit = {
-  commandId: CommandId;
-  actor: OperatorId;
-  provenance: OperatorProvenance;
-  operation: OperatorAction;
-  expectedRevision: number;
-  committedRevision: number;
-  before: Sha256Digest;
-  after: Sha256Digest;
-  evidenceRefs: readonly ArtifactRef[];
-  committedAt: Timestamp;
-};
-
 export function parseChairMutationContext(value: unknown, path = "chairCommand"): ChairMutationContext {
   const record = strictRecord(value, path, [
     "commandId",
