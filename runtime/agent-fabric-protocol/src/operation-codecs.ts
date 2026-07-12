@@ -120,7 +120,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.requestLifecycle]: object(["action", "agentId", "taskId", "taskRevision", "checkpoint", "commandId"]),
   [FABRIC_OPERATIONS.getAgentLifecycle]: object(["agentId"]),
   [FABRIC_OPERATIONS.reportProviderState]: object(["agentId", "providerSessionGeneration", "contextRevision", "commandId"], ["checkpointSha256"]),
-  [FABRIC_OPERATIONS.dispatchProviderAction]: object(["adapterId", "actionId", "operation", "payload", "commandId"]),
+  [FABRIC_OPERATIONS.dispatchProviderAction]: object(["adapterId", "actionId", "operation", "payload", "commandId"], ["authorityId"]),
   [FABRIC_OPERATIONS.reconcileProviderAction]: object(["actionId", "commandId"]),
   [FABRIC_OPERATIONS.getProviderAction]: object(["actionId"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["source", "directInputProvenance", "taskRevision", "summary", "commandId"]),
@@ -1022,7 +1022,10 @@ const providerActionResultCodec = objectCodec({
   history: textList,
   executionCount: integer(),
   effectCount: integer(),
-}, { resultDigest: sha256 });
+}, {
+  resultDigest: sha256,
+  providerAnswer: boundedString({ maxBytes: 262_144, example: "Review complete." }),
+});
 const agentCustodyResultCodec = objectCodec({
   agentId: identifier,
   authorityId: identifier,
@@ -2944,7 +2947,7 @@ function enumField(operation: ProtocolOperation, field: string, direction: Codec
   if (field === "source" && operation === FABRIC_OPERATIONS.recordOperatorIntervention) return enumeration(["fabric", "integration"]);
   if (field === "directInputProvenance") return enumeration(["complete", "partial", "unavailable"]);
   if (field === "operation" && operation === FABRIC_OPERATIONS.dispatchProviderAction) {
-    return enumeration(["send_turn", "wakeup", "release", "steer"]);
+    return enumeration(["spawn", "send_turn", "wakeup", "release", "steer"]);
   }
   if (field === "action" && operation === FABRIC_OPERATIONS.requestLifecycle) {
     return enumeration(["compact", "rotate", "completion-ready", "release"]);

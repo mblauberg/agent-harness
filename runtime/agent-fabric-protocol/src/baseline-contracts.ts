@@ -95,6 +95,7 @@ export type ProviderActionResult = {
   executionCount: number;
   effectCount: number;
   resultDigest?: string;
+  providerAnswer?: string;
 };
 export type TeamCreateInput = {
   teamId: string;
@@ -193,7 +194,7 @@ export type BaselineOperationInputMap = {
   [FABRIC_OPERATIONS.requestLifecycle]: { action: "compact" | "rotate" | "completion-ready" | "release"; agentId: string; taskId: string; taskRevision: number; checkpoint: LifecycleCheckpoint; commandId: string };
   [FABRIC_OPERATIONS.getAgentLifecycle]: { agentId: string };
   [FABRIC_OPERATIONS.reportProviderState]: { agentId: string; providerSessionGeneration: number; contextRevision: string; checkpointSha256?: string; commandId: string };
-  [FABRIC_OPERATIONS.dispatchProviderAction]: { adapterId: string; actionId: string; operation: "send_turn" | "wakeup" | "release" | "steer"; payload: Readonly<Record<string, JsonValue>>; commandId: string };
+  [FABRIC_OPERATIONS.dispatchProviderAction]: { adapterId: string; actionId: string; operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer"; authorityId?: string; payload: Readonly<Record<string, JsonValue>>; commandId: string };
   [FABRIC_OPERATIONS.reconcileProviderAction]: { actionId: string; commandId: string };
   [FABRIC_OPERATIONS.getProviderAction]: { actionId: string };
   [FABRIC_OPERATIONS.recordOperatorIntervention]: { source: "fabric" | "integration"; directInputProvenance: "complete" | "partial" | "unavailable"; taskRevision: number; summary: string; commandId: string };

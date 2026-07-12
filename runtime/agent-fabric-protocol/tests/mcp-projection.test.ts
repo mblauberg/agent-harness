@@ -197,7 +197,7 @@ describe("registry-owned current-agent MCP projection", () => {
     });
   });
 
-  it("projects provider actions only through typed metadata and a canonical result digest", () => {
+  it("projects provider actions only through typed metadata, a bounded answer and a canonical result digest", () => {
     const descriptors = buildMcpDescriptorSet(new Set(operationsForPrincipal("agent"))).tools;
     for (const operation of [
       FABRIC_OPERATIONS.dispatchProviderAction,
@@ -209,7 +209,10 @@ describe("registry-owned current-agent MCP projection", () => {
       expect(descriptor?.outputSchema).toMatchObject({
         type: "object",
         additionalProperties: false,
-        properties: { resultDigest: { pattern: "^sha256:[a-f0-9]{64}$" } },
+        properties: {
+          resultDigest: { pattern: "^sha256:[a-f0-9]{64}$" },
+          providerAnswer: { "x-maxUtf8Bytes": 262_144 },
+        },
       });
       expect(JSON.stringify(descriptor?.outputSchema)).not.toContain('"result"');
     }

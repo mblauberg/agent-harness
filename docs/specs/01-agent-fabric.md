@@ -1,14 +1,20 @@
 # Shared agent fabric
 
 Status: Current protocol and provider-task extension approved; implementation in progress; final human acceptance pending
-Version: 0.24
+Version: 0.25
 Date: 12 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.24 adds one current task-bound ephemeral provider path for fresh
+Version 0.25 closes the answer-bearing review contract: a successful task-bound
+ephemeral provider action projects one validated, nonempty, bounded UTF-8
+`providerAnswer` string plus its canonical result digest. It never projects the
+raw adapter result object, resume reference, usage record, transport detail or
+credential. An adapter must explicitly advertise answer-bearing spawn support;
+otherwise Fabric rejects the review before provider I/O. Version 0.24 adds one
+current task-bound ephemeral provider path for fresh
 reviewers and bonus-family workers. `fabric_provider_action_dispatch` accepts
 `operation: spawn` only with an exact active task, narrowed authority,
 explicit model/family and read-only admitted payload. It records the provider
@@ -754,8 +760,10 @@ bridge capability; `bridgeState` reports the runtime outcome.
 
 Every model-visible result is the exact closed public result codec. Opaque
 provider output is replaced by typed contract evidence and/or a digest before
-projection; `additionalProperties: true`, raw provider JSON and copied output
-schemas are forbidden.
+projection. The sole text exception is the validated, bounded
+`providerAnswer` from an adapter-advertised task-bound ephemeral spawn;
+`additionalProperties: true`, raw provider JSON and copied output schemas are
+forbidden.
 
 A launched chair receives this same current, principal-scoped MCP operation
 surface through the secret-consuming provider-session bridge. Its one-use
@@ -1178,7 +1186,7 @@ read-only externally disclosable authority envelope
 When it dispatches `operation: spawn` to an activated compatible adapter with
 an explicit model, model family, prompt and exact task ID
 Then Fabric persists one action and returns the bounded provider answer through
-the action result
+the closed `providerAnswer` action result field plus a canonical digest
 And a missing task, stale task scope, forbidden disclosure, model mismatch,
 duplicate changed action or unsupported adapter fails before provider work
 And no retained agent identity, capability or hidden direct-CLI result path is

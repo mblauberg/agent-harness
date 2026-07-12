@@ -562,9 +562,10 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
       });
     case "dispatchProviderAction": {
       const operation = params.operation;
-      if (operation !== "send_turn" && operation !== "wakeup" && operation !== "release" && operation !== "steer") throw new TypeError("invalid provider action operation");
+      if (operation !== "spawn" && operation !== "send_turn" && operation !== "wakeup" && operation !== "release" && operation !== "steer") throw new TypeError("invalid provider action operation");
       return client.dispatchProviderAction({
         adapterId: requiredString(params, "adapterId"), actionId: requiredString(params, "actionId"), operation,
+        ...(typeof params.authorityId === "string" ? { authorityId: params.authorityId } : {}),
         payload: requiredRecord(params, "payload"), commandId: requiredString(params, "commandId"),
       });
     }

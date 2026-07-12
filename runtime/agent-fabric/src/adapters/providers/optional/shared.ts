@@ -18,6 +18,7 @@ export type OptionalProviderCapabilities = {
   actionJournal: true;
   persistentSession: boolean;
   ephemeralWorker: true;
+  answerBearingSpawn?: true;
   controlModes: ["managed"];
   inboxDeliveryModes: ["structured-push"];
   recoveryOperations: string[];
@@ -85,6 +86,7 @@ export function optionalCapabilities(input: {
   compactInPlace: boolean;
   persistentSession?: boolean;
   recoveryOperations?: string[];
+  answerBearingSpawn?: true;
 }): OptionalProviderCapabilities {
   return {
     protocolVersion: 1,
@@ -94,6 +96,7 @@ export function optionalCapabilities(input: {
     actionJournal: true,
     persistentSession: input.persistentSession ?? true,
     ephemeralWorker: true,
+    ...(input.answerBearingSpawn === true ? { answerBearingSpawn: true } : {}),
     controlModes: ["managed"],
     inboxDeliveryModes: ["structured-push"],
     recoveryOperations: input.recoveryOperations ?? ["resume_reference", "lookup_action"],

@@ -5569,6 +5569,7 @@
                 "operation": {
                   "type": "string",
                   "enum": [
+                    "spawn",
                     "send_turn",
                     "wakeup",
                     "release",
@@ -5579,6 +5580,14 @@
                   "$ref": "#/$defs/boundedJsonValue"
                 },
                 "commandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "authorityId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128,
@@ -35747,6 +35756,13 @@
                 "resultDigest": {
                   "type": "string",
                   "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "providerAnswer": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 262144,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 262144
                 }
               }
             }
@@ -35939,6 +35955,13 @@
                 "resultDigest": {
                   "type": "string",
                   "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "providerAnswer": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 262144,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 262144
                 }
               }
             }
@@ -36131,6 +36154,13 @@
                 "resultDigest": {
                   "type": "string",
                   "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "providerAnswer": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 262144,
+                  "x-minUtf8Bytes": 1,
+                  "x-maxUtf8Bytes": 262144
                 }
               }
             }

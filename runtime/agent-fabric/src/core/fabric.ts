@@ -217,6 +217,7 @@ type TaskCreateInput = {
   baseRevision: string;
   commandId: string;
 };
+const MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES = 65_536;
 type StoredAuthority = {
   workspaceRoots: string[];
   sourcePaths: string[];
@@ -662,6 +663,27 @@ function isProviderActionStatus(value: unknown): value is ProviderActionResult["
   return ["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"].includes(String(value));
 }
 
+const MAXIMUM_PROVIDER_ANSWER_BYTES = 262_144;
+
+function providerAnswerFromAdapterResult(value: unknown): string {
+  if (!isRow(value) || typeof value.result !== "string") {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "answer-bearing provider spawn returned no validated answer");
+  }
+  const answer = value.result.trim();
+  if (answer.length === 0 || Buffer.byteLength(answer, "utf8") > MAXIMUM_PROVIDER_ANSWER_BYTES) {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "answer-bearing provider spawn returned an empty or oversized answer");
+  }
+  return answer;
+}
+
+function isTaskBoundEphemeralProviderPayload(value: unknown): value is Record<string, unknown> {
+  return isRow(value) &&
+    typeof value.taskId === "string" &&
+    typeof value.model === "string" &&
+    typeof value.modelFamily === "string" &&
+    typeof value.prompt === "string";
+}
+
 function providerActionResult(value: unknown): ProviderActionResult {
   if (
     !isRow(value) ||
@@ -680,13 +702,18 @@ function providerActionResult(value: unknown): ProviderActionResult {
     executionCount: value.executionCount,
     effectCount: value.effectCount,
     ...(value.result === undefined ? {} : { result: value.result }),
+    ...(typeof value.providerAnswer === "string" ? { providerAnswer: value.providerAnswer } : {}),
   };
 }
 
 function isProviderActionResult(value: unknown): value is ProviderActionResult {
   try {
     providerActionResult(value);
-    return true;
+    return !isRow(value) || value.providerAnswer === undefined || (
+      typeof value.providerAnswer === "string" &&
+      value.providerAnswer.trim().length > 0 &&
+      Buffer.byteLength(value.providerAnswer, "utf8") <= MAXIMUM_PROVIDER_ANSWER_BYTES
+    );
   } catch {
     return false;
   }
@@ -4179,7 +4206,8 @@ export class Fabric {
     input: {
       adapterId: string;
       actionId: string;
-      operation: "send_turn" | "wakeup" | "release" | "steer";
+      operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
+      authorityId?: string;
       payload: Record<string, unknown>;
       commandId: string;
     },
@@ -4188,7 +4216,10 @@ export class Fabric {
     this.#assertGenericProviderAction(runId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
-    const target = this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
+    const ephemeralSpawn = input.operation === "spawn";
+    const target = ephemeralSpawn
+      ? undefined
+      : this.#providerSessions.resolveTarget(runId, input.adapterId, input.payload);
     if (input.operation === "send_turn" && target === undefined) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "send_turn requires a bound provider session target");
     }
@@ -4196,7 +4227,28 @@ export class Fabric {
     if (taskValue !== undefined && typeof taskValue !== "string") {
       throw new FabricError("CAPABILITY_FORBIDDEN", "provider task ID must be text");
     }
-    const taskId = input.operation === "send_turn" || input.operation === "steer"
+    if (ephemeralSpawn && taskValue === undefined) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn requires an exact task ID");
+    }
+    if (ephemeralSpawn) {
+      if (input.authorityId === undefined) {
+        throw new ProjectFabricCoreError("PROTOCOL_INVALID", "ephemeral provider spawn requires delegated authority");
+      }
+      if (
+        typeof input.payload.model !== "string" || input.payload.model.trim().length === 0 ||
+        typeof input.payload.modelFamily !== "string" || input.payload.modelFamily.trim().length === 0 ||
+        typeof input.payload.prompt !== "string" || input.payload.prompt.trim().length === 0 ||
+        Buffer.byteLength(input.payload.prompt, "utf8") > MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES
+      ) {
+        throw new ProjectFabricCoreError(
+          "PROTOCOL_INVALID",
+          "ephemeral provider spawn requires a bounded prompt and explicit model family",
+        );
+      }
+    } else if (input.authorityId !== undefined) {
+      throw new ProjectFabricCoreError("PROTOCOL_INVALID", "delegated provider authority is spawn-only");
+    }
+    const taskId = input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer"
       ? resolveTaskBindingForActiveWork(
         this.#database,
         runId,
@@ -4262,9 +4314,21 @@ export class Fabric {
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
         "provider actor",
       );
-      admittedInputPayload = this.#admitProviderPayload(runId, stringField(actor, "authority_id"), taskBoundPayload);
+      let providerAuthorityId = stringField(actor, "authority_id");
+      if (ephemeralSpawn) {
+        const delegated = rowOrNotFound(
+          this.#database.prepare("SELECT parent_authority_id FROM authorities WHERE run_id = ? AND authority_id = ?")
+            .get(runId, input.authorityId),
+          "ephemeral provider authority",
+        );
+        if (delegated.parent_authority_id !== providerAuthorityId) {
+          throw new FabricError("CAPABILITY_FORBIDDEN", "ephemeral provider authority is not delegated by the chair");
+        }
+        providerAuthorityId = input.authorityId as string;
+      }
+      admittedInputPayload = this.#admitProviderPayload(runId, providerAuthorityId, taskBoundPayload);
     }
-    if (input.operation === "send_turn" || input.operation === "steer") {
+    if (input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer") {
       this.#assertAdapterModel(input.adapterId, admittedInputPayload);
     }
     const identityHash = sha256(canonicalJson({
@@ -4295,6 +4359,28 @@ export class Fabric {
         actionId: input.actionId,
         commandId: `${input.commandId}:reconcile`,
       });
+    }
+    if (ephemeralSpawn) {
+      const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
+      assertAdapterOperation(capabilities, "spawn");
+      if (
+        !isRow(capabilities) ||
+        capabilities.ephemeralWorker !== true ||
+        capabilities.answerBearingSpawn !== true
+      ) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise answer-bearing ephemeral spawn");
+      }
+      const result = await this.#executeAdapterOperation({
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        operation: "spawn",
+        method: "spawn",
+        payload: admittedInputPayload,
+        requireProviderAnswer: true,
+      });
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
+      return result;
     }
     let providerPayload = admittedInputPayload;
     let turnLeaseGeneration: number | null = null;
@@ -4465,7 +4551,7 @@ export class Fabric {
   getProviderAction(runId: string, actionId: string): ProviderActionResult {
     const row = rowOrNotFound(
       this.#database
-        .prepare("SELECT status, history_json, execution_count, effect_count, result_json FROM provider_actions WHERE run_id = ? AND action_id = ?")
+        .prepare("SELECT operation, payload_json, status, history_json, execution_count, effect_count, result_json FROM provider_actions WHERE run_id = ? AND action_id = ?")
         .get(runId, actionId),
       "provider action",
     );
@@ -4474,13 +4560,19 @@ export class Fabric {
       throw new Error("stored provider action is invalid");
     }
     const resultJson = row.result_json;
+    const result = typeof resultJson === "string" ? JSON.parse(resultJson) as unknown : undefined;
+    const payload: unknown = JSON.parse(stringField(row, "payload_json"));
+    const providerAnswer = row.operation === "spawn" && isTaskBoundEphemeralProviderPayload(payload) && result !== undefined
+      ? providerAnswerFromAdapterResult(result)
+      : undefined;
     return {
       actionId,
       status: row.status,
       history,
       executionCount: numberField(row, "execution_count"),
       effectCount: numberField(row, "effect_count"),
-      ...(typeof resultJson === "string" ? { result: JSON.parse(resultJson) } : {}),
+      ...(result === undefined ? {} : { result }),
+      ...(providerAnswer === undefined ? {} : { providerAnswer }),
     };
   }
 
@@ -5643,6 +5735,7 @@ export class Fabric {
     operation: string;
     method: string;
     payload: Record<string, unknown>;
+    requireProviderAnswer?: true;
   }): Promise<ProviderActionResult> {
     const payloadJson = canonicalJson(input.payload);
     const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
@@ -5686,6 +5779,9 @@ export class Fabric {
       );
     try {
       const response = await this.#requestAdapter(input.adapterId, input.method, { ...input.payload, actionId: input.actionId, payload: input.payload });
+      const providerAnswer = input.requireProviderAnswer === true
+        ? providerAnswerFromAdapterResult(response)
+        : undefined;
       const result: ProviderActionResult = {
         actionId: input.actionId,
         status: "terminal",
@@ -5693,6 +5789,7 @@ export class Fabric {
         executionCount: 1,
         effectCount: 1,
         result: response,
+        ...(providerAnswer === undefined ? {} : { providerAnswer }),
       };
       this.#persistProviderAction(input.runId, input.actionId, { idempotencyProven: true }, result);
       return result;

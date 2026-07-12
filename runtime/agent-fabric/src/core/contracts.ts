@@ -94,6 +94,7 @@ export type ProviderActionResult = {
   executionCount: number;
   effectCount: number;
   result?: unknown;
+  providerAnswer?: string;
 };
 export type InterventionResult = { interventionId: string };
 export type DiscussionGroupInput = { groupId: string; memberAgentIds: string[] };

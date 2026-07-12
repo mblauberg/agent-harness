@@ -104,8 +104,27 @@ input.on("line", (line) => {
   if (request.method === "capabilities") {
     respond(request.id, {
       protocolVersion: 1,
-      operations: ["capabilities", "dispatch", "lookup_action", "cancel_action", "release"],
+      operations: ["capabilities", "spawn", "dispatch", "lookup_action", "cancel_action", "release"],
       actionJournal: true,
+      ephemeralWorker: true,
+      answerBearingSpawn: true,
+    });
+    return;
+  }
+  if (request.method === "spawn") {
+    if (
+      typeof request.params.actionId !== "string" ||
+      typeof request.params.model !== "string" ||
+      typeof request.params.modelFamily !== "string" ||
+      typeof request.params.prompt !== "string" ||
+      typeof request.params.taskId !== "string"
+    ) {
+      fail(request.id, "INVALID_PARAMS", "task-bound ephemeral spawn fields are required");
+      return;
+    }
+    respond(request.id, {
+      result: `review:${request.params.modelFamily}:${request.params.model}`,
+      taskId: request.params.taskId,
     });
     return;
   }

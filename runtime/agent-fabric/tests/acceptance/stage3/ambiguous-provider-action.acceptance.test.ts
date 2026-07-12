@@ -15,6 +15,63 @@ afterEach(async () => {
 });
 
 describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
+  it("runs a task-bound ephemeral provider spawn without creating an agent identity", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1, "cost:USD": 1 },
+      },
+      commandId: "provider-review:authority",
+    });
+    const before = await fixture.chair.getRunStatus({ runId: fixture.runId });
+    const result = await fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review:spawn",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Review the current implementation read-only.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review:dispatch",
+    });
+
+    expect(result).toMatchObject({
+      actionId: "provider-review:spawn",
+      status: "terminal",
+      executionCount: 1,
+      effectCount: 1,
+      result: { resumeReference: "new:replacement:g1", generation: 1, result: "fake provider review complete" },
+      providerAnswer: "fake provider review complete",
+    });
+    expect((await fixture.chair.getRunStatus({ runId: fixture.runId })).counts.agents).toBe(before.counts.agents);
+    expect(await fixture.chair.getProviderAction({ actionId: "provider-review:spawn" })).toEqual(result);
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review:missing-task",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Missing task must fail before provider dispatch.",
+      },
+      commandId: "provider-review:missing-task",
+    })).rejects.toMatchObject({ code: "PROTOCOL_INVALID" });
+  });
+
   it("persists prepared, dispatched, accepted and terminal states across a core restart", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));

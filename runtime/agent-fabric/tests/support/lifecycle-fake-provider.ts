@@ -79,6 +79,8 @@ input.on("line", (line) => {
       protocolVersion: 1,
       operations: ["status", "spawn", "dispatch", "lookup_action", "cancel_action", "release"],
       actionJournal: true,
+      ephemeralWorker: true,
+      answerBearingSpawn: true,
       compactInPlace: false,
       idempotencyEvidence: "per-action",
     });
@@ -90,7 +92,7 @@ input.on("line", (line) => {
     const resumeReference = `${prior}:replacement:g${String(generation)}`;
     journal.sessions[resumeReference] = { released: false, generation };
     saveJournal(journal);
-    respond(request.id, { resumeReference, generation });
+    respond(request.id, { resumeReference, generation, result: "fake provider review complete" });
     return;
   }
   if (request.method === "release") {

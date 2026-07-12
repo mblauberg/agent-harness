@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import { DAEMON_ROOT_AUTHORITY } from "../support/daemon-testkit.ts";
 import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
+import { callTool, spawnMcpProxy } from "../support/mcp-testkit.ts";
 
 const fakeAdapter = fileURLToPath(new URL("../support/daemon-fake-adapter.ts", import.meta.url));
 
@@ -81,6 +82,100 @@ describe("daemon adapter composition", () => {
       }
     } finally {
       await bootstrap.close();
+      await daemon.stop();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a task-bound ephemeral provider review through the generated MCP surface", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "af-ephemeral-"));
+    const stateDirectory = join(directory, "state");
+    const runtimeDirectory = join(directory, "runtime");
+    const socketPath = join(runtimeDirectory, "fabric.sock");
+    const databasePath = join(stateDirectory, "fabric.sqlite3");
+    const daemon = await startFabricDaemon({
+      databasePath,
+      stateDirectory,
+      runtimeDirectory,
+      socketPath,
+      adapters: {
+        fake: {
+          command: [process.execPath, "--import", "tsx", fakeAdapter],
+          environment: { FAKE_ADAPTER_JOURNAL: join(directory, "fake-journal.json") },
+          modelPolicy: {
+            allowedFamilies: ["fake"],
+            allowedModelPatterns: ["fake-reviewer-*"],
+            requiresExplicitModel: true,
+          },
+        },
+      },
+    });
+    const bootstrap = await connectFabricDaemon({ socketPath, capability: daemon.bootstrapCapability });
+    let chairProxy: Awaited<ReturnType<typeof spawnMcpProxy>> | undefined;
+    try {
+      const rootAuthority = {
+        ...DAEMON_ROOT_AUTHORITY,
+        disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
+      };
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot: directory,
+        runId: "run-daemon-ephemeral-review",
+        chair: { agentId: "chair", authority: rootAuthority },
+      });
+      const chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
+      try {
+        const reviewAuthority = await chair.delegateAuthority({
+          parentAuthorityId: run.chairAuthorityId,
+          authority: {
+            ...rootAuthority,
+            budget: { turns: 1, "cost:USD": 1 },
+          },
+          commandId: "daemon-ephemeral-review:authority",
+        });
+        chairProxy = await spawnMcpProxy({
+          socketPath,
+          capability: run.chairCapability,
+          label: "daemon-ephemeral-review-chair",
+        });
+        const task = await callTool(chairProxy.client, "fabric_task_create", {
+          taskId: "daemon-ephemeral-review",
+          authorityId: reviewAuthority.authorityId,
+          eligibleAgentIds: ["chair"],
+          participantAgentIds: ["chair"],
+          objective: "review the current implementation",
+          baseRevision: "daemon-ephemeral-review-base",
+          commandId: "daemon-ephemeral-review:task",
+        });
+        expect(task.isError, task.text).toBe(false);
+        const outcome = await callTool(chairProxy.client, "fabric_provider_action_dispatch", {
+          adapterId: "fake",
+          actionId: "daemon-ephemeral-review:spawn",
+          operation: "spawn",
+          authorityId: reviewAuthority.authorityId,
+          payload: {
+            taskId: "daemon-ephemeral-review",
+            model: "fake-reviewer-v1",
+            modelFamily: "fake",
+            prompt: "Review the current implementation read-only.",
+            cwd: "src",
+          },
+          commandId: "daemon-ephemeral-review:dispatch",
+        });
+        expect(outcome.isError, outcome.text).toBe(false);
+        expect(outcome.structured).toMatchObject({
+          actionId: "daemon-ephemeral-review:spawn",
+          status: "terminal",
+          executionCount: 1,
+          effectCount: 1,
+          providerAnswer: "review:fake:fake-reviewer-v1",
+          resultDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+        });
+      } finally {
+        await chair.close();
+      }
+    } finally {
+      await Promise.allSettled([chairProxy?.close(), bootstrap.close()]);
       await daemon.stop();
       await rm(directory, { recursive: true, force: true });
     }

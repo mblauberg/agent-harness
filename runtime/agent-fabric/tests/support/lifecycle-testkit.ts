@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
-import type { Fabric, FabricClient } from "../../src/index.ts";
+import type { AuthorityInput, Fabric, FabricClient } from "../../src/index.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
@@ -55,6 +55,8 @@ export type LifecycleFixture = {
   clock: ManualClock;
   fabric: Fabric;
   capabilities: { chair: string; leader: string; child: string };
+  chairAuthorityId: string;
+  rootAuthority: AuthorityInput;
   chair: FabricClient;
   leader: FabricClient;
   child: FabricClient;
@@ -153,6 +155,7 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
   const leaderTaskReady = await chairBase.createTask({
     taskId: "leader-task",
     authorityId: leaderAuthority.authorityId,
+    participantAgentIds: ["chair", "leader"],
     eligibleAgentIds: ["leader"],
     objective: "own the Stage 3 lifecycle",
     baseRevision: "stage3-base",
@@ -190,6 +193,8 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
       leader: leaderRegistration.capability,
       child: childRegistration.capability,
     },
+    chairAuthorityId: run.chairAuthorityId,
+    rootAuthority,
     chair: asLifecycleClient(chairBase),
     leader: asLifecycleClient(leaderBase),
     child: asLifecycleClient(childBase),

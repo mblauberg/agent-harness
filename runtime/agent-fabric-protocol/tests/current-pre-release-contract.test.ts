@@ -70,6 +70,25 @@ describe("current pre-release protocol contract", () => {
     })).toThrowError(/unknown field: humanGates/iu);
   });
 
+  it("admits a task-bound ephemeral provider spawn under delegated authority", () => {
+    const input = {
+      adapterId: "agy",
+      actionId: "review_gemini_01",
+      operation: "spawn",
+      authorityId: "authority_review_01",
+      payload: {
+        taskId: "task_review_01",
+        model: "gemini-3.1-pro",
+        modelFamily: "google",
+        prompt: "Review the current implementation read-only.",
+        cwd: "src/review",
+      },
+      commandId: "command_review_01",
+    } as const;
+
+    expect(parseOperationInput(FABRIC_OPERATIONS.dispatchProviderAction, input)).toStrictEqual(input);
+  });
+
   it("accepts only atomic structured team creation", () => {
     const input = {
       teamId: "team_01",

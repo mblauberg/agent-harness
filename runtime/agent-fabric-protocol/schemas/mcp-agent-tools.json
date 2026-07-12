@@ -5766,6 +5766,7 @@
           "operation": {
             "type": "string",
             "enum": [
+              "spawn",
               "send_turn",
               "wakeup",
               "release",
@@ -5776,6 +5777,9 @@
             "$ref": "#/$defs/boundedJsonValue"
           },
           "commandId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
             "$ref": "#/$defs/generated_1"
           }
         },
@@ -5843,11 +5847,18 @@
           "resultDigest": {
             "type": "string",
             "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "providerAnswer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 262144,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 262144
           }
         }
       },
-      "inputCodecDigest": "sha256:e84a0496a61fee5be6fb3908cd4120ff6f572de36043a60534d30b50759ee5c9",
-      "outputCodecDigest": "sha256:8c13c5caaa805ae9a34f0c5ef7a831a5f3120f8edc2e113a972a8ad18a50d8b2"
+      "inputCodecDigest": "sha256:22d672de5762690861d7a256d234f58deea9d87ecf24df8e4f135e482519c20d",
+      "outputCodecDigest": "sha256:bfbd9092a349abd6f9390addfedf004d37f7ad0d8f0384a42c853f8b8470a72f"
     },
     {
       "operation": "fabric.v1.provider-action.read",
@@ -5925,11 +5936,18 @@
           "resultDigest": {
             "type": "string",
             "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "providerAnswer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 262144,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 262144
           }
         }
       },
       "inputCodecDigest": "sha256:031c4a8265202e7dbffeba684ac9ebd43afc75cb43531536114d7e07d454edc0",
-      "outputCodecDigest": "sha256:8c13c5caaa805ae9a34f0c5ef7a831a5f3120f8edc2e113a972a8ad18a50d8b2"
+      "outputCodecDigest": "sha256:bfbd9092a349abd6f9390addfedf004d37f7ad0d8f0384a42c853f8b8470a72f"
     },
     {
       "operation": "fabric.v1.provider-action.reconcile",
@@ -6016,11 +6034,18 @@
           "resultDigest": {
             "type": "string",
             "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "providerAnswer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 262144,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 262144
           }
         }
       },
       "inputCodecDigest": "sha256:b54c9760ba73f482f4ab4c5563015e20b51e3f09d014faaf9009ee9776c37cc6",
-      "outputCodecDigest": "sha256:8c13c5caaa805ae9a34f0c5ef7a831a5f3120f8edc2e113a972a8ad18a50d8b2"
+      "outputCodecDigest": "sha256:bfbd9092a349abd6f9390addfedf004d37f7ad0d8f0384a42c853f8b8470a72f"
     },
     {
       "operation": "fabric.v1.provider-state.report",

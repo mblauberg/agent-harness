@@ -329,7 +329,8 @@ export class FabricClient {
   async dispatchProviderAction(input: {
     adapterId: string;
     actionId: string;
-    operation: "send_turn" | "wakeup" | "release" | "steer";
+    operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
+    authorityId?: string;
     payload: Record<string, unknown>;
     commandId: string;
   }): Promise<ProviderActionResult> {

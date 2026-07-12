@@ -70,6 +70,7 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
   actionJournal: true,
   persistentSession: true,
   ephemeralWorker: true,
+  answerBearingSpawn: true,
   controlModes: ["managed"],
   inboxDeliveryModes: ["structured-push"],
   recoveryOperations: ["resume_reference", "lookup_action"],

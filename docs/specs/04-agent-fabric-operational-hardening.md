@@ -1,13 +1,20 @@
 # Agent fabric operational hardening
 
-Status: Console daemon-lifecycle and seat-generation extension approved; implementation in progress; final human acceptance pending
-Version: 1.20
+Status: Console daemon-lifecycle, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
+Version: 1.21
 Date: 12 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.20 binds busy-incumbent attach before SQLite inspection and makes the
+Version 1.21 permits one closed public text field for answer-bearing review
+work without weakening the raw-result boundary. A task-bound ephemeral spawn
+must use an adapter that advertises answer-bearing support; Fabric validates a
+nonempty bounded UTF-8 provider result string, persists the complete private
+result, and projects only `providerAnswer` plus the canonical result digest.
+Resume references, usage, transport data, credentials and arbitrary result
+members remain private. Version 1.20 binds busy-incumbent attach before SQLite
+inspection and makes the
 current MCP seat roster a daemon-owned generation CAS. A compatible incumbent
 is authenticated through its private handshake without racing its live WAL;
 only the elected no-incumbent spawn path inspects/publishes state. Seat
@@ -789,8 +796,10 @@ results replace the token with target identity plus `bridgeState` and
 `bridgeGeneration`. An adapter without bridge provisioning reports that closed
 capability before dispatch; attach may remain an honest bridge-less participant,
 but no surface claims provider-originated Fabric access. Raw adapter result JSON
-is never model-visible: the public codec exposes only typed contract evidence or
-its digest and has `additionalProperties: false`.
+is never model-visible: the public codec exposes only typed contract evidence,
+the canonical digest, and for an adapter-advertised task-bound ephemeral review
+the validated bounded `providerAnswer` string. It has
+`additionalProperties: false`.
 
 The hard projection limits are 96 tools, 32 KiB canonical JSON per descriptor
 and 512 KiB for the complete descriptor set. The complete authorised set must

@@ -34,6 +34,7 @@ export type ProviderAdapterCapabilities = {
   actionJournal: true;
   persistentSession: boolean;
   ephemeralWorker: true;
+  answerBearingSpawn?: true;
   controlModes: ["managed"];
   inboxDeliveryModes: ["structured-push"];
   recoveryOperations: string[];
