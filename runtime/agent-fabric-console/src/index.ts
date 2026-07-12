@@ -1546,11 +1546,42 @@ function repositoryDetailLines(
   ];
 }
 
-function reviewLines(presentation: FabricConsolePresentation): readonly string[] {
+type FabricReviewContent = Readonly<{
+  lines: readonly string[];
+  requiredContextLineCount: number;
+}>;
+
+function reviewLines(presentation: FabricConsolePresentation): FabricReviewContent {
   const review = presentation.review;
-  if (review === null) return [];
+  if (review === null) return { lines: [], requiredContextLineCount: 0 };
+  const scopes = review.gates.map(
+    (gate) => `${gate.gateId} r${gate.gateRevision} ${gate.scope}`,
+  );
+  const consequences = review.gates.flatMap((gate) => gate.consequences);
+  const evidence = [
+    ...review.gates.flatMap((gate) => gate.evidence),
+    ...review.evidence,
+  ];
+  const priority = [
+    `REVIEW ${review.stage.toUpperCase()} | ${review.consequenceClass}`,
+    `Revisions: projection r${review.projectionRevision} | item r${review.itemRevision} | preview r${review.previewRevision}`,
+    `Scope: ${scopes.join(" | ") || `${presentation.activeView}:${review.itemId}`}`,
+    `Consequence: ${consequences.join(" | ") || review.consequenceClass}`,
+    `Evidence: ${evidence.join(" | ") || "none declared"}`,
+  ];
+  const intentLines = review.intent.map((item) => {
+    const prefixes: Readonly<Record<string, string>> = {
+      "Accepted receipt": "Receipt",
+      "Accepted receipt digest": "RcptDig",
+      "Artifact digest": "Artifact",
+      "Promotion action": "Action",
+      "Promotion target": "Target",
+    };
+    return `${prefixes[item.label] ?? `Intent ${item.label}`}:${item.value}`;
+  });
   const lines = [
-    `REVIEW ${review.stage.toUpperCase()} — ${review.consequenceClass}`,
+    ...priority,
+    ...intentLines,
     ...(review.workflowId === null
       ? []
       : [
@@ -1563,16 +1594,6 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
     `Intent:${review.intentDigest}`,
     `Before:${review.beforeStateDigest}`,
     `Confirmation: ${review.confirmationMode}`,
-    ...review.intent.map((item) => {
-      const prefixes: Readonly<Record<string, string>> = {
-        "Accepted receipt": "Receipt",
-        "Accepted receipt digest": "RcptDig",
-        "Artifact digest": "Artifact",
-        "Promotion action": "Action",
-        "Promotion target": "Target",
-      };
-      return `${prefixes[item.label] ?? `Intent ${item.label}`}:${item.value}`;
-    }),
   ];
   for (const gate of review.gates) {
     lines.push(
@@ -1601,7 +1622,7 @@ function reviewLines(presentation: FabricConsolePresentation): readonly string[]
   }
   if (review.result !== null) lines.push(`Result: ${review.result}`);
   if (review.failure !== null) lines.push(`Failure: ${review.failure}`);
-  return lines;
+  return { lines, requiredContextLineCount: priority.length };
 }
 
 function renderFabricReview(
@@ -1609,8 +1630,12 @@ function renderFabricReview(
   columns: number,
   presentation: FabricConsolePresentation,
   bounds: Rect,
-): void {
-  const lines = reviewLines(presentation);
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+  pointerEnabled: boolean,
+): Readonly<{ contextVisible: boolean }> {
+  const content = reviewLines(presentation);
+  const lines = content.lines;
   const visibleCount = bounds.y2 - bounds.y1 + 1;
   const offset = Math.min(
     presentation.reviewScrollOffset,
@@ -1621,6 +1646,22 @@ function renderFabricReview(
     .entries()) {
     setFabricRow(rows, bounds.y1 + index, columns, line);
   }
+  const scrollMaximum = Math.max(0, lines.length - visibleCount);
+  if (pointerEnabled && scrollMaximum > 0) {
+    hitRegions.push({
+      id: "review:scroll",
+      kind: "pager",
+      rect: bounds,
+      enabled: true,
+      geometryKey,
+      binding: null,
+      scrollMaximum,
+    });
+  }
+  return {
+    contextVisible:
+      offset === 0 && visibleCount >= content.requiredContextLineCount,
+  };
 }
 
 function actionBindingFor(
@@ -1645,13 +1686,17 @@ function renderFabricActions(
   dataset: FabricConsoleDataset,
   geometryKey: string,
   hitRegions: FabricHitRegion[],
+  actionVisible: (action: PresentedAction) => boolean = () => true,
 ): void {
-  if (presentation.actions.length === 0) {
+  const actions = presentation.actions.filter(actionVisible);
+  if (actions.length === 0) {
     setFabricRow(
       rows,
       row,
       columns,
-      presentation.connection === "LIVE"
+      presentation.actions.length > 0
+        ? "Actions unavailable in this geometry"
+        : presentation.connection === "LIVE"
         ? "Actions: select an actionable item"
         : `Actions disabled: ${presentation.connection}`,
     );
@@ -1659,7 +1704,7 @@ function renderFabricActions(
   }
   let line = "";
   let x = 1;
-  for (const [index, action] of presentation.actions.entries()) {
+  for (const [index, action] of actions.entries()) {
     const marker = presentation.focusId === action.id ? ">" : "";
     const label = `${marker}[${String(index + 1)} ${action.enabled ? "" : "×"}${action.label}]`;
     const gap = x === 1 ? "" : " ";
@@ -1680,6 +1725,37 @@ function renderFabricActions(
   setFabricRow(rows, row, columns, line);
 }
 
+function renderFabricDetachRow(
+  rows: string[],
+  columns: number,
+  row: number,
+  prefix: string,
+  presentation: FabricConsolePresentation,
+  geometryKey: string,
+  hitRegions: FabricHitRegion[],
+): void {
+  if (columns < 8 || row < 1 || row > rows.length) {
+    setFabricRow(rows, row, columns, prefix);
+    return;
+  }
+  const label = presentation.inputMode === "browse"
+    ? presentation.focusId === "detach" ? ">detach " : "q detach"
+    : presentation.focusId === "detach" ? ">Detach " : "[Detach]";
+  const prefixWidth = Math.max(0, columns - 9);
+  const value = prefixWidth === 0
+    ? label
+    : `${fitCells(chromeText(prefix), prefixWidth)} ${label}`;
+  setFabricRow(rows, row, columns, value);
+  hitRegions.push({
+    id: "detach",
+    kind: "detach",
+    rect: { x1: columns - 7, y1: row, x2: columns, y2: row },
+    enabled: true,
+    geometryKey,
+    binding: null,
+  });
+}
+
 function renderFabricFooter(
   rows: string[],
   columns: number,
@@ -1690,40 +1766,36 @@ function renderFabricFooter(
 ): void {
   const statusRow = rows.length - 1;
   const helpRow = rows.length;
+  const inputModal = presentation.inputMode !== "browse";
   setFabricRow(
     rows,
     statusRow,
     columns,
     presentation.notice ??
       (presentation.inputMode === "palette"
-        ? `WORKFLOW JSON: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels`
+        ? `WORKFLOW JSON: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels | Ctrl-C safety`
         : presentation.inputMode === "guided"
-          ? `GUIDED FORM: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels`
+          ? `GUIDED FORM: ${String(Buffer.byteLength(presentation.draft))} bytes | Enter opens Review | Esc cancels | Ctrl-C safety`
         : presentation.inputMode === "editor"
-          ? `DRAFT: ${String(Buffer.byteLength(presentation.draft))} bytes | Esc returns to browse`
+          ? `DRAFT: ${String(Buffer.byteLength(presentation.draft))} bytes | Esc returns to browse | Ctrl-C safety`
           :
           (presentation.failureCode === null
             ? `V:${presentation.activeView} F:${presentation.focusId ?? "browse"} ${presentation.connection} r${dataset.snapshotRevision ?? "?"} MOUSE:${presentation.mouseCapture ? "ON" : "OFF"} DROP:${String(presentation.rejectedInputCount)}${presentation.review === null ? "" : ` REVIEW+${String(presentation.reviewScrollOffset)}`}`
             : `Action failed: ${presentation.failureCode}`)),
   );
-  const help = "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll | q detach";
-  setFabricRow(rows, helpRow, columns, help);
-  const detachIndex = help.indexOf("q detach");
-  if (detachIndex >= 0 && detachIndex + 8 <= columns) {
-    hitRegions.push({
-      id: "detach",
-      kind: "detach",
-      rect: {
-        x1: detachIndex + 1,
-        y1: helpRow,
-        x2: detachIndex + 8,
-        y2: helpRow,
-      },
-      enabled: true,
-      geometryKey,
-      binding: null,
-    });
-  }
+  renderFabricDetachRow(
+    rows,
+    columns,
+    helpRow,
+    inputModal
+      ? presentation.inputMode === "editor"
+        ? "Esc browse | Ctrl-C safety detach"
+        : "Esc cancel | Ctrl-C safety detach"
+      : "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll",
+    presentation,
+    geometryKey,
+    hitRegions,
+  );
 }
 
 function renderFabricStrip(
@@ -1735,51 +1807,152 @@ function renderFabricStrip(
   hitRegions: FabricHitRegion[],
 ): void {
   const header = presentation.header;
-  setFabricRow(
-    rows,
-    1,
-    columns,
-    `P:${header.project} R:${header.run} ${presentation.connection}`,
-  );
-  const top = presentation.topAttention ?? presentation.masterRows[0];
-  if (top !== undefined && rows.length >= 2) {
-    setFabricRow(rows, 2, columns, rowText(top, false));
-    hitRegions.push({
-      id: `row:${top.view}:${top.stableId}`,
-      kind: "row",
-      rect: { x1: 1, y1: 2, x2: columns, y2: 2 },
-      enabled: true,
+  const inputModal = presentation.inputMode !== "browse";
+  const footerRow = rows.length;
+  const bodyEnd = Math.max(0, footerRow - 1);
+  const footerPrefix = inputModal
+    ? presentation.inputMode === "editor"
+      ? "Esc browse | Ctrl-C safety"
+      : "Esc cancel | Ctrl-C safety"
+    : "? help";
+
+  if (presentation.review !== null && bodyEnd >= 1) {
+    const actionRow = !inputModal && bodyEnd >= 2 ? bodyEnd : null;
+    const reviewEnd = actionRow === null ? bodyEnd : actionRow - 1;
+    const reviewState = renderFabricReview(
+      rows,
+      columns,
+      presentation,
+      { x1: 1, y1: 1, x2: columns, y2: Math.max(1, reviewEnd) },
       geometryKey,
-      binding: presentedBinding(dataset, top),
-    });
+      hitRegions,
+      !inputModal,
+    );
+    if (actionRow !== null) {
+      renderFabricActions(
+        rows,
+        columns,
+        actionRow,
+        presentation,
+        dataset,
+        geometryKey,
+        hitRegions,
+        (action) =>
+          (action.id !== "review:continue" && action.id !== "review:confirm") ||
+          reviewState.contextVisible,
+      );
+    }
+    renderFabricDetachRow(
+      rows,
+      columns,
+      footerRow,
+      footerPrefix,
+      presentation,
+      geometryKey,
+      hitRegions,
+    );
+    return;
   }
-  if (rows.length >= 4) {
+
+  const selected = presentation.masterRows.find((row) => row.selected);
+  const work = selected ?? presentation.topAttention ?? presentation.masterRows[0];
+  const topAttention = presentation.topAttention?.stableId === work?.stableId
+    ? null
+    : presentation.topAttention;
+  const fullHeader = [
+    `Project:${header.project}`,
+    `Session:${header.session}`,
+    `Run:${header.run}`,
+    `Revision:r${header.revision ?? "?"}`,
+    `Fresh:${header.freshness.toUpperCase()}`,
+    `Phase:${header.phase}`,
+    `Owner:${header.owner}`,
+    `Next:${header.nextMilestone}`,
+    `Health:${header.health}`,
+  ];
+  let nextRow = 1;
+  const renderWork = (item: PresentedRow): void => {
+    if (nextRow > bodyEnd) return;
+    const id = `row:${item.view}:${item.stableId}`;
     setFabricRow(
       rows,
-      rows.length - 1,
+      nextRow,
       columns,
-      presentation.notice ??
-        (presentation.inputMode === "palette"
-          ? `WORKFLOW:${String(Buffer.byteLength(presentation.draft))}B Enter Review Esc cancel`
-          : presentation.inputMode === "guided"
-            ? `FORM:${String(Buffer.byteLength(presentation.draft))}B Enter Review Esc cancel`
-          : `Health:${header.health} Attn:${String(header.attentionCount)} Next:${header.nextMilestone}`),
+      rowText(item, presentation.focusId === id),
     );
-  }
-  if (rows.length >= 3) {
-    const help = "? help | q detach";
-    setFabricRow(rows, rows.length, columns, help);
-    if (columns >= 17) {
+    if (!inputModal) {
       hitRegions.push({
-        id: "detach",
-        kind: "detach",
-        rect: { x1: 10, y1: rows.length, x2: 17, y2: rows.length },
+        id,
+        kind: "row",
+        rect: { x1: 1, y1: nextRow, x2: columns, y2: nextRow },
         enabled: true,
         geometryKey,
-        binding: null,
+        binding: presentedBinding(dataset, item),
       });
     }
+    nextRow += 1;
+  };
+
+  if (bodyEnd >= 12) {
+    for (const value of fullHeader) {
+      if (nextRow > bodyEnd) break;
+      setFabricRow(rows, nextRow, columns, value);
+      nextRow += 1;
+    }
+    if (work !== undefined) renderWork(work);
+  } else {
+    setFabricRow(
+      rows,
+      nextRow,
+      columns,
+      `P:${header.project} S:${header.session} R:${header.run} r${header.revision ?? "?"} ${header.freshness.toUpperCase()}`,
+    );
+    nextRow += 1;
+    if (work !== undefined) renderWork(work);
+    for (const value of fullHeader.slice(1)) {
+      if (nextRow > bodyEnd) break;
+      setFabricRow(rows, nextRow, columns, value);
+      nextRow += 1;
+    }
   }
+  if (topAttention !== null && topAttention !== undefined) {
+    renderWork(topAttention);
+  }
+  for (const detail of presentation.detail?.lines ?? []) {
+    if (nextRow > bodyEnd) break;
+    setFabricRow(rows, nextRow, columns, `${detail.label}:${detail.value}`);
+    nextRow += 1;
+  }
+  for (const item of presentation.masterRows) {
+    if (
+      nextRow > bodyEnd ||
+      item.stableId === work?.stableId ||
+      item.stableId === topAttention?.stableId
+    ) {
+      continue;
+    }
+    renderWork(item);
+  }
+  if (nextRow <= bodyEnd) {
+    setFabricRow(
+      rows,
+      nextRow,
+      columns,
+      presentation.notice ??
+        (inputModal
+          ? `${presentation.inputMode.toUpperCase()}:${String(Buffer.byteLength(presentation.draft))}B | Esc | Ctrl-C`
+          : `View:${presentation.activeView} | ${presentation.connection}`),
+    );
+  }
+  renderFabricDetachRow(
+    rows,
+    columns,
+    footerRow,
+    footerPrefix,
+    presentation,
+    geometryKey,
+    hitRegions,
+  );
 }
 
 export function renderFabricConsoleFrame(
@@ -1858,14 +2031,36 @@ export function renderFabricConsoleFrame(
     };
   }
 
+  const inputModal = presentation.inputMode !== "browse";
+  const contentHitRegions = inputModal ? [] : hitRegions;
   renderFabricHeader(rows, dimensions.columns, presentation);
-  renderFabricTabs(
-    rows,
-    dimensions.columns,
-    presentation,
-    geometryKey,
-    hitRegions,
-  );
+  if (presentation.review !== null) {
+    setFabricRow(
+      rows,
+      4,
+      dimensions.columns,
+      inputModal
+        ? "REVIEW INPUT MODAL | Esc returns | Ctrl-C safety | Detach local"
+        : "REVIEW MODAL | PgUp/PgDn or wheel scroll | Detach local",
+    );
+  } else if (inputModal) {
+    setFabricRow(
+      rows,
+      4,
+      dimensions.columns,
+      presentation.inputMode === "editor"
+        ? "EDITOR INPUT MODAL | Esc returns | Ctrl-C safety | Detach local"
+        : `${presentation.inputMode.toUpperCase()} INPUT MODAL | Esc cancels | Ctrl-C safety | Detach local`,
+    );
+  } else {
+    renderFabricTabs(
+      rows,
+      dimensions.columns,
+      presentation,
+      geometryKey,
+      hitRegions,
+    );
+  }
   const actionRow = dimensions.rows - 2;
   const body: Rect = {
     x1: 1,
@@ -1873,8 +2068,17 @@ export function renderFabricConsoleFrame(
     x2: dimensions.columns,
     y2: Math.max(5, actionRow - 1),
   };
+  let reviewContextVisible = true;
   if (presentation.review !== null) {
-    renderFabricReview(rows, dimensions.columns, presentation, body);
+    reviewContextVisible = renderFabricReview(
+      rows,
+      dimensions.columns,
+      presentation,
+      body,
+      geometryKey,
+      hitRegions,
+      !inputModal,
+    ).contextVisible;
   } else if (mode === "wide") {
     const masterWidth = Math.min(
       dimensions.columns - 32,
@@ -1889,7 +2093,7 @@ export function renderFabricConsoleFrame(
       dataset,
       ui,
       geometryKey,
-      hitRegions,
+      contentHitRegions,
       master,
     );
     for (let y = body.y1; y <= body.y2; y += 1) {
@@ -1900,14 +2104,16 @@ export function renderFabricConsoleFrame(
         "|",
       );
     }
-    hitRegions.push({
-      id: "splitter:master-detail",
-      kind: "splitter",
-      rect: { x1: masterWidth + 1, y1: body.y1, x2: masterWidth + 1, y2: body.y2 },
-      enabled: true,
-      geometryKey,
-      binding: null,
-    });
+    if (!inputModal) {
+      hitRegions.push({
+        id: "splitter:master-detail",
+        kind: "splitter",
+        rect: { x1: masterWidth + 1, y1: body.y1, x2: masterWidth + 1, y2: body.y2 },
+        enabled: true,
+        geometryKey,
+        binding: null,
+      });
+    }
     renderFabricDetail(
       rows,
       dimensions.columns,
@@ -1915,7 +2121,7 @@ export function renderFabricConsoleFrame(
       dataset,
       ui,
       geometryKey,
-      hitRegions,
+      contentHitRegions,
       detail,
     );
   } else if (mode === "reference") {
@@ -1933,18 +2139,20 @@ export function renderFabricConsoleFrame(
       dataset,
       ui,
       geometryKey,
-      hitRegions,
+      contentHitRegions,
       { ...body, y2: splitRow - 1 },
     );
     setFabricRow(rows, splitRow, dimensions.columns, "==== DETAIL ====");
-    hitRegions.push({
-      id: "splitter:master-detail",
-      kind: "splitter",
-      rect: { x1: 1, y1: splitRow, x2: dimensions.columns, y2: splitRow },
-      enabled: true,
-      geometryKey,
-      binding: null,
-    });
+    if (!inputModal) {
+      hitRegions.push({
+        id: "splitter:master-detail",
+        kind: "splitter",
+        rect: { x1: 1, y1: splitRow, x2: dimensions.columns, y2: splitRow },
+        enabled: true,
+        geometryKey,
+        binding: null,
+      });
+    }
     renderFabricDetail(
       rows,
       dimensions.columns,
@@ -1952,7 +2160,7 @@ export function renderFabricConsoleFrame(
       dataset,
       ui,
       geometryKey,
-      hitRegions,
+      contentHitRegions,
       { ...body, y1: splitRow + 1 },
     );
   } else if (presentation.compactPane === "master") {
@@ -1963,7 +2171,7 @@ export function renderFabricConsoleFrame(
       dataset,
       ui,
       geometryKey,
-      hitRegions,
+      contentHitRegions,
       body,
     );
   } else {
@@ -1974,19 +2182,33 @@ export function renderFabricConsoleFrame(
       dataset,
       ui,
       geometryKey,
-      hitRegions,
+      contentHitRegions,
       body,
     );
   }
-  renderFabricActions(
-    rows,
-    dimensions.columns,
-    actionRow,
-    presentation,
-    dataset,
-    geometryKey,
-    hitRegions,
-  );
+  if (inputModal) {
+    setFabricRow(
+      rows,
+      actionRow,
+      dimensions.columns,
+      presentation.inputMode === "editor"
+        ? "Draft input owns keys | Esc returns | Ctrl-C detaches safely"
+        : "Form input owns keys | Enter reviews | Esc cancels | Ctrl-C detaches safely",
+    );
+  } else {
+    renderFabricActions(
+      rows,
+      dimensions.columns,
+      actionRow,
+      presentation,
+      dataset,
+      geometryKey,
+      hitRegions,
+      (action) =>
+        (action.id !== "review:continue" && action.id !== "review:confirm") ||
+        reviewContextVisible,
+    );
+  }
   renderFabricFooter(
     rows,
     dimensions.columns,

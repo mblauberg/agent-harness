@@ -1396,6 +1396,119 @@ describe("structured presenter and responsive Fabric renderer", () => {
       .toMatchObject({ rect: { x1: 1, y1: 2, x2: 30, y2: 2 } });
   });
 
+  it("uses narrow tall strip rows for identity, operating state, and selected work", () => {
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ focusId: "row:attention:attention:safety" }),
+      { columns: 24, rows: 24 },
+    );
+    const visible = frame.rows.join("\n");
+
+    expect(frame.mode).toBe("strip");
+    expect(visible).toContain("Project:project-1");
+    expect(visible).toContain("Session:session-1");
+    expect(visible).toContain("Run:AFAB-004");
+    expect(visible).toContain("Revision:r11");
+    expect(visible).toContain("Fresh:LIVE");
+    expect(visible).toContain("Phase:implement");
+    expect(visible).toContain("Owner:codex-chair");
+    expect(visible).toContain("Next:Console GREEN");
+    expect(visible).toContain("Health:blocked");
+    expect(visible).toContain(">*!! Approve quarantine");
+    expect(frame.rows.filter((line) => line.trim().length > 0).length).toBeGreaterThanOrEqual(12);
+    expect(frame.hitRegions.find(({ id }) => id === "detach")).toMatchObject({
+      rect: { y1: 24, y2: 24 },
+      enabled: true,
+    });
+  });
+
+  it("keeps strip review context visible and withholds confirmation until it fits", () => {
+    const dataset = richDataset();
+    const state = controllerState(review("confirm"));
+    const short = renderFabricConsoleFrame(
+      dataset,
+      state,
+      createFabricUiState({ focusId: "review:confirm" }),
+      { columns: 30, rows: 5 },
+    );
+    const tall = renderFabricConsoleFrame(
+      dataset,
+      state,
+      createFabricUiState({ focusId: "review:confirm" }),
+      { columns: 30, rows: 8 },
+    );
+    const scrolled = renderFabricConsoleFrame(
+      dataset,
+      state,
+      createFabricUiState({
+        focusId: "review:confirm",
+        reviewScrollOffset: 5,
+      }),
+      { columns: 30, rows: 8 },
+    );
+
+    expect(short.rows.join("\n")).toContain("REVIEW CONFIRM");
+    expect(short.rows.join("\n")).toContain("Revision");
+    expect(short.hitRegions.some(({ id }) => id === "review:confirm")).toBe(false);
+    expect(short.hitRegions.some(({ kind }) => kind === "row" || kind === "tab" || kind === "splitter")).toBe(false);
+
+    const visible = tall.rows.join("\n");
+    expect(visible).toContain("REVIEW CONFIRM");
+    expect(visible).toContain("Revisions:");
+    expect(visible).toContain("Scope:");
+    expect(visible).toContain("Consequence:");
+    expect(visible).toContain("Evidence:");
+    expect(tall.hitRegions.find(({ id }) => id === "review:confirm")).toMatchObject({
+      kind: "action",
+      enabled: true,
+    });
+    expect(tall.hitRegions.some(({ kind }) => kind === "row" || kind === "tab" || kind === "splitter")).toBe(false);
+    expect(scrolled.hitRegions.some(({ id }) => id === "review:confirm")).toBe(false);
+    expect(scrolled.rows.join("\n")).not.toContain("Revisions:");
+  });
+
+  it.each(["editor", "guided", "palette"] as const)(
+    "renders honest %s modal help with only local Detach pointer authority",
+    (inputMode) => {
+      const frame = renderFabricConsoleFrame(
+        richDataset(),
+        controllerState(),
+        createFabricUiState({
+          inputMode,
+          draft: "q? remains draft",
+          mouseCapture: true,
+        }),
+        { columns: 80, rows: 24 },
+      );
+      const visible = frame.rows.join("\n");
+
+      expect(visible).toContain("Esc");
+      expect(visible).toContain("Ctrl-C");
+      expect(visible).toContain("Detach");
+      expect(visible).not.toContain("? help");
+      expect(visible).not.toContain("q detach");
+      expect(frame.hitRegions.map(({ id }) => id)).toStrictEqual(["detach"]);
+    },
+  );
+
+  it("makes a full-size review modal pointer-local and removes underlying hit geometry", () => {
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(review()),
+      createFabricUiState({ mouseCapture: true }),
+      { columns: 80, rows: 24 },
+    );
+    const ids = frame.hitRegions.map(({ id }) => id);
+
+    expect(ids).toContain("review:scroll");
+    expect(ids).toContain("review:continue");
+    expect(ids).toContain("review:cancel");
+    expect(ids).toContain("detach");
+    expect(frame.hitRegions.some(({ kind }) => kind === "row" || kind === "tab" || kind === "splitter")).toBe(false);
+    expect(ids.some((id) => id.startsWith("action:") || id.startsWith("view:"))).toBe(false);
+  });
+
   it("exposes inert detach geometry only when its label is visible", () => {
     const dataset = richDataset();
     const state = controllerState();

@@ -767,6 +767,73 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.closed).toBe(true);
   });
 
+  it.each(["editor", "guided", "palette"] as const)(
+    "allows only pointer Detach while the %s modal owns input",
+    async (inputMode) => {
+      const controller = new FakeController();
+      const beforeController = structuredClone(controller.state);
+      const detach = vi.fn(async () => {});
+      const activate = vi.fn(async () => {});
+      const runtime = new FabricConsoleRuntime({
+        controller,
+        viewport: { columns: 80, rows: 24 },
+        ui: createFabricUiState({ inputMode, mouseCapture: true, draft: "q?" }),
+        draw: () => {},
+        detach,
+        activate,
+        eventId: () => `event-modal-mouse-${inputMode}`,
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+      const underlyingActionPoint = { x: 2, y: 22 };
+      const modifiers = { shift: false, alt: false, ctrl: false };
+
+      await runtime.handleInput({
+        kind: "mouse",
+        phase: "press",
+        button: "left",
+        ...underlyingActionPoint,
+        modifiers,
+      });
+      await runtime.handleInput({
+        kind: "mouse",
+        phase: "release",
+        button: "left",
+        ...underlyingActionPoint,
+        modifiers,
+      });
+
+      expect(activate).not.toHaveBeenCalled();
+      expect(detach).not.toHaveBeenCalled();
+      expect(controller.state).toStrictEqual(beforeController);
+      expect(runtime.ui.draft).toBe("q?");
+
+      const detachRegion = runtime.frame.hitRegions.find(({ id }) => id === "detach");
+      expect(detachRegion).toBeDefined();
+      if (detachRegion === undefined) return;
+      const detachPoint = { x: detachRegion.rect.x1, y: detachRegion.rect.y1 };
+      await runtime.handleInput({
+        kind: "mouse",
+        phase: "press",
+        button: "left",
+        ...detachPoint,
+        modifiers,
+      });
+      await runtime.handleInput({
+        kind: "mouse",
+        phase: "release",
+        button: "left",
+        ...detachPoint,
+        modifiers,
+      });
+
+      expect(detach).toHaveBeenCalledOnce();
+      expect(detach).toHaveBeenCalledWith({ reason: "operator" });
+      expect(activate).not.toHaveBeenCalled();
+      expect(runtime.closed).toBe(true);
+    },
+  );
+
   it("uses local keyboard and mouse paths for split resizing without commands", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({

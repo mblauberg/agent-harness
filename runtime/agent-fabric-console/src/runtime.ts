@@ -317,6 +317,10 @@ export class FabricConsoleRuntime {
       await this.close("operator");
       return;
     }
+    if (this.#ui.inputMode !== "browse" && event.kind === "mouse") {
+      await this.#handleModalMouse(event);
+      return;
+    }
     if (this.#ui.inputMode !== "browse") {
       await this.#handleEditorInput(event);
       return;
@@ -329,6 +333,37 @@ export class FabricConsoleRuntime {
       return;
     }
     await this.#handleBrowseKey(event);
+  }
+
+  async #handleModalMouse(
+    event: Extract<TerminalInputEvent, { kind: "mouse" }>,
+  ): Promise<void> {
+    if (!this.#ui.mouseCapture) return;
+    const reduced = this.#reducePointer(
+      this.#pointer,
+      event,
+      this.#frame,
+      this.#controller.dataset,
+    );
+    this.#pointer = reduced.state;
+    for (const intent of reduced.intents) {
+      if (
+        intent.kind === "scroll" &&
+        intent.regionId === "review:scroll" &&
+        this.#frame.presentation.review !== null
+      ) {
+        this.#page(intent.direction ?? 1, intent.regionId);
+        continue;
+      }
+      if (intent.kind !== "activate-region" || intent.regionId !== "detach") {
+        continue;
+      }
+      const detach = this.#frame.hitRegions.find(
+        (region) =>
+          region.id === "detach" && region.kind === "detach" && region.enabled,
+      );
+      if (detach !== undefined) await this.#activateRegion(detach, "mouse");
+    }
   }
 
   async #handleEditorInput(
