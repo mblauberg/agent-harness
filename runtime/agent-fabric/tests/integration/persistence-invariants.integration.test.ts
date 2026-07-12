@@ -66,7 +66,22 @@ describe("additive persistence invariants", () => {
       INSERT INTO authority_budget(authority_id,unit_key,granted)
       VALUES ('authority-a','turns',4),('authority-a','provider_calls',2),('authority-a','descendants',1);
       INSERT INTO tasks VALUES ('run-a','task-a','authority-a','review','base','active','chair-a',1,1,'chair-a');
+      INSERT INTO authorities VALUES ('authority-unsafe','run-a','authority-a','{}','unsafe',1);
+      INSERT INTO authority_budget(authority_id,unit_key,granted)
+      VALUES ('authority-unsafe','turns',9007199254740992);
     `);
+    expect(() => database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
+        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
+        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
+        task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
+      ) VALUES (
+        'run-a','action-unsafe-turns','fake','spawn',NULL,NULL,NULL,'identity-unsafe','payload-unsafe','{"maxTurns":9007199254740992}',
+        'dispatched','["prepared","dispatched"]',1,0,0,NULL,1,1,
+        'task-a','authority-unsafe','{"turns":9007199254740992}',NULL,'reserved',1
+      )
+    `).run()).toThrow(/INVARIANT_provider_actions_budget_reservation/u);
     expect(() => database.prepare(`
       INSERT INTO provider_actions(
         run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
