@@ -77,3 +77,11 @@ owners.
 Humans own production promotion, external sending, public publication,
 irreversible disclosure or data changes, and acceptance of degraded safeguards.
 The agent may prepare and verify; it may execute only within explicit authority.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records workflow evidence; it cannot release or deploy and never
+substitutes for target-bound human authority.

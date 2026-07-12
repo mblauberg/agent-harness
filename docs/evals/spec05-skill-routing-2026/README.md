@@ -16,15 +16,22 @@ MCP surface and daemon: Claude through `claude-agent-sdk`, Cursor Grok through
 task/action identity, route, model lineage, terminal digest and raw JSON output.
 The executable validator recomputes all input and raw-output hashes, requires
 all 108 case rows, 100% primary accuracy, at least 90% exact companion fidelity,
-and zero portability failures. Synthetic, recorded or self-declared adapters
-are rejected.
+and zero portability failures. Each retained output preserves the exact Fabric
+`providerAnswer` bytes and must match the answer digest in its terminal action
+evidence; semantic-equivalent or synthetic replacement JSON fails even if its
+local output hash and metrics are rewritten. Synthetic, recorded or
+self-declared adapters are rejected.
 
 `portability-result.json` is a separate deterministic filesystem probe. It
-executes every affected skill's project-artifact fallback with an isolated
-empty command path and proves that `agent-fabric-console`, `herdr` and `gh` are
-absent. This proves local artifact mechanics; the three real semantic outputs
-independently exercise the portability prompts and their artifact contracts.
-Neither layer claims human acceptance or production task-success rates.
+executes every affected skill's owned `portable-workflow.v1.json` contract
+through `skills/_shared/portable_workflow.py`, with an isolated empty command
+path proving that `agent-fabric-console`, `herdr` and `gh` are absent. The
+evaluator only supplies the canonical project context and validates the
+artifact produced by that external runner; a missing, broken or dishonest
+runner fails the probe. This proves local artifact mechanics; the three real
+semantic outputs independently exercise the portability prompts and their
+artifact contracts. Neither layer claims human acceptance or production
+task-success rates.
 
 Commands:
 

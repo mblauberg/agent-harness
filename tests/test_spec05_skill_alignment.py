@@ -2,6 +2,7 @@ from collections import Counter
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 import yaml
@@ -153,6 +154,20 @@ def test_spec05_routing_validator_rejects_synthetic_or_self_declared_answers(tmp
         module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE, evidence_root=tmp_path)
 
 
+def test_spec05_routing_validator_binds_exact_output_bytes_to_fabric_answer(tmp_path):
+    module = load_spec05_evaluation()
+    result = module.make_contract_test_result(ROOT, SPEC05_EVIDENCE, tmp_path)
+    module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE, evidence_root=tmp_path)
+
+    invocation = result["invocations"][0]
+    output_path = tmp_path / invocation["output_artifact"]
+    output_path.write_text(json.dumps(json.loads(output_path.read_text()), indent=2) + "\n")
+    invocation["output_sha256"] = module.sha256_file(output_path)
+
+    with pytest.raises(module.Invalid, match="exact Fabric provider answer"):
+        module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE, evidence_root=tmp_path)
+
+
 def test_spec05_retained_real_fabric_routing_result_passes():
     module = load_spec05_evaluation()
     result = json.loads((SPEC05_EVIDENCE / "routing-result.json").read_text())
@@ -172,3 +187,16 @@ def test_spec05_adapter_absent_workflows_execute_and_match_retained_result(tmp_p
         "gh": True,
         "herdr": True,
     }
+
+
+def test_spec05_adapter_absent_probe_fails_when_the_real_workflow_runner_breaks(tmp_path):
+    module = load_spec05_evaluation()
+    runner = tmp_path / "broken-portable-workflow.py"
+    runner.write_text("raise SystemExit(42)\n")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        module.run_portability_probe(
+            ROOT,
+            tmp_path / "probe",
+            workflow_runner=runner,
+        )

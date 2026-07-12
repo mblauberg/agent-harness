@@ -70,3 +70,10 @@ Rules no session may break, with links — not restated content.
   the route section already records outcomes.
 - "I'll re-plan the whole effort" mid-route → re-planning is a leg: grill it,
   update Destination/Route once, dated.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact remains a curated route, never live task truth.

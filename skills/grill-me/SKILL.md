@@ -21,3 +21,10 @@ sources, investigate it instead of spending human attention. Stop when the
 shared decision/acceptance contract is clear, the user asks to stop, or the next
 branch needs unavailable owner authority. Return the resolved register to
 `scope` for a digest-bound handoff; the interview itself is not approval.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records workflow evidence; it never approves the decision context.

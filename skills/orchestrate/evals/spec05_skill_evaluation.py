@@ -251,7 +251,7 @@ def _action_evidence(
     required = {
         "schema_version", "route", "run_id", "task_id", "action_id",
         "adapter_id", "model_family", "model", "status", "result_digest",
-        "base_revision", "prompt_sha256",
+        "provider_answer_sha256", "base_revision", "prompt_sha256",
     }
     fail(not isinstance(action, dict) or set(action) != required, "Fabric action evidence keys are invalid")
     family = invocation["family"]
@@ -325,11 +325,13 @@ def validate_routing_result(
             (output_path, invocation["output_sha256"], "output"),
         ):
             fail(not path.is_file() or sha256_file(path) != digest, f"routing {label} evidence is missing or changed")
-        _action_evidence(
+        action = _action_evidence(
             action_path,
             invocation,
             plan["classifier"]["provider_prompt_sha256"],
         )
+        fail(action["provider_answer_sha256"] != sha256_file(output_path),
+             "routing output is not the exact Fabric provider answer")
         output = _parse_output(output_path, cases, known_skills)
         by_id = {row["case_id"]: row for row in output["selections"]}
         for case in cases:
@@ -383,6 +385,8 @@ def make_contract_test_result(root: Path, evidence: Path, output_root: Path) -> 
         action_id = f"contract-action-{family}"
         action_path = output_root / f"{family}-action.json"
         output_path = output_root / f"{family}-output.json"
+        provider_answer = json.dumps(_expected_output(root), sort_keys=True)
+        output_path.write_text(provider_answer)
         action_path.write_text(json.dumps({
             "schema_version": SCHEMA_VERSION,
             "route": ROUTE,
@@ -394,10 +398,10 @@ def make_contract_test_result(root: Path, evidence: Path, output_root: Path) -> 
             "model": model,
             "status": "terminal",
             "result_digest": sha256_bytes(family.encode()),
+            "provider_answer_sha256": sha256_bytes(provider_answer.encode()),
             "base_revision": "contract-test-revision",
             "prompt_sha256": plan["classifier"]["provider_prompt_sha256"],
         }, sort_keys=True) + "\n")
-        output_path.write_text(json.dumps(_expected_output(root), sort_keys=True) + "\n")
         invocations.append({
             "invocation_id": f"contract-{family}",
             "family": family,
@@ -470,6 +474,8 @@ def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
                  f"Fabric routing bundle {family} {field} is missing")
         action_path = raw / f"{family}-action.json"
         output_path = raw / f"{family}-output.json"
+        provider_answer = row["answer"]
+        output_path.write_text(provider_answer)
         action_path.write_text(json.dumps({
             "schema_version": SCHEMA_VERSION,
             "route": ROUTE,
@@ -481,14 +487,14 @@ def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
             "model": row["model"],
             "status": row["status"],
             "result_digest": row["resultDigest"],
+            "provider_answer_sha256": sha256_bytes(provider_answer.encode()),
             "base_revision": row["baseRevision"],
             "prompt_sha256": row["promptSha256"],
         }, indent=2, sort_keys=True) + "\n")
         try:
-            parsed_answer = json.loads(row["answer"])
+            json.loads(provider_answer)
         except json.JSONDecodeError as exc:
             raise Invalid(f"Fabric routing bundle {family} answer is not exact JSON: {exc}") from exc
-        output_path.write_text(json.dumps(parsed_answer, indent=2, sort_keys=True) + "\n")
         parsed = _parse_output(output_path, cases, known_skills)
         selected = {selection["case_id"]: selection for selection in parsed["selections"]}
         for case in cases:
@@ -545,7 +551,12 @@ def import_fabric_bundle(root: Path, evidence: Path, bundle_path: Path) -> Path:
     return result_path
 
 
-def run_portability_probe(root: Path, probe_root: Path) -> dict[str, Any]:
+def run_portability_probe(
+    root: Path,
+    probe_root: Path,
+    *,
+    workflow_runner: Path | None = None,
+) -> dict[str, Any]:
     empty_bin = probe_root / "empty-bin"
     artifacts = probe_root / "project-artifacts"
     empty_bin.mkdir(parents=True, exist_ok=True)
@@ -560,24 +571,39 @@ def run_portability_probe(root: Path, probe_root: Path) -> dict[str, Any]:
     }
     context_path = artifacts / "project-context.json"
     context_path.write_text(json.dumps(context, sort_keys=True) + "\n")
+    runner = workflow_runner or root / "skills" / "_shared" / "portable_workflow.py"
     cases = []
     for skill in AFFECTED:
         fixture = yaml.safe_load(
             (root / "skills" / skill / "evals" / "spec05_cases.yaml").read_text()
         )
         portable = next(case for case in fixture["cases"] if case["relation"] == "portability")
-        output = {
-            "schema_version": SCHEMA_VERSION,
-            "skill": skill,
-            "artifact_kind": ARTIFACT_KINDS[skill],
-            "artifact_basis": "project-artifacts",
-            "source_digest": sha256_file(context_path),
-            "adapters_used": [],
-            "status": "completed",
-        }
         output_path = artifacts / f"{skill}-{ARTIFACT_KINDS[skill]}.json"
-        output_path.write_text(json.dumps(output, sort_keys=True) + "\n")
+        subprocess.run(
+            [
+                sys.executable,
+                str(runner),
+                "--skill-root", str(root / "skills" / skill),
+                "--context", str(context_path),
+                "--output", str(output_path),
+            ],
+            check=True,
+            cwd=artifacts,
+            env={"PATH": str(empty_bin), "PYTHONUTF8": "1"},
+            capture_output=True,
+            text=True,
+        )
         observed = json.loads(output_path.read_text())
+        fail(not isinstance(observed, dict) or set(observed) != {
+            "schema_version", "skill", "artifact_kind", "artifact_basis",
+            "source_digest", "adapters_used", "status",
+        }, f"portable workflow output is invalid for {skill}")
+        fail(observed["schema_version"] != SCHEMA_VERSION or observed["skill"] != skill,
+             f"portable workflow identity differs for {skill}")
+        fail(observed["artifact_kind"] != ARTIFACT_KINDS[skill],
+             f"portable workflow artifact kind differs for {skill}")
+        fail(observed["source_digest"] != sha256_file(context_path),
+             f"portable workflow source digest differs for {skill}")
         cases.append({
             "case_id": portable["id"],
             "skill": skill,

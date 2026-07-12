@@ -70,3 +70,10 @@ delete unknown files. Staleness becomes visible state, not catch-up churn.
 
 Project knowledge belongs in project docs. Harness-private memory contains only
 cross-project user preferences; raw session logs never become state.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact is the resumable handoff evidence, not live task truth.

@@ -72,3 +72,11 @@ harness changes only under explicit authority or an enclosing `implement` run;
 material cross-project changes return through human-approved scope. Finish with
 a compact table: finding, evidence, root cause, proposed change, regression
 gate, owner/destination and status (`promote`, `experiment`, `defer`, `reject`).
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records retrospective evidence; proposed improvements still require
+their normal authority.

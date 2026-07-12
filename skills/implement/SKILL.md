@@ -74,3 +74,11 @@ authority and must name a normal reconciliation run.
   approved digests.
 - `awaiting_acceptance` is the successful machine-gate state. Move the
   canonical receipt to `accepted` only after explicit human acceptance.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records workflow evidence; it never grants acceptance or promotion
+authority.

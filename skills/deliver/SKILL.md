@@ -61,3 +61,11 @@ transport is unavailable.
 `implement` uses this same receipt with profile `software`; no parallel
 implementation receipt format exists. Live task or membership projections may
 link to it but never replace its canonical acceptance evidence.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records workflow evidence; it never grants acceptance or release
+authority.

@@ -5,6 +5,7 @@
   "model": "opus",
   "model_family": "anthropic",
   "prompt_sha256": "sha256:adbd4ce01e18fe26b29f9c5d66d75167cea24e6137b02d1176843fad792132d9",
+  "provider_answer_sha256": "sha256:4fb9f7c782e945c049efcd3ba1b339e7fc269aad4db5d8bde097854cbc685fe5",
   "result_digest": "sha256:55ec7692c46a10099ada85ec7f49cc512d5b819f5dc6df8f87e6a81cdd46b1fb",
   "route": "generated MCP -> daemon -> task-bound ephemeral provider action",
   "run_id": "spec05-skill-routing-evaluation",

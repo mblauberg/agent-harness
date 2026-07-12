@@ -75,3 +75,10 @@ failure modes are explicit, authority/risk are machine-readable, evidence is
 anchored, and a human approved the spec and one-way doors. The execution
 handoff is digest-bound to the exact approved scope, decisions and authority;
 change creates a new revision and gate.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records scope evidence; it never supplies human approval.

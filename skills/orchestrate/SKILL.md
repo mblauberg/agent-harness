@@ -78,3 +78,11 @@ Load only the relevant file from [references/](references/):
 `evaluation-and-observability.md`, `domain-adaptation.md`, and
 `system-design-patterns.md`. Helpers and static guards live in `scripts/` and
 `evals/`; `cf_dispatch.sh` is degraded fallback/preflight, not primary execution.
+
+## Adapter-absent path
+
+Console, Herdr and GitHub are optional. Continue from canonical project
+artifacts and emit the skill-owned artifact kind in
+[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
+artifact records coordination evidence; it never creates Fabric authority or a
+second live task owner.
