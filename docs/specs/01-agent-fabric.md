@@ -1,14 +1,27 @@
 # Shared agent fabric
 
-Status: Current protocol, provider-task, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
-Version: 0.28
-Date: 12 July 2026
+Status: Current protocol, provider-task, route-lineage, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
+Version: 0.29
+Date: 13 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.28 keeps task-bound provider execution within the public protocol's
+Version 0.29 closes the provider-review lineage gap already covered by
+FR-015, FR-016A, AC-014 and Spec 05 v1.4. A task-bound answer-bearing spawn
+now carries one strict route request. At new-action admission the daemon invokes
+the trusted existing model router, verifies the resolved adapter, model,
+family and effective effort against the admitted provider payload, and commits
+the canonical route request, receipt and their digests with the immutable
+provider action before provider I/O. Exact replay uses that stored route;
+changed route input conflicts. A chair-only typed review-evidence operation
+then derives reviewer identity, terminal answer/result digest and structural
+independence from durable action, route and reviewed-artifact publisher
+lineage. Caller-authored post-hoc route receipts, provider-family assertions
+and independence booleans no longer certify review. This clarification does
+not approve proposed continuity-routing modes or any other later-spec
+capability. Version 0.28 keeps task-bound provider execution within the public protocol's
 30-second request ceiling. Dispatch atomically reserves and journals the action
 plus command receipt, queues one daemon-owned completion, and returns its
 durable `prepared` or `dispatched` receipt before provider completion. The chair reads the same action until a
@@ -1038,15 +1051,21 @@ An adapter without a verified entry remains disabled.
 - **FR-013 (Stage 3):** Agents shall request compaction, rotation or release through a
   checkpointed lifecycle operation.
 - **FR-014 (Stage 3):** The daemon shall not delete provider-native session files.
-- **FR-015 (Stage 3):** Model and effort resolution shall use the existing model router
-  and retain its receipt.
+- **FR-015 (Stage 3):** Model and effort resolution shall use the existing
+  trusted model router. For a task-bound answer-bearing spawn, the daemon shall
+  invoke it from a strict route request at new-action admission and atomically
+  retain the canonical request, receipt and both digests on the provider action
+  before provider I/O; a caller-authored post-hoc receipt cannot certify the
+  action.
 - **FR-016 (Stage 4):** An optional bonus-family leg shall follow its configured
   retry and acknowledgement deadline, then terminate as degraded or failed and
   record the reason rather than block the required primary path.
 - **FR-016A (Stage 4):** A fresh ephemeral provider worker or reviewer shall run
-  through a task-bound `provider-action.dispatch` `spawn`, return its bounded
-  answer in the durable provider-action result and create no retained agent
-  identity or implicit provider-session authority.
+  through a route-bound, task-bound `provider-action.dispatch` `spawn`, return
+  its bounded answer in the durable provider-action result and create no
+  retained agent identity or implicit provider-session authority. Review
+  certification shall use the terminal action's daemon-derived route and
+  artifact lineage rather than caller-supplied provider family or independence.
 - **FR-017 (Stage 1):** The daemon shall resume committed coordination state after an
   unclean restart.
 - **FR-018 (Stage 1):** Before barrier closure, the fabric shall export a
@@ -1216,14 +1235,22 @@ And no side-effecting action is replayed without reconciliation.
 Given the chair owns or participates in one active review task and delegates a
 read-only externally disclosable authority envelope
 When it dispatches `operation: spawn` to an activated compatible adapter with
-an explicit model, model family, prompt and exact task ID
+an exact reviewed-artifact reference, strict route request, explicit admitted
+model, model family, applicable effort, prompt and exact task ID
 Then Fabric persists one action and returns either its durable `prepared` or `dispatched`
 receipt or the bounded terminal answer through the closed `providerAnswer`
 action result field plus a canonical digest
+And the action's immutable route binding contains the canonical daemon-produced
+route receipt and digest before provider I/O
 And a nonterminal receipt remains readable while one daemon-owned completion
 settles it; the chair polls the same action rather than redispatching
-And a missing task, stale task scope, forbidden disclosure, model mismatch,
-duplicate changed action or unsupported adapter fails before provider work
+And exact replay returns that same route and action, while a missing task,
+stale task scope, forbidden disclosure, route/payload mismatch, changed route
+request, duplicate changed action or unsupported adapter fails before provider
+work
+And the current chair may record review evidence only by referencing that exact
+terminal action, route digest, task, result digest and reviewed artifact; Fabric
+derives model family, model, answer and structural independence
 And no retained agent identity, capability or hidden direct-CLI result path is
 created.
 
@@ -3842,3 +3869,165 @@ Acceptance additionally requires:
   malformed and cross-boundary candidates fail closed or omit the optional
   field. Console review/confirm tests then resolve/revise only those exact
   bindings.
+
+### 32.19 Admission-bound provider routes and review lineage
+
+FR-015 already requires the existing model router and Spec 05 v1.4 already
+requires fresh external reviews to be answer-bearing Fabric tasks. For a
+task-bound answer-bearing `spawn`, the route is therefore action-admission
+input, not an artifact that the caller may publish after the action. The
+`provider-action.dispatch` requires the following closed `routeRequest` for
+that operation only. `reviewedArtifactRef` is closed optional input represented
+explicitly as `null` for non-review answer-bearing work; both fields are
+rejected for every other provider action:
+
+```yaml
+routeRequest:
+  schemaVersion: 1
+  adapterAlias: configured-nonempty-alias
+  modelAlias: configured-nonempty-alias
+  explicitModel: null-or-exact-allowlisted-model
+  role: configured-route-role
+  leadFamily: canonical-nonempty-model-family
+  requireDistinct: true-or-false
+  providerEffort: null-or-explicit-provider-effort
+reviewedArtifactRef:
+  oneOf:
+    - null
+    - artifactId: exact-active-artifact
+      revision: positive-current-revision
+      path: canonical-relative-path
+      sha256: sha256-prefixed-source-digest
+```
+
+The codec rejects additional fields, unconfigured aliases/roles, an explicit
+model outside the router's allow-list, an effort value unsupported by the
+selected adapter/model and any non-null artifact outside the exact project or
+current active registry revision. A spawn intended to certify review requires
+the exact artifact form; another answer-bearing worker uses explicit `null`.
+`providerEffort` is required when the selected
+provider/model exposes an effort choice and is `null` otherwise. The caller
+cannot select the router executable, catalogue, capability source or
+configuration path.
+
+One checked-in `model-route.v1` closed schema in the shared protocol package is
+the sole request/receipt shape owner. The TypeScript daemon and Python router
+both validate directly against that same versioned artifact; neither maintains
+a hand-written permissive copy. Its version is a constant, unknown fields fail,
+and request/receipt parity fixtures are shared across both runtimes. This
+current FR-015 refactor adds no capability snapshot, evidence selector,
+Pareto/native routing mode or other continuity-policy input.
+
+For a new action identity, the daemon invokes the trusted, harness-root-owned
+`scripts/model-route` resolver with that exact request. A successful receipt
+must use schema version 1 and status `ok`; echo the adapter alias, model alias,
+role, lead family and requested effort; satisfy `requireDistinct`; and resolve
+to the action's admitted adapter plus the provider payload's exact `model`,
+`modelFamily` and effective `effort`. An explicit model must resolve to that
+same model. The adapter compatibility identity in the receipt must equal the
+activated adapter contract. Any missing, extra, malformed, rejected,
+substituted-but-unreflected or conflicting value fails before provider I/O.
+When the reviewed artifact has a uniquely provable agent publisher family, the
+route's lead family must equal it; absence of such lineage remains representable
+but cannot later prove cross-family independence.
+
+The daemon canonicalises the strict route request and complete router receipt,
+computes a `sha256:` digest for each, and commits both immutable values with the
+provider action, its complete budget reservation and command receipt in one
+transaction before queuing adapter I/O. The canonical null-or-exact
+reviewed-artifact reference is part of the same action identity. Replay checks the existing action before
+calling the router: the exact command/action, payload, route-request digest and
+artifact reference return the stored action and route; any changed value is a
+dedupe conflict even when the newly resolved model would be the same. Router or
+configuration drift never rewrites an admitted route. A prepared or dispatched
+action with a missing or conflicting route binding is quarantined; recovery
+never reconstructs one from caller bytes or by rerunning the router.
+
+`fabric.v1.review-evidence.record`, negotiated as
+`provider-review-evidence.v1`, is an agent-principal operation whose mutation
+path additionally requires the current chair lease and generation. Its closed
+request is:
+
+```yaml
+review_evidence_record_v1:
+  schemaVersion: 1
+  evidenceId: stable-id
+  commandId: stable-chair-command
+  providerActionRef:
+    adapterId: exact-admitted-adapter
+    actionId: exact-terminal-action
+  taskId: exact-action-task
+  routeReceiptDigest: sha256-prefixed-route-receipt-digest
+  resultDigest: sha256-prefixed-terminal-result-digest
+  reviewedArtifactRef:
+    artifactId: exact-action-reviewed-artifact
+    revision: positive-current-revision
+    path: canonical-relative-path
+    sha256: sha256-prefixed-source-digest
+  adjudicationDisposition: clean-or-findings-substantiated-or-findings-unsubstantiated-or-findings-mixed-or-unusable
+```
+
+The request supplies equality preconditions and one bounded chair
+adjudication; it has no reviewer-agent, provider-family, model, answer or
+independence field. In one transaction the daemon requires the action to be a
+terminal, task-bound, answer-bearing ephemeral spawn with no retained target
+agent; matches its task, route digest, canonical result digest and originally
+bound artifact; and rechecks the artifact's active identity and publisher.
+It then derives and stores the exact bounded `providerAnswer`, provider family,
+resolved model, effective effort and complete route receipt from the immutable
+action/route rows.
+
+Structural independence is also daemon-derived. The daemon snapshots the
+reviewed artifact's publisher kind/reference and, for an agent publisher, its
+exact provider custody/action plus any immutable route binding. It emits one
+closed state:
+
+- `proved-distinct-family` only when the publisher's provider family is
+  uniquely durable, equals the route's lead family, differs from the review
+  route family, and the stored request/receipt prove required distinctness;
+- `same-family` when the durable publisher and reviewer families are equal; or
+- `unproved` when the publisher is non-agent, its provider lineage is absent or
+  ambiguous, or any required lineage link cannot be proved.
+
+This is structural routing evidence, not a claim that the answer is correct or
+that reviewers could not share training data. Only `proved-distinct-family`
+can satisfy a cross-family review requirement. No retained reviewer agent is
+needed because the terminal action and route are the reviewer identity.
+
+The immutable record stores a canonical publisher-lineage snapshot and digest.
+Exact evidence/command replay returns it; changed action, task, route, result,
+artifact or disposition conflicts. `fabric-receipt.json` exports every admitted
+route under `providerRoutes` and every certified review under
+`providerReviews`, including the exact action/task/artifact references,
+canonical route request and receipt plus digests, terminal answer/result
+digest, daemon-derived family/model/effort, publisher lineage/digest,
+structural-independence state and chair disposition. The current baseline has
+no caller-writable `modelRoutingEvidence` or `crossFamilyReviews` certification
+path. A direct provider CLI result may be retained only as a visibly degraded
+ordinary artifact; it cannot be imported into this operation or satisfy a
+Fabric/cross-family review gate.
+
+Added requirements are:
+
+- **FR-053:** A task-bound answer-bearing spawn shall resolve and immutably bind
+  one daemon-produced route before provider I/O; exact replay shall reuse it
+  and changed route input shall conflict.
+- **FR-054:** The current chair alone may create typed provider-review evidence,
+  and Fabric shall derive its reviewer route, terminal answer/result digest and
+  structural independence from durable action, route and artifact-publisher
+  lineage.
+
+Acceptance additionally requires:
+
+- **AC-043:** Real-router/fake-provider fixtures cover alias and explicit-model
+  routing, applicable explicit effort, required distinctness, exact payload
+  agreement, atomic action/route/budget/receipt commit, all mismatches before
+  provider I/O, exact replay without router reinvocation, changed-request
+  conflict and restart without route reconstruction.
+- **AC-044:** Chair-only review-evidence fixtures accept one exact terminal
+  answer-bearing action and derive its answer, result digest, family, model and
+  `proved-distinct-family` publisher lineage. Non-chair calls, retained-agent
+  substitution, nonterminal/ambiguous actions, crossed task/action/route/result/
+  artifact references, same-family/unproved cross-family completion claims,
+  changed replay and caller-authored legacy/CLI evidence fail closed. Receipt
+  export reproduces the exact immutable lineage.

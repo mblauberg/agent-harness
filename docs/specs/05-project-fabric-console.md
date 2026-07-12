@@ -1,8 +1,8 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.6
-Date: 12 July 2026
+Version: 1.7
+Date: 13 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
 Design chairs: Codex with Claude Code adversarial review
@@ -10,7 +10,16 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.6 records the live MCP review finding that provider turns can exceed
+Version 1.7 closes the already-binding v1.4 external-review lineage gap. Fresh
+provider review dispatch now includes an exact reviewed-artifact reference and
+strict router request; the daemon binds its trusted-router receipt to the
+answer-bearing action before provider I/O. After the terminal answer, the chair
+records only exact references plus a bounded adjudication disposition. Fabric
+derives provider/model identity, answer/result digest and structural
+independence, then exports the immutable lineage. Direct provider CLI review
+remains a degraded, non-certifying artifact. This is a current Spec 05
+hardening clarification, not approval of proposed Spec 06 continuity-routing
+capabilities. Version 1.6 records the live MCP review finding that provider turns can exceed
 the binding 30-second public request maximum. Review dispatch therefore returns
 the durable action receipt promptly and the chair reads that exact action until
 its bounded terminal answer arrives; timeout, disconnect and polling never
@@ -365,6 +374,41 @@ the coordinated chair, a handoff-based chair replacement, or an independent
 run chair. The prompt shall reference artifact paths and digests and require the
 receiving owner to reopen them. It shall not paste large artifacts into the
 prompt.
+
+Fresh external implementation review is a Fabric review task, not an
+unattributed provider transcript. The chair shall register the exact immutable
+artifact to be reviewed, create the review task, and dispatch one task-bound
+answer-bearing ephemeral action with that artifact reference and the strict
+route request owned by Spec 01 section 32.19. The request names the adapter and
+model aliases, optional explicit model, reviewer role, lead family,
+distinctness requirement and explicit provider effort where applicable. The
+Console and Python router use the same closed `model-route.v1` protocol schema;
+the Console exposes no capability/evidence selector or continuity-routing
+mode. The daemon invokes the trusted router and binds its canonical
+receipt/digest to the
+action before provider I/O. The Console shall display the admitted adapter,
+resolved family/model/effort, route digest, task, reviewed artifact and action
+state from that durable binding; it shall never infer them from the answer or a
+route file supplied later.
+
+After `provider-action.read` returns the terminal answer and canonical result
+digest, the chair may call the typed review-evidence operation with only the
+exact action, task, route, result and artifact references plus one closed
+adjudication disposition. Fabric derives the answer, family, model, effort,
+artifact publisher lineage and structural-independence state. The Console
+shall show `proved-distinct-family`, `same-family` or `unproved` exactly as
+returned and shall count only the first state toward a cross-family gate. It
+shall not offer editable provider-family or independence controls. A retained
+reviewer agent is neither created nor required; the terminal action and route
+are its identity.
+
+A direct Claude, Cursor, Gemini or other provider CLI may be used only when
+Fabric is unavailable and the chair records the degraded reason. Its output may
+be registered as an ordinary review artifact for diagnosis, but it is visibly
+`non-certifying`, cannot create provider-review evidence and cannot satisfy the
+fresh other-primary, cross-family or no-unresolved-P0-P2 completion gate. The
+review must be rerun through Fabric before completion; post-hoc import,
+self-attested family and caller-selected independence are unavailable.
 
 ## 7. Human-attention policy
 
@@ -797,6 +841,9 @@ Implementation is accepted only when objective tests demonstrate:
     cover every configured dimension and the Console projects remaining or
     unknown capacity honestly.
 33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
+    Every provider review counted toward that gate has a terminal task-bound
+    answer-bearing action and typed Fabric review-evidence record; a direct CLI
+    artifact is degraded evidence only and cannot satisfy the gate.
 34. A real scoping intake registers a spec, ADR, decision/finding and Git diff;
     Project/Evidence row and detail preserve exact accepted scope, kind,
     revision, provenance and source digest. Multi-page content continues without
@@ -812,6 +859,17 @@ Implementation is accepted only when objective tests demonstrate:
     selects its secondary client, `s` returns to the retained project selector,
     and `--session` selects an exact stable ID for interactive or export use.
     A peer without `run-session-projection.v1` is explicitly incompatible.
+36. Provider-review routing invokes the trusted model router exactly once for a
+    new action, binds the canonical request/receipt and exact reviewed artifact
+    before provider I/O, and reuses that route on exact replay. Alias, explicit-
+    model, lead-family, distinctness, effort, adapter/model/family/payload,
+    artifact and changed-replay mismatches fail closed without provider work.
+37. Chair-only review evidence accepts the exact terminal action/task/route/
+    result/artifact tuple and derives the answer, family, model, effort and
+    publisher-lineage independence. Same-family, non-agent, missing or crossed
+    lineage is labelled honestly and cannot satisfy cross-family review;
+    receipt export preserves the complete immutable lineage without a retained
+    reviewer agent.
 
 ## 16. Implementation gate
 
@@ -827,5 +885,7 @@ shipped Pause/Resume, Attention decision and evidence discussion/request-
 changes affordance execute its typed revision-bound review/confirm path; no
 required action remains an implementation placeholder. Version 1.6 binds those
 review tasks to durable dispatch/read completion within the existing public
-protocol deadline. Final human acceptance remains pending; Git push,
+protocol deadline. Version 1.7 binds trusted-router admission and daemon-derived
+review lineage to those same tasks without adding Spec 06 continuity modes.
+Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.
