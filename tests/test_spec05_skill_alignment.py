@@ -1,10 +1,15 @@
 from collections import Counter
+import importlib.util
+import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SPEC05_EVAL = ROOT / "skills" / "orchestrate" / "evals" / "spec05_skill_evaluation.py"
+SPEC05_EVIDENCE = ROOT / "docs" / "evals" / "spec05-skill-routing-2026"
 AFFECTED = {
     "scope",
     "grill-me",
@@ -118,3 +123,46 @@ def test_deliver_exposes_the_typed_portable_fabric_relationship_contract():
     assert "not_applicable" in next(
         case["prompt"] for case in cases if case["relation"] == "portability"
     )
+
+
+def load_spec05_evaluation():
+    assert SPEC05_EVAL.is_file(), "Spec 05 needs an executable routing and portability evaluation"
+    spec = importlib.util.spec_from_file_location("spec05_skill_evaluation", SPEC05_EVAL)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_spec05_routing_packet_is_derived_from_live_catalogue_and_focused_cases():
+    module = load_spec05_evaluation()
+    module.validate_frozen_routing_inputs(ROOT, SPEC05_EVIDENCE)
+
+
+def test_spec05_routing_validator_rejects_synthetic_or_self_declared_answers(tmp_path):
+    module = load_spec05_evaluation()
+    result = module.make_contract_test_result(ROOT, SPEC05_EVIDENCE, tmp_path)
+    module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE, evidence_root=tmp_path)
+
+    action_path = tmp_path / result["invocations"][0]["action_evidence_artifact"]
+    action = json.loads(action_path.read_text())
+    action["adapter_id"] = "recorded-eval"
+    action_path.write_text(json.dumps(action, sort_keys=True) + "\n")
+    result["invocations"][0]["action_evidence_sha256"] = module.sha256_file(action_path)
+    with pytest.raises(module.Invalid, match="real Agent Fabric adapter"):
+        module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE, evidence_root=tmp_path)
+
+
+def test_spec05_adapter_absent_workflows_execute_and_match_retained_result(tmp_path):
+    module = load_spec05_evaluation()
+    actual = module.run_portability_probe(ROOT, tmp_path / "probe")
+    retained = json.loads((SPEC05_EVIDENCE / "portability-result.json").read_text())
+    assert actual == retained
+    module.validate_portability_result(retained, ROOT, SPEC05_EVIDENCE)
+    assert {case["skill"] for case in retained["cases"]} == AFFECTED
+    assert all(case["status"] == "pass" for case in retained["cases"])
+    assert retained["environment"]["absent_commands"] == {
+        "agent-fabric-console": True,
+        "gh": True,
+        "herdr": True,
+    }

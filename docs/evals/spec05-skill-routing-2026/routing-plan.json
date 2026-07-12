@@ -1,0 +1,33 @@
+{
+  "catalogue": {
+    "path": "catalogue.txt",
+    "sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94"
+  },
+  "classifier": {
+    "packet_path": "routing-packet.txt",
+    "packet_sha256": "sha256:4e5a2c7255bfd191ed7f17cce469b9063335773d4305b09a4994a453a91304a2",
+    "path": "classifier-instruction.txt",
+    "sha256": "sha256:a47969795bd7103ca169ec7d71bf55708434b6fffb2a424228bc041c323bdbb1"
+  },
+  "dataset": {
+    "cases": 36,
+    "path": "routing-holdout.yaml",
+    "sha256": "sha256:b2bf46930a10100b58c7ca7b77714f9d3970ca07f7b8c48469628f54aa9567e8"
+  },
+  "evaluation_id": "spec05-skill-routing-20260712-v1",
+  "schedule": {
+    "case_rows": 108,
+    "families": [
+      "anthropic",
+      "google",
+      "xai"
+    ],
+    "minimum_families": 3
+  },
+  "schema_version": 1,
+  "thresholds": {
+    "companion_fidelity": 0.9,
+    "critical_portability_failures": 0,
+    "primary_accuracy": 1.0
+  }
+}
