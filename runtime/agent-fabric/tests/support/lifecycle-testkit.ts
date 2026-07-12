@@ -75,6 +75,8 @@ function adapterOptions(fixture: {
   clock: ManualClock;
   providerJournalPath: string;
   providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
+  capabilitiesDelayMs?: number;
+  mandatoryUsageUnits?: boolean;
 }): Stage3OpenOptions {
   return {
     databasePath: fixture.databasePath,
@@ -86,13 +88,19 @@ function adapterOptions(fixture: {
         environment: {
           LIFECYCLE_FAKE_JOURNAL: fixture.providerJournalPath,
           LIFECYCLE_FAKE_STATUS: fixture.providerStatus ?? "healthy",
+          ...(fixture.capabilitiesDelayMs === undefined
+            ? {}
+            : { LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS: String(fixture.capabilitiesDelayMs) }),
+          LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
         },
       },
     },
   };
 }
 
-export async function createLifecycleFixture(): Promise<LifecycleFixture> {
+export async function createLifecycleFixture(
+  options: { capabilitiesDelayMs?: number; mandatoryUsageUnits?: boolean } = {},
+): Promise<LifecycleFixture> {
   const directory = await mkdtemp(join(tmpdir(), "agent-fabric-lifecycle-"));
   const runDirectory = join(directory, ".agent-run", "run-stage3");
   const databasePath = join(directory, "fabric.sqlite3");
@@ -102,7 +110,13 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
   await mkdir(join(directory, "src", "leader", "child"), { recursive: true });
   await mkdir(runDirectory, { recursive: true });
   await writeFile(providerSessionMarker, '{"provider":"fake","session":"leader"}\n');
-  const fabric = await openFabric(adapterOptions({ databasePath, directory, clock, providerJournalPath }));
+  const fabric = await openFabric(adapterOptions({
+    databasePath,
+    directory,
+    clock,
+    providerJournalPath,
+    ...options,
+  }));
   const rootAuthority = {
     workspaceRoots: ["."],
     sourcePaths: ["src"],
@@ -110,7 +124,18 @@ export async function createLifecycleFixture(): Promise<LifecycleFixture> {
     actions: [...AUTHORITY_ACTION_VOCABULARY],
     disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
-    budget: { turns: 40, "cost:USD": 20 },
+    budget: {
+      turns: 40,
+      provider_calls: 40,
+      concurrent_turns: 8,
+      wall_clock_milliseconds: 1_000_000,
+      "cost:USD": 20,
+      "input_tokens:fake": 100_000,
+      "output_tokens:fake": 100_000,
+      descendants: 10,
+      message_bytes: 1_000_000,
+      artifact_bytes: 1_000_000,
+    },
   };
   const run = await createCurrentSessionRun({
     databasePath,

@@ -17,6 +17,8 @@ type Action = {
   effectCount: number;
   idempotencyProven: boolean;
   result?: unknown;
+  scenario?: string;
+  lookupCount?: number;
 };
 
 type Journal = {
@@ -75,18 +77,29 @@ input.on("line", (line) => {
   const journal = loadJournal();
 
   if (request.method === "capabilities") {
-    respond(request.id, {
+    const result = {
       protocolVersion: 1,
       operations: ["status", "spawn", "dispatch", "lookup_action", "cancel_action", "release"],
       actionJournal: true,
       ephemeralWorker: true,
       answerBearingSpawn: true,
+      answerBearingSpawnTurns: "one-shot",
+      ...(process.env.LIFECYCLE_FAKE_MANDATORY_USAGE === "1"
+        ? { answerBearingUsageUnits: ["cost:USD", "input_tokens:fake", "output_tokens:fake"] }
+        : {}),
       compactInPlace: false,
       idempotencyEvidence: "per-action",
-    });
+    };
+    const delay = Number(process.env.LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS ?? "0");
+    if (Number.isSafeInteger(delay) && delay > 0) setTimeout(() => respond(request.id, result), delay);
+    else respond(request.id, result);
     return;
   }
   if (request.method === "spawn") {
+    if (typeof request.params.taskId === "string" && request.params.maxTurns !== 1) {
+      fail(request.id, "INVALID_PARAMS", "task-bound fake spawn requires maxTurns=1");
+      return;
+    }
     const prior = typeof request.params.priorResumeReference === "string" ? request.params.priorResumeReference : "new";
     const generation = typeof request.params.generation === "number" ? request.params.generation : 1;
     const resumeReference = `${prior}:replacement:g${String(generation)}`;
@@ -100,6 +113,8 @@ input.on("line", (line) => {
       }
       const answer = scenario === "ambiguous-review-valid"
         ? "recovered provider review"
+        : scenario === "ambiguous-review-usage-late"
+          ? "recovered provider review with late usage"
         : scenario === "ambiguous-review-empty"
           ? ""
           : "x".repeat(262_145);
@@ -112,13 +127,28 @@ input.on("line", (line) => {
         effectCount: 1,
         idempotencyProven: true,
         result: { resumeReference, generation, result: answer },
+        scenario,
+        lookupCount: 0,
       };
       saveJournal(journal);
       fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the direct response was lost");
       return;
     }
     saveJournal(journal);
-    respond(request.id, { resumeReference, generation, result: "fake provider review complete" });
+    respond(request.id, {
+      resumeReference,
+      generation,
+      result: "fake provider review complete",
+      ...(scenario === "terminal-exact-usage"
+        ? { resourceUsage: { "cost:USD": 5, "input_tokens:fake": 3, "output_tokens:fake": 4 } }
+        : scenario === "terminal-unreserved-usage"
+          ? { resourceUsage: { "output_tokens:other": 1 } }
+          : scenario === "terminal-over-cap-usage"
+            ? { resourceUsage: { "cost:USD": 11 } }
+            : scenario === "terminal-malformed-usage"
+              ? { resourceUsage: "not-a-budget-vector" }
+        : {}),
+    });
     return;
   }
   if (request.method === "release") {
@@ -181,6 +211,17 @@ input.on("line", (line) => {
     if (action === undefined) {
       fail(request.id, "ACTION_NOT_FOUND", "action does not exist");
     } else {
+      if (action.scenario === "ambiguous-review-usage-late") {
+        action.lookupCount = (action.lookupCount ?? 0) + 1;
+        if (action.lookupCount >= 2 && isRecord(action.result)) {
+          action.result.resourceUsage = {
+            "cost:USD": 5,
+            "input_tokens:fake": 3,
+            "output_tokens:fake": 4,
+          };
+        }
+        saveJournal(journal);
+      }
       respond(request.id, action);
     }
     return;

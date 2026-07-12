@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -10,11 +11,335 @@ import {
 
 const cleanup: Array<() => Promise<void>> = [];
 
+function authorityBudget(
+  databasePath: string,
+  authorityId: string,
+): Record<string, { granted: number; reserved: number; consumed: number; usageUnknown: boolean }> {
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    return Object.fromEntries(database.prepare(`
+      SELECT unit_key,granted,reserved,consumed,usage_unknown
+        FROM authority_budget WHERE authority_id=? ORDER BY unit_key
+    `).all(authorityId).map((value) => {
+      const row = value as {
+        unit_key: string;
+        granted: number;
+        reserved: number;
+        consumed: number;
+        usage_unknown: number;
+      };
+      return [row.unit_key, {
+        granted: row.granted,
+        reserved: row.reserved,
+        consumed: row.consumed,
+        usageUnknown: row.usage_unknown === 1,
+      }];
+    }));
+  } finally {
+    database.close();
+  }
+}
+
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((close) => close()));
 });
 
 describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
+  it("reserves and exactly settles every configured provider budget dimension", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: {
+          turns: 2,
+          provider_calls: 2,
+          concurrent_turns: 1,
+          wall_clock_milliseconds: 1_000,
+          "cost:USD": 10,
+          "input_tokens:fake": 10,
+          "output_tokens:fake": 10,
+          descendants: 1,
+          message_bytes: 128,
+          artifact_bytes: 128,
+        },
+      },
+      commandId: "provider-review-vector:authority",
+    });
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-vector:spawn",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Return exact bounded usage.",
+        cwd: "src/leader",
+        scenario: "terminal-exact-usage",
+      },
+      commandId: "provider-review-vector:dispatch",
+    })).resolves.toMatchObject({ status: "terminal", providerAnswer: "fake provider review complete" });
+
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
+      provider_calls: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
+      concurrent_turns: { granted: 1, reserved: 0, consumed: 0, usageUnknown: false },
+      wall_clock_milliseconds: { granted: 1_000, reserved: 0, consumed: 0, usageUnknown: false },
+      "cost:USD": { granted: 10, reserved: 0, consumed: 5, usageUnknown: false },
+      "input_tokens:fake": { granted: 10, reserved: 0, consumed: 3, usageUnknown: false },
+      "output_tokens:fake": { granted: 10, reserved: 0, consumed: 4, usageUnknown: false },
+      descendants: { granted: 1, reserved: 0, consumed: 0, usageUnknown: false },
+      message_bytes: { granted: 128, reserved: 0, consumed: 0, usageUnknown: false },
+      artifact_bytes: { granted: 128, reserved: 0, consumed: 0, usageUnknown: false },
+    });
+  });
+
+  it.each([
+    "terminal-unreserved-usage",
+    "terminal-over-cap-usage",
+    "terminal-malformed-usage",
+  ] as const)("quarantines %s before accepting terminal settlement", async (scenario) => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1, "cost:USD": 10 },
+      },
+      commandId: `provider-review-invalid-usage:${scenario}:authority`,
+    });
+    const actionId = `provider-review-invalid-usage:${scenario}:spawn`;
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Return an invalid usage vector.",
+        cwd: "src/leader",
+        scenario,
+      },
+      commandId: `provider-review-invalid-usage:${scenario}:dispatch`,
+    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId,
+      commandId: `provider-review-invalid-usage:${scenario}:reconcile`,
+    })).resolves.toMatchObject({ status: "quarantined", executionCount: 1 });
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { reserved: 1, consumed: 0, usageUnknown: true },
+    });
+  });
+
+  it("rejects adapter-mandatory usage dimensions before provider I/O", async () => {
+    const fixture = await createLifecycleFixture({ mandatoryUsageUnits: true });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-mandatory-usage:authority",
+    });
+    const actionId = "provider-review-mandatory-usage:spawn";
+
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Do not run without mandatory usage capacity.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-mandatory-usage:dispatch",
+    })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+    await expect(fixture.chair.getProviderAction({ actionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("reconciles late exact usage without replaying the provider effect", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: {
+          turns: 1,
+          provider_calls: 1,
+          "cost:USD": 10,
+          "input_tokens:fake": 10,
+          "output_tokens:fake": 10,
+        },
+      },
+      commandId: "provider-review-late-usage:authority",
+    });
+    const actionId = "provider-review-late-usage:spawn";
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Return usage through durable lookup.",
+        cwd: "src/leader",
+        scenario: "ambiguous-review-usage-late",
+      },
+      commandId: "provider-review-late-usage:dispatch",
+    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId,
+      commandId: "provider-review-late-usage:reconcile-1",
+    })).resolves.toMatchObject({
+      status: "terminal",
+      providerAnswer: "recovered provider review with late usage",
+    });
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { reserved: 0, consumed: 1, usageUnknown: false },
+      provider_calls: { reserved: 0, consumed: 1, usageUnknown: false },
+      "cost:USD": { reserved: 10, consumed: 0, usageUnknown: true },
+      "input_tokens:fake": { reserved: 10, consumed: 0, usageUnknown: true },
+      "output_tokens:fake": { reserved: 10, consumed: 0, usageUnknown: true },
+    });
+
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId,
+      commandId: "provider-review-late-usage:reconcile-2",
+    })).resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      "cost:USD": { reserved: 0, consumed: 5, usageUnknown: false },
+      "input_tokens:fake": { reserved: 0, consumed: 3, usageUnknown: false },
+      "output_tokens:fake": { reserved: 0, consumed: 4, usageUnknown: false },
+    });
+  });
+
+  it("rechecks task state atomically after adapter capabilities before provider dispatch", async () => {
+    const fixture = await createLifecycleFixture({ capabilitiesDelayMs: 100 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-task-race:authority",
+    });
+    const dispatch = fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-task-race:spawn",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Do not start after task completion.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-task-race:dispatch",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review-task-race:complete",
+    });
+
+    await expect(dispatch).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await expect(fixture.chair.getProviderAction({
+      actionId: "provider-review-task-race:spawn",
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("blocks task terminalisation while its provider action remains unresolved", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-task-obligation:authority",
+    });
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-task-obligation:spawn",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Remain unresolved until lookup.",
+        cwd: "src/leader",
+        scenario: "ambiguous-review-valid",
+      },
+      commandId: "provider-review-task-obligation:dispatch",
+    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await expect(fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review-task-obligation:complete-early",
+    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await fixture.chair.reconcileProviderAction({
+      actionId: "provider-review-task-obligation:spawn",
+      commandId: "provider-review-task-obligation:reconcile",
+    });
+    await expect(fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review-task-obligation:complete",
+    })).resolves.toMatchObject({ state: "complete" });
+  });
   it("atomically spends one delegated turn across concurrent ephemeral provider spawns", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => {
@@ -117,7 +442,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         ...fixture.rootAuthority,
         sourcePaths: ["src/leader"],
         actions: [...fixture.rootAuthority.actions],
-        budget: { turns: 1 },
+        budget: { turns: 3 },
       },
       commandId: "provider-review-exhausted:authority",
     });
@@ -136,7 +461,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         cwd: "src/leader",
       },
       commandId: "provider-review-exhausted:dispatch",
-    })).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
     await expect(fixture.chair.getProviderAction({
       actionId: "provider-review-exhausted:spawn",
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -278,6 +603,29 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     expect((await fixture.chair.getRunStatus({ runId: fixture.runId })).counts.agents).toBe(before.counts.agents);
     expect(await fixture.chair.getProviderAction({ actionId: "provider-review:spawn" })).toEqual(result);
+    expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+      turns: { reserved: 0, consumed: 1, usageUnknown: false },
+      "cost:USD": { reserved: 1, consumed: 0, usageUnknown: true },
+    });
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId: "provider-review:spawn",
+      commandId: "provider-review:late-usage-unavailable",
+    })).resolves.toEqual(result);
+    expect(await fixture.chair.getProviderAction({ actionId: "provider-review:spawn" })).toEqual(result);
+    await fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review:complete-task-before-replay",
+    });
+    const lifecycleDatabase = new Database(fixture.databasePath);
+    try {
+      lifecycleDatabase.prepare(`
+        UPDATE runs SET lifecycle_state='quiescing',revision=revision+1 WHERE run_id=?
+      `).run(fixture.runId);
+    } finally {
+      lifecycleDatabase.close();
+    }
     await expect(fixture.chair.dispatchProviderAction({
       adapterId: "fake-lifecycle",
       actionId: "provider-review:spawn",
@@ -292,6 +640,20 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       },
       commandId: "provider-review:dispatch-replay",
     })).resolves.toEqual(result);
+    await expect(fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review:spawn",
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Changed identity must not replay.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review:dispatch-conflict-after-quiesce",
+    })).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
 
     await expect(fixture.chair.dispatchProviderAction({
       adapterId: "fake-lifecycle",

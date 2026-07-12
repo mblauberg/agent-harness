@@ -72,6 +72,8 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
   persistentSession: true,
   ephemeralWorker: true,
   answerBearingSpawn: true,
+  answerBearingSpawnTurns: "payload-max-turns",
+  answerBearingUsageUnits: ["cost:USD", "input_tokens:anthropic", "output_tokens:anthropic"],
   controlModes: ["managed"],
   inboxDeliveryModes: ["structured-push"],
   recoveryOperations: ["resume_reference", "lookup_action"],
@@ -290,6 +292,38 @@ async function consumeQuery(
     result: terminal.result,
     usage: terminal.usage,
     costUsd: terminal.total_cost_usd,
+  };
+}
+
+function claudeResourceUsage(completed: {
+  usage: unknown;
+  costUsd: number;
+}): Record<string, number> {
+  if (!isRecord(completed.usage)) {
+    throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Claude Agent SDK omitted token usage");
+  }
+  const uncachedInputTokens = completed.usage.input_tokens;
+  const outputTokens = completed.usage.output_tokens;
+  const cacheCreationInputTokens = completed.usage.cache_creation_input_tokens ?? 0;
+  const cacheReadInputTokens = completed.usage.cache_read_input_tokens ?? 0;
+  if (
+    typeof uncachedInputTokens !== "number" || !Number.isSafeInteger(uncachedInputTokens) || uncachedInputTokens < 0 ||
+    typeof cacheCreationInputTokens !== "number" || !Number.isSafeInteger(cacheCreationInputTokens) || cacheCreationInputTokens < 0 ||
+    typeof cacheReadInputTokens !== "number" || !Number.isSafeInteger(cacheReadInputTokens) || cacheReadInputTokens < 0 ||
+    typeof outputTokens !== "number" || !Number.isSafeInteger(outputTokens) || outputTokens < 0 ||
+    typeof completed.costUsd !== "number" || !Number.isFinite(completed.costUsd) || completed.costUsd < 0
+  ) {
+    throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Claude Agent SDK returned invalid resource usage");
+  }
+  const inputTokens = uncachedInputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const costMicrounits = Math.ceil(completed.costUsd * 1_000_000);
+  if (!Number.isSafeInteger(inputTokens) || !Number.isSafeInteger(costMicrounits)) {
+    throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Claude Agent SDK cost exceeds safe microunit range");
+  }
+  return {
+    "cost:USD": costMicrounits,
+    "input_tokens:anthropic": inputTokens,
+    "output_tokens:anthropic": outputTokens,
   };
 }
 
@@ -582,7 +616,15 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
-    return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, prior, this.#executable) }));
+    const completed = await consumeQuery(this.#query({
+      prompt: prompt(payload),
+      options: claudeReadOnlyOptions(payload, prior, this.#executable),
+    }));
+    return {
+      resumeReference: completed.resumeReference,
+      result: completed.result,
+      resourceUsage: claudeResourceUsage(completed),
+    };
   }
 
   async launchChair(input: ChairLaunchBoundaryInput): Promise<ChairLaunchProviderResult> {

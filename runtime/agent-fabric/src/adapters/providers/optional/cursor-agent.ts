@@ -23,6 +23,7 @@ export function createCursorAgentAdapter(options: {
       modelFamilies: ["cursor-composer", "xai"],
       compactInPlace: false,
       answerBearingSpawn: true,
+      answerBearingSpawnTurns: "one-shot",
     }),
     boundary: options.boundary,
     journal: options.journal,

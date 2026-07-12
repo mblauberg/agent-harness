@@ -489,6 +489,39 @@ describe("Claude Agent SDK fabric adapter", () => {
     })).toThrowError(/effort must be one of low, medium, high, xhigh, max/u);
   });
 
+  it("normalises billed Claude usage into conservative integer budget units", async () => {
+    const query = vi.fn((input: unknown) => ({
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "result",
+          subtype: "success",
+          session_id: "claude-usage-session",
+          result: "bounded answer",
+          usage: {
+            input_tokens: 7,
+            cache_creation_input_tokens: 2,
+            cache_read_input_tokens: 3,
+            output_tokens: 5,
+          },
+          total_cost_usd: 0.0000001,
+        };
+      },
+      input,
+    }));
+    const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never });
+
+    await expect(boundary.spawn({ prompt: "review", maxTurns: 1 })).resolves.toEqual({
+      resumeReference: "claude-usage-session",
+      result: "bounded answer",
+      resourceUsage: {
+        "cost:USD": 1,
+        "input_tokens:anthropic": 12,
+        "output_tokens:anthropic": 5,
+      },
+    });
+  });
+
   it("allows only path-bounded read tools for a delegated review root", async () => {
     const root = await mkdtemp(join(tmpdir(), "claude-review-root-"));
     const outside = await mkdtemp(join(tmpdir(), "claude-review-outside-"));
@@ -602,6 +635,9 @@ describe("Claude Agent SDK fabric adapter", () => {
       adapterId: "claude-agent-sdk",
       protocolVersion: 1,
       actionJournal: true,
+      answerBearingSpawn: true,
+      answerBearingSpawnTurns: "payload-max-turns",
+      answerBearingUsageUnits: ["cost:USD", "input_tokens:anthropic", "output_tokens:anthropic"],
       controlModes: ["managed"],
       inboxDeliveryModes: ["structured-push"],
       compactInPlace: false,

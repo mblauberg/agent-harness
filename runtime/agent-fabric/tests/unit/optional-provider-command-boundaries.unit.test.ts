@@ -15,6 +15,29 @@ import {
 } from "../../src/adapters/providers/optional/invocations.ts";
 
 describe("optional provider command boundaries", () => {
+  it("accepts only one explicitly bounded turn for task-bound one-shot Agy and Cursor spawns", async () => {
+    const runner = vi.fn(async () => {
+      throw new Error("provider runner must not start for an invalid turn contract");
+    });
+    const agy = createAgyCliBoundary({ executable: "/agy", cwd: "/workspace", runner });
+    const cursor = createCursorCliBoundary({ executable: "/cursor", cwd: "/workspace", runner });
+
+    for (const boundary of [agy, cursor]) {
+      await expect(boundary.spawn({
+        taskId: "review-task",
+        model: "review-model",
+        prompt: "review",
+        maxTurns: 2,
+      })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+      await expect(boundary.spawn({
+        taskId: "review-task",
+        model: "review-model",
+        prompt: "review",
+      })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    }
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it("derives Agy's resumable conversation from its private invocation log when stdout is plain text", async () => {
     const runner = vi.fn(async (invocation: { args: string[] }) => {
       const logIndex = invocation.args.indexOf("--log-file");

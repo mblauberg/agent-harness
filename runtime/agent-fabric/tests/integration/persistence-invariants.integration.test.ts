@@ -55,6 +55,119 @@ describe("additive persistence invariants", () => {
     expect(() => database.prepare("INSERT INTO messages VALUES ('message-x','run-a','chair-a','dedupe','hash','{}','event','body',2,'conversation',NULL,NULL,0,NULL,1)").run()).toThrow(/INVARIANT_messages_requires_ack/u);
   });
 
+  it("couples provider action budget vectors, task liveness and authority ledger transitions", () => {
+    const database = new Database(":memory:");
+    openDatabases.push(database);
+    applyInvariantMigrations(database);
+    seedInvariantRuns(database);
+    database.exec(`
+      INSERT INTO authorities VALUES ('authority-a','run-a',NULL,'{}','a',1);
+      INSERT INTO agents VALUES ('run-a','chair-a',NULL,'authority-a',NULL,'ready');
+      INSERT INTO authority_budget(authority_id,unit_key,granted)
+      VALUES ('authority-a','turns',4),('authority-a','provider_calls',2),('authority-a','descendants',1);
+      INSERT INTO tasks VALUES ('run-a','task-a','authority-a','review','base','active','chair-a',1,1,'chair-a');
+    `);
+    expect(() => database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
+        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
+        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
+        task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
+      ) VALUES (
+        'run-a','action-invalid-unit','fake','spawn',NULL,NULL,NULL,'identity-invalid','payload-invalid','{}',
+        'dispatched','["prepared","dispatched"]',1,0,0,NULL,1,1,
+        'task-a','authority-a','{"descendants":1}',NULL,'reserved',1
+      )
+    `).run()).toThrow(/INVARIANT_provider_actions_budget_reservation/u);
+    database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
+        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
+        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
+        task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
+      ) VALUES (
+        'run-a','action-budget','fake','spawn',NULL,NULL,NULL,'identity','payload','{}',
+        'dispatched','["prepared","dispatched"]',1,0,0,NULL,1,1,
+        'task-a','authority-a','{"provider_calls":1,"turns":2}',NULL,'reserved',1
+      )
+    `).run();
+
+    expect(database.prepare(`
+      SELECT unit_key,reserved,consumed,provider_reserved,provider_consumed FROM authority_budget
+       WHERE authority_id='authority-a' AND unit_key IN ('provider_calls','turns') ORDER BY unit_key
+    `).all()).toEqual([
+      { unit_key: "provider_calls", reserved: 1, consumed: 0, provider_reserved: 1, provider_consumed: 0 },
+      { unit_key: "turns", reserved: 2, consumed: 0, provider_reserved: 2, provider_consumed: 0 },
+    ]);
+    expect(() => database.prepare(`
+      UPDATE authority_budget SET provider_reserved=0
+       WHERE authority_id='authority-a' AND unit_key='turns'
+    `).run()).toThrow(/INVARIANT_authority_budget_provider_ledger/u);
+    expect(() => database.prepare(`
+      UPDATE provider_actions SET budget_reservation_json='{"turns":1}'
+       WHERE action_id='action-budget'
+    `).run()).toThrow(/INVARIANT_provider_actions_budget_binding_immutable/u);
+    expect(() => database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal',budget_state='settled',budget_settlement_json='{"turns":1}'
+       WHERE action_id='action-budget'
+    `).run()).toThrow(/INVARIANT_provider_actions_budget_settlement/u);
+    expect(() => database.prepare("UPDATE tasks SET state='complete' WHERE task_id='task-a'").run())
+      .toThrow(/INVARIANT_task_provider_action_unresolved/u);
+    expect(() => database.prepare(`
+      UPDATE provider_actions SET status='terminal' WHERE action_id='action-budget'
+    `).run()).toThrow(/CHECK constraint failed/u);
+    expect(() => database.prepare(`
+      UPDATE provider_actions SET status='quarantined' WHERE action_id='action-budget'
+    `).run()).toThrow(/CHECK constraint failed/u);
+
+    database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal',effect_count=1,budget_state='settled',
+             budget_settlement_json='{"provider_calls":1,"turns":1}'
+       WHERE action_id='action-budget'
+    `).run();
+    expect(database.prepare(`
+      SELECT unit_key,reserved,consumed,provider_reserved,provider_consumed,usage_unknown FROM authority_budget
+       WHERE authority_id='authority-a' AND unit_key IN ('provider_calls','turns') ORDER BY unit_key
+    `).all()).toEqual([
+      { unit_key: "provider_calls", reserved: 0, consumed: 1, provider_reserved: 0, provider_consumed: 1, usage_unknown: 0 },
+      { unit_key: "turns", reserved: 0, consumed: 1, provider_reserved: 0, provider_consumed: 1, usage_unknown: 0 },
+    ]);
+    expect(() => database.prepare(`
+      UPDATE authority_budget SET consumed=0,provider_consumed=0
+       WHERE authority_id='authority-a' AND unit_key='turns'
+    `).run()).toThrow(/INVARIANT_authority_budget_provider_ledger/u);
+    expect(() => database.prepare("UPDATE tasks SET state='complete' WHERE task_id='task-a'").run())
+      .not.toThrow();
+
+    database.prepare("UPDATE tasks SET state='active' WHERE task_id='task-a'").run();
+    database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
+        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
+        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision,
+        task_id,budget_authority_id,budget_reservation_json,budget_settlement_json,budget_state,budget_started_at
+      ) VALUES (
+        'run-a','action-unknown','fake','spawn',NULL,NULL,NULL,'identity-unknown','payload-unknown','{}',
+        'dispatched','["prepared","dispatched"]',1,0,0,NULL,2,1,
+        'task-a','authority-a','{"turns":1}',NULL,'reserved',2
+      )
+    `).run();
+    database.prepare(`
+      UPDATE provider_actions
+         SET status='terminal',effect_count=1,budget_state='usage-unknown',
+             budget_settlement_json='{"turns":"unknown"}'
+       WHERE action_id='action-unknown'
+    `).run();
+    expect(() => database.prepare(`
+      UPDATE authority_budget SET usage_unknown=0
+       WHERE authority_id='authority-a' AND unit_key='turns'
+    `).run()).toThrow(/INVARIANT_authority_budget_provider_ledger/u);
+    expect(() => database.prepare("UPDATE tasks SET state='complete' WHERE task_id='task-a'").run())
+      .not.toThrow();
+  });
+
   it("rejects a fifth run-wide team leader even when the existing leaders are nested", () => {
     const database = new Database(":memory:");
     openDatabases.push(database);
@@ -103,9 +216,9 @@ describe("additive persistence invariants", () => {
       ["INVARIANT_deliveries_recipient_same_run", "INSERT INTO deliveries VALUES ('delivery-x','message-a','run-a','chair-b',2,'ready',0,NULL,NULL,NULL,NULL)", "UPDATE deliveries SET recipient_id='chair-b' WHERE delivery_id='delivery-a'"],
       ["INVARIANT_leases_values", "INSERT INTO leases VALUES ('lease-x','run-a','other','worker-a',1,'active',9,1)", "UPDATE leases SET status='bad' WHERE lease_id='lease-a'"],
       ["INVARIANT_leases_holder_same_run", "INSERT INTO leases VALUES ('lease-x','run-a','write','chair-b',1,'active',9,1)", "UPDATE leases SET holder_agent_id='chair-b' WHERE lease_id='lease-a'"],
-      ["INVARIANT_provider_actions_values", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','worker-a',1,1,'i','p','{}','bad','[]',0,0,0,NULL,1,1,NULL,NULL,NULL)", "UPDATE provider_actions SET status='bad' WHERE action_id='action-a'"],
-      ["INVARIANT_provider_actions_target_same_run", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','chair-b',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1,NULL,NULL,NULL)", "UPDATE provider_actions SET target_agent_id='chair-b' WHERE action_id='action-a'"],
-      ["INVARIANT_authority_budget_boolean", "INSERT INTO authority_budget VALUES ('authority-a','other',1,0,0,2)", "UPDATE authority_budget SET usage_unknown=2 WHERE authority_id='authority-a'"],
+      ["INVARIANT_provider_actions_values", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','worker-a',1,1,'i','p','{}','bad','[]',0,0,0,NULL,1,1,NULL,NULL,NULL,NULL,NULL,NULL)", "UPDATE provider_actions SET status='bad' WHERE action_id='action-a'"],
+      ["INVARIANT_provider_actions_target_same_run", "INSERT INTO provider_actions VALUES ('run-a','action-x','a','turn','chair-b',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1,NULL,NULL,NULL,NULL,NULL,NULL)", "UPDATE provider_actions SET target_agent_id='chair-b' WHERE action_id='action-a'"],
+      ["INVARIANT_authority_budget_boolean", "INSERT INTO authority_budget VALUES ('authority-a','other',1,0,0,0,0,2)", "UPDATE authority_budget SET usage_unknown=2 WHERE authority_id='authority-a'"],
       ["INVARIANT_capabilities_generation", "INSERT INTO capabilities VALUES ('token-x','run-a','worker-a',0,9,NULL)", "UPDATE capabilities SET principal_generation=0 WHERE token_hash='token-a'"],
       ["INVARIANT_provider_state_generation", "INSERT INTO provider_state VALUES ('run-a','chair-a',0,NULL,NULL)", "UPDATE provider_state SET provider_session_generation=0 WHERE agent_id='worker-a'"],
       ["INVARIANT_events_actor_same_run", "INSERT INTO events VALUES ('event-x','run-a','x','chair-b','{}',2)", "UPDATE events SET actor_agent_id='chair-b' WHERE event_id='event-a'"],
@@ -128,7 +241,7 @@ describe("additive persistence invariants", () => {
           INSERT INTO agents VALUES ('run-a','chair-a',NULL,'authority-a',NULL,'ready');
           INSERT INTO agents VALUES ('run-a','worker-a','chair-a','authority-a',NULL,'ready');
           INSERT INTO agents VALUES ('run-b','chair-b',NULL,'authority-b',NULL,'ready');
-          INSERT INTO authority_budget VALUES ('authority-a','turns',10,0,0,0);
+          INSERT INTO authority_budget VALUES ('authority-a','turns',10,0,0,0,0,0);
           INSERT INTO tasks VALUES ('run-a','task-a','authority-a','x','b','ready','worker-a',0,0,'chair-a');
           INSERT INTO messages VALUES ('message-a','run-a','chair-a','da','h','{}','event','b',1,'c',NULL,NULL,0,NULL,1);
           INSERT INTO messages VALUES ('message-b','run-b','chair-b','db','h','{}','event','b',1,'c',NULL,NULL,0,NULL,1);
@@ -136,7 +249,7 @@ describe("additive persistence invariants", () => {
           INSERT INTO leases VALUES ('lease-a','run-a','write','worker-a',1,'active',9,1);
           INSERT INTO capabilities VALUES ('token-a','run-a','worker-a',1,9,NULL);
           INSERT INTO provider_state VALUES ('run-a','worker-a',1,NULL,NULL);
-          INSERT INTO provider_actions VALUES ('run-a','action-a','a','turn','worker-a',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1,NULL,NULL,NULL);
+          INSERT INTO provider_actions VALUES ('run-a','action-a','a','turn','worker-a',1,1,'i','p','{}','terminal','[]',0,0,1,NULL,1,1,NULL,NULL,NULL,NULL,NULL,NULL);
           INSERT INTO events VALUES ('event-a','run-a','x','worker-a','{}',1);
           INSERT INTO barriers VALUES ('run-a','run','','closed',1,'hash');
           INSERT INTO teams VALUES ('run-a','team-a',NULL,1,'chair-a','chair-a',NULL,'task-a','authority-a','budget-a','active',1,NULL,1);

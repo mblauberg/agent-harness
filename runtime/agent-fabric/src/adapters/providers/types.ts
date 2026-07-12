@@ -35,6 +35,8 @@ export type ProviderAdapterCapabilities = {
   persistentSession: boolean;
   ephemeralWorker: true;
   answerBearingSpawn?: true;
+  answerBearingSpawnTurns?: "payload-max-turns" | "one-shot";
+  answerBearingUsageUnits?: string[];
   controlModes: ["managed"];
   inboxDeliveryModes: ["structured-push"];
   recoveryOperations: string[];

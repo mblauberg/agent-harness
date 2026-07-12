@@ -140,6 +140,8 @@ CREATE TABLE authority_budget (
   granted INTEGER NOT NULL CHECK (granted >= 0),
   reserved INTEGER NOT NULL DEFAULT 0 CHECK (reserved >= 0 AND reserved <= granted),
   consumed INTEGER NOT NULL DEFAULT 0 CHECK (consumed >= 0 AND consumed <= granted),
+  provider_reserved INTEGER NOT NULL DEFAULT 0 CHECK (provider_reserved >= 0 AND provider_reserved <= reserved),
+  provider_consumed INTEGER NOT NULL DEFAULT 0 CHECK (provider_consumed >= 0 AND provider_consumed <= consumed),
   usage_unknown INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (authority_id, unit_key),
   CHECK (reserved + consumed <= granted)
@@ -1526,17 +1528,27 @@ CREATE TABLE provider_actions (
   result_json TEXT,
   updated_at INTEGER NOT NULL,
   journal_revision INTEGER NOT NULL DEFAULT 1 CHECK (journal_revision >= 1),
+  task_id TEXT,
   budget_authority_id TEXT REFERENCES authorities(authority_id),
-  budget_reserved_turns INTEGER CHECK (budget_reserved_turns IS NULL OR budget_reserved_turns >= 1),
-  budget_state TEXT CHECK (budget_state IS NULL OR budget_state IN ('reserved','consumed','usage-unknown')),
+  budget_reservation_json TEXT CHECK (budget_reservation_json IS NULL OR json_valid(budget_reservation_json)),
+  budget_settlement_json TEXT CHECK (budget_settlement_json IS NULL OR json_valid(budget_settlement_json)),
+  budget_state TEXT CHECK (budget_state IS NULL OR budget_state IN ('reserved','settled','usage-unknown')),
+  budget_started_at INTEGER CHECK (budget_started_at IS NULL OR budget_started_at >= 0),
   PRIMARY KEY (run_id, action_id),
   CHECK (
-    (budget_authority_id IS NULL AND budget_reserved_turns IS NULL AND budget_state IS NULL) OR
-    (budget_authority_id IS NOT NULL AND budget_reserved_turns IS NOT NULL AND budget_state IS NOT NULL
+    (task_id IS NULL AND budget_authority_id IS NULL AND budget_reservation_json IS NULL
+      AND budget_settlement_json IS NULL AND budget_state IS NULL AND budget_started_at IS NULL) OR
+    (task_id IS NOT NULL AND budget_authority_id IS NOT NULL AND budget_reservation_json IS NOT NULL
+      AND budget_state IS NOT NULL AND budget_started_at IS NOT NULL
       AND operation='spawn' AND target_agent_id IS NULL)
   ),
-  CHECK (budget_state<>'consumed' OR status='terminal'),
-  CHECK (budget_state<>'usage-unknown' OR status='quarantined')
+  CHECK (budget_state<>'reserved' OR budget_settlement_json IS NULL),
+  CHECK (budget_state NOT IN ('settled','usage-unknown') OR budget_settlement_json IS NOT NULL),
+  CHECK (budget_state<>'settled' OR status='terminal'),
+  CHECK (budget_state<>'usage-unknown' OR status IN ('ambiguous','terminal','quarantined')),
+  CHECK (budget_state IS NULL OR status NOT IN ('terminal','quarantined') OR budget_state IN ('settled','usage-unknown')),
+  CHECK (budget_state IS NULL OR status<>'quarantined' OR budget_state='usage-unknown'),
+  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id)
 );
 
 CREATE TABLE provider_agent_custody (
@@ -3706,6 +3718,46 @@ CREATE TRIGGER provider_actions_values_insert BEFORE INSERT ON provider_actions 
     SELECT 1 FROM authorities authority
      WHERE authority.authority_id=NEW.budget_authority_id AND authority.run_id=NEW.run_id
   ) THEN RAISE(ABORT, 'INVARIANT_provider_actions_budget_authority_same_run') END;
+  SELECT CASE WHEN NEW.budget_authority_id IS NOT NULL AND (
+    NEW.budget_state<>'reserved' OR json_type(NEW.budget_reservation_json)<>'object'
+    OR NOT EXISTS (SELECT 1 FROM json_each(NEW.budget_reservation_json))
+    OR EXISTS (
+      SELECT 1 FROM json_each(NEW.budget_reservation_json) reservation
+       LEFT JOIN authority_budget budget
+         ON budget.authority_id=NEW.budget_authority_id AND budget.unit_key=reservation.key
+      WHERE reservation.type<>'integer' OR reservation.value<1
+         OR budget.authority_id IS NULL OR budget.usage_unknown<>0
+         OR budget.granted-budget.reserved-budget.consumed<reservation.value
+         OR NOT (
+           reservation.key IN ('turns','provider_calls','concurrent_turns','wall_clock_milliseconds')
+           OR reservation.key GLOB 'cost:[A-Z][A-Z][A-Z]'
+           OR reservation.key GLOB 'input_tokens:[a-z0-9]*'
+           OR reservation.key GLOB 'output_tokens:[a-z0-9]*'
+         )
+    )
+  ) THEN RAISE(ABORT, 'INVARIANT_provider_actions_budget_reservation') END;
+  SELECT CASE WHEN NEW.budget_authority_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM tasks task
+     WHERE task.run_id=NEW.run_id AND task.task_id=NEW.task_id
+       AND task.state NOT IN ('complete','cancelled','degraded')
+  ) THEN RAISE(ABORT, 'INVARIANT_provider_actions_task_active') END;
+END;
+
+CREATE TRIGGER provider_actions_budget_reserve
+AFTER INSERT ON provider_actions
+WHEN NEW.budget_state='reserved'
+BEGIN
+  UPDATE authority_budget
+     SET reserved=reserved+(
+           SELECT reservation.value FROM json_each(NEW.budget_reservation_json) reservation
+            WHERE reservation.key=authority_budget.unit_key
+         ),
+         provider_reserved=provider_reserved+(
+           SELECT reservation.value FROM json_each(NEW.budget_reservation_json) reservation
+            WHERE reservation.key=authority_budget.unit_key
+         )
+   WHERE authority_id=NEW.budget_authority_id
+     AND unit_key IN (SELECT reservation.key FROM json_each(NEW.budget_reservation_json) reservation);
 END;
 
 CREATE TRIGGER provider_actions_values_update BEFORE UPDATE OF status,execution_count,effect_count,idempotency_proven,provider_session_generation,turn_lease_generation,target_agent_id,run_id,budget_authority_id ON provider_actions BEGIN
@@ -3720,16 +3772,161 @@ CREATE TRIGGER provider_actions_values_update BEFORE UPDATE OF status,execution_
 END;
 
 CREATE TRIGGER provider_actions_budget_binding_immutable
-BEFORE UPDATE OF budget_authority_id,budget_reserved_turns ON provider_actions
+BEFORE UPDATE OF task_id,budget_authority_id,budget_reservation_json,budget_started_at ON provider_actions
 WHEN NEW.budget_authority_id IS NOT OLD.budget_authority_id
-  OR NEW.budget_reserved_turns IS NOT OLD.budget_reserved_turns
+  OR NEW.task_id IS NOT OLD.task_id
+  OR NEW.budget_reservation_json IS NOT OLD.budget_reservation_json
+  OR NEW.budget_started_at IS NOT OLD.budget_started_at
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_provider_actions_budget_binding_immutable'); END;
 
 CREATE TRIGGER provider_actions_budget_state_cas
-BEFORE UPDATE OF budget_state ON provider_actions
+BEFORE UPDATE OF budget_state,budget_settlement_json,status ON provider_actions
 WHEN NEW.budget_state IS NOT OLD.budget_state
- AND NOT (OLD.budget_state='reserved' AND NEW.budget_state IN ('consumed','usage-unknown'))
-BEGIN SELECT RAISE(ABORT, 'INVARIANT_provider_actions_budget_state_cas'); END;
+  OR NEW.budget_settlement_json IS NOT OLD.budget_settlement_json
+BEGIN
+  SELECT CASE WHEN NOT (
+    (OLD.budget_state='reserved' AND NEW.budget_state IN ('settled','usage-unknown'))
+    OR (OLD.budget_state='usage-unknown' AND NEW.budget_state='usage-unknown')
+    OR (OLD.budget_state='usage-unknown' AND NEW.budget_state='settled')
+  ) THEN RAISE(ABORT, 'INVARIANT_provider_actions_budget_state_cas') END;
+  SELECT CASE WHEN json_type(NEW.budget_settlement_json)<>'object'
+    OR (SELECT COUNT(*) FROM json_each(NEW.budget_settlement_json))<>
+       (SELECT COUNT(*) FROM json_each(OLD.budget_reservation_json))
+    OR EXISTS (
+      SELECT 1 FROM json_each(OLD.budget_reservation_json) reservation
+       LEFT JOIN json_each(NEW.budget_settlement_json) settlement ON settlement.key=reservation.key
+      WHERE settlement.key IS NULL
+         OR NOT (
+           (settlement.type='integer' AND settlement.value BETWEEN 0 AND reservation.value)
+           OR (settlement.type='text' AND settlement.value='unknown')
+         )
+    )
+    OR EXISTS (
+      SELECT 1 FROM json_each(NEW.budget_settlement_json) settlement
+       LEFT JOIN json_each(OLD.budget_reservation_json) reservation ON reservation.key=settlement.key
+      WHERE reservation.key IS NULL
+    )
+    OR (NEW.budget_state='settled' AND EXISTS (
+      SELECT 1 FROM json_each(NEW.budget_settlement_json) WHERE type<>'integer'
+    ))
+    OR (NEW.budget_state='usage-unknown' AND NOT EXISTS (
+      SELECT 1 FROM json_each(NEW.budget_settlement_json) WHERE type='text' AND value='unknown'
+    ))
+    OR (OLD.budget_state='usage-unknown' AND EXISTS (
+      SELECT 1 FROM json_each(OLD.budget_settlement_json) prior
+       JOIN json_each(NEW.budget_settlement_json) current ON current.key=prior.key
+      WHERE prior.type='integer' AND (current.type<>'integer' OR current.value<>prior.value)
+    ))
+  THEN RAISE(ABORT, 'INVARIANT_provider_actions_budget_settlement') END;
+END;
+
+CREATE TRIGGER provider_actions_budget_settle
+AFTER UPDATE OF budget_state,budget_settlement_json ON provider_actions
+WHEN NEW.budget_state IS NOT OLD.budget_state
+  OR NEW.budget_settlement_json IS NOT OLD.budget_settlement_json
+BEGIN
+  UPDATE authority_budget
+     SET reserved=reserved-CASE WHEN (
+           SELECT settlement.type='integer' AND (
+             OLD.budget_state='reserved' OR prior.type='text'
+           )
+             FROM json_each(NEW.budget_settlement_json) settlement
+             LEFT JOIN json_each(OLD.budget_settlement_json) prior ON prior.key=settlement.key
+            WHERE settlement.key=authority_budget.unit_key
+         ) THEN (
+           SELECT reservation.value FROM json_each(OLD.budget_reservation_json) reservation
+            WHERE reservation.key=authority_budget.unit_key
+         ) ELSE 0 END,
+         provider_reserved=provider_reserved-CASE WHEN (
+           SELECT settlement.type='integer' AND (
+             OLD.budget_state='reserved' OR prior.type='text'
+           )
+             FROM json_each(NEW.budget_settlement_json) settlement
+             LEFT JOIN json_each(OLD.budget_settlement_json) prior ON prior.key=settlement.key
+            WHERE settlement.key=authority_budget.unit_key
+         ) THEN (
+           SELECT reservation.value FROM json_each(OLD.budget_reservation_json) reservation
+            WHERE reservation.key=authority_budget.unit_key
+         ) ELSE 0 END,
+         consumed=consumed+CASE WHEN (
+           SELECT settlement.type='integer' AND (
+             OLD.budget_state='reserved' OR prior.type='text'
+           )
+             FROM json_each(NEW.budget_settlement_json) settlement
+             LEFT JOIN json_each(OLD.budget_settlement_json) prior ON prior.key=settlement.key
+            WHERE settlement.key=authority_budget.unit_key
+         ) THEN (
+           SELECT settlement.value FROM json_each(NEW.budget_settlement_json) settlement
+           WHERE settlement.key=authority_budget.unit_key
+         ) ELSE 0 END,
+         provider_consumed=provider_consumed+CASE WHEN (
+           SELECT settlement.type='integer' AND (
+             OLD.budget_state='reserved' OR prior.type='text'
+           )
+             FROM json_each(NEW.budget_settlement_json) settlement
+             LEFT JOIN json_each(OLD.budget_settlement_json) prior ON prior.key=settlement.key
+            WHERE settlement.key=authority_budget.unit_key
+         ) THEN (
+           SELECT settlement.value FROM json_each(NEW.budget_settlement_json) settlement
+            WHERE settlement.key=authority_budget.unit_key
+         ) ELSE 0 END,
+         usage_unknown=CASE
+           WHEN (SELECT settlement.type='text' FROM json_each(NEW.budget_settlement_json) settlement
+                  WHERE settlement.key=authority_budget.unit_key) THEN 1
+           ELSE CASE WHEN EXISTS (
+             SELECT 1 FROM provider_actions action
+              JOIN json_each(action.budget_settlement_json) settlement
+                ON settlement.key=authority_budget.unit_key
+             WHERE action.budget_authority_id=NEW.budget_authority_id
+               AND action.budget_state='usage-unknown'
+               AND settlement.type='text' AND settlement.value='unknown'
+           ) THEN 1 ELSE 0 END
+         END
+   WHERE authority_id=NEW.budget_authority_id
+     AND unit_key IN (SELECT reservation.key FROM json_each(OLD.budget_reservation_json) reservation);
+END;
+
+CREATE TRIGGER provider_actions_budget_delete_forbidden
+BEFORE DELETE ON provider_actions
+WHEN OLD.budget_authority_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_provider_actions_budget_binding_immutable'); END;
+
+CREATE TRIGGER authority_budget_provider_ledger_update
+AFTER UPDATE OF reserved,provider_reserved,consumed,provider_consumed,usage_unknown ON authority_budget
+WHEN NEW.provider_reserved<>(
+  SELECT COALESCE(SUM(reservation.value),0)
+    FROM provider_actions action
+    JOIN json_each(action.budget_reservation_json) reservation ON reservation.key=NEW.unit_key
+    LEFT JOIN json_each(action.budget_settlement_json) settlement ON settlement.key=reservation.key
+   WHERE action.budget_authority_id=NEW.authority_id
+     AND (
+       action.budget_state='reserved'
+       OR (action.budget_state='usage-unknown' AND settlement.type='text' AND settlement.value='unknown')
+     )
+) OR NEW.provider_consumed<>(
+  SELECT COALESCE(SUM(settlement.value),0)
+    FROM provider_actions action
+    JOIN json_each(action.budget_settlement_json) settlement ON settlement.key=NEW.unit_key
+   WHERE action.budget_authority_id=NEW.authority_id
+     AND settlement.type='integer'
+     AND action.budget_state IN ('settled','usage-unknown')
+) OR (NEW.usage_unknown=0 AND EXISTS (
+  SELECT 1 FROM provider_actions action
+  JOIN json_each(action.budget_settlement_json) settlement ON settlement.key=NEW.unit_key
+   WHERE action.budget_authority_id=NEW.authority_id
+     AND action.budget_state='usage-unknown'
+     AND settlement.type='text' AND settlement.value='unknown'
+))
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_authority_budget_provider_ledger'); END;
+
+CREATE TRIGGER task_provider_action_unresolved
+BEFORE UPDATE OF state ON tasks
+WHEN NEW.state IN ('complete','cancelled','degraded') AND EXISTS (
+  SELECT 1 FROM provider_actions action
+   WHERE action.run_id=NEW.run_id AND action.task_id=NEW.task_id
+     AND action.status IN ('prepared','dispatched','accepted','ambiguous')
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_task_provider_action_unresolved'); END;
 
 CREATE TRIGGER provider_agent_custody_immutable_delete
 BEFORE DELETE ON provider_agent_custody

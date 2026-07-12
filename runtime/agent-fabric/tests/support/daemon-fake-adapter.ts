@@ -114,7 +114,11 @@ input.on("line", (line) => {
         "release",
       ],
       actionJournal: true,
-      ...(ephemeralSpawnEnabled ? { ephemeralWorker: true, answerBearingSpawn: true } : {}),
+      ...(ephemeralSpawnEnabled ? {
+        ephemeralWorker: true,
+        answerBearingSpawn: true,
+        answerBearingSpawnTurns: "one-shot",
+      } : {}),
     });
     return;
   }
@@ -128,7 +132,8 @@ input.on("line", (line) => {
       typeof request.params.model !== "string" ||
       typeof request.params.modelFamily !== "string" ||
       typeof request.params.prompt !== "string" ||
-      typeof request.params.taskId !== "string"
+      typeof request.params.taskId !== "string" ||
+      request.params.maxTurns !== 1
     ) {
       fail(request.id, "INVALID_PARAMS", "task-bound ephemeral spawn fields are required");
       return;
