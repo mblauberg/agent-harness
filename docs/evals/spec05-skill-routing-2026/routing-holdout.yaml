@@ -103,9 +103,9 @@ cases:
   portable_artifact_kind: implementation-checkpoint
 - id: c013
   relation: positive
-  prompt: For this bounded delivery, keep one chair while dynamically forming coordinated
-    workstreams, settle only after recursive obligations close, and use a generation-bound
-    live handoff if the chair must change.
+  prompt: Orchestrate this bounded coordination run with one chair, dynamically formed
+    workstreams, recursive settlement, and a generation-bound live handoff if the
+    chair must change.
   expected:
     primary_skill: orchestrate
     companion_skills: []

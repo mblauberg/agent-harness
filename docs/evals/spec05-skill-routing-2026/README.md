@@ -1,7 +1,7 @@
 # Spec 05 lifecycle-skill evaluation
 
 Status: revised frozen inputs and adapter-absent executable probe pass; fresh
-real Fabric routing rerun pending after one retained semantic non-pass
+real Fabric routing rerun pending after two retained semantic non-passes
 Date: 12 July 2026
 
 This evaluation closes Spec 05 AC24 without treating the focused skill YAML as
@@ -49,3 +49,9 @@ outputs remain under `attempts/attempt-01/`. Adjudication corrected one
 misowned session fixture, sharpened two genuinely ambiguous prompts and stated
 the pre-existing companion boundary explicitly. No failed output was relabelled
 or reused; the revised packet requires a fresh three-family run.
+
+Attempt 02 passed companion and portability thresholds, but all three families
+read "bounded delivery" as `deliver` primary in the positive orchestration
+fixture. That wording was corrected to an explicit bounded coordination-run
+operation. The 105/108 primary result and all raw evidence remain retained;
+the 100% primary threshold was not lowered.

@@ -50,7 +50,7 @@ c009: Implement this approved substantial change in a fresh session, adapting th
 c010: The intended outcome and authority are unsettled; decide the scope before any implementation.
 c011: Implement this approved cross-cutting change with adaptive, partitioned agent teams and independent review.
 c012: With Console, Herdr and GitHub unavailable, implement the approved change using project artifacts and the canonical delivery receipt.
-c013: For this bounded delivery, keep one chair while dynamically forming coordinated workstreams, settle only after recursive obligations close, and use a generation-bound live handoff if the chair must change.
+c013: Orchestrate this bounded coordination run with one chair, dynamically formed workstreams, recursive settlement, and a generation-bound live handoff if the chair must change.
 c014: Implement this approved tightly coupled one-file fix with no useful parallel decomposition.
 c015: Implement the approved migration with non-overlapping parallel writers in isolated repository worktrees.
 c016: With Console, Herdr and GitHub unavailable, orchestrate native workers from project artifacts and return namespaced evidence to one chair.
