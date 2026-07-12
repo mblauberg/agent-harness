@@ -20,7 +20,10 @@ REQUIRED_DOCTRINE = {
     "scope": ("decision context", "digest-bound"),
     "grill-me": ("decision context", "digest-bound"),
     "implement": ("minor work", "fresh implementation session", "adaptive plan"),
-    "orchestrate": ("one chair", "leaders", ".worktrees/<task-agent>"),
+    "orchestrate": (
+        "one chair", "leaders", ".worktrees/<task-agent>",
+        "recursive obligations", "generation-bound operator action",
+    ),
     "session": ("fresh session", "provider session", "compaction"),
     "deliver": ("project session", "coordination run", "workstream"),
     "work-map": ("project/run/lead", "not live task truth"),

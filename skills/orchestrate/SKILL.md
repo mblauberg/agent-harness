@@ -7,28 +7,28 @@ description: "Use when bounded fan-out, multi-agent research, cross-family revie
 
 ## Overview
 
-Decompose -> waves -> reduce -> gate -> finish. Chair synthesises; workers
-provide decorrelated coverage. One chair per coordination run may appoint
+Decompose -> waves -> reduce -> gate. Chair synthesises decorrelated coverage.
+One chair per coordination run may appoint
 leaders, form/retire teams, pair or reroute inside authority.
 
 ## Rules
 
-- Once triggered, **default to fan-out** across bounded, useful
-  slices. If safe decomposition fails, use one read-only auditor.
-- Preflight dependencies, tool density and shared error sources. Keep
+- **Default to fan-out** when bounded; if decomposition fails, use one read-only auditor.
+- Preflight dependencies and shared errors. Keep
   coordination-heavy reasoning with one owner.
 - **No concurrent shared-state writes.** Partition source scopes. With approved
   worktree authority, writers use isolated repository-owned
   `.worktrees/<task-agent>`; otherwise use read/patch-only workers and one
   serial applier.
-- **Keep topology exact.** Coordinated expansion adds workstreams under
-  the sole run/chair. Independent concurrency uses separate project sessions;
-  never create a second live run inside one session.
+- **Keep topology exact.** Coordinated workstreams stay under the sole
+  run/chair; settle only after recursive obligations close. Live chair handoff
+  is a generation-bound operator action, never generic takeover. Independent
+  work uses separate project sessions; never add a second live run.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
   Pane injection is fire-and-forget steering. Without a tested callback,
   record `FABRIC-ROUNDTRIP-UNAVAILABLE` and use an artifact plus bounded
   collection.
-- Record each worker's task-relevant cwd; never assume one global repository.
+- Record each worker's cwd; never assume one global repository.
 - **Workers write full output to files** when scratch authority exists and
   return only a short digest plus path.
 - **Cross-family follows the HARNESS risk ladder.** The other primary is
@@ -39,7 +39,7 @@ leaders, form/retire teams, pair or reroute inside authority.
 
 ## When This Pays
 
-Use when decomposition pays; skip tightly coupled or unpartitionable tasks.
+Use for useful decomposition; skip tightly coupled work.
 
 ## Adaptive Loop
 

@@ -37,6 +37,13 @@ the five affected overages were compressed without weakening the contracts.
 The final affected gate returned `16 passed`; the remaining harness pytest
 returned `422 passed` after building the worktree-local lockfile dependencies.
 
+The integrated workstream/live-handoff extension added a second focused
+RED→GREEN on 12 July: the doctrine test first failed on missing recursive
+settlement and live-handoff custody, then passed after `orchestrate` bound
+settlement to recursive obligations and chair change to a generation-bound
+operator action. The entrypoint remained within its 500-word budget and the
+doctrine checker passed.
+
 `scripts/check-harness` initially stopped in `public_release_check.py` on a
 pre-existing absolute path in
 `runtime/agent-fabric-console/tests/presenter-render.test.ts`. The chair owned
