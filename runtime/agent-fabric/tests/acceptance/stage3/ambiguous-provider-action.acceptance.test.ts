@@ -72,6 +72,61 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).rejects.toMatchObject({ code: "PROTOCOL_INVALID" });
   });
 
+  it("recovers only a validated answer from terminal adapter evidence", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 3, "cost:USD": 3 },
+      },
+      commandId: "provider-review-recovery:authority",
+    });
+    const dispatch = async (scenario: string) => await fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId: `provider-review-recovery:${scenario}`,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Review the current implementation read-only.",
+        cwd: "src/leader",
+        scenario,
+      },
+      commandId: `provider-review-recovery:${scenario}:dispatch`,
+    });
+
+    await expect(dispatch("ambiguous-review-valid")).rejects.toMatchObject({
+      code: "LIFECYCLE_PRECONDITION_FAILED",
+    });
+    await expect(fixture.chair.reconcileProviderAction({
+      actionId: "provider-review-recovery:ambiguous-review-valid",
+      commandId: "provider-review-recovery:valid:reconcile",
+    })).resolves.toMatchObject({
+      status: "terminal",
+      providerAnswer: "recovered provider review",
+    });
+
+    for (const scenario of ["ambiguous-review-empty", "ambiguous-review-oversized"] as const) {
+      await expect(dispatch(scenario)).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+      await expect(fixture.chair.reconcileProviderAction({
+        actionId: `provider-review-recovery:${scenario}`,
+        commandId: `provider-review-recovery:${scenario}:reconcile`,
+      })).resolves.toMatchObject({ status: "quarantined" });
+      expect(await fixture.chair.getProviderAction({
+        actionId: `provider-review-recovery:${scenario}`,
+      })).toMatchObject({ status: "quarantined" });
+    }
+  });
+
   it("persists prepared, dispatched, accepted and terminal states across a core restart", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));

@@ -715,6 +715,18 @@ function providerActionResult(value: unknown): ProviderActionResult {
   };
 }
 
+function providerActionResultWithRequiredAnswer(
+  value: unknown,
+  answerBearing: boolean,
+): ProviderActionResult {
+  const result = providerActionResult(value);
+  if (!answerBearing || result.status !== "terminal") return result;
+  return {
+    ...result,
+    providerAnswer: providerAnswerFromAdapterResult(result.result),
+  };
+}
+
 function isProviderActionResult(value: unknown): value is ProviderActionResult {
   try {
     providerActionResult(value);
@@ -4645,20 +4657,34 @@ export class Fabric {
         .get(runId, input.actionId),
       "provider action",
     );
+    const storedPayload: unknown = JSON.parse(stringField(stored, "payload_json"));
+    if (!isRow(storedPayload)) throw new Error("stored provider action payload is invalid");
+    const answerBearing = stored.operation === "spawn" && isTaskBoundEphemeralProviderPayload(storedPayload);
+    const quarantine = (candidate: ProviderActionResult): ProviderActionResult => {
+      const quarantined: ProviderActionResult = {
+        ...candidate,
+        status: "quarantined",
+      };
+      delete quarantined.providerAnswer;
+      this.#database
+        .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
+        .run(this.#clock(), runId, input.actionId);
+      this.#providerSessions.settleTurn(runId, input.actionId, "quarantined");
+      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
+      return quarantined;
+    };
     let result = this.getProviderAction(runId, input.actionId);
     if (result.status === "prepared") {
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
-      const payload: unknown = JSON.parse(stringField(stored, "payload_json"));
-      if (!isRow(payload)) throw new Error("stored provider action payload is invalid");
       const adapterId = stringField(stored, "adapter_id");
       this.#database
         .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND action_id = ?")
         .run(this.#clock(), runId, input.actionId);
       try {
-        const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload });
-        result = providerActionResult(response);
+        const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
+        result = providerActionResultWithRequiredAnswer(response, answerBearing);
         this.#persistProviderAction(runId, input.actionId, response, result);
       } catch {
         result = {
@@ -4684,15 +4710,14 @@ export class Fabric {
     try {
       lookup = await this.#requestAdapter(adapterId, "lookup_action", { actionId: input.actionId });
     } catch {
-      result = { ...result, status: "quarantined" };
-      this.#database
-        .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.actionId);
-      this.#providerSessions.settleTurn(runId, input.actionId, "quarantined");
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
+      return quarantine(result);
     }
-    const lookedUp = providerActionResult(lookup);
+    let lookedUp: ProviderActionResult;
+    try {
+      lookedUp = providerActionResultWithRequiredAnswer(lookup, answerBearing);
+    } catch {
+      return quarantine(result);
+    }
     const idempotencyProven = numberField(stored, "idempotency_proven") === 1 ||
       (isRow(lookup) && lookup.idempotencyProven === true);
     if (lookedUp.status === "terminal") {
@@ -4702,16 +4727,15 @@ export class Fabric {
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
-      const payload: unknown = JSON.parse(stringField(stored, "payload_json"));
-      if (!isRow(payload)) throw new Error("stored provider action payload is invalid");
-      const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload });
-      result = providerActionResult(replayed);
+      const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
+      try {
+        result = providerActionResultWithRequiredAnswer(replayed, answerBearing);
+      } catch {
+        return quarantine(result);
+      }
       this.#persistProviderAction(runId, input.actionId, replayed, result);
     } else {
-      result = { ...lookedUp, status: "quarantined" };
-      this.#database
-        .prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.actionId);
+      return quarantine(lookedUp);
     }
     this.#providerSessions.settleTurn(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
     this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);

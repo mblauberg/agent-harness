@@ -91,6 +91,32 @@ input.on("line", (line) => {
     const generation = typeof request.params.generation === "number" ? request.params.generation : 1;
     const resumeReference = `${prior}:replacement:g${String(generation)}`;
     journal.sessions[resumeReference] = { released: false, generation };
+    const scenario = typeof request.params.scenario === "string" ? request.params.scenario : "terminal";
+    if (scenario.startsWith("ambiguous-review-")) {
+      const actionId = request.params.actionId;
+      if (typeof actionId !== "string") {
+        fail(request.id, "INVALID_PARAMS", "actionId is required");
+        return;
+      }
+      const answer = scenario === "ambiguous-review-valid"
+        ? "recovered provider review"
+        : scenario === "ambiguous-review-empty"
+          ? ""
+          : "x".repeat(262_145);
+      journal.actions[actionId] = {
+        actionId,
+        payloadHash: payloadHash(request.params.payload),
+        status: "terminal",
+        history: ["prepared", "dispatched", "accepted", "terminal"],
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: true,
+        result: { resumeReference, generation, result: answer },
+      };
+      saveJournal(journal);
+      fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the direct response was lost");
+      return;
+    }
     saveJournal(journal);
     respond(request.id, { resumeReference, generation, result: "fake provider review complete" });
     return;
