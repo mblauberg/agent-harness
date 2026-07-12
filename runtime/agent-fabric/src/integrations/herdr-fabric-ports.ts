@@ -23,6 +23,15 @@ export type HerdrFabricPortsOptions = Readonly<{
   clock?: () => number;
 }>;
 
+type HerdrAppliedActionInput = Readonly<{
+  actionId: ProviderActionId;
+  projectId: ProjectId;
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  targetAgentId: AgentId | null;
+  intent: JsonValue;
+}>;
+
 export type FabricSteerReference =
   | {
       kind: "task";
@@ -169,31 +178,20 @@ export class HerdrFabricPorts {
     })();
   }
 
+  /** Pure closed-family validation used even when the optional integration is disabled. */
+  validateAction(input: HerdrAppliedActionInput): void {
+    this.#validatedActionInput(input);
+  }
+
   /** Internal daemon seam for already-authorised non-steer Herdr intents. */
-  prepareAction(input: Readonly<{
-    actionId: ProviderActionId;
-    projectId: ProjectId;
-    projectSessionId: ProjectSessionId;
-    coordinationRunId: CoordinationRunId;
-    targetAgentId: AgentId | null;
-    intent: JsonValue;
-  }>): HerdrActionRecord {
-    const actionId = safeActionId(input.actionId);
-    const run = this.#runIdentity(input.coordinationRunId);
-    if (run.projectId !== input.projectId || run.projectSessionId !== input.projectSessionId) {
-      throw new TypeError("Herdr action binding names another project session");
-    }
-    const intent = canonicalise(parseJsonValue(input.intent, "herdr.intent"));
-    assertNoCredentialLikeValue(intent, "Herdr intent");
-    if (!isRecord(intent) || typeof intent.kind !== "string" || !HERDR_APPLIED_OPERATIONS.has(intent.kind as HerdrAppliedOperation)) {
-      throw new TypeError("Herdr action kind is outside the closed integration family");
-    }
+  prepareAction(input: HerdrAppliedActionInput): HerdrActionRecord {
+    const { actionId, intent, operation } = this.#validatedActionInput(input);
     return this.#database.transaction(() => this.#prepareAction({
       actionId,
       runId: input.coordinationRunId,
       projectSessionId: input.projectSessionId,
       targetAgentId: input.targetAgentId,
-      operation: intent.kind as HerdrAppliedOperation,
+      operation,
       payload: intent,
     }))();
   }
@@ -454,6 +452,76 @@ export class HerdrFabricPorts {
     };
   }
 
+  #validatedActionInput(input: HerdrAppliedActionInput): {
+    actionId: ProviderActionId;
+    intent: JsonValue;
+    operation: HerdrAppliedOperation;
+  } {
+    const actionId = safeActionId(input.actionId);
+    const run = this.#runIdentity(input.coordinationRunId);
+    if (run.projectId !== input.projectId || run.projectSessionId !== input.projectSessionId) {
+      throw new TypeError("Herdr action binding names another project session");
+    }
+    assertClosedAppliedIntent(input.intent, input);
+    const intent = canonicalise(parseJsonValue(input.intent, "herdr.intent"));
+    assertNoCredentialLikeValue(intent, "Herdr intent");
+    if (!isRecord(intent) || typeof intent.kind !== "string" || !HERDR_APPLIED_OPERATIONS.has(intent.kind as HerdrAppliedOperation)) {
+      throw new TypeError("Herdr action kind is outside the closed integration family");
+    }
+    this.#assertAuthoritativeIntentBinding(intent, input);
+    return { actionId, intent, operation: intent.kind as HerdrAppliedOperation };
+  }
+
+  #assertAuthoritativeIntentBinding(intent: Record<string, unknown>, input: HerdrAppliedActionInput): void {
+    if (intent.kind === "agent.ensure-pane") {
+      const identity = intent.identity;
+      if (!isRecord(identity) || input.targetAgentId === null) throw new TypeError("Herdr agent identity is unavailable");
+      const current = this.#database.prepare(`
+        SELECT agent.provider_session_ref,
+               COALESCE(state.provider_session_generation, 1) AS provider_session_generation,
+               binding.adapter_id
+          FROM agents agent
+          LEFT JOIN provider_state state ON state.run_id=agent.run_id AND state.agent_id=agent.agent_id
+          LEFT JOIN agent_adapter_bindings binding ON binding.run_id=agent.run_id AND binding.agent_id=agent.agent_id
+         WHERE agent.run_id=? AND agent.agent_id=?
+      `).get(input.coordinationRunId, input.targetAgentId);
+      if (
+        !isRow(current) || nullableText(current, "provider_session_ref") === null ||
+        nullableText(current, "adapter_id") === null ||
+        identity.providerSessionRef !== nullableText(current, "provider_session_ref") ||
+        identity.provider !== nullableText(current, "adapter_id") ||
+        identity.providerSessionGeneration !== integer(current, "provider_session_generation")
+      ) throw new TypeError("Herdr agent provider session identity is stale or unbound");
+      return;
+    }
+    let itemId: unknown;
+    let revision: unknown;
+    if (intent.kind === "attention.project") {
+      itemId = intent.itemId;
+      revision = intent.revision;
+    } else if (intent.kind === "notification.show") {
+      itemId = intent.attentionItemId;
+      revision = intent.attentionRevision;
+    } else if (intent.kind === "target.focus" && isRecord(intent.target) && intent.target.kind === "console-item" && intent.target.view === "attention") {
+      itemId = intent.target.itemId;
+      revision = intent.target.revision;
+    } else {
+      return;
+    }
+    const item = this.#database.prepare(`
+      SELECT attention.project_session_id, attention.coordination_run_id, attention.revision, session.project_id
+        FROM attention_items attention
+        JOIN project_sessions session ON session.project_session_id=attention.project_session_id
+       WHERE attention.item_id=?
+    `).get(itemId);
+    if (
+      !isRow(item) || text(item, "project_id") !== input.projectId ||
+      text(item, "project_session_id") !== input.projectSessionId ||
+      integer(item, "revision") !== revision ||
+      (nullableText(item, "coordination_run_id") !== null && nullableText(item, "coordination_run_id") !== input.coordinationRunId)
+    ) throw new TypeError("Herdr attention projection binding is stale or outside the coordination run");
+  }
+
   #prepareAction(input: Readonly<{
     actionId: ProviderActionId;
     runId: CoordinationRunId;
@@ -579,6 +647,174 @@ function assertClosedDirectSteerIntent(intent: DirectSteerIntent): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(intent.paneRef)) throw new TypeError("Herdr direct-steer pane reference is invalid");
   boundedSafeText(intent.prompt, "Herdr direct-steer prompt", 4096);
   parseSteerReference(intent.reference);
+}
+
+function assertClosedAppliedIntent(
+  value: JsonValue,
+  binding: Readonly<{
+    projectId: ProjectId;
+    projectSessionId: ProjectSessionId;
+    coordinationRunId: CoordinationRunId;
+    targetAgentId: AgentId | null;
+  }>,
+): void {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    throw new TypeError("Herdr action intent must be a closed object");
+  }
+  switch (value.kind) {
+    case "console.ensure-pane": {
+      requireExactIntent(value, ["kind", "profileId", "projectId", "projectSessionId"]);
+      requireProjectBinding(value, binding);
+      if (value.profileId !== "agent-fabric-console" || binding.targetAgentId !== null) {
+        throw new TypeError("Herdr Console intent has an invalid closed binding");
+      }
+      return;
+    }
+    case "agent.ensure-pane": {
+      requireExactIntent(value, ["identity", "kind", "paneClass", "placement", "surface"]);
+      if (!isRecord(value.identity)) throw new TypeError("Herdr agent identity must be a closed object");
+      requireExactIntent(value.identity, [
+        "agentId", "coordinationRunId", "modelFamily", "projectId", "projectSessionId",
+        "provider", "providerSessionGeneration", "providerSessionRef",
+      ]);
+      requireProjectBinding(value.identity, binding);
+      if (
+        value.identity.coordinationRunId !== binding.coordinationRunId ||
+        value.identity.agentId !== binding.targetAgentId || binding.targetAgentId === null
+      ) throw new TypeError("Herdr agent identity is outside its closed Fabric binding");
+      parseIdentifier<"AgentId">(value.identity.agentId, "herdr.intent.identity.agentId");
+      boundedSafeText(value.identity.provider, "Herdr identity provider", 128);
+      boundedSafeText(value.identity.modelFamily, "Herdr identity model family", 128);
+      boundedSafeText(value.identity.providerSessionRef, "Herdr identity provider session", 512);
+      if (!Number.isSafeInteger(value.identity.providerSessionGeneration) || Number(value.identity.providerSessionGeneration) < 1) {
+        throw new TypeError("Herdr identity provider generation is invalid");
+      }
+      if (
+        !["chair", "paired-primary", "selected-long-running-worker"].includes(String(value.paneClass)) ||
+        !["provider-tui", "observer"].includes(String(value.surface)) ||
+        !["beside-chair", "workspace-default"].includes(String(value.placement))
+      ) throw new TypeError("Herdr agent pane intent has an invalid closed variant");
+      return;
+    }
+    case "panes.arrange": {
+      requireExactIntent(value, ["kind", "layout", "paneRefs"]);
+      if (
+        !Array.isArray(value.paneRefs) || value.paneRefs.length < 1 || value.paneRefs.length > 16 ||
+        !value.paneRefs.every(validPaneReference) || new Set(value.paneRefs).size !== value.paneRefs.length ||
+        (value.layout !== "side-by-side" && value.layout !== "workspace-default") || binding.targetAgentId !== null
+      ) throw new TypeError("Herdr pane arrangement intent has an invalid closed shape");
+      return;
+    }
+    case "agent.project-metadata": {
+      requireExactIntent(value, ["agentId", "kind", "metadata", "paneRef"]);
+      if (value.agentId !== binding.targetAgentId || binding.targetAgentId === null || !validPaneReference(value.paneRef) || !isRecord(value.metadata)) {
+        throw new TypeError("Herdr agent metadata intent has an invalid closed binding");
+      }
+      requireExactIntent(value.metadata, ["contextPressure", "lifecycle", "modelFamily", "provider", "role", "taskLabel"]);
+      parseIdentifier<"AgentId">(value.agentId, "herdr.intent.agentId");
+      boundedSafeText(value.metadata.provider, "Herdr metadata provider", 128);
+      boundedSafeText(value.metadata.modelFamily, "Herdr metadata model family", 128);
+      boundedSafeText(value.metadata.lifecycle, "Herdr metadata lifecycle", 128);
+      boundedTextAllowEmpty(value.metadata.taskLabel, "Herdr metadata task label", 512);
+      if (
+        !["chair", "lead", "worker", "reviewer"].includes(String(value.metadata.role)) ||
+        !["low", "medium", "high", "unknown"].includes(String(value.metadata.contextPressure))
+      ) throw new TypeError("Herdr metadata intent has an invalid closed variant");
+      return;
+    }
+    case "attention.project": {
+      requireExactIntent(value, ["itemId", "kind", "label", "projectId", "projectSessionId", "revision", "title"]);
+      requireProjectBinding(value, binding);
+      boundedSafeText(value.itemId, "Herdr attention item", 128);
+      boundedSafeText(value.title, "Herdr attention title", 512);
+      nonNegativeRevision(value.revision, "Herdr attention revision");
+      if (!["Decision", "Approval", "Blocked", "FYI"].includes(String(value.label)) || binding.targetAgentId !== null) {
+        throw new TypeError("Herdr attention intent has an invalid closed variant");
+      }
+      return;
+    }
+    case "target.focus": {
+      requireExactIntent(value, ["kind", "target"]);
+      if (!isRecord(value.target) || typeof value.target.kind !== "string") throw new TypeError("Herdr focus target must be closed");
+      if (value.target.kind === "agent-pane") {
+        requireExactIntent(value.target, ["agentId", "kind", "paneRef"]);
+        if (value.target.agentId !== binding.targetAgentId || binding.targetAgentId === null || !validPaneReference(value.target.paneRef)) {
+          throw new TypeError("Herdr agent focus target has an invalid closed binding");
+        }
+        parseIdentifier<"AgentId">(value.target.agentId, "herdr.intent.target.agentId");
+        return;
+      }
+      if (value.target.kind === "console-item") {
+        requireExactIntent(value.target, ["itemId", "kind", "revision", "view"]);
+        boundedSafeText(value.target.itemId, "Herdr Console focus item", 128);
+        nonNegativeRevision(value.target.revision, "Herdr Console focus revision");
+        if (!CONSOLE_VIEWS.has(String(value.target.view)) || binding.targetAgentId !== null) {
+          throw new TypeError("Herdr Console focus target has an invalid closed binding");
+        }
+        return;
+      }
+      throw new TypeError("Herdr focus target is outside the closed family");
+    }
+    case "agent.wake": {
+      requireExactIntent(value, ["agentId", "kind", "paneRef"]);
+      if (value.agentId !== binding.targetAgentId || binding.targetAgentId === null || !validPaneReference(value.paneRef)) {
+        throw new TypeError("Herdr wake intent has an invalid closed binding");
+      }
+      parseIdentifier<"AgentId">(value.agentId, "herdr.intent.agentId");
+      return;
+    }
+    case "notification.show": {
+      requireExactIntent(value, ["attentionItemId", "attentionRevision", "body", "focusTarget", "kind", "title"]);
+      boundedSafeText(value.attentionItemId, "Herdr notification item", 128);
+      boundedSafeText(value.title, "Herdr notification title", 256);
+      boundedSafeText(value.body, "Herdr notification body", 1024);
+      nonNegativeRevision(value.attentionRevision, "Herdr notification revision");
+      if (binding.targetAgentId !== null) throw new TypeError("Herdr notification intent has an invalid closed binding");
+      if (value.focusTarget === null) return;
+      if (!isRecord(value.focusTarget)) throw new TypeError("Herdr notification focus target must be closed");
+      requireExactIntent(value.focusTarget, ["itemId", "kind", "revision", "view"]);
+      boundedSafeText(value.focusTarget.itemId, "Herdr notification focus item", 128);
+      nonNegativeRevision(value.focusTarget.revision, "Herdr notification focus revision");
+      if (value.focusTarget.kind !== "console-item" || !CONSOLE_VIEWS.has(String(value.focusTarget.view))) {
+        throw new TypeError("Herdr notification focus target is outside the closed family");
+      }
+      return;
+    }
+    default:
+      throw new TypeError("Herdr action kind is outside the closed integration family");
+  }
+}
+
+const CONSOLE_VIEWS = new Set(["attention", "project", "runs", "work", "agents", "evidence", "activity", "system"]);
+
+function requireExactIntent(value: Record<string, unknown>, keys: readonly string[]): void {
+  if (!exactKeys(value, keys)) throw new TypeError("Herdr action intent is not closed");
+}
+
+function requireProjectBinding(
+  value: Record<string, unknown>,
+  binding: Readonly<{ projectId: ProjectId; projectSessionId: ProjectSessionId }>,
+): void {
+  const projectId = parseIdentifier<"ProjectId">(value.projectId, "herdr.intent.projectId");
+  const projectSessionId = parseIdentifier<"ProjectSessionId">(value.projectSessionId, "herdr.intent.projectSessionId");
+  if (projectId !== binding.projectId || projectSessionId !== binding.projectSessionId) {
+    throw new TypeError("Herdr intent names another project session");
+  }
+}
+
+function validPaneReference(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(value) && !SECRET_PATTERN.test(value);
+}
+
+function nonNegativeRevision(value: unknown, label: string): void {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new TypeError(`${label} is invalid`);
+}
+
+function boundedTextAllowEmpty(value: unknown, label: string, maximumBytes: number): string {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maximumBytes || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u009b]/u.test(value)) {
+    throw new TypeError(`${label} is unsafe or exceeds its bound`);
+  }
+  return value;
 }
 
 function parseReceipt(value: unknown): HerdrEffectReceipt {

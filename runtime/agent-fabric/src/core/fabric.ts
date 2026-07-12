@@ -73,6 +73,13 @@ import {
   type GitHostedChecksPort,
 } from "../operator/git-repository-read.js";
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
+import {
+  HerdrDaemonIntegration,
+  type HerdrDaemonActionRequest,
+  type HerdrDaemonActionResult,
+  type HerdrDaemonIntegrationConfiguration,
+  type HerdrDirectSteerRequest,
+} from "../integrations/herdr-daemon-integration.js";
 import { ArtifactContentReadService } from "../operator/artifact-content-read.js";
 import {
   ExternalEffectService,
@@ -182,6 +189,7 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
     registry: readonly RegisteredEffectPort[];
     evidence: ExternalEffectEvidencePort;
   }>;
+  herdr?: HerdrDaemonIntegrationConfiguration;
 };
 
 type Row = Record<string, unknown>;
@@ -900,6 +908,8 @@ export class Fabric {
   readonly #notificationWorker: NativeNotificationWorker;
   readonly #artifactRegistry: ArtifactRegistry;
   readonly #externalEffects: ExternalEffectService | undefined;
+  readonly #herdr: HerdrDaemonIntegration;
+  readonly #herdrConfigured: boolean;
 
   constructor(options: FabricRuntimeOpenOptions) {
     const clock = options.clock ?? Date.now;
@@ -1071,6 +1081,24 @@ export class Fabric {
       integrationId: "native-desktop",
       clock: this.#clock,
     });
+    this.#herdr = new HerdrDaemonIntegration({
+      database: this.#database,
+      configuration: options.herdr ?? { mode: "disabled" },
+      clock: this.#clock,
+    });
+    this.#herdrConfigured = options.herdr !== undefined;
+  }
+
+  async executeHerdrAction(request: HerdrDaemonActionRequest): Promise<HerdrDaemonActionResult> {
+    return await this.#herdr.executeAction(request);
+  }
+
+  async executeHerdrDirectSteer(request: HerdrDirectSteerRequest): Promise<HerdrDaemonActionResult> {
+    return await this.#herdr.executeDirectSteer(request);
+  }
+
+  async runHerdrPresencePass(): Promise<import("../integrations/herdr-daemon-integration.js").HerdrPresencePassResult> {
+    return await this.#herdr.runPresencePass();
   }
 
   recoverDaemonRuntimeEpoch(input: {
@@ -1594,6 +1622,8 @@ export class Fabric {
     this.#notifications.recover();
     await this.#launchCustody?.recover();
     await this.#externalEffects?.recover();
+    await this.#herdr.recover();
+    if (this.#herdrConfigured) await this.#herdr.runPresencePass();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")

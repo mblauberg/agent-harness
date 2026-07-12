@@ -231,6 +231,94 @@ describe("operator projection store", () => {
     expect(snapshot.stateDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
   });
 
+  it("projects persisted Herdr presence without treating pane identity as Fabric authority", () => {
+    const fixture = setupProjection();
+    fixture.database.prepare(`
+      INSERT INTO integration_availability(
+        integration_id, state, discovered_contract_json, checked_at
+      ) VALUES ('herdr-control-v1', 'available', ?, ?)
+    `).run(JSON.stringify({
+      schemaVersion: 1,
+      generation: 3,
+      operationFamily: "herdr-control-v1",
+      detail: "Herdr control and presence available",
+      degradedRunIds: [],
+      presence: [{
+        projectId: "project_01",
+        projectSessionId: "session_01",
+        coordinationRunId: "run_01",
+        agentId: "chair_01",
+        state: "available",
+        paneRef: "w3:p4",
+        readiness: "identity-unverified",
+        observedAt: now - 50,
+      }],
+    }), now - 50);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const page = fixture.projections.page({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "agents",
+      after: 0,
+      limit: 10,
+    }, "include");
+    expect(page).toMatchObject({
+      view: "agents",
+      page: {
+        freshness: "live",
+        value: {
+          items: [{
+            agentId: "chair_01",
+            visibility: {
+              freshness: "snapshot",
+              source: "herdr",
+              revision: 3,
+              observedAt: new Date(now - 50).toISOString(),
+              value: { paneRef: "w3:p4" },
+            },
+          }],
+        },
+      },
+    });
+    expect(fixture.database.prepare(`
+      SELECT lifecycle FROM agents WHERE run_id='run_01' AND agent_id='chair_01'
+    `).get()).toEqual({ lifecycle: "ready" });
+  });
+
+  it("keeps agent projection operable when the optional Herdr contract is malformed", () => {
+    const fixture = setupProjection();
+    fixture.database.prepare(`
+      INSERT INTO integration_availability(
+        integration_id, state, discovered_contract_json, checked_at
+      ) VALUES ('herdr-control-v1', 'available', '{', ?)
+    `).run(now - 50);
+    const page = fixture.projections.page({
+      credential: fixture.credential,
+      projectId: identifier<"ProjectId">("project_01"),
+      projectSessionId: identifier<"ProjectSessionId">("session_01"),
+      view: "agents",
+      after: 0,
+      limit: 10,
+    }, "include");
+    expect(page).toMatchObject({
+      page: {
+        freshness: "live",
+        value: {
+          items: [{
+            agentId: "chair_01",
+            visibility: {
+              freshness: "unavailable",
+              source: "herdr",
+              reason: "malformed-presence-contract",
+            },
+          }],
+        },
+      },
+    });
+  });
+
   it("pages v2 attention rows at one snapshot and resolves an exact revision-bound detail", () => {
     const fixture = setupProjection();
     const projectId = identifier<"ProjectId">("project_01");

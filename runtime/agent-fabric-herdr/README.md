@@ -55,6 +55,16 @@ const integration = await createProductionHerdrIntegration({
 });
 ```
 
+The production Fabric daemon owns this composition in normal use. Pass the
+same pins through `startFabricDaemon({ herdr: { enabled: true, ... } })`; the
+child daemon validates a closed configuration, creates a private per-session
+evidence directory, prepares each `herdr-control-v1` action before loading or
+probing Herdr, and polls structured presence without overlapping passes.
+Restart performs lookup only for already-dispatched/ambiguous actions. It also
+rehydrates terminal Console/agent pane observation bindings from durable Fabric
+actions without replaying pane creation. Disabled or missing packages remain a
+typed optional-integration failure and do not disable non-Herdr Fabric paths.
+
 Provider-TUI lookup binds an exact provider-session reference, but Herdr does
 not expose the Fabric project/run identity or provider-session generation.
 Presence therefore remains `identity-unverified` with `identity: null`; pane

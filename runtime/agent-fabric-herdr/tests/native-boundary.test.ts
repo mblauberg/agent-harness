@@ -166,6 +166,130 @@ describe("sealed Herdr CLI boundary", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("restores a persisted Fabric presence registration after daemon restart without replaying pane creation", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "fabric-herdr-presence-restart-")));
+    const { mkdir } = await import("node:fs/promises");
+    const state = join(root, "state");
+    const project = join(root, "project");
+    await mkdir(state, { mode: 0o700 });
+    await mkdir(project, { mode: 0o700 });
+    const intent: AgentEnsurePaneIntent = {
+      kind: "agent.ensure-pane",
+      identity: {
+        projectId: "project-01" as ProjectId,
+        projectSessionId: "session-01" as ProjectSessionId,
+        coordinationRunId: "run-01" as CoordinationRunId,
+        agentId: "agent-peer" as AgentId,
+        provider: "codex",
+        modelFamily: "openai",
+        providerSessionRef: "thread-01" as ProviderSessionRef,
+        providerSessionGeneration: 3,
+      },
+      paneClass: "paired-primary",
+      surface: "provider-tui",
+      placement: "beside-chair",
+    };
+    const calls: HerdrCommandRequest[] = [];
+    const boundary = new HerdrCliBoundary({
+      executable: "/opt/homebrew/bin/herdr",
+      expectedVersion: "0.7.3",
+      expectedProtocol: 16,
+      projectId: intent.identity.projectId,
+      projectSessionId: intent.identity.projectSessionId,
+      canonicalProjectRoot: project,
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
+      process: {
+        run: async (request) => {
+          calls.push(request);
+          return response({
+            snapshot: {
+              version: "0.7.3",
+              protocol: 16,
+              agents: [{
+                agent: "codex",
+                cwd: project,
+                agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "thread-01" },
+                pane_id: "w5:p7",
+              }],
+              panes: [],
+            },
+          });
+        },
+      },
+      effectJournal: new HerdrEffectEvidenceJournal({ stateDirectory: state }),
+      clock: () => Date.parse("2027-01-01T00:00:00Z"),
+    });
+
+    (boundary as unknown as { restorePresenceRegistration(value: AgentEnsurePaneIntent): void })
+      .restorePresenceRegistration(intent);
+
+    await expect(boundary.observeAgent(intent.identity.agentId)).resolves.toMatchObject({
+      state: "present",
+      paneRef: "w5:p7",
+    });
+    await expect(boundary.observeAgent(intent.identity.agentId)).resolves.toMatchObject({
+      state: "present",
+      paneRef: "w5:p7",
+    });
+    expect(calls.map((call) => call.arguments)).toEqual([["api", "snapshot"]]);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("restores a persisted Console pane binding from structured presence without replaying launch", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "fabric-herdr-console-restart-")));
+    const { mkdir } = await import("node:fs/promises");
+    const state = join(root, "state");
+    const project = join(root, "project");
+    await mkdir(state, { mode: 0o700 });
+    await mkdir(project, { mode: 0o700 });
+    const name = `fabric-console-${createHash("sha256").update("project-01\0session-01").digest("hex").slice(0, 16)}`;
+    const calls: HerdrCommandRequest[] = [];
+    const boundary = new HerdrCliBoundary({
+      executable: "/opt/homebrew/bin/herdr",
+      expectedVersion: "0.7.3",
+      expectedProtocol: 16,
+      projectId: "project-01",
+      projectSessionId: "session-01",
+      canonicalProjectRoot: project,
+      consoleExecutable: "/opt/agent-fabric/runtime/agent-fabric-console/dist/cli.js",
+      process: {
+        run: async (request) => {
+          calls.push(request);
+          return response({
+            snapshot: {
+              version: "0.7.3",
+              protocol: 16,
+              agents: [{ name, cwd: project, pane_id: "w5:p9", tab_id: "w5:t2" }],
+              panes: [],
+            },
+          });
+        },
+      },
+      effectJournal: new HerdrEffectEvidenceJournal({ stateDirectory: state }),
+    });
+
+    await (boundary as unknown as {
+      restoreConsolePresenceRegistration(value: ConsoleEnsurePaneIntent): Promise<void>;
+    }).restoreConsolePresenceRegistration({
+      kind: "console.ensure-pane",
+      projectId: "project-01" as ProjectId,
+      projectSessionId: "session-01" as ProjectSessionId,
+      profileId: "agent-fabric-console",
+    });
+    await expect(boundary.projectAttention("attention-after-restart" as ProviderActionId, {
+      kind: "attention.project",
+      projectId: "project-01" as ProjectId,
+      projectSessionId: "session-01" as ProjectSessionId,
+      itemId: "attention-01",
+      revision: 1,
+      label: "FYI",
+      title: "Restored",
+    })).resolves.toMatchObject({ status: "applied", paneRef: "w5:p9" });
+    expect(calls[0]?.arguments).toEqual(["api", "snapshot"]);
+    expect(calls.some((call) => call.arguments[0] === "agent" && call.arguments[1] === "start")).toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("uses fixed wake and validated fire-and-forget injection commands without claiming delivery", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "fabric-herdr-input-")));
     const { mkdir } = await import("node:fs/promises");

@@ -48,6 +48,7 @@ import { ProjectFabricCoreError, type CoreServiceOptions } from "../project-sess
 import { digest, integer, isRow, nullableText, row, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
 import { renderSafeMessageBody } from "./message-safety.js";
+import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -712,15 +713,115 @@ export class OperatorProjectionStore {
         providerSessionGeneration: generation,
         lifecycle: text(agent, "lifecycle"),
         contextPressure: "unknown",
-        visibility: {
-          freshness: "unavailable",
-          source: "herdr",
-          revision: generation,
-          observedAt,
-          reason: "not-observed",
-        },
+        visibility: this.#herdrVisibility(text(agent, "run_id"), agentId, generation, observedAt),
       };
     });
+  }
+
+  #herdrVisibility(
+    coordinationRunId: string,
+    agentId: string,
+    fallbackRevision: number,
+    fallbackObservedAt: Timestamp,
+  ): ProjectionFact<{ paneRef: string | null }, "herdr"> {
+    const value = this.#database.prepare(`
+      SELECT state, discovered_contract_json, checked_at
+        FROM integration_availability WHERE integration_id=?
+    `).get(HERDR_CONTROL_ADAPTER_ID);
+    if (!isRow(value)) {
+      return {
+        freshness: "unavailable",
+        source: "herdr",
+        revision: fallbackRevision,
+        observedAt: fallbackObservedAt,
+        reason: "not-observed",
+      };
+    }
+    const integrationState = text(value, "state");
+    const checkedAtValue = integer(value, "checked_at");
+    const checkedAt = toTimestamp(checkedAtValue, "Herdr integration checkedAt");
+    let contract: Row;
+    let generation: number;
+    try {
+      contract = jsonObject(text(value, "discovered_contract_json"), "Herdr integration contract");
+      if (contract.schemaVersion !== 1 || contract.operationFamily !== HERDR_CONTROL_ADAPTER_ID) {
+        throw new TypeError("Herdr integration contract identity is incompatible");
+      }
+      generation = contractGeneration(contract);
+    } catch {
+      return {
+        freshness: "unavailable",
+        source: "herdr",
+        revision: fallbackRevision,
+        observedAt: checkedAt,
+        reason: "malformed-presence-contract",
+      };
+    }
+    if (!Array.isArray(contract.presence) || contract.presence.length > 256) {
+      return {
+        freshness: "unavailable",
+        source: "herdr",
+        revision: generation,
+        observedAt: checkedAt,
+        reason: "malformed-presence-contract",
+      };
+    }
+    const candidates = contract.presence.filter((entry): entry is Row =>
+      isRow(entry) && entry.coordinationRunId === coordinationRunId && entry.agentId === agentId
+    );
+    if (candidates.length !== 1) {
+      return {
+        freshness: "unavailable",
+        source: "herdr",
+        revision: generation,
+        observedAt: checkedAt,
+        reason: candidates.length === 0 ? "not-observed" : "conflicting-presence-observation",
+      };
+    }
+    const presence = candidates[0] as Row;
+    const paneRef = presence.paneRef;
+    const observedAtValue = presence.observedAt;
+    if (
+      (paneRef !== null && (typeof paneRef !== "string" || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(paneRef))) ||
+      typeof observedAtValue !== "number" || !Number.isSafeInteger(observedAtValue) ||
+      observedAtValue < 0 || observedAtValue > checkedAtValue ||
+      (presence.state !== "available" && presence.state !== "unavailable") ||
+      typeof presence.readiness !== "string"
+    ) {
+      return {
+        freshness: "unavailable",
+        source: "herdr",
+        revision: generation,
+        observedAt: checkedAt,
+        reason: "malformed-presence-observation",
+      };
+    }
+    const observedAt = toTimestamp(observedAtValue, "Herdr presence observedAt");
+    if (integrationState === "stale") {
+      return {
+        freshness: "stale",
+        source: "herdr",
+        revision: generation,
+        observedAt,
+        value: { paneRef },
+      };
+    }
+    if (integrationState !== "available" || presence.state !== "available") {
+      return {
+        freshness: "unavailable",
+        source: "herdr",
+        revision: generation,
+        observedAt,
+        reason: typeof presence.readiness === "string" ? presence.readiness : "presence-unavailable",
+      };
+    }
+    return {
+      freshness: "snapshot",
+      source: "herdr",
+      revision: generation,
+      observedAt,
+      value: { paneRef },
+    };
   }
 
   #evidenceItems(

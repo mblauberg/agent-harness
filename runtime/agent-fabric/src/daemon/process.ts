@@ -25,6 +25,11 @@ import {
   type DaemonRequest,
 } from "./protocol.js";
 import { parseDaemonAdapters } from "./composition.js";
+import {
+  composeHerdrDaemonIntegration,
+  herdrPresencePollInterval,
+  parseHerdrDaemonProcessConfiguration,
+} from "./herdr-composition.js";
 import { BootstrapElection } from "./bootstrap-election.js";
 import { GuardedIdleStopController, type QuiesceToken } from "./global-liveness.js";
 import { IdleShutdownScheduler } from "./idle-shutdown-scheduler.js";
@@ -95,6 +100,9 @@ const workspaceRoots = Array.isArray(workspaceRootsValue) && workspaceRootsValue
   : undefined;
 const githubHostedChecksValue: unknown = JSON.parse(
   process.env.AGENT_FABRIC_GITHUB_HOSTED_CHECKS_JSON ?? '{"enabled":false}',
+);
+const herdrProcessConfiguration = parseHerdrDaemonProcessConfiguration(
+  process.env.AGENT_FABRIC_HERDR_JSON,
 );
 // Temporary compatibility fallback until every launcher supplies the persisted
 // runtime epoch. New bootstrap callers pass the authoritative generation.
@@ -189,6 +197,7 @@ const daemonAdapters = parseDaemonAdapters(process.env.AGENT_FABRIC_ADAPTERS_JSO
 const gitHostedChecks = await createOptionalGitHubHostedChecksAdapter(
   githubHostedChecksValue as OptionalGitHubHostedChecksConfiguration,
 );
+const herdrIntegration = composeHerdrDaemonIntegration(herdrProcessConfiguration, stateDirectory);
 const initializeResult = daemonInitializeResult(Object.keys(daemonAdapters));
 type PendingDaemonStop = Readonly<{
   custodyId: string;
@@ -213,6 +222,7 @@ const fabric = await openFabric({
   workspaceRoots,
   adapters: daemonAdapters,
   ...(gitHostedChecks === undefined ? {} : { gitHostedChecks }),
+  herdr: herdrIntegration,
   daemonStopPort: {
     request: async (request) => {
       const existing = pendingDaemonStops.get(request.custodyId);
@@ -594,11 +604,17 @@ const notificationTimer = setInterval(() => {
 }, 1_000);
 notificationTimer.unref();
 void fabric.runNativeNotificationPass().catch(() => undefined);
+const herdrPollInterval = herdrPresencePollInterval(herdrProcessConfiguration);
+const herdrTimer = herdrPollInterval === null ? null : setInterval(() => {
+  void fabric.runHerdrPresencePass().catch(() => undefined);
+}, herdrPollInterval);
+herdrTimer?.unref();
 scheduleIdleStop = () => idleScheduler.schedule("operator-detach");
 closeBackgroundWorkers = () => {
   idleScheduler.close();
   resultDeadlineScheduler.close();
   clearInterval(notificationTimer);
+  if (herdrTimer !== null) clearInterval(herdrTimer);
 };
 
 completeQueuedDaemonStop = (custodyId: string): void => {

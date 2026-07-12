@@ -12,6 +12,7 @@ export type {
   DaemonStartOptions,
   FabricDaemonHandle,
 } from "./daemon/client.js";
+export type { HerdrDaemonProcessConfiguration } from "./daemon/herdr-composition.js";
 export {
   LocalOperatorConsoleUnavailableError,
   openLocalOperatorConsoleSession,
@@ -42,6 +43,18 @@ export type {
   HerdrFabricPortsOptions,
   HerdrRecoverySummary,
 } from "./integrations/herdr-fabric-ports.js";
+export {
+  HerdrDaemonIntegration,
+} from "./integrations/herdr-daemon-integration.js";
+export type {
+  HerdrDaemonActionRequest,
+  HerdrDaemonActionResult,
+  HerdrDaemonIntegrationConfiguration,
+  HerdrDaemonRuntime,
+  HerdrDaemonRuntimeFactoryInput,
+  HerdrPresencePassResult,
+  HerdrDirectSteerRequest,
+} from "./integrations/herdr-daemon-integration.js";
 export type {
   LocalOperatorConsoleSession,
   LocalOperatorConsoleSessionOptions,

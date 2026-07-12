@@ -62,6 +62,7 @@ export class HerdrCliBoundary implements HerdrControlPort, HerdrPresencePort {
   readonly #observerNames = new Map<AgentId, string>();
   readonly #paneTabs = new Map<string, string>();
   #consolePane: string | null = null;
+  #presenceSnapshotCache: { expiresAt: number; value: Promise<Record<string, unknown>> } | null = null;
 
   constructor(options: HerdrCliBoundaryOptions) {
     assertOptions(options);
@@ -106,6 +107,56 @@ export class HerdrCliBoundary implements HerdrControlPort, HerdrPresencePort {
 
   async lookupAction(actionId: ProviderActionId): Promise<HerdrEffectLookup> {
     return this.#options.effectJournal.lookupAction(actionId).catch(() => ({ status: "unknown" }));
+  }
+
+  /** Rehydrates only the expected observation binding; it performs no pane mutation. */
+  restorePresenceRegistration(intent: AgentEnsurePaneIntent): void {
+    if (
+      intent.kind !== "agent.ensure-pane" ||
+      intent.identity.projectId !== this.#options.projectId ||
+      intent.identity.projectSessionId !== this.#options.projectSessionId
+    ) throw new TypeError("Herdr presence registration is bound to another project session");
+    if (
+      !Number.isSafeInteger(intent.identity.providerSessionGeneration) ||
+      intent.identity.providerSessionGeneration < 1 ||
+      Buffer.byteLength(intent.identity.providerSessionRef, "utf8") < 1 ||
+      Buffer.byteLength(intent.identity.providerSessionRef, "utf8") > 512 ||
+      /[\u0000-\u001f\u007f\u009b]/u.test(intent.identity.providerSessionRef)
+    ) throw new TypeError("Herdr presence registration identity is invalid");
+    if (intent.surface === "observer") {
+      if (
+        this.#options.observerExecutable === undefined || this.#options.observerSocketPath === undefined ||
+        this.#options.observerCapabilityFile === undefined || this.#options.observerCursorDirectory === undefined
+      ) throw new TypeError("Herdr observer presence registration is not configured");
+      this.#presenceKinds.set(intent.identity.agentId, "observer");
+      this.#observerNames.set(
+        intent.identity.agentId,
+        `fabric-observer-${createHash("sha256").update(`${intent.identity.coordinationRunId}\0${intent.identity.agentId}`).digest("hex").slice(0, 16)}`,
+      );
+    } else if (intent.surface === "provider-tui") {
+      this.#presenceKinds.set(intent.identity.agentId, "provider-session");
+    } else {
+      throw new TypeError("Herdr presence registration surface is invalid");
+    }
+    this.#expectedAgents.set(intent.identity.agentId, intent.identity);
+  }
+
+  /** Rehydrates a Console pane binding from structured Herdr presence only. */
+  async restoreConsolePresenceRegistration(intent: ConsoleEnsurePaneIntent): Promise<void> {
+    if (
+      intent.kind !== "console.ensure-pane" || intent.profileId !== "agent-fabric-console" ||
+      intent.projectId !== this.#options.projectId || intent.projectSessionId !== this.#options.projectSessionId
+    ) throw new TypeError("Herdr Console presence registration is bound to another project session");
+    const snapshot = await this.#snapshotForPresence();
+    const paneRef = findNamedPane(
+      snapshot,
+      consoleName(intent.projectId, intent.projectSessionId),
+      this.#options.canonicalProjectRoot,
+    );
+    this.#consolePane = paneRef;
+    if (paneRef === null) return;
+    const paneTab = findPaneTab(snapshot, paneRef);
+    if (paneTab !== null) this.#paneTabs.set(paneRef, paneTab);
   }
 
   async ensureConsolePane(actionId: ProviderActionId, intent: ConsoleEnsurePaneIntent): Promise<HerdrEffectReceipt> {
@@ -390,11 +441,14 @@ export class HerdrCliBoundary implements HerdrControlPort, HerdrPresencePort {
       return { state: "unavailable", observedAt, reason: "agent has no Fabric-bound Herdr presence registration" };
     }
     try {
-      const snapshot = await this.#snapshot();
+      const snapshot = await this.#snapshotForPresence();
       const paneRef = this.#presenceKinds.get(agentId) === "observer"
         ? findNamedPane(snapshot, this.#observerNames.get(agentId) ?? "", this.#options.canonicalProjectRoot)
         : findProviderSessionPane(snapshot, identity.providerSessionRef);
       if (paneRef === null) return { state: "absent", observedAt, reason: "exact provider-session pane is absent" };
+      this.#agentPanes.set(agentId, paneRef);
+      const paneTab = findPaneTab(snapshot, paneRef);
+      if (paneTab !== null) this.#paneTabs.set(paneRef, paneTab);
       return { state: "present", paneRef: paneRef as never, observedAt, identity: null };
     } catch {
       return { state: "unavailable", observedAt, reason: "Herdr structured presence is unavailable" };
@@ -413,6 +467,16 @@ export class HerdrCliBoundary implements HerdrControlPort, HerdrPresencePort {
       snapshot.agents.length > 256 || snapshot.panes.length > 256
     ) throw new TypeError("Herdr snapshot is malformed or incompatible");
     return snapshot;
+  }
+
+  async #snapshotForPresence(): Promise<Record<string, unknown>> {
+    const now = performance.now();
+    if (this.#presenceSnapshotCache !== null && this.#presenceSnapshotCache.expiresAt > now) {
+      return await this.#presenceSnapshotCache.value;
+    }
+    const value = this.#snapshot();
+    this.#presenceSnapshotCache = { expiresAt: now + 200, value };
+    return await value;
   }
 
   async #run(arguments_: readonly string[], timeoutMs: number, maximumOutputBytes: number): Promise<Record<string, unknown>> {

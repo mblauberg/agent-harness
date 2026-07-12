@@ -118,8 +118,7 @@ adapters:
       allowed: []
       route_role: visibility-and-wakeup-only
     official_source_url: "https://github.com/ogulcancelik/herdr"
-    unresolved_pins:
-      - daemon-owned Fabric action composition and presence recovery
+    unresolved_pins: []
 
   pi-rpc:
     enabled: false
