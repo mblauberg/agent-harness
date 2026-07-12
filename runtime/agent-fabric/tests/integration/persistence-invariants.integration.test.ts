@@ -55,6 +55,36 @@ describe("additive persistence invariants", () => {
     expect(() => database.prepare("INSERT INTO messages VALUES ('message-x','run-a','chair-a','dedupe','hash','{}','event','body',2,'conversation',NULL,NULL,0,NULL,1)").run()).toThrow(/INVARIANT_messages_requires_ack/u);
   });
 
+  it("rejects a fifth run-wide team leader even when the existing leaders are nested", () => {
+    const database = new Database(":memory:");
+    openDatabases.push(database);
+    applyInvariantMigrations(database);
+    seedInvariantRuns(database);
+    const insert = database.prepare(`
+      INSERT INTO teams(
+        run_id,team_id,parent_team_id,depth,leader_agent_id,original_leader_agent_id,
+        successor_agent_id,root_task_id,authority_id,budget_id,state,generation,
+        handoff_evidence,created_at
+      ) VALUES ('run-a',?,?,?,?,?,NULL,?,?,?,'active',1,NULL,1)
+    `);
+    insert.run("parent", null, 1, "leader-parent", "leader-parent", "task-parent", "authority-parent", "budget-parent");
+    for (const suffix of ["a", "b", "c"]) {
+      insert.run(`child-${suffix}`, "parent", 2, `leader-${suffix}`, `leader-${suffix}`, `task-${suffix}`, `authority-${suffix}`, `budget-${suffix}`);
+    }
+
+    expect(() => insert.run(
+      "child-d",
+      "parent",
+      2,
+      "leader-d",
+      "leader-d",
+      "task-d",
+      "authority-d",
+      "budget-d",
+    )).toThrow(/INVARIANT_teams_run_leader_cap/u);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM teams WHERE run_id='run-a'").get()).toEqual({ count: 4 });
+  });
+
   it("fires every additive insert and update invariant trigger", () => {
     const cases = [
       ["INVARIANT_agents_lifecycle", "INSERT INTO agents VALUES ('run-a','bad',NULL,'authority-a',NULL,'bad')", "UPDATE agents SET lifecycle='bad' WHERE agent_id='worker-a'"],

@@ -3894,6 +3894,14 @@ CREATE TRIGGER teams_values_update BEFORE UPDATE OF state,generation,depth ON te
 WHEN NEW.state NOT IN ('active','frozen','barrier-closed') OR NEW.generation < 1 OR NEW.depth < 1
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_teams_values'); END;
 
+CREATE TRIGGER teams_run_leader_cap_insert BEFORE INSERT ON teams
+WHEN (SELECT COUNT(*) FROM teams WHERE run_id=NEW.run_id) >= 4
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_teams_run_leader_cap'); END;
+
+CREATE TRIGGER teams_run_leader_cap_update BEFORE UPDATE OF run_id ON teams
+WHEN NEW.run_id<>OLD.run_id AND (SELECT COUNT(*) FROM teams WHERE run_id=NEW.run_id) >= 4
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_teams_run_leader_cap'); END;
+
 CREATE TRIGGER workstream_custody_immutable_delete
 BEFORE DELETE ON workstream_custody
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_workstream_custody_immutable'); END;
