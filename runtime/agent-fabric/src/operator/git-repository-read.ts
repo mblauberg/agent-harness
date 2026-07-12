@@ -139,6 +139,9 @@ export async function observeGitRepositoryForMutation(
   const remoteRefs = (await runGit(worktreePath, [
     "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/remotes",
   ])).stdout;
+  const localRefs = (await runGit(worktreePath, [
+    "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/heads",
+  ])).stdout;
   const remoteConfiguration = (await runGit(worktreePath, [
     "config", "--null", "--get-regexp", "^remote\\..*\\.(url|pushurl|fetch)$",
   ], { allowedExitCodes: [1] })).stdout;
@@ -155,14 +158,19 @@ export async function observeGitRepositoryForMutation(
   const indexDigest = sha256Buffers([Buffer.from("git-index-v1\0"), index]);
   const worktreeDigest = sha256Buffers([Buffer.from("git-worktree-v1\0"), status.raw, Buffer.from(contentDigest)]);
   const remoteStateDigest = sha256Buffers([Buffer.from("git-remotes-v1\0"), remoteRefs, remoteConfiguration]);
+  const commonInfo = await lstat(identity.commonDirectory);
+  const worktrees = await readWorktrees(repositoryRoot, worktreePath);
+  const configDigest = sha256Buffers([Buffer.from("git-local-config-v1\0"), localConfiguration]);
+  const localRefsDigest = sha256Buffers([Buffer.from("git-local-refs-v1\0"), localRefs]);
   const repositoryStateDigest = sha256Digest(canonicalJson({
     headDigest,
     indexDigest,
     worktreeDigest,
-    remoteDigest: remoteStateDigest,
+    remoteStateDigest,
+    configDigest,
+    localRefsDigest,
+    worktreeRegistryDigest: worktrees.fenceDigest,
   }));
-  const commonInfo = await lstat(identity.commonDirectory);
-  const worktrees = await readWorktrees(repositoryRoot, worktreePath);
   return {
     repositoryRoot,
     worktreePath,
@@ -177,7 +185,7 @@ export async function observeGitRepositoryForMutation(
     indexDigest,
     worktreeDigest,
     remoteStateDigest,
-    configDigest: sha256Buffers([Buffer.from("git-local-config-v1\0"), localConfiguration]),
+    configDigest,
     worktreeRegistryDigest: worktrees.fenceDigest,
   };
 }

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import type {
@@ -42,6 +42,7 @@ export type FixedGitMutationPortOptions = {
   gitExecutable?: string;
   privateStateRoot: string;
   clock?: () => number;
+  faultInjector?: (point: "after-private-lock" | "before-first-mutation") => Promise<void>;
 };
 
 /** Fixed, bounded Git process owner. Callers provide typed data, never argv. */
@@ -49,11 +50,13 @@ export class FixedGitMutationPort implements GitMutationPort {
   readonly #gitExecutable: string;
   readonly #privateStateRoot: string;
   readonly #clock: () => number;
+  readonly #faultInjector: ((point: "after-private-lock" | "before-first-mutation") => Promise<void>) | undefined;
 
   constructor(options: FixedGitMutationPortOptions) {
     this.#gitExecutable = options.gitExecutable ?? DEFAULT_GIT;
     this.#privateStateRoot = resolve(options.privateStateRoot);
     this.#clock = options.clock ?? Date.now;
+    this.#faultInjector = options.faultInjector;
     if (!this.#gitExecutable.startsWith("/")) throw new TypeError("Git executable must be absolute");
   }
 
@@ -63,10 +66,14 @@ export class FixedGitMutationPort implements GitMutationPort {
 
   async dispatch(intent: OperatorGitIntent, context: GitMutationDispatchContext): Promise<GitMutationInspection> {
     return await this.#withPrivateReservation(intent.repository.commonDirectoryIdentityDigest, async () => {
+      await this.#faultInjector?.("after-private-lock");
       await this.#assertBoundary(intent);
       const before = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
       assertSameRepositoryBinding(before, intent.repository, "Git repository changed before lock/CAS");
       await this.#assertTypedInputs(intent, context);
+      await this.#faultInjector?.("before-first-mutation");
+      const finalFence = await this.observe(intent.repository.repositoryRoot, intent.repository.worktreePath);
+      assertSameRepositoryBinding(finalFence, intent.repository, "Git repository changed immediately before mutation");
       try {
         await this.#mutate(intent, context);
       } catch (error: unknown) {
@@ -140,6 +147,43 @@ export class FixedGitMutationPort implements GitMutationPort {
       (operation.variant === "upstream-set" || operation.variant === "upstream-unset") &&
       operation.expectedConfigDigest !== intent.repository.configDigest
     ) throw new ProjectFabricCoreError("STALE_REVISION", "Git local configuration changed before upstream mutation");
+    if (operation.variant === "commit") {
+      if (operation.sourceIndexDigest !== intent.repository.indexDigest) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "Git commit source index does not match the reviewed repository");
+      }
+      const headRef = (await this.#run(worktreePath, ["symbolic-ref", "-q", "HEAD"])).stdout.trim();
+      assertFullRef(headRef);
+      const head = await readGitObjectDigest(worktreePath, headRef);
+      if (head.digest !== operation.parentObjectDigest) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "Git commit parent changed before mutation");
+      }
+    }
+    if (operation.variant === "branch-delete-merged-only") {
+      const base = await nativeIdForDigest(
+        worktreePath,
+        operation.mergedIntoObjectDigest,
+        this.#gitExecutable,
+        await this.#environment(),
+      );
+      await this.#run(worktreePath, ["merge-base", "--is-ancestor", operation.sourceRef, base]);
+      await this.#assertRefNotCheckedOut(worktreePath, operation.sourceRef);
+    }
+    if (operation.variant === "branch-delete-force") {
+      await this.#assertRefNotCheckedOut(worktreePath, operation.sourceRef);
+    }
+    if (operation.variant === "worktree-move" || operation.variant === "worktree-remove-clean" || operation.variant === "worktree-remove-force") {
+      await this.#assertWorktreeState(intent.repository.repositoryRoot, operation.sourceWorktreePath, operation.expectedWorktreeStateDigest);
+    }
+    if (operation.variant === "worktree-create-existing-branch") {
+      const source = await readGitObjectDigest(worktreePath, operation.branchRef);
+      if (source.digest !== operation.sourceObjectDigest) {
+        throw new ProjectFabricCoreError("STALE_REVISION", "Git worktree source branch changed before mutation");
+      }
+    }
+    if (
+      operation.variant === "worktree-create-detached" || operation.variant === "worktree-create-new-branch" ||
+      operation.variant === "worktree-create-existing-branch" || operation.variant === "worktree-move"
+    ) await this.#assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
     for (const [ref, expected] of refDigestChecks(operation)) {
       const observed = await readGitObjectDigest(worktreePath, ref);
       if (observed.digest !== expected) {
@@ -235,10 +279,8 @@ export class FixedGitMutationPort implements GitMutationPort {
         await this.#run(cwd, ["branch", "--move", branchShort(operation.sourceRef), branchShort(operation.destinationRef)]);
         return;
       case "branch-delete-merged-only":
-        await this.#run(cwd, ["branch", "--delete", branchShort(operation.sourceRef)]);
-        return;
       case "branch-delete-force":
-        await this.#run(cwd, ["branch", "--delete", "--force", branchShort(operation.sourceRef)]);
+        await this.#deleteRefExactly(cwd, operation.sourceRef, operation.sourceObjectDigest);
         return;
       case "worktree-create-detached": {
         assertWorktreeDestination(intent.repository.repositoryRoot, operation.destinationWorktreePath);
@@ -389,6 +431,49 @@ export class FixedGitMutationPort implements GitMutationPort {
       await handle.close();
       await unlink(lockPath).catch(() => undefined);
     }
+  }
+
+  async #deleteRefExactly(cwd: string, ref: string, expectedDigest: Sha256Digest): Promise<void> {
+    const current = await readGitObjectDigest(cwd, ref);
+    if (current.digest !== expectedDigest) throw new ProjectFabricCoreError("STALE_REVISION", "Git branch changed before deletion");
+    await this.#run(cwd, ["update-ref", "-d", ref, current.nativeObjectId]);
+  }
+
+  async #assertRefNotCheckedOut(cwd: string, ref: string): Promise<void> {
+    const worktrees = (await this.#run(cwd, ["worktree", "list", "--porcelain"])).stdout;
+    if (worktrees.split("\n").some((line) => line === `branch ${ref}`)) {
+      throw new ProjectFabricCoreError("CONFLICT", "Git branch is checked out in a registered worktree");
+    }
+  }
+
+  async #assertWorktreeState(repositoryRoot: string, sourcePath: string, expectedDigest: Sha256Digest): Promise<void> {
+    const canonicalSource = await realpath(sourcePath);
+    if (canonicalSource !== sourcePath || sourcePath === repositoryRoot || dirname(sourcePath) !== join(repositoryRoot, ".worktrees")) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git worktree source is not a canonical repository-owned child");
+    }
+    const source = await observeGitRepositoryForMutation(repositoryRoot, sourcePath);
+    if (source.worktreeDigest !== expectedDigest) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "Git worktree state changed before mutation");
+    }
+  }
+
+  async #assertWorktreeDestination(repositoryRoot: string, destinationPath: string): Promise<void> {
+    const expectedParent = join(repositoryRoot, ".worktrees");
+    if (dirname(destinationPath) !== expectedParent || basename(destinationPath).length === 0) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git worktree destination is not a direct repository-owned child");
+    }
+    const canonicalParent = await realpath(expectedParent);
+    const parent = await lstat(expectedParent);
+    if (canonicalParent !== expectedParent || !parent.isDirectory() || parent.isSymbolicLink()) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Git worktree parent is not one canonical repository-owned directory");
+    }
+    try {
+      await lstat(destinationPath);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    throw new ProjectFabricCoreError("CONFLICT", "Git worktree destination already exists");
   }
 
   async #run(
