@@ -254,7 +254,7 @@ export function beginIdleQuiesce(
 
 export function recheckIdle(
   database: Database.Database,
-  options: { now: number; token: QuiesceToken },
+  options: { now: number; token: QuiesceToken; excludeOperatorEffectCustodyId?: string },
 ): { state: "stop-permitted"; snapshot: GlobalLivenessSnapshot } | { state: "busy"; reason: string; snapshot?: GlobalLivenessSnapshot } {
   try {
     return database.transaction(() => {
@@ -269,6 +269,9 @@ export function recheckIdle(
       const snapshot = readWithinTransaction(database, {
         now: options.now,
         daemonInstanceGeneration: options.token.daemonInstanceGeneration,
+        ...(options.excludeOperatorEffectCustodyId === undefined
+          ? {}
+          : { excludeOperatorEffectCustodyId: options.excludeOperatorEffectCustodyId }),
       });
       const changed = snapshot.globalStateRevision !== options.token.observedGlobalStateRevision;
       if (snapshot.failClosed || !snapshot.idle || changed) {
@@ -318,10 +321,17 @@ async function completeDrainedIdleStop(options: {
   database: Database.Database;
   token: QuiesceToken;
   clock: () => number;
+  excludeOperatorEffectCustodyId?: string;
   beforeStopCommit?: () => Promise<void>;
   reopenSocket(): Promise<void>;
 }): Promise<IdleStopResult> {
-  const postDrain = recheckIdle(options.database, { now: options.clock(), token: options.token });
+  const postDrain = recheckIdle(options.database, {
+    now: options.clock(),
+    token: options.token,
+    ...(options.excludeOperatorEffectCustodyId === undefined
+      ? {}
+      : { excludeOperatorEffectCustodyId: options.excludeOperatorEffectCustodyId }),
+  });
   if (postDrain.state === "busy") {
     await options.reopenSocket();
     return postDrain;
@@ -329,7 +339,13 @@ async function completeDrainedIdleStop(options: {
   if (options.beforeStopCommit !== undefined) await options.beforeStopCommit();
   try {
     if (!completeIdleStop(options.database, { now: options.clock(), token: options.token })) {
-      const changed = recheckIdle(options.database, { now: options.clock(), token: options.token });
+      const changed = recheckIdle(options.database, {
+        now: options.clock(),
+        token: options.token,
+        ...(options.excludeOperatorEffectCustodyId === undefined
+          ? {}
+          : { excludeOperatorEffectCustodyId: options.excludeOperatorEffectCustodyId }),
+      });
       await options.reopenSocket();
       return changed.state === "busy"
         ? changed
@@ -385,6 +401,7 @@ export async function attemptDrainedStop(options: {
   token: QuiesceToken;
   election: IdleElectionPort;
   database: Database.Database;
+  excludeOperatorEffectCustodyId?: string;
   clock?: () => number;
   beforeFinalRecheck?: () => Promise<void>;
   beforeStopCommit?: () => Promise<void>;
@@ -394,13 +411,22 @@ export async function attemptDrainedStop(options: {
   const clock = options.clock ?? Date.now;
   const elected = await options.election.withExclusiveLock(options.actionId, async () => {
     await options.beforeFinalRecheck?.();
-    const final = recheckIdle(options.database, { now: clock(), token: options.token });
+    const final = recheckIdle(options.database, {
+      now: clock(),
+      token: options.token,
+      ...(options.excludeOperatorEffectCustodyId === undefined
+        ? {}
+        : { excludeOperatorEffectCustodyId: options.excludeOperatorEffectCustodyId }),
+    });
     if (final.state === "busy") return final;
     await options.closeSocket();
     return await completeDrainedIdleStop({
       database: options.database,
       token: options.token,
       clock,
+      ...(options.excludeOperatorEffectCustodyId === undefined
+        ? {}
+        : { excludeOperatorEffectCustodyId: options.excludeOperatorEffectCustodyId }),
       ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
       reopenSocket: options.reopenSocket,
     });

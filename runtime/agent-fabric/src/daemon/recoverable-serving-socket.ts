@@ -1,12 +1,34 @@
 import { chmodSync } from "node:fs";
 import type { Server, Socket } from "node:net";
 
+export class RecoverableServingAdmissionFence {
+  #accepting = true;
+
+  close(): void {
+    this.#accepting = false;
+  }
+
+  reopen(): void {
+    this.#accepting = true;
+  }
+
+  tryAdmit(): boolean {
+    return this.#accepting;
+  }
+}
+
 export async function openRecoverableUnixListener(
   server: Server,
   socketPath: string,
-  options: { setMode?(path: string, mode: number): void } = {},
+  options: {
+    setMode?(path: string, mode: number): void;
+    admissionFence?: RecoverableServingAdmissionFence;
+  } = {},
 ): Promise<void> {
-  if (server.listening) return;
+  if (server.listening) {
+    options.admissionFence?.reopen();
+    return;
+  }
   const setMode = options.setMode ?? chmodSync;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -14,6 +36,7 @@ export async function openRecoverableUnixListener(
       server.off("error", reject);
       try {
         setMode(socketPath, 0o600);
+        options.admissionFence?.reopen();
         resolve();
       } catch (error: unknown) {
         server.close((closeError) => {
@@ -30,7 +53,9 @@ export async function closeRecoverableUnixListener(options: {
   server: Server;
   sockets: Iterable<Socket>;
   waitForInFlight(): Promise<void>;
+  admissionFence?: RecoverableServingAdmissionFence;
 }): Promise<void> {
+  options.admissionFence?.close();
   const closed = options.server.listening
     ? new Promise<void>((resolve, reject) => options.server.close((error) => {
         if (error === undefined) resolve();
@@ -38,5 +63,6 @@ export async function closeRecoverableUnixListener(options: {
       }))
     : Promise.resolve();
   for (const socket of options.sockets) socket.end();
-  await Promise.all([closed, options.waitForInFlight()]);
+  await closed;
+  await options.waitForInFlight();
 }

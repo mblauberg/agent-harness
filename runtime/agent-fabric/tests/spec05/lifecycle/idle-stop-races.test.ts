@@ -10,6 +10,7 @@ import { attemptDrainedStop, attemptIdleStop } from "../../../src/daemon/global-
 import {
   closeRecoverableUnixListener,
   openRecoverableUnixListener,
+  RecoverableServingAdmissionFence,
 } from "../../../src/daemon/recoverable-serving-socket.ts";
 import { createLivenessDatabase, seedProject } from "./liveness-fixture.ts";
 
@@ -162,6 +163,115 @@ describe("global idle stop races", () => {
     expect(server.listening).toBe(true);
   });
 
+  it("does not finish a Unix listener drain while a late frame is still tracked", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-late-frame-drain-"));
+    directories.push(root);
+    const socketPath = join(root, "fabric.sock");
+    const activeSockets = new Set<Socket>();
+    let totalInFlight = 0;
+    const inFlightDrainers = new Set<() => void>();
+    let startCommand!: () => void;
+    const commandStarted = new Promise<void>((resolve) => { startCommand = resolve; });
+    let finishCommand!: () => void;
+    const commandFinished = new Promise<void>((resolve) => { finishCommand = resolve; });
+    const server = createServer((socket) => {
+      activeSockets.add(socket);
+      socket.once("close", () => activeSockets.delete(socket));
+      socket.once("data", () => {
+        totalInFlight += 1;
+        startCommand();
+        socket.destroy();
+        void commandFinished.then(() => {
+          totalInFlight -= 1;
+          if (totalInFlight !== 0) return;
+          for (const resolvePromise of inFlightDrainers) resolvePromise();
+          inFlightDrainers.clear();
+        });
+      });
+    });
+    servers.push(server);
+    await openRecoverableUnixListener(server, socketPath);
+
+    const client = createConnection(socketPath);
+    await new Promise<void>((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    const closing = closeRecoverableUnixListener({
+      server,
+      sockets: activeSockets,
+      waitForInFlight: async () => {
+        if (totalInFlight === 0) return;
+        await new Promise<void>((resolvePromise) => inFlightDrainers.add(resolvePromise));
+      },
+    });
+    client.write("late frame\n");
+    await commandStarted;
+
+    const finishedBeforeCommand = await Promise.race([
+      closing.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+    expect(finishedBeforeCommand).toBe(false);
+    finishCommand();
+    await closing;
+    client.destroy();
+  });
+
+  it("rejects a late Unix socket frame after the serving admission fence closes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-late-frame-fence-"));
+    directories.push(root);
+    const socketPath = join(root, "fabric.sock");
+    const activeSockets = new Set<Socket>();
+    const admissionFence = new RecoverableServingAdmissionFence();
+    let decide!: (decision: "admitted" | "rejected") => void;
+    const decision = new Promise<"admitted" | "rejected">((resolve) => { decide = resolve; });
+    const server = createServer((socket) => {
+      activeSockets.add(socket);
+      socket.once("close", () => activeSockets.delete(socket));
+      socket.once("data", () => {
+        decide(admissionFence.tryAdmit() ? "admitted" : "rejected");
+        socket.destroy();
+      });
+    });
+    servers.push(server);
+    await openRecoverableUnixListener(server, socketPath, { admissionFence });
+
+    const client = createConnection(socketPath);
+    await new Promise<void>((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    const closing = closeRecoverableUnixListener({
+      server,
+      sockets: activeSockets,
+      waitForInFlight: async () => undefined,
+      admissionFence,
+    });
+    client.write("late frame\n");
+
+    await expect(decision).resolves.toBe("rejected");
+    await closing;
+    client.destroy();
+  });
+
+  it("reopens admission when listener recovery finds the Unix server already listening", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-listener-idempotent-recovery-"));
+    directories.push(root);
+    const socketPath = join(root, "fabric.sock");
+    const admissionFence = new RecoverableServingAdmissionFence();
+    const server = createServer();
+    servers.push(server);
+    await openRecoverableUnixListener(server, socketPath, { admissionFence });
+    admissionFence.close();
+    expect(admissionFence.tryAdmit()).toBe(false);
+
+    await openRecoverableUnixListener(server, socketPath, { admissionFence });
+
+    expect(server.listening).toBe(true);
+    expect(admissionFence.tryAdmit()).toBe(true);
+  });
+
   it("closes a newly opened Unix listener when socket permission hardening fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-listener-mode-failure-"));
     directories.push(root);
@@ -223,5 +333,34 @@ describe("global idle stop races", () => {
     })).resolves.toMatchObject({ state: "stopped", globalStateRevision: 1 });
     expect(closeSocket).toHaveBeenCalledTimes(1);
     expect(reopenSocket).not.toHaveBeenCalled();
+  });
+
+  it("excludes only the dispatching daemon-stop command from its drained liveness check", async () => {
+    const database = createLivenessDatabase();
+    databases.push(database);
+    seedProject(database);
+    database.prepare(`
+      INSERT INTO operator_effect_custody(custody_id, project_session_id, state)
+      VALUES ('daemon_stop_self_01', 'session_01', 'dispatching')
+    `).run();
+    database.prepare(`
+      UPDATE daemon_runtime_epochs SET state='quiescing', observed_global_revision=1
+       WHERE instance_generation=7
+    `).run();
+    const root = await mkdtemp(join(tmpdir(), "fabric-drained-stop-self-custody-"));
+    directories.push(root);
+
+    await expect(attemptDrainedStop({
+      actionId: "drained_stop_self_custody_01",
+      token: { daemonInstanceGeneration: 7, observedGlobalStateRevision: 1 },
+      election: new BootstrapElection({ runtimeDirectory: join(root, "runtime") }),
+      database,
+      clock: () => 1_000,
+      closeSocket: vi.fn(),
+      reopenSocket: vi.fn(),
+      excludeOperatorEffectCustodyId: "daemon_stop_self_01",
+    })).resolves.toMatchObject({ state: "stopped", globalStateRevision: 1 });
+    expect(database.prepare("SELECT state FROM operator_effect_custody WHERE custody_id='daemon_stop_self_01'").get())
+      .toEqual({ state: "dispatching" });
   });
 });

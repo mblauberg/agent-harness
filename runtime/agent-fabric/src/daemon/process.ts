@@ -62,6 +62,7 @@ import { inspectFabricDatabase } from "../core/migrations.js";
 import {
   closeRecoverableUnixListener,
   openRecoverableUnixListener,
+  RecoverableServingAdmissionFence,
 } from "./recoverable-serving-socket.js";
 
 class DaemonProtocolError extends Error {
@@ -323,6 +324,7 @@ const fabric = await (async () => {
 })();
 rmSync(socketPath, { force: true });
 const sockets = new Set<Socket>();
+const servingAdmission = new RecoverableServingAdmissionFence();
 let completeQueuedDaemonStop: (commandId: string) => void = () => undefined;
 let totalInFlight = 0;
 const inFlightDrainers = new Set<() => void>();
@@ -468,6 +470,17 @@ const servePrivateControlConnection = (socket: Socket): void => {
         }).catch(() => socket.destroy());
         return;
       }
+      if (!servingAdmission.tryAdmit()) {
+        void writer.write({
+          id,
+          error: {
+            name: "DaemonProtocolError",
+            code: "DAEMON_OVERLOADED",
+            message: "daemon is draining and is not accepting commands",
+          },
+        }).catch(() => socket.destroy());
+        return;
+      }
       if (totalInFlight >= FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight) {
         void writer.write({
           id,
@@ -507,6 +520,11 @@ const servePublicConnection = (socket: Socket): void => {
       return fabric.verifyProtocolCredential(credential);
     },
     dispatch: async (context, operation, input) => {
+      if (!servingAdmission.tryAdmit()) {
+        throw Object.assign(new Error("daemon is draining and is not accepting commands"), {
+          code: "OVERLOADED",
+        });
+      }
       if (totalInFlight >= FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight) {
         throw Object.assign(new Error(
           `daemon permits ${String(FABRIC_PROTOCOL_LIMITS.maximumTotalInFlight)} in-flight commands`,
@@ -584,7 +602,7 @@ const server = createServer((socket) => {
 });
 
 const openServingSocket = async (): Promise<void> =>
-  await openRecoverableUnixListener(server, socketPath);
+  await openRecoverableUnixListener(server, socketPath, { admissionFence: servingAdmission });
 
 await openServingSocket();
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
@@ -631,7 +649,12 @@ const markProductionTerminal = async (
 
 const stopElection = new BootstrapElection({ runtimeDirectory });
 const closeServingSocket = async (): Promise<void> =>
-  await closeRecoverableUnixListener({ server, sockets, waitForInFlight });
+  await closeRecoverableUnixListener({
+    server,
+    sockets,
+    waitForInFlight,
+    admissionFence: servingAdmission,
+  });
 
 const finishProcess = async (input: {
   signal: NodeJS.Signals | null;
@@ -728,6 +751,7 @@ completeQueuedDaemonStop = (custodyId: string): void => {
     void fabric.attemptDrainedStop({
       actionId: `operator-daemon-stop:${custodyId}`,
       token: pending.token,
+      excludeOperatorEffectCustodyId: custodyId,
       election: stopElection,
       closeSocket: async () => {
         socketClosed = true;

@@ -1141,6 +1141,7 @@ export class Fabric {
   async attemptDrainedStop(input: {
     actionId: string;
     token: QuiesceToken;
+    excludeOperatorEffectCustodyId?: string;
     election: IdleElectionPort;
     closeSocket(): Promise<void>;
     reopenSocket(): Promise<void>;
@@ -1164,45 +1165,107 @@ export class Fabric {
     state: "stopped" | "failed" | "rejected";
     result: unknown;
   }): void {
-    const changed = this.#database.prepare(`
-      UPDATE operator_daemon_stop_custody SET state=?, result_json=?, updated_at=?
-       WHERE custody_id=? AND result_correlation_digest=?
-         AND operator_id=? AND project_id=? AND project_session_id=? AND command_id=?
-         AND principal_generation=? AND daemon_instance_generation=? AND operation='daemon-stop'
-         AND state IN ('prepared','scheduled')
-    `).run(
-      input.state,
-      canonicalJson(input.result),
-      this.#clock(),
-      input.custodyId,
-      input.resultCorrelationDigest,
-      input.operatorId,
-      input.projectId,
-      input.projectSessionId,
-      input.commandId,
-      input.principalGeneration,
-      input.daemonInstanceGeneration,
-    );
-    if (changed.changes === 1) return;
-    const existing = this.#database.prepare(`
-      SELECT state, result_json FROM operator_daemon_stop_custody
-       WHERE custody_id=? AND result_correlation_digest=?
-         AND operator_id=? AND project_id=? AND project_session_id=?
-         AND principal_generation=? AND command_id=?
-         AND daemon_instance_generation=? AND operation='daemon-stop'
-    `).get(
-      input.custodyId,
-      input.resultCorrelationDigest,
-      input.operatorId,
-      input.projectId,
-      input.projectSessionId,
-      input.principalGeneration,
-      input.commandId,
-      input.daemonInstanceGeneration,
-    );
-    if (!isRow(existing) || existing.state !== input.state || existing.result_json !== canonicalJson(input.result)) {
-      throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop custody result correlation changed");
-    }
+    const persist = this.#database.transaction(() => {
+      const resultJson = canonicalJson(input.result);
+      const changed = this.#database.prepare(`
+        UPDATE operator_daemon_stop_custody SET state=?, result_json=?, updated_at=?
+         WHERE custody_id=? AND result_correlation_digest=?
+           AND operator_id=? AND project_id=? AND project_session_id=? AND command_id=?
+           AND principal_generation=? AND daemon_instance_generation=? AND operation='daemon-stop'
+           AND state IN ('prepared','scheduled')
+      `).run(
+        input.state,
+        resultJson,
+        this.#clock(),
+        input.custodyId,
+        input.resultCorrelationDigest,
+        input.operatorId,
+        input.projectId,
+        input.projectSessionId,
+        input.commandId,
+        input.principalGeneration,
+        input.daemonInstanceGeneration,
+      );
+      if (changed.changes !== 1) {
+        const existing = this.#database.prepare(`
+          SELECT state, result_json FROM operator_daemon_stop_custody
+           WHERE custody_id=? AND result_correlation_digest=?
+             AND operator_id=? AND project_id=? AND project_session_id=?
+             AND principal_generation=? AND command_id=?
+             AND daemon_instance_generation=? AND operation='daemon-stop'
+        `).get(
+          input.custodyId,
+          input.resultCorrelationDigest,
+          input.operatorId,
+          input.projectId,
+          input.projectSessionId,
+          input.principalGeneration,
+          input.commandId,
+          input.daemonInstanceGeneration,
+        );
+        if (!isRow(existing) || existing.state !== input.state || existing.result_json !== resultJson) {
+          throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop custody result correlation changed");
+        }
+      }
+
+      const terminalOutcome = input.state === "stopped"
+        ? canonicalJson({ status: "committed", afterState: { lifecycleState: "stopped" } })
+        : input.state === "rejected"
+          ? canonicalJson({ status: "rejected", code: "state-changed", evidenceRefs: [] })
+          : null;
+      const effectState = input.state === "stopped"
+        ? "terminal"
+        : input.state;
+      const effectChanged = terminalOutcome === null
+        ? this.#database.prepare(`
+            UPDATE operator_effect_custody SET state='failed', updated_at=?
+             WHERE custody_id=? AND operator_id=? AND project_id=? AND project_session_id=?
+               AND principal_generation=? AND command_id=? AND operation='stop' AND state='dispatching'
+          `).run(
+            this.#clock(),
+            input.custodyId,
+            input.operatorId,
+            input.projectId,
+            input.projectSessionId,
+            input.principalGeneration,
+            input.commandId,
+          )
+        : this.#database.prepare(`
+            UPDATE operator_effect_custody SET state=?, outcome_json=?, updated_at=?
+             WHERE custody_id=? AND operator_id=? AND project_id=? AND project_session_id=?
+               AND principal_generation=? AND command_id=? AND operation='stop' AND state='dispatching'
+          `).run(
+            effectState,
+            terminalOutcome,
+            this.#clock(),
+            input.custodyId,
+            input.operatorId,
+            input.projectId,
+            input.projectSessionId,
+            input.principalGeneration,
+            input.commandId,
+          );
+      if (effectChanged.changes === 1) return;
+      const existingEffect = this.#database.prepare(`
+        SELECT state, outcome_json FROM operator_effect_custody
+         WHERE custody_id=? AND operator_id=? AND project_id=? AND project_session_id=?
+           AND principal_generation=? AND command_id=? AND operation='stop'
+      `).get(
+        input.custodyId,
+        input.operatorId,
+        input.projectId,
+        input.projectSessionId,
+        input.principalGeneration,
+        input.commandId,
+      );
+      if (
+        !isRow(existingEffect) || existingEffect.state !== effectState ||
+        (terminalOutcome !== null && existingEffect.outcome_json !== terminalOutcome)
+      ) {
+        throw new ProjectFabricCoreError("STALE_GENERATION", "daemon stop effect custody finalization changed");
+      }
+    });
+    persist();
   }
 
   provisionLocalOperator(input: LocalOperatorProvisioningInput): LocalOperatorProvisioningResult {

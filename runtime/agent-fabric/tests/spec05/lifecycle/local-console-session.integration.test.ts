@@ -541,6 +541,151 @@ describe("public local operator Console session", () => {
     });
   });
 
+  it("lets an explicit operator daemon-stop drain its own dispatch custody and exit", async () => {
+    const { paths, projectA, projectB, daemon } = await fixture();
+    const session = await openLocalOperatorConsoleSession({
+      projectRoot: projectA,
+      surface: "standalone",
+      paths,
+      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+      clientId: "console_daemon_stop_01",
+    });
+    const projectSnapshot = await session.projectClient.projection?.snapshot({
+      credential: session.projectCredential,
+      projectId: session.projectId,
+    });
+    const createProjectSession = session.projectClient.operations[FABRIC_OPERATIONS.projectSessionCreate];
+    if (projectSnapshot === undefined || createProjectSession === undefined) {
+      throw new Error("project client did not negotiate project-session creation");
+    }
+    await createProjectSession({
+      command: {
+        credential: session.projectCredential,
+        commandId: "console_daemon_stop_session_create" as never,
+        expectedRevision: projectSnapshot.project.revision,
+        actor: session.operatorId,
+        provenance: {
+          kind: "console-direct-input",
+          clientId: session.clientId,
+          inputEventId: "console_daemon_stop_session_create_input",
+        },
+        evidenceRefs: [],
+      },
+      projectSessionId: "session_console_daemon_stop_01" as never,
+      projectId: session.projectId,
+      mode: "coordinated",
+      generation: 1,
+      authorityRef: `sha256:${"a".repeat(64)}` as never,
+      budgetRef: "budget_console_daemon_stop_01",
+      launchPacketRef: {
+        path: "launch/daemon-stop.json" as never,
+        digest: `sha256:${"b".repeat(64)}` as never,
+      },
+    });
+    await session.refreshProjectSessions();
+    await session.selectProjectSession("session_console_daemon_stop_01" as never);
+    await session.detach({ reason: "operator" });
+
+    const readEpoch = async () => {
+      const { default: Database } = await import("better-sqlite3");
+      const database = new Database(paths.databasePath, { readonly: true, fileMustExist: true });
+      try {
+        const epoch = database.prepare(`
+          SELECT instance_generation AS instanceGeneration, state, observed_global_revision AS observedGlobalRevision
+            FROM daemon_runtime_epochs ORDER BY instance_generation DESC LIMIT 1
+        `).get() as { instanceGeneration: number; state: string; observedGlobalRevision: number | null };
+        const global = database.prepare("SELECT revision FROM daemon_global_state WHERE singleton=1")
+          .get() as { revision: number };
+        return { ...epoch, globalRevision: global.revision };
+      } finally {
+        database.close();
+      }
+    };
+    const actions = session.client.console?.actions;
+    if (actions === undefined) throw new Error("session client did not negotiate operator actions");
+    const command = (commandId: string, expectedRevision: number) => ({
+      credential: session.credential,
+      commandId: commandId as never,
+      expectedRevision,
+      actor: session.operatorId,
+      provenance: {
+        kind: "console-direct-input" as const,
+        clientId: session.clientId,
+        inputEventId: `${commandId}:input`,
+      },
+      evidenceRefs: [],
+    });
+
+    const beforeDrain = await readEpoch();
+    expect(beforeDrain.state).toBe("running");
+    const drainPreview = await actions.preview({
+      command: command("console_daemon_drain_preview_01", beforeDrain.globalRevision),
+      projectId: session.projectId,
+      intent: {
+        kind: "daemon-drain",
+        expectedDaemonGeneration: beforeDrain.instanceGeneration,
+        expectedGlobalStateRevision: beforeDrain.globalRevision,
+      },
+    });
+    const drained = await actions.commit({
+      command: command("console_daemon_drain_commit_01", beforeDrain.globalRevision),
+      projectId: session.projectId,
+      previewId: drainPreview.previewId,
+      expectedPreviewRevision: drainPreview.previewRevision,
+      previewDigest: drainPreview.previewDigest,
+      expectedIntentDigest: drainPreview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_console_daemon_drain_01" },
+    });
+    if (drained.effectRef === undefined) throw new Error("daemon drain did not return its receipt");
+
+    const beforeStop = await readEpoch();
+    expect(beforeStop).toMatchObject({
+      instanceGeneration: beforeDrain.instanceGeneration,
+      state: "quiescing",
+      observedGlobalRevision: beforeStop.globalRevision,
+    });
+    const stopPreview = await actions.preview({
+      command: command("console_daemon_stop_preview_01", beforeStop.globalRevision),
+      projectId: session.projectId,
+      intent: {
+        kind: "daemon-stop",
+        expectedDaemonGeneration: beforeStop.instanceGeneration,
+        expectedGlobalStateRevision: beforeStop.globalRevision,
+        drainReceiptRef: drained.effectRef,
+      },
+    });
+    await actions.commit({
+      command: command("console_daemon_stop_commit_01", beforeStop.globalRevision),
+      projectId: session.projectId,
+      previewId: stopPreview.previewId,
+      expectedPreviewRevision: stopPreview.previewRevision,
+      previewDigest: stopPreview.previewDigest,
+      expectedIntentDigest: stopPreview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_console_daemon_stop_01" },
+    });
+
+    const exited = await Promise.race([
+      daemon.waitForExit().then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000)),
+    ]);
+    expect(exited).toBe(true);
+    const { default: Database } = await import("better-sqlite3");
+    const database = new Database(paths.databasePath, { readonly: true, fileMustExist: true });
+    try {
+      expect(database.prepare(`
+        SELECT state FROM daemon_runtime_epochs WHERE instance_generation=?
+      `).get(beforeStop.instanceGeneration)).toEqual({ state: "stopped" });
+      expect(database.prepare(`
+        SELECT state FROM operator_daemon_stop_custody WHERE command_id='console_daemon_stop_commit_01'
+      `).get()).toEqual({ state: "stopped" });
+      expect(database.prepare(`
+        SELECT state FROM operator_effect_custody WHERE command_id='console_daemon_stop_commit_01'
+      `).get()).toEqual({ state: "terminal" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("never direct-stops a ready shared daemon when its first Console fails late", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-console-late-failure-"));
     roots.push(root);
