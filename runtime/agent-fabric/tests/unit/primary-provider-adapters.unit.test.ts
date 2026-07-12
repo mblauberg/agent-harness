@@ -462,6 +462,7 @@ describe("Claude Agent SDK fabric adapter", () => {
     expect(claudeReadOnlyOptions({
       cwd: "/workspace/src",
       model: "claude-sonnet-4-5",
+      effort: "max",
       allowedTools: ["Bash"],
       disallowedTools: [],
       sandbox: "read-only",
@@ -469,6 +470,7 @@ describe("Claude Agent SDK fabric adapter", () => {
     }, undefined, "/trusted/claude")).toMatchObject({
       cwd: "/workspace/src",
       model: "claude-sonnet-4-5",
+      effort: "max",
       tools: [],
       permissionMode: "plan",
       settingSources: [],
@@ -476,6 +478,14 @@ describe("Claude Agent SDK fabric adapter", () => {
       plugins: [],
       pathToClaudeCodeExecutable: "/trusted/claude",
     });
+  });
+
+  it("rejects an unrecognised Claude effort before provider work", () => {
+    expect(() => claudeReadOnlyOptions({
+      cwd: "/workspace/src",
+      model: "opus",
+      effort: "ultra",
+    })).toThrowError(/effort must be one of low, medium, high, xhigh, max/u);
   });
 
   it("journals a provider effect before returning it and replays the terminal result without a second effect", async () => {

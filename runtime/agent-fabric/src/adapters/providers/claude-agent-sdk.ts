@@ -121,8 +121,18 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
   },
 };
 
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+function claudeEffort(value: unknown): (typeof CLAUDE_EFFORTS)[number] | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !CLAUDE_EFFORTS.includes(value as (typeof CLAUDE_EFFORTS)[number])) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "effort must be one of low, medium, high, xhigh, max");
+  }
+  return value as (typeof CLAUDE_EFFORTS)[number];
+}
+
 function validateClaudeChairLaunchPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  const allowed = new Set(["cwd", "modelFamily", "model", "prompt", "maxTurns"]);
+  const allowed = new Set(["cwd", "modelFamily", "model", "prompt", "maxTurns", "effort"]);
   if (Object.keys(payload).some((key) => !allowed.has(key))) {
     throw new ProviderAdapterError("INVALID_PARAMS", "Claude chair launch payload has unexpected fields");
   }
@@ -140,6 +150,8 @@ function validateClaudeChairLaunchPayload(payload: Record<string, unknown>): Rec
   };
   const maxTurns = positiveInteger(payload.maxTurns, "maxTurns");
   if (maxTurns !== undefined) validated.maxTurns = maxTurns;
+  const effort = claudeEffort(payload.effort);
+  if (effort !== undefined) validated.effort = effort;
   return validated;
 }
 
@@ -160,10 +172,12 @@ export function claudeReadOnlyOptions(
   const cwd = optionalString(payload.cwd, "cwd");
   const model = optionalString(payload.model, "model");
   const maxTurns = positiveInteger(payload.maxTurns, "maxTurns");
+  const effort = claudeEffort(payload.effort);
   return {
     ...(cwd === undefined ? {} : { cwd }),
     ...(model === undefined ? {} : { model }),
     ...(maxTurns === undefined ? {} : { maxTurns }),
+    ...(effort === undefined ? {} : { effort }),
     ...(resume === undefined ? {} : { resume }),
     ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
     ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
