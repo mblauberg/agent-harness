@@ -41,7 +41,7 @@ describe("packed agent-fabric schema custody", () => {
     ]);
     expect(await readdir(join(extracted, "schemas"))).toContain("database-baseline.v1.json");
 
-    await symlink(new URL("../../../node_modules", import.meta.url), join(extracted, "node_modules"));
+    await symlink(new URL("../../../../../node_modules", import.meta.url), join(extracted, "node_modules"));
     const workspace = join(root, "workspace");
     await mkdir(workspace);
     const databasePath = join(root, "fresh.sqlite3");

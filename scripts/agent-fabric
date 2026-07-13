@@ -20,5 +20,5 @@ if [ -f "$dist_cli" ] && ! find "$package_root/src" -type f -name '*.ts' -newer 
   exec node "$package_root/dist/cli/main.js" "$@"
 fi
 
-exec node --import "$package_root/node_modules/tsx/dist/loader.mjs" \
+exec node --import "$agents_home/node_modules/tsx/dist/loader.mjs" \
   "$package_root/src/cli/main.ts" "$@"

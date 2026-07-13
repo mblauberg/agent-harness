@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -26,15 +27,22 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: |
-            runtime/agent-fabric/package-lock.json
-            runtime/agent-fabric-protocol/package-lock.json
-      - name: Install locked protocol dependencies
-        run: npm --prefix runtime/agent-fabric-protocol ci --ignore-scripts --no-audit --no-fund
-      - name: Build protocol for source-tree wrapper tests
-        run: npm --prefix runtime/agent-fabric-protocol run build
-      - name: Install locked Fabric development dependencies
-        run: npm --prefix runtime/agent-fabric ci --no-audit --no-fund
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.12.1
+          test "$(npm --version)" = "11.12.1"
+      - name: Install locked workspace dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build TypeScript workspace for schema verification
+        run: npm run build:types
+      - name: Verify committed protocol schemas
+        run: npm run schema:check:generated
+      - name: Build workspace for source-tree wrapper tests
+        run: npm run build
+      - name: Verify generated protocol schema tree is unchanged
+        run: |
+          test -z "$(git status --porcelain --untracked-files=all -- runtime/agent-fabric-protocol/schemas)"
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -58,32 +66,32 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: |
-            runtime/agent-fabric/package-lock.json
-            runtime/agent-fabric-protocol/package-lock.json
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.12.1
+          test "$(npm --version)" = "11.12.1"
       - name: Assert protocol build starts clean
-        working-directory: runtime/agent-fabric
-        run: test ! -e ../agent-fabric-protocol/dist
-      - name: Install locked fabric dependencies
-        working-directory: runtime/agent-fabric
-        run: npm ci
+        run: test ! -e runtime/agent-fabric-protocol/dist
+      - name: Install locked workspace dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build workspace in dependency order
+        run: npm run build
       - name: Run fabric typecheck, build and tests
-        working-directory: runtime/agent-fabric
         env:
           AGENT_FABRIC_PORTABLE_TESTS: "1"
-        run: npm run check
+        run: |
+          npm run schema:check --workspace=@local/agent-fabric
+          npm run typecheck --workspace=@local/agent-fabric
+          npm run test --workspace=@local/agent-fabric
       - name: Verify local protocol dependency was built
-        working-directory: runtime/agent-fabric
-        run: test -f ../agent-fabric-protocol/dist/index.d.ts
+        run: test -f runtime/agent-fabric-protocol/dist/index.d.ts
       - name: Run fabric evaluation suite
-        working-directory: runtime/agent-fabric
-        run: npm run test:evaluation
+        run: npm run test:evaluation --workspace=@local/agent-fabric
       - name: Run fabric load suite
-        working-directory: runtime/agent-fabric
-        run: npm run test:load
+        run: npm run test:load --workspace=@local/agent-fabric
       - name: Audit production dependencies
-        working-directory: runtime/agent-fabric
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --workspace=@local/agent-fabric --omit=dev --audit-level=high
 
   review-portal-supervisor:
     name: Review portal supervisor (${{ matrix.os }})
@@ -129,25 +137,25 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: |
-            runtime/agent-fabric-console/package-lock.json
-            runtime/agent-fabric/package-lock.json
-            runtime/agent-fabric-protocol/package-lock.json
-      - name: Install locked Console dependencies
-        working-directory: runtime/agent-fabric-console
-        run: npm ci
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.12.1
+          test "$(npm --version)" = "11.12.1"
+      - name: Install locked workspace dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build workspace in dependency order
+        run: npm run build
       - name: Run Console typecheck, build and tests
-        working-directory: runtime/agent-fabric-console
-        run: npm run check
+        run: |
+          npm run typecheck --workspace=@local/agent-fabric-console
+          npm run test --workspace=@local/agent-fabric-console
       - name: Run Console evaluation suite
-        working-directory: runtime/agent-fabric-console
-        run: npm run test:evaluation
+        run: npm run test:evaluation --workspace=@local/agent-fabric-console
       - name: Run Console load suite
-        working-directory: runtime/agent-fabric-console
-        run: npm run test:load
+        run: npm run test:load --workspace=@local/agent-fabric-console
       - name: Audit Console production dependencies
-        working-directory: runtime/agent-fabric-console
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --workspace=@local/agent-fabric-console --omit=dev --audit-level=high
 
   herdr:
     name: Agent fabric Herdr adapter and audit
@@ -163,15 +171,18 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: |
-            runtime/agent-fabric-herdr/package-lock.json
-            runtime/agent-fabric-protocol/package-lock.json
-      - name: Install locked Herdr dependencies
-        working-directory: runtime/agent-fabric-herdr
-        run: npm ci
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.12.1
+          test "$(npm --version)" = "11.12.1"
+      - name: Install locked workspace dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build workspace in dependency order
+        run: npm run build
       - name: Run Herdr typecheck, build and tests
-        working-directory: runtime/agent-fabric-herdr
-        run: npm run check
+        run: |
+          npm run typecheck --workspace=@local/agent-fabric-herdr
+          npm run test --workspace=@local/agent-fabric-herdr
       - name: Audit Herdr production dependencies
-        working-directory: runtime/agent-fabric-herdr
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --workspace=@local/agent-fabric-herdr --omit=dev --audit-level=high

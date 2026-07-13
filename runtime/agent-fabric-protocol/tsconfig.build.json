@@ -2,8 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "allowImportingTsExtensions": false,
+    "composite": true,
     "noEmit": false,
-    "rootDir": "src"
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["tests", "dist", "node_modules", "vitest.config.ts"]

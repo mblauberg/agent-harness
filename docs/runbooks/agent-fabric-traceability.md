@@ -114,9 +114,9 @@ stage.
 ### Every stage
 
 ```sh
-npm --prefix runtime/agent-fabric run typecheck
-npm --prefix runtime/agent-fabric test -- --run
-npm --prefix runtime/agent-fabric run build
+npm run build
+npm run typecheck --workspace=@local/agent-fabric
+npm run test --workspace=@local/agent-fabric -- --run
 scripts/check-harness
 scripts/public-release-check
 git diff --check
@@ -128,17 +128,17 @@ python3 skills/deliver/scripts/validate_delivery.py \
 
 | Stage | Command |
 |---:|---|
-| 1 | `npm --prefix runtime/agent-fabric run test:unit` |
-| 1 | `npm --prefix runtime/agent-fabric run test:integration` |
-| 1 | `npm --prefix runtime/agent-fabric run test:acceptance` |
-| 1 | `npm --prefix runtime/agent-fabric run test:load` |
-| 2 | `npm --prefix runtime/agent-fabric run test:integration` |
-| 2 | `npm --prefix runtime/agent-fabric run test:acceptance` |
-| 3 | `npm --prefix runtime/agent-fabric run test:integration` |
-| 3 | `npm --prefix runtime/agent-fabric run test:acceptance` |
-| 4 | `npm --prefix runtime/agent-fabric run test:acceptance` |
-| 5 | `npm --prefix runtime/agent-fabric run test:evaluation` |
-| 5 | `npm --prefix runtime/agent-fabric run test:load` |
+| 1 | `npm run test:unit --workspace=@local/agent-fabric` |
+| 1 | `npm run test:integration --workspace=@local/agent-fabric` |
+| 1 | `npm run test:acceptance --workspace=@local/agent-fabric` |
+| 1 | `npm run test:load --workspace=@local/agent-fabric` |
+| 2 | `npm run test:integration --workspace=@local/agent-fabric` |
+| 2 | `npm run test:acceptance --workspace=@local/agent-fabric` |
+| 3 | `npm run test:integration --workspace=@local/agent-fabric` |
+| 3 | `npm run test:acceptance --workspace=@local/agent-fabric` |
+| 4 | `npm run test:acceptance --workspace=@local/agent-fabric` |
+| 5 | `npm run test:evaluation --workspace=@local/agent-fabric` |
+| 5 | `npm run test:load --workspace=@local/agent-fabric` |
 
 Provider activation remains blocked until the selected entry in
 `config/adapter-compatibility.yaml` is enabled and fully pinned. The default

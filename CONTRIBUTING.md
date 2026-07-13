@@ -19,8 +19,9 @@ checks, the skill trigger fixtures, the shell parse, the release and
 static-security scanners, and the `pytest` suite in `tests/`. You need Python
 3.11+ with `pytest` and `pyyaml`, and Node.js 24: the suite always runs, and some
 of those tests shell out to `node`. Changing anything under `runtime/` also means
-`npm run check` in that package, plus its evaluation and load suites when that
-package provides them. Paste the exact commands and results into the pull request:
+running `npm ci` and `npm run check` at the repository root, plus the root
+evaluation and load scripts when the affected workspaces provide them. Paste the
+exact commands and results into the pull request:
 a gate you skipped is fine if you say so, a gate you imply is not.
 
 ## Risk and authority

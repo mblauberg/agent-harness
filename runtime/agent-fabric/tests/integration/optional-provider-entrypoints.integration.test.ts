@@ -76,7 +76,7 @@ describe("optional provider executable wrappers", () => {
     temporaryDirectories.push(directory);
     const wrapperPath = fileURLToPath(new URL("../../src/adapters/providers/optional/pi-rpc.ts", import.meta.url));
     const providerPath = fileURLToPath(new URL("../support/pi-jsonl-rpc-fake.ts", import.meta.url));
-    const tsxLoaderPath = fileURLToPath(new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url));
+    const tsxLoaderPath = fileURLToPath(import.meta.resolve("tsx"));
     process.env.AGENT_FABRIC_TEST_SECRET = "must-not-cross-provider-boundary";
     const transport = new AdapterProcessTransport({
       command: [

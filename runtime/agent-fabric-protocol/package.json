@@ -20,7 +20,7 @@
     "./schemas/*.schema.json": "./schemas/*.schema.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/write-schema.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/write-schema.mjs --write",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run build && npm run test"

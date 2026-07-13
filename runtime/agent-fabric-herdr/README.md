@@ -139,9 +139,11 @@ fallback supplies neither delivery evidence nor barrier satisfaction.
 
 ## Verify
 
+Run from the repository root.
+
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
-npm run check
+npm run check --workspace=@local/agent-fabric-herdr
 ```
 
 Tests use fake Fabric ports and local sealed process fixtures. They do not start
