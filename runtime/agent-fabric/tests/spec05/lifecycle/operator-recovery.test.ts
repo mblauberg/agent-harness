@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   LifecycleRotationDomain,
@@ -92,6 +92,8 @@ function seed(): LifecycleAgentSeed {
     childRevision: 5,
     writeRevision: 6,
     authorityRevision: 7,
+    recoveryCheckpointState: "last-validated",
+    recoveryCheckpointRef: "checkpoint:operator-recovery",
     childIds: ["worker"],
     openWork: [{ obligationId: "task", kind: "task", revision: 3 }],
     turns: [],
@@ -286,6 +288,75 @@ describe("Spec 05 operator generation-loss recovery", () => {
       { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
     )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
   });
+
+  it.each(["absent", "invalid"] as const)(
+    "requires read-only checkpoint validation before fresh recovery from an %s loss checkpoint",
+    (checkpointState) => {
+      const checkpointValidator = { validate: vi.fn(() => false) };
+      const domain = new LifecycleRotationDomain({
+        provider: new RecoveryProvider(),
+        recoveryAuthority: trustedRecoveryAuthority,
+        recoveryCheckpoint: checkpointValidator,
+      } as never, [{
+        ...seed(),
+        recoveryCheckpointState: checkpointState,
+        recoveryCheckpointRef: null,
+      } as never]);
+      const lossId = openLoss(domain);
+      const checkpoint = domain.inspectLoss(PROJECT, "run-recovery", lossId).checkpoint;
+      const issueId = attemptId(pair);
+      const capability = `capability:${pair.actionId}`;
+      domain.registerRecoveryIssue(freshRecoveryIssue({
+        issueId,
+        capability,
+        projectSessionId: PROJECT,
+        runId: "run-recovery",
+        agentId: "chair",
+        sessionGeneration: 3,
+        lossId,
+        pair,
+        adapterContractDigest: digest("replacement-contract"),
+        operation: "launch",
+        checkpointDigest: checkpoint.checkpointDigest,
+      }));
+
+      expect(() => domain.prepareFreshRotation({
+        projectSessionId: PROJECT,
+        runId: "run-recovery",
+        lossId,
+        issueId,
+        capability,
+        pair,
+        adapterContractDigest: digest("replacement-contract"),
+        operation: "launch",
+        checkpoint,
+      })).toThrow(expect.objectContaining({ code: "RECOVERY_CHECKPOINT_VALIDATION_REQUIRED" }));
+      expect(checkpointValidator.validate).toHaveBeenCalledTimes(1);
+
+      checkpointValidator.validate.mockReturnValue(true);
+      expect(domain.prepareFreshRotation({
+        projectSessionId: PROJECT,
+        runId: "run-recovery",
+        lossId,
+        issueId,
+        capability,
+        pair,
+        adapterContractDigest: digest("replacement-contract"),
+        operation: "launch",
+        checkpoint,
+      })).toMatchObject({ checkpoint });
+      expect(domain.inspectLoss(PROJECT, "run-recovery", lossId)).toMatchObject({
+        checkpointState,
+        checkpointRef: null,
+        checkpointDigest: null,
+      });
+      expect(() => LifecycleRotationDomain.hydrate({
+        provider: new RecoveryProvider(),
+        recoveryAuthority: trustedRecoveryAuthority,
+        recoveryCheckpoint: checkpointValidator,
+      }, JSON.parse(JSON.stringify(domain.snapshot())) as ReturnType<typeof domain.snapshot>)).not.toThrow();
+    },
+  );
 
   it("previews without mutation, then Commit creates an asynchronous fresh custody", async () => {
     const provider = new RecoveryProvider();

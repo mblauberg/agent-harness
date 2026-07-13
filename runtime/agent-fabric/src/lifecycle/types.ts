@@ -20,6 +20,8 @@ export type CustodyDisposition = "adopted" | "no-effect" | "superseded" | "quara
 
 export type GenerationLossState = "open" | "recovery-in-progress" | "recovered-adopted" | "abandoned";
 
+export type RecoveryCheckpointState = "absent" | "invalid" | "last-validated";
+
 export type LifecycleDigest = `sha256:${string}`;
 
 export interface ProviderContext {
@@ -115,6 +117,8 @@ export interface LifecycleAgentSeed {
   readonly childRevision: number;
   readonly writeRevision: number;
   readonly authorityRevision: number;
+  readonly recoveryCheckpointState: RecoveryCheckpointState;
+  readonly recoveryCheckpointRef: string | null;
   readonly childIds: readonly string[];
   readonly openWork: readonly LifecycleOpenWork[];
   readonly turns: readonly LifecycleTurn[];
@@ -279,6 +283,7 @@ export interface LifecycleDomainPorts {
   readonly reviewCertification?: ReviewCertificationDecisionPort;
   readonly fault?: LifecycleFaultPort;
   readonly recoveryAuthority?: LifecycleRecoveryAuthorityPort;
+  readonly recoveryCheckpoint?: LifecycleRecoveryCheckpointValidationPort;
 }
 
 export type LifecycleRecoveryIssueStatus = "active" | "consumed" | "revoked" | "expired";
@@ -313,6 +318,17 @@ export interface LifecycleRecoveryAuthorityPort {
   verifyAbandonAuthority(issue: LifecycleRecoveryIssue, authority: LifecycleAbandonAuthority): boolean;
 }
 
+export interface LifecycleRecoveryCheckpointValidationPort {
+  validate(input: {
+    readonly projectSessionId: string;
+    readonly runId: string;
+    readonly agentId: string;
+    readonly lossId: string;
+    readonly checkpointState: Exclude<RecoveryCheckpointState, "last-validated">;
+    readonly checkpoint: LifecycleCheckpoint;
+  }): boolean;
+}
+
 export interface LifecycleAgentView {
   readonly projectSessionId: string;
   readonly runId: string;
@@ -323,6 +339,8 @@ export interface LifecycleAgentView {
   readonly sourceBinding: LifecycleSourceBinding;
   readonly principalGeneration: number;
   readonly bridgeGeneration: number;
+  readonly recoveryCheckpointState: RecoveryCheckpointState;
+  readonly recoveryCheckpointRef: string | null;
   readonly claimsFrozen: boolean;
   readonly turns: readonly LifecycleTurn[];
   readonly writes: readonly LifecycleWriteCustody[];
@@ -412,6 +430,9 @@ export interface GenerationLossView {
   readonly sourceBridgeGeneration: number;
   readonly sourceBridgeOwnerId: string;
   readonly sourceRole: AgentRole;
+  readonly checkpointState: RecoveryCheckpointState;
+  readonly checkpointRef: string | null;
+  readonly checkpointDigest: LifecycleDigest | null;
   readonly checkpoint: LifecycleCheckpoint;
   readonly fencedCheckpoint: LifecycleCheckpoint;
   readonly checkpointWriteRevision: number;

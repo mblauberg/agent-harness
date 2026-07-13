@@ -44,6 +44,8 @@ function seed(overrides: Partial<LifecycleAgentSeed> = {}): LifecycleAgentSeed {
     childRevision: 4,
     writeRevision: 5,
     authorityRevision: 6,
+    recoveryCheckpointState: "last-validated",
+    recoveryCheckpointRef: "checkpoint:invariants",
     childIds: ["worker-b", "worker-a"],
     openWork: [
       { obligationId: "task-b", kind: "task", revision: 2 },

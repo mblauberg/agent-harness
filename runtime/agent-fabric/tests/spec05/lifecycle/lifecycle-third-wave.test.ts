@@ -50,6 +50,8 @@ function seed(overrides: Record<string, unknown> = {}): LifecycleAgentSeed {
     childRevision: 1,
     writeRevision: 1,
     authorityRevision: 1,
+    recoveryCheckpointState: "last-validated",
+    recoveryCheckpointRef: "checkpoint:third-wave",
     childIds: [],
     openWork: [{ obligationId: "task-a", kind: "task", revision: 1 }],
     turns: [{

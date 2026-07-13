@@ -57,6 +57,8 @@ interface MutableAgent {
   childRevision: number;
   writeRevision: number;
   authorityRevision: number;
+  recoveryCheckpointState: LifecycleAgentSeed["recoveryCheckpointState"];
+  recoveryCheckpointRef: string | null;
   childIds: string[];
   openWork: LifecycleOpenWork[];
   turns: LifecycleTurn[];
@@ -130,6 +132,9 @@ interface MutableLoss {
   readonly sourceBridgeGeneration: number;
   readonly sourceBridgeOwnerId: string;
   readonly sourceRole: LifecycleAgentSeed["role"];
+  readonly checkpointState: GenerationLossView["checkpointState"];
+  readonly checkpointRef: string | null;
+  readonly checkpointDigest: LifecycleDigest | null;
   readonly checkpoint: LifecycleCheckpoint;
   readonly fencedCheckpoint: LifecycleCheckpoint;
   readonly checkpointWriteRevision: number;
@@ -256,7 +261,7 @@ function validCustodyHistory(history: readonly string[], phase: MutableCustody["
     prepared: ["dispatched", "superseded", "no-effect", "abandoned"],
     dispatched: ["accepted", "ambiguous", "provider-terminal", "no-effect", "quarantined", "abandoned"],
     accepted: ["ambiguous", "provider-terminal", "no-effect", "quarantined", "abandoned"],
-    ambiguous: ["accepted", "provider-terminal", "no-effect", "quarantined", "abandoned"],
+    ambiguous: ["provider-terminal", "no-effect", "quarantined", "abandoned"],
     "provider-terminal": ["committing", "quarantined", "abandoned"],
     committing: ["adopted", "superseded", "quarantined", "abandoned"],
     adopted: [],
@@ -271,6 +276,40 @@ function validCustodyHistory(history: readonly string[], phase: MutableCustody["
     if (!(transitions[prior] ?? []).includes(next)) return false;
   }
   return history.at(-1) === (phase === "finalized" ? disposition : phase);
+}
+
+function hasTerminalCustodyEvidence(
+  custody: MutableCustody,
+  audits: readonly LifecycleAuditEvent[],
+  losses: ReadonlyMap<string, MutableLoss>,
+): boolean {
+  if (custody.phase !== "finalized" || custody.disposition === null) return true;
+  const finalizedDetails: Readonly<Record<Exclude<NonNullable<MutableCustody["disposition"]>, "abandoned">, readonly string[]>> = {
+    adopted: ["replacement-adopted"],
+    "no-effect": ["pre-dispatch-zero-effect", "authenticated-provider-closed-no-effect"],
+    superseded: ["source-drift-before-dispatch", "source-drift-before-commit", "source-cas-lost"],
+    quarantined: [
+      "provider-observation-invalid",
+      "provider-no-effect-proof-invalid",
+      "replacement-attestation-invalid",
+    ],
+  };
+  if (custody.disposition !== "abandoned") {
+    const allowed = finalizedDetails[custody.disposition];
+    const evidence = audits.filter((event) =>
+      event.kind === "lifecycle-custody-finalized" && event.sourceId === custody.custodyRef
+    );
+    return evidence.length === 1 && allowed.includes(evidence[0]?.detail ?? "");
+  }
+  const directEvidence = audits.filter((event) =>
+    event.kind === "lifecycle-custody-abandoned" && event.sourceId === custody.custodyRef
+  );
+  if (directEvidence.length === 1) return true;
+  if (directEvidence.length > 1) return false;
+  if (custody.recoveryFromLossId === null) return false;
+  const loss = losses.get(custody.recoveryFromLossId);
+  return loss?.state === "abandoned" && canonicalJson(loss.actionPair) === canonicalJson(custody.pair) &&
+    audits.filter((event) => event.kind === "generation-loss-abandoned" && event.sourceId === loss.lossId).length === 1;
 }
 
 function terminalTurn(turn: LifecycleTurn): boolean {
@@ -302,6 +341,14 @@ function cloneAgent(seed: LifecycleAgentSeed): MutableAgent {
   nonnegativeInteger(seed.messageWatermark, "messageWatermark");
   nonnegativeInteger(seed.deliveryWatermark, "deliveryWatermark");
   nonnegativeInteger(seed.membershipWatermark, "membershipWatermark");
+  if (!["absent", "invalid", "last-validated"].includes(seed.recoveryCheckpointState) ||
+    (seed.recoveryCheckpointState === "last-validated") !==
+      (typeof seed.recoveryCheckpointRef === "string" && seed.recoveryCheckpointRef.length > 0)) {
+    throw new LifecycleDomainError(
+      "INVALID_RECOVERY_CHECKPOINT",
+      "last-validated recovery checkpoint requires one nonempty reference; absent/invalid require null",
+    );
+  }
   if (!validProviderContext(seed.provider)) {
     throw new LifecycleDomainError("INVALID_PROVIDER_CONTEXT", "provider evidence and history require SHA-256 digests");
   }
@@ -511,7 +558,8 @@ export class LifecycleRotationDomain {
       if (!hasExactKeys(source, [
         "projectSessionId", "runId", "agentId", "bridgeOwnerId", "role", "lifecycle", "provider", "sourceBinding",
         "principalGeneration", "bridgeGeneration", "taskRevision", "mailboxRevision", "childRevision",
-        "writeRevision", "authorityRevision", "childIds", "openWork", "turns", "writes", "deliveries",
+        "writeRevision", "authorityRevision", "recoveryCheckpointState", "recoveryCheckpointRef",
+        "childIds", "openWork", "turns", "writes", "deliveries",
         "taskOwnerLeases", "barriers", "memberships", "messageWatermark", "deliveryWatermark",
         "membershipWatermark", "archivalPlan", "claimsFrozen",
         "sourceCapabilityRevoked", "principalRevoked", "bridgeRevoked",
@@ -523,6 +571,9 @@ export class LifecycleRotationDomain {
         typeof source.claimsFrozen !== "boolean" || source.claimsFrozen !== (source.lifecycle !== "ready") ||
         typeof source.sourceCapabilityRevoked !== "boolean" || typeof source.principalRevoked !== "boolean" ||
         typeof source.bridgeRevoked !== "boolean" ||
+        !["absent", "invalid", "last-validated"].includes(source.recoveryCheckpointState) ||
+        (source.recoveryCheckpointState === "last-validated") !==
+          (typeof source.recoveryCheckpointRef === "string" && source.recoveryCheckpointRef.length > 0) ||
         !validProviderContext(source.provider) || !validSourceBinding(source.sourceBinding) ||
         !source.turns.every((turn) => hasExactKeys(turn, ["turnId", "state", "providerGeneration", "principalGeneration", "bridgeGeneration"]) &&
           ["active", "terminal", "quarantined", "revoked"].includes(turn.state) && Number.isSafeInteger(turn.providerGeneration) &&
@@ -814,7 +865,8 @@ export class LifecycleRotationDomain {
       if (!hasExactKeys(source, [
         "lossId", "projectSessionId", "runId", "agentId", "cause", "state", "actionPair", "reviewDecision",
         "activeRecoveryAttemptId", "activeRecoveryCustodyRef", "oldProvider", "newProvider", "sourceBinding",
-        "sourcePrincipalGeneration", "sourceBridgeGeneration", "sourceBridgeOwnerId", "sourceRole", "checkpoint",
+        "sourcePrincipalGeneration", "sourceBridgeGeneration", "sourceBridgeOwnerId", "sourceRole",
+        "checkpointState", "checkpointRef", "checkpointDigest", "checkpoint",
         "fencedCheckpoint", "checkpointWriteRevision", "sourceWriteRevision", "sourceAuthorityRevision",
         "fencedWriteCustodyIds", "lossEvidenceDigest",
       ])) {
@@ -872,6 +924,11 @@ export class LifecycleRotationDomain {
         !Number.isSafeInteger(source.sourceAuthorityRevision) || source.sourceAuthorityRevision < 0 ||
         typeof source.sourceBridgeOwnerId !== "string" || source.sourceBridgeOwnerId.length === 0 ||
         (source.sourceRole !== "chair" && source.sourceRole !== "child") ||
+        !["absent", "invalid", "last-validated"].includes(source.checkpointState) ||
+        (source.checkpointState === "last-validated"
+          ? typeof source.checkpointRef !== "string" || source.checkpointRef.length === 0 ||
+            source.checkpointDigest !== source.checkpoint.checkpointDigest
+          : source.checkpointRef !== null || source.checkpointDigest !== null) ||
         !causeValid || source.newProvider.evidenceDigest !== source.lossEvidenceDigest ||
         source.checkpoint.sourceBindingDigest !== checkpointSourceBindingDigest ||
         source.checkpoint.sourceHistoryDigest !== source.oldProvider.historyDigest ||
@@ -895,6 +952,11 @@ export class LifecycleRotationDomain {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "audit event references a missing agent");
       }
       domain.#audits.push({ ...event });
+    }
+    if ([...domain.#custodies.values()].some((custody) =>
+      !hasTerminalCustodyEvidence(custody, domain.#audits, domain.#losses)
+    )) {
+      throw new LifecycleDomainError("SNAPSHOT_INVALID", "finalized custody lacks its exact terminal evidence");
     }
     for (const entry of snapshot.contextEvents) {
       if (!hasExactKeys(entry, ["key", "observation", "observationDigest", "result"]) || !validDigest(entry.observationDigest) ||
@@ -937,7 +999,7 @@ export class LifecycleRotationDomain {
       const loss = domain.#losses.get(source.lossId);
       const issue = domain.#recoveryIssues.get(source.issueId);
       if (loss === undefined || loss.projectSessionId !== source.projectSessionId || loss.runId !== source.runId ||
-        loss.agentId !== source.agentId || canonicalJson(source.checkpoint) !== canonicalJson(loss.checkpoint)) {
+        loss.agentId !== source.agentId || !domain.#recoveryCheckpointAccepted(loss, source.checkpoint)) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "fresh rotation preview references the wrong loss");
       }
       if (issue === undefined || issue.path !== "fresh-rotate" || issue.recoverySourceRef !== loss.lossId ||
@@ -962,6 +1024,9 @@ export class LifecycleRotationDomain {
         if (loss === undefined || loss.projectSessionId !== custody.projectSessionId || loss.runId !== custody.runId || loss.agentId !== custody.agentId) {
           throw new LifecycleDomainError("SNAPSHOT_INVALID", "custody recovery source correlation is invalid");
         }
+        if (!domain.#recoveryCheckpointAccepted(loss, custody.checkpoint)) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "custody recovery checkpoint is not validator-bound");
+        }
       }
     }
     const commandCustodyRefs = snapshot.commands.map((entry) => entry.custodyRef);
@@ -983,10 +1048,15 @@ export class LifecycleRotationDomain {
     for (const loss of domain.#losses.values()) {
       const sourceEvents = [...domain.#contextEvents.values()].filter((record) => record.result.lossId === loss.lossId);
       const linkedCustodies = [...domain.#custodies.values()].filter((custody) => custody.recoveryFromLossId === loss.lossId);
+      const reusedReservation = loss.cause === "generation-advance" && [...domain.#custodies.values()].some((custody) =>
+        custody.projectSessionId === loss.projectSessionId && custody.runId === loss.runId &&
+        custody.agentId === loss.agentId &&
+        custody.reservedProviderGeneration === loss.newProvider.providerGeneration
+      );
       const nonfinal = linkedCustodies.filter((custody) => custody.phase !== "finalized");
       const sourceObservation = sourceEvents[0]?.observation;
       const lossAgent = domain.#agents.get(agentKey(loss.projectSessionId, loss.runId, loss.agentId));
-      if (sourceEvents.length !== 1 || sourceObservation === undefined ||
+      if (sourceEvents.length !== 1 || sourceObservation === undefined || reusedReservation ||
         loss.lossId !== `loss:${loss.projectSessionId}:${loss.runId}:${loss.agentId}:${sourceObservation.sourceEventId}` ||
         sourceObservation.projectSessionId !== loss.projectSessionId || sourceObservation.runId !== loss.runId ||
         sourceObservation.agentId !== loss.agentId || sourceObservation.providerGeneration !== loss.newProvider.providerGeneration ||
@@ -1055,6 +1125,8 @@ export class LifecycleRotationDomain {
         agent.bridgeGeneration !== activeLoss.sourceBridgeGeneration || agent.bridgeOwnerId !== activeLoss.sourceBridgeOwnerId ||
         agent.role !== activeLoss.sourceRole || agent.writeRevision !== activeLoss.sourceWriteRevision ||
         agent.authorityRevision !== activeLoss.sourceAuthorityRevision ||
+        agent.recoveryCheckpointState !== activeLoss.checkpointState ||
+        agent.recoveryCheckpointRef !== activeLoss.checkpointRef ||
         !exactCheckpoint(checkpointFor(agent), activeLoss.fencedCheckpoint) || !agent.sourceCapabilityRevoked ||
         !agent.bridgeRevoked || !agent.claimsFrozen ||
         (activeLoss.state === "open" ? agent.lifecycle !== "recovery-required" : agent.lifecycle !== "suspended") ||
@@ -1146,6 +1218,8 @@ export class LifecycleRotationDomain {
         childRevision: agent.childRevision,
         writeRevision: agent.writeRevision,
         authorityRevision: agent.authorityRevision,
+        recoveryCheckpointState: agent.recoveryCheckpointState,
+        recoveryCheckpointRef: agent.recoveryCheckpointRef,
         childIds: agent.childIds,
         openWork: agent.openWork,
         turns: agent.turns,
@@ -1390,6 +1464,8 @@ export class LifecycleRotationDomain {
       sourceBinding: cloneSourceBinding(agent.sourceBinding),
       principalGeneration: agent.principalGeneration,
       bridgeGeneration: agent.bridgeGeneration,
+      recoveryCheckpointState: agent.recoveryCheckpointState,
+      recoveryCheckpointRef: agent.recoveryCheckpointRef,
       claimsFrozen: agent.claimsFrozen,
       turns: agent.turns.map((turn) => ({ ...turn })),
       writes: agent.writes.map((write) => ({ ...write })),
@@ -1698,6 +1774,14 @@ export class LifecycleRotationDomain {
 
   observeContext(_observation: ContextObservation): ContextObservationResult {
     if (
+      !hasExactKeys(_observation, [
+        "sourceEventId", "projectSessionId", "runId", "agentId",
+        "providerGeneration", "contextRevision", "evidenceDigest",
+      ]) ||
+      typeof _observation.sourceEventId !== "string" || _observation.sourceEventId.length === 0 ||
+      typeof _observation.projectSessionId !== "string" || _observation.projectSessionId.length === 0 ||
+      typeof _observation.runId !== "string" || _observation.runId.length === 0 ||
+      typeof _observation.agentId !== "string" || _observation.agentId.length === 0 ||
       !Number.isSafeInteger(_observation.providerGeneration) ||
       _observation.providerGeneration < 1 ||
       !Number.isSafeInteger(_observation.contextRevision) ||
@@ -1731,6 +1815,16 @@ export class LifecycleRotationDomain {
     };
     const currentGeneration = agent.provider.providerGeneration;
     const currentRevision = agent.provider.contextRevision;
+    const identityHighWater = this.#providerHighWater.get(
+      agentKey(agent.projectSessionId, agent.runId, agent.agentId),
+    ) ?? currentGeneration;
+    if (_observation.providerGeneration > currentGeneration &&
+      _observation.providerGeneration <= identityHighWater) {
+      throw new LifecycleDomainError(
+        "CONTEXT_GENERATION_REUSED",
+        "provider telemetry cannot resurrect a generation spent by lifecycle custody",
+      );
+    }
     if (
       _observation.providerGeneration < currentGeneration ||
       (_observation.providerGeneration === currentGeneration && _observation.contextRevision < currentRevision)
@@ -1818,6 +1912,11 @@ export class LifecycleRotationDomain {
       sourceBridgeGeneration,
       sourceBridgeOwnerId,
       sourceRole,
+      checkpointState: agent.recoveryCheckpointState,
+      checkpointRef: agent.recoveryCheckpointRef,
+      checkpointDigest: agent.recoveryCheckpointState === "last-validated"
+        ? checkpoint.checkpointDigest
+        : null,
       checkpoint,
       fencedCheckpoint,
       checkpointWriteRevision,
@@ -1851,6 +1950,9 @@ export class LifecycleRotationDomain {
       sourceBridgeGeneration: loss.sourceBridgeGeneration,
       sourceBridgeOwnerId: loss.sourceBridgeOwnerId,
       sourceRole: loss.sourceRole,
+      checkpointState: loss.checkpointState,
+      checkpointRef: loss.checkpointRef,
+      checkpointDigest: loss.checkpointDigest,
       checkpoint: { ...loss.checkpoint },
       fencedCheckpoint: { ...loss.fencedCheckpoint },
       checkpointWriteRevision: loss.checkpointWriteRevision,
@@ -1892,6 +1994,12 @@ export class LifecycleRotationDomain {
     }
     if (!exactCheckpoint(loss.checkpoint, _request.checkpoint)) {
       throw new LifecycleDomainError("CHECKPOINT_MISMATCH", "fresh rotation checkpoint is not the exact stored loss-time vector");
+    }
+    if (!this.#recoveryCheckpointAccepted(loss, _request.checkpoint)) {
+      throw new LifecycleDomainError(
+        "RECOVERY_CHECKPOINT_VALIDATION_REQUIRED",
+        "absent or invalid loss checkpoint requires the read-only recovery validator",
+      );
     }
     const issue = this.#recoveryIssues.get(_request.issueId);
     const verifier = this.#ports.recoveryAuthority;
@@ -1962,7 +2070,7 @@ export class LifecycleRotationDomain {
     }
     if (loss.state !== "open") throw new LifecycleDomainError("LOSS_NOT_OPEN", "generation loss is not open for fresh rotation");
     const agent = this.#agent(loss.projectSessionId, loss.runId, loss.agentId);
-    if (!exactCheckpoint(loss.checkpoint, preparation.checkpoint) || !this.#lossSourceStillCurrent(loss, agent)) {
+    if (!this.#recoveryCheckpointAccepted(loss, preparation.checkpoint) || !this.#lossSourceStillCurrent(loss, agent)) {
       throw new LifecycleDomainError("CHECKPOINT_MISMATCH", "fresh rotation loss-time source changed after preview");
     }
     if (agent.turns.some((turn) => !terminalTurn(turn))) {
@@ -2290,12 +2398,29 @@ export class LifecycleRotationDomain {
     return loss;
   }
 
+  #recoveryCheckpointAccepted(loss: MutableLoss, checkpoint: LifecycleCheckpoint): boolean {
+    if (!exactCheckpoint(loss.checkpoint, checkpoint)) return false;
+    if (loss.checkpointState === "last-validated") {
+      return loss.checkpointRef !== null && loss.checkpointDigest === checkpoint.checkpointDigest;
+    }
+    return this.#ports.recoveryCheckpoint?.validate({
+      projectSessionId: loss.projectSessionId,
+      runId: loss.runId,
+      agentId: loss.agentId,
+      lossId: loss.lossId,
+      checkpointState: loss.checkpointState,
+      checkpoint: { ...checkpoint },
+    }) === true;
+  }
+
   #lossSourceStillCurrent(loss: MutableLoss, agent: MutableAgent): boolean {
     return canonicalJson(agent.provider) === canonicalJson(loss.newProvider) &&
       canonicalJson(agent.sourceBinding) === canonicalJson(loss.sourceBinding) &&
       agent.principalGeneration === loss.sourcePrincipalGeneration &&
       agent.bridgeGeneration === loss.sourceBridgeGeneration &&
       agent.bridgeOwnerId === loss.sourceBridgeOwnerId && agent.role === loss.sourceRole &&
+      agent.recoveryCheckpointState === loss.checkpointState &&
+      agent.recoveryCheckpointRef === loss.checkpointRef &&
       agent.writeRevision === loss.sourceWriteRevision && agent.authorityRevision === loss.sourceAuthorityRevision &&
       exactCheckpoint(checkpointFor(agent), loss.fencedCheckpoint) && agent.sourceCapabilityRevoked &&
       agent.bridgeRevoked && loss.fencedWriteCustodyIds.every((id) =>
@@ -2323,6 +2448,12 @@ export class LifecycleRotationDomain {
   ): Promise<LifecycleCustodyView> {
     if (observation.status === "accepted") {
       if (!hasExactKeys(observation, ["status"])) {
+        return this.#finalize(custody, agent, "quarantined", "provider-observation-invalid", "recovery-required");
+      }
+      if (custody.phase === "ambiguous") {
+        return this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+      }
+      if (custody.phase !== "dispatched" && custody.phase !== "accepted") {
         return this.#finalize(custody, agent, "quarantined", "provider-observation-invalid", "recovery-required");
       }
       if (custody.phase !== "accepted") custody.history.push("accepted");

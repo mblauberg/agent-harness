@@ -48,6 +48,8 @@ function seed(): LifecycleAgentSeed {
     childRevision: 1,
     writeRevision: 1,
     authorityRevision: 1,
+    recoveryCheckpointState: "last-validated",
+    recoveryCheckpointRef: "checkpoint:crash",
     childIds: [],
     openWork: [{ obligationId: "task", kind: "task", revision: 1 }],
     turns: [{
@@ -114,6 +116,7 @@ class JournalProvider implements LifecycleProviderPort {
   effectCount = 0;
   lookupCount = 0;
   directStatus: "terminal" | "accepted" | "ambiguous" = "terminal";
+  lookupStatus: "terminal" | "accepted" | "ambiguous" = "terminal";
 
   async dispatchReplacement(request: ReplacementDispatch): Promise<ProviderActionObservation> {
     this.dispatchCount += 1;
@@ -135,6 +138,8 @@ class JournalProvider implements LifecycleProviderPort {
     const action = this.actions.get(pair.actionId);
     if (action === undefined) return { status: "closed-no-effect", proofDigest: digest("no-effect") };
     if (canonicalJson(action.pair) !== canonicalJson(pair)) throw new Error("provider lookup pair conflict");
+    if (this.lookupStatus === "accepted") return { status: "accepted" };
+    if (this.lookupStatus === "ambiguous") return { status: "ambiguous" };
     return action.result;
   }
 }
@@ -309,6 +314,31 @@ describe("Spec 05 lifecycle crash and replay", () => {
       expect(provider).toMatchObject({ dispatchCount: 1, effectCount: 1, lookupCount: 1 });
     },
   );
+
+  it("never regresses an ambiguous action to accepted on a later lookup", async () => {
+    const provider = new JournalProvider();
+    provider.directStatus = "ambiguous";
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = admitted(domain);
+    domain.markTurnTerminal(PROJECT, "run-crash", "chair", "caller");
+    await expect(domain.driveRotation(PROJECT, "run-crash", accepted.custodyRef))
+      .resolves.toMatchObject({ phase: "ambiguous" });
+    provider.lookupStatus = "accepted";
+
+    await expect(domain.driveRotation(PROJECT, "run-crash", accepted.custodyRef))
+      .resolves.toMatchObject({ phase: "ambiguous" });
+    expect(domain.inspectCustody(PROJECT, "run-crash", accepted.custodyRef).history)
+      .toEqual(["awaiting-boundary", "prepared", "dispatched", "ambiguous"]);
+
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    snapshot.custodies[0].phase = "accepted";
+    snapshot.custodies[0].history.push("accepted");
+    const { snapshotDigest: _ignored, ...preimage } = snapshot;
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
 });
 
 describe("Spec 05 lifecycle terminal dispositions", () => {

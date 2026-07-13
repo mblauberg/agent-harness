@@ -16,7 +16,7 @@ const provider: LifecycleProviderPort = {
   async lookupReplacement() { return { status: "ambiguous" }; },
 };
 
-function seed(): LifecycleAgentSeed {
+function seed(overrides: Partial<LifecycleAgentSeed> = {}): LifecycleAgentSeed {
   return {
     projectSessionId: PROJECT,
     runId: "run-observation",
@@ -48,6 +48,8 @@ function seed(): LifecycleAgentSeed {
     childRevision: 1,
     writeRevision: 1,
     authorityRevision: 1,
+    recoveryCheckpointState: "last-validated",
+    recoveryCheckpointRef: "checkpoint:observation",
     childIds: [],
     openWork: [],
     turns: [],
@@ -63,6 +65,7 @@ function seed(): LifecycleAgentSeed {
     sourceCapabilityRevoked: false,
     principalRevoked: false,
     bridgeRevoked: false,
+    ...overrides,
   };
 }
 
@@ -130,6 +133,49 @@ describe("Spec 05 provider context observations", () => {
     expect(domain.audits(PROJECT, "run-observation")).toHaveLength(1);
   });
 
+  it("rejects telemetry that tries to resurrect a provider generation spent by a closed custody", () => {
+    const domain = new LifecycleRotationDomain({ provider }, [seed({
+      turns: [{
+        turnId: "rotation-caller",
+        state: "active",
+        providerGeneration: 2,
+        principalGeneration: 7,
+        bridgeGeneration: 9,
+      }],
+    })]);
+    const accepted = domain.requestRotation({
+      commandId: "spend-generation-three",
+      projectSessionId: PROJECT,
+      runId: "run-observation",
+      agentId: "worker",
+      action: "rotate",
+      auth: { providerGeneration: 2, principalGeneration: 7, bridgeGeneration: 9 },
+      checkpoint: domain.checkpoint(PROJECT, "run-observation", "worker"),
+      adapterId: "provider",
+      actionId: "spent-generation-three",
+      adapterContractDigest: digest("replacement-contract"),
+      operation: "launch",
+    });
+    domain.markTurnTerminal(PROJECT, "run-observation", "worker", "rotation-caller");
+    domain.proveNoEffect(PROJECT, "run-observation", accepted.custodyRef, {
+      pair: { adapterId: "provider", actionId: "spent-generation-three" },
+      dispatchRecorded: false,
+      evidenceDigest: digest("zero-dispatch"),
+    });
+
+    expect(() => domain.observeContext(observation({
+      sourceEventId: "late-spent-generation",
+      providerGeneration: 3,
+      contextRevision: 0,
+      evidenceDigest: digest("late-spent-generation"),
+    }))).toThrow(expect.objectContaining({ code: "CONTEXT_GENERATION_REUSED" }));
+    expect(domain.inspectAgent(PROJECT, "run-observation", "worker")).toMatchObject({
+      lifecycle: "ready",
+      provider: { providerGeneration: 2 },
+    });
+    expect(domain.inspectHighWater(PROJECT, "run-observation", "worker").providerGeneration).toBe(3);
+  });
+
   it.each([
     ["context-advance" as const, { providerGeneration: 2, contextRevision: 6 }],
     ["generation-advance" as const, { providerGeneration: 4, contextRevision: 0 }],
@@ -175,6 +221,7 @@ describe("Spec 05 provider context observations", () => {
   });
 
   it.each([
+    { sourceEventId: "" },
     { providerGeneration: 0, contextRevision: 1 },
     { providerGeneration: 2, contextRevision: -1 },
     { providerGeneration: Number.NaN, contextRevision: 1 },

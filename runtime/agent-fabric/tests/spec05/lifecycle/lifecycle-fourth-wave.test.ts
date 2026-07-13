@@ -47,6 +47,8 @@ function seed(overrides: Partial<LifecycleAgentSeed> = {}): LifecycleAgentSeed {
     childRevision: 1,
     writeRevision: 1,
     authorityRevision: 1,
+    recoveryCheckpointState: "last-validated",
+    recoveryCheckpointRef: "checkpoint:fourth",
     childIds: [],
     openWork: [{ obligationId: "task", kind: "task", revision: 1 }],
     turns: [{ turnId: "caller", state: "active", providerGeneration: 1, principalGeneration: 1, bridgeGeneration: 1 }],
@@ -396,6 +398,34 @@ describe("Spec 05 exact snapshot correlations", () => {
     mutate(snapshot);
 
     expect(() => LifecycleRotationDomain.hydrate({ provider: new ConfigurableProvider() }, seal(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects a resealed rewrite of an older finalized custody disposition", async () => {
+    const provider = new ConfigurableProvider();
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const first = request(domain, "historical-first");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    domain.advanceRevision(PROJECT, RUN, "chair", "task");
+    await expect(domain.driveRotation(PROJECT, RUN, first.custodyRef))
+      .resolves.toMatchObject({ disposition: "superseded" });
+
+    domain.openTurn(PROJECT, RUN, "chair", {
+      turnId: "second-caller",
+      state: "active",
+      providerGeneration: 1,
+      principalGeneration: 1,
+      bridgeGeneration: 1,
+    });
+    request(domain, "historical-second");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "second-caller");
+
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const historical = snapshot.custodies.find((custody: any) => custody.commandId === "historical-first");
+    historical.disposition = "no-effect";
+    historical.history[historical.history.length - 1] = "no-effect";
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
       .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
   });
 });
