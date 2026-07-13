@@ -6,7 +6,7 @@ import {
   parseLaunchResourcePlanV1,
   parseProjectSessionLaunchCurrentState,
   parseProjectSessionLaunchIntent,
-  parseProviderActionRefV1,
+  parseLaunchProviderActionJournalRefV1,
 } from "./launch.js";
 import { parseJsonValue, type JsonValue } from "./primitives.js";
 import type { ProtocolOperation } from "./rpc-contract.js";
@@ -131,12 +131,11 @@ const ambiguousOutcome = parseLaunchAdapterOutcomeV1({
   ...terminalSuccessOutcome,
   outcome: { kind: "ambiguous", reasonCode: "missing-resume-reference", evidenceDigest: null },
 });
-const providerActionRefV1 = parseProviderActionRefV1({
+const launchProviderActionJournalRefV1 = parseLaunchProviderActionJournalRefV1({
   schemaVersion: 1,
   projectSessionId: "ps_01",
   coordinationRunId: "run_launch_01",
-  providerAdapterId: "claude-agent-sdk",
-  providerActionId: "provider_action_launch_01",
+  actionRef: { adapterId: "claude-agent-sdk", actionId: "provider_action_launch_01" },
   providerContractDigest: digestB,
   custodyAttemptGeneration: 1,
   journalRevision: 3,
@@ -153,7 +152,8 @@ export const LAUNCH_CONTRACT_FIXTURES = Object.freeze({
   terminalSuccessOutcome,
   terminalNoEffectOutcome,
   ambiguousOutcome,
-  providerActionRefV1,
+  providerActionRefV1: launchProviderActionJournalRefV1.actionRef,
+  launchProviderActionJournalRefV1,
 });
 
 const session = {

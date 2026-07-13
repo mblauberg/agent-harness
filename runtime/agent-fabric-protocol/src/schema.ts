@@ -14,12 +14,82 @@ import {
 import { OPERATION_CODECS } from "./operation-codecs.js";
 import {
   LAUNCH_ADAPTER_OUTCOME_V1_CODEC,
+  LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
   LAUNCH_PACKET_V1_CODEC,
   LAUNCH_RESOURCE_PLAN_V1_CODEC,
   PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC,
   PROJECT_SESSION_LAUNCH_INTENT_CODEC,
   PROVIDER_ACTION_REF_V1_CODEC,
 } from "./launch.js";
+import {
+  ACTUAL_REVIEW_ROUTE_IDENTITY_V1_CODEC,
+  ADAPTER_CAPABILITY_SNAPSHOT_V1_CODEC,
+  ADAPTER_EFFECTIVE_CONFIGURATION_REF_V1_CODEC,
+  ADAPTER_EFFECTIVE_CONFIGURATION_V1_CODEC,
+  CAPABILITY_SNAPSHOT_REF_V1_CODEC,
+  CAPABILITY_SNAPSHOT_SUMMARY_V1_CODEC,
+  DEPLOYED_ROUTE_ADMISSION_V1_CODEC,
+  DEPLOYED_ROUTE_DISPATCH_V1_CODEC,
+  DEPLOYED_ROUTE_OBSERVATION_V1_CODEC,
+  DISCOVERY_SURFACE_MANIFEST_V1_CODEC,
+  DISCOVERY_SURFACE_REF_V1_CODEC,
+  FABRIC_OPERATIONAL_SPAN_V1_CODEC,
+  PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC,
+  PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC,
+  PROVIDER_CONTEXT_PRESSURE_V1_CODEC,
+  PROVIDER_ROUTE_V1_CODEC,
+} from "./route-lineage.js";
+import {
+  EVALUATED_ROUTE_IDENTITY_V1_CODEC,
+  ROUTE_EVALUATION_EVIDENCE_V1_CODEC,
+  TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC,
+  TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC,
+  TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC,
+  TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC,
+  TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC,
+  TOPOLOGY_WAVE_LIST_V1_CODEC,
+  TOPOLOGY_WAVE_PLAN_CURRENT_V1_CODEC,
+  TOPOLOGY_WAVE_PLAN_INPUT_V1_CODEC,
+  TOPOLOGY_WAVE_PLAN_REF_V1_CODEC,
+  TOPOLOGY_WAVE_PLAN_V1_CODEC,
+} from "./topology-evaluation.js";
+import {
+  REVIEW_BUNDLE_PORTAL_ERROR_V1_CODEC,
+  REVIEW_BUNDLE_READ_ARGS_V1_CODEC,
+  REVIEW_BUNDLE_READ_RESULT_V1_CODEC,
+  REVIEW_BUNDLE_SEARCH_ARGS_V1_CODEC,
+  REVIEW_BUNDLE_SEARCH_RESULT_V1_CODEC,
+  REVIEW_PORTAL_REQUEST_V1_CODEC,
+  REVIEW_PORTAL_RESPONSE_V1_CODEC,
+} from "./review-portal.js";
+import {
+  REVIEW_COMPLETION_V1_CODEC,
+  COVERAGE_SUMMARY_V1_CODEC,
+  REPAIR_CURRENCY_V1_CODEC,
+  REVIEW_CERTIFICATION_BASIS_V1_CODEC,
+  REVIEW_EVIDENCE_CURRENCY_V1_CODEC,
+  REVIEW_EVIDENCE_RECORD_V1_CODEC,
+  REVIEW_EVIDENCE_READ_V1_CODEC,
+  REVIEW_EVIDENCE_MUTATION_RECEIPT_V1_CODEC,
+  REVIEW_RESULT_V1_CODEC,
+  REVIEW_SLOT_V1_CODEC,
+  REVIEW_TARGET_PREPARATION_READ_V1_CODEC,
+  PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC,
+  PROVIDER_ACTION_TERMINAL_PROJECTION_V1_CODEC,
+  PROVIDER_ROUTE_PROJECTION_V1_CODEC,
+  TERMINAL_RESULT_IDENTITY_V1_CODEC,
+} from "./provider-review.js";
+import { RESOLVED_REVIEW_PROFILE_V1_CODEC } from "./review-profile.js";
+import {
+  AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC,
+  LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
+  LIFECYCLE_CURRENT_STATE_V1_CODEC,
+  LIFECYCLE_CUSTODY_ROW_V1_CODEC,
+  LIFECYCLE_GENERATION_LOSS_ROW_V1_CODEC,
+  LIFECYCLE_RECOVERY_SOURCE_V1_CODEC,
+  LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC,
+  LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC,
+} from "./lifecycle.js";
 import { OPERATION_REGISTRY } from "./operations.js";
 import { parseJsonValue, type JsonValue } from "./primitives.js";
 import { PROTOCOL_ERROR_CODES, PROTOCOL_LIMITS, type ProtocolOperation } from "./rpc-contract.js";
@@ -47,6 +117,65 @@ export const LAUNCH_CONTRACT_SCHEMAS = Object.freeze({
   projectSessionLaunchCurrentState: standaloneLaunchSchema(PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC.schema),
   launchAdapterOutcomeV1: standaloneLaunchSchema(LAUNCH_ADAPTER_OUTCOME_V1_CODEC.schema),
   providerActionRefV1: standaloneLaunchSchema(PROVIDER_ACTION_REF_V1_CODEC.schema),
+  launchProviderActionJournalRefV1: standaloneLaunchSchema(LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC.schema),
+});
+
+export const SPEC05_CONTRACT_SCHEMAS = Object.freeze({
+  "adapter-capability-snapshot.v1": ADAPTER_CAPABILITY_SNAPSHOT_V1_CODEC.schema,
+  "capability-snapshot-ref.v1": CAPABILITY_SNAPSHOT_REF_V1_CODEC.schema,
+  "capability-snapshot-summary.v1": CAPABILITY_SNAPSHOT_SUMMARY_V1_CODEC.schema,
+  "discovery-surface-manifest.v1": DISCOVERY_SURFACE_MANIFEST_V1_CODEC.schema,
+  "discovery-surface-ref.v1": DISCOVERY_SURFACE_REF_V1_CODEC.schema,
+  "deployed-route-admission.v1": DEPLOYED_ROUTE_ADMISSION_V1_CODEC.schema,
+  "deployed-route-dispatch.v1": DEPLOYED_ROUTE_DISPATCH_V1_CODEC.schema,
+  "deployed-route-observation.v1": DEPLOYED_ROUTE_OBSERVATION_V1_CODEC.schema,
+  "actual-review-route-identity.v1": ACTUAL_REVIEW_ROUTE_IDENTITY_V1_CODEC.schema,
+  "adapter-effective-configuration.v1": ADAPTER_EFFECTIVE_CONFIGURATION_V1_CODEC.schema,
+  "adapter-effective-configuration-ref.v1": ADAPTER_EFFECTIVE_CONFIGURATION_REF_V1_CODEC.schema,
+  "provider-context-pressure.v1": PROVIDER_CONTEXT_PRESSURE_V1_CODEC.schema,
+  "provider-context-pressure-read-request.v1": PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC.schema,
+  "provider-context-pressure-read.v1": PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC.schema,
+  "provider-route.v1": PROVIDER_ROUTE_V1_CODEC.schema,
+  "topology-wave-plan-ref.v1": TOPOLOGY_WAVE_PLAN_REF_V1_CODEC.schema,
+  "topology-wave-plan.v1": TOPOLOGY_WAVE_PLAN_V1_CODEC.schema,
+  "topology-wave-plan-current.v1": TOPOLOGY_WAVE_PLAN_CURRENT_V1_CODEC.schema,
+  "topology-wave-plan-input.v1": TOPOLOGY_WAVE_PLAN_INPUT_V1_CODEC.schema,
+  "topology-wave-append-request.v1": TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC.schema,
+  "topology-wave-append-receipt.v1": TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC.schema,
+  "topology-wave-current-read-request.v1": TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC.schema,
+  "topology-wave-current-read.v1": TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC.schema,
+  "topology-wave-list-request.v1": TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC.schema,
+  "topology-wave-list.v1": TOPOLOGY_WAVE_LIST_V1_CODEC.schema,
+  "fabric-operational-span.v1": FABRIC_OPERATIONAL_SPAN_V1_CODEC.schema,
+  "evaluated-route-identity.v1": EVALUATED_ROUTE_IDENTITY_V1_CODEC.schema,
+  "route-evaluation-evidence.v1": ROUTE_EVALUATION_EVIDENCE_V1_CODEC.schema,
+  "terminal-result-identity.v1": TERMINAL_RESULT_IDENTITY_V1_CODEC.schema,
+  "review-result.v1": REVIEW_RESULT_V1_CODEC.schema,
+  "review-certification-basis.v1": REVIEW_CERTIFICATION_BASIS_V1_CODEC.schema,
+  "coverage-summary.v1": COVERAGE_SUMMARY_V1_CODEC.schema,
+  "review-evidence-record.v1": REVIEW_EVIDENCE_RECORD_V1_CODEC.schema,
+  "provider-route-projection.v1": PROVIDER_ROUTE_PROJECTION_V1_CODEC.schema,
+  "provider-action-terminal-projection.v1": PROVIDER_ACTION_TERMINAL_PROJECTION_V1_CODEC.schema,
+  "review-evidence-mutation-receipt.v1": REVIEW_EVIDENCE_MUTATION_RECEIPT_V1_CODEC.schema,
+  "review-target-preparation-read.v1": REVIEW_TARGET_PREPARATION_READ_V1_CODEC.schema,
+  "review-evidence-read.v1": REVIEW_EVIDENCE_READ_V1_CODEC.schema,
+  "review-completion.v1": REVIEW_COMPLETION_V1_CODEC.schema,
+  "review-bundle-read-args.v1": REVIEW_BUNDLE_READ_ARGS_V1_CODEC.schema,
+  "review-bundle-read-result.v1": REVIEW_BUNDLE_READ_RESULT_V1_CODEC.schema,
+  "review-bundle-search-args.v1": REVIEW_BUNDLE_SEARCH_ARGS_V1_CODEC.schema,
+  "review-bundle-search-result.v1": REVIEW_BUNDLE_SEARCH_RESULT_V1_CODEC.schema,
+  "review-bundle-portal-error.v1": REVIEW_BUNDLE_PORTAL_ERROR_V1_CODEC.schema,
+  "review-bundle-portal-request.v1": REVIEW_PORTAL_REQUEST_V1_CODEC.schema,
+  "review-bundle-portal-response.v1": REVIEW_PORTAL_RESPONSE_V1_CODEC.schema,
+  "lifecycle-custody-row.v1": LIFECYCLE_CUSTODY_ROW_V1_CODEC.schema,
+  "lifecycle-generation-loss-row.v1": LIFECYCLE_GENERATION_LOSS_ROW_V1_CODEC.schema,
+  "lifecycle-recovery-source.v1": LIFECYCLE_RECOVERY_SOURCE_V1_CODEC.schema,
+  "lifecycle-recovery-checkpoint-validate-request.v1": LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC.schema,
+  "lifecycle-recovery-checkpoint-validation.v1": LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC.schema,
+  "lifecycle-accepted-suspended.v1": LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC.schema,
+  "lifecycle-current-state.v1": LIFECYCLE_CURRENT_STATE_V1_CODEC.schema,
+  "agent-lifecycle-recovery-intent.v1": AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC.schema,
+  "spec05-four-slot-v1": RESOLVED_REVIEW_PROFILE_V1_CODEC.schema,
 });
 
 const principalSchemas = {
@@ -77,12 +206,16 @@ const principalSchemas = {
   integration: {
     type: "object",
     additionalProperties: false,
-    required: ["kind", "integrationId", "projectId", "principalGeneration"],
+    required: ["kind", "integrationId", "projectId", "projectSessionId", "runId", "principalGeneration", "providerId", "providerSessionRef"],
     properties: {
       kind: { const: "integration" },
       integrationId: idSchema,
       projectId: idSchema,
+      projectSessionId: idSchema,
+      runId: idSchema,
       principalGeneration: { type: "integer", minimum: 1 },
+      providerId: idSchema,
+      providerSessionRef: idSchema,
     },
   },
 } as const;
@@ -327,6 +460,8 @@ export const PROTOCOL_SCHEMA = {
     projectSessionLaunchCurrentState: PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC.schema,
     launchAdapterOutcomeV1: LAUNCH_ADAPTER_OUTCOME_V1_CODEC.schema,
     providerActionRefV1: PROVIDER_ACTION_REF_V1_CODEC.schema,
+    launchProviderActionJournalRefV1: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC.schema,
+    ...SPEC05_CONTRACT_SCHEMAS,
     fabricOperation: { type: "string", enum: operations },
     activeFabricOperation: { type: "string", enum: activeOperations },
     operatorPrincipal: principalSchemas.operator,
@@ -336,8 +471,8 @@ export const PROTOCOL_SCHEMA = {
     operatorCapability: {
       oneOf: [
         capabilityVariant("project-launch", ["read", "launch"]),
-        capabilityVariant("session", ["read", "decide", "steer", "pause", "resume", "cancel", "drain", "stop", "launch", "git", "external-effect"]),
-        capabilityVariant("takeover", ["read", "decide", "steer", "pause", "resume", "cancel", "drain", "stop", "launch", "takeover", "git", "external-effect"]),
+        capabilityVariant("session", ["read", "decide", "steer", "pause", "resume", "cancel", "drain", "stop", "launch", "git", "agent-lifecycle-recovery-issue", "external-effect"]),
+        capabilityVariant("takeover", ["read", "decide", "steer", "pause", "resume", "cancel", "drain", "stop", "launch", "takeover", "git", "agent-lifecycle-recovery-issue", "external-effect"]),
       ],
     },
     protocolFailure: protocolFailureSchema,
@@ -375,8 +510,8 @@ export function initializeResponseSchemas(): readonly JsonSchema[] {
 
 type SchemaKeywordDefinition = {
   keyword: string;
-  schemaType: "boolean" | "number";
-  type?: "string";
+  schemaType: "array" | "boolean" | "number";
+  type?: "string" | "object" | "array";
   errors: false;
   validate(schema: unknown, data: unknown): boolean;
 };
@@ -387,6 +522,39 @@ export type ProtocolSchemaKeywordTarget = {
 
 export function addProtocolSchemaKeywords(target: ProtocolSchemaKeywordTarget): void {
   target.addKeyword({
+    keyword: "x-combinedMaxFeatureNames",
+    schemaType: "number",
+    type: "object",
+    errors: false,
+    validate: (maximum, data) => {
+      if (typeof maximum !== "number" || data === null || typeof data !== "object" || Array.isArray(data)) return false;
+      const record = data as Readonly<Record<string, unknown>>;
+      return Array.isArray(record.requiredFeatures) && Array.isArray(record.optionalFeatures) &&
+        record.requiredFeatures.length + record.optionalFeatures.length <= maximum;
+    },
+  });
+  target.addKeyword({
+    keyword: "x-crossArrayUnique",
+    schemaType: "array",
+    type: "object",
+    errors: false,
+    validate: (fields, data) => {
+      if (!Array.isArray(fields) || !fields.every((field) => typeof field === "string") ||
+        data === null || typeof data !== "object" || Array.isArray(data)) return false;
+      const record = data as Readonly<Record<string, unknown>>;
+      const seen = new Set<unknown>();
+      for (const field of fields) {
+        const values = record[field];
+        if (!Array.isArray(values)) return false;
+        for (const value of values) {
+          if (seen.has(value)) return false;
+          seen.add(value);
+        }
+      }
+      return true;
+    },
+  });
+  target.addKeyword({
     keyword: "x-minUtf8Bytes",
     schemaType: "number",
     type: "string",
@@ -395,6 +563,56 @@ export function addProtocolSchemaKeywords(target: ProtocolSchemaKeywordTarget): 
       typeof minimum === "number" && typeof data === "string" && Buffer.byteLength(data, "utf8") >= minimum
     ),
   });
+  const correlatedCodecKeyword = (
+    keyword: string,
+    codec: { parse(value: unknown, path: string): unknown },
+  ): void => {
+    target.addKeyword({
+      keyword,
+      schemaType: "boolean",
+      errors: false,
+      validate: (enabled, data) => {
+        if (enabled !== true) return true;
+        try {
+          codec.parse(data, keyword);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+  };
+  correlatedCodecKeyword("x-reviewPreparationCorrelated", REVIEW_TARGET_PREPARATION_READ_V1_CODEC);
+  correlatedCodecKeyword("x-routeRecoveryCorrelated", PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC);
+  correlatedCodecKeyword("x-providerActionTerminalCorrelated", PROVIDER_ACTION_TERMINAL_PROJECTION_V1_CODEC);
+  correlatedCodecKeyword("x-reviewEvidenceMutationReceiptCorrelated", REVIEW_EVIDENCE_MUTATION_RECEIPT_V1_CODEC);
+  correlatedCodecKeyword("x-reviewEvidenceCorrelated", REVIEW_EVIDENCE_RECORD_V1_CODEC);
+  correlatedCodecKeyword("x-reviewEvidenceCurrencyCorrelated", REVIEW_EVIDENCE_CURRENCY_V1_CODEC);
+  correlatedCodecKeyword("x-reviewEvidenceReadCorrelated", REVIEW_EVIDENCE_READ_V1_CODEC);
+  correlatedCodecKeyword("x-reviewSlotCorrelated", REVIEW_SLOT_V1_CODEC);
+  correlatedCodecKeyword("x-reviewCompletionCorrelated", REVIEW_COMPLETION_V1_CODEC);
+  correlatedCodecKeyword("x-repairCurrencyOrdered", REPAIR_CURRENCY_V1_CODEC);
+  correlatedCodecKeyword("x-deployedRouteObservationCorrelated", DEPLOYED_ROUTE_OBSERVATION_V1_CODEC);
+  correlatedCodecKeyword("x-actualReviewRouteCorrelated", ACTUAL_REVIEW_ROUTE_IDENTITY_V1_CODEC);
+  correlatedCodecKeyword("x-fourSlotProfileMatrix", RESOLVED_REVIEW_PROFILE_V1_CODEC);
+  correlatedCodecKeyword("x-topologyAppendReceiptCorrelated", TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC);
+  correlatedCodecKeyword("x-topologyCurrentReadCorrelated", TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC);
+  correlatedCodecKeyword("x-providerContextPressureReadCorrelated", PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC);
+  correlatedCodecKeyword("x-reviewPortalResponseBound", REVIEW_PORTAL_RESPONSE_V1_CODEC);
+  correlatedCodecKeyword("x-reviewCertificationBasisCorrelated", REVIEW_CERTIFICATION_BASIS_V1_CODEC);
+  correlatedCodecKeyword("x-coverageGroupsOrdered", COVERAGE_SUMMARY_V1_CODEC);
+  correlatedCodecKeyword("x-adapterCapabilitySnapshotCorrelated", ADAPTER_CAPABILITY_SNAPSHOT_V1_CODEC);
+  correlatedCodecKeyword("x-deployedRouteAdmissionCorrelated", DEPLOYED_ROUTE_ADMISSION_V1_CODEC);
+  correlatedCodecKeyword("x-providerRouteCorrelated", PROVIDER_ROUTE_V1_CODEC);
+  correlatedCodecKeyword("x-providerContextPressureCorrelated", PROVIDER_CONTEXT_PRESSURE_V1_CODEC);
+  correlatedCodecKeyword("x-routeEvaluationEvidenceCorrelated", ROUTE_EVALUATION_EVIDENCE_V1_CODEC);
+  correlatedCodecKeyword("x-lifecycleCustodyCorrelated", LIFECYCLE_CUSTODY_ROW_V1_CODEC);
+  correlatedCodecKeyword("x-lifecycleGenerationLossCorrelated", LIFECYCLE_GENERATION_LOSS_ROW_V1_CODEC);
+  correlatedCodecKeyword("x-lifecycleRecoverySourceCorrelated", LIFECYCLE_RECOVERY_SOURCE_V1_CODEC);
+  correlatedCodecKeyword("x-lifecycleAcceptedSuspendedCorrelated", LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC);
+  correlatedCodecKeyword("x-lifecycleCurrentStateCorrelated", LIFECYCLE_CURRENT_STATE_V1_CODEC);
+  correlatedCodecKeyword("x-lifecycleCheckpointValidateCorrelated", LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC);
+  correlatedCodecKeyword("x-agentLifecycleRecoveryIntentCorrelated", AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC);
   target.addKeyword({
     keyword: "x-maxUtf8Bytes",
     schemaType: "number",
@@ -416,6 +634,59 @@ export function addProtocolSchemaKeywords(target: ProtocolSchemaKeywordTarget): 
       } catch {
         return false;
       }
+    },
+  });
+  target.addKeyword({
+    keyword: "x-base64LengthMatches",
+    schemaType: "boolean",
+    type: "object",
+    errors: false,
+    validate: (enabled, data) => {
+      if (enabled !== true) return true;
+      if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
+      const record = data as Readonly<Record<string, unknown>>;
+      return typeof record.payload === "string" && typeof record.rawByteLength === "number" &&
+        Buffer.from(record.payload, "base64").byteLength === record.rawByteLength;
+    },
+  });
+  target.addKeyword({
+    keyword: "x-searchEntriesCanonical",
+    schemaType: "boolean",
+    type: "object",
+    errors: false,
+    validate: (enabled, data) => {
+      if (enabled !== true) return true;
+      if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
+      const entries = (data as Readonly<Record<string, unknown>>).entries;
+      if (!Array.isArray(entries)) return false;
+      let previous = "";
+      for (const entry of entries) {
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+        const record = entry as Readonly<Record<string, unknown>>;
+        if (typeof record.snippet !== "string" || typeof record.rawByteLength !== "number") return false;
+        const decodedLength = Buffer.from(record.snippet, "base64").byteLength;
+        if (decodedLength !== record.rawByteLength || decodedLength > 65_536) return false;
+        const key = `${String(record.objectDigest)}\u0000${String(record.offset).padStart(16, "0")}\u0000${String(record.rawByteLength).padStart(16, "0")}`;
+        if (previous !== "" && previous >= key) return false;
+        previous = key;
+      }
+      return true;
+    },
+  });
+  target.addKeyword({
+    keyword: "x-maxCanonicalJsonBytes",
+    schemaType: "number",
+    errors: false,
+    validate: (maximum, data) => {
+      if (typeof maximum !== "number") return false;
+      const canonical = (value: unknown): string => {
+        if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value);
+        if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+        if (typeof value !== "object") return "";
+        const record = value as Readonly<Record<string, unknown>>;
+        return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+      };
+      return Buffer.byteLength(canonical(data), "utf8") <= maximum;
     },
   });
 }

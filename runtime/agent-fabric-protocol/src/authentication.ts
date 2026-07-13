@@ -131,7 +131,16 @@ export function parseProtocolPrincipal(value: unknown, path = "principal"): Prot
     };
   }
   if (kind === "integration") {
-    const record = strictRecord(value, path, ["kind", "integrationId", "projectId", "principalGeneration"]);
+    const record = strictRecord(value, path, [
+      "kind",
+      "integrationId",
+      "projectId",
+      "projectSessionId",
+      "runId",
+      "principalGeneration",
+      "providerId",
+      "providerSessionRef",
+    ]);
     return {
       kind,
       integrationId: parseIdentifier<"IntegrationId">(
@@ -139,7 +148,17 @@ export function parseProtocolPrincipal(value: unknown, path = "principal"): Prot
         `${path}.integrationId`,
       ) as IntegrationId,
       projectId: parseIdentifier<"ProjectId">(record.projectId, `${path}.projectId`) as ProjectId,
+      projectSessionId: parseIdentifier<"ProjectSessionId">(
+        record.projectSessionId,
+        `${path}.projectSessionId`,
+      ) as ProjectSessionId,
+      runId: parseIdentifier<"CoordinationRunId">(record.runId, `${path}.runId`),
       principalGeneration: safeInteger(record.principalGeneration, `${path}.principalGeneration`, 1),
+      providerId: parseIdentifier<"ProviderId">(record.providerId, `${path}.providerId`),
+      providerSessionRef: parseIdentifier<"ProviderSessionRef">(
+        record.providerSessionRef,
+        `${path}.providerSessionRef`,
+      ),
     };
   }
   throw new TypeError(`${path}.kind must be operator, agent or integration`);

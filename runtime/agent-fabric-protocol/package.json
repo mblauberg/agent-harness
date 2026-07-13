@@ -16,7 +16,8 @@
       "import": "./dist/index.js"
     },
     "./schemas/protocol.schema.json": "./schemas/protocol.schema.json",
-    "./schemas/mcp-agent-tools.json": "./schemas/mcp-agent-tools.json"
+    "./schemas/mcp-agent-tools.json": "./schemas/mcp-agent-tools.json",
+    "./schemas/*.schema.json": "./schemas/*.schema.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/write-schema.mjs",

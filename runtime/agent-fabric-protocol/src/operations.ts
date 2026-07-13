@@ -23,7 +23,10 @@ export type OperationFeature =
   | "artifact-content-read.v1"
   | "lifecycle-control.v1"
   | "workstreams.v1"
-  | "chair-live-handoff.v1";
+  | "chair-live-handoff.v1"
+  | "provider-review-evidence.v1"
+  | "provider-context-pressure.v1"
+  | "topology-wave.v1";
 
 type OperationDefinition = {
   operation: `fabric.v1.${string}`;
@@ -142,10 +145,25 @@ const DEFINITIONS = defineOperations({
   operatorActionCommit: { operation: "fabric.v1.operator-action.commit", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   operatorActionStatus: { operation: "fabric.v1.operator-action.status", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
   operatorActionReconcile: { operation: "fabric.v1.operator-action.reconcile", feature: "operator-actions.v1", principals: ["operator"], kind: "extension" },
+  agentLifecycleRecoveryCheckpointValidate: { operation: "fabric.v1.agent-lifecycle-recovery-checkpoint.validate", feature: "lifecycle-control.v1", principals: ["operator"], kind: "extension", gateOwner: "scoped-gate" },
   messageBodyRead: { operation: "fabric.v1.message-body.read", feature: "message-body-read.v1", principals: ["operator"], kind: "extension" },
   operatorRepositoryRead: { operation: "fabric.v1.operator-repository.read", feature: "operator-repository-read.v1", principals: ["operator"], kind: "extension" },
   evidencePublish: { operation: "fabric.v1.evidence.publish", feature: "artifact-registry.v1", principals: ["agent"], kind: "extension" },
   operatorArtifactContentRead: { operation: "fabric.v1.operator-artifact-content.read", feature: "artifact-content-read.v1", principals: ["operator"], kind: "extension" },
+  reviewTargetPrepare: { operation: "fabric.v1.review-target.prepare", feature: "provider-review-evidence.v1", principals: ["agent"], kind: "extension" },
+  reviewTargetPreparationRead: { operation: "fabric.v1.review-target-preparation.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  reviewTargetRebind: { operation: "fabric.v1.review-target.rebind", feature: "provider-review-evidence.v1", principals: ["agent"], kind: "extension" },
+  reviewEvidenceRead: { operation: "fabric.v1.review-evidence.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  reviewEvidenceList: { operation: "fabric.v1.review-evidence.list", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  reviewEvidenceAnnotate: { operation: "fabric.v1.review-evidence.annotate", feature: "provider-review-evidence.v1", principals: ["agent"], kind: "extension" },
+  reviewEvidenceAnnotationCurrentRead: { operation: "fabric.v1.review-evidence-annotation.current.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  reviewFindingPageRead: { operation: "fabric.v1.review-finding-page.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  reviewCompletionRead: { operation: "fabric.v1.review-completion.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  providerRouteIntegrityRecoveryRead: { operation: "fabric.v1.provider-route-integrity-recovery.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
+  providerContextPressureRead: { operation: "fabric.v1.provider-context-pressure.read", feature: "provider-context-pressure.v1", principals: ["agent", "operator"], kind: "extension" },
+  topologyWaveAppend: { operation: "fabric.v1.topology-wave.append", feature: "topology-wave.v1", principals: ["agent"], kind: "extension" },
+  topologyWaveCurrentRead: { operation: "fabric.v1.topology-wave.current.read", feature: "topology-wave.v1", principals: ["agent", "operator"], kind: "extension" },
+  topologyWaveList: { operation: "fabric.v1.topology-wave.list", feature: "topology-wave.v1", principals: ["agent", "operator"], kind: "extension" },
 });
 
 type OperationConstants = {

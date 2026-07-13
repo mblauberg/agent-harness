@@ -24,6 +24,10 @@ import type {
   IntakeSubmission,
 } from "./intake.js";
 import type { MembershipBindRequest, MembershipBindResult } from "./membership.js";
+import type {
+  LifecycleRecoveryCheckpointValidateRequestV1,
+  LifecycleRecoveryCheckpointValidationV1,
+} from "./lifecycle.js";
 import { FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
 import type {
   ChairTakeoverRequest,
@@ -102,6 +106,43 @@ import type {
   WorkstreamProjection,
   WorkstreamSettleRequest,
 } from "./workstreams.js";
+import type {
+  ProviderRouteIntegrityRecoveryProjectionV1,
+  ProviderRouteIntegrityRecoveryReadErrorV1,
+  ProviderRouteIntegrityRecoveryReadRequestV1,
+  ReviewCompletionReadRequestV1,
+  ReviewCompletionV1,
+  ReviewEvidenceAnnotationAppendRequestV1,
+  ReviewEvidenceAnnotationCurrentReadRequestV1,
+  ReviewEvidenceAnnotationCurrentReadResultV1,
+  ReviewEvidenceAnnotationV1,
+  ReviewEvidenceListRequestV1,
+  ReviewEvidenceListResultV1,
+  ReviewEvidenceReadRequestV1,
+  ReviewEvidenceReadV1,
+  ReviewFindingPageReadRequestV1,
+  ReviewFindingPageReadResultV1,
+  ReviewTargetPreparationAcceptedV1,
+  ReviewTargetPreparationReadRequestV1,
+  ReviewTargetPreparationReadErrorV1,
+  ReviewTargetPreparationReadV1,
+  ReviewTargetPrepareV1,
+  ReviewTargetRebindReceiptV1,
+  ReviewTargetRebindV1,
+  ReviewReadErrorV1,
+} from "./provider-review.js";
+import type {
+  ProviderContextPressureReadRequestV1,
+  ProviderContextPressureReadV1,
+} from "./route-lineage.js";
+import type {
+  TopologyWaveAppendReceiptV1,
+  TopologyWaveAppendRequestV1,
+  TopologyWaveCurrentReadRequestV1,
+  TopologyWaveCurrentReadV1,
+  TopologyWaveListRequestV1,
+  TopologyWaveListV1,
+} from "./topology-evaluation.js";
 
 export type ProtocolLimits = {
   maximumFrameBytes: number;
@@ -138,7 +179,11 @@ export type ProtocolPrincipal =
       kind: "integration";
       integrationId: IntegrationId;
       projectId: ProjectId;
+      projectSessionId: ProjectSessionId;
+      runId: string;
       principalGeneration: number;
+      providerId: string;
+      providerSessionRef: string;
     };
 
 export type ProtocolInitializeRequest = {
@@ -209,10 +254,25 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.operatorActionCommit]: OperatorActionCommitRequest;
   [FABRIC_OPERATIONS.operatorActionStatus]: OperatorActionStatusRequest;
   [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionReconcileRequest;
+  [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: LifecycleRecoveryCheckpointValidateRequestV1;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadRequest;
   [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadRequest;
   [FABRIC_OPERATIONS.evidencePublish]: EvidencePublishRequest;
   [FABRIC_OPERATIONS.operatorArtifactContentRead]: ArtifactContentReadRequest;
+  [FABRIC_OPERATIONS.reviewTargetPrepare]: ReviewTargetPrepareV1;
+  [FABRIC_OPERATIONS.reviewTargetPreparationRead]: ReviewTargetPreparationReadRequestV1;
+  [FABRIC_OPERATIONS.reviewTargetRebind]: ReviewTargetRebindV1;
+  [FABRIC_OPERATIONS.reviewEvidenceRead]: ReviewEvidenceReadRequestV1;
+  [FABRIC_OPERATIONS.reviewEvidenceList]: ReviewEvidenceListRequestV1;
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotate]: ReviewEvidenceAnnotationAppendRequestV1;
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead]: ReviewEvidenceAnnotationCurrentReadRequestV1;
+  [FABRIC_OPERATIONS.reviewFindingPageRead]: ReviewFindingPageReadRequestV1;
+  [FABRIC_OPERATIONS.reviewCompletionRead]: ReviewCompletionReadRequestV1;
+  [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: ProviderRouteIntegrityRecoveryReadRequestV1;
+  [FABRIC_OPERATIONS.providerContextPressureRead]: ProviderContextPressureReadRequestV1;
+  [FABRIC_OPERATIONS.topologyWaveAppend]: TopologyWaveAppendRequestV1;
+  [FABRIC_OPERATIONS.topologyWaveCurrentRead]: TopologyWaveCurrentReadRequestV1;
+  [FABRIC_OPERATIONS.topologyWaveList]: TopologyWaveListRequestV1;
 };
 
 export type OperationInputMap = BaselineOperationInputMap & ExtensionOperationInputMap;
@@ -281,10 +341,25 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.operatorActionCommit]: OperatorActionReceipt;
   [FABRIC_OPERATIONS.operatorActionStatus]: OperatorActionStatus;
   [FABRIC_OPERATIONS.operatorActionReconcile]: OperatorActionStatus;
+  [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: LifecycleRecoveryCheckpointValidationV1;
   [FABRIC_OPERATIONS.messageBodyRead]: MessageBodyReadResult;
   [FABRIC_OPERATIONS.operatorRepositoryRead]: GitRepositoryReadResult;
   [FABRIC_OPERATIONS.evidencePublish]: EvidenceArtifactRegistration;
   [FABRIC_OPERATIONS.operatorArtifactContentRead]: ArtifactContentReadResult;
+  [FABRIC_OPERATIONS.reviewTargetPrepare]: ReviewTargetPreparationAcceptedV1;
+  [FABRIC_OPERATIONS.reviewTargetPreparationRead]: ReviewTargetPreparationReadV1 | ReviewTargetPreparationReadErrorV1;
+  [FABRIC_OPERATIONS.reviewTargetRebind]: ReviewTargetRebindReceiptV1;
+  [FABRIC_OPERATIONS.reviewEvidenceRead]: ReviewEvidenceReadV1 | ReviewReadErrorV1;
+  [FABRIC_OPERATIONS.reviewEvidenceList]: ReviewEvidenceListResultV1 | ReviewReadErrorV1;
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotate]: ReviewEvidenceAnnotationV1 | ReviewReadErrorV1;
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead]: ReviewEvidenceAnnotationCurrentReadResultV1 | ReviewReadErrorV1;
+  [FABRIC_OPERATIONS.reviewFindingPageRead]: ReviewFindingPageReadResultV1 | ReviewReadErrorV1;
+  [FABRIC_OPERATIONS.reviewCompletionRead]: ReviewCompletionV1 | ReviewReadErrorV1;
+  [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: ProviderRouteIntegrityRecoveryProjectionV1 | ProviderRouteIntegrityRecoveryReadErrorV1;
+  [FABRIC_OPERATIONS.providerContextPressureRead]: ProviderContextPressureReadV1;
+  [FABRIC_OPERATIONS.topologyWaveAppend]: TopologyWaveAppendReceiptV1;
+  [FABRIC_OPERATIONS.topologyWaveCurrentRead]: TopologyWaveCurrentReadV1;
+  [FABRIC_OPERATIONS.topologyWaveList]: TopologyWaveListV1;
 };
 
 export type OperationResultMap = BaselineOperationResultMap & ExtensionOperationResultMap;

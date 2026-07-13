@@ -197,7 +197,7 @@ describe("registry-owned current-agent MCP projection", () => {
     });
   });
 
-  it("projects provider actions only through typed metadata, a bounded answer and a canonical result digest", () => {
+  it("projects provider actions through discriminated review-safe and bounded ordinary results", () => {
     const descriptors = buildMcpDescriptorSet(new Set(operationsForPrincipal("agent"))).tools;
     for (const operation of [
       FABRIC_OPERATIONS.dispatchProviderAction,
@@ -206,15 +206,14 @@ describe("registry-owned current-agent MCP projection", () => {
     ]) {
       const descriptor = descriptors.find((candidate) => candidate.operation === operation);
       expect(descriptor).toBeDefined();
-      expect(descriptor?.outputSchema).toMatchObject({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          resultDigest: { pattern: "^sha256:[a-f0-9]{64}$" },
-          providerAnswer: { "x-maxUtf8Bytes": 262_144 },
-        },
-      });
-      expect(JSON.stringify(descriptor?.outputSchema)).not.toContain('"result"');
+      const serialized = JSON.stringify(descriptor?.outputSchema);
+      expect(serialized).toContain('"oneOf"');
+      expect(serialized).toContain('"non-review"');
+      expect(serialized).toContain('"certifying-review"');
+      expect(serialized).toContain('"providerAnswer"');
+      expect(serialized).toContain('"x-maxUtf8Bytes":262144');
+      expect(serialized.indexOf('"providerAnswer"')).toBeLessThan(serialized.indexOf('"certifying-review"'));
+      expect(serialized).not.toContain('"result"');
     }
   });
 });
