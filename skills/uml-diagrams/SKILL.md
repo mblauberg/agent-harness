@@ -50,7 +50,7 @@ Prefer PlantUML source (`.puml`) and inspect a render before finalising.
 - `<<include>>`: base -> included, arrowhead at included.
 - `<<extend>>`: extension -> base, arrowhead at base; record its condition in
   the diagram or linked requirement according to the project profile.
-- No solid use-case-to-use-case associations; only include, extend, or generalisation.
+- No solid association directly between two use cases; only include, extend, or generalisation.
 - A package-only overview does not also carry the detailed per-package use-case
   view; split conceptual levels unless the project explicitly combines them.
 - Cross-package references use the project's traceability convention; do not

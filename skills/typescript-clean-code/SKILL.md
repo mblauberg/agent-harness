@@ -43,7 +43,7 @@ Generic clean-code sense is assumed. Apply these TypeScript-specific rules. See
   churn a stable boundary for taste alone. Return `[]` for empty collections and a
   Result/union for expected failure. Throw only for exceptional cases. Prefer
   `?.` and `??` to scattered null checks.
-- Never widen a function's return to include `null`/`undefined` "just in case" — that pushes a guard onto every caller.
+- Never widen a function's return to include `null`/`undefined` "just in case"; that pushes a guard onto every caller.
 
 ## Async
 

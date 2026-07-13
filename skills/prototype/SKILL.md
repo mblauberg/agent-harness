@@ -3,7 +3,7 @@ name: prototype
 description: "Use for an authorised, timeboxed throwaway build that answers one feasibility question. Not for production code, settled requirements, or debugging known breakage; use implement, scope, or diagnose."
 ---
 
-# prototype — spike to learn, then throw it away
+# prototype: spike to learn, then throw it away
 
 Some uncertainty is cheaper to build through than to talk through. A
 prototype exists to answer ONE named question; the deliverable is the
@@ -11,12 +11,12 @@ answer, never the code.
 
 ## Contract (agree before writing code)
 
-1. **The question** — one sentence, falsifiable. "Can X stream 10k rows
+1. **The question**: one sentence, falsifiable. "Can X stream 10k rows
    without buffering?" not "explore X".
-2. **Timebox** — default 30–60 min of agent work. Hit the box with no answer
+2. **Timebox**: default 30 to 60 min of agent work. Hit the box with no answer
    → that IS a finding (question too big; split it or grill further).
-3. **Kill criteria** — what result answers the question either way.
-4. **Where it lives** — an authorised, manifest-owned scratch dir outside
+3. **Kill criteria**: what result answers the question either way.
+4. **Where it lives**: an authorised, manifest-owned scratch dir outside
    production source. Never import it from real code or touch external systems,
    credentials or user data without separate authority.
 

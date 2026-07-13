@@ -5,7 +5,7 @@ description: "Use for source- or browser-read-only review of frontend UX, visual
 
 # Frontend review
 
-Review the user-facing result, not only the diff. Source stays read-only. Write
+Review the user-facing result, rather than the diff alone. Source stays read-only. Write
 only a report path explicitly assigned by the user or enclosing run; otherwise
 return findings in chat. Builds may run only when proven no-write or configured
 to an assigned isolated output/cache path. Browser
