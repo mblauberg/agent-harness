@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  LifecycleRotationDomain,
+  LifecycleRotationDomain as UnauthenticatedLifecycleRotationDomain,
   lifecycleDigest,
   type LifecycleAgentSeed,
   type LifecycleDomainPorts,
@@ -10,6 +10,7 @@ import {
   type ProviderActionPair,
   type ReplacementDispatch,
 } from "../../../src/lifecycle/index.ts";
+import { ReceiptBackedLifecycleRotationDomain as LifecycleRotationDomain } from "./recovery-issue-fixture.ts";
 
 const digest = lifecycleDigest;
 const PROJECT = "project-fourth";
@@ -327,6 +328,7 @@ describe("Spec 05 changed-write custody", () => {
     }
     expect(domain.inspectCustody(PROJECT, RUN, accepted.custodyRef)).toMatchObject({
       changedWriteCustodyIds: ["changed-write"],
+      terminalReceipt: { kind: "custody-terminal" },
     });
     expect(domain.inspectAgent(PROJECT, RUN, "chair").writes).toEqual([
       { custodyId: "changed-write", state: "active" },
@@ -379,12 +381,30 @@ describe("Spec 05 closed provider terminal evidence", () => {
     await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef)).resolves.toMatchObject({
       disposition: "quarantined",
       candidate: null,
+      terminalReceipt: { kind: "custody-terminal" },
     });
     expect(domain.inspectAgent(PROJECT, RUN, "chair")).toMatchObject({ provider: { providerGeneration: 1 } });
   });
 });
 
 describe("Spec 05 exact snapshot correlations", () => {
+  it("fails closed when terminal append or hydration lacks the external receipt authority", async () => {
+    const provider = new ConfigurableProvider();
+    provider.outcome = "no-effect";
+    const unauthenticated = new UnauthenticatedLifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(unauthenticated as LifecycleRotationDomain, "missing-receipt-authority");
+    unauthenticated.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    await expect(unauthenticated.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .rejects.toMatchObject({ code: "LIFECYCLE_RECEIPT_AUTHORITY_UNAVAILABLE" });
+
+    const authenticated = new LifecycleRotationDomain({ provider }, [seed()]);
+    const sealed = request(authenticated, "hydrate-without-receipt-authority");
+    authenticated.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    await authenticated.driveRotation(PROJECT, RUN, sealed.custodyRef);
+    expect(() => UnauthenticatedLifecycleRotationDomain.hydrate({ provider }, authenticated.snapshot()))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
   it("rejects a resealed adopted proof substituted away from its launch attestation", async () => {
     const provider = new ConfigurableProvider();
     const domain = new LifecycleRotationDomain({ provider }, [seed()]);
@@ -554,6 +574,85 @@ describe("Spec 05 exact snapshot correlations", () => {
 
     expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
       .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects coordinated terminal-disposition resealing after deleting the mutable proof record", async () => {
+    const provider = new ConfigurableProvider();
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(domain, "terminal-receipt-co-tamper");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    domain.advanceRevision(PROJECT, RUN, "chair", "task");
+    await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .resolves.toMatchObject({ disposition: "superseded" });
+
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const custody = snapshot.custodies[0];
+    custody.disposition = "no-effect";
+    custody.history[custody.history.length - 1] = "no-effect";
+    const proofDigest = digest("forged-terminal-no-effect");
+    custody.terminalEvidence = {
+      schemaVersion: 1,
+      disposition: "no-effect",
+      detail: "pre-dispatch-zero-effect",
+      proofDigest,
+      terminalEvidenceDigest: lifecycleDigest({
+        schemaVersion: 1,
+        custodyRef: custody.custodyRef,
+        requestDigest: custody.requestDigest,
+        pair: custody.pair,
+        disposition: "no-effect",
+        detail: "pre-dispatch-zero-effect",
+        proofDigest,
+        history: custody.history,
+      }),
+    };
+    snapshot.custodyDispositionProofs = [];
+    snapshot.audits.find((event: any) =>
+      event.kind === "lifecycle-custody-finalized" && event.sourceId === custody.custodyRef
+    ).detail = "pre-dispatch-zero-effect";
+    snapshot.audits.push({
+      kind: "lifecycle-no-effect",
+      projectSessionId: custody.projectSessionId,
+      runId: custody.runId,
+      agentId: custody.agentId,
+      sourceId: custody.custodyRef,
+      detail: proofDigest,
+    });
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("uses the external custody lookup to reject a terminal receipt deleted behind a nonterminal rewrite", async () => {
+    const provider = new ConfigurableProvider();
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(domain, "terminal-receipt-phase-downgrade");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    domain.advanceRevision(PROJECT, RUN, "chair", "task");
+    await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .resolves.toMatchObject({ disposition: "superseded" });
+
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const custody = snapshot.custodies[0];
+    custody.phase = "prepared";
+    custody.disposition = null;
+    custody.history = ["awaiting-boundary", "prepared"];
+    custody.terminalEvidence = null;
+    custody.terminalReceipt = null;
+    snapshot.custodyDispositionProofs = [];
+    snapshot.audits = snapshot.audits.filter((event: any) =>
+      event.kind !== "lifecycle-custody-finalized"
+    );
+    snapshot.agents[0].lifecycle = "suspended";
+    snapshot.agents[0].claimsFrozen = true;
+    snapshot.agents[0].writes[0].state = "lifecycle-quarantined";
+    snapshot.agents[0].writeRevision -= 1;
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
+      .toThrow(expect.objectContaining({
+        code: "SNAPSHOT_INVALID",
+        message: "external terminal receipt contradicts mutable nonterminal custody state",
+      }));
   });
 });
 

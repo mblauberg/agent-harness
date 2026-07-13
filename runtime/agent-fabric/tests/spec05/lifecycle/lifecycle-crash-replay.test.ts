@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  LifecycleRotationDomain,
   canonicalJson,
   lifecycleDigest,
   type LifecycleAgentSeed,
@@ -11,7 +10,11 @@ import {
   type ProviderActionPair,
   type ReplacementDispatch,
 } from "../../../src/lifecycle/index.ts";
-import { abandonRecoveryIssue, trustedRecoveryAuthority } from "./recovery-issue-fixture.ts";
+import {
+  abandonRecoveryIssue,
+  ReceiptBackedLifecycleRotationDomain as LifecycleRotationDomain,
+  trustedRecoveryAuthority,
+} from "./recovery-issue-fixture.ts";
 
 const digest = lifecycleDigest;
 const PROJECT = "project-crash";
@@ -477,7 +480,11 @@ describe("Spec 05 lifecycle terminal dispositions", () => {
       expectedSourceCheckpointDigest: plan.sourceCheckpointDigest,
     };
     const first = domain.abandonCustody(request);
-    expect(first).toMatchObject({ phase: "finalized", disposition: "abandoned" });
+    expect(first).toMatchObject({
+      phase: "finalized",
+      disposition: "abandoned",
+      terminalReceipt: { kind: "custody-terminal" },
+    });
     const auditCount = domain.snapshot().audits.length;
     expect(domain.abandonCustody(request)).toEqual(first);
     expect(domain.snapshot().audits).toHaveLength(auditCount);

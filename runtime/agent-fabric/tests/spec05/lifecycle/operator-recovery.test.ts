@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  LifecycleRotationDomain,
   lifecycleDigest,
   type ContextObservation,
   type LifecycleAgentSeed,
@@ -10,7 +9,12 @@ import {
   type ProviderActionPair,
   type ReplacementDispatch,
 } from "../../../src/lifecycle/index.ts";
-import { abandonRecoveryIssue, freshRecoveryIssue, trustedRecoveryAuthority } from "./recovery-issue-fixture.ts";
+import {
+  abandonRecoveryIssue,
+  freshRecoveryIssue,
+  ReceiptBackedLifecycleRotationDomain as LifecycleRotationDomain,
+  trustedRecoveryAuthority,
+} from "./recovery-issue-fixture.ts";
 
 const digest = lifecycleDigest;
 const PROJECT = "project-recovery";
@@ -481,6 +485,71 @@ describe("Spec 05 operator generation-loss recovery", () => {
     )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
   });
 
+  it("rejects coordinated resealing of both adopted-custody and recovered-loss review decisions", async () => {
+    const provider = new RecoveryProvider();
+    const domain = recoveryDomain(provider);
+    const lossId = openLoss(domain);
+    preview(domain, lossId);
+    const accepted = domain.commitFreshRotation({
+      projectSessionId: PROJECT,
+      runId: "run-recovery",
+      lossId,
+      pair,
+      attemptId: attemptId(pair),
+    });
+    await domain.driveRotation(PROJECT, "run-recovery", accepted.custodyRef);
+    const tampered = structuredClone(domain.snapshot()) as any;
+    const custody = tampered.custodies[0];
+    const lifecycleCustodyRef = {
+      schemaVersion: 1,
+      runId: custody.runId,
+      agentId: custody.agentId,
+      custodyId: custody.custodyRef,
+      custodyRevision: 1,
+    };
+    const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
+      projectSessionId: custody.projectSessionId,
+      lifecycleCustodyRef,
+      checkpoint: custody.checkpoint,
+      successorProvider: custody.candidate.provider,
+      successorPrincipalGeneration: custody.candidate.principalGeneration,
+      successorBridgeGeneration: custody.candidate.bridgeGeneration,
+      launchAttestation: custody.candidate.launchAttestation,
+    });
+    const evidencePreimage = {
+      schemaVersion: 1,
+      runId: custody.runId,
+      lifecycleCustodyRef,
+      lifecycleAdoptionEvidenceDigest,
+      reason: "target-read-failed",
+    };
+    const decision = {
+      kind: "integrity-stale",
+      evidence: { ...evidencePreimage, evidenceDigest: lifecycleDigest(evidencePreimage) },
+    };
+    custody.reviewDecision = decision;
+    tampered.losses[0].reviewDecision = structuredClone(decision);
+    tampered.audits.find((event: any) =>
+      event.kind === "lifecycle-review-adoption-decision" && event.sourceId === custody.custodyRef
+    ).detail = lifecycleDigest({
+      schemaVersion: 1,
+      projectSessionId: custody.projectSessionId,
+      runId: custody.runId,
+      agentId: custody.agentId,
+      lifecycleCustodyRef,
+      lifecycleAdoptionEvidenceDigest,
+      sourceCheckpointDigest: custody.checkpoint.checkpointDigest,
+      recoveryFromLossId: custody.recoveryFromLossId,
+      reviewDecision: decision,
+    });
+    const { snapshotDigest: _ignored, ...preimage } = tampered;
+
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
   it("rejects an open loss carrying a review decision without an adopted custody", () => {
     const provider = new RecoveryProvider();
     const domain = recoveryDomain(provider);
@@ -567,6 +636,68 @@ describe("Spec 05 operator generation-loss recovery", () => {
       reservedPrincipalGeneration: 9,
       reservedBridgeGeneration: 11,
     });
+  });
+
+  it.each([
+    ["preview", (snapshot: any) => { snapshot.freshRotations = []; }],
+    ["commit replay", (snapshot: any) => { snapshot.freshRotationCommitDigests = []; }],
+    ["preview and commit replay", (snapshot: any) => {
+      snapshot.freshRotations = [];
+      snapshot.freshRotationCommitDigests = [];
+    }],
+  ])("requires the fresh-recovery custody's %s record during hydration", (_label, mutate) => {
+    const provider = new RecoveryProvider();
+    const domain = recoveryDomain(provider);
+    const lossId = openLoss(domain);
+    preview(domain, lossId);
+    domain.commitFreshRotation({
+      projectSessionId: PROJECT,
+      runId: "run-recovery",
+      lossId,
+      pair,
+      attemptId: attemptId(pair),
+    });
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    mutate(snapshot);
+    const { snapshotDigest: _ignored, ...preimage } = snapshot;
+
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("replays both fresh-rotation phases after hydration without reopening the loss", () => {
+    const provider = new RecoveryProvider();
+    const domain = recoveryDomain(provider);
+    const lossId = openLoss(domain);
+    const preparation = preview(domain, lossId);
+    const commitRequest = {
+      projectSessionId: PROJECT,
+      runId: "run-recovery",
+      lossId,
+      pair,
+      attemptId: attemptId(pair),
+    };
+    const acceptance = domain.commitFreshRotation(commitRequest);
+    const restored = LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      domain.snapshot(),
+    );
+
+    expect(restored.prepareFreshRotation({
+      projectSessionId: PROJECT,
+      runId: "run-recovery",
+      lossId,
+      issueId: attemptId(pair),
+      capability: `capability:${pair.actionId}`,
+      pair,
+      adapterContractDigest: digest("replacement-contract"),
+      operation: "launch",
+      checkpoint: preparation.checkpoint,
+      checkpointArtifactRef: preparation.checkpointValidation.checkpointRef,
+    })).toEqual(preparation);
+    expect(restored.commitFreshRotation(commitRequest)).toEqual(acceptance);
   });
 
   it("requires destructive authority and derives direct-open archival consequences", () => {

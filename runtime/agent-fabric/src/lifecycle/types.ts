@@ -311,6 +311,76 @@ export interface LifecycleDomainPorts {
   readonly fault?: LifecycleFaultPort;
   readonly recoveryAuthority?: LifecycleRecoveryAuthorityPort;
   readonly recoveryCheckpoint?: LifecycleRecoveryCheckpointValidationPort;
+  readonly integrityReceipts?: LifecycleIntegrityReceiptAuthorityPort;
+}
+
+export interface LifecycleCustodyTerminalReceiptSubject {
+  readonly schemaVersion: 1;
+  readonly kind: "custody-terminal";
+  readonly projectSessionId: string;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly custodyRef: string;
+  readonly requestDigest: LifecycleDigest;
+  readonly pair: ProviderActionPair;
+  readonly disposition: CustodyDisposition;
+  readonly terminalEvidenceDigest: LifecycleDigest;
+  readonly recoveryFromLossId: string | null;
+}
+
+export interface LifecycleReviewDecisionReceiptSubject {
+  readonly schemaVersion: 1;
+  readonly kind: "review-adoption-decision";
+  readonly projectSessionId: string;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly lifecycleCustodyRef: LifecycleCustodyRef;
+  readonly lifecycleAdoptionEvidenceDigest: LifecycleDigest;
+  readonly reviewDecisionDigest: LifecycleDigest;
+  readonly certificationCutDigest: LifecycleDigest | null;
+  readonly recoveryFromLossId: string | null;
+  readonly recoveryLossDecisionDigest: LifecycleDigest | null;
+}
+
+export type LifecycleIntegrityReceiptSubject =
+  | LifecycleCustodyTerminalReceiptSubject
+  | LifecycleReviewDecisionReceiptSubject;
+
+export interface LifecycleAuthenticatedReceipt {
+  readonly schemaVersion: 1;
+  readonly kind: LifecycleIntegrityReceiptSubject["kind"];
+  readonly authorityId: string;
+  readonly authoritySequence: number;
+  readonly previousReceiptDigest: LifecycleDigest | null;
+  readonly subjectDigest: LifecycleDigest;
+  readonly receiptDigest: LifecycleDigest;
+  readonly attestation: string;
+}
+
+export interface LifecycleIntegrityReceiptLookup {
+  readonly kind: LifecycleIntegrityReceiptSubject["kind"];
+  readonly projectSessionId: string;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly custodyRef: string;
+}
+
+export interface LifecycleIntegrityReceiptRecord {
+  readonly subject: LifecycleIntegrityReceiptSubject;
+  readonly receipt: LifecycleAuthenticatedReceipt;
+}
+
+/**
+ * External append-only trust boundary. Append must be idempotent for an exact
+ * subject and reject a changed subject for the same lookup key. Read and
+ * verification must consult authority state outside the resealable lifecycle
+ * snapshot; hydration uses the authoritative read even when mutable custody
+ * state claims that no receipt is required.
+ */
+export interface LifecycleIntegrityReceiptAuthorityPort {
+  appendReceipt(subject: LifecycleIntegrityReceiptSubject): LifecycleAuthenticatedReceipt;
+  readReceipt(lookup: LifecycleIntegrityReceiptLookup): LifecycleIntegrityReceiptRecord | null;
+  verifyReceipt(subject: LifecycleIntegrityReceiptSubject, receipt: LifecycleAuthenticatedReceipt): boolean;
 }
 
 export type LifecycleRecoveryIssueStatus = "active" | "consumed" | "revoked" | "expired";
@@ -429,7 +499,9 @@ export interface LifecycleCustodyView {
   readonly checkpointValidation: LifecycleRecoveryCheckpointBinding | null;
   readonly candidate: ReplacementCandidate | null;
   readonly reviewDecision: ReviewAdoptionDecision | null;
+  readonly reviewDecisionReceipt: LifecycleAuthenticatedReceipt | null;
   readonly terminalEvidence: LifecycleCustodyTerminalEvidence | null;
+  readonly terminalReceipt: LifecycleAuthenticatedReceipt | null;
 }
 
 export interface LifecycleCustodyTerminalEvidence {
@@ -690,7 +762,9 @@ export interface LifecycleCustodySnapshot {
   readonly history: readonly string[];
   readonly acceptance: RotationAcceptance;
   readonly reviewDecision: ReviewAdoptionDecision | null;
+  readonly reviewDecisionReceipt: LifecycleAuthenticatedReceipt | null;
   readonly terminalEvidence: LifecycleCustodyTerminalEvidence | null;
+  readonly terminalReceipt: LifecycleAuthenticatedReceipt | null;
 }
 
 export interface LifecycleGenerationLossSnapshot extends GenerationLossView {}

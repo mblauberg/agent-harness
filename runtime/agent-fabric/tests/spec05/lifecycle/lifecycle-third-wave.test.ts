@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  LifecycleRotationDomain,
   lifecycleDigest,
   type LifecycleAgentSeed,
   type LifecycleDomainSnapshotV1,
@@ -9,7 +8,12 @@ import {
   type ProviderActionObservation,
   type ReplacementDispatch,
 } from "../../../src/lifecycle/index.ts";
-import { abandonRecoveryIssue, freshRecoveryIssue, trustedRecoveryAuthority } from "./recovery-issue-fixture.ts";
+import {
+  abandonRecoveryIssue,
+  freshRecoveryIssue,
+  ReceiptBackedLifecycleRotationDomain as LifecycleRotationDomain,
+  trustedRecoveryAuthority,
+} from "./recovery-issue-fixture.ts";
 
 const digest = lifecycleDigest;
 const PROJECT = "project-third";
@@ -307,6 +311,8 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
       phase: "finalized",
       disposition: "adopted",
       reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
+      reviewDecisionReceipt: { kind: "review-adoption-decision" },
+      terminalReceipt: { kind: "custody-terminal" },
     });
     expect(domain.inspectAgent(PROJECT, "run-third", "chair")).toMatchObject({
       lifecycle: "ready",
@@ -318,6 +324,8 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
       phase: "finalized",
       disposition: "adopted",
       reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
+      reviewDecisionReceipt: { kind: "review-adoption-decision" },
+      terminalReceipt: { kind: "custody-terminal" },
     });
   });
 
@@ -379,6 +387,60 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     const snapshot = structuredClone(domain.snapshot()) as any;
     snapshot.custodies[0].reviewDecision = { kind: "no-current-target" };
     snapshot.reviewCertificationCuts = [];
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, sealSnapshot(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects coordinated resealing of the review decision, cut, and mutable audit evidence", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
+        commitReviewAdoption() {},
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+    await domain.driveRotation(PROJECT, "run-third", accepted.custodyRef);
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const custody = snapshot.custodies[0];
+    custody.reviewDecision = { kind: "no-current-target" };
+    snapshot.reviewCertificationCuts = [];
+    snapshot.audits.find((event: any) =>
+      event.kind === "lifecycle-review-adoption-decision" && event.sourceId === custody.custodyRef
+    ).detail = lifecycleDigest({
+      schemaVersion: 1,
+      projectSessionId: custody.projectSessionId,
+      runId: custody.runId,
+      agentId: custody.agentId,
+      lifecycleCustodyRef: {
+        schemaVersion: 1,
+        runId: custody.runId,
+        agentId: custody.agentId,
+        custodyId: custody.custodyRef,
+        custodyRevision: 1,
+      },
+      lifecycleAdoptionEvidenceDigest: lifecycleDigest({
+        projectSessionId: custody.projectSessionId,
+        lifecycleCustodyRef: {
+          schemaVersion: 1,
+          runId: custody.runId,
+          agentId: custody.agentId,
+          custodyId: custody.custodyRef,
+          custodyRevision: 1,
+        },
+        checkpoint: custody.checkpoint,
+        successorProvider: custody.candidate.provider,
+        successorPrincipalGeneration: custody.candidate.principalGeneration,
+        successorBridgeGeneration: custody.candidate.bridgeGeneration,
+        launchAttestation: custody.candidate.launchAttestation,
+      }),
+      sourceCheckpointDigest: custody.checkpoint.checkpointDigest,
+      recoveryFromLossId: custody.recoveryFromLossId,
+      reviewDecision: custody.reviewDecision,
+    });
 
     expect(() => LifecycleRotationDomain.hydrate({ provider }, sealSnapshot(snapshot)))
       .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  LifecycleRotationDomain,
   lifecycleDigest,
   type LifecycleAgentSeed,
   type LifecycleProviderPort,
   type ProviderActionObservation,
   type ReplacementDispatch,
 } from "../../../src/lifecycle/index.ts";
+import { ReceiptBackedLifecycleRotationDomain as LifecycleRotationDomain } from "./recovery-issue-fixture.ts";
 
 const digest = lifecycleDigest;
 const PROJECT = "project-invariants";
