@@ -18,6 +18,7 @@ WORKSPACE_GUIDES = (
     ROOT / "docs" / "runbooks" / "agent-fabric-operations.md",
     ROOT / "docs" / "runbooks" / "agent-fabric-traceability.md",
     ROOT / "docs" / "handoffs" / "HANDOFF-2026-07-13-project-fabric-console.md",
+    ROOT / "docs" / "handoffs" / "HANDOFF-2026-07-13-capability-profiles-v2.md",
     ROOT / "runtime" / "agent-fabric" / "README.md",
     ROOT / "runtime" / "agent-fabric-herdr" / "README.md",
 )

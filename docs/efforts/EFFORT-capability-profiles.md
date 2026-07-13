@@ -1,10 +1,11 @@
 # EFFORT: capability-compiled execution authority
 
 Updated: 13 July 2026
-Status: active. Lane B implemented and locally verified; publication stopped
-after `main` advanced and exposed the already-known Lane D/Rust failures. Lane
-C characterisation goldens are integrated; V2 cutover remains blocked on Lane
-A integration and a non-overlapping runtime baseline.
+Status: active. Lane B is implemented, locally verified and authorised for
+promotion through PR #7 after rebasing over current `main`. Lane D and Rust CI
+reconciliation remain deferred. Lane C characterisation goldens are integrated;
+V2 cutover remains blocked on Lane A integration and a non-overlapping runtime
+baseline.
 
 ## Destination
 
@@ -144,8 +145,8 @@ JSON
 - The first accepted artifact (`2db4f5a`) was pushed to draft PR
   [#7](https://github.com/mblauberg/provenant/pull/7). Promotion stopped when
   remote `main` advanced, invalidating its exact ancestry and acceptance
-  binding. Nothing was merged or released to `main`; the rebased artifact
-  requires fresh review and exact acceptance before promotion resumes.
+  binding. The human explicitly re-authorised conflict resolution and merge of
+  the rebased artifact on 13 July 2026; PR #7 is the canonical promotion state.
 
 ## Deferred registry (decided, not scheduled here)
 
