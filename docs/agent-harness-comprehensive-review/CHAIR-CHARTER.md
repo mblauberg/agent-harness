@@ -62,16 +62,27 @@ The ADRs (`../adr/0001`–`0008`) remain the ratified design owners. The chair
 implements them; it does not silently overturn them (a genuine reversal is a
 one-way-door council vote, recorded, and lands via PR).
 
-## 4. The single human gate: PR review
+## 4. The single human gate: one consolidated PR
 
-- Work happens on feature branches in authorised `.worktrees/<task-agent>`
-  scopes (`docs/worktrees.md`). The chair MAY push feature branches and open
-  PRs so the human can review them — that is the point of the workflow.
-- The human reviews and merges PRs. No direct pushes to `main`; no
-  admin-merge-over-red (PR #6's history is the anti-pattern).
-- Each PR is self-contained, green on every required check, and carries its
-  evidence (deterministic gates, review legs, council rationale) in the
-  description so the human review is a genuine gate, not a rubber stamp.
+The whole programme lands as **one monolithic integration branch and one GitHub
+PR** for the human to review and merge — not a stream of small PRs.
+
+- Lanes/legs run in authorised `.worktrees/<task-agent>` scopes
+  (`docs/worktrees.md`), one serial writer per file. As each lane completes and
+  is verified, the chair integrates it into a single long-lived integration
+  branch (e.g. `comprehensive-review`) in the primary checkout, then **prunes
+  that lane's worktree and branch** (`git worktree remove`, `git branch -d`
+  once merged). No stray worktrees or branches remain.
+- The chair pushes **only that one integration branch** to `origin` and opens
+  **one PR**. It authors and updates that PR; it does not merge it.
+- The human reviews and merges the single PR. No direct pushes to `main`; no
+  admin-merge-over-red (PR #6's history is the anti-pattern). The chair may
+  fast-forward its *local* `main` for integration convenience, but the GitHub
+  `main` advances only through the human-merged PR.
+- The PR is green on every required check and carries its full evidence
+  (deterministic gates, review legs, council `D-nnn` rationale, per-lane
+  receipts) in the description, so the human review is a genuine gate. Keep the
+  branch rebased/current and the PR description a living index of what landed.
 
 ## 5. Decision protocol (LLM resolution)
 
@@ -136,8 +147,9 @@ human instruction may widen them:
   implementation and PRs, not shipping. If a lane genuinely needs an external
   effect, the chair stops and asks the human — this is the one retained
   ask-the-human condition.
-- **The human PR review is the merge gate** (§4). The chair pushes feature
-  branches and opens PRs; it never merges to `main` or force-pushes shared refs.
+- **The human PR review is the merge gate** (§4). The chair pushes the single
+  integration branch and opens the single PR; it never merges that PR, pushes to
+  `origin/main`, or force-pushes shared refs.
 - **The write-profile containment spike is still executed adversarially**
   (worktree/symlink/git/network/settings/secret/lifecycle matrix) before any
   write profile ships. Worktrees are not permission boundaries; provider
