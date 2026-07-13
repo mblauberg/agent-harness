@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/authority-profile.schema.json",
+  "title": "Portable authority profile policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "policyId",
+    "compilerRule",
+    "profiles"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "policyId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compilerRule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "purpose",
+          "filesystem",
+          "network",
+          "tools",
+          "externalEffects"
+        ],
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extends": {
+            "type": "string"
+          },
+          "filesystem": {
+            "type": "object"
+          },
+          "network": {
+            "type": "object"
+          },
+          "tools": {
+            "type": "object"
+          },
+          "externalEffects": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "degradation": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "decisionReceipt": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

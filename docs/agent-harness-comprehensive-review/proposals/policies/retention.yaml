@@ -1,0 +1,63 @@
+schemaVersion: 1
+policyId: default-retention
+classes:
+  ephemeral:
+    examples:
+    - scratch-prompts
+    - temporary-renders
+    - disposable-worktrees
+    default: delete-after-verified-close
+  operational:
+    examples:
+    - detailed-events
+    - intermediate-checkpoints
+    - provider-debug-output
+    default: compact-then-expire
+    ttlDays: 30
+  evidence:
+    examples:
+    - receipts
+    - approvals
+    - test-results
+    - effect-records
+    default: retain-by-risk-and-project-policy
+  durable-knowledge:
+    examples:
+    - current-specs
+    - adrs
+    - runbooks
+    - promoted-research
+    default: retain-until-superseded
+  sensitive:
+    examples:
+    - credentials
+    - raw-private-input
+    - secret-bearing-debug
+    default: minimise-redact-expire-earliest
+apply:
+  requires:
+  - preview-digest
+  - protected-path-check
+  - legal-hold-check
+  - owner-scope-check
+  records:
+  - actor
+  - policy-version
+  - candidate-digest
+  - deleted
+  - retained
+  - reason
+  - receipt
+  unknownUserFiles: never-delete
+  evidenceReceipts: never-delete-without-explicit-hold-aware-policy
+notesInbox:
+  requiredMetadata:
+  - owner
+  - createdAt
+  - expiresAt
+  - promotionTarget
+  terminalActions:
+  - promote
+  - merge
+  - delete
+  canonicalTruth: false

@@ -1,0 +1,47 @@
+schemaVersion: 1
+policyId: adaptive-route-intents
+intentBands:
+  flagship: maximum expected utility for weak-oracle or consequential work
+  workhorse: balanced quality, latency and cost for bounded implementation
+  scout: low-cost discovery, retrieval and mechanical checks
+candidateFacts:
+- taskClass
+- observedTaskPerformance
+- contextAndToolCapabilities
+- latency
+- cost
+- availabilityAndRateLimit
+- privacyAndDataLocality
+- sessionContinuity
+- effortControls
+- reviewIndependence
+- recentDegradation
+hardConstraints:
+- providerAllowed
+- familyAllowed
+- profileSupported
+- privacyAllowed
+- budgetAvailable
+- requiredEffortAvailable
+selection:
+  method: constrained-expected-utility
+  fallback: narrower-capable-route-with-explicit-substitution
+  staleFacts: fail-or-mark-unverified-by-risk-policy
+receipt:
+- candidates
+- hardConstraintResults
+- scores
+- selected
+- substitution
+- capabilitySource
+- factFreshness
+- predictedUtility
+calibration:
+- taskOutcome
+- escapedDefects
+- reviewYield
+- latency
+- tokens
+- cost
+- retries
+- humanInterventions

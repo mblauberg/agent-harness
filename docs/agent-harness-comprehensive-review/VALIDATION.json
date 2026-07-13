@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "validatedAt": "2026-07-13T05:17:05.773586+00:00",
+  "checks": [
+    {
+      "name": "yaml-parse",
+      "status": "pass",
+      "detail": "Parsed 9 YAML files."
+    },
+    {
+      "name": "json-parse",
+      "status": "pass",
+      "detail": "Parsed 8 JSON files."
+    },
+    {
+      "name": "json-schema-validation",
+      "status": "pass",
+      "detail": "Validated four Draft 2020-12 schemas and all worked examples/policy."
+    },
+    {
+      "name": "skill-proposal-invariants",
+      "status": "pass",
+      "detail": "{\"architecture-review\": {\"fixtureCases\": 5, \"words\": 253}, \"orchestrate\": {\"fixtureCases\": 4, \"words\": 271}, \"refactor\": {\"fixtureCases\": 4, \"words\": 238}}"
+    },
+    {
+      "name": "manifest-consistency",
+      "status": "pass",
+      "detail": "34 proposed catalogue entries: 33 current and 1 proposed; provider profile references resolve."
+    },
+    {
+      "name": "findings-consistency",
+      "status": "pass",
+      "detail": "46 unique findings with recognised priorities."
+    },
+    {
+      "name": "review-inventory",
+      "status": "pass",
+      "detail": "19 Markdown documents, 8 JSON files and 9 YAML files."
+    }
+  ],
+  "warnings": [
+    "Proposal files are illustrative and were not integrated with or executed against the repository.",
+    "Repository build, tests, provider smokes and Console usability were not run because no local checkout was available."
+  ],
+  "status": "pass"
+}
