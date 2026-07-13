@@ -235,7 +235,7 @@ Five specs, indexed in `docs/specs/00-index.md`:
 | 02 | Adaptive agent harness lifecycle | The abstract session→scope→...→retrospect lifecycle and route-evaluation evidence rules that `HARNESS.md` implements | v1.2; base implementation machine-verified; amendment implementation/acceptance pending |
 | 03 | Agent fabric activation and operations | How provider adapters get safely turned on (capability pinning, permission profiles, fail-closed compatibility) | v1.2; base activation implemented; amendment implementation/acceptance pending |
 | 04 | Agent fabric operational hardening | Daemon robustness — capability refresh, crash recovery, receipt/bundle digesting, lifecycle exits, terminal geometry minimums | v1.30; implementation in progress; final verification/acceptance pending |
-| 05 | Project Fabric Console and adaptive session orchestration | The Console TUI's exact behaviour — topology, route-arm display, review-family projections | v1.13; approved; implementation in progress; final verification, provider review and human acceptance pending |
+| 05 | Project Fabric Console and adaptive session orchestration | The Console TUI's exact behaviour — topology, route-arm display, review-family projections | v1.13 draft amendment under acceptance; v1.0 approved; implementation, authority trace, final verification and provider review pending |
 
 Two things stand out reading these: the version numbers are unusually high
 (0.35, 1.30, 1.13) for a repo this size, meaning each spec has been through

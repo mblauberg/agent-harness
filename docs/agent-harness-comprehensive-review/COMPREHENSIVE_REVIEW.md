@@ -1,5 +1,20 @@
 # Comprehensive review of `agent-harness`
 
+> **Validated 2026-07-13** — see `SCOPING-SESSION.md` for decisions and
+> `findings-register.md` for the verification annex (45/46 confirmed on HEAD
+> `babd47a`). Key deltas from this document as written: Decision 3 (one
+> generated manifest) **rejected** in favour of per-domain owners + drift
+> checks; the section 9 "immediate approval package" **re-sequenced** into four
+> bounded steps with a mandatory adversarial containment gate before any write
+> profile (see `implementation-roadmap.md` banner and
+> `challenges/codex-pair-round2.md`); intake/backlog/retention-delete demoted
+> from P0 and deferred until after the write pilot. The codex-pair challenge
+> also found the pack overstates missing architecture: `CommandJournal`,
+> `ProviderSessionCoordinator` and `ExternalEffectService` already implement
+> parts of the target; and it identified an authority-schema gap
+> (delivery envelope vs Fabric `AuthorityInput`) as a write-enablement
+> prerequisite the pack missed.
+
 ## 1. Executive assessment
 
 ### 1.1 Bottom line

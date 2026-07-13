@@ -9,7 +9,9 @@ implementation.
 ## Contents
 
 - `harness.manifest.yaml` — one registry for packages, skills, providers,
-  policies, generation and distribution.
+  policies, generation and distribution. **REJECTED 2026-07-13** (scoping
+  session round 4): replaced by per-domain owners with generated projections
+  and CI drift checks; retained here as a rejected illustration only.
 - `policies/lifecycle.yaml` — executable lifecycle and review decisions.
 - `policies/authority-profiles.yaml` — portable capability profiles.
 - `policies/retention.yaml` — governed compaction and deletion.

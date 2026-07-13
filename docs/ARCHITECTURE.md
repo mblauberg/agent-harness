@@ -348,8 +348,11 @@ location and lifecycle are defined in [worktrees.md](worktrees.md).
 ## Context and durable memory
 
 Project knowledge must remain visible to every family. Durable facts therefore
-live in project-owned state files, specifications, ADRs, runbooks and context
-digests. Private harness memory is limited to cross-project user preferences.
+live in project-owned state files, specifications, ADRs ([adr/](adr/)), runbooks
+and context digests. Private harness memory is limited to cross-project user
+preferences. Architecture decisions ratified 2026-07-13 (execution authority
+profiles, seam-completion refactoring, per-domain truth owners, backlog and
+retention posture) are recorded in [adr/0001–0008](adr/README.md).
 
 Workers return compressed findings and artifact paths. Session hygiene checks
 freshness, size, duplication, stale logs, scratch manifests and handoff quality.
