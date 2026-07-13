@@ -1,16 +1,40 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../src/core/migrations.ts";
 import { canonicalJson, digest } from "../../src/project-session/store-support.ts";
 
 const SHA_A = `sha256:${"a".repeat(64)}`;
+const EMPTY_FINDING_SET_JSON = '{"findingCount":0,"pages":[],"schemaVersion":1}';
+const EMPTY_FINDING_SET_DIGEST = `sha256:${createHash("sha256")
+  .update(EMPTY_FINDING_SET_JSON)
+  .digest("hex")}`;
+const RECOVERY_NOW = Date.now();
+const RECOVERY_ISSUED_AT = RECOVERY_NOW - 60_000;
+const RECOVERY_EXPIRES_AT = RECOVERY_NOW + 60_000;
 
 function openDatabase(): Database.Database {
   const database = new Database(":memory:");
   database.pragma("foreign_keys = ON");
   applyMigrations(database);
   return database;
+}
+
+function foreignKeySignatures(database: Database.Database, table: string): string[] {
+  const rows = database.prepare(`SELECT * FROM pragma_foreign_key_list(?)`).all(table) as Array<{
+    id: number;
+    seq: number;
+    table: string;
+    from: string;
+    to: string;
+  }>;
+  const grouped = new Map<number, typeof rows>();
+  for (const row of rows) grouped.set(row.id, [...(grouped.get(row.id) ?? []), row]);
+  return [...grouped.values()].map((group) => {
+    const ordered = group.toSorted((left, right) => left.seq - right.seq);
+    return `${ordered[0]?.table}:${ordered.map((row) => `${row.from}->${row.to}`).join(",")}`;
+  });
 }
 
 function seedRun(database: Database.Database): void {
@@ -177,6 +201,7 @@ function insertTopologyPlan(
   database: Database.Database,
   plan: Readonly<{ json: string; digest: string }>,
   policyRevision = 1,
+  rationaleEvidenceId = "rationale",
 ): void {
   database.prepare(`
     INSERT INTO topology_wave_plans(
@@ -192,7 +217,7 @@ function insertTopologyPlan(
     "chair", 1, 1,
     1, SHA_A, SHA_A,
     policyRevision, SHA_A, SHA_A,
-    "rationale", 1, "approved",
+    rationaleEvidenceId, 1, "approved",
     plan.json, plan.digest, 1,
   );
 }
@@ -212,7 +237,8 @@ function seedGenerationLossRecovery(database: Database.Database): void {
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     "parent-capability", "b".repeat(64), "operator", "project", "session",
-    1, 1, 1, "session", '["agent-lifecycle-recovery-issue"]', 1, 100,
+    1, 1, 1, "session", '["agent-lifecycle-recovery-issue"]',
+    RECOVERY_NOW - 180_000, RECOVERY_NOW + 180_000,
   );
   database.prepare(`
     INSERT INTO scoped_gates(
@@ -229,6 +255,15 @@ function seedGenerationLossRecovery(database: Database.Database): void {
     '["agent-lifecycle-recovery-issue"]', "Recover chair?", "Stranded lifecycle",
     "[]", "fresh rotate", "[]", "[]", "fabric", "operator", "operator",
     "{}", "approved", 1, null, 1, 1, 1,
+  );
+  database.prepare(`
+    INSERT INTO provider_action_pair_preflights(
+      adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
+      input_digest,state,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(
+    "adapter", "source-action", "run", "lifecycle-owner", "principal",
+    "lifecycle-input", "admitted", 1, 1,
   );
   database.prepare(`
     INSERT INTO provider_actions(
@@ -265,6 +300,8 @@ function seedGenerationLossRecovery(database: Database.Database): void {
 function insertGenerationLossRecoveryIssue(
   database: Database.Database,
   sourceBridgeRevision = 1,
+  issuedAt = RECOVERY_ISSUED_AT,
+  expiresAt = RECOVERY_EXPIRES_AT,
 ): void {
   database.prepare(`
     INSERT INTO agent_lifecycle_recovery_capability_issues(
@@ -283,7 +320,7 @@ function insertGenerationLossRecoveryIssue(
     1, 1, 1, "generation-loss", "loss", 1, SHA_A,
     "provider-session-1", "source-capability", "source-action", "adapter", SHA_A,
     "bridge-row", sourceBridgeRevision, 1, 1, 1, 1, 1, 1, "chair",
-    "parent-capability", "recovery-gate", "fresh-rotate", "active", 10, 20,
+    "parent-capability", "recovery-gate", "fresh-rotate", "active", issuedAt, expiresAt,
   );
 }
 
@@ -345,6 +382,15 @@ function insertProviderAction(
   actionId = "shared-action",
 ): void {
   database.prepare(`
+    INSERT INTO provider_action_pair_preflights(
+      adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
+      input_digest,state,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(
+    adapterId, actionId, "run", `owner-${adapterId}`, "principal",
+    `input-${adapterId}`, "admitted", 1, 1,
+  );
+  database.prepare(`
     INSERT INTO provider_actions(
       run_id,action_id,adapter_id,operation,target_agent_id,
       provider_session_generation,identity_hash,payload_hash,payload_json,
@@ -359,6 +405,183 @@ function insertProviderAction(
 }
 
 describe("current database baseline invariants", () => {
+  it("equality-binds preflight, action, route, reservation, and evidence to one exact run", () => {
+    const database = openDatabase();
+
+    expect(foreignKeySignatures(database, "provider_actions")).toContain(
+      "provider_action_pair_preflights:run_id->run_id,adapter_id->adapter_id,action_id->action_id",
+    );
+    expect(foreignKeySignatures(database, "provider_actions")).toContain(
+      "review_finding_capacity_reservations:run_id->run_id,adapter_id->adapter_id,action_id->action_id,finding_capacity_reservation_digest->reservation_digest",
+    );
+    expect(foreignKeySignatures(database, "provider_action_routes")).toEqual(expect.arrayContaining([
+      "provider_action_pair_preflights:run_id->run_id,adapter_id->adapter_id,action_id->action_id",
+      "provider_actions:run_id->run_id,adapter_id->adapter_id,action_id->action_id",
+    ]));
+    expect(foreignKeySignatures(database, "review_finding_capacity_reservations")).toContain(
+      "provider_action_pair_preflights:run_id->run_id,adapter_id->adapter_id,action_id->action_id,owner_digest->owner_digest",
+    );
+    expect(foreignKeySignatures(database, "provider_review_evidence")).toContain(
+      "review_finding_capacity_reservations:run_id->run_id,adapter_id->adapter_id,action_id->action_id,reservation_digest->reservation_digest",
+    );
+
+    database.close();
+  });
+
+  it("rejects action and reservation rows crossed onto another run", () => {
+    const database = openDatabase();
+    seedRun(database);
+    database.prepare(`
+      INSERT INTO projects(
+        project_id,canonical_root,revision,authority_generation,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?)
+    `).run("other-project", "/tmp/other-project", 1, 1, 1, 1);
+    database.prepare(`
+      INSERT INTO project_sessions(
+        project_session_id,project_id,mode,state,revision,generation,
+        authority_ref,budget_ref,launch_packet_path,launch_packet_digest,
+        membership_revision,origin_kind,origin_operator_id,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "other-session", "other-project", "coordinated", "active", 1, 1,
+      SHA_A, "budget-ref", "launch", "launch-digest", 1,
+      "operator-launch", "operator", 1, 1,
+    );
+    database.prepare(`
+      INSERT INTO runs(
+        run_id,chair_agent_id,workspace_root,created_at,project_session_id,
+        lifecycle_state,revision,chair_generation,chair_lease_id,authority_ref,
+        budget_ref,dependency_revision,topology_slot
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "other-run", "other-chair", "/tmp/other", 1, "other-session", "active", 1, 1,
+      "other-lease", SHA_A, "budget-ref", 1, 1,
+    );
+    database.prepare(`
+      INSERT INTO authorities(authority_id,run_id,authority_json,authority_hash,created_at)
+      VALUES (?,?,?,?,?)
+    `).run("other-authority", "other-run", "{}", "a".repeat(64), 1);
+    database.prepare(`
+      INSERT INTO agents(run_id,agent_id,authority_id,lifecycle) VALUES (?,?,?,?)
+    `).run("other-run", "other-chair", "other-authority", "ready");
+    database.prepare(`
+      INSERT INTO provider_action_pair_preflights(
+        adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
+        input_digest,state,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?)
+    `).run("adapter", "action", "run", "owner", "principal", "input", "resolving", 1, 1);
+
+    expect(() => database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,
+        provider_session_generation,identity_hash,payload_hash,payload_json,
+        status,history_json,execution_count,effect_count,idempotency_proven,
+        result_json,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "other-run", "action", "adapter", "turn", "other-chair", 1,
+      "identity", "payload", "{}", "prepared", "[]", 0, 0, 0, null, 1,
+    )).toThrow("FOREIGN KEY constraint failed");
+
+    database.prepare(`
+      INSERT INTO review_finding_sets(
+        finding_set_digest,finding_count,page_count,canonical_byte_length,created_at
+      ) VALUES (?,?,?,?,?)
+    `).run(EMPTY_FINDING_SET_DIGEST, 0, 0, Buffer.byteLength(EMPTY_FINDING_SET_JSON), 1);
+    expect(() => database.prepare(`
+      INSERT INTO review_finding_capacity_reservations(
+        adapter_id,action_id,run_id,target_generation,slot,owner_digest,
+        finding_window_mode,prior_open_finding_set_digest,
+        maximum_new_findings,maximum_new_finding_bytes,reservation_digest,
+        state,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "adapter", "action", "other-run", 1, "native", "owner", "normal",
+      EMPTY_FINDING_SET_DIGEST, 32, 65_536, `sha256:${"b".repeat(64)}`,
+      "preflight", 1, 1,
+    )).toThrow("FOREIGN KEY constraint failed");
+
+    database.close();
+  });
+
+  it("advances finding-capacity reservations only through the closed state graph", () => {
+    const database = openDatabase();
+    seedRun(database);
+    database.prepare(`
+      INSERT INTO review_finding_sets(
+        finding_set_digest,finding_count,page_count,canonical_byte_length,created_at
+      ) VALUES (?,?,?,?,?)
+    `).run(
+      EMPTY_FINDING_SET_DIGEST,
+      0,
+      0,
+      Buffer.byteLength(EMPTY_FINDING_SET_JSON),
+      1,
+    );
+    database.prepare(`
+      INSERT INTO provider_action_pair_preflights(
+        adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
+        input_digest,state,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?)
+    `).run("adapter", "action", "run", "owner", "principal", "input", "resolving", 1, 1);
+    database.prepare(`
+      INSERT INTO review_finding_capacity_reservations(
+        adapter_id,action_id,run_id,target_generation,slot,owner_digest,
+        finding_window_mode,prior_open_finding_set_digest,
+        maximum_new_findings,maximum_new_finding_bytes,reservation_digest,
+        state,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "adapter", "action", "run", 1, "native", "owner", "normal",
+      EMPTY_FINDING_SET_DIGEST, 32, 65_536, `sha256:${"b".repeat(64)}`,
+      "preflight", 1, 1,
+    );
+
+    expect(() => database.prepare(`
+      UPDATE review_finding_capacity_reservations
+         SET state='settled',updated_at=2
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
+
+    database.prepare(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,
+        provider_session_generation,identity_hash,payload_hash,payload_json,
+        status,history_json,execution_count,effect_count,idempotency_proven,
+        result_json,updated_at,finding_capacity_reservation_digest
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "run", "action", "adapter", "turn", "chair", 1,
+      "identity", "payload", "{}", "prepared", "[]", 0, 0, 0,
+      null, 1, `sha256:${"b".repeat(64)}`,
+    );
+    database.prepare(`
+      UPDATE review_finding_capacity_reservations
+         SET state='attached',updated_at=2
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run();
+    expect(() => database.prepare(`
+      UPDATE review_finding_capacity_reservations
+         SET state='preflight',updated_at=3
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
+    database.prepare(`
+      UPDATE review_finding_capacity_reservations
+         SET state='settled',updated_at=3
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run();
+    expect(() => database.prepare(`
+      UPDATE review_finding_capacity_reservations SET updated_at=4
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
+    expect(() => database.prepare(`
+      DELETE FROM review_finding_capacity_reservations
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
+
+    database.close();
+  });
+
   it("keys provider actions by the global adapter and action pair", () => {
     const database = openDatabase();
     seedRun(database);
@@ -419,6 +642,45 @@ describe("current database baseline invariants", () => {
     database.close();
   });
 
+  it("admits at most one policy revision ahead of the current pointer", () => {
+    const database = openDatabase();
+    seedRun(database);
+    database.prepare(`
+      INSERT INTO coordination_policy_revisions(
+        project_session_id,coordination_run_id,policy_revision,
+        policy_ref,policy_digest,created_at
+      ) VALUES (?,?,?,?,?,?)
+    `).run("session", "run", 1, SHA_A, SHA_A, 1);
+    database.prepare(`
+      INSERT INTO coordination_policy_current(
+        project_session_id,coordination_run_id,policy_revision,
+        policy_ref,policy_digest,revision
+      ) VALUES (?,?,?,?,?,?)
+    `).run("session", "run", 1, SHA_A, SHA_A, 1);
+    database.prepare(`
+      INSERT INTO coordination_policy_revisions(
+        project_session_id,coordination_run_id,policy_revision,
+        policy_ref,policy_digest,created_at
+      ) VALUES (?,?,?,?,?,?)
+    `).run("session", "run", 2, SHA_A, SHA_A, 2);
+
+    expect(() => database.prepare(`
+      INSERT INTO coordination_policy_revisions(
+        project_session_id,coordination_run_id,policy_revision,
+        policy_ref,policy_digest,created_at
+      ) VALUES (?,?,?,?,?,?)
+    `).run("session", "run", 3, SHA_A, SHA_A, 3))
+      .toThrow("INVARIANT_coordination_policy_revision_contiguous");
+
+    expect(() => database.prepare(`
+      UPDATE coordination_policy_current
+         SET policy_revision=2,revision=2
+       WHERE project_session_id='session' AND coordination_run_id='run'
+    `).run()).not.toThrow();
+
+    database.close();
+  });
+
   it("rejects a topology plan bound to a noncurrent policy revision", () => {
     const database = openDatabase();
     seedTopologyCurrency(database);
@@ -470,6 +732,165 @@ describe("current database baseline invariants", () => {
     database.close();
   });
 
+  it("verifies the topology plan digest over canonical JCS without planDigest", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    const valid = topologyPlan();
+    const forgedDigest = `sha256:${"b".repeat(64)}`;
+    const forgedBody = JSON.parse(valid.json) as Record<string, unknown>;
+    forgedBody.planDigest = forgedDigest;
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson(forgedBody),
+      digest: forgedDigest,
+    })).toThrow("INVARIANT_topology_wave_plan_codec");
+
+    database.close();
+  });
+
+  it("rejects topology plans whose nested owner is not a current run agent", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    const body = JSON.parse(topologyPlan().json) as Record<string, unknown>;
+    delete body.planDigest;
+    const stageOwners = body.stageOwners as Array<Record<string, unknown>>;
+    const writePartitions = body.writePartitions as Array<Record<string, unknown>>;
+    if (stageOwners[0] === undefined || writePartitions[0] === undefined) {
+      throw new Error("topology fixture is incomplete");
+    }
+    stageOwners[0].ownerAgentId = "forged-agent";
+    writePartitions[0].ownerAgentId = "forged-agent";
+    const planDigest = digest(body);
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson({ ...body, planDigest }),
+      digest: planDigest,
+    })).toThrow("INVARIANT_topology_wave_plan_currency");
+
+    database.close();
+  });
+
+  it("rejects topology plans whose nested task is outside the current run", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    const body = JSON.parse(topologyPlan().json) as Record<string, unknown>;
+    delete body.planDigest;
+    const stageOwners = body.stageOwners as Array<Record<string, unknown>>;
+    if (stageOwners[0] === undefined) throw new Error("topology fixture is incomplete");
+    stageOwners[0].taskId = "forged-task";
+    const planDigest = digest(body);
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson({ ...body, planDigest }),
+      digest: planDigest,
+    })).toThrow("INVARIANT_topology_wave_plan_currency");
+
+    database.close();
+  });
+
+  it("rejects topology plans whose nested evidence is not active project evidence", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    const body = JSON.parse(topologyPlan().json) as Record<string, unknown>;
+    delete body.planDigest;
+    const decomposability = body.decomposability as Record<string, unknown>;
+    const contention = body.contention as Record<string, unknown>;
+    decomposability.evidenceRef = `sha256:${"b".repeat(64)}`;
+    contention.evidenceRef = `sha256:${"b".repeat(64)}`;
+    const planDigest = digest(body);
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson({ ...body, planDigest }),
+      digest: planDigest,
+    })).toThrow("INVARIANT_topology_wave_plan_currency");
+
+    database.close();
+  });
+
+  it("rejects topology write owners outside the current plan authority", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    database.prepare(`
+      INSERT INTO authorities(authority_id,run_id,authority_json,authority_hash,created_at)
+      VALUES (?,?,?,?,?)
+    `).run("foreign-authority", "run", "{}", "b".repeat(64), 1);
+    database.prepare(`
+      INSERT INTO agents(run_id,agent_id,authority_id,lifecycle) VALUES (?,?,?,?)
+    `).run("run", "foreign-owner", "foreign-authority", "ready");
+    const body = JSON.parse(topologyPlan().json) as Record<string, unknown>;
+    delete body.planDigest;
+    const stageOwners = body.stageOwners as Array<Record<string, unknown>>;
+    const writePartitions = body.writePartitions as Array<Record<string, unknown>>;
+    if (stageOwners[0] === undefined || writePartitions[0] === undefined) {
+      throw new Error("topology fixture is incomplete");
+    }
+    stageOwners[0].ownerAgentId = "foreign-owner";
+    writePartitions[0].ownerAgentId = "foreign-owner";
+    const planDigest = digest(body);
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson({ ...body, planDigest }),
+      digest: planDigest,
+    })).toThrow("INVARIANT_topology_wave_plan_currency");
+
+    database.close();
+  });
+
+  it("rejects topology dependencies whose required task state is not current", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    database.prepare(`
+      INSERT INTO tasks(
+        run_id,task_id,authority_id,objective,base_revision,state,revision,created_by
+      ) VALUES (?,?,?,?,?,?,?,?)
+    `).run("run", "dependency", "authority", "dependency", "base", "active", 1, "chair");
+    const body = JSON.parse(topologyPlan().json) as Record<string, unknown>;
+    delete body.planDigest;
+    body.dependencies = [{
+      dependencyTaskId: "dependency",
+      evidenceRef: SHA_A,
+      requiredState: "ready",
+    }];
+    const planDigest = digest(body);
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson({ ...body, planDigest }),
+      digest: planDigest,
+    })).toThrow("INVARIANT_topology_wave_plan_currency");
+
+    database.close();
+  });
+
+  it("rejects a topology rationale artifact outside the current project", () => {
+    const database = openDatabase();
+    seedTopologyCurrency(database);
+    database.prepare(`
+      INSERT INTO projects(
+        project_id,canonical_root,revision,authority_generation,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?)
+    `).run("foreign-project", "/tmp/foreign", 1, 1, 1, 1);
+    database.prepare(`
+      INSERT INTO artifacts(
+        artifact_id,project_id,publisher_kind,publisher_ref,source_kind,evidence_kind,
+        relative_path,sha256,registry_state,revision,created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "foreign-rationale", "foreign-project", "operator", "operator",
+      "project-file", "artifact", "foreign.txt", SHA_A, "active", 1, 1,
+    );
+    const body = JSON.parse(topologyPlan().json) as Record<string, unknown>;
+    delete body.planDigest;
+    body.rationaleRef = { evidenceId: "foreign-rationale", evidenceRevision: 1 };
+    const planDigest = digest(body);
+
+    expect(() => insertTopologyPlan(database, {
+      json: canonicalJson({ ...body, planDigest }),
+      digest: planDigest,
+    }, 1, "foreign-rationale")).toThrow("INVARIANT_topology_wave_plan_currency");
+
+    database.close();
+  });
+
   it("rejects a recovery capability issue with invented source and authority bindings", () => {
     const database = openDatabase();
     seedRun(database);
@@ -492,7 +913,7 @@ describe("current database baseline invariants", () => {
       SHA_A, "forged-provider-session", "forged-source-capability", "forged-action",
       "forged-adapter", SHA_A, "forged-bridge", 999, 999, 999, 999,
       999, 999, 999, "chair", "missing-parent", "missing-gate",
-      "fresh-rotate", "consumed", 1, 2,
+      "fresh-rotate", "active", RECOVERY_ISSUED_AT, RECOVERY_EXPIRES_AT,
     )).toThrow("INVARIANT_agent_lifecycle_recovery_issue_binding");
 
     database.close();
@@ -516,6 +937,47 @@ describe("current database baseline invariants", () => {
     `).run()).toThrow("INVARIANT_agent_lifecycle_recovery_issue_status");
 
     database.close();
+  });
+
+  it("projects only active unexpired lifecycle recovery issues as current", () => {
+    const database = openDatabase();
+    seedRun(database);
+    seedGenerationLossRecovery(database);
+    insertGenerationLossRecoveryIssue(database);
+
+    expect(database.prepare(`
+      SELECT issue_id FROM agent_lifecycle_recovery_capability_issue_current
+    `).all()).toEqual([{ issue_id: "issue" }]);
+
+    database.prepare(`
+      UPDATE agent_lifecycle_recovery_capability_issues SET status='revoked'
+       WHERE issue_id='issue'
+    `).run();
+    expect(database.prepare(`
+      SELECT issue_id FROM agent_lifecycle_recovery_capability_issue_current
+    `).all()).toEqual([]);
+
+    database.close();
+
+    const expiredDatabase = openDatabase();
+    seedRun(expiredDatabase);
+    seedGenerationLossRecovery(expiredDatabase);
+    insertGenerationLossRecoveryIssue(
+      expiredDatabase,
+      1,
+      RECOVERY_NOW - 120_000,
+      RECOVERY_NOW - 60_000,
+    );
+
+    expect(expiredDatabase.prepare(`
+      SELECT issue_id FROM agent_lifecycle_recovery_capability_issue_current
+    `).all()).toEqual([]);
+    expect(() => expiredDatabase.prepare(`
+      UPDATE agent_lifecycle_recovery_capability_issues SET status='consumed'
+       WHERE issue_id='issue'
+    `).run()).toThrow("INVARIANT_agent_lifecycle_recovery_issue_status");
+
+    expiredDatabase.close();
   });
 
   it("refuses to consume a recovery issue after its parent capability is revoked", () => {
@@ -668,6 +1130,41 @@ describe("current database baseline invariants", () => {
       ) VALUES (?,?,?,?,?,?)
     `).run(graph.pageDigest, 1, finding.digest, "F-2", "P2", finding.json))
       .toThrow("INVARIANT_review_finding_member_closed");
+
+    database.close();
+  });
+
+  it("admits only the canonical empty finding-set root and byte length", () => {
+    const database = openDatabase();
+
+    expect(() => database.prepare(`
+      INSERT INTO review_finding_sets(
+        finding_set_digest,finding_count,page_count,canonical_byte_length,created_at
+      ) VALUES (?,?,?,?,?)
+    `).run(
+      EMPTY_FINDING_SET_DIGEST,
+      0,
+      0,
+      Buffer.byteLength(EMPTY_FINDING_SET_JSON),
+      1,
+    )).not.toThrow();
+
+    expect(() => database.prepare(`
+      INSERT INTO review_finding_sets(
+        finding_set_digest,finding_count,page_count,canonical_byte_length,created_at
+      ) VALUES (?,?,?,?,?)
+    `).run(
+      `sha256:${"0".repeat(64)}`,
+      0,
+      0,
+      Buffer.byteLength(EMPTY_FINDING_SET_JSON),
+      1,
+    )).toThrow("CHECK constraint failed");
+    expect(() => database.prepare(`
+      INSERT INTO review_finding_sets(
+        finding_set_digest,finding_count,page_count,canonical_byte_length,created_at
+      ) VALUES (?,?,?,?,?)
+    `).run(EMPTY_FINDING_SET_DIGEST, 0, 0, 0, 1)).toThrow("CHECK constraint failed");
 
     database.close();
   });

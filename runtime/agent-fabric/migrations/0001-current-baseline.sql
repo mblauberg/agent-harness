@@ -1380,7 +1380,10 @@ SELECT issue.issue_id
      SELECT 1 FROM json_each(gate.enforcement_points_json)
       WHERE type = 'text' AND value = 'agent-lifecycle-recovery-issue'
    )
- WHERE EXISTS (
+ WHERE issue.status = 'active'
+ AND issue.issued_at <= CAST(unixepoch('subsec') * 1000 AS INTEGER)
+ AND issue.expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
+ AND EXISTS (
    SELECT 1 FROM agents agent
     WHERE agent.run_id = issue.run_id AND agent.agent_id = issue.agent_id
  )
@@ -2185,6 +2188,13 @@ CREATE TABLE provider_actions (
   budget_settlement_json TEXT CHECK (budget_settlement_json IS NULL OR json_valid(budget_settlement_json)),
   budget_state TEXT CHECK (budget_state IS NULL OR budget_state IN ('reserved','settled','usage-unknown')),
   budget_started_at INTEGER CHECK (budget_started_at IS NULL OR budget_started_at >= 0),
+  finding_capacity_reservation_digest TEXT CHECK (
+    finding_capacity_reservation_digest IS NULL OR (
+      length(finding_capacity_reservation_digest) = 71 AND
+      substr(finding_capacity_reservation_digest, 1, 7) = 'sha256:' AND
+      substr(finding_capacity_reservation_digest, 8) NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
   PRIMARY KEY (adapter_id, action_id),
   UNIQUE (run_id, adapter_id, action_id),
   CHECK (
@@ -2200,7 +2210,13 @@ CREATE TABLE provider_actions (
   CHECK (budget_state<>'usage-unknown' OR status IN ('ambiguous','terminal','quarantined')),
   CHECK (budget_state IS NULL OR status NOT IN ('terminal','quarantined') OR budget_state IN ('settled','usage-unknown')),
   CHECK (budget_state IS NULL OR status<>'quarantined' OR budget_state='usage-unknown'),
-  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id)
+  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id, finding_capacity_reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      run_id, adapter_id, action_id, reservation_digest
+    )
 );
 
 CREATE TABLE provider_agent_custody (
@@ -5168,7 +5184,12 @@ CREATE TABLE review_finding_sets (
   canonical_byte_length INTEGER NOT NULL CHECK (canonical_byte_length BETWEEN 0 AND 1048576),
   created_at INTEGER NOT NULL,
   CHECK ((finding_count = 0) = (page_count = 0)),
-  CHECK ((finding_count = 0) = (canonical_byte_length = 0))
+  CHECK (
+    (finding_count = 0 AND page_count = 0 AND
+      finding_set_digest = 'sha256:58afae1b74b0f7295f280a34196c2e092e4040016e64927e132f99356b48b7a2' AND
+      canonical_byte_length = 47) OR
+    (finding_count > 0 AND page_count > 0 AND canonical_byte_length > 0)
+  )
 );
 
 CREATE TABLE review_finding_pages (
@@ -5536,6 +5557,8 @@ CREATE TABLE provider_action_pair_preflights (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (adapter_id, action_id),
   UNIQUE (adapter_id, action_id, owner_digest),
+  UNIQUE (run_id, adapter_id, action_id),
+  UNIQUE (run_id, adapter_id, action_id, owner_digest),
   FOREIGN KEY (run_id) REFERENCES runs(run_id)
 );
 
@@ -5550,14 +5573,21 @@ CREATE TABLE review_finding_capacity_reservations (
   prior_open_finding_set_digest TEXT NOT NULL,
   maximum_new_findings INTEGER NOT NULL CHECK (maximum_new_findings BETWEEN 0 AND 32),
   maximum_new_finding_bytes INTEGER NOT NULL CHECK (maximum_new_finding_bytes >= 0),
-  reservation_digest TEXT NOT NULL,
+  reservation_digest TEXT NOT NULL CHECK (
+    length(reservation_digest) = 71 AND
+    substr(reservation_digest, 1, 7) = 'sha256:' AND
+    substr(reservation_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
   state TEXT NOT NULL CHECK (state IN ('preflight','attached','released','settled')),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (adapter_id, action_id),
   UNIQUE (adapter_id, action_id, reservation_digest),
-  FOREIGN KEY (adapter_id, action_id, owner_digest)
-    REFERENCES provider_action_pair_preflights(adapter_id, action_id, owner_digest),
+  UNIQUE (run_id, adapter_id, action_id, reservation_digest),
+  FOREIGN KEY (run_id, adapter_id, action_id, owner_digest)
+    REFERENCES provider_action_pair_preflights(
+      run_id, adapter_id, action_id, owner_digest
+    ),
   FOREIGN KEY (prior_open_finding_set_digest)
     REFERENCES review_finding_sets(finding_set_digest),
   CHECK ((finding_window_mode = 'resolution-only') =
@@ -5579,6 +5609,42 @@ WHEN NOT EXISTS (
    WHERE complete.finding_set_digest = NEW.prior_open_finding_set_digest
 )
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TRIGGER review_finding_capacity_reservations_state_update
+BEFORE UPDATE ON review_finding_capacity_reservations
+WHEN NOT (
+    (OLD.state = 'preflight' AND NEW.state IN ('attached','released')) OR
+    (OLD.state = 'attached' AND NEW.state IN ('settled','released'))
+  )
+  OR NEW.adapter_id IS NOT OLD.adapter_id
+  OR NEW.action_id IS NOT OLD.action_id
+  OR NEW.run_id IS NOT OLD.run_id
+  OR NEW.target_generation IS NOT OLD.target_generation
+  OR NEW.slot IS NOT OLD.slot
+  OR NEW.owner_digest IS NOT OLD.owner_digest
+  OR NEW.finding_window_mode IS NOT OLD.finding_window_mode
+  OR NEW.prior_open_finding_set_digest IS NOT OLD.prior_open_finding_set_digest
+  OR NEW.maximum_new_findings IS NOT OLD.maximum_new_findings
+  OR NEW.maximum_new_finding_bytes IS NOT OLD.maximum_new_finding_bytes
+  OR NEW.reservation_digest IS NOT OLD.reservation_digest
+  OR NEW.created_at IS NOT OLD.created_at
+  OR NEW.updated_at <= OLD.updated_at
+  OR (NEW.state = 'attached' AND NOT EXISTS (
+    SELECT 1 FROM provider_actions action
+     WHERE action.run_id = NEW.run_id
+       AND action.adapter_id = NEW.adapter_id
+       AND action.action_id = NEW.action_id
+       AND action.finding_capacity_reservation_digest = NEW.reservation_digest
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_review_finding_capacity_reservation_state');
+END;
+
+CREATE TRIGGER review_finding_capacity_reservations_state_delete
+BEFORE DELETE ON review_finding_capacity_reservations
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_review_finding_capacity_reservation_state');
+END;
 
 CREATE TABLE review_terminal_sequence_high_water (
   run_id TEXT PRIMARY KEY,
@@ -5991,8 +6057,10 @@ CREATE TABLE provider_action_routes (
   admission_digest TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (adapter_id, action_id),
-  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_action_pair_preflights(adapter_id, action_id),
-  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_actions(adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id),
   FOREIGN KEY (adapter_id, capability_snapshot_generation,
       capability_snapshot_digest, capability_body_digest)
     REFERENCES adapter_capability_snapshots(adapter_id, snapshot_generation,
@@ -6201,6 +6269,10 @@ CREATE TABLE provider_review_evidence (
   FOREIGN KEY (current_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
   FOREIGN KEY (new_open_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
   FOREIGN KEY (repair_required_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (run_id, adapter_id, action_id, reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      run_id, adapter_id, action_id, reservation_digest
+    ),
   CHECK (new_head_generation = prior_head_generation + 1),
   CHECK (actual_route_identity_digest IS NULL OR route_observation_digest IS NOT NULL)
 );
@@ -6548,6 +6620,12 @@ WHEN NEW.policy_revision <> COALESCE((
    WHERE project_session_id = NEW.project_session_id
      AND coordination_run_id = NEW.coordination_run_id
 ), 1)
+  OR NEW.policy_revision > COALESCE((
+    SELECT policy_revision + 1
+      FROM coordination_policy_current
+     WHERE project_session_id = NEW.project_session_id
+       AND coordination_run_id = NEW.coordination_run_id
+  ), 1)
 BEGIN
   SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_revision_contiguous');
 END;
@@ -6697,6 +6775,7 @@ WHEN
   OR length(NEW.plan_digest) <> 71
   OR substr(NEW.plan_digest, 1, 7) <> 'sha256:'
   OR substr(NEW.plan_digest, 8) GLOB '*[^0-9a-f]*'
+  OR fabric_topology_plan_digest(NEW.plan_json) IS NOT NEW.plan_digest
   OR NEW.plan_json <> json(NEW.plan_json)
   OR EXISTS (
     SELECT 1
@@ -6938,7 +7017,15 @@ END;
 
 CREATE TRIGGER topology_wave_plans_currency_insert
 BEFORE INSERT ON topology_wave_plans
-WHEN NOT EXISTS (
+WHEN json_type(NEW.plan_json) = 'object'
+  AND (SELECT COUNT(*) FROM json_each(NEW.plan_json)) = 22
+  AND json_type(NEW.plan_json, '$.stageOwners') = 'array'
+  AND json_type(NEW.plan_json, '$.writePartitions') = 'array'
+  AND json_type(NEW.plan_json, '$.dependencies') = 'array'
+  AND json_type(NEW.plan_json, '$.decomposability.evidenceRef') = 'text'
+  AND json_type(NEW.plan_json, '$.contention.evidenceRef') = 'text'
+  AND (
+NOT EXISTS (
   SELECT 1
     FROM runs run
     JOIN agents chair
@@ -6972,6 +7059,116 @@ WHEN NOT EXISTS (
      AND policy_current.policy_revision = NEW.policy_revision
      AND policy_current.policy_ref = NEW.policy_ref
      AND policy_current.policy_digest = NEW.policy_digest
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+   WHERE NOT EXISTS (
+     SELECT 1 FROM agents current_agent
+      WHERE current_agent.run_id = NEW.coordination_run_id
+        AND current_agent.agent_id = json_extract(owner.value, '$.ownerAgentId')
+        AND current_agent.lifecycle <> 'archived'
+   )
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+   WHERE NOT EXISTS (
+     SELECT 1 FROM tasks current_task
+      WHERE current_task.run_id = NEW.coordination_run_id
+        AND current_task.task_id = json_extract(owner.value, '$.taskId')
+   )
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.writePartitions') partition
+   WHERE NOT EXISTS (
+     SELECT 1
+       FROM agents owner
+       JOIN authorities owner_authority
+         ON owner_authority.authority_id = owner.authority_id
+        AND owner_authority.run_id = owner.run_id
+      WHERE owner.run_id = NEW.coordination_run_id
+        AND owner.agent_id = json_extract(partition.value, '$.ownerAgentId')
+        AND 'sha256:' || owner_authority.authority_hash =
+          json_extract(partition.value, '$.authorityRef')
+   )
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.dependencies') dependency
+   WHERE NOT EXISTS (
+     SELECT 1 FROM tasks dependency_task
+      WHERE dependency_task.run_id = NEW.coordination_run_id
+        AND dependency_task.task_id = json_extract(
+          dependency.value, '$.dependencyTaskId'
+        )
+        AND (
+          (json_extract(dependency.value, '$.requiredState') = 'ready'
+            AND dependency_task.state = 'ready') OR
+          (json_extract(dependency.value, '$.requiredState') = 'completed'
+            AND dependency_task.state = 'complete')
+        )
+   )
+   OR NOT (
+     json_extract(dependency.value, '$.evidenceRef') =
+       json_extract(dependency.value, '$.dependencyTaskId')
+     OR EXISTS (
+       SELECT 1
+         FROM artifacts evidence
+         JOIN project_sessions evidence_session
+           ON evidence_session.project_id = evidence.project_id
+        WHERE evidence_session.project_session_id = NEW.project_session_id
+          AND evidence.registry_state = 'active'
+          AND (evidence.artifact_id = json_extract(dependency.value, '$.evidenceRef')
+            OR evidence.sha256 = json_extract(dependency.value, '$.evidenceRef'))
+          AND (evidence.project_session_id IS NULL OR
+            evidence.project_session_id = NEW.project_session_id)
+          AND (evidence.run_id IS NULL OR evidence.run_id = NEW.coordination_run_id)
+     )
+   )
+)
+OR NOT EXISTS (
+  SELECT 1
+    FROM artifacts evidence
+    JOIN project_sessions evidence_session
+      ON evidence_session.project_id = evidence.project_id
+   WHERE evidence_session.project_session_id = NEW.project_session_id
+     AND evidence.registry_state = 'active'
+     AND (evidence.artifact_id = json_extract(
+       NEW.plan_json, '$.decomposability.evidenceRef'
+     ) OR evidence.sha256 = json_extract(
+       NEW.plan_json, '$.decomposability.evidenceRef'
+     ))
+     AND (evidence.project_session_id IS NULL OR
+       evidence.project_session_id = NEW.project_session_id)
+     AND (evidence.run_id IS NULL OR evidence.run_id = NEW.coordination_run_id)
+)
+OR NOT EXISTS (
+  SELECT 1
+    FROM artifacts evidence
+    JOIN project_sessions evidence_session
+      ON evidence_session.project_id = evidence.project_id
+   WHERE evidence_session.project_session_id = NEW.project_session_id
+     AND evidence.registry_state = 'active'
+     AND (evidence.artifact_id = json_extract(
+       NEW.plan_json, '$.contention.evidenceRef'
+     ) OR evidence.sha256 = json_extract(
+       NEW.plan_json, '$.contention.evidenceRef'
+     ))
+     AND (evidence.project_session_id IS NULL OR
+       evidence.project_session_id = NEW.project_session_id)
+     AND (evidence.run_id IS NULL OR evidence.run_id = NEW.coordination_run_id)
+)
+OR NOT EXISTS (
+  SELECT 1
+    FROM artifacts rationale
+    JOIN project_sessions rationale_session
+      ON rationale_session.project_id = rationale.project_id
+   WHERE rationale_session.project_session_id = NEW.project_session_id
+     AND rationale.artifact_id = NEW.rationale_evidence_id
+     AND rationale.revision = NEW.rationale_evidence_revision
+     AND rationale.registry_state = 'active'
+     AND (rationale.project_session_id IS NULL OR
+       rationale.project_session_id = NEW.project_session_id)
+     AND (rationale.run_id IS NULL OR rationale.run_id = NEW.coordination_run_id)
+)
 )
 BEGIN
   SELECT RAISE(ABORT, 'INVARIANT_topology_wave_plan_currency');
