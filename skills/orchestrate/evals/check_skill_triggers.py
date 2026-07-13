@@ -18,6 +18,7 @@ SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
 REF_DIR = os.path.join(SKILL_DIR, "references")
 SCRIPT_DIR = os.path.join(SKILL_DIR, "scripts")
 CASES = os.path.join(HERE, "contract_cases.yaml")
+TOPOLOGY_CASES = os.path.join(HERE, "topology_value_cases.yaml")
 
 STOP = set(
     "the a an of to and or for with this that in on is be use when it as your you "
@@ -55,6 +56,14 @@ CASE_GROUP_MINIMUMS = {
     "doctrine_invariants": 10,
     "reference_invariants": 10,
 }
+TOPOLOGY_FACTOR_KEYS = {
+    "independent_information",
+    "stable_interfaces",
+    "non_overlapping_writes",
+    "independently_checkable_returns",
+    "expected_information_gain",
+    "coordination_shared_state_tool_density_cost",
+}
 
 
 def parse_cases(path):
@@ -83,6 +92,78 @@ def parse_cases(path):
             raise ValueError(f"{group} cases must be unique")
         out[group] = [{"prompt": value, "why": ""} for value in normalized]
     return out
+
+
+def parse_topology_cases(path):
+    try:
+        raw = yaml.safe_load(open(path, encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"topology value cases are unreadable: {exc}") from exc
+    if not isinstance(raw, dict) or set(raw) != {
+        "schema_version", "target_skill", "cases",
+    }:
+        raise ValueError(
+            "topology value cases require exactly schema_version, target_skill and cases"
+        )
+    if raw["schema_version"] != 1 or raw["target_skill"] != "orchestrate":
+        raise ValueError("topology value case identity is invalid")
+    cases = raw["cases"]
+    if not isinstance(cases, list) or len(cases) < 6:
+        raise ValueError("topology value cases require at least six cases")
+
+    ids = set()
+    prompts = set()
+    outcomes = {"parallel": 0, "serial": 0}
+    tags = set()
+    bool_factors = TOPOLOGY_FACTOR_KEYS - {
+        "expected_information_gain",
+        "coordination_shared_state_tool_density_cost",
+    }
+    for case in cases:
+        if not isinstance(case, dict) or set(case) != {
+            "id", "prompt", "tags", "factors", "expected_topology",
+        }:
+            raise ValueError("topology value case keys are invalid")
+        case_id = case["id"]
+        prompt = case["prompt"]
+        if (
+            not isinstance(case_id, str) or not case_id.startswith("topology-")
+            or case_id in ids
+            or not isinstance(prompt, str) or not prompt.strip() or prompt in prompts
+        ):
+            raise ValueError("topology value case id or prompt is invalid")
+        ids.add(case_id)
+        prompts.add(prompt)
+        if (
+            not isinstance(case["tags"], list) or not case["tags"]
+            or any(not isinstance(tag, str) or not tag for tag in case["tags"])
+        ):
+            raise ValueError("topology value case tags are invalid")
+        tags.update(case["tags"])
+
+        factors = case["factors"]
+        if not isinstance(factors, dict) or set(factors) != TOPOLOGY_FACTOR_KEYS:
+            raise ValueError("topology value case factors are invalid")
+        if any(type(factors[key]) is not bool for key in bool_factors):
+            raise ValueError("topology structural factors must be booleans")
+        gain = factors["expected_information_gain"]
+        cost = factors["coordination_shared_state_tool_density_cost"]
+        if any(type(value) is not int or not 0 <= value <= 3 for value in (gain, cost)):
+            raise ValueError("topology value factors must be integers from zero to three")
+        expected = "parallel" if all(factors[key] for key in bool_factors) and gain > cost else "serial"
+        if case["expected_topology"] != expected:
+            raise ValueError(
+                f"{case_id} expected_topology violates the decomposition/value gate"
+            )
+        outcomes[expected] += 1
+
+    required_tags = {
+        "decomposable", "bounded", "tightly-coupled", "shared-error",
+        "overlapping-writes", "tool-density",
+    }
+    if outcomes["parallel"] < 2 or outcomes["serial"] < 4 or not required_tags <= tags:
+        raise ValueError("topology value cases lack required parallel/serial boundary coverage")
+    return cases
 
 
 def token_norm(w):
@@ -117,6 +198,7 @@ def description_from_frontmatter(fm):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", default=CASES)
+    parser.add_argument("--topology-cases", default=TOPOLOGY_CASES)
     args = parser.parse_args(argv)
     fails = []
     if not os.path.exists(SKILL_MD):
@@ -131,6 +213,11 @@ def main(argv=None):
         cases = parse_cases(args.cases)
     except ValueError as exc:
         cases = {group: [] for group in CASE_GROUP_MINIMUMS}
+        fails.append(str(exc))
+    try:
+        topology_cases = parse_topology_cases(args.topology_cases)
+    except ValueError as exc:
+        topology_cases = []
         fails.append(str(exc))
 
     if not fm:
@@ -211,6 +298,7 @@ def main(argv=None):
         "SKILL DOCTRINE CHECK: PASS "
         f"({len(cases.get('doctrine_invariants', []))} doctrine, "
         f"{len(cases.get('reference_invariants', []))} reference, "
+        f"{len(topology_cases)} topology, "
         f"{word_count} words; routing evidence is external)"
     )
     return 0
