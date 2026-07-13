@@ -1,0 +1,105 @@
+schemaVersion: 1
+policyId: portable-authority-profiles
+compilerRule: "requested \u2229 human-authority \u2229 task-ownership \u2229 workspace-ownership \u2229 risk-policy \u2229 provider-capabilities \u2229 local-trust \u2229 budget"
+profiles:
+  review-readonly:
+    purpose: Inspection, research and independent review.
+    filesystem:
+      mode: read-only
+      roots: admitted-task-roots
+    network:
+      mode: 'off'
+    tools:
+      classes:
+      - read
+      - search
+      - metadata
+      - non-mutating-tests
+    externalEffects: forbidden
+    degradation: block-on-broader-provider-default
+  workspace-write-offline:
+    purpose: Implementation and tests in one owned worktree without external effects.
+    filesystem:
+      mode: workspace-write
+      root: exact-owned-worktree
+      siblingAccess: forbidden
+    network:
+      mode: 'off'
+    tools:
+      classes:
+      - read
+      - search
+      - edit
+      - shell
+      - test
+      - build
+    externalEffects: forbidden
+    requires:
+    - worktree-binding
+    - owner-generation
+    - path-policy
+    - provider-enforcement
+  workspace-write-network-allowlist:
+    purpose: Implementation requiring declared package or test endpoints.
+    extends: workspace-write-offline
+    network:
+      mode: allowlist
+      targetsFrom: approved-task-policy
+    requires:
+    - enforceable-egress-policy
+    filesystem:
+      mode: workspace-write
+      root: exact-owned-worktree
+      siblingAccess: forbidden
+    tools:
+      classes:
+      - read
+      - search
+      - edit
+      - shell
+      - test
+      - build
+    externalEffects: forbidden
+  browser-test:
+    purpose: Browser-based verification against declared local or test endpoints.
+    extends: workspace-write-network-allowlist
+    tools:
+      classes:
+      - read
+      - search
+      - browser
+      - test
+      - artefact-write
+    externalEffects: forbidden
+    filesystem:
+      mode: workspace-write
+      root: exact-owned-worktree
+      siblingAccess: forbidden
+    network:
+      mode: allowlist
+      targetsFrom: approved-browser-test-policy
+  release-effects:
+    purpose: Exact external mutation through a separate minimum-credential executor.
+    filesystem:
+      mode: none-or-artefact-read
+    network:
+      mode: exact-registered-target
+    tools:
+      classes:
+      - typed-effect-request
+    externalEffects: staged-executor-only
+    requires:
+    - accepted-artefact
+    - effect-proposal
+    - required-gates
+    - idempotency-key
+    - reconciliation-recipe
+decisionReceipt:
+- requestedProfileId
+- effectiveProfileId
+- policyVersion
+- authorityDigest
+- workspaceDigest
+- providerCapabilityDigest
+- nativeSettingsDigest
+- degradations
