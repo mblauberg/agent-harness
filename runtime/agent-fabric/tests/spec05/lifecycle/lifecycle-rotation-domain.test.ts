@@ -287,6 +287,16 @@ describe("Spec 05 lifecycle adoption", () => {
     const ports: LifecycleDomainPorts = {
       provider,
       reviewCertification: {
+        readCurrentTarget() {
+          return {
+            schemaVersion: 1,
+            runId: "run-1",
+            targetGeneration: 3,
+            predecessorBindingGeneration: 2,
+            predecessorBindingDigest: digest("prior-binding"),
+            terminalSequenceHighWater: 7,
+          };
+        },
         commitReviewAdoption(input) {
           reviewDecisions.push(input.lifecycleCustodyRef.custodyId);
           const cutPreimage = {
@@ -404,6 +414,16 @@ describe("Spec 05 lifecycle adoption", () => {
     const domain = new LifecycleRotationDomain({
       provider,
       reviewCertification: {
+        readCurrentTarget() {
+          return {
+            schemaVersion: 1,
+            runId: "run-1",
+            targetGeneration: 3,
+            predecessorBindingGeneration: 2,
+            predecessorBindingDigest: digest("malformed-prior-binding"),
+            terminalSequenceHighWater: 4,
+          };
+        },
         commitReviewAdoption(input) {
           input.commitLifecycleAdoption(
             { kind: "stale", reason: "same-subject-predicate-failed" } as never,
@@ -417,7 +437,7 @@ describe("Spec 05 lifecycle adoption", () => {
     await expect(domain.driveRotation(PROJECT, "run-1", accepted.custodyRef)).resolves.toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: null,
+      reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
     });
     expect(domain.inspectAgent(PROJECT, "run-1", "chair")).toMatchObject({
       lifecycle: "ready",
@@ -425,7 +445,7 @@ describe("Spec 05 lifecycle adoption", () => {
     });
   });
 
-  it("emits no review decision when the source CAS loses inside the transaction owner", async () => {
+  it("does not let the review callback take ownership of the lifecycle source CAS", async () => {
     const provider = new RecordingProvider();
     provider.result = terminalCandidate;
     const committedReviewDecisions: string[] = [];
@@ -433,6 +453,7 @@ describe("Spec 05 lifecycle adoption", () => {
     domain = new LifecycleRotationDomain({
       provider,
       reviewCertification: {
+        readCurrentTarget() { return null; },
         commitReviewAdoption(input) {
           domain.advanceRevision(PROJECT, "run-1", "chair", "task");
           if (input.commitLifecycleAdoption({ kind: "no-current-target" })) {
@@ -446,15 +467,15 @@ describe("Spec 05 lifecycle adoption", () => {
 
     await expect(domain.driveRotation(PROJECT, "run-1", accepted.custodyRef)).resolves.toMatchObject({
       phase: "finalized",
-      disposition: "superseded",
-      reviewDecision: null,
+      disposition: "adopted",
+      reviewDecision: { kind: "no-current-target" },
     });
-    expect(committedReviewDecisions).toEqual([]);
+    expect(committedReviewDecisions).toEqual([accepted.custodyRef]);
     expect(domain.inspectAgent(PROJECT, "run-1", "chair")).toMatchObject({
       lifecycle: "ready",
-      provider: { providerGeneration: 1 },
-      principalGeneration: 1,
-      bridgeGeneration: 1,
+      provider: { providerGeneration: 2 },
+      principalGeneration: 2,
+      bridgeGeneration: 2,
     });
   });
 

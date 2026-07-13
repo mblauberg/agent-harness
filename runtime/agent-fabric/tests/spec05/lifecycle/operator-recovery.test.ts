@@ -325,8 +325,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
         operation: "launch",
         checkpointDigest: checkpoint.checkpointDigest,
       }));
-
-      expect(() => domain.prepareFreshRotation({
+      const prepareRequest = {
         projectSessionId: PROJECT,
         runId: "run-recovery",
         lossId,
@@ -337,7 +336,10 @@ describe("Spec 05 operator generation-loss recovery", () => {
         operation: "launch",
         checkpoint,
         checkpointArtifactRef,
-      } as never)).toThrow(expect.objectContaining({ code: "RECOVERY_CHECKPOINT_VALIDATION_REQUIRED" }));
+      };
+
+      expect(() => domain.prepareFreshRotation(prepareRequest))
+        .toThrow(expect.objectContaining({ code: "RECOVERY_CHECKPOINT_VALIDATION_REQUIRED" }));
       expect(checkpointValidator.validate).toHaveBeenCalledTimes(1);
 
       const validation = {
@@ -348,18 +350,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
         validationEvidenceDigest: digest(`checkpoint-validation:${checkpointState}`),
       };
       checkpointValidator.validate.mockReturnValue(validation as never);
-      const prepared = domain.prepareFreshRotation({
-        projectSessionId: PROJECT,
-        runId: "run-recovery",
-        lossId,
-        issueId,
-        capability,
-        pair,
-        adapterContractDigest: digest("replacement-contract"),
-        operation: "launch",
-        checkpoint,
-        checkpointArtifactRef,
-      } as never);
+      const prepared = domain.prepareFreshRotation(prepareRequest);
       expect(prepared).toMatchObject({
         checkpoint,
         checkpointValidation: {
@@ -383,10 +374,22 @@ describe("Spec 05 operator generation-loss recovery", () => {
         attemptId: issueId,
       });
       expect(checkpointValidator.validate).toHaveBeenCalledTimes(2);
-      expect(() => LifecycleRotationDomain.hydrate({
+      const restored = LifecycleRotationDomain.hydrate({
         provider: new RecoveryProvider(),
         recoveryAuthority: trustedRecoveryAuthority,
-      }, JSON.parse(JSON.stringify(domain.snapshot())) as ReturnType<typeof domain.snapshot>)).not.toThrow();
+      }, JSON.parse(JSON.stringify(domain.snapshot())) as ReturnType<typeof domain.snapshot>);
+      expect(restored.prepareFreshRotation(prepareRequest)).toEqual(prepared);
+      for (const changed of [
+        { ...prepareRequest, checkpointArtifactRef: `${checkpointArtifactRef}:changed` },
+        { ...prepareRequest, capability: `${capability}:changed` },
+        { ...prepareRequest, pair: { ...pair, actionId: `${pair.actionId}:changed` } },
+        { ...prepareRequest, adapterContractDigest: digest("changed-replacement-contract") },
+        { ...prepareRequest, operation: "changed-launch" },
+        { ...prepareRequest, checkpoint: { ...checkpoint, taskDigest: digest("changed-task") } },
+      ]) {
+        expect(() => restored.prepareFreshRotation(changed))
+          .toThrow(expect.objectContaining({ code: "FRESH_ROTATE_PREVIEW_CONFLICT" }));
+      }
       expect(checkpointValidator.validate).toHaveBeenCalledTimes(2);
     },
   );

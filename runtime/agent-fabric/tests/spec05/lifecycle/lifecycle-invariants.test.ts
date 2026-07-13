@@ -294,6 +294,7 @@ describe("Spec 05 lifecycle capability and custody isolation", () => {
     const domain = new LifecycleRotationDomain({
       provider,
       reviewCertification: {
+        readCurrentTarget() { return null; },
         commitReviewAdoption(input) {
           reviewCuts.push(input.lifecycleCustodyRef.custodyId);
           input.commitLifecycleAdoption({ kind: "no-current-target" });

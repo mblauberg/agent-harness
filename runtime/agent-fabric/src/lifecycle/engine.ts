@@ -21,6 +21,7 @@ import {
   type ContextObservationResult,
   type LifecycleCustodyView,
   type LifecycleCustodyTerminalEvidence,
+  type LifecycleCustodyDispositionProof,
   type LifecycleDelivery,
   type LifecycleDigest,
   type LifecycleDomainPorts,
@@ -41,6 +42,7 @@ import {
   type ReplacementCandidate,
   type ReviewAdoptionDecision,
   type ReviewCertificationCut,
+  type ReviewCertificationTargetSnapshot,
   type RotationAcceptance,
   type RotationRequest,
 } from "./types.js";
@@ -314,6 +316,28 @@ function terminalEvidenceFor(
   });
 }
 
+function dispositionProofFor(
+  custody: MutableCustody,
+  disposition: LifecycleCustodyDispositionProof["disposition"],
+  detail: string,
+  evidenceDigest: LifecycleDigest,
+): LifecycleCustodyDispositionProof {
+  const preimage = {
+    schemaVersion: 1 as const,
+    projectSessionId: custody.projectSessionId,
+    runId: custody.runId,
+    agentId: custody.agentId,
+    custodyRef: custody.custodyRef,
+    requestDigest: custody.requestDigest as LifecycleDigest,
+    pair: custody.pair,
+    sourceCheckpointDigest: custody.checkpoint.checkpointDigest,
+    disposition,
+    detail,
+    evidenceDigest,
+  };
+  return Object.freeze({ ...preimage, proofRecordDigest: lifecycleDigest(preimage) });
+}
+
 function validTerminalEvidence(custody: MutableCustody): boolean {
   const evidence = custody.terminalEvidence;
   if (custody.phase !== "finalized" || custody.disposition === null) return evidence === null;
@@ -361,6 +385,10 @@ function hasTerminalCustodyEvidence(
     const evidence = audits.filter((event) => correlatedAudit(event, "lifecycle-custody-finalized"));
     if (evidence.length !== 1 || !allowed.includes(evidence[0]?.detail ?? "") ||
       evidence[0]?.detail !== custody.terminalEvidence.detail) return false;
+    if (custody.disposition === "adopted") {
+      return custody.candidate !== null &&
+        custody.terminalEvidence.proofDigest === lifecycleDigest(custody.candidate.launchAttestation);
+    }
     if (custody.disposition !== "no-effect") return true;
     const proofKind = custody.terminalEvidence.detail === "pre-dispatch-zero-effect"
       ? "lifecycle-no-effect"
@@ -598,6 +626,8 @@ export class LifecycleRotationDomain {
   readonly #freshRotationCommitDigests = new Map<string, FreshCommitRecord>();
   readonly #recoveryIssues = new Map<string, MutableRecoveryIssue>();
   readonly #recoveryRetirements = new Map<string, LifecycleRecoveryRetirement>();
+  readonly #reviewCertificationCuts = new Map<string, ReviewCertificationCut>();
+  readonly #custodyDispositionProofs = new Map<string, LifecycleCustodyDispositionProof>();
 
   constructor(
     ports: LifecycleDomainPorts,
@@ -637,7 +667,8 @@ export class LifecycleRotationDomain {
     const rootKeys = [
       "schemaVersion", "agents", "custodies", "commands", "providerHighWater", "principalHighWater",
       "bridgeHighWater", "contextEvents", "losses", "audits", "freshRotations",
-      "freshRotationCommitDigests", "recoveryIssues", "recoveryRetirements", "snapshotDigest",
+      "freshRotationCommitDigests", "recoveryIssues", "recoveryRetirements", "reviewCertificationCuts",
+      "custodyDispositionProofs", "snapshotDigest",
     ];
     if (!hasExactKeys(snapshot, rootKeys) || snapshot.schemaVersion !== 1) {
       throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle snapshot root must match the exact v1 schema");
@@ -649,7 +680,7 @@ export class LifecycleRotationDomain {
     if (![snapshot.agents, snapshot.custodies, snapshot.commands, snapshot.providerHighWater,
       snapshot.principalHighWater, snapshot.bridgeHighWater, snapshot.contextEvents, snapshot.losses,
       snapshot.audits, snapshot.freshRotations, snapshot.freshRotationCommitDigests, snapshot.recoveryIssues,
-      snapshot.recoveryRetirements].every(Array.isArray)) {
+      snapshot.recoveryRetirements, snapshot.reviewCertificationCuts, snapshot.custodyDispositionProofs].every(Array.isArray)) {
       throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle snapshot collections must be arrays");
     }
     const domain = new LifecycleRotationDomain(ports, []);
@@ -950,6 +981,55 @@ export class LifecycleRotationDomain {
         history: [...source.history],
       });
     }
+    for (const source of snapshot.reviewCertificationCuts) {
+      if (!hasExactKeys(source, [
+        "schemaVersion", "runId", "targetGeneration", "predecessorBindingGeneration",
+        "predecessorBindingDigest", "terminalSequenceHighWater", "lifecycleCustodyRef",
+        "lifecycleAdoptionEvidenceDigest", "cutDigest",
+      ])) throw new LifecycleDomainError("SNAPSHOT_INVALID", "review certification cut is not closed");
+      const custodyRef = source.lifecycleCustodyRef as LifecycleCustodyRef;
+      const custody = domain.#custodies.get(custodyRef.custodyId);
+      if (custody === undefined || custody.candidate === null || custody.disposition !== "adopted" ||
+        custody.reviewDecision === null || custody.reviewDecision.kind === "no-current-target") {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "review certification cut lacks its adopted lifecycle custody");
+      }
+      const lifecycleCustodyRef = {
+        schemaVersion: 1 as const,
+        runId: custody.runId,
+        agentId: custody.agentId,
+        custodyId: custody.custodyRef,
+        custodyRevision: 1,
+      };
+      const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
+        projectSessionId: custody.projectSessionId,
+        lifecycleCustodyRef,
+        checkpoint: custody.checkpoint,
+        successorProvider: custody.candidate.provider,
+        successorPrincipalGeneration: custody.candidate.principalGeneration,
+        successorBridgeGeneration: custody.candidate.bridgeGeneration,
+        launchAttestation: custody.candidate.launchAttestation,
+      });
+      try {
+        domain.#assertReviewAdoptionDecision(
+          { kind: "stale", cut: source, reason: "same-subject-predicate-failed" },
+          custody.runId,
+          lifecycleCustodyRef,
+          lifecycleAdoptionEvidenceDigest,
+        );
+      } catch {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "review certification cut is malformed or crossed");
+      }
+      if (canonicalJson(custody.reviewDecision.cut) !== canonicalJson(source)) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision does not name its lifecycle-owned cut");
+      }
+      domain.#setUnique(domain.#reviewCertificationCuts, custody.custodyRef, Object.freeze(structuredClone(source)));
+    }
+    for (const custody of domain.#custodies.values()) {
+      const decisionOwnsCut = custody.reviewDecision !== null && custody.reviewDecision.kind !== "no-current-target";
+      if (decisionOwnsCut !== domain.#reviewCertificationCuts.has(custody.custodyRef)) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision and lifecycle-owned certification cut diverged");
+      }
+    }
     for (const entry of snapshot.commands) {
       if (!hasExactKeys(entry, ["key", "custodyRef"])) throw new LifecycleDomainError("SNAPSHOT_INVALID", "command correlation is not closed");
       const custody = domain.#custodies.get(entry.custodyRef);
@@ -1070,6 +1150,35 @@ export class LifecycleRotationDomain {
       !hasTerminalCustodyEvidence(custody, domain.#audits, domain.#losses)
     )) {
       throw new LifecycleDomainError("SNAPSHOT_INVALID", "finalized custody lacks its exact terminal evidence");
+    }
+    for (const source of snapshot.custodyDispositionProofs) {
+      if (!hasExactKeys(source, [
+        "schemaVersion", "projectSessionId", "runId", "agentId", "custodyRef", "requestDigest", "pair",
+        "sourceCheckpointDigest", "disposition", "detail", "evidenceDigest", "proofRecordDigest",
+      ])) throw new LifecycleDomainError("SNAPSHOT_INVALID", "custody disposition proof is not closed");
+      const { proofRecordDigest, ...proofPreimage } = source;
+      const custody = domain.#custodies.get(source.custodyRef);
+      if (source.schemaVersion !== 1 ||
+        (source.disposition !== "superseded" && source.disposition !== "quarantined") ||
+        !validDigest(source.requestDigest) || !validActionPair(source.pair) ||
+        !validDigest(source.sourceCheckpointDigest) || source.detail.length === 0 ||
+        !validDigest(source.evidenceDigest) || !validDigest(proofRecordDigest) ||
+        proofRecordDigest !== lifecycleDigest(proofPreimage) || custody === undefined ||
+        custody.projectSessionId !== source.projectSessionId || custody.runId !== source.runId ||
+        custody.agentId !== source.agentId || custody.requestDigest !== source.requestDigest ||
+        canonicalJson(custody.pair) !== canonicalJson(source.pair) ||
+        custody.checkpoint.checkpointDigest !== source.sourceCheckpointDigest ||
+        custody.disposition !== source.disposition || custody.terminalEvidence === null ||
+        custody.terminalEvidence.detail !== source.detail || custody.terminalEvidence.proofDigest !== source.evidenceDigest) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "custody disposition proof is malformed, crossed or substituted");
+      }
+      domain.#setUnique(domain.#custodyDispositionProofs, source.custodyRef, Object.freeze(structuredClone(source)));
+    }
+    for (const custody of domain.#custodies.values()) {
+      const requiresDispositionProof = custody.disposition === "superseded" || custody.disposition === "quarantined";
+      if (requiresDispositionProof !== domain.#custodyDispositionProofs.has(custody.custodyRef)) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "custody disposition lacks one independently persisted proof record");
+      }
     }
     for (const entry of snapshot.contextEvents) {
       if (!hasExactKeys(entry, ["key", "observation", "observationDigest", "result"]) || !validDigest(entry.observationDigest) ||
@@ -1256,6 +1365,17 @@ export class LifecycleRotationDomain {
         retirementKey(source.recoverySourceKind, source.recoverySourceRef),
         Object.freeze(structuredClone(source)),
       );
+    }
+    for (const custody of domain.#custodies.values()) {
+      if (custody.disposition !== "abandoned" || custody.terminalEvidence === null) continue;
+      const retirement = custody.recoveryFromLossId === null
+        ? domain.#recoveryRetirements.get(retirementKey("custody", custody.custodyRef))
+        : domain.#recoveryRetirements.get(retirementKey("generation-loss", custody.recoveryFromLossId));
+      if (retirement === undefined ||
+        custody.terminalEvidence.proofDigest !== retirement.directHumanAttestationDigest ||
+        custody.terminalEvidence.detail !== retirement.abandonReason) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "abandoned custody proof is not bound to its retirement attestation");
+      }
     }
     const commandCustodyRefs = snapshot.commands.map((entry) => entry.custodyRef);
     if (commandCustodyRefs.length !== domain.#custodies.size || new Set(commandCustodyRefs).size !== domain.#custodies.size) {
@@ -1525,6 +1645,12 @@ export class LifecycleRotationDomain {
       recoveryRetirements: [...this.#recoveryRetirements.values()]
         .sort((left, right) => left.retirementId.localeCompare(right.retirementId))
         .map((retirement) => structuredClone(retirement)),
+      reviewCertificationCuts: [...this.#reviewCertificationCuts.values()]
+        .sort((left, right) => left.lifecycleCustodyRef.custodyId.localeCompare(right.lifecycleCustodyRef.custodyId))
+        .map((cut) => structuredClone(cut)),
+      custodyDispositionProofs: [...this.#custodyDispositionProofs.values()]
+        .sort((left, right) => left.custodyRef.localeCompare(right.custodyRef))
+        .map((proof) => structuredClone(proof)),
     };
     return { ...preimage, snapshotDigest: lifecycleDigest(preimage) };
   }
@@ -2294,6 +2420,20 @@ export class LifecycleRotationDomain {
       throw new LifecycleDomainError("FRESH_RECOVERY_ISSUE_INVALID", "fresh rotation requires one exact issued capability");
     }
     const loss = this.#loss(_request.projectSessionId, _request.runId, _request.lossId);
+    const existing = this.#freshRotations.get(_request.issueId);
+    if (existing !== undefined) {
+      const exactReplay = existing.projectSessionId === _request.projectSessionId &&
+        existing.runId === _request.runId && existing.lossId === _request.lossId &&
+        typeof _request.capability === "string" && lifecycleDigest(_request.capability) === existing.issueCapabilityHash &&
+        canonicalJson(existing.pair) === canonicalJson(_request.pair) &&
+        exactCheckpoint(existing.checkpoint, _request.checkpoint) &&
+        existing.checkpointValidation.checkpointRef === _request.checkpointArtifactRef &&
+        existing.adapterContractDigest === _request.adapterContractDigest && existing.operation === _request.operation;
+      if (!exactReplay) {
+        throw new LifecycleDomainError("FRESH_ROTATE_PREVIEW_CONFLICT", "fresh rotation preview changed immutable input");
+      }
+      return existing;
+    }
     if (loss.state !== "open") throw new LifecycleDomainError("LOSS_NOT_OPEN", "generation loss is not direct-open");
     if (!validActionPair(_request.pair) || !validDigest(_request.adapterContractDigest) || _request.operation.length === 0) {
       throw new LifecycleDomainError("RECOVERY_ACTION_PAIR_INVALID", "fresh rotation requires the closed canonical action pair");
@@ -2357,13 +2497,6 @@ export class LifecycleRotationDomain {
       reservedPrincipalGeneration: principalGeneration,
       reservedBridgeGeneration: bridgeGeneration,
     });
-    const existing = this.#freshRotations.get(issue.issueId);
-    if (existing !== undefined) {
-      if (canonicalJson(existing) !== canonicalJson(preparation)) {
-        throw new LifecycleDomainError("FRESH_ROTATE_PREVIEW_CONFLICT", "fresh rotation preview changed immutable input");
-      }
-      return existing;
-    }
     this.#freshRotations.set(issue.issueId, preparation);
     return preparation;
   }
@@ -3056,6 +3189,13 @@ export class LifecycleRotationDomain {
     custody.disposition = disposition;
     custody.history.push(disposition);
     custody.terminalEvidence = terminalEvidenceFor(custody, disposition, detail, proofDigest);
+    if (disposition === "superseded" || disposition === "quarantined") {
+      this.#setUnique(
+        this.#custodyDispositionProofs,
+        custody.custodyRef,
+        dispositionProofFor(custody, disposition, detail, proofDigest),
+      );
+    }
     if ((disposition === "no-effect" || disposition === "superseded") && custody.changedWriteCustodyIds.length > 0) {
       const changed = new Set(custody.changedWriteCustodyIds);
       let restored = false;
@@ -3092,9 +3232,6 @@ export class LifecycleRotationDomain {
     commitLifecycleAdoption: (decision: ReviewAdoptionDecision | null) => boolean,
   ): boolean {
     const port = this.#ports.reviewCertification;
-    if (port === undefined) {
-      return commitLifecycleAdoption({ kind: "no-current-target" });
-    }
     const lifecycleCustodyRef = {
       schemaVersion: 1 as const,
       runId: custody.runId,
@@ -3111,9 +3248,57 @@ export class LifecycleRotationDomain {
       successorBridgeGeneration: candidate.bridgeGeneration,
       launchAttestation: candidate.launchAttestation,
     });
-    let adoptionAttempted = false;
-    let adoptionCommitted = false;
-    let committedDecision: ReviewAdoptionDecision | null = null;
+    let target: ReviewCertificationTargetSnapshot | null = null;
+    if (port !== undefined) {
+      try {
+        const observed = port.readCurrentTarget({
+          projectSessionId: custody.projectSessionId,
+          runId: custody.runId,
+          agentId: custody.agentId,
+        });
+        if (observed !== null && hasExactKeys(observed, [
+          "schemaVersion", "runId", "targetGeneration", "predecessorBindingGeneration",
+          "predecessorBindingDigest", "terminalSequenceHighWater",
+        ]) && observed.schemaVersion === 1 && observed.runId === custody.runId &&
+          Number.isSafeInteger(observed.targetGeneration) && observed.targetGeneration >= 1 &&
+          Number.isSafeInteger(observed.predecessorBindingGeneration) && observed.predecessorBindingGeneration >= 1 &&
+          validDigest(observed.predecessorBindingDigest) && Number.isSafeInteger(observed.terminalSequenceHighWater) &&
+          observed.terminalSequenceHighWater >= 0) {
+          target = observed;
+        }
+      } catch {
+        target = null;
+      }
+    }
+    const cut = target === null
+      ? null
+      : (() => {
+          const preimage = {
+            schemaVersion: 1 as const,
+            runId: target.runId,
+            targetGeneration: target.targetGeneration,
+            predecessorBindingGeneration: target.predecessorBindingGeneration,
+            predecessorBindingDigest: target.predecessorBindingDigest,
+            terminalSequenceHighWater: target.terminalSequenceHighWater,
+            lifecycleCustodyRef,
+            lifecycleAdoptionEvidenceDigest,
+          };
+          return Object.freeze({ ...preimage, cutDigest: lifecycleDigest(preimage) });
+        })();
+    const fallbackDecision: ReviewAdoptionDecision = cut === null
+      ? { kind: "no-current-target" }
+      : { kind: "stale", cut, reason: "same-subject-predicate-failed" };
+    if (!commitLifecycleAdoption(fallbackDecision)) return false;
+    if (cut !== null) this.#setUnique(this.#reviewCertificationCuts, custody.custodyRef, cut);
+    if (port === undefined) return true;
+    const setDecision = (decision: ReviewAdoptionDecision): void => {
+      custody.reviewDecision = structuredClone(decision);
+      if (custody.recoveryFromLossId !== null) {
+        this.#loss(custody.projectSessionId, custody.runId, custody.recoveryFromLossId).reviewDecision = structuredClone(decision);
+      }
+    };
+    let decisionAttempted = false;
+    let committedDecision: ReviewAdoptionDecision = fallbackDecision;
     const commitDecision = (candidateDecision: ReviewAdoptionDecision): boolean => {
       this.#assertReviewAdoptionDecision(
         candidateDecision,
@@ -3121,13 +3306,18 @@ export class LifecycleRotationDomain {
         lifecycleCustodyRef,
         lifecycleAdoptionEvidenceDigest,
       );
-      adoptionAttempted = true;
-      if (committedDecision !== null) {
+      if ((cut === null && candidateDecision.kind !== "no-current-target") ||
+        (cut !== null && (candidateDecision.kind === "no-current-target" ||
+          canonicalJson(candidateDecision.cut) !== canonicalJson(cut)))) {
+        throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "review decision crossed its lifecycle-owned certification cut");
+      }
+      if (decisionAttempted) {
         return canonicalJson(committedDecision) === canonicalJson(candidateDecision);
       }
-      adoptionCommitted = commitLifecycleAdoption(candidateDecision);
-      if (adoptionCommitted) committedDecision = structuredClone(candidateDecision);
-      return adoptionCommitted;
+      decisionAttempted = true;
+      committedDecision = structuredClone(candidateDecision);
+      setDecision(committedDecision);
+      return true;
     };
     try {
       port.commitReviewAdoption({
@@ -3137,13 +3327,9 @@ export class LifecycleRotationDomain {
         commitLifecycleAdoption: commitDecision,
       });
     } catch {
-      if (adoptionCommitted) return true;
-      return commitLifecycleAdoption(null);
+      setDecision(fallbackDecision);
     }
-    if (!adoptionAttempted) {
-      return commitLifecycleAdoption(null);
-    }
-    return adoptionCommitted;
+    return true;
   }
 
   #assertReviewAdoptionDecision(

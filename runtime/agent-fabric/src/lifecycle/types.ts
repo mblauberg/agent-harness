@@ -236,6 +236,15 @@ export interface ReviewCertificationCut {
   readonly cutDigest: LifecycleDigest;
 }
 
+export interface ReviewCertificationTargetSnapshot {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly targetGeneration: number;
+  readonly predecessorBindingGeneration: number;
+  readonly predecessorBindingDigest: LifecycleDigest;
+  readonly terminalSequenceHighWater: number;
+}
+
 export interface LifecycleCustodyRef {
   readonly schemaVersion: 1;
   readonly runId: string;
@@ -258,6 +267,11 @@ export type ReviewAdoptionDecision =
     };
 
 export interface ReviewCertificationDecisionPort {
+  readCurrentTarget(input: {
+    readonly projectSessionId: string;
+    readonly runId: string;
+    readonly agentId: string;
+  }): ReviewCertificationTargetSnapshot | null;
   commitReviewAdoption(input: {
     readonly lifecycleCustodyRef: LifecycleCustodyRef;
     readonly lifecycleAdoptionEvidenceDigest: LifecycleDigest;
@@ -411,6 +425,21 @@ export interface LifecycleCustodyTerminalEvidence {
   readonly detail: string;
   readonly proofDigest: LifecycleDigest;
   readonly terminalEvidenceDigest: LifecycleDigest;
+}
+
+export interface LifecycleCustodyDispositionProof {
+  readonly schemaVersion: 1;
+  readonly projectSessionId: string;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly custodyRef: string;
+  readonly requestDigest: LifecycleDigest;
+  readonly pair: ProviderActionPair;
+  readonly sourceCheckpointDigest: LifecycleDigest;
+  readonly disposition: "superseded" | "quarantined";
+  readonly detail: string;
+  readonly evidenceDigest: LifecycleDigest;
+  readonly proofRecordDigest: LifecycleDigest;
 }
 
 export interface LifecycleHighWaterView {
@@ -681,6 +710,8 @@ export interface LifecycleDomainSnapshotV1 {
   }[];
   readonly recoveryIssues: readonly LifecycleRecoveryIssue[];
   readonly recoveryRetirements: readonly LifecycleRecoveryRetirement[];
+  readonly reviewCertificationCuts: readonly ReviewCertificationCut[];
+  readonly custodyDispositionProofs: readonly LifecycleCustodyDispositionProof[];
   readonly snapshotDigest: LifecycleDigest;
 }
 

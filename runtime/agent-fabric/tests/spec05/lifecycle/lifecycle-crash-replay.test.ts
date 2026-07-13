@@ -229,6 +229,16 @@ describe("Spec 05 lifecycle crash and replay", () => {
     const domain = new LifecycleRotationDomain({
       provider,
       reviewCertification: {
+        readCurrentTarget() {
+          return {
+            schemaVersion: 1,
+            runId: "run-crash",
+            targetGeneration: 8,
+            predecessorBindingGeneration: 7,
+            predecessorBindingDigest: digest("review-predecessor"),
+            terminalSequenceHighWater: 13,
+          };
+        },
         commitReviewAdoption(input) {
           const cutPreimage = {
             schemaVersion: 1 as const,
@@ -283,6 +293,9 @@ describe("Spec 05 lifecycle crash and replay", () => {
     const recoveredDomain = LifecycleRotationDomain.hydrate({
       provider,
       reviewCertification: {
+        readCurrentTarget() {
+          throw new Error("review transaction owner must not be re-entered");
+        },
         commitReviewAdoption() {
           throw new Error("review transaction owner must not be re-entered");
         },
@@ -469,6 +482,25 @@ describe("Spec 05 lifecycle terminal dispositions", () => {
     expect(domain.abandonCustody(request)).toEqual(first);
     expect(domain.snapshot().audits).toHaveLength(auditCount);
     expect(domain.inspectAgent(PROJECT, "run-crash", "chair")).toMatchObject({ lifecycle: "archived", claimsFrozen: true });
+    const tampered = structuredClone(domain.snapshot()) as any;
+    const abandoned = tampered.custodies.find((entry: any) => entry.custodyRef === accepted.custodyRef);
+    abandoned.terminalEvidence.proofDigest = digest("substituted-retirement-attestation");
+    abandoned.terminalEvidence.terminalEvidenceDigest = lifecycleDigest({
+      schemaVersion: 1,
+      custodyRef: abandoned.custodyRef,
+      requestDigest: abandoned.requestDigest,
+      pair: abandoned.pair,
+      disposition: abandoned.disposition,
+      detail: abandoned.terminalEvidence.detail,
+      proofDigest: abandoned.terminalEvidence.proofDigest,
+      history: abandoned.history,
+    });
+    const { snapshotDigest: _ignored, ...preimage } = tampered;
+    expect(() => LifecycleRotationDomain.hydrate({
+      provider: new JournalProvider(),
+      recoveryAuthority: trustedRecoveryAuthority,
+    }, { ...preimage, snapshotDigest: lifecycleDigest(preimage) }))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
   });
 
   it("retires an already-final custody without rewriting it and hydrates the durable retirement", () => {

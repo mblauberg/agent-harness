@@ -169,6 +169,17 @@ function reboundDecision(input: {
   };
 }
 
+function currentReviewTarget() {
+  return {
+    schemaVersion: 1 as const,
+    runId: "run-third",
+    targetGeneration: 2,
+    predecessorBindingGeneration: 1,
+    predecessorBindingDigest: digest("predecessor-binding"),
+    terminalSequenceHighWater: 1,
+  };
+}
+
 describe("Spec 05 lifecycle closed durable snapshot", () => {
   it("seals the exact schema and rejects any unsealed field change", () => {
     const domain = new LifecycleRotationDomain({ provider: new TerminalProvider() }, [seed()]);
@@ -183,6 +194,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
       "commands",
       "contextEvents",
       "custodies",
+      "custodyDispositionProofs",
       "freshRotationCommitDigests",
       "freshRotations",
       "losses",
@@ -190,6 +202,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
       "providerHighWater",
       "recoveryIssues",
       "recoveryRetirements",
+      "reviewCertificationCuts",
       "schemaVersion",
       "snapshotDigest",
     ]);
@@ -203,6 +216,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
   it.each([
     ["agent field", (snapshot: any) => { snapshot.agents[0].taskRevision += 1; }],
     ["custody collection", (snapshot: any) => { snapshot.custodies.push({ forged: true }); }],
+    ["custody disposition proof collection", (snapshot: any) => { snapshot.custodyDispositionProofs.push({ forged: true }); }],
     ["command collection", (snapshot: any) => { snapshot.commands.push({ key: "forged", custodyRef: "forged" }); }],
     ["high-water", (snapshot: any) => { snapshot.providerHighWater[0].value += 1; }],
     ["principal high-water", (snapshot: any) => { snapshot.principalHighWater[0].value += 1; }],
@@ -213,6 +227,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
     ["fresh preview collection", (snapshot: any) => { snapshot.freshRotations.push({ forged: true }); }],
     ["fresh commit collection", (snapshot: any) => { snapshot.freshRotationCommitDigests.push({ forged: true }); }],
     ["recovery retirement collection", (snapshot: any) => { snapshot.recoveryRetirements.push({ forged: true }); }],
+    ["review certification cut collection", (snapshot: any) => { snapshot.reviewCertificationCuts.push({ forged: true }); }],
   ])("rejects an unsealed %s tamper", (_label, mutate) => {
     const domain = new LifecycleRotationDomain({ provider: new TerminalProvider() }, [seed()]);
     const tampered = structuredClone(domain.snapshot()) as any;
@@ -255,6 +270,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     domain = new LifecycleRotationDomain({
       provider,
       reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
         commitReviewAdoption(input) {
           expect(input.commitLifecycleAdoption(reboundDecision(input) as never)).toBe(true);
           observedInside = domain.inspectCustody(PROJECT, "run-third", input.lifecycleCustodyRef.custodyId);
@@ -277,6 +293,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     const domain = new LifecycleRotationDomain({
       provider,
       reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
         commitReviewAdoption(input) {
           input.commitLifecycleAdoption(reboundDecision(input) as never);
           throw new Error("review transaction rollback");
@@ -289,7 +306,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).resolves.toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: { kind: "rebound" },
+      reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
     });
     expect(domain.inspectAgent(PROJECT, "run-third", "chair")).toMatchObject({
       lifecycle: "ready",
@@ -300,15 +317,18 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     expect(domain.inspectCustody(PROJECT, "run-third", accepted.custodyRef)).toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: { kind: "rebound" },
+      reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
     });
   });
 
-  it("adopts without a review decision when the transaction owner returns without committing", async () => {
+  it("persists a lifecycle-owned cut and leaves a present target stale when review returns without committing", async () => {
     const provider = new TerminalProvider();
     const domain = new LifecycleRotationDomain({
       provider,
-      reviewCertification: { commitReviewAdoption() {} },
+      reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
+        commitReviewAdoption() {},
+      } as never,
     }, [seed()]);
     const accepted = request(domain);
     domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
@@ -316,7 +336,16 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).resolves.toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: null,
+      reviewDecision: {
+        kind: "stale",
+        reason: "same-subject-predicate-failed",
+        cut: {
+          targetGeneration: 2,
+          predecessorBindingGeneration: 1,
+          terminalSequenceHighWater: 1,
+          lifecycleCustodyRef: { custodyId: accepted.custodyRef },
+        },
+      },
     });
     expect(domain.inspectAgent(PROJECT, "run-third", "chair")).toMatchObject({
       lifecycle: "ready",
@@ -325,8 +354,14 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     expect(domain.inspectCustody(PROJECT, "run-third", accepted.custodyRef)).toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: null,
+      reviewDecision: { kind: "stale" },
     });
+    expect((domain.snapshot() as any).reviewCertificationCuts).toMatchObject([{
+      targetGeneration: 2,
+      predecessorBindingGeneration: 1,
+      terminalSequenceHighWater: 1,
+      lifecycleCustodyRef: { custodyId: accepted.custodyRef },
+    }]);
   });
 });
 

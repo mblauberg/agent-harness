@@ -385,6 +385,110 @@ describe("Spec 05 closed provider terminal evidence", () => {
 });
 
 describe("Spec 05 exact snapshot correlations", () => {
+  it("rejects a resealed adopted proof substituted away from its launch attestation", async () => {
+    const provider = new ConfigurableProvider();
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(domain, "adopted-proof-substitution");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .resolves.toMatchObject({ disposition: "adopted" });
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const custody = snapshot.custodies[0];
+    custody.terminalEvidence.proofDigest = digest("substituted-launch-attestation");
+    custody.terminalEvidence.terminalEvidenceDigest = lifecycleDigest({
+      schemaVersion: 1,
+      custodyRef: custody.custodyRef,
+      requestDigest: custody.requestDigest,
+      pair: custody.pair,
+      disposition: custody.disposition,
+      detail: custody.terminalEvidence.detail,
+      proofDigest: custody.terminalEvidence.proofDigest,
+      history: custody.history,
+    });
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects a resealed no-effect proof substituted away from its provider proof audit", async () => {
+    const provider = new ConfigurableProvider();
+    provider.outcome = "no-effect";
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(domain, "no-effect-proof-substitution");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .resolves.toMatchObject({ disposition: "no-effect" });
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const custody = snapshot.custodies[0];
+    custody.terminalEvidence.proofDigest = digest("substituted-provider-no-effect-proof");
+    custody.terminalEvidence.terminalEvidenceDigest = lifecycleDigest({
+      schemaVersion: 1,
+      custodyRef: custody.custodyRef,
+      requestDigest: custody.requestDigest,
+      pair: custody.pair,
+      disposition: custody.disposition,
+      detail: custody.terminalEvidence.detail,
+      proofDigest: custody.terminalEvidence.proofDigest,
+      history: custody.history,
+    });
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects a resealed superseded proof substituted away from its persisted source-drift record", async () => {
+    const provider = new ConfigurableProvider();
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(domain, "superseded-proof-substitution");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    domain.advanceRevision(PROJECT, RUN, "chair", "task");
+    await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .resolves.toMatchObject({ disposition: "superseded" });
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const custody = snapshot.custodies[0];
+    custody.terminalEvidence.proofDigest = digest("substituted-source-drift");
+    custody.terminalEvidence.terminalEvidenceDigest = lifecycleDigest({
+      schemaVersion: 1,
+      custodyRef: custody.custodyRef,
+      requestDigest: custody.requestDigest,
+      pair: custody.pair,
+      disposition: custody.disposition,
+      detail: custody.terminalEvidence.detail,
+      proofDigest: custody.terminalEvidence.proofDigest,
+      history: custody.history,
+    });
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects a resealed quarantined proof substituted away from its persisted provider-integrity record", async () => {
+    const provider = new ConfigurableProvider();
+    provider.providerExtras = { hiddenProviderField: "forged" };
+    const domain = new LifecycleRotationDomain({ provider }, [seed()]);
+    const accepted = request(domain, "quarantined-proof-substitution");
+    domain.markTurnTerminal(PROJECT, RUN, "chair", "caller");
+    await expect(domain.driveRotation(PROJECT, RUN, accepted.custodyRef))
+      .resolves.toMatchObject({ disposition: "quarantined" });
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(structuredClone(snapshot)))).not.toThrow();
+    const custody = snapshot.custodies[0];
+    custody.terminalEvidence.proofDigest = digest("substituted-provider-integrity-proof");
+    custody.terminalEvidence.terminalEvidenceDigest = lifecycleDigest({
+      schemaVersion: 1,
+      custodyRef: custody.custodyRef,
+      requestDigest: custody.requestDigest,
+      pair: custody.pair,
+      disposition: custody.disposition,
+      detail: custody.terminalEvidence.detail,
+      proofDigest: custody.terminalEvidence.proofDigest,
+      history: custody.history,
+    });
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
   it.each([
     ["skipped target", (snapshot: any) => {
       snapshot.custodies[0].reservedProviderGeneration = 3;
