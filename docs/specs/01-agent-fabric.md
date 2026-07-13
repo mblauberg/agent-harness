@@ -8598,11 +8598,13 @@ lookup that could bless the unannounced generation; only the exact operator
 fresh-rotate/abandon paths below can close it.
 
 Generation-loss edges are `open -> recovery-in-progress -> recovered-adopted`,
-`recovery-in-progress -> abandoned` and direct `open -> abandoned`.
+`recovery-in-progress -> abandoned`, `recovery-in-progress -> open` and direct
+`open -> abandoned`.
 fresh-rotate binds its new custody and canonical provider action pair to the
 loss and moves open to recovery-in-progress. Only adopted custody atomically
 records recovered-adopted and clears loss freezes. A no-effect/quarantined/
-superseded custody returns the loss to open with immutable attempt history.
+superseded custody returns the loss to open (the `recovery-in-progress -> open`
+edge) with immutable attempt history.
 Direct-open abandon records `abandonKind: direct-open` and
 `recoveryActionRef: null`; abandon after a recovery attempt records
 `abandonKind: recovery-attempt` and that custody's exact
@@ -8630,7 +8632,9 @@ lifecycleRecoverySourceV1 arm, current validated checkpoint digest, exact source
 action/adapter/contract/bridge-row identity and revisions, provider/principal/
 bridge generations, current chair-lease generation when applicable, bridge-
 owner kind, fresh-rotate only, gate, issue/expiry and capability hash. Status is
-active, consumed, revoked or expired. Neither a generic session grant nor broad
+active, commit-pending, consumed, revoked or expired; a handoff without commit is
+commit-pending and freezes later expiry/revocation until exact apply or explicit
+integrity recovery (see section 9.4.1). Neither a generic session grant nor broad
 takeover reaches fresh-rotate Commit directly.
 
 The intent additionally binds one closed path:

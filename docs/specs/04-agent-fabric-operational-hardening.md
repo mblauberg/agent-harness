@@ -1005,10 +1005,13 @@ authority and run revisions and revokes every active Git grant under the old
 tuple in one transaction. `runs.dependency_revision` remains the canonical
 dependency owner; no grant-local counter may substitute for either revision.
 The history primary key is `(project_session_id, coordination_run_id,
-authority_revision)`. In addition to the full authority/allow-list tuple, the
-exact four-column tuple `(project_session_id, coordination_run_id,
-authority_revision, authority_ref)` is `UNIQUE`, so the existing
-`operator_git_effect_bindings` composite foreign key has a valid parent key.
+authority_revision)`. The exact four-column tuple `(project_session_id,
+coordination_run_id, authority_revision, authority_ref)` is `UNIQUE`, so the
+existing `operator_git_effect_bindings` composite foreign key has a valid parent
+key; the exact six-column tuple `(project_session_id, coordination_run_id,
+authority_revision, authority_ref, git_allowlist_epoch, git_allowlist_digest)`
+is likewise declared `UNIQUE`, so the allow-list-bound `operator_git_grants`
+composite foreign key also has a valid parent key.
 The history has a composite foreign key to `runs`. Insert/update triggers require the current
 `runs` authority tuple to have exactly one matching immutable history row.
 Adding, replacing or removing `git_allowlist_v1` appends authority history and
@@ -7550,8 +7553,8 @@ Capability issuance equality-copies every immutable loss source action,
 adapter/contract, principal/bridge/owner and chair session/run/lease field; it
 never late-resolves a mutable bridge/session join.
 
-Loss edges are open -> recovery-in-progress -> recovered-adopted|abandoned and
-direct open -> abandoned.
+Loss edges are open -> recovery-in-progress -> recovered-adopted|abandoned,
+recovery-in-progress -> open and direct open -> abandoned.
 Fresh custody no-effect/quarantine/supersession returns it to open with attempt
 history; only adopted custody terminalises recovered and clears freezes.
 Absent/invalid checkpoint permits fresh rotation only after the read-only
@@ -7734,6 +7737,7 @@ adapter_provider_smoke_subjects(
   PRIMARY KEY(adapter_id, smoke_id),
   UNIQUE(action_adapter_id, action_id),
   UNIQUE(evidence_id, evidence_revision),
+  CHECK(action_adapter_id = adapter_id),
   FOREIGN KEY(evidence_id, evidence_revision)
     REFERENCES artifacts(artifact_id, revision),
   FOREIGN KEY(action_adapter_id, action_id)
