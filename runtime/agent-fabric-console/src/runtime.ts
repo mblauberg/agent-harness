@@ -180,6 +180,10 @@ export class FabricConsoleRuntime {
   } | null = null;
   #inputFocusSession: Readonly<{ openerFocusId: string | null }> | null = null;
   #pendingReviewOpener: Readonly<{ focusId: string | null }> | null = null;
+  #inertWorkflowSettlement: {
+    review: FabricConsoleUiState["workflowReview"];
+    dataset: FabricConsoleDataset | null;
+  } | null = null;
   #closed = false;
   #closePromise: Promise<void> | null = null;
   #inputTail: Promise<void> = Promise.resolve();
@@ -213,10 +217,13 @@ export class FabricConsoleRuntime {
   }
 
   repaint(): FabricConsoleFrame {
-    this.#frame = this.#reconcileFocus(this.#renderCurrentFrame());
+    const rendered = this.#renderCurrentFrame();
+    this.#frame = rendered.mode === "inert"
+      ? rendered
+      : this.#reconcileFocus(rendered);
     if (!this.#closed) {
       this.#draw(this.#frame);
-      this.#recordReviewCoverage(this.#frame);
+      if (this.#frame.mode !== "inert") this.#recordReviewCoverage(this.#frame);
     }
     return this.#frame;
   }
@@ -389,6 +396,21 @@ export class FabricConsoleRuntime {
     this.#viewport = viewport;
     this.#pointer = { pressed: null };
     let frame = this.#renderCurrentFrame();
+    if (frame.mode === "inert") {
+      this.#frame = frame;
+      this.#draw(this.#frame);
+      return this.#frame;
+    }
+    if (this.#inertWorkflowSettlement !== null) {
+      const settlement = this.#inertWorkflowSettlement;
+      this.#inertWorkflowSettlement = null;
+      if (settlement.dataset !== null) this.#applyDataset(settlement.dataset);
+      this.#applyWorkflowReview(settlement.review);
+      this.#clampMasterOffsets();
+      frame = this.#renderCurrentFrame();
+      this.#clampActiveDetailOffset(frame);
+      frame = this.#renderCurrentFrame();
+    }
     if (this.#restorableResizeFocus !== null) {
       const restorable = this.#restorableResizeFocus;
       const originalVisible = frame.hitRegions.some(
@@ -423,7 +445,9 @@ export class FabricConsoleRuntime {
       };
       frame = this.#renderCurrentFrame();
     }
-    this.#frame = this.#reconcileFocus(frame);
+    this.#frame = this.#hasEnabledVisibleFocus(frame)
+      ? frame
+      : this.#reconcileFocus(frame);
     this.#draw(this.#frame);
     this.#recordReviewCoverage(this.#frame);
     return this.#frame;
@@ -454,6 +478,22 @@ export class FabricConsoleRuntime {
 
   updateDataset(dataset: FabricConsoleDataset): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
+    if (this.#frame.mode === "inert") {
+      if (this.#inertWorkflowSettlement !== null) {
+        this.#inertWorkflowSettlement = {
+          ...this.#inertWorkflowSettlement,
+          dataset,
+        };
+      }
+      return this.#frame;
+    }
+    this.#applyDataset(dataset);
+    this.#clampMasterOffsets();
+    this.#clampActiveDetailOffset(this.#renderCurrentFrame());
+    return this.repaint();
+  }
+
+  #applyDataset(dataset: FabricConsoleDataset): void {
     this.#controller.updateDataset(dataset);
     const confirmation = this.#ui.artifactConfirmation;
     const inspection = dataset.inspection;
@@ -469,13 +509,53 @@ export class FabricConsoleRuntime {
       this.#ui = { ...this.#ui, artifactConfirmation: null };
     }
     this.#pointer = { pressed: null };
-    return this.repaint();
+  }
+
+  #clampMasterOffsets(): void {
+    const scrollOffsetByView = { ...this.#ui.scrollOffsetByView };
+    let changed = false;
+    for (const view of FABRIC_VIEWS) {
+      const current = scrollOffsetByView[view];
+      if (current === undefined) continue;
+      const sessionChoiceCount = view === "project" &&
+          this.#controller.dataset.projectSessions?.selectedProjectSessionId === null
+        ? this.#controller.dataset.projectSessions.choices.length
+        : 0;
+      const maximum = Math.max(
+        0,
+        this.#controller.dataset.pages[view].rows.length + sessionChoiceCount - 1,
+      );
+      const clamped = Math.min(maximum, Math.max(0, Math.trunc(current)));
+      if (clamped !== current) {
+        scrollOffsetByView[view] = clamped;
+        changed = true;
+      }
+    }
+    if (changed) this.#ui = { ...this.#ui, scrollOffsetByView };
+  }
+
+  #clampActiveDetailOffset(frame: FabricConsoleFrame): void {
+    const view = this.#controller.state.activeView;
+    const current = this.#ui.detailScrollOffsetByView[view];
+    if (current === undefined) return;
+    const maximum = frame.hitRegions.find(
+      ({ id, kind }) => kind === "pager" && id.startsWith(`detail:${view}:`),
+    )?.scrollMaximum ?? 0;
+    const clamped = Math.min(maximum, Math.max(0, Math.trunc(current)));
+    if (clamped === current) return;
+    this.#ui = {
+      ...this.#ui,
+      detailScrollOffsetByView: {
+        ...this.#ui.detailScrollOffsetByView,
+        [view]: clamped,
+      },
+    };
   }
 
   setArtifactConfirmation(
     confirmation: ArtifactReviewConfirmation | null,
   ): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#ui = {
       ...this.#ui,
       artifactConfirmation: confirmation,
@@ -487,7 +567,7 @@ export class FabricConsoleRuntime {
   }
 
   setInputMode(mode: FabricConsoleUiState["inputMode"]): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     if (this.#ui.inputMode === "browse" && mode !== "browse") {
       this.#rememberInputOpener();
     }
@@ -499,7 +579,7 @@ export class FabricConsoleRuntime {
   }
 
   beginGuidedWorkflow(draft: ConsoleGuidedWorkflowDraft): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#rememberInputOpener();
     this.#pendingReviewOpener = { focusId: this.#ui.focusId };
     this.#ui = {
@@ -515,7 +595,7 @@ export class FabricConsoleRuntime {
   }
 
   cancelGuidedWorkflow(): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     const pendingOpener = this.#pendingReviewOpener;
     this.#pendingReviewOpener = null;
     this.#inputFocusSession = null;
@@ -534,7 +614,28 @@ export class FabricConsoleRuntime {
   setWorkflowReview(
     review: FabricConsoleUiState["workflowReview"],
   ): FabricConsoleFrame {
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
+    this.#applyWorkflowReview(review);
+    return this.repaint();
+  }
+
+  settleWorkflowReview(
+    review: FabricConsoleUiState["workflowReview"],
+  ): FabricConsoleFrame {
     if (this.#closed) return this.#frame;
+    if (this.#frame.mode === "inert") {
+      this.#inertWorkflowSettlement = {
+        review,
+        dataset: this.#inertWorkflowSettlement?.dataset ?? null,
+      };
+      return this.#frame;
+    }
+    return this.setWorkflowReview(review);
+  }
+
+  #applyWorkflowReview(
+    review: FabricConsoleUiState["workflowReview"],
+  ): void {
     const echoInput =
       review?.stage === "confirm" && review.confirmationMode === "echo";
     if (review === null) this.#pendingReviewOpener = null;
@@ -550,11 +651,10 @@ export class FabricConsoleRuntime {
         : null,
     };
     this.#setEditorActive?.(echoInput);
-    return this.repaint();
   }
 
   setFocus(focusId: string | null): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#restorableResizeFocus = null;
     this.#ui = { ...this.#ui, focusId };
     return this.repaint();
@@ -579,7 +679,11 @@ export class FabricConsoleRuntime {
     const frame = this.#frame;
     let actionTarget: CapturedActionTarget = { kind: "none" };
     let pointerIntents: readonly CapturedPointerIntent[] = [];
-    if (event.kind === "mouse" && this.#ui.mouseCapture) {
+    if (
+      frame.mode !== "inert" &&
+      event.kind === "mouse" &&
+      this.#ui.mouseCapture
+    ) {
       const reduced = this.#reducePointer(
         this.#pointer,
         event,
@@ -664,9 +768,22 @@ export class FabricConsoleRuntime {
 
   async #handleInput(input: CapturedInput): Promise<void> {
     const { event } = input;
-    this.#restorableResizeFocus = null;
     if (event.kind === "fatal") {
       await this.close("safety");
+      return;
+    }
+    if (event.kind === "key" && event.key === "ctrl-c") {
+      await this.close("safety");
+      return;
+    }
+    if (this.#frame.mode === "inert") {
+      if (
+        event.kind === "key" &&
+        event.key === "text" &&
+        event.text === "q"
+      ) {
+        await this.close("operator");
+      }
       return;
     }
     if (event.kind === "rejected") {
@@ -679,19 +796,7 @@ export class FabricConsoleRuntime {
       this.repaint();
       return;
     }
-    if (event.kind === "key" && event.key === "ctrl-c") {
-      await this.close("safety");
-      return;
-    }
-    if (
-      event.kind === "key" &&
-      event.key === "text" &&
-      event.text === "q" &&
-      this.#frame.mode === "inert"
-    ) {
-      await this.close("operator");
-      return;
-    }
+    this.#restorableResizeFocus = null;
     if (this.#ui.inputMode !== "browse" && event.kind === "mouse") {
       await this.#handleModalMouse(input);
       return;
