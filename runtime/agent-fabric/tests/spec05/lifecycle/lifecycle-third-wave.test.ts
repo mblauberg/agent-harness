@@ -364,6 +364,78 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     }]);
   });
 
+  it("rejects a resealed stale review decision downgraded to no target with its cut deleted", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
+        commitReviewAdoption() {},
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+    await domain.driveRotation(PROJECT, "run-third", accepted.custodyRef);
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    snapshot.custodies[0].reviewDecision = { kind: "no-current-target" };
+    snapshot.reviewCertificationCuts = [];
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, sealSnapshot(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects deleting the immutable review decision evidence from an adopted chair", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
+        commitReviewAdoption() {},
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+    await domain.driveRotation(PROJECT, "run-third", accepted.custodyRef);
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    snapshot.audits = snapshot.audits.filter((event: any) =>
+      event.kind !== "lifecycle-review-adoption-decision"
+    );
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, sealSnapshot(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects a resealed stale decision replaced by forged integrity evidence with its cut deleted", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget: currentReviewTarget,
+        commitReviewAdoption() {},
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+    await domain.driveRotation(PROJECT, "run-third", accepted.custodyRef);
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    const cut = snapshot.custodies[0].reviewDecision.cut;
+    const evidencePreimage = {
+      schemaVersion: 1 as const,
+      runId: "run-third",
+      lifecycleCustodyRef: cut.lifecycleCustodyRef,
+      lifecycleAdoptionEvidenceDigest: cut.lifecycleAdoptionEvidenceDigest,
+      reason: "target-read-failed" as const,
+    };
+    snapshot.custodies[0].reviewDecision = {
+      kind: "integrity-stale",
+      evidence: { ...evidencePreimage, evidenceDigest: lifecycleDigest(evidencePreimage) },
+    };
+    snapshot.reviewCertificationCuts = [];
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, sealSnapshot(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
   it("persists integrity-stale evidence instead of claiming no target when target observation fails", async () => {
     const provider = new TerminalProvider();
     const domain = new LifecycleRotationDomain({
@@ -405,6 +477,29 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     );
     expect(restored.inspectCustody(PROJECT, "run-third", accepted.custodyRef).reviewDecision)
       .toEqual(adopted.reviewDecision);
+  });
+
+  it("rejects a resealed integrity-stale decision downgraded to no target", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget() {
+          throw new Error("review target store unavailable");
+        },
+        commitReviewAdoption() {
+          throw new Error("review transaction unavailable");
+        },
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+    await domain.driveRotation(PROJECT, "run-third", accepted.custodyRef);
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    snapshot.custodies[0].reviewDecision = { kind: "no-current-target" };
+
+    expect(() => LifecycleRotationDomain.hydrate({ provider }, sealSnapshot(snapshot)))
+      .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
   });
 
   it("persists integrity-stale evidence instead of claiming no target for a malformed target row", async () => {

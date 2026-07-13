@@ -458,6 +458,43 @@ describe("Spec 05 operator generation-loss recovery", () => {
     )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
   });
 
+  it("rejects a recovered loss whose review decision is crossed from its adopted custody", async () => {
+    const provider = new RecoveryProvider();
+    const domain = recoveryDomain(provider);
+    const lossId = openLoss(domain);
+    preview(domain, lossId);
+    const accepted = domain.commitFreshRotation({
+      projectSessionId: PROJECT,
+      runId: "run-recovery",
+      lossId,
+      pair,
+      attemptId: attemptId(pair),
+    });
+    await domain.driveRotation(PROJECT, "run-recovery", accepted.custodyRef);
+    const tampered = structuredClone(domain.snapshot()) as any;
+    tampered.losses[0].reviewDecision = null;
+    const { snapshotDigest: _ignored, ...preimage } = tampered;
+
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects an open loss carrying a review decision without an adopted custody", () => {
+    const provider = new RecoveryProvider();
+    const domain = recoveryDomain(provider);
+    openLoss(domain);
+    const tampered = structuredClone(domain.snapshot()) as any;
+    tampered.losses[0].reviewDecision = { kind: "no-current-target" };
+    const { snapshotDigest: _ignored, ...preimage } = tampered;
+
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
   it("rejects stale checkpoint, broad authority and a noncanonical pair without mutation", () => {
     const domain = recoveryDomain(new RecoveryProvider());
     const lossId = openLoss(domain);

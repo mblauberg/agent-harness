@@ -338,6 +338,40 @@ function dispositionProofFor(
   return Object.freeze({ ...preimage, proofRecordDigest: lifecycleDigest(preimage) });
 }
 
+function reviewAdoptionDecisionEvidenceDigest(
+  custody: MutableCustody,
+  candidate: ReplacementCandidate,
+  decision: ReviewAdoptionDecision,
+): LifecycleDigest {
+  const lifecycleCustodyRef = {
+    schemaVersion: 1 as const,
+    runId: custody.runId,
+    agentId: custody.agentId,
+    custodyId: custody.custodyRef,
+    custodyRevision: 1,
+  };
+  const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
+    projectSessionId: custody.projectSessionId,
+    lifecycleCustodyRef,
+    checkpoint: custody.checkpoint,
+    successorProvider: candidate.provider,
+    successorPrincipalGeneration: candidate.principalGeneration,
+    successorBridgeGeneration: candidate.bridgeGeneration,
+    launchAttestation: candidate.launchAttestation,
+  });
+  return lifecycleDigest({
+    schemaVersion: 1,
+    projectSessionId: custody.projectSessionId,
+    runId: custody.runId,
+    agentId: custody.agentId,
+    lifecycleCustodyRef,
+    lifecycleAdoptionEvidenceDigest,
+    sourceCheckpointDigest: custody.checkpoint.checkpointDigest,
+    recoveryFromLossId: custody.recoveryFromLossId,
+    reviewDecision: decision,
+  });
+}
+
 function validTerminalEvidence(custody: MutableCustody): boolean {
   const evidence = custody.terminalEvidence;
   if (custody.phase !== "finalized" || custody.disposition === null) return evidence === null;
@@ -1147,6 +1181,23 @@ export class LifecycleRotationDomain {
       }
       domain.#audits.push({ ...event });
     }
+    for (const custody of domain.#custodies.values()) {
+      const owner = domain.#agents.get(agentKey(custody.projectSessionId, custody.runId, custody.agentId));
+      const decisionEvidence = domain.#audits.filter((event) =>
+        event.kind === "lifecycle-review-adoption-decision" &&
+        event.projectSessionId === custody.projectSessionId && event.runId === custody.runId &&
+        event.agentId === custody.agentId && event.sourceId === custody.custodyRef
+      );
+      const requiresDecisionEvidence = custody.disposition === "adopted" && owner?.role === "chair";
+      if (requiresDecisionEvidence) {
+        if (custody.candidate === null || custody.reviewDecision === null || decisionEvidence.length !== 1 ||
+          decisionEvidence[0]?.detail !== reviewAdoptionDecisionEvidenceDigest(custody, custody.candidate, custody.reviewDecision)) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "chair adoption lacks its immutable correlated review decision evidence");
+        }
+      } else if (decisionEvidence.length !== 0) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision evidence is not owned by an adopted chair custody");
+      }
+    }
     if ([...domain.#custodies.values()].some((custody) =>
       !hasTerminalCustodyEvidence(custody, domain.#audits, domain.#losses)
     )) {
@@ -1397,6 +1448,8 @@ export class LifecycleRotationDomain {
     for (const loss of domain.#losses.values()) {
       const sourceEvents = [...domain.#contextEvents.values()].filter((record) => record.result.lossId === loss.lossId);
       const linkedCustodies = [...domain.#custodies.values()].filter((custody) => custody.recoveryFromLossId === loss.lossId);
+      const adoptedCustodies = linkedCustodies.filter((custody) => custody.disposition === "adopted");
+      const adoptedCustody = adoptedCustodies[0];
       const reusedReservation = loss.cause === "generation-advance" && [...domain.#custodies.values()].some((custody) =>
         custody.projectSessionId === loss.projectSessionId && custody.runId === loss.runId &&
         custody.agentId === loss.agentId &&
@@ -1413,6 +1466,9 @@ export class LifecycleRotationDomain {
         sourceObservation.evidenceDigest !== loss.lossEvidenceDigest) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "generation loss requires one exact source observation");
       }
+      if (loss.state !== "recovered-adopted" && loss.reviewDecision !== null) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "non-adopted generation loss cannot carry a review decision");
+      }
       if (loss.state === "open" && (loss.actionPair !== null || nonfinal.length !== 0 ||
         loss.activeRecoveryAttemptId !== null || loss.activeRecoveryCustodyRef !== null)) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "open generation loss cannot own an action or nonfinal custody");
@@ -1423,7 +1479,9 @@ export class LifecycleRotationDomain {
         nonfinal[0]?.recoveryAttemptId !== loss.activeRecoveryAttemptId
       )) throw new LifecycleDomainError("SNAPSHOT_INVALID", "recovery-in-progress loss requires its exact nonfinal custody");
       if (loss.state === "recovered-adopted" && (
-        loss.actionPair === null || linkedCustodies.filter((custody) => custody.disposition === "adopted").length !== 1 ||
+        loss.actionPair === null || adoptedCustodies.length !== 1 || adoptedCustody === undefined ||
+        canonicalJson(loss.actionPair) !== canonicalJson(adoptedCustody.pair) ||
+        canonicalJson(loss.reviewDecision) !== canonicalJson(adoptedCustody.reviewDecision) ||
         loss.activeRecoveryAttemptId !== null || loss.activeRecoveryCustodyRef !== null || lossAgent === undefined ||
         lossAgent.writeRevision < loss.sourceWriteRevision || loss.fencedWriteCustodyIds.some((id) =>
           !lossAgent.writes.some((write) => write.custodyId === id && write.state === "lifecycle-quarantined")
@@ -3309,7 +3367,23 @@ export class LifecycleRotationDomain {
         : { kind: "no-current-target" };
     if (!commitLifecycleAdoption(fallbackDecision)) return false;
     if (cut !== null) this.#setUnique(this.#reviewCertificationCuts, custody.custodyRef, cut);
-    if (port === undefined) return true;
+    const persistDecisionEvidence = (): void => {
+      if (custody.reviewDecision === null) {
+        throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "chair adoption lacks its final review decision");
+      }
+      this.#audit(
+        "lifecycle-review-adoption-decision",
+        custody.projectSessionId,
+        custody.runId,
+        custody.agentId,
+        custody.custodyRef,
+        reviewAdoptionDecisionEvidenceDigest(custody, candidate, custody.reviewDecision),
+      );
+    };
+    if (port === undefined) {
+      persistDecisionEvidence();
+      return true;
+    }
     const setDecision = (decision: ReviewAdoptionDecision): void => {
       custody.reviewDecision = structuredClone(decision);
       if (custody.recoveryFromLossId !== null) {
@@ -3349,6 +3423,7 @@ export class LifecycleRotationDomain {
     } catch {
       setDecision(fallbackDecision);
     }
+    persistDecisionEvidence();
     return true;
   }
 
