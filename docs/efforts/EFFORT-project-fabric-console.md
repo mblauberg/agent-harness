@@ -1,6 +1,6 @@
 # EFFORT: project fabric console
 
-Updated: 12 July 2026
+Updated: 13 July 2026
 Status: active
 
 ## Destination
@@ -15,11 +15,18 @@ separate gates.
 ## Route
 
 - [x] Leg 1: canonical delivery run, binding Spec 01/04 amendments, independent amendment review and versioned evaluation plan
-- [x] Leg 2: one current public protocol and one current database baseline; incompatible pre-release state is preserved and rejected
-- [x] Leg 3: project-session/operator persistence, daemon lifecycle, current-generation seats, task-bound answer-bearing provider reviews and MCP projection
-- [x] Leg 4: standalone TypeScript Console and Herdr adapter, including responsive cell-grid rendering, terminal restoration and dynamic resize from ultra-small through wide layouts
-- [x] Leg 5: serial Fabric/RPC/MCP/package integration and affected lifecycle skills
-- [>] Leg 6: clean full harness/runtime/Console/Herdr/evaluation/load/audit gates and live MCP round-trip on the final integrated commit
+- [>] Leg 2: one current public protocol and one current database baseline; the
+  protocol is on the serial integration branch and the independently reviewed
+  database baseline is under bounded invariant repair
+- [>] Leg 3: project-session/operator persistence, daemon lifecycle,
+  current-generation seats, task-bound answer-bearing provider reviews and MCP
+  projection; lifecycle custody and the native review-portal supervisor await
+  independent review, while review-evidence daemon composition remains open
+- [>] Leg 4: standalone TypeScript Console and Herdr adapter, including
+  responsive cell-grid rendering, terminal restoration and dynamic resize from
+  ultra-small through wide layouts; exact 30x6/inert-boundary repair is active
+- [ ] Leg 5: serial Fabric/RPC/MCP/package integration and affected lifecycle skills
+- [ ] Leg 6: clean full harness/runtime/Console/Herdr/evaluation/load/audit gates and live MCP round-trip on the final integrated commit
 - [ ] Leg 7: fresh native, Claude Opus, Cursor Grok and Gemini reviews, bounded repair and machine-ready receipt
 - [ ] Leg 8: human-recorded 80x24 timed-identification evaluation and explicit final human acceptance
 
@@ -50,3 +57,9 @@ separate gates.
   task-bound answer-bearing provider review actions. The remaining route is
   fresh integrated evidence, independent review, the human timed-identification
   evaluation and final acceptance.
+- 13 July 2026 Codex: corrected this map after live branch inspection. Protocol
+  contracts and current result identities are staged on the serial integration
+  branch; database invariant repair, responsive Console repair and the native
+  review-portal supervisor are isolated parallel writes. Review-evidence,
+  topology/context and lifecycle persistence still require serial integration
+  before any full-gate or completion claim.
