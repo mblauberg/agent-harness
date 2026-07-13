@@ -51,6 +51,34 @@ const EXPECTED_CHAIR_PRINCIPAL = {
 const temporaryDirectories: string[] = [];
 const temporaryClosures: Array<() => Promise<void>> = [];
 
+function hydrateWorkspaceRoot(value: unknown, workspaceRoot: string): unknown {
+  if (typeof value === "string") return value.replaceAll("$WORKSPACE_ROOT", workspaceRoot);
+  if (Array.isArray(value)) return value.map((entry) => hydrateWorkspaceRoot(entry, workspaceRoot));
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, hydrateWorkspaceRoot(entry, workspaceRoot)]),
+    );
+  }
+  return value;
+}
+
+function normalizeFunctions(value: unknown): unknown {
+  if (typeof value === "function") return "[function]";
+  if (Array.isArray(value)) return value.map(normalizeFunctions);
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalizeFunctions(entry)]));
+  }
+  return value;
+}
+
+async function providerPermissionGolden(name: "admitted" | "claude" | "codex"): Promise<Record<string, unknown>> {
+  const value: unknown = JSON.parse(await readFile(
+    new URL(`../fixtures/provider-permissions/review-readonly.${name}.json`, import.meta.url),
+    "utf8",
+  ));
+  return hydrateWorkspaceRoot(value, "/workspace/project") as Record<string, unknown>;
+}
+
 function providerSessionProtocolTransport(
   call: ProviderSessionProtocolTransport["call"],
   close: ProviderSessionProtocolTransport["close"],
@@ -580,6 +608,22 @@ describe("Claude Agent SDK fabric adapter", () => {
       });
     },
   );
+
+  it("matches the exact current Claude review-readonly golden without SDK sandbox or a network fence", async () => {
+    const admitted = await providerPermissionGolden("admitted");
+    const options = claudeReadOnlyOptions({
+      ...admitted,
+      model: "claude-opus-4-6",
+      modelFamily: "anthropic",
+      maxTurns: 3,
+      effort: "high",
+      tools: ["Bash"],
+      allowedTools: ["Bash"],
+    });
+    expect(normalizeFunctions(options)).toStrictEqual(await providerPermissionGolden("claude"));
+    expect(options).not.toHaveProperty("sandbox");
+    expect(options).not.toHaveProperty("network");
+  });
 
   it("allows only path-bounded read tools for a delegated review root", async () => {
     const root = await mkdtemp(join(tmpdir(), "claude-review-root-"));
@@ -2112,6 +2156,16 @@ describe("Codex app-server fabric adapter", () => {
       approvalPolicy: "on-request",
       permissions: "read-only",
     })).toEqual({ cwd: "/workspace/src", sandbox: "read-only", approvalPolicy: "never" });
+  });
+  it("matches the exact current Codex review-readonly golden without a positive network fence", async () => {
+    const admitted = await providerPermissionGolden("admitted");
+    const configuration = codexThreadConfiguration({
+      ...admitted,
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+    });
+    expect(configuration).toStrictEqual(await providerPermissionGolden("codex"));
+    expect(configuration).not.toHaveProperty("network");
   });
   it("maps fabric turn, steer and release actions to an injected app-server boundary", async () => {
     const actionJournal = await journal();
