@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $# -le 1 ]] || { echo "usage: check-skill-javascript [skills-root]" >&2; exit 2; }
+
+SKILLS_ROOT="${1:-skills}"
+command -v node >/dev/null 2>&1 || { echo "node is required" >&2; exit 1; }
+[[ -d "$SKILLS_ROOT" ]] || { echo "skills root not found: $SKILLS_ROOT" >&2; exit 1; }
+
+checked=0
+while IFS= read -r -d '' script; do
+  node --check "$script" >/dev/null
+  checked=$((checked + 1))
+done < <(
+  find "$SKILLS_ROOT" \
+    -type d -name node_modules -prune -o \
+    -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -print0
+)
+
+(( checked > 0 )) || { echo "no skill JavaScript files found under: $SKILLS_ROOT" >&2; exit 1; }
+echo "PASS: checked $checked skill JavaScript files"

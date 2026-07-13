@@ -306,6 +306,57 @@ def test_orchestrate_static_checker_does_not_claim_model_routing_passes():
     assert " inferred" not in result.stdout
 
 
+@pytest.mark.parametrize("broken_suffix", ("js", "mjs", "cjs"))
+def test_skill_javascript_gate_checks_all_module_suffixes_and_prunes_dependencies(
+    tmp_path: Path,
+    broken_suffix: str,
+):
+    checker = ROOT / "scripts" / "check-skill-javascript"
+    assert checker.stat().st_mode & 0o111
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    (skills / "valid.js").write_text("const valid = true;\n")
+    (skills / "valid.mjs").write_text(
+        "export const valid = await Promise.resolve(true);\n"
+    )
+    (skills / "valid.cjs").write_text("module.exports = { valid: true };\n")
+    vendored = skills / "node_modules"
+    vendored.mkdir()
+    (vendored / "ignored.mjs").write_text("const = broken;\n")
+
+    passing = subprocess.run(
+        [str(checker), str(skills)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert passing.returncode == 0, passing.stderr
+    assert "PASS: checked 3 skill JavaScript files" in passing.stdout
+
+    broken = skills / f"broken.{broken_suffix}"
+    broken.write_text("const = broken;\n")
+    failing = subprocess.run(
+        [str(checker), str(skills)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert failing.returncode != 0
+    assert str(broken) in failing.stderr
+
+
+def test_skill_javascript_gate_rejects_an_empty_tree(tmp_path: Path):
+    checker = ROOT / "scripts" / "check-skill-javascript"
+    result = subprocess.run(
+        [str(checker), str(tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "no skill JavaScript files found" in result.stderr
+
+
 @pytest.mark.parametrize(
     "content",
     (

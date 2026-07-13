@@ -1,5 +1,6 @@
 import json
 import http.client
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -40,6 +41,65 @@ def _run_inject(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def test_live_wrap_does_not_execute_shell_syntax_from_project_filenames(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "SHELL_INJECTION_MARKER"
+    page = tmp_path / "$(touch SHELL_INJECTION_MARKER).html"
+    page.write_text('<html><body><section class="target">safe</section></body></html>\n')
+
+    result = subprocess.run(
+        [
+            "node",
+            str(SCRIPTS / "live-wrap.mjs"),
+            "--id",
+            "security-test",
+            "--count",
+            "1",
+            "--query",
+            "target",
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+
+
+def test_live_entrypoint_does_not_execute_shell_syntax_from_server_state(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "SHELL_INJECTION_MARKER"
+    page = tmp_path / "index.html"
+    page.write_text("<html><body>safe</body></html>\n")
+    _write_config(tmp_path, ["index.html"])
+    server_path = tmp_path / ".impeccable" / "live" / "server.json"
+    server_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "port": 8400,
+                "token": "$(touch SHELL_INJECTION_MARKER)",
+            }
+        )
+    )
+
+    result = subprocess.run(
+        ["node", str(SCRIPTS / "live.mjs")],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["error"] == "inject_failed"
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("escaping_path", ["../outside.html", "/tmp/outside.html"])

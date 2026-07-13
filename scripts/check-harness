@@ -32,7 +32,8 @@ while IFS= read -r -d '' script; do
   esac
 done < <(find skills -type f -name '*.sh' -print0)
 
-if command -v node >/dev/null 2>&1 && [[ -d "$HOME/.claude/workflows" ]]; then
+"$ROOT/scripts/check-skill-javascript" skills
+if [[ -d "$HOME/.claude/workflows" ]]; then
   while IFS= read -r -d '' workflow; do
     node --check "$workflow" >/dev/null
   done < <(find "$HOME/.claude/workflows" -maxdepth 1 -type f -name '*.js' -print0)
