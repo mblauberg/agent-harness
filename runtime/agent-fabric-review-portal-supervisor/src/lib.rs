@@ -102,11 +102,20 @@ pub struct CustodyEntry {
     pub digest: [u8; 32],
 }
 
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum CustodyRemovalState {
+    Canonical,
+    Claimed,
+    Removed,
+}
+
 #[derive(Debug)]
 pub enum CustodyError {
     InvalidBasename,
     DirectoryIdentityMismatch,
     DirectoryNotPrivate,
+    ClaimDirectoryNotDistinct,
     EntryIdentityMismatch,
     EntryDigestMismatch,
     EntryTypeForbidden,
@@ -210,6 +219,9 @@ impl fmt::Display for CustodyError {
                 formatter.write_str("custody directory identity changed")
             }
             Self::DirectoryNotPrivate => formatter.write_str("custody directory is not private"),
+            Self::ClaimDirectoryNotDistinct => {
+                formatter.write_str("custody claim directory is not a distinct trusted namespace")
+            }
             Self::EntryIdentityMismatch => formatter.write_str("custody entry identity changed"),
             Self::EntryDigestMismatch => formatter.write_str("custody entry digest changed"),
             Self::EntryTypeForbidden => formatter.write_str("custody entry type is not removable"),
@@ -417,7 +429,12 @@ pub fn inspect_custody_entry(
 }
 
 #[cfg(unix)]
-/// Removes one custody entry only when its recorded identity and kind still match.
+/// Idempotently moves one exact custody entry through a separately trusted claim directory and
+/// removes it only after revalidation there.
+///
+/// The caller must persist the claim-directory path and identity for crash recovery and keep that
+/// namespace outside the authority of every process able to mutate the canonical directory. The
+/// function rejects reuse of the canonical directory as the claim namespace.
 ///
 /// # Errors
 ///
@@ -425,6 +442,8 @@ pub fn inspect_custody_entry(
 pub fn remove_custody_entry(
     directory: &Path,
     expected_directory: FileIdentity,
+    claim_directory: &Path,
+    expected_claim_directory: FileIdentity,
     basename: &str,
     expected_entry: CustodyEntry,
 ) -> Result<(), CustodyError> {
@@ -432,36 +451,75 @@ pub fn remove_custody_entry(
 
     validate_cleanup_basename(basename)?;
     let directory = open_private_custody_directory(directory, expected_directory)?;
-    let actual_entry = inspect_custody_entry_at(&directory, basename)?;
-    require_expected_custody_entry(actual_entry, expected_entry)?;
-    let basename = custody_basename_c_string(basename)?;
-    let claim_basename = custody_claim_basename(&basename, expected_entry);
-
-    // Atomically move the current name into a private, no-replace claim before the final
-    // validation. A concurrent swap can therefore make validation fail, but it cannot redirect
-    // the eventual unlink back to a replacement at the public basename.
-    unsafe_sys::rename_entry_no_replace_at(
-        directory.as_raw_fd(),
-        &basename,
-        directory.as_raw_fd(),
-        &claim_basename,
-    )?;
+    let claim_directory =
+        open_private_custody_directory(claim_directory, expected_claim_directory)?;
+    if expected_directory == expected_claim_directory {
+        return Err(CustodyError::ClaimDirectoryNotDistinct);
+    }
+    let basename_c = custody_basename_c_string(basename)?;
+    let claim_basename = custody_claim_basename(&basename_c, expected_entry);
+    let basename = basename_c
+        .to_str()
+        .map_err(|_| CustodyError::InvalidBasename)?;
     let claim_name = claim_basename
         .to_str()
         .map_err(|_| CustodyError::InvalidBasename)?;
-    let claimed_entry = match inspect_custody_entry_at(&directory, claim_name) {
-        Ok(entry) => entry,
-        Err(error) => {
-            restore_custody_claim(&directory, &claim_basename, &basename)?;
-            return Err(error);
+
+    match custody_removal_state(
+        &directory,
+        basename,
+        &claim_directory,
+        claim_name,
+        expected_entry,
+    )? {
+        CustodyRemovalState::Canonical => {
+            // The raced source namespace chooses which inode reaches this atomic transition.
+            // Validate again only after the entry reaches the separately trusted namespace.
+            unsafe_sys::rename_entry_no_replace_at(
+                directory.as_raw_fd(),
+                &basename_c,
+                claim_directory.as_raw_fd(),
+                &claim_basename,
+            )?;
+            let claimed_entry = inspect_custody_entry_at(&claim_directory, claim_name)?;
+            require_expected_custody_entry(claimed_entry, expected_entry)?;
         }
-    };
-    if let Err(error) = require_expected_custody_entry(claimed_entry, expected_entry) {
-        restore_custody_claim(&directory, &claim_basename, &basename)?;
-        return Err(error);
+        CustodyRemovalState::Claimed => {}
+        CustodyRemovalState::Removed => return Ok(()),
     }
-    unsafe_sys::unlink_entry_at(directory.as_raw_fd(), &claim_basename)?;
+    unsafe_sys::unlink_entry_at(claim_directory.as_raw_fd(), &claim_basename)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn custody_removal_state(
+    directory: &std::fs::File,
+    basename: &str,
+    claim_directory: &std::fs::File,
+    claim_name: &str,
+    expected_entry: CustodyEntry,
+) -> Result<CustodyRemovalState, CustodyError> {
+    match inspect_custody_entry_at(claim_directory, claim_name) {
+        Ok(entry) => {
+            require_expected_custody_entry(entry, expected_entry)?;
+            return Ok(CustodyRemovalState::Claimed);
+        }
+        Err(error) if custody_entry_is_absent(&error) => {}
+        Err(error) => return Err(error),
+    }
+    match inspect_custody_entry_at(directory, basename) {
+        Ok(entry) => {
+            require_expected_custody_entry(entry, expected_entry)?;
+            Ok(CustodyRemovalState::Canonical)
+        }
+        Err(error) if custody_entry_is_absent(&error) => Ok(CustodyRemovalState::Removed),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn custody_entry_is_absent(error: &CustodyError) -> bool {
+    matches!(error, CustodyError::Io(error) if error.kind() == io::ErrorKind::NotFound)
 }
 
 #[cfg(unix)]
@@ -501,23 +559,6 @@ fn custody_claim_basename(
         write!(&mut claim, "{byte:02x}").expect("writing to a String cannot fail");
     }
     std::ffi::CString::new(claim).expect("claim name is fixed lowercase ASCII")
-}
-
-#[cfg(unix)]
-fn restore_custody_claim(
-    directory: &std::fs::File,
-    claim_basename: &std::ffi::CStr,
-    original_basename: &std::ffi::CStr,
-) -> Result<(), CustodyError> {
-    use std::os::fd::AsRawFd;
-
-    unsafe_sys::rename_entry_no_replace_at(
-        directory.as_raw_fd(),
-        claim_basename,
-        directory.as_raw_fd(),
-        original_basename,
-    )?;
-    Ok(())
 }
 
 #[cfg(unix)]

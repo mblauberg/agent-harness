@@ -13,9 +13,10 @@ Spec 04 section 9.21.3 and Spec 05 section 6:
   PID/start/PGID/session identity plus Darwin audit-token PID generation, verify bounded ancestry,
   and perform polled TERM -> 250 ms -> KILL -> bounded WNOHANG reap cleanup only for an exact
   isolated group while retaining trigger/outcome evidence;
-- custody helpers walk and retain no-follow directory descriptors, use fstatat/openat/unlinkat,
-  and remove only an exact owner-matched socket or SHA-256-matched regular file beneath the exact
-  0700 directory identity.
+- custody helpers walk and retain no-follow directory descriptors, require a separately persisted
+  private claim-directory identity outside the raced source namespace, and idempotently drive an
+  exact owner/digest-matched entry through `canonical -> claimed -> removed` using atomic rename,
+  post-claim revalidation and `unlinkat`.
 
 TypeScript remains the sole JSON-RPC/MCP parser, policy owner, ledger/journal
 owner and one-use broker. The binary never receives a bearer capability.
@@ -36,7 +37,8 @@ following on the activated build:
 - control EOF, deadline, cancellation, provider exit and daemon/supervisor
   death wiring to the cleanup owner;
 - durable persistence and comparison of the expected custody identity/digest passed to this
-  crate's no-follow removal boundary;
+  crate's no-follow removal boundary, plus the distinct private claim-directory path/device/inode
+  kept outside provider mutation authority;
 - current-build source/auth/tool/network denial plus `setsid`, double-fork,
   daemonisation and reparent escape canaries.
 
