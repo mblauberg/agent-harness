@@ -29,6 +29,7 @@ Framing decisions for the session: **personal-first, product-compatible**
 | D-018 | Direct cutover by default before stable release | **Accepted** | Both reviewers agree; pairs with F-020 compat-waiver policy. |
 | D-019 | Add explicit local threat modes | **Accepted, strengthened** | Codex round 1: isolation-substrate attestation (worktrees are NOT permission boundaries) becomes a hard gate on the write pilot, not just documentation. |
 | D-020 | Proposal-first, evaluated self-improvement | **Accepted, narrowed** | Manual flywheel already exists in `skills/retrospect`; runtime enforcement deferred (not P0). |
+| D-021 | Autonomous LLM-resolved implementation; PR review the only human gate | **Accepted — human directive** (2026-07-13) | codex `gpt-5.6-sol` chair (xhigh/max/ultra) + Opus pair implement every lane; each decision is LLM-resolved (chair discretion or council vote) and recorded here. Former human gates (spec-amendment acceptance, containment-spike verdict, 80×24 usability, final acceptance) become council decisions, landing via PR. Preserved boundaries (not delegated): no push-to-`main`/release/deploy/credential mutation, no network egress or external-effect enablement; the write-profile containment spike is still executed adversarially (only its verdict is adjudicated); `.agent-run/AFAB-004` never accessed. Charter: [`CHAIR-CHARTER.md`](CHAIR-CHARTER.md). |
 
 Style policy (F-025, round 7): `$caveman` remains default for inter-agent,
 mechanical and status traffic; human-facing explanatory output is

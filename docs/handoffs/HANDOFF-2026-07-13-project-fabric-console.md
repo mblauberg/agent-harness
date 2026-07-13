@@ -295,22 +295,36 @@ Then run the operations-runbook status/doctor and registered MCP health/round-
 trip commands. Record exact commit, environment, counts, failures and repair
 reruns. Older branch passes are not substitutes.
 
-## Human gates
+## Gates (under the chair charter)
 
-Only these remain genuine human gates:
+Per the human directive of 2026-07-13, this effort now runs under the
+[chair charter](../agent-harness-comprehensive-review/CHAIR-CHARTER.md). The
+gates below are reclassified accordingly.
+
+**LLM-resolved (chair discretion or council vote, recorded, then landed via PR
+review — the only human gate):**
 
 1. Acceptance of material v1.1-v1.13 additions without an exact direct-human
-   authority trace, plus any new material spec/one-way-door change outside the
-   accepted scope.
-2. Any lifting of the `.agent-run/AFAB-004` prohibition or appointment of an
-   authorised receipt verifier.
-3. The human-recorded 80x24 timed-identification evaluation.
-4. Explicit final acceptance.
-5. Any later push, release, deployment, provider-login change or credential/
-   registry mutation.
+   authority trace, and any new material spec/one-way-door change — council
+   vote; a genuine ADR/contract reversal is an explicit `D-nnn` record.
+2. The 80x24 timed-identification evaluation: the chair runs the evaluation
+   harness and the council adjudicates the result.
+3. "Final acceptance" of the effort: council vote on the assembled evidence,
+   then the PR carries that evidence for the human's review-and-merge.
 
-PR #6 acceptance and this local branch/worktree consolidation were already
-authorised. They do not authorise another push or release.
+**Preserved boundaries (NOT delegated; a new explicit human instruction is
+required to widen them):**
+
+4. The `.agent-run/AFAB-004` prohibition stands — it is never accessed, and
+   lifting it or appointing a receipt verifier remains a human-only decision.
+5. No push to `main`, release, deployment, provider-login change or credential/
+   registry mutation. The chair pushes feature branches and opens PRs only; the
+   human reviews and merges. Anything that would ship stops and asks the human.
+
+PR #6 acceptance and the earlier local branch/worktree consolidation were
+already authorised and do not authorise a push or release. The charter's
+feature-branch-push + PR-open authority is the sanctioned path to the human's
+review.
 
 ## Exit condition
 

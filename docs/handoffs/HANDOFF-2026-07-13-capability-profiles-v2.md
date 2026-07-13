@@ -2,6 +2,17 @@
 
 Status: active
 
+Governance: runs under the
+[chair charter](../agent-harness-comprehensive-review/CHAIR-CHARTER.md) (human
+directive 2026-07-13). Every "human-approved", "ask the human" and "acceptance"
+gate below is now **LLM-resolved** (chair discretion or council vote, recorded
+in the decision register) and lands via **PR review** — the only human gate.
+The preserved boundaries still hold verbatim: no push to `main`, no release/
+deploy, no write profile, no network egress or external effect; a change that
+would enable any of those still **stops and asks the human**. This handoff's
+technical content — resume gates, seam checks, file plan, acceptance commands —
+is unchanged and binding.
+
 Blocked-by: Lane A and Lane B must be accepted and integrated on `main`; do not
 start from sibling-worktree state
 

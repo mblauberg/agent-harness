@@ -67,13 +67,29 @@ spec-edit) leg, digest-bound to the ADRs and this map.
   governed deletion machinery, replay/time-travel Console work — after the
   write pilot proves out.
 
-## Human gates and exclusions
+## Governance, gates and exclusions
 
-- Spec amendment approval (Lane A) before any write-capable contract lands.
-- Containment-spike verdict review before the first write pilot (Step 3).
-- No network egress profile, no external-effect enablement, no release/push
-  authority anywhere in this effort.
-- Spec-05 close-out items (live MCP round-trips, four-family review, 80x24
-  human usability evaluation, final acceptance) remain owned by
-  [EFFORT-project-fabric-console.md](EFFORT-project-fabric-console.md), not
-  this effort.
+Per the human directive of 2026-07-13, this effort runs under the autonomous
+[chair charter](../agent-harness-comprehensive-review/CHAIR-CHARTER.md): a
+codex `gpt-5.6-sol` chair with an Opus pair implements every lane, LLM-resolving
+each decision (chair discretion or council vote) and recording it in the
+[decision register](../agent-harness-comprehensive-review/decision-register.md).
+
+- **The only human gate is PR review.** Nothing merges to `main` without a
+  human approving the pull request; no direct pushes or admin-merge-over-red.
+- **LLM-resolved (was human-gated):** the Lane A write-profile spec-amendment
+  acceptance; the Step-3 containment-spike verdict; risk-tier and lane
+  acceptance; and the Spec-05 close-out judgements (four-family review
+  adjudication, 80×24 usability result) — each still *produced* to full rigor,
+  only the accept decision moves from human to chair/council, then lands via PR.
+- **Preserved boundaries (not delegated):** no network-egress profile, no
+  external-effect enablement, no release/deploy, no production credential or
+  registry mutation — anywhere in this effort. The chair pushes feature
+  branches and opens PRs; it never ships. A lane that genuinely needs an
+  external effect stops and asks the human. The write-profile containment spike
+  is still executed adversarially (only its verdict is council-adjudicated).
+  `.agent-run/AFAB-004` is never accessed.
+- Spec-05 close-out items (live MCP round-trips, four-family review, 80×24
+  usability evaluation, final acceptance) remain owned by
+  [EFFORT-project-fabric-console.md](EFFORT-project-fabric-console.md), executed
+  under the same charter governance.
