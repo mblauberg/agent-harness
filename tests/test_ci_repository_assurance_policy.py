@@ -59,8 +59,18 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
     harness_steps = _steps(_job(document, "harness"))
     fabric_steps = _steps(_job(document, "fabric"))
 
+    harness_node_setup = next(
+        step for step in harness_steps if str(step.get("uses", "")).startswith("actions/setup-node@")
+    )
+    assert harness_node_setup.get("with", {}).get("node-version") == "24"
     harness_commands = "\n".join(str(step.get("run", "")) for step in harness_steps)
-    assert "scripts/check-harness" in harness_commands
+    for required in (
+        "npm --prefix runtime/agent-fabric-protocol ci --ignore-scripts",
+        "npm --prefix runtime/agent-fabric-protocol run build",
+        "npm --prefix runtime/agent-fabric ci --no-audit --no-fund",
+        "scripts/check-harness",
+    ):
+        assert required in harness_commands
 
     node_setup = next(step for step in fabric_steps if str(step.get("uses", "")).startswith("actions/setup-node@"))
     assert node_setup.get("with", {}).get("node-version") == "24"
