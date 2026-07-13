@@ -347,6 +347,51 @@ describe("public protocol server", () => {
     }
   });
 
+  it("rejects a structurally valid provider result whose action identity differs from its request", async () => {
+    const afterResponse = vi.fn();
+    const agentInitialize: ProtocolInitializeRequest = {
+      protocolVersion: 1,
+      client: { name: "provider-correlation-test", version: "1.0.0" },
+      authentication: {
+        scheme: "capability",
+        credential: "agent-secret-provider-correlation",
+        clientNonce: "provider_correlation_nonce_01",
+      },
+      expectedPrincipalKind: "agent",
+      requiredFeatures: ["fabric-core.v1"],
+      optionalFeatures: [],
+    };
+    const agentCredential: VerifiedProtocolCredential = {
+      principal: {
+        kind: "agent",
+        agentId: "chair_01" as never,
+        projectSessionId: "session_01" as never,
+        runId: "run_01",
+        principalGeneration: 1,
+      },
+      grantedOperations: [FABRIC_OPERATIONS.getProviderAction],
+    };
+    const transport = await connectServer(async () => ({
+      kind: "non-review",
+      actionRef: { adapterId: "adapter_wrong", actionId: "action_01" },
+      status: "prepared",
+      history: ["prepared"],
+      executionCount: 0,
+      effectCount: 0,
+    }), afterResponse, { initialize: agentInitialize, credential: agentCredential });
+
+    try {
+      await expect(transport.call(FABRIC_OPERATIONS.getProviderAction, {
+        adapterId: "adapter_expected",
+        actionId: "action_01",
+        expectedActionKind: "non-review",
+      })).rejects.toMatchObject({ name: "ProtocolRemoteError", code: "PROTOCOL_INVALID" });
+      expect(afterResponse).not.toHaveBeenCalled();
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("runs shutdown handoff only after a valid success is written", async () => {
     const afterResponse = vi.fn();
     const transport = await connectServer(async () => session, afterResponse);

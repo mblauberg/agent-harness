@@ -4,7 +4,7 @@ import {
   parseIdentifier,
   parseArtifactRef,
   parseOperatorCapabilityGrant,
-  parseProviderActionRefV1,
+  parseLaunchProviderActionJournalRefV1,
   parseSha256Digest,
   parseTimestamp,
   type OperatorActionCommitRequest,
@@ -1744,12 +1744,14 @@ describe("operator action store", () => {
         launchTerminal = true;
         return {};
       },
-      providerActionRefForCommand: () => parseProviderActionRefV1({
+      launchProviderActionJournalRefForCommand: () => parseLaunchProviderActionJournalRefV1({
         schemaVersion: 1,
         projectSessionId,
         coordinationRunId: "run_launch_01",
-        providerAdapterId: "claude-agent-sdk",
-        providerActionId,
+        actionRef: {
+          adapterId: "claude-agent-sdk",
+          actionId: providerActionId,
+        },
         providerContractDigest: authorityRef,
         custodyAttemptGeneration: 1,
         journalRevision: launchTerminal ? 2 : 1,

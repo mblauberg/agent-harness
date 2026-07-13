@@ -609,7 +609,7 @@ export class FabricConsoleApplication {
           eventId: activation.eventId,
           echoText: this.#runtime.ui.draft,
         });
-        this.#runtime.setWorkflowReview(committed.review);
+        this.#runtime.settleWorkflowReview(committed.review);
         if (committed.reconnectProjectSessionId !== null) {
           await this.#reconnectAfterProjectSessionCreate(
             committed.reconnectProjectSessionId,

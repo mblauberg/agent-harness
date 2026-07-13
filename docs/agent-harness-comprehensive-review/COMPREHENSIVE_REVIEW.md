@@ -495,48 +495,48 @@ Do not begin by renaming every directory. First add the root workspace and modul
 
 Fix the README count, add write permissions and continue extending current files.
 
-**Benefit:** low disruption.  
-**Failure mode:** compounds the Fabric and Console concentration, and makes every new feature harder to reason about.  
+**Benefit:** low disruption.
+**Failure mode:** compounds the Fabric and Console concentration, and makes every new feature harder to reason about.
 **Use:** only for immediate truth/defect fixes before the structural tranche.
 
 ### Option B — Modular monolith (**recommended**)
 
 One process, one SQLite authority, explicit bounded modules, one event journal, provider adapters and separate effect executors.
 
-**Benefit:** retains transactional simplicity and existing fail-closed semantics while improving locality, testing and replaceability.  
-**Cost:** requires careful characterisation and staged extraction.  
+**Benefit:** retains transactional simplicity and existing fail-closed semantics while improving locality, testing and replaceability.
+**Cost:** requires careful characterisation and staged extraction.
 **Fit:** best match for a local, single-operator, multi-agent harness.
 
 ### Option C — Distributed services/event-sourced platform
 
 Split scheduler, authority, provider workers, evidence and UI into network services.
 
-**Benefit:** theoretical independent scaling.  
-**Failure mode:** operational and security complexity dominates current needs; distributed transactions and schema evolution become the product.  
+**Benefit:** theoretical independent scaling.
+**Failure mode:** operational and security complexity dominates current needs; distributed transactions and schema evolution become the product.
 **Decision:** reject until measured concurrency, multi-host or multi-tenant requirements justify it.
 
 ### Option D — Provider-native only, remove Fabric
 
 Let Codex and Claude manage their own sessions and coordinate through files.
 
-**Benefit:** small custom runtime.  
-**Failure mode:** loses neutral authority, durable cross-provider work state, evidence, budget reconciliation and one operator projection.  
+**Benefit:** small custom runtime.
+**Failure mode:** loses neutral authority, durable cross-provider work state, evidence, budget reconciliation and one operator projection.
 **Decision:** reject.
 
 ### Option E — Make MCP the whole control plane
 
 Expose scheduler, supervision, events and effects through MCP.
 
-**Benefit:** one protocol surface.  
-**Failure mode:** MCP is well suited to focused tools/resources, not necessarily daemon ownership, process supervision, high-frequency event streaming or transactional cross-tool authority.  
+**Benefit:** one protocol surface.
+**Failure mode:** MCP is well suited to focused tools/resources, not necessarily daemon ownership, process supervision, high-frequency event streaming or transactional cross-tool authority.
 **Decision:** use MCP selectively.
 
 ### Option F — Adopt an external agent framework wholesale
 
 Replace the current harness with a generic orchestration framework.
 
-**Benefit:** faster access to some features.  
-**Failure mode:** the repository's key value is its authority/evidence model; wholesale adoption would import different assumptions and duplicate abstractions.  
+**Benefit:** faster access to some features.
+**Failure mode:** the repository's key value is its authority/evidence model; wholesale adoption would import different assumptions and duplicate abstractions.
 **Decision:** borrow mechanisms and adapters, not lifecycle ownership.
 
 ## 7. Recommended implementation order

@@ -17,6 +17,7 @@ import {
   applyMigrations,
   assertCurrentSchema,
   inspectFabricDatabase,
+  registerFabricSqlFunctions,
 } from "../core/migrations.js";
 import {
   assertDatabaseIntegrity,
@@ -79,6 +80,7 @@ export function openFabricDatabase(databasePath: string): Database.Database {
     if (inspection.state === "absent") initialiseCurrentDatabase(databasePath);
 
     database = new Database(databasePath, { fileMustExist: true });
+    registerFabricSqlFunctions(database);
     // Recheck on the exact writable handle before any persistent pragma,
     // permission or marker mutation.
     database.pragma("trusted_schema = OFF");

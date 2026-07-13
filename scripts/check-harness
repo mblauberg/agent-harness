@@ -41,6 +41,18 @@ fi
 "$PYTHON" scripts/public_release_check.py
 "$PYTHON" scripts/static-security-check.py
 "$PYTHON" scripts/validate_delivery_scenarios.py
+"$PYTHON" scripts/render_skill_catalogue.py --check
+# House style is gated on the root documents and on every skill front door.
+# skills/*/references/ and docs/ are not yet clean and are not gated; CONTRIBUTING
+# says so, and says to run the checker by hand on anything else you touch.
+"$PYTHON" skills/engineering-writing/scripts/check_engineering_style.py \
+  README.md \
+  HARNESS.md \
+  MAINTAINING.md \
+  AGENTS.md \
+  CONTRIBUTING.md \
+  docs/ARCHITECTURE.md \
+  skills/*/SKILL.md
 
 "$PYTHON" -m pytest -q \
   tests \

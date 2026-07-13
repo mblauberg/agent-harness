@@ -1,0 +1,98 @@
+name: Bug report
+description: The harness behaves differently from its documented contract.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not report a security vulnerability here. Use the private route in
+        SECURITY.md. Redact credentials, private prompts, personal data and
+        private project names from everything you paste below.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: >-
+        The documented behaviour, the behaviour you saw, and the gap between
+        them. Quote the contract you are measuring against (a SKILL.md line,
+        HARNESS.md, a script's help text) where you can.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where the failure reproduces. A skill that works on one platform and not the other is a portability bug, and that distinction matters.
+      options:
+        - Claude Code
+        - Codex
+        - Both
+        - Neither (scripts, runtime or CI only)
+    validations:
+      required: true
+
+  - type: input
+    id: skill
+    attributes:
+      label: Skill involved
+      description: >-
+        The kebab-case skill directory name. Use "none" if the failure is in
+        scripts/, runtime/, config/ or CI rather than in a skill.
+      placeholder: implement
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Harness commit
+      description: 'Output of: git -C "${AGENTS_HOME:-$HOME/.agents}" rev-parse --short HEAD'
+      placeholder: 0ea935f
+    validations:
+      required: true
+
+  - type: textarea
+    id: check-harness
+    attributes:
+      label: scripts/check-harness output
+      description: >-
+        Run scripts/check-harness at the harness root and paste the output,
+        whether it passes or fails. A bug that the gate already catches is a
+        different bug from one it misses, and we cannot tell which you have
+        without this.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >-
+        The smallest steps that reproduce it: the prompt or command, the files
+        it touched, and what came back. Include the routed model and effort if
+        the failure involves routing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, Node version, and client versions.
+      placeholder: "macOS 15.3, Python 3.12.4, Node 24.2.0, Claude Code 2.1.0"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before you file
+      options:
+        - label: This is not a security vulnerability. Those go through SECURITY.md.
+          required: true
+        - label: I have removed credentials, personal data and private project names from this report.
+          required: true

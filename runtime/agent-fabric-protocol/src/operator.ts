@@ -40,6 +40,7 @@ export const OPERATOR_ACTIONS = [
   "git",
   "git-authorise",
   "git-custody-resolve",
+  "agent-lifecycle-recovery-issue",
   "external-effect",
 ] as const;
 

@@ -1,4 +1,4 @@
-# Maintaining the harness
+# Maintaining Provenant
 
 ## Start with the contracts
 
@@ -111,6 +111,6 @@ The first public release must use a fresh root commit. Never push private
 pre-publication refs merely because the current tree is clean.
 
 Review must be independent of authorship and proportionate to risk. A substantial
-`implement` run gets a fresh native reviewer and the other primary family; crucial work
+`implement` run gets a fresh native reviewer and the other primary family; `crucial` work
 also attempts a non-blocking bonus family. Fix and re-run until the gate is
 clean, then ask the human for final acceptance or promotion authority.

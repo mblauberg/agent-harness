@@ -51,7 +51,10 @@ import {
   parseScopedGateResolveRequest,
 } from "./gates.js";
 import { parseProjectSession } from "./project-session.js";
-import { PROJECT_SESSION_LAUNCH_INTENT_CODEC, PROVIDER_ACTION_REF_V1_CODEC } from "./launch.js";
+import {
+  LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
+  PROJECT_SESSION_LAUNCH_INTENT_CODEC,
+} from "./launch.js";
 import {
   parseResultDelivery,
   parseTaskCompleteWithReply,
@@ -74,6 +77,54 @@ import {
   assertWorkstreamCreateSemantics,
   type WorkstreamCreateRequest,
 } from "./workstreams.js";
+import {
+  PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC,
+  PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_ERROR_V1_CODEC,
+  PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_REQUEST_V1_CODEC,
+  REVIEW_COMPLETION_READ_REQUEST_V1_CODEC,
+  REVIEW_COMPLETION_V1_CODEC,
+  REVIEW_EVIDENCE_ANNOTATION_APPEND_REQUEST_V1_CODEC,
+  REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_REQUEST_V1_CODEC,
+  REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_RESULT_V1_CODEC,
+  REVIEW_EVIDENCE_ANNOTATION_V1_CODEC,
+  REVIEW_EVIDENCE_LIST_REQUEST_V1_CODEC,
+  REVIEW_EVIDENCE_LIST_RESULT_V1_CODEC,
+  REVIEW_EVIDENCE_READ_REQUEST_V1_CODEC,
+  REVIEW_EVIDENCE_READ_V1_CODEC,
+  REVIEW_FINDING_PAGE_READ_REQUEST_V1_CODEC,
+  REVIEW_FINDING_PAGE_READ_RESULT_V1_CODEC,
+  REVIEW_READ_ERROR_V1_CODEC,
+  REVIEW_TARGET_PREPARATION_ACCEPTED_V1_CODEC,
+  REVIEW_TARGET_PREPARATION_READ_REQUEST_V1_CODEC,
+  REVIEW_TARGET_PREPARATION_READ_ERROR_V1_CODEC,
+  REVIEW_TARGET_PREPARATION_READ_V1_CODEC,
+  REVIEW_TARGET_PREPARE_V1_CODEC,
+  REVIEW_TARGET_REBIND_RECEIPT_V1_CODEC,
+  REVIEW_TARGET_REBIND_V1_CODEC,
+} from "./provider-review.js";
+import {
+  PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC,
+  PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC,
+} from "./route-lineage.js";
+import {
+  TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC,
+  TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC,
+  TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC,
+  TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC,
+  TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC,
+  TOPOLOGY_WAVE_LIST_V1_CODEC,
+} from "./topology-evaluation.js";
+import {
+  PROVIDER_ACTION_DISPATCH_INPUT_V1_CODEC,
+  PROVIDER_ACTION_RESULT_V1_CODEC,
+} from "./provider-action.js";
+import {
+  AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC,
+  LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
+  LIFECYCLE_CURRENT_STATE_V1_CODEC,
+  LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC,
+  LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC,
+} from "./lifecycle.js";
 
 export type ObjectWireShape = {
   kind: "object";
@@ -120,9 +171,12 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.requestLifecycle]: object(["action", "agentId", "taskId", "taskRevision", "checkpoint", "commandId"]),
   [FABRIC_OPERATIONS.getAgentLifecycle]: object(["agentId"]),
   [FABRIC_OPERATIONS.reportProviderState]: object(["agentId", "providerSessionGeneration", "contextRevision", "commandId"], ["checkpointSha256"]),
-  [FABRIC_OPERATIONS.dispatchProviderAction]: object(["adapterId", "actionId", "operation", "payload", "commandId"], ["authorityId"]),
-  [FABRIC_OPERATIONS.reconcileProviderAction]: object(["actionId", "commandId"]),
-  [FABRIC_OPERATIONS.getProviderAction]: object(["actionId"]),
+  [FABRIC_OPERATIONS.dispatchProviderAction]: object(
+    ["adapterId", "actionId", "operation", "payload", "commandId", "certifyingReview"],
+    ["authorityId", "taskId", "routeRequest"],
+  ),
+  [FABRIC_OPERATIONS.reconcileProviderAction]: object(["adapterId", "actionId", "expectedActionKind", "commandId"]),
+  [FABRIC_OPERATIONS.getProviderAction]: object(["adapterId", "actionId", "expectedActionKind"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["source", "directInputProvenance", "taskRevision", "summary", "commandId"]),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: object(["kind", "agentId", "commandId"]),
   [FABRIC_OPERATIONS.createTeam]: object(["teamId", "leader", "rootTask", "initialMembers", "discussionGroups", "reservedBudget", "commandId"], ["parentTeamId"]),
@@ -191,6 +245,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.operatorActionCommit]: object(["command", "projectId", "previewId", "expectedPreviewRevision", "previewDigest", "expectedIntentDigest", "confirmation"]),
   [FABRIC_OPERATIONS.operatorActionStatus]: object(["credential", "projectId", "commandId"]),
   [FABRIC_OPERATIONS.operatorActionReconcile]: object(["command", "projectId", "targetCommandId", "expectedStatus", "expectedAttemptGeneration", "mode"]),
+  [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "agentId", "source", "checkpointArtifactRef", "expectedSessionRevision", "expectedSessionGeneration", "expectedRunRevision", "expectedAgentRevision", "expectedSourceRevision", "gateId", "expectedGateRevision", "expectedGateStatus"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["credential", "projectSessionId", "messageId", "expectedRevision"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["credential", "projectId", "snapshotRevision", "target", "diff", "log"],
@@ -221,6 +276,20 @@ export const OPERATION_INPUT_SHAPES = {
     ],
     ["projectSessionId"],
   ),
+  [FABRIC_OPERATIONS.reviewTargetPrepare]: object(["schemaVersion", "commandId", "taskId", "expectedTargetGeneration", "deliveryManifestRef"]),
+  [FABRIC_OPERATIONS.reviewTargetPreparationRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "preparationId"]),
+  [FABRIC_OPERATIONS.reviewTargetRebind]: object(["schemaVersion", "commandId", "targetGeneration", "expectedChairBindingGeneration", "lifecycleCustodyRef"]),
+  [FABRIC_OPERATIONS.reviewEvidenceRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "evidenceId"]),
+  [FABRIC_OPERATIONS.reviewEvidenceList]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "targetGeneration", "slot", "pageSize", "cursor"]),
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotate]: object(["schemaVersion", "commandId", "projectSessionId", "coordinationRunId", "evidenceId", "expectedResultDigest", "expectedHeadGeneration", "expectedAnnotationRevision", "disposition", "note"]),
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "evidenceId"]),
+  [FABRIC_OPERATIONS.reviewFindingPageRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "findingSetDigest", "pageDigest"]),
+  [FABRIC_OPERATIONS.reviewCompletionRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId"]),
+  [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "actionRef"]),
+  [FABRIC_OPERATIONS.providerContextPressureRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "agentId"]),
+  [FABRIC_OPERATIONS.topologyWaveAppend]: object(["schemaVersion", "commandId", "projectSessionId", "coordinationRunId", "expectedCurrent", "plan"]),
+  [FABRIC_OPERATIONS.topologyWaveCurrentRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId"]),
+  [FABRIC_OPERATIONS.topologyWaveList]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId", "pageSize", "cursor"]),
 } as const satisfies Record<ProtocolOperation, WireShape>;
 
 export const OPERATION_RESULT_SHAPES = {
@@ -251,12 +320,12 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.renewWriteLease]: object(["leaseId", "holderAgentId", "generation", "status", "scope"]),
   [FABRIC_OPERATIONS.getWriteLease]: object(["leaseId", "holderAgentId", "generation", "status", "scope"]),
   [FABRIC_OPERATIONS.releaseWriteLease]: object(["leaseId", "status", "generation"]),
-  [FABRIC_OPERATIONS.requestLifecycle]: object(["agentId", "lifecycle", "providerSessionGeneration"], ["rotation"]),
-  [FABRIC_OPERATIONS.getAgentLifecycle]: object(["agentId", "lifecycle", "providerSessionGeneration"], ["rotation"]),
-  [FABRIC_OPERATIONS.reportProviderState]: object(["agentId", "lifecycle", "providerSessionGeneration"], ["rotation"]),
-  [FABRIC_OPERATIONS.dispatchProviderAction]: object(["actionId", "status", "history", "executionCount", "effectCount"], ["result"]),
-  [FABRIC_OPERATIONS.reconcileProviderAction]: object(["actionId", "status", "history", "executionCount", "effectCount"], ["result"]),
-  [FABRIC_OPERATIONS.getProviderAction]: object(["actionId", "status", "history", "executionCount", "effectCount"], ["result"]),
+  [FABRIC_OPERATIONS.requestLifecycle]: object(["schemaVersion", "kind", "agentId"]),
+  [FABRIC_OPERATIONS.getAgentLifecycle]: object(["schemaVersion", "kind", "agentId"]),
+  [FABRIC_OPERATIONS.reportProviderState]: object(["schemaVersion", "kind", "agentId"]),
+  [FABRIC_OPERATIONS.dispatchProviderAction]: object(["kind"], ["actionRef", "status", "history", "executionCount", "effectCount", "resultDigest", "providerAnswer", "action"]),
+  [FABRIC_OPERATIONS.reconcileProviderAction]: object(["kind"], ["actionRef", "status", "history", "executionCount", "effectCount", "resultDigest", "providerAnswer", "action"]),
+  [FABRIC_OPERATIONS.getProviderAction]: object(["kind"], ["actionRef", "status", "history", "executionCount", "effectCount", "resultDigest", "providerAnswer", "action"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["interventionId"]),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: object(["visibility", "providerSession", "delivery"], ["recovery"]),
   [FABRIC_OPERATIONS.createTeam]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMembers"]),
@@ -324,9 +393,10 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.projectionViewPage]: object(["status", "view"], ["rows", "nextCursor", "hasMore", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision", "snapshotCursor"]),
   [FABRIC_OPERATIONS.projectionDetailRead]: object(["status"], ["detailRef", "detail", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision"]),
   [FABRIC_OPERATIONS.operatorActionPreview]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
-  [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef", "providerActionRef"]),
-  [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "providerActionRef", "receipt", "code", "evidenceRefs"]),
-  [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "providerActionRef", "receipt", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef", "launchProviderActionJournalRef"]),
+  [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: object(["schemaVersion", "status"], ["source", "checkpointRef", "checkpointDigest", "checkpointVectorDigest", "validationReceiptDigest", "reason", "evidenceDigest"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["available", "messageId", "revision"], ["body", "terminalNeutralised", "capabilityValuesRedacted", "artifactRefs", "reason"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["status"],
@@ -367,6 +437,20 @@ export const OPERATION_RESULT_SHAPES = {
       "credentialValuesRedacted",
     ],
   ),
+  [FABRIC_OPERATIONS.reviewTargetPrepare]: object(["schemaVersion", "preparationId", "ownerCommandId", "inputDigest", "projectSessionId", "coordinationRunId", "taskId", "expectedTargetGeneration", "reservedTargetGeneration", "reservedBundleGeneration", "deliveryManifestRef", "state", "acceptedReceiptDigest"]),
+  [FABRIC_OPERATIONS.reviewTargetPreparationRead]: object(["schemaVersion", "accepted", "revision", "state", "phase", "progress", "terminal"]),
+  [FABRIC_OPERATIONS.reviewTargetRebind]: object(["schemaVersion", "status", "targetGeneration", "reviewSubjectDigest", "priorBindingGeneration", "newBindingGeneration", "priorBindingDigest", "newBindingDigest", "lifecycleAdoptionDigest", "bundleDigest", "profileDigest", "slotHeadSetDigest", "openAndRepairFindingSetDigest", "rebindReceiptDigest"]),
+  [FABRIC_OPERATIONS.reviewEvidenceRead]: object(["schemaVersion", "record", "currency", "annotation"]),
+  [FABRIC_OPERATIONS.reviewEvidenceList]: object(["schemaVersion", "entries", "nextCursor"]),
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotate]: object(["schemaVersion", "evidenceId", "annotationRevision", "priorAnnotationRevision", "commandId", "chairBindingGeneration", "disposition", "note", "noteDigest", "annotationDigest"]),
+  [FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead]: object(["schemaVersion", "evidenceId", "annotation"]),
+  [FABRIC_OPERATIONS.reviewFindingPageRead]: object(["schemaVersion", "findingSetDigest", "pageDigest", "members", "nextPageDigest"]),
+  [FABRIC_OPERATIONS.reviewCompletionRead]: object(["schemaVersion", "blockers", "targetGeneration", "targetChair", "reviewedArtifactRef", "publicationLineageDigest", "bundleDigest", "manifestRootDigest", "coverageDigest", "riskReadMapDigest", "mandatoryReadSetDigest", "profileDigest", "unavailableSlots", "slots", "finalReviewComplete"]),
+  [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId", "actionRef", "targetGeneration", "slot", "attemptGeneration", "recoveryGeneration", "state", "reason", "reservationDigest", "routeState", "routeReceiptDigest", "lookupState", "lookupEvidenceDigest", "disposition", "settlementDigest", "recoveryEvidenceDigest", "retirementEligible"]),
+  [FABRIC_OPERATIONS.providerContextPressureRead]: object(["schemaVersion", "currency", "pressure", "readAt", "ageSeconds"]),
+  [FABRIC_OPERATIONS.topologyWaveAppend]: object(["schemaVersion", "commandId", "status", "priorPlanRef", "planRef", "pointer", "receiptDigest"]),
+  [FABRIC_OPERATIONS.topologyWaveCurrentRead]: object(["schemaVersion", "currency", "plan", "pointer"]),
+  [FABRIC_OPERATIONS.topologyWaveList]: object(["schemaVersion", "plans", "nextCursor", "watermarkRevision"]),
 } as const satisfies Record<ProtocolOperation, WireShape>;
 
 const text = boundedString();
@@ -1005,26 +1089,6 @@ const leaseResultCodec = objectCodec({
   generation: positiveInteger,
   status: enumeration(["active", "quarantined"]),
   scope: stringList,
-});
-const lifecycleResultCodec = objectCodec({
-  agentId: identifier,
-  lifecycle: text,
-  providerSessionGeneration: positiveInteger,
-}, {
-  rotation: objectCodec({
-    kind: enumeration(["in-place", "replacement-session"]),
-    priorResumeReference: identifier,
-  }),
-});
-const providerActionResultCodec = objectCodec({
-  actionId: identifier,
-  status: enumeration(["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"]),
-  history: textList,
-  executionCount: integer(),
-  effectCount: integer(),
-}, {
-  resultDigest: sha256,
-  providerAnswer: boundedString({ maxBytes: 262_144, example: "Review complete." }),
 });
 const agentCustodyResultCodec = objectCodec({
   agentId: identifier,
@@ -1925,6 +1989,7 @@ const operatorActionIntentCodec = unionOf([
   gitAuthoriseIntentCodec,
   gitOperationDraftIntentCodec,
   gitCustodyResolveIntentCodec,
+  AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC,
   objectCodec({
     kind: literal("registered-external-effect"),
     integrationId: identifier,
@@ -1935,6 +2000,18 @@ const operatorActionIntentCodec = unionOf([
     targetId: identifier,
     expectedTargetRevision: positiveInteger,
     idempotencyKey: text,
+  }),
+  objectCodec({
+    kind: literal("provider-route-integrity-retire"),
+    projectSessionId: identifier,
+    coordinationRunId: identifier,
+    actionRef: objectCodec({ adapterId: identifier, actionId: identifier }),
+    recoveryGeneration: positiveInteger,
+    expectedState: literal("awaiting-human-retire"),
+    reservationDigest: sha256,
+    gateId: identifier,
+    expectedGateRevision: positiveInteger,
+    directInputAttestationId: identifier,
   }),
   objectCodec({
     kind: literal("promotion"),
@@ -2001,7 +2078,7 @@ const operatorActionReceiptFields = {
 };
 const operatorActionReceiptCodec = unionOf([
   objectCodec(operatorActionReceiptFields, { effectRef: artifactRefCodec }),
-  objectCodec({ ...operatorActionReceiptFields, providerActionRef: PROVIDER_ACTION_REF_V1_CODEC }, {
+  objectCodec({ ...operatorActionReceiptFields, launchProviderActionJournalRef: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC }, {
     effectRef: artifactRefCodec,
   }),
 ]);
@@ -2163,7 +2240,7 @@ const operatorActionStatusBaseCodec = unionOf([
     intentDigest: sha256,
     phase: enumeration(["prepared", "dispatched", "accepted", "observing"]),
     attemptGeneration: positiveInteger,
-    providerActionRef: PROVIDER_ACTION_REF_V1_CODEC,
+    launchProviderActionJournalRef: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
   }),
   objectCodec({
     status: literal("pending"),
@@ -2185,7 +2262,7 @@ const operatorActionStatusBaseCodec = unionOf([
     commandId: identifier,
     intentDigest: sha256,
     attemptGeneration: positiveInteger,
-    providerActionRef: PROVIDER_ACTION_REF_V1_CODEC,
+    launchProviderActionJournalRef: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
   }, { effectRef: artifactRefCodec }),
   objectCodec({
     status: literal("ambiguous"),
@@ -2267,9 +2344,14 @@ const operatorActionAvailabilityCodec = unionOf([
       "daemon-drain",
       "daemon-stop",
       "git",
+      "git-authorise",
+      "git-operation-draft",
+      "git-custody-resolve",
+      "agent-lifecycle-recovery",
       "registered-external-effect",
+      "provider-route-integrity-retire",
       "promotion",
-    ]), { minimum: 1, maximum: 17, unique: true }),
+    ]), { minimum: 1, maximum: 19, unique: true }),
     requiresPreview: literal(true),
   }),
 ]);
@@ -2938,7 +3020,7 @@ const booleanFields = new Set([
 ]);
 const integerFields = new Set([
   "after", "assignmentGeneration", "attachmentGeneration", "callbackGeneration", "chairGeneration",
-  "claimGeneration", "committedRevision", "confirmedPreviewRevision", "contiguousWatermark", "cursor",
+  "claimGeneration", "committedRevision", "confirmedPreviewRevision", "contextRevision", "contiguousWatermark", "cursor",
   "currentSnapshotRevision", "daemonInstanceGeneration", "dependencyRevision", "depth", "effectCount",
   "executionCount", "expectedAttachmentGeneration", "expectedChairGeneration", "expectedClaimGeneration",
   "expectedDaemonGeneration", "expectedGeneration", "expectedGlobalStateRevision", "expectedMembershipRevision",
@@ -2961,6 +3043,12 @@ function enumField(operation: ProtocolOperation, field: string, direction: Codec
   if (field === "directInputProvenance") return enumeration(["complete", "partial", "unavailable"]);
   if (field === "operation" && operation === FABRIC_OPERATIONS.dispatchProviderAction) {
     return enumeration(["spawn", "send_turn", "wakeup", "release", "steer"]);
+  }
+  if (
+    field === "expectedActionKind" &&
+    (operation === FABRIC_OPERATIONS.reconcileProviderAction || operation === FABRIC_OPERATIONS.getProviderAction)
+  ) {
+    return enumeration(["non-review", "certifying-review"]);
   }
   if (field === "action" && operation === FABRIC_OPERATIONS.requestLifecycle) {
     return enumeration(["compact", "rotate", "completion-ready", "release"]);
@@ -3145,7 +3233,7 @@ function semanticFieldCodec(
     return field === "capability" ? secret : identifier;
   }
   if ([
-    "baseRevision", "body", "contextRevision", "default", "evidence", "handoffEvidence", "humanUtterance",
+    "baseRevision", "body", "default", "evidence", "handoffEvidence", "humanUtterance",
     "lifecycle", "objective", "question", "reason", "recommendation", "summary", "target", "title", "type",
   ].includes(field)) return field === "recommendation" ? optionalText : text;
   if (["status", "state", "kind", "origin", "action", "source", "directInputProvenance", "visibility", "providerSession", "delivery", "recovery"].includes(field)) {
@@ -3244,11 +3332,6 @@ const leaseResultOperations: ReadonlySet<ProtocolOperation> = new Set([
   FABRIC_OPERATIONS.renewWriteLease,
   FABRIC_OPERATIONS.getWriteLease,
 ]);
-const lifecycleResultOperations: ReadonlySet<ProtocolOperation> = new Set([
-  FABRIC_OPERATIONS.requestLifecycle,
-  FABRIC_OPERATIONS.getAgentLifecycle,
-  FABRIC_OPERATIONS.reportProviderState,
-]);
 const providerActionResultOperations: ReadonlySet<ProtocolOperation> = new Set([
   FABRIC_OPERATIONS.dispatchProviderAction,
   FABRIC_OPERATIONS.reconcileProviderAction,
@@ -3268,6 +3351,21 @@ const budgetResultOperations: ReadonlySet<ProtocolOperation> = new Set([
 ]);
 
 function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
+  if (operation === FABRIC_OPERATIONS.dispatchProviderAction) return PROVIDER_ACTION_DISPATCH_INPUT_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewTargetPrepare) return REVIEW_TARGET_PREPARE_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewTargetPreparationRead) return REVIEW_TARGET_PREPARATION_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewTargetRebind) return REVIEW_TARGET_REBIND_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceRead) return REVIEW_EVIDENCE_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceList) return REVIEW_EVIDENCE_LIST_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotate) return REVIEW_EVIDENCE_ANNOTATION_APPEND_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead) return REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewFindingPageRead) return REVIEW_FINDING_PAGE_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewCompletionRead) return REVIEW_COMPLETION_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead) return PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.providerContextPressureRead) return PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.topologyWaveAppend) return TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.topologyWaveCurrentRead) return TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.topologyWaveList) return TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.evidencePublish) return evidencePublishInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadInputCodec;
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationInputCodec;
@@ -3285,6 +3383,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionCommitCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus) return operatorActionStatusInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionReconcile) return operatorActionReconcileCodec;
+  if (operation === FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate) return LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.scopedGateCheck) return parsedBy(scopedGateCheckCodec, parseScopedGateCheckRequest);
   if (operation === FABRIC_OPERATIONS.membershipBind) return parsedBy(membershipBindCodec, parseMembershipBindRequest);
   if (operation === FABRIC_OPERATIONS.intakeRevise) return parsedBy(intakeRevisionCodec, parseIntakeRevisionRequest);
@@ -3301,6 +3400,20 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
 }
 
 function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
+  if (operation === FABRIC_OPERATIONS.reviewTargetPrepare) return REVIEW_TARGET_PREPARATION_ACCEPTED_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewTargetPreparationRead) return unionOf([REVIEW_TARGET_PREPARATION_READ_V1_CODEC, REVIEW_TARGET_PREPARATION_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.reviewTargetRebind) return REVIEW_TARGET_REBIND_RECEIPT_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceRead) return unionOf([REVIEW_EVIDENCE_READ_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceList) return unionOf([REVIEW_EVIDENCE_LIST_RESULT_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotate) return unionOf([REVIEW_EVIDENCE_ANNOTATION_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead) return unionOf([REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_RESULT_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.reviewFindingPageRead) return unionOf([REVIEW_FINDING_PAGE_READ_RESULT_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.reviewCompletionRead) return unionOf([REVIEW_COMPLETION_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead) return unionOf([PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC, PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_ERROR_V1_CODEC]);
+  if (operation === FABRIC_OPERATIONS.providerContextPressureRead) return PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.topologyWaveAppend) return TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.topologyWaveCurrentRead) return TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.topologyWaveList) return TOPOLOGY_WAVE_LIST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.evidencePublish) return evidenceRegistrationCodec;
   if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadResultCodec;
   if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationResultCodec;
@@ -3309,8 +3422,13 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   }
   if (taskResultOperations.has(operation)) return taskResultCodec;
   if (leaseResultOperations.has(operation)) return leaseResultCodec;
-  if (lifecycleResultOperations.has(operation)) return lifecycleResultCodec;
-  if (providerActionResultOperations.has(operation)) return providerActionResultCodec;
+  if (operation === FABRIC_OPERATIONS.requestLifecycle) {
+    return unionOf([LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC, LIFECYCLE_CURRENT_STATE_V1_CODEC]);
+  }
+  if (operation === FABRIC_OPERATIONS.getAgentLifecycle || operation === FABRIC_OPERATIONS.reportProviderState) {
+    return LIFECYCLE_CURRENT_STATE_V1_CODEC;
+  }
+  if (providerActionResultOperations.has(operation)) return PROVIDER_ACTION_RESULT_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamResultCodec;
   if (operation === FABRIC_OPERATIONS.workstreamCreate || operation === FABRIC_OPERATIONS.workstreamSettle) {
     return workstreamProjectionCodec;
@@ -3367,6 +3485,9 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionReceiptCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus || operation === FABRIC_OPERATIONS.operatorActionReconcile) {
     return operatorActionStatusCodec;
+  }
+  if (operation === FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate) {
+    return LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC;
   }
   if (operation === FABRIC_OPERATIONS.membershipBind) {
     const base = semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
@@ -3495,6 +3616,102 @@ export function parseOperationResult<Operation extends ProtocolOperation>(
 ): OperationResultMap[Operation] {
   if (!isFabricOperation(operation)) throw new TypeError(`unknown fabric operation: ${String(operation)}`);
   return OPERATION_CODECS[operation].result.parse(value, `${operation}.result`) as OperationResultMap[Operation];
+}
+
+export type ProviderActionResultKind = "non-review" | "certifying-review";
+
+export type OperationResultPrincipalContext = Readonly<{
+  kind: OperationPrincipalKind;
+  agentId?: string;
+  projectSessionId?: string;
+  runId?: string;
+}>;
+
+function providerActionIdentity(value: unknown, path: string): Readonly<{ adapterId: unknown; actionId: unknown }> {
+  const result = value as Readonly<Record<string, unknown>>;
+  const ref = result.kind === "certifying-review"
+    ? ((result.action as Readonly<Record<string, unknown>>).actionRef as Readonly<Record<string, unknown>>)
+    : result.actionRef as Readonly<Record<string, unknown>>;
+  if (ref === undefined || ref === null || typeof ref !== "object") {
+    throw new TypeError(`${path} has no canonical actionRef`);
+  }
+  return { adapterId: ref.adapterId, actionId: ref.actionId };
+}
+
+export function parseOperationResultForInput<Operation extends ProtocolOperation>(
+  operation: Operation,
+  input: OperationInputMap[Operation],
+  value: unknown,
+  principal?: OperationResultPrincipalContext,
+): OperationResultMap[Operation] {
+  const result = parseOperationResult(operation, value);
+  if (([
+    FABRIC_OPERATIONS.dispatchProviderAction,
+    FABRIC_OPERATIONS.reconcileProviderAction,
+    FABRIC_OPERATIONS.getProviderAction,
+  ] as readonly ProtocolOperation[]).includes(operation)) {
+    const request = input as Readonly<Record<string, unknown>>;
+    const parsed = result as Readonly<Record<string, unknown>>;
+    const identity = providerActionIdentity(parsed, `${operation}.result`);
+    if (identity.adapterId !== request.adapterId || identity.actionId !== request.actionId) {
+      throw new TypeError(`${operation}.result action identity must equal the exact requested actionRef`);
+    }
+    const dispatchKind = operation === FABRIC_OPERATIONS.dispatchProviderAction
+      ? (request.certifyingReview === null ? "non-review" : "certifying-review")
+      : undefined;
+    const expectedKind = dispatchKind ?? request.expectedActionKind;
+    if (parsed.kind !== expectedKind) {
+      throw new TypeError(`${operation}.result kind must be ${expectedKind} for the classified provider action`);
+    }
+    if (
+      operation === FABRIC_OPERATIONS.dispatchProviderAction &&
+      parsed.kind === "non-review" &&
+      parsed.providerAnswer !== undefined &&
+      request.operation !== "spawn"
+    ) {
+      throw new TypeError(`${operation}.result providerAnswer is available only for a task-bound non-review spawn`);
+    }
+  }
+  if (operation === FABRIC_OPERATIONS.requestLifecycle) {
+    const request = input as Readonly<Record<string, unknown>>;
+    const parsed = result as Readonly<Record<string, unknown>>;
+    const action = request.action;
+    if (action === "rotate" || action === "compact") {
+      if (parsed.kind !== "accepted-suspended") {
+        throw new TypeError(`${operation}.result for ${action} must be accepted-suspended, not current-state`);
+      }
+      if (
+        parsed.action !== action ||
+        parsed.agentId !== request.agentId ||
+        parsed.taskId !== request.taskId ||
+        parsed.taskRevision !== request.taskRevision
+      ) {
+        throw new TypeError(`${operation}.result accepted-suspended identity must equal the exact lifecycle request`);
+      }
+      if (
+        principal?.kind !== "agent" ||
+        parsed.projectSessionId !== principal.projectSessionId ||
+        parsed.coordinationRunId !== principal.runId ||
+        parsed.agentId !== principal.agentId
+      ) {
+        throw new TypeError(`${operation}.result accepted-suspended session and run must equal the authenticated agent principal`);
+      }
+      const checkpoint = request.checkpoint as Readonly<Record<string, unknown>>;
+      if (parsed.checkpointDigest !== `sha256:${String(checkpoint.sha256)}`) {
+        throw new TypeError(`${operation}.result checkpointDigest must equal the exact lifecycle request checkpoint`);
+      }
+    } else if (parsed.kind !== "current-state" || parsed.agentId !== request.agentId) {
+      throw new TypeError(`${operation}.result for ${String(action)} must be current-state for the exact agent`);
+    }
+  }
+  if (operation === FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate) {
+    const request = input as Readonly<Record<string, unknown>>;
+    const parsed = result as Readonly<Record<string, unknown>>;
+    if (parsed.status === "validated" && JSON.stringify(parsed.source) !== JSON.stringify(request.source)) {
+      throw new TypeError(`${operation}.result source must equal the exact checkpoint validation request source`);
+    }
+  }
+  return result;
 }
 
 export function assertCodecRegistryExhaustive(): void {

@@ -1,8 +1,8 @@
 # Agent Harness comprehensive review pack
 
-**Repository:** `mblauberg/agent-harness`  
-**Baseline:** `main` at `0ea935f8ccaad550d8db0f9ea40324f58bdda569`  
-**Review date:** 13 July 2026  
+**Repository:** `mblauberg/agent-harness`
+**Baseline:** `main` at `0ea935f8ccaad550d8db0f9ea40324f58bdda569`
+**Review date:** 13 July 2026
 **Review mode:** static repository inspection through the connected GitHub interface, supplemented by current primary-source research.
 
 ## Important limitation

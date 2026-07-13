@@ -17,13 +17,23 @@ function sha256(value) {
 }
 
 try {
+  database.pragma("foreign_keys = ON");
   database.exec(baseline);
+  const foreignKeyViolations = database.pragma("foreign_key_check");
+  if (foreignKeyViolations.length !== 0) {
+    throw new Error(`database baseline has foreign-key violations: ${JSON.stringify(foreignKeyViolations)}`);
+  }
   const rows = database.prepare(`
     SELECT type,name,tbl_name,sql
       FROM sqlite_schema
      WHERE name NOT LIKE 'sqlite_%'
      ORDER BY type,name,tbl_name
   `).all();
+  for (const row of rows) {
+    if (row.type !== "table" && row.type !== "view") continue;
+    const quotedName = `"${row.name.replaceAll('"', '""')}"`;
+    database.prepare(`SELECT * FROM ${quotedName} LIMIT 0`).all();
+  }
   const manifest = {
     schemaVersion: 1,
     epoch: "agent-fabric-pre-release-v1",

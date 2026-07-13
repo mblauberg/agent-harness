@@ -39,7 +39,16 @@ class RecordingTransport implements ProtocolRpcTransport {
         }
       : kind === "agent"
         ? { kind, agentId: "agent_01" as never, projectSessionId: "ps_01" as never, runId: "run_01", principalGeneration: 1 }
-        : { kind, integrationId: "integration_01" as never, projectId: "project_01" as never, principalGeneration: 1 };
+        : {
+            kind,
+            integrationId: "integration_01" as never,
+            projectId: "project_01" as never,
+            projectSessionId: "ps_01" as never,
+            runId: "run_01",
+            principalGeneration: 1,
+            providerId: "anthropic",
+            providerSessionRef: "provider_session_01",
+          };
     this.allowedOperations = new Set(allowedOperations ??
       [...operationsForFeatures(features)].filter((operation) => OPERATION_REGISTRY[operation].principals.includes(kind)));
   }

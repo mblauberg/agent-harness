@@ -3,7 +3,7 @@ name: work-map
 description: "Use when a multi-session effort needs one persistent route showing current leg, blockers, dependencies, and next work. Not for one-session checklists or handoffs; use session."
 ---
 
-# work-map — the map for multi-session efforts
+# work-map: the map for multi-session efforts
 
 A handoff file (see `session`) carries ONE session's baton. When an effort
 spans many sessions or agents, the batons pile up and nobody holds the route.
@@ -43,14 +43,14 @@ Rules no session may break, with links — not restated content.
 
 ## Rules
 
-- **Legs are outcomes, not tasks** — each leg independently verifiable and
+- **Legs are outcomes, not tasks**: each leg independently verifiable and
   small enough for one session. A leg an agent can't finish in a session gets
   split at the next update.
 - **Resume order** (interleaves with `session` start): project state file →
   this map → the claimed leg's handoff only → start. Never reconstruct the
-  route from old transcripts or piled-up handoffs — consumed handoffs should
+  route from old transcripts or piled-up handoffs; consumed handoffs should
   already be archived.
-- **Update on leg completion, not continuously** — the map is curated durable
+- **Update on leg completion, not continuously**: the map is curated durable
   project state; the trail line is one sentence, not a
   log. Session-level detail stays in handoffs.
 - **One chair/map owner writes the map.** Parallel workers write namespaced

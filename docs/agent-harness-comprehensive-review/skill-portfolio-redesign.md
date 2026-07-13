@@ -125,7 +125,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `scope`
 
-**Retain:** specification, acceptance criteria, one-way-door identification, approval.  
+**Retain:** specification, acceptance criteria, one-way-door identification, approval.
 **Change:**
 
 - replace mandatory one-question rounds with decision packets;
@@ -139,7 +139,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `deliver`
 
-**Retain:** neutral delivery envelope and evidence receipt.  
+**Retain:** neutral delivery envelope and evidence receipt.
 **Change:**
 
 - make it a thin entry to the executable lifecycle;
@@ -150,7 +150,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `implement`
 
-**Retain:** approved change delivery, deterministic checks, review and bounded repair.  
+**Retain:** approved change delivery, deterministic checks, review and bounded repair.
 **Change:**
 
 - consume an execution plan;
@@ -163,7 +163,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `tdd`
 
-**Retain:** red/green/refactor and behavioural contract.  
+**Retain:** red/green/refactor and behavioural contract.
 **Change:**
 
 - use the shared exception record;
@@ -173,7 +173,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `refactor`
 
-**Retain:** behaviour-preserving structural improvement.  
+**Retain:** behaviour-preserving structural improvement.
 **Change:**
 
 - default direct cutover for pre-release/no-consumer systems;
@@ -185,7 +185,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `diagnose`
 
-**Retain:** evidence-backed cause and no unapproved permanent edit.  
+**Retain:** evidence-backed cause and no unapproved permanent edit.
 **Change:**
 
 - add emergency containment and irreproducible incident states;
@@ -196,7 +196,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `code-review`
 
-**Retain:** multi-lens review beyond the diff and evidence rather than votes.  
+**Retain:** multi-lens review beyond the diff and evidence rather than votes.
 **Change:**
 
 - add `investigate`;
@@ -208,7 +208,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `evaluate`
 
-**Retain:** frozen plan, lineage, blinded grading and held-out cases.  
+**Retain:** frozen plan, lineage, blinded grading and held-out cases.
 **Change:**
 
 - add evaluator calibration;
@@ -220,7 +220,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `release`
 
-**Retain:** separate effect authority, rollback and observation.  
+**Retain:** separate effect authority, rollback and observation.
 **Change:**
 
 - execute through typed effect proposals;
@@ -231,7 +231,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `retrospect`
 
-**Retain:** root-cause clusters, regression promotion and proposal-first learning.  
+**Retain:** root-cause clusters, regression promotion and proposal-first learning.
 **Change:**
 
 - consume route/topology/cost/review metrics;
@@ -241,7 +241,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `session`
 
-**Retain:** continuity, hand-off and context hygiene.  
+**Retain:** continuity, hand-off and context hygiene.
 **Change:**
 
 - replace archive-everything with retention classes;
@@ -252,7 +252,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `work-map`
 
-**Retain:** curated orientation for long efforts.  
+**Retain:** curated orientation for long efforts.
 **Change:**
 
 - state explicitly that it is not live queue truth;
@@ -262,7 +262,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `orchestrate`
 
-**Retain:** bounded scopes, non-overlapping writes, cross-family synthesis.  
+**Retain:** bounded scopes, non-overlapping writes, cross-family synthesis.
 **Change:**
 
 - use a decomposition/value test before fan-out;
@@ -274,7 +274,7 @@ Keep a concise natural-language `description` for provider discovery.
 
 ### `autonomous-lab`
 
-**Retain:** resumability, anti-placebo evaluation, bounded state.  
+**Retain:** resumability, anti-placebo evaluation, bounded state.
 **Change:**
 
 - add automatic terminal/pause states;

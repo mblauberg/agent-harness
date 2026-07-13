@@ -141,6 +141,7 @@ export type UsabilityObservation = Readonly<{
   optionalIntegrationIndependent: boolean;
   nativeNotificationVisible: boolean;
   dynamicResizeSafe: boolean;
+  spec17ProjectionSafe: boolean;
   artifactReviewSafe: boolean;
   actionMatrixSafe: boolean;
   scrollAndSelectionSafe: boolean;
@@ -538,10 +539,7 @@ function attentionRow(
             kind: "attention",
             label: item.label,
             priority: item.priority,
-            title:
-              item.duplicateCount > 1
-                ? `${item.title} (${String(item.duplicateCount)} grouped)`
-                : item.title,
+            title: item.title,
             ...(item.gateBinding === null
               ? {}
               : {
@@ -795,6 +793,150 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       },
     }),
   );
+  const spec17 = {
+    reviewRuns: runs.map((run, index) => ({
+      projectSessionId,
+      coordinationRunId: run.runId,
+      preparation: {
+        state: "unavailable",
+        reason: "preparation-id-not-projected",
+        code: null,
+      },
+      completion: {
+        state: "unavailable",
+        reason: "review-completion-projection-unavailable",
+        code: null,
+      },
+      evidence: {
+        state: "current",
+        value: evidenceReview === null || index !== 0
+          ? []
+          : [{
+              schemaVersion: 1,
+              record: {
+                evidenceId: evidenceReview.evidenceId,
+                targetGeneration: 2,
+                slot: "native",
+                endpointProvider: "openai",
+                providerFamily: "gpt",
+                model: "gpt-5.4",
+                routeReceiptDigest: digest,
+                routeObservationDigest: digest,
+                actualRouteIdentityDigest: digest,
+              },
+              currency: {
+                target: "current",
+                source: "current",
+                chair: "current",
+                profile: "current",
+                certifying: false,
+                blockerCodes: ["actual-route-mismatch"],
+              },
+              annotation: null,
+            }],
+      },
+      recoveries: [],
+      providerRoute: {
+        state: "unavailable",
+        reason: "operator-route-projection-unavailable",
+        code: null,
+      },
+      capabilityFreshness: {
+        state: "unavailable",
+        reason: "operator-capability-projection-unavailable",
+        code: null,
+      },
+    })),
+    topology: workRows.map((work, index) => {
+      const run = runs[index];
+      return {
+        taskId: work.stableId,
+        coordinationRunId: run?.runId ?? null,
+        read: {
+          state: "current",
+          value: {
+            schemaVersion: 1,
+            currency: "current",
+            pointer: { revision: 3, planDigest: digest },
+            plan: {
+              waveId: `wave-evaluation-${String(index + 1)}`,
+              waveRevision: 3,
+              state: "started",
+              predecessor: null,
+              dependencies: [],
+              decomposability: {
+                kind: "decomposable",
+                evidenceRef: "evidence-topology",
+              },
+              topology: {
+                executionShape: "fabric-explicit",
+                mode: "parallel",
+                maximumConcurrentAgents: 3,
+              },
+              chair: {
+                agentId: String(run?.chairAgentId ?? "unassigned"),
+                principalGeneration: 2,
+                chairLeaseGeneration: 4,
+              },
+              stageOwners: [],
+              writePartitions: [],
+              contention: {
+                mode: "disjoint-partitions",
+                serializationOwnerAgentId: null,
+                evidenceRef: "evidence-contention",
+              },
+              budget: {
+                providerTurns: 12,
+                toolCalls: 40,
+                wallClockSeconds: 900,
+                maximumParallelAgents: 3,
+              },
+              stopConditions: [],
+              authority: {
+                authorityRevision: 5,
+                authorityRef: "authority-evaluation",
+                authorityDigest: digest,
+              },
+              policy: {
+                policyRevision: 6,
+                policyRef: "policy-evaluation",
+                policyDigest: digest,
+              },
+              rationaleRef: "rationale-evidence-evaluation",
+              planDigest: digest,
+            },
+          },
+        },
+      };
+    }),
+    contextPressure: agentRows.map((agent, index) => ({
+      agentId: agent.stableId,
+      coordinationRunId: runs[index]?.runId ?? null,
+      read: {
+        state: "current",
+        value: {
+          schemaVersion: 1,
+          currency: "current",
+          readAt: timestamp,
+          ageSeconds: 5,
+          pressure: {
+            pressure: "high",
+            source: "native-exact",
+            confidence: "exact",
+            windowTokens: 100_000,
+            usedTokens: 81_000,
+            remainingTokens: 19_000,
+            observedAt: timestamp,
+            expiresAt: "2026-07-11T12:05:00.000Z",
+            providerGeneration: 3,
+            contextRevision: 9,
+            revision: 4,
+            evidenceDigest: digest,
+          },
+        },
+      },
+    })),
+  } as unknown as NonNullable<FabricConsoleDataset["spec05"]>;
   const pages = createEmptyViewPages();
   const attentionFacts: AttentionItem[] = fixture.attention.map((item) => ({
     itemId: item.id,
@@ -922,7 +1064,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
         readTransactionId: `fixture:${fixture.id}:activity`,
       },
     },
-    loadedAtMs: performance.now(),
+    loadedAtMs: Date.parse(timestamp),
     canMutate: true,
     productionActionPlanning: true,
     workflowCapabilities: {
@@ -938,6 +1080,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       },
       promotion: { state: "available" },
     },
+    spec05: spec17,
     ...(evidenceReview === null ? {} : {
       inspection: {
         kind: "artifact" as const,
@@ -1277,6 +1420,105 @@ function frameHasEnabledVisibleFocus(frame: FabricConsoleFrame): boolean {
     cellSlice(firstRow, region.rect.x1 - 1, region.rect.x1) === ">";
 }
 
+function spec17ProjectionGeometrySafe(
+  dataset: FabricConsoleDataset,
+  render: UsabilityEvaluationDependencies["render"],
+): boolean {
+  const requiredCases: Array<Readonly<{
+    view: "runs" | "work" | "agents" | "evidence";
+    stableId: string;
+    expected: readonly Readonly<{ label: string; value: string }>[];
+  }>> = [];
+  const run = dataset.pages.runs.rows[0];
+  const work = dataset.pages.work.rows[0];
+  const agent = dataset.pages.agents.rows[0];
+  if (run === undefined || work === undefined || agent === undefined) return false;
+  requiredCases.push(
+    {
+      view: "runs",
+      stableId: run.stableId,
+      expected: [
+        {
+          label: "Review preparation",
+          value: "unavailable | preparation-id-not-projected",
+        },
+        {
+          label: "Provider route",
+          value: "unavailable | operator-route-projection-unavailable",
+        },
+        {
+          label: "Capability freshness",
+          value: "unavailable | operator-capability-projection-unavailable",
+        },
+      ],
+    },
+    {
+      view: "work",
+      stableId: work.stableId,
+      expected: [
+        { label: "Topology currency", value: "CURRENT" },
+        {
+          label: "Topology execution",
+          value: "fabric-explicit | parallel | max 3",
+        },
+      ],
+    },
+    {
+      view: "agents",
+      stableId: agent.stableId,
+      expected: [
+        { label: "Context pressure", value: "HIGH | CURRENT | age 5s" },
+        {
+          label: "Context tokens",
+          value: "window 100000 | used 81000 | remaining 19000",
+        },
+      ],
+    },
+  );
+  const evidence = dataset.pages.evidence.rows[0];
+  if (evidence !== undefined) {
+    requiredCases.push({
+      view: "evidence",
+      stableId: evidence.stableId,
+      expected: [
+        { label: "Admitted review route", value: "openai | gpt | gpt-5.4" },
+        {
+          label: "Actual endpoint identity",
+          value: "Unknown | actual-route-mismatch",
+        },
+      ],
+    });
+  }
+
+  const geometries = [
+    { columns: 30, rows: 6, mode: "strip" },
+    { columns: 80, rows: 24, mode: "reference" },
+    { columns: 120, rows: 32, mode: "wide" },
+  ] as const;
+  return requiredCases.every(({ view, stableId, expected }) => {
+    const controller = new EvaluationRuntimeController(dataset);
+    controller.activateView(view);
+    controller.select(view, stableId);
+    return geometries.every(({ columns, rows, mode }) => {
+      const frame = render(
+        dataset,
+        controller.state,
+        createFabricUiState({ focusId: `detail:${view}:${stableId}` }),
+        { columns, rows },
+      );
+      const detail = frame.presentation.detail?.lines ?? [];
+      return frame.mode === mode &&
+        frame.columns === columns &&
+        frame.rows.length === rows &&
+        frame.rows.every((line) => stringWidth(line) === columns) &&
+        expected.every((line) => detail.some(
+          (candidate) => candidate.label === line.label &&
+            candidate.value === line.value,
+        ));
+    });
+  });
+}
+
 async function observe(
   fixture: UsabilityFixture,
   manifest: UsabilityManifest,
@@ -1308,6 +1550,10 @@ async function observe(
     reducePointer: dependencies.reducePointer,
   });
   runtime.repaint();
+  const spec17ProjectionSafe = spec17ProjectionGeometrySafe(
+    dataset,
+    dependencies.render,
+  );
 
   const reachedViews = new Set<FabricView>();
   for (const [index, view] of FABRIC_VIEWS.entries()) {
@@ -1338,28 +1584,59 @@ async function observe(
     ({ enabled, id }) => enabled && id === splitterFocusId,
   );
   if (splitterAvailable) runtime.setFocus(splitterFocusId);
+  const inertUiBefore = structuredClone(runtime.ui);
+  const inertControllerBefore = structuredClone(controller.state);
   const resizeFrames = [
-    runtime.resize({ columns: 44, rows: 15 }),
+    runtime.resize({ columns: 0, rows: 0 }),
+    runtime.resize({ columns: 29, rows: 5 }),
+  ];
+  await runtime.handleInput({ kind: "key", key: "alt-8" });
+  await runtime.handleInput({ kind: "key", key: "page-down" });
+  await runtime.handleInput({ kind: "paste", text: "must remain inert" });
+  await runtime.handleInput({
+    kind: "mouse",
+    phase: "wheel",
+    button: "wheel-down",
+    x: 1,
+    y: 1,
+    modifiers: { shift: false, alt: false, ctrl: false },
+  });
+  keyboardEventCount += 2;
+  mouseEventCount += 1;
+  const inertStatePreserved =
+    JSON.stringify(runtime.ui) === JSON.stringify(inertUiBefore) &&
+    JSON.stringify(controller.state) === JSON.stringify(inertControllerBefore);
+  resizeFrames.push(
+    runtime.resize({ columns: 30, rows: 6 }),
     runtime.resize(manifest.referenceViewport),
     runtime.resize({ columns: 120, rows: 32 }),
-  ];
+  );
   resizeEventCount += resizeFrames.length;
   const dynamicResizeSafe =
-    resizeFrames[0]?.columns === 44 && resizeFrames[0].rows.length === 15 &&
-    resizeFrames[1]?.columns === manifest.referenceViewport.columns &&
-    resizeFrames[1].rows.length === manifest.referenceViewport.rows &&
-    resizeFrames[2]?.columns === 120 && resizeFrames[2].rows.length === 32 &&
-    resizeFrames.every((candidate) => candidate.mode !== "inert") &&
+    resizeFrames[0]?.columns === 0 && resizeFrames[0].rows.length === 0 &&
+    resizeFrames[0].mode === "inert" &&
+    resizeFrames[1]?.columns === 29 && resizeFrames[1].rows.length === 5 &&
+    resizeFrames[1].mode === "inert" &&
+    resizeFrames[2]?.columns === 30 && resizeFrames[2].rows.length === 6 &&
+    resizeFrames[2].mode === "strip" &&
+    resizeFrames[3]?.columns === manifest.referenceViewport.columns &&
+    resizeFrames[3].rows.length === manifest.referenceViewport.rows &&
+    resizeFrames[3].mode === "reference" &&
+    resizeFrames[4]?.columns === 120 && resizeFrames[4].rows.length === 32 &&
+    resizeFrames[4].mode === "wide" &&
     new Set(resizeFrames.map(({ geometryKey }) => geometryKey)).size ===
       resizeFrames.length &&
+    inertStatePreserved &&
     controller.state.activeView === "attention" &&
     (controller.state.selectionByView.attention?.stableId ?? null) === selectionBeforeResize &&
     runtime.ui.draft === preservedDraft &&
     splitterAvailable &&
-    resizeFrames[0]?.presentation.focusId !== splitterFocusId &&
+    resizeFrames[0]?.presentation.focusId === splitterFocusId &&
     resizeFrames[1]?.presentation.focusId === splitterFocusId &&
-    resizeFrames[2]?.presentation.focusId === splitterFocusId &&
-    resizeFrames.every((candidate) => frameHasEnabledVisibleFocus(candidate));
+    resizeFrames[2]?.presentation.focusId !== splitterFocusId &&
+    resizeFrames[3]?.presentation.focusId === splitterFocusId &&
+    resizeFrames[4]?.presentation.focusId === splitterFocusId &&
+    resizeFrames.slice(2).every((candidate) => frameHasEnabledVisibleFocus(candidate));
 
   await runtime.handleInput({ kind: "key", key: "alt-m" });
   keyboardEventCount += 1;
@@ -1417,7 +1694,9 @@ async function observe(
       await evidenceRuntime.handleInput({ kind: "key", key: "home" });
       keyboardEventCount += 2;
       const evidenceFrames = [
-        evidenceRuntime.resize({ columns: 60, rows: 18 }),
+        evidenceRuntime.resize({ columns: 0, rows: 0 }),
+        evidenceRuntime.resize({ columns: 29, rows: 5 }),
+        evidenceRuntime.resize({ columns: 30, rows: 6 }),
         evidenceRuntime.resize(manifest.referenceViewport),
         evidenceRuntime.resize({ columns: 120, rows: 32 }),
       ];
@@ -1552,6 +1831,7 @@ async function observe(
             `${topNotification.status} | journal ${topNotification.journalState}`,
           )),
     dynamicResizeSafe,
+    spec17ProjectionSafe,
     artifactReviewSafe,
     actionMatrixSafe: interactionCoverage.actionMatrixSafe,
     scrollAndSelectionSafe: interactionCoverage.scrollAndSelectionSafe,
@@ -1621,6 +1901,7 @@ export async function evaluateUsabilityManifest(
         observation.optionalIntegrationIndependent &&
         observation.nativeNotificationVisible &&
         observation.dynamicResizeSafe &&
+        observation.spec17ProjectionSafe &&
         observation.artifactReviewSafe &&
         observation.actionMatrixSafe &&
         observation.scrollAndSelectionSafe &&

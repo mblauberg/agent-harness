@@ -67,7 +67,7 @@ promotion.
    the domain incident process.
 
 Validate terminal evidence with `--gate complete`. `complete` means the outcome
-was proved, not merely that an operation succeeded. `reversed` and `failed`
+was proved, rather than that an operation merely succeeded. `reversed` and `failed`
 remain explicit outcomes with evidence and follow-up owners.
 
 ## Human gates

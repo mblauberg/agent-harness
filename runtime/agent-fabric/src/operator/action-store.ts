@@ -12,7 +12,7 @@ import type {
   OperatorActionStatus,
   OperatorActionStatusRequest,
   ProjectSessionLaunchCurrentState,
-  ProviderActionRefV1,
+  LaunchProviderActionJournalRefV1,
   RegisteredExternalEffectState,
   ScopedGate,
   Sha256Digest,
@@ -135,7 +135,10 @@ export interface OperatorLaunchCustodyPort {
     operatorCommandId: string;
   }>): LaunchDispatchHandle;
   dispatchPrepared(handle: LaunchDispatchHandle): Promise<unknown>;
-  providerActionRefForCommand(operatorId: string, commandId: string): ProviderActionRefV1;
+  launchProviderActionJournalRefForCommand(
+    operatorId: string,
+    commandId: string,
+  ): LaunchProviderActionJournalRefV1;
 }
 
 export interface OperatorChairRecoveryCustodyPort {
@@ -512,18 +515,18 @@ export class OperatorActionStore {
         operatorId: context.operatorId,
         operatorCommandId: request.command.commandId,
       });
-      const providerActionRef = launchCustody.providerActionRefForCommand(
+      const launchProviderActionJournalRef = launchCustody.launchProviderActionJournalRefForCommand(
         context.operatorId,
         request.command.commandId,
       );
       const preparedState = {
         ...provisionalState,
-        attemptGeneration: providerActionRef.custodyAttemptGeneration,
+        attemptGeneration: launchProviderActionJournalRef.custodyAttemptGeneration,
       };
       const receipt: OperatorActionReceipt = {
         ...provisionalReceipt,
         afterStateDigest: digestValue(preparedState, "operatorLaunchCommit.preparedStateDigest"),
-        providerActionRef,
+        launchProviderActionJournalRef,
       };
       this.#database.prepare(`
         UPDATE operator_previews SET preview_json=? WHERE preview_id=?
@@ -547,7 +550,10 @@ export class OperatorActionStore {
     await launchCustody.dispatchPrepared(prepared.handle);
     return {
       ...prepared.receipt,
-      providerActionRef: launchCustody.providerActionRefForCommand(context.operatorId, request.command.commandId),
+      launchProviderActionJournalRef: launchCustody.launchProviderActionJournalRefForCommand(
+        context.operatorId,
+        request.command.commandId,
+      ),
     };
   }
 
@@ -912,30 +918,33 @@ export class OperatorActionStore {
     if (launchCustody === undefined || envelope.action === null) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
     }
-    const providerActionRef = launchCustody.providerActionRefForCommand(operatorId, commandId);
+    const launchProviderActionJournalRef = launchCustody.launchProviderActionJournalRefForCommand(
+      operatorId,
+      commandId,
+    );
     const receipt: OperatorActionReceipt = {
       ...parseStoredReceipt(envelope.action),
-      providerActionRef,
+      launchProviderActionJournalRef,
     };
-    if (providerActionRef.journalState === "terminal") {
+    if (launchProviderActionJournalRef.journalState === "terminal") {
       return { status: "committed", commandId, receipt };
     }
-    if (providerActionRef.journalState === "ambiguous") {
+    if (launchProviderActionJournalRef.journalState === "ambiguous") {
       return {
         status: "ambiguous",
         commandId,
         intentDigest: envelope.preview.intentDigest,
-        attemptGeneration: providerActionRef.custodyAttemptGeneration,
-        providerActionRef,
+        attemptGeneration: launchProviderActionJournalRef.custodyAttemptGeneration,
+        launchProviderActionJournalRef,
       };
     }
     return {
       status: "pending",
       commandId,
       intentDigest: envelope.preview.intentDigest,
-      phase: providerActionRef.journalState,
-      attemptGeneration: providerActionRef.custodyAttemptGeneration,
-      providerActionRef,
+      phase: launchProviderActionJournalRef.journalState,
+      attemptGeneration: launchProviderActionJournalRef.custodyAttemptGeneration,
+      launchProviderActionJournalRef,
     };
   }
 
@@ -1954,6 +1963,15 @@ function validateCurrentState(
       throw new ProjectFabricCoreError("STALE_REVISION", "chair live handoff bridge revision changed");
     }
     return;
+  }
+  if (
+    intent.kind === "agent-lifecycle-recovery" ||
+    intent.kind === "provider-route-integrity-retire"
+  ) {
+    throw new ProjectFabricCoreError(
+      "CAPABILITY_FORBIDDEN",
+      `${intent.kind} current-state validation is unavailable until its daemon custody owner is composed`,
+    );
   }
   if (current.kind !== "promotion") throw new TypeError("promotion intent received another current-state family");
   try {

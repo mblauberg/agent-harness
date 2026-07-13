@@ -1,0 +1,21 @@
+# Blank issues are disabled: every report should arrive with the fields that
+# make it actionable. Discussions are not enabled on this repository yet; add a
+# contact link here when they are.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (do not open an issue)
+    url: https://github.com/mblauberg/provenant/blob/main/SECURITY.md
+    about: >-
+      Report privately through GitHub's private vulnerability-reporting or
+      draft security-advisory flow. Never put exploit details, credentials,
+      private prompts or personal data in a public issue.
+  - name: Contributing guide
+    url: https://github.com/mblauberg/provenant/blob/main/CONTRIBUTING.md
+    about: >-
+      The scripts/check-harness gate, which changes need a spec first, the risk
+      and authority fields, and the Australian-English house style.
+  - name: Harness constitution
+    url: https://github.com/mblauberg/provenant/blob/main/HARNESS.md
+    about: >-
+      Topology, lifecycle, risk tiers, routing and memory policy. Read this
+      before proposing a change to authority or to a gate.

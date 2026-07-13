@@ -134,21 +134,21 @@ export function responsiveModeFor(
   if (
     columns === undefined ||
     rows === undefined ||
-    !Number.isFinite(columns) ||
-    !Number.isFinite(rows) ||
+    !Number.isSafeInteger(columns) ||
+    !Number.isSafeInteger(rows) ||
     columns < 0 ||
     rows < 0
   ) {
     return "inert";
   }
-  const width = Math.trunc(columns);
-  const height = Math.trunc(rows);
+  const width = columns;
+  const height = rows;
   if (
     width > MAX_PRESENTATION_CELLS ||
     height > MAX_PRESENTATION_CELLS ||
     width * height > MAX_PRESENTATION_CELLS ||
-    width < 12 ||
-    height < 3
+    width < 30 ||
+    height < 6
   ) {
     return "inert";
   }
@@ -306,14 +306,12 @@ function headerFreshness(
   if (dataset.connection.state === "unsupported" || dataset.snapshot === null) {
     return "unavailable";
   }
-  if (dataset.connection.state !== "live") {
-    return "stale";
-  }
   const states = [
     factState(dataset.snapshot.project),
     factState(dataset.snapshot.session),
     factState(dataset.snapshot.runs),
   ];
+  if (dataset.connection.state !== "live") states.push("stale");
   return states.sort((left, right) => FACT_SEVERITY[right] - FACT_SEVERITY[left])[0] ?? "unavailable";
 }
 
@@ -372,8 +370,9 @@ function presentHeader(dataset: FabricConsoleDataset): PresentedHeader {
 }
 
 function ageLabel(ageMs: number): string {
-  if (ageMs < 1_000) return "now";
-  const seconds = Math.floor(ageMs / 1_000);
+  const boundedAgeMs = Number.isFinite(ageMs) ? Math.max(0, ageMs) : 0;
+  if (boundedAgeMs < 1_000) return "now";
+  const seconds = Math.floor(boundedAgeMs / 1_000);
   if (seconds < 60) return `${String(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${String(minutes)}m`;
@@ -381,8 +380,26 @@ function ageLabel(ageMs: number): string {
   return `${String(hours)}h`;
 }
 
-function freshnessLabel(freshness: ConsoleFreshness): string {
-  return `${freshness.state.toUpperCase()} ${ageLabel(freshness.ageMs)}`;
+function ageAtRender(
+  observedAt: string,
+  minimumAgeMs: number,
+  dataset: FabricConsoleDataset,
+): number {
+  const observedAtMs = Date.parse(observedAt);
+  const derivedAgeMs = Number.isFinite(observedAtMs) &&
+      Number.isFinite(dataset.loadedAtMs)
+    ? dataset.loadedAtMs - observedAtMs
+    : 0;
+  return Math.max(0, minimumAgeMs, derivedAgeMs);
+}
+
+function freshnessLabel(
+  freshness: ConsoleFreshness,
+  dataset: FabricConsoleDataset,
+): string {
+  return `${freshness.state.toUpperCase()} ${
+    ageLabel(ageAtRender(freshness.observedAt, freshness.ageMs, dataset))
+  }`;
 }
 
 const URGENCY_MARKER: Readonly<Record<ConsoleUrgency, string>> = {
@@ -394,7 +411,24 @@ const URGENCY_MARKER: Readonly<Record<ConsoleUrgency, string>> = {
   normal: " ",
 };
 
-function summaryText(row: ConsoleRow): readonly [string, string] {
+function attentionGroupingLabel(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): string | null {
+  if (row.view !== "attention") return null;
+  const item = factValue(dataset.snapshot?.attention)?.find(
+    (candidate) => candidate.itemId === row.stableId,
+  );
+  if (item === undefined) return null;
+  return `x${String(item.duplicateCount)} grouped | source ${item.sourceFreshness} | last event ${
+    ageLabel(ageAtRender(item.lastEventAt, 0, dataset))
+  }`;
+}
+
+function summaryText(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): readonly [string, string] {
   const summary = row.summary;
   if (summary === null) {
     const reason =
@@ -407,15 +441,17 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
   }
   switch (summary.kind) {
     case "attention":
+      const grouping = attentionGroupingLabel(row, dataset);
+      const groupingSuffix = grouping === null ? "" : ` | ${grouping}`;
       if (summary.nativeNotification.kind === "feature-unavailable") {
         return [
           summary.title,
-          `${summary.label} | ${summary.priority} | notify unavailable/feature-not-negotiated`,
+          `${summary.label} | ${summary.priority} | notify unavailable/feature-not-negotiated${groupingSuffix}`,
         ];
       }
       return [
         summary.title,
-        `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}`,
+        `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}${groupingSuffix}`,
       ];
     case "project":
       return [
@@ -449,8 +485,9 @@ function presentRow(
   row: ConsoleRow,
   selected: boolean,
   canMutate: boolean,
+  dataset: FabricConsoleDataset,
 ): PresentedRow {
-  const [primary, secondary] = summaryText(row);
+  const [primary, secondary] = summaryText(row, dataset);
   return {
     view: row.view,
     stableId: row.stableId,
@@ -459,7 +496,7 @@ function presentRow(
     urgencyMarker: URGENCY_MARKER[row.urgency],
     primary,
     secondary,
-    freshness: freshnessLabel(row.freshness),
+    freshness: freshnessLabel(row.freshness, dataset),
     actionable:
       canMutate &&
       row.freshness.state === "live" &&
@@ -467,16 +504,576 @@ function presentRow(
   };
 }
 
-function detailLines(row: ConsoleRow): PresentedDetail {
-  const [primary, secondary] = summaryText(row);
+type DetailLine = Readonly<{ label: string; value: string }>;
+
+type ReviewPreparationShape = Readonly<{
+  state: string;
+  phase: string;
+  revision: number;
+  accepted: Readonly<{
+    preparationId: string;
+    taskId: string;
+    reservedTargetGeneration: number;
+  }>;
+  progress:
+    | Readonly<{ kind: "phase-only" }>
+    | Readonly<{
+        kind: "finite";
+        completed: number;
+        total: number;
+        planDigest: string;
+      }>;
+  terminal:
+    | null
+    | Readonly<{ kind: "succeeded"; targetRef: number }>
+    | Readonly<{
+        kind: "conflicted" | "failed";
+        code: string;
+        evidenceDigest: string;
+      }>;
+}>;
+
+type ReviewCompletionShape = Readonly<{
+  blockers: readonly string[];
+  targetGeneration: number | null;
+  targetChair: null | Readonly<{
+    agentId: string;
+    bindingGeneration: number;
+    principalGeneration: number;
+    providerSessionGeneration: number;
+    modelFamily: string;
+    model: string;
+  }>;
+  reviewedArtifactRef: string | null;
+  publicationLineageDigest: string | null;
+  bundleDigest: string | null;
+  manifestRootDigest: string | null;
+  coverageDigest: string | null;
+  riskReadMapDigest: string | null;
+  mandatoryReadSetDigest: string | null;
+  profileDigest: string | null;
+  unavailableSlots: readonly Readonly<{
+    slot: string;
+    reason: string;
+    endpointProvider: string;
+    providerFamily: string;
+    model: string;
+    availabilityRevision: number;
+  }>[];
+  slots: readonly Readonly<{
+    slot: string;
+    verdict: string | null;
+    certifying: boolean;
+    endpointProvider: string;
+    providerFamily: string;
+    model: string;
+    actualRouteIdentityDigest: string | null;
+    blockers: readonly string[];
+  }>[];
+  finalReviewComplete: boolean;
+}>;
+
+type TopologyCurrentShape =
+  | Readonly<{ currency: "unavailable"; plan: null; pointer: null }>
+  | Readonly<{
+      currency: "current" | "stale";
+      pointer: Readonly<{ revision: number; planDigest: string }>;
+      plan: Readonly<{
+        waveId: string;
+        waveRevision: number;
+        state: string;
+        predecessor: null | Readonly<{
+          waveId: string;
+          waveRevision: number;
+          planDigest: string;
+        }>;
+        dependencies: readonly Readonly<{
+          dependencyTaskId: string;
+          requiredState: string;
+          evidenceRef: string;
+        }>[];
+        decomposability: Readonly<{ kind: string; evidenceRef: string }>;
+        topology: Readonly<{
+          executionShape: string;
+          mode: string;
+          maximumConcurrentAgents: number;
+        }>;
+        chair: Readonly<{
+          agentId: string;
+          principalGeneration: number;
+          chairLeaseGeneration: number;
+        }>;
+        stageOwners: readonly Readonly<{
+          stageId: string;
+          taskId: string;
+          ownerAgentId: string;
+          writePartitionId: string | null;
+        }>[];
+        writePartitions: readonly Readonly<{
+          partitionId: string;
+          ownerAgentId: string;
+          mode: string;
+          pathSetDigest: string;
+          authorityRef: string;
+        }>[];
+        contention: Readonly<{
+          mode: string;
+          serializationOwnerAgentId: string | null;
+          evidenceRef: string;
+        }>;
+        budget: Readonly<{
+          providerTurns: number;
+          toolCalls: number;
+          wallClockSeconds: number;
+          maximumParallelAgents: number;
+        }>;
+        stopConditions: readonly Readonly<{
+          conditionId: string;
+          kind: string;
+          predicateRef: string;
+        }>[];
+        authority: Readonly<{
+          authorityRevision: number;
+          authorityRef: string;
+          authorityDigest: string;
+        }>;
+        policy: Readonly<{
+          policyRevision: number;
+          policyRef: string;
+          policyDigest: string;
+        }>;
+        rationaleRef: string;
+        planDigest: string;
+      }>;
+    }>;
+
+type ContextPressureCurrentShape =
+  | Readonly<{
+      currency: "unavailable";
+      pressure: null;
+      ageSeconds: null;
+      readAt: string;
+    }>
+  | Readonly<{
+      currency: "current" | "stale";
+      ageSeconds: number;
+      readAt: string;
+      pressure: Readonly<{
+        pressure: string;
+        source: string;
+        confidence: string;
+        windowTokens: number | null;
+        usedTokens: number | null;
+        remainingTokens: number | null;
+        providerGeneration: number;
+        contextRevision: number;
+        revision: number;
+        observedAt: string;
+        expiresAt: string;
+        evidenceDigest: string;
+      }>;
+    }>;
+
+type ReviewEvidenceShape = Readonly<{
+  record: Readonly<{
+    evidenceId: string;
+    targetGeneration: number;
+    slot: string;
+    endpointProvider: string;
+    providerFamily: string;
+    model: string;
+    routeReceiptDigest: string;
+    routeObservationDigest: string | null;
+    actualRouteIdentityDigest: string | null;
+  }>;
+  currency: Readonly<{
+    target: string;
+    source: string;
+    chair: string;
+    profile: string;
+    certifying: boolean;
+    blockerCodes: readonly string[];
+  }>;
+}>;
+
+function unavailableProjectionValue(read: Readonly<{
+  state: "unavailable";
+  reason: string;
+  code: string | null;
+}>): string {
+  return `unavailable | ${read.reason}${read.code === null ? "" : ` | ${read.code}`}`;
+}
+
+function observedNullable(value: string | number | null): string {
+  return value === null ? "observed null" : String(value);
+}
+
+function reviewRunDetailLines(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): readonly DetailLine[] {
+  if (row.view !== "runs") return [];
+  const projection = dataset.spec05?.reviewRuns.find(
+    ({ coordinationRunId }) => coordinationRunId === row.stableId,
+  );
+  if (projection === undefined) return [];
+  const lines: DetailLine[] = [];
+  if (projection.preparation.state === "unavailable") {
+    lines.push({
+      label: "Review preparation",
+      value: unavailableProjectionValue(projection.preparation),
+    });
+  } else {
+    const preparation = projection.preparation.value as unknown as ReviewPreparationShape;
+    lines.push(
+      {
+        label: "Review preparation",
+        value: `${preparation.state.toUpperCase()} | ${preparation.phase} | r${String(preparation.revision)}`,
+      },
+      {
+        label: "Review preparation identity",
+        value: `${preparation.accepted.preparationId} | task ${preparation.accepted.taskId} | target ${String(preparation.accepted.reservedTargetGeneration)}`,
+      },
+      {
+        label: "Review preparation progress",
+        value: preparation.progress.kind === "phase-only"
+          ? "phase-only"
+          : `${String(preparation.progress.completed)}/${String(preparation.progress.total)} verified-build-items | ${preparation.progress.planDigest}`,
+      },
+      {
+        label: "Review preparation terminal",
+        value: preparation.terminal === null
+          ? "observed null"
+          : preparation.terminal.kind === "succeeded"
+            ? `succeeded | target ${String(preparation.terminal.targetRef)}`
+            : `${preparation.terminal.kind} | ${preparation.terminal.code} | ${preparation.terminal.evidenceDigest}`,
+      },
+    );
+  }
+  if (projection.completion.state === "unavailable") {
+    lines.push({
+      label: "Review completion",
+      value: unavailableProjectionValue(projection.completion),
+    });
+  } else {
+    const completion = projection.completion.value as unknown as ReviewCompletionShape;
+    lines.push(
+      {
+        label: "Review target generation",
+        value: observedNullable(completion.targetGeneration),
+      },
+      {
+        label: "Review completion",
+        value: completion.finalReviewComplete ? "COMPLETE" : "INCOMPLETE",
+      },
+      {
+        label: "Review blockers",
+        value: completion.blockers.length === 0
+          ? "none observed"
+          : completion.blockers.join(", "),
+      },
+      {
+        label: "Reviewed artifact",
+        value: observedNullable(completion.reviewedArtifactRef),
+      },
+      {
+        label: "Review target chair",
+        value: completion.targetChair === null
+          ? "observed null"
+          : `${completion.targetChair.agentId} | binding g${String(completion.targetChair.bindingGeneration)} | principal g${String(completion.targetChair.principalGeneration)} | provider g${String(completion.targetChair.providerSessionGeneration)} | ${completion.targetChair.modelFamily}/${completion.targetChair.model}`,
+      },
+      {
+        label: "Review target digests",
+        value: `publication ${observedNullable(completion.publicationLineageDigest)} | bundle ${observedNullable(completion.bundleDigest)} | manifest ${observedNullable(completion.manifestRootDigest)} | coverage ${observedNullable(completion.coverageDigest)} | risk ${observedNullable(completion.riskReadMapDigest)} | mandatory ${observedNullable(completion.mandatoryReadSetDigest)} | profile ${observedNullable(completion.profileDigest)}`,
+      },
+    );
+    for (const unavailable of completion.unavailableSlots) {
+      lines.push({
+        label: `Review slot ${unavailable.slot}`,
+        value: `unavailable | ${unavailable.reason} | ${unavailable.endpointProvider}/${unavailable.providerFamily}/${unavailable.model} | availability r${String(unavailable.availabilityRevision)}`,
+      });
+    }
+    for (const slot of completion.slots) {
+      lines.push(
+        {
+          label: `Review slot ${slot.slot}`,
+          value: `${observedNullable(slot.verdict)} | ${slot.certifying ? "certifying" : "noncertifying"}`,
+        },
+        {
+          label: `Review slot ${slot.slot} provider`,
+          value: `${slot.endpointProvider}/${slot.providerFamily}/${slot.model}`,
+        },
+        {
+          label: `Review slot ${slot.slot} route proof`,
+          value: slot.actualRouteIdentityDigest === null
+            ? `observed null | blockers ${slot.blockers.join(", ") || "none observed"}`
+            : `proved | ${slot.actualRouteIdentityDigest}`,
+        },
+      );
+    }
+  }
+  lines.push({
+    label: "Review evidence",
+    value: projection.evidence.state === "unavailable"
+      ? unavailableProjectionValue(projection.evidence)
+      : `${String(projection.evidence.value.length)} record(s)`,
+  });
+  for (const recovery of projection.recoveries) {
+    lines.push({
+      label: `Route recovery ${recovery.actionRef.adapterId}:${recovery.actionRef.actionId}`,
+      value: recovery.read.state === "unavailable"
+        ? unavailableProjectionValue(recovery.read)
+        : `${recovery.read.value.state} | route ${recovery.read.value.routeState} | lookup ${recovery.read.value.lookupState} | retirement ${recovery.read.value.retirementEligible ? "eligible" : "ineligible"}`,
+    });
+  }
+  lines.push(
+    {
+      label: "Provider route",
+      value: unavailableProjectionValue(projection.providerRoute),
+    },
+    {
+      label: "Capability freshness",
+      value: unavailableProjectionValue(projection.capabilityFreshness),
+    },
+  );
+  return lines;
+}
+
+function topologyDetailLines(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): readonly DetailLine[] {
+  if (row.view !== "work") return [];
+  const projection = dataset.spec05?.topology.find(
+    ({ taskId }) => taskId === row.stableId,
+  );
+  if (projection === undefined) return [];
+  if (projection.read.state === "unavailable") {
+    return [{
+      label: "Topology current",
+      value: unavailableProjectionValue(projection.read),
+    }];
+  }
+  const current = projection.read.value as unknown as TopologyCurrentShape;
+  if (current.currency === "unavailable") {
+    return [
+      { label: "Topology currency", value: "UNAVAILABLE" },
+      { label: "Topology current", value: "observed null" },
+    ];
+  }
+  const plan = current.plan;
+  const lines: DetailLine[] = [
+    { label: "Topology currency", value: current.currency.toUpperCase() },
+    {
+      label: "Topology wave",
+      value: `${plan.waveId}@r${String(plan.waveRevision)} | ${plan.state}`,
+    },
+    {
+      label: "Topology pointer",
+      value: `r${String(current.pointer.revision)} | ${current.pointer.planDigest}`,
+    },
+    {
+      label: "Topology predecessor",
+      value: plan.predecessor === null
+        ? "observed null"
+        : `${plan.predecessor.waveId}@r${String(plan.predecessor.waveRevision)} | ${plan.predecessor.planDigest}`,
+    },
+    {
+      label: "Topology decomposability",
+      value: `${plan.decomposability.kind} | ${plan.decomposability.evidenceRef}`,
+    },
+    {
+      label: "Topology execution",
+      value: `${plan.topology.executionShape} | ${plan.topology.mode} | max ${String(plan.topology.maximumConcurrentAgents)}`,
+    },
+    {
+      label: "Topology chair",
+      value: `${plan.chair.agentId} | principal g${String(plan.chair.principalGeneration)} | lease g${String(plan.chair.chairLeaseGeneration)}`,
+    },
+    {
+      label: "Topology contention",
+      value: `${plan.contention.mode} | owner ${observedNullable(plan.contention.serializationOwnerAgentId)} | ${plan.contention.evidenceRef}`,
+    },
+    {
+      label: "Topology budget",
+      value: `turns ${String(plan.budget.providerTurns)} | tools ${String(plan.budget.toolCalls)} | wall ${String(plan.budget.wallClockSeconds)}s | parallel ${String(plan.budget.maximumParallelAgents)}`,
+    },
+    {
+      label: "Topology authority",
+      value: `${plan.authority.authorityRef}@r${String(plan.authority.authorityRevision)} | ${plan.authority.authorityDigest}`,
+    },
+    {
+      label: "Topology policy",
+      value: `${plan.policy.policyRef}@r${String(plan.policy.policyRevision)} | ${plan.policy.policyDigest}`,
+    },
+    { label: "Topology rationale", value: plan.rationaleRef },
+    { label: "Topology plan digest", value: plan.planDigest },
+  ];
+  for (const dependency of plan.dependencies) {
+    lines.push({
+      label: "Topology dependency",
+      value: `${dependency.dependencyTaskId} | ${dependency.requiredState} | ${dependency.evidenceRef}`,
+    });
+  }
+  for (const owner of plan.stageOwners) {
+    lines.push({
+      label: `Topology stage ${owner.stageId}`,
+      value: `${owner.taskId} | owner ${owner.ownerAgentId} | partition ${observedNullable(owner.writePartitionId)}`,
+    });
+  }
+  for (const partition of plan.writePartitions) {
+    lines.push({
+      label: `Topology partition ${partition.partitionId}`,
+      value: `${partition.mode} | owner ${partition.ownerAgentId} | paths ${partition.pathSetDigest} | authority ${partition.authorityRef}`,
+    });
+  }
+  for (const stop of plan.stopConditions) {
+    lines.push({
+      label: `Topology stop ${stop.conditionId}`,
+      value: `${stop.kind} | ${stop.predicateRef}`,
+    });
+  }
+  return lines;
+}
+
+function contextPressureDetailLines(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): readonly DetailLine[] {
+  if (row.view !== "agents") return [];
+  const projection = dataset.spec05?.contextPressure.find(
+    ({ agentId }) => agentId === row.stableId,
+  );
+  if (projection === undefined) return [];
+  if (projection.read.state === "unavailable") {
+    return [{
+      label: "Context pressure",
+      value: unavailableProjectionValue(projection.read),
+    }];
+  }
+  const current = projection.read.value as unknown as ContextPressureCurrentShape;
+  if (current.currency === "unavailable") {
+    return [
+      { label: "Context pressure", value: "observed null | UNAVAILABLE" },
+      { label: "Context age", value: "observed null" },
+    ];
+  }
+  const pressure = current.pressure;
+  const tokens = pressure.windowTokens === null
+    ? "observed null"
+    : `window ${String(pressure.windowTokens)} | used ${String(pressure.usedTokens)} | remaining ${String(pressure.remainingTokens)}`;
+  return [
+    {
+      label: "Context pressure",
+      value: `${pressure.pressure.toUpperCase()} | ${current.currency.toUpperCase()} | age ${String(current.ageSeconds)}s`,
+    },
+    {
+      label: "Context source",
+      value: `${pressure.source} | ${pressure.confidence}`,
+    },
+    { label: "Context tokens", value: tokens },
+    {
+      label: "Context generations",
+      value: `provider g${String(pressure.providerGeneration)} | context r${String(pressure.contextRevision)} | projection r${String(pressure.revision)}`,
+    },
+    {
+      label: "Context observation",
+      value: `${pressure.observedAt} -> ${pressure.expiresAt} | read ${current.readAt}`,
+    },
+    { label: "Context evidence", value: pressure.evidenceDigest },
+  ];
+}
+
+function evidenceReviewDetailLines(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): readonly DetailLine[] {
+  if (row.view !== "evidence") return [];
+  const reviewRuns = dataset.spec05?.reviewRuns ?? [];
+  const matchingRuns = reviewRuns.flatMap((run) =>
+    run.evidence.state !== "current"
+      ? []
+      : (run.evidence.value as unknown as readonly ReviewEvidenceShape[])
+        .filter(({ record }) => record.evidenceId === row.stableId)
+        .map((evidence) => ({
+          coordinationRunId: String(run.coordinationRunId),
+          evidence,
+        }))
+  );
+  const inspectionRunId =
+    dataset.inspection?.kind === "artifact" &&
+      dataset.inspection.state === "current" &&
+      dataset.inspection.binding.view === "evidence" &&
+      dataset.inspection.binding.itemId === row.stableId &&
+      dataset.inspection.result.coordinationRunId !== null
+      ? String(dataset.inspection.result.coordinationRunId)
+      : null;
+  const evidence = inspectionRunId === null
+    ? matchingRuns.length === 1
+      ? matchingRuns[0]?.evidence
+      : undefined
+    : matchingRuns.find(
+      ({ coordinationRunId }) => coordinationRunId === inspectionRunId,
+    )?.evidence;
+  if (evidence === undefined && matchingRuns.length > 0) {
+    return [{
+      label: "Review evidence",
+      value: "unavailable | coordination-run-binding-unavailable",
+    }];
+  }
+  if (evidence === undefined) return [];
+  const record = evidence.record;
+  const currency = evidence.currency;
+  const routeProof = currency.blockerCodes.includes("actual-route-mismatch")
+    ? "Unknown | actual-route-mismatch"
+    : currency.blockerCodes.includes("actual-route-unproved")
+      ? "Unknown | actual-route-unproved"
+      : record.actualRouteIdentityDigest !== null &&
+          record.routeObservationDigest !== null
+        ? `proved | ${record.actualRouteIdentityDigest}`
+        : "Unknown | actual-route-unproved";
+  return [
+    {
+      label: "Review target",
+      value: `generation ${String(record.targetGeneration)} | slot ${record.slot}`,
+    },
+    {
+      label: "Admitted review route",
+      value: `${record.endpointProvider} | ${record.providerFamily} | ${record.model}`,
+    },
+    { label: "Actual endpoint identity", value: routeProof },
+    {
+      label: "Actual route observation",
+      value: observedNullable(record.routeObservationDigest),
+    },
+    { label: "Route receipt", value: record.routeReceiptDigest },
+    {
+      label: "Review currency",
+      value: `target ${currency.target} | source ${currency.source} | chair ${currency.chair} | profile ${currency.profile}`,
+    },
+    {
+      label: "Review certification",
+      value: `${currency.certifying ? "certifying" : "noncertifying"} | blockers ${currency.blockerCodes.join(", ") || "none observed"}`,
+    },
+  ];
+}
+
+function detailLines(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): PresentedDetail {
+  const [primary, secondary] = summaryText(row, dataset);
   const lines: Array<Readonly<{ label: string; value: string }>> = [
     { label: "ID", value: row.stableId },
     { label: "Revision", value: row.revision },
     { label: "Kind", value: row.summary?.kind ?? "unavailable" },
     { label: "Summary", value: primary },
     { label: "State", value: secondary },
+    { label: "Source", value: row.freshness.source },
+    { label: "Freshness", value: freshnessLabel(row.freshness, dataset) },
   ];
   if (row.summary?.kind === "attention") {
+    const grouping = attentionGroupingLabel(row, dataset);
     const notification = row.summary.nativeNotification;
     if (notification.kind === "feature-unavailable") {
       lines.push({
@@ -503,11 +1100,10 @@ function detailLines(row: ConsoleRow): PresentedDetail {
         },
       );
     }
+    if (grouping !== null) {
+      lines.push({ label: "Attention grouping", value: grouping });
+    }
   }
-  lines.push(
-    { label: "Source", value: row.freshness.source },
-    { label: "Freshness", value: freshnessLabel(row.freshness) },
-  );
   if (row.actionAvailability.state === "read-only") {
     lines.push({ label: "Actions", value: `read-only: ${row.actionAvailability.reason}` });
   } else {
@@ -530,6 +1126,12 @@ function detailLines(row: ConsoleRow): PresentedDetail {
       value: row.summary.projectSessionId,
     });
   }
+  lines.push(
+    ...reviewRunDetailLines(row, dataset),
+    ...topologyDetailLines(row, dataset),
+    ...contextPressureDetailLines(row, dataset),
+    ...evidenceReviewDetailLines(row, dataset),
+  );
   return { stableId: row.stableId, revision: row.revision, lines };
 }
 
@@ -550,7 +1152,9 @@ function actionLabel(action: OperatorAvailableAction): string {
     "git-authorise": "Git authority",
     "git-operation-draft": "Git draft",
     "git-custody-resolve": "Resolve Git custody",
+    "agent-lifecycle-recovery": "Recover agent lifecycle",
     "registered-external-effect": "External effect",
+    "provider-route-integrity-retire": "Retire provider reservation",
     promotion: "Promote release",
   };
   return labels[action];
@@ -967,6 +1571,71 @@ function presentIntent(
       },
     ];
   }
+  if (intent.kind === "provider-route-integrity-retire") {
+    return [
+      { label: "Kind", value: intent.kind },
+      { label: "Session", value: intent.projectSessionId },
+      { label: "Run", value: intent.coordinationRunId },
+      {
+        label: "Provider action",
+        value: `${intent.actionRef.adapterId}:${intent.actionRef.actionId}`,
+      },
+      { label: "Recovery generation", value: String(intent.recoveryGeneration) },
+      { label: "Expected state", value: intent.expectedState },
+      { label: "Reservation digest", value: intent.reservationDigest },
+      { label: "Gate", value: `${intent.gateId}@r${String(intent.expectedGateRevision)}` },
+      { label: "Direct input attestation", value: intent.directInputAttestationId },
+    ];
+  }
+  if (intent.kind === "agent-lifecycle-recovery") {
+    const source = intent.source.kind === "custody"
+      ? `custody:${intent.source.custodyRef.custodyId}@r${String(intent.source.custodyRef.custodyRevision)}`
+      : `generation-loss:${intent.source.generationLossRef.generationLossId}@r${String(intent.source.generationLossRef.generationLossRevision)}`;
+    const common = [
+      { label: "Kind", value: `${intent.kind}:${intent.path}` },
+      { label: "Session", value: intent.projectSessionId },
+      { label: "Run", value: intent.coordinationRunId },
+      { label: "Agent", value: intent.agentId },
+      { label: "Recovery source", value: source },
+      { label: "Expected session", value: `r${String(intent.expectedSessionRevision)} g${String(intent.expectedSessionGeneration)}` },
+      { label: "Expected run revision", value: String(intent.expectedRunRevision) },
+      { label: "Expected agent revision", value: String(intent.expectedAgentRevision) },
+      { label: "Expected source revision", value: String(intent.expectedSourceRevision) },
+      { label: "Expected principal generation", value: String(intent.expectedPrincipalGeneration) },
+      { label: "Expected provider generation", value: String(intent.expectedProviderGeneration) },
+      { label: "Expected bridge generation", value: String(intent.expectedBridgeGeneration) },
+      { label: "Expected context revision", value: String(intent.expectedContextRevision) },
+      { label: "Bridge owner", value: intent.bridgeOwnerKind },
+      {
+        label: "Expected chair lease generation",
+        value: intent.expectedChairLeaseGeneration === null
+          ? "inapplicable"
+          : String(intent.expectedChairLeaseGeneration),
+      },
+      { label: "Gate", value: `${intent.gateId}@r${String(intent.expectedGateRevision)} ${intent.expectedGateStatus}` },
+    ];
+    return intent.path === "fresh-rotate"
+      ? [
+          ...common,
+          { label: "Recovery capability", value: `${intent.recoveryCapabilityId}@r${String(intent.expectedRecoveryCapabilityRevision)}` },
+          { label: "Recovery capability hash", value: intent.recoveryCapabilityHash },
+          { label: "Replacement adapter", value: intent.replacementAdapterId },
+          { label: "Replacement contract", value: intent.replacementContractDigest },
+          { label: "Replacement action", value: `${intent.replacementActionRef.adapterId}:${intent.replacementActionRef.actionId}` },
+          { label: "Checkpoint", value: `${intent.checkpointRef.checkpointId}@r${String(intent.checkpointRef.checkpointRevision)}` },
+          { label: "Checkpoint digest", value: intent.checkpointDigest },
+          {
+            label: "Checkpoint validation receipt",
+            value: intent.checkpointValidationReceiptDigest ?? "observed-null",
+          },
+        ]
+      : [
+          ...common,
+          { label: "Reason", value: intent.reason },
+          { label: "Direct input attestation", value: intent.directInputAttestationId },
+          { label: "Destructive confirmation", value: intent.destructiveConfirmationDigest },
+        ];
+  }
   if (intent.kind === "chair-bridge-recovery") {
     return [
       { label: "Kind", value: intent.kind },
@@ -1188,7 +1857,7 @@ export function presentFabricConsole(
       : review === null
         ? workflowReviewActions(workflowReview as ConsoleWorkflowReview)
         : reviewActions(review);
-  const baseDetail = selectedRow === null ? null : detailLines(selectedRow);
+  const baseDetail = selectedRow === null ? null : detailLines(selectedRow, dataset);
   const unavailableActions = actions.filter(
     (action): action is PresentedAction & { reason: string } =>
       !action.enabled && action.reason !== undefined,
@@ -1223,6 +1892,7 @@ export function presentFabricConsole(
         candidate,
         candidate.stableId === selected?.stableId,
         dataset.canMutate && dataset.connection.state === "live",
+        dataset,
       ),
     ),
     topAttention:
@@ -1233,6 +1903,7 @@ export function presentFabricConsole(
             controller.selectionByView.attention?.stableId ===
               dataset.pages.attention.rows[0].stableId,
             dataset.canMutate && dataset.connection.state === "live",
+            dataset,
           ),
     detail,
     actions,

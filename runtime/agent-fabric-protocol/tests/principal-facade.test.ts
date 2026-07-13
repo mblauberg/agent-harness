@@ -52,7 +52,11 @@ const principals = {
     kind: "integration",
     integrationId: "integration_01" as never,
     projectId: "project_01" as never,
+    projectSessionId: "ps_01" as never,
+    runId: "run_01",
     principalGeneration: 1,
+    providerId: "anthropic",
+    providerSessionRef: "provider_session_01",
   },
 } as const satisfies Record<string, ProtocolPrincipal>;
 

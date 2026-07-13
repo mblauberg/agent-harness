@@ -1,11 +1,11 @@
 schema_version: 1
 target_skill: orchestrate
 cases:
-  - {id: q154, relation: positive, prompt: "Fan out this repository-wide audit across bounded agents and synthesise verified findings.", tags: [direct], expected: {primary_skill: orchestrate, companion_skills: []}}
+  - {id: q154, relation: positive, prompt: "Fan out this decomposable repository-wide audit across bounded read-only agents with independently checkable source-anchored returns, then synthesise it.", tags: [direct], expected: {primary_skill: orchestrate, companion_skills: []}}
   - {id: q155, relation: positive, prompt: "Use native subagents and cross-family reviewers for this multi-angle research task.", tags: [direct], expected: {primary_skill: orchestrate, companion_skills: []}}
   - {id: q156, relation: positive, prompt: "Send this Claude pair an answer-bearing request through Fabric, use Herdr only to wake it, and collect the correlated result.", tags: [direct], expected: {primary_skill: orchestrate, companion_skills: []}}
   - {id: q157, relation: negative, prompt: "Fix this one-character typo in the local Markdown file.", tags: [no-skill], expected: {primary_skill: null, companion_skills: []}}
-  - {id: q158, relation: negative, prompt: "This tightly coupled function fails one test; reproduce the root cause without editing.", tags: [adjacent], expected: {primary_skill: diagnose, companion_skills: []}}
+  - {id: q158, relation: negative, prompt: "These tightly coupled symptoms share one unknown error source and mutable fixture; reproduce the root cause serially without editing.", tags: [adjacent], expected: {primary_skill: diagnose, companion_skills: []}}
   - {id: q159, relation: negative, prompt: "Run this open-ended research mission across crashes until I explicitly write STOP.", tags: [adjacent], expected: {primary_skill: autonomous-lab, companion_skills: []}}
   - {id: q160, relation: boundary, prompt: "Implement this approved large migration using partitioned agent waves and independent review.", tags: [composition], expected: {primary_skill: implement, companion_skills: [orchestrate]}}
   - {id: q161, relation: boundary, prompt: "Run a multi-agent source-read-only PR review with independent lenses and claim reduction.", tags: [composition], expected: {primary_skill: code-review, companion_skills: [orchestrate]}}

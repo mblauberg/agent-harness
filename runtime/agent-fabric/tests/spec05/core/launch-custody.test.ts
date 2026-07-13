@@ -640,7 +640,7 @@ describe("launch custody", () => {
       SELECT operation_id, state FROM resource_reservations
        WHERE reservation_id=(SELECT reservation_id FROM project_session_launch_custody)
     `).get()).toEqual({ operation_id: "provider_launch_01", state: "reserved" });
-    expect(fixture.service.providerActionRefForCommand("operator_01", "commit_launch_01")).toMatchObject({
+    expect(fixture.service.launchProviderActionJournalRefForCommand("operator_01", "commit_launch_01")).toMatchObject({
       journalState: "prepared",
       journalRevision: 1,
       outcomeKind: null,
@@ -703,14 +703,14 @@ describe("launch custody", () => {
     } as unknown as OperatorActionCommitRequest);
 
     expect(genericEffects).toBe(0);
-    expect(receipt.providerActionRef).toMatchObject({ journalState: "ambiguous", outcomeKind: "ambiguous" });
+    expect(receipt.launchProviderActionJournalRef).toMatchObject({ journalState: "ambiguous", outcomeKind: "ambiguous" });
     expect(actions.status({
       credential: command.credential,
       projectId: "project_01",
       commandId: "commit_launch_vertical_01",
     } as never)).toMatchObject({
       status: "ambiguous",
-      providerActionRef: { journalState: "ambiguous", outcomeKind: "ambiguous" },
+      launchProviderActionJournalRef: { journalState: "ambiguous", outcomeKind: "ambiguous" },
     });
   });
 
@@ -811,7 +811,7 @@ describe("launch custody", () => {
       effect_count: 1,
       provider_session_generation: 2,
     });
-    expect(fixture.service.providerActionRefForCommand("operator_01", "commit_launch_01")).toMatchObject({
+    expect(fixture.service.launchProviderActionJournalRefForCommand("operator_01", "commit_launch_01")).toMatchObject({
       journalState: "terminal",
       journalRevision: 3,
       outcomeKind: "terminal-success",

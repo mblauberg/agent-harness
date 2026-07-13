@@ -5,7 +5,7 @@ import type { FabricClient } from "../../../src/core/client.ts";
 import { dispatchAgentProtocol } from "../../../src/daemon/agent-protocol-dispatch.ts";
 
 describe("public provider-action result projection", () => {
-  it("replaces opaque adapter output with a canonical digest and keeps only a validated provider answer", async () => {
+  it("projects the canonical non-review action identity and never exposes an answer for a non-spawn", async () => {
     const secret = "afc_secret_provider_output_must_not_escape";
     const client = {
       async dispatchProviderAction() {
@@ -25,18 +25,19 @@ describe("public provider-action result projection", () => {
       adapterId: "fake",
       actionId: "action-1",
       operation: "steer",
+      certifyingReview: null,
       payload: { instruction: "bounded" },
       commandId: "command-1",
     });
 
     expect(projected).toStrictEqual({
-      actionId: "action-1",
+      kind: "non-review",
+      actionRef: { adapterId: "fake", actionId: "action-1" },
       status: "terminal",
       history: ["prepared", "terminal"],
       executionCount: 1,
       effectCount: 1,
       resultDigest: "sha256:bbfc12f874f5c4b41578fc1e37fc4dee81888983788d49560593eb5116f332eb",
-      providerAnswer: "bounded review answer",
     });
     expect(JSON.stringify(projected)).not.toContain(secret);
   });

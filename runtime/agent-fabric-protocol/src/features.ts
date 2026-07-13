@@ -29,6 +29,9 @@ export const OPERATION_FEATURES = [
   "lifecycle-control.v1",
   "workstreams.v1",
   "chair-live-handoff.v1",
+  "provider-review-evidence.v1",
+  "provider-context-pressure.v1",
+  "topology-wave.v1",
 ] as const satisfies readonly OperationFeature[];
 
 export const RESULT_SHAPE_FEATURES = [

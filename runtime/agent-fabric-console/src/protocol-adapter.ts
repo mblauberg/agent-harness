@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 
 import {
+  FABRIC_OPERATIONS,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
+  type AgentId,
   type ArtifactContentClient,
   type ArtifactContentReadResult,
   type ArtifactContentTransformation,
@@ -28,6 +30,12 @@ import {
   type ProjectId,
   type ProjectSessionDiscovery,
   type ProjectSessionId,
+  type ProviderActionRefV1,
+  type ProviderContextPressureReadRequestV1,
+  type ProviderContextPressureReadV1,
+  type ProviderRouteIntegrityRecoveryProjectionV1,
+  type ProviderRouteIntegrityRecoveryReadErrorV1,
+  type ProviderRouteIntegrityRecoveryReadRequestV1,
   type ProjectionEventsRequest,
   type ProjectionEventsResult,
   type ProjectionSnapshotRequest,
@@ -36,6 +44,15 @@ import {
   type Sha256Digest,
   type TaskId,
   type Timestamp,
+  type TopologyWaveCurrentReadRequestV1,
+  type TopologyWaveCurrentReadV1,
+  type ReviewCompletionReadRequestV1,
+  type ReviewCompletionV1,
+  type ReviewEvidenceListRequestV1,
+  type ReviewEvidenceListResultV1,
+  type ReviewEvidenceReadV1,
+  type ReviewReadErrorV1,
+  type ReviewTargetPreparationReadV1,
 } from "@local/agent-fabric-protocol";
 import { parseArtifactContentReadResult } from "@local/agent-fabric-protocol";
 
@@ -71,6 +88,24 @@ export type ConsoleProtocolPort = Readonly<{
   readMessageBody: MessageBodyClient["read"] | null;
   readRepository: GitRepositoryReadClient["read"] | null;
   readArtifactContent: ArtifactContentClient["readContent"] | null;
+  reviewCompletionRead?:
+    | ((request: ReviewCompletionReadRequestV1) => Promise<ReviewCompletionV1 | ReviewReadErrorV1>)
+    | null;
+  reviewEvidenceList?:
+    | ((request: ReviewEvidenceListRequestV1) => Promise<ReviewEvidenceListResultV1 | ReviewReadErrorV1>)
+    | null;
+  providerRouteIntegrityRecoveryRead?:
+    | ((request: ProviderRouteIntegrityRecoveryReadRequestV1) => Promise<
+        ProviderRouteIntegrityRecoveryProjectionV1 |
+        ProviderRouteIntegrityRecoveryReadErrorV1
+      >)
+    | null;
+  providerContextPressureRead?:
+    | ((request: ProviderContextPressureReadRequestV1) => Promise<ProviderContextPressureReadV1>)
+    | null;
+  topologyWaveCurrentRead?:
+    | ((request: TopologyWaveCurrentReadRequestV1) => Promise<TopologyWaveCurrentReadV1>)
+    | null;
 }>;
 
 export type ConsoleArtifactContentPage = Readonly<{
@@ -182,6 +217,16 @@ export function bindConsoleProtocolClient(
       readMessageBody: client.messages?.read ?? null,
       readRepository: client.repository?.read ?? null,
       readArtifactContent: artifactRead,
+      reviewCompletionRead:
+        client.operations?.[FABRIC_OPERATIONS.reviewCompletionRead] ?? null,
+      reviewEvidenceList:
+        client.operations?.[FABRIC_OPERATIONS.reviewEvidenceList] ?? null,
+      providerRouteIntegrityRecoveryRead:
+        client.operations?.[FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead] ?? null,
+      providerContextPressureRead:
+        client.operations?.[FABRIC_OPERATIONS.providerContextPressureRead] ?? null,
+      topologyWaveCurrentRead:
+        client.operations?.[FABRIC_OPERATIONS.topologyWaveCurrentRead] ?? null,
     },
   };
 }
@@ -363,6 +408,59 @@ function reviewDisposition(
   return "blocked-redacted";
 }
 
+export type ConsoleClosedProjectionUnavailableReason =
+  | "operation-not-negotiated"
+  | "preparation-id-not-projected"
+  | "operator-route-projection-unavailable"
+  | "run-correlation-unavailable"
+  | "read-error"
+  | "contract-invalid";
+
+export type ConsoleClosedProjectionRead<Value> =
+  | Readonly<{ state: "current"; value: Value }>
+  | Readonly<{
+      state: "unavailable";
+      reason: ConsoleClosedProjectionUnavailableReason;
+      code: string | null;
+    }>;
+
+export type ConsoleClosedProjectionUnavailable = Extract<
+  ConsoleClosedProjectionRead<never>,
+  { state: "unavailable" }
+>;
+
+export type ConsoleReviewRunProjection = Readonly<{
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  preparation: ConsoleClosedProjectionRead<ReviewTargetPreparationReadV1>;
+  completion: ConsoleClosedProjectionRead<ReviewCompletionV1>;
+  evidence: ConsoleClosedProjectionRead<readonly ReviewEvidenceReadV1[]>;
+  recoveries: readonly Readonly<{
+    actionRef: ProviderActionRefV1;
+    read: ConsoleClosedProjectionRead<ProviderRouteIntegrityRecoveryProjectionV1>;
+  }>[];
+  providerRoute: ConsoleClosedProjectionUnavailable;
+  capabilityFreshness: ConsoleClosedProjectionUnavailable;
+}>;
+
+export type ConsoleTopologyProjection = Readonly<{
+  taskId: TaskId;
+  coordinationRunId: CoordinationRunId | null;
+  read: ConsoleClosedProjectionRead<TopologyWaveCurrentReadV1>;
+}>;
+
+export type ConsoleContextPressureProjection = Readonly<{
+  agentId: AgentId;
+  coordinationRunId: CoordinationRunId | null;
+  read: ConsoleClosedProjectionRead<ProviderContextPressureReadV1>;
+}>;
+
+export type ConsoleSpec05Projections = Readonly<{
+  reviewRuns: readonly ConsoleReviewRunProjection[];
+  topology: readonly ConsoleTopologyProjection[];
+  contextPressure: readonly ConsoleContextPressureProjection[];
+}>;
+
 export type FabricConsoleDataset = Readonly<{
   connection: ConsoleConnection;
   snapshot: OperatorProjectionSnapshot | null;
@@ -378,6 +476,7 @@ export type FabricConsoleDataset = Readonly<{
   workflowCapabilities?: ConsoleWorkflowCapabilities;
   productionActionPlanning?: true;
   inspection?: ConsoleReadInspection;
+  spec05?: ConsoleSpec05Projections;
 }>;
 
 export type ConsoleProtocolAdapterOptions = Readonly<{
@@ -391,6 +490,24 @@ export type ConsoleProtocolAdapterOptions = Readonly<{
   maxPagesPerView?: number;
   maxResnapshotAttempts?: number;
 }>;
+
+const MAX_CLOSED_PROJECTION_PAGES = 100;
+
+type ReviewCompletionActionShape = Readonly<{
+  slots: readonly Readonly<{ actionRef: ProviderActionRefV1 | null }>[];
+}>;
+
+type ReviewEvidenceListPageShape = Readonly<{
+  entries: readonly ReviewEvidenceReadV1[];
+  nextCursor: string | null;
+}>;
+
+function closedProjectionUnavailable(
+  reason: ConsoleClosedProjectionUnavailableReason,
+  code: string | null = null,
+): ConsoleClosedProjectionUnavailable {
+  return { state: "unavailable", reason, code };
+}
 
 export type BootstrapUnavailableReason =
   | "feature-unavailable"
@@ -590,6 +707,7 @@ export class ConsoleProtocolAdapter {
       ) {
         return this.#loadWithFallback();
       }
+      const spec05 = await this.#loadSpec05Projections(this.#lastGood.pages);
       const current: FabricConsoleDataset = {
         ...this.#lastGood,
         cursor: result.nextCursor,
@@ -597,6 +715,7 @@ export class ConsoleProtocolAdapter {
           state: "live",
           compatibility: this.#binding.compatibility,
         },
+        spec05,
         loadedAtMs: this.#now(),
         canMutate: !this.#binding.readOnly && this.#binding.actions !== null,
       };
@@ -1002,6 +1121,7 @@ export class ConsoleProtocolAdapter {
       const snapshotRevision = revisionFromProtocol(snapshot.snapshotRevision);
       try {
         const pages = await this.#loadPages(snapshot.snapshotRevision);
+        const spec05 = await this.#loadSpec05Projections(pages);
         return {
           connection: {
             state: "live",
@@ -1011,6 +1131,7 @@ export class ConsoleProtocolAdapter {
           snapshotRevision,
           cursor: snapshot.cursor,
           pages,
+          spec05,
           loadedAtMs: this.#now(),
           canMutate:
             !this.#binding.readOnly && this.#binding.actions !== null,
@@ -1023,6 +1144,288 @@ export class ConsoleProtocolAdapter {
       }
     }
     throw new ProjectionInvalidError("resnapshot attempts exhausted");
+  }
+
+  async #loadSpec05Projections(
+    pages: ConsoleViewPages,
+  ): Promise<ConsoleSpec05Projections> {
+    if (!this.#binding.ok) {
+      return { reviewRuns: [], topology: [], contextPressure: [] };
+    }
+    const runBindings = pages.runs.rows.flatMap((row) => {
+      if (
+        row.summary?.kind !== "run" ||
+        row.summary.projectSessionId === undefined ||
+        row.detailRef?.kind !== "run"
+      ) {
+        return [];
+      }
+      if (
+        row.stableId !== row.detailRef.coordinationRunId ||
+        (row.detailRef.projectSessionId !== undefined &&
+          row.detailRef.projectSessionId !== row.summary.projectSessionId)
+      ) {
+        throw new ProjectionInvalidError(
+          "run projection identity does not match its exact review scope",
+        );
+      }
+      return [{
+        projectSessionId: row.summary.projectSessionId,
+        coordinationRunId: row.detailRef.coordinationRunId,
+      }];
+    });
+    const uniqueRunBindings = runBindings.filter((candidate, index) =>
+      runBindings.findIndex((other) =>
+        other.projectSessionId === candidate.projectSessionId &&
+        other.coordinationRunId === candidate.coordinationRunId
+      ) === index
+    );
+    const reviewRuns = await Promise.all(
+      uniqueRunBindings.map((scope) => this.#loadReviewRunProjection(scope)),
+    );
+    const exactRun = uniqueRunBindings.length === 1
+      ? uniqueRunBindings[0] ?? null
+      : null;
+    const topology = await Promise.all(pages.work.rows.flatMap((row) => {
+      if (row.detailRef?.kind !== "task") return [];
+      const taskId = row.detailRef.taskId;
+      if (exactRun === null) {
+        return [Promise.resolve<ConsoleTopologyProjection>({
+          taskId,
+          coordinationRunId: null,
+          read: closedProjectionUnavailable("run-correlation-unavailable"),
+        })];
+      }
+      return [this.#readTopology(exactRun, taskId)];
+    }));
+    const contextPressure = await Promise.all(pages.agents.rows.flatMap((row) => {
+      if (row.detailRef?.kind !== "agent") return [];
+      const agentId = row.detailRef.agentId;
+      if (exactRun === null) {
+        return [Promise.resolve<ConsoleContextPressureProjection>({
+          agentId,
+          coordinationRunId: null,
+          read: closedProjectionUnavailable("run-correlation-unavailable"),
+        })];
+      }
+      return [this.#readContextPressure(exactRun, agentId)];
+    }));
+    return { reviewRuns, topology, contextPressure };
+  }
+
+  async #loadReviewRunProjection(scope: Readonly<{
+    projectSessionId: ProjectSessionId;
+    coordinationRunId: CoordinationRunId;
+  }>): Promise<ConsoleReviewRunProjection> {
+    const [completion, evidence] = await Promise.all([
+      this.#readReviewCompletion(scope),
+      this.#readReviewEvidence(scope),
+    ]);
+    const actionRefs = completion.state === "current"
+      ? (completion.value as unknown as ReviewCompletionActionShape).slots.flatMap(({ actionRef }) =>
+          actionRef === null ? [] : [actionRef]
+        ).filter((candidate, index, all) =>
+          all.findIndex((other) =>
+            other.adapterId === candidate.adapterId &&
+            other.actionId === candidate.actionId
+          ) === index
+        )
+      : [];
+    const recoveries = await Promise.all(actionRefs.map(async (actionRef) => ({
+      actionRef,
+      read: await this.#readRouteRecovery(scope, actionRef),
+    })));
+    return {
+      ...scope,
+      preparation: closedProjectionUnavailable(
+        "preparation-id-not-projected",
+      ),
+      completion,
+      evidence,
+      recoveries,
+      providerRoute: closedProjectionUnavailable(
+        "operator-route-projection-unavailable",
+      ),
+      capabilityFreshness: closedProjectionUnavailable(
+        "operator-route-projection-unavailable",
+      ),
+    };
+  }
+
+  async #readReviewCompletion(scope: Readonly<{
+    projectSessionId: ProjectSessionId;
+    coordinationRunId: CoordinationRunId;
+  }>): Promise<ConsoleClosedProjectionRead<ReviewCompletionV1>> {
+    if (!this.#binding.ok) {
+      return closedProjectionUnavailable("operation-not-negotiated");
+    }
+    const read = this.#binding.port.reviewCompletionRead ?? null;
+    if (read === null) {
+      return closedProjectionUnavailable("operation-not-negotiated");
+    }
+    try {
+      const result = await read({ schemaVersion: 1, ...scope });
+      const code = failureCode(result);
+      return code !== null
+        ? closedProjectionUnavailable("read-error", code)
+        : { state: "current", value: result };
+    } catch (error) {
+      return closedProjectionUnavailable(
+        "read-error",
+        failureCode(error) ?? "transport-failure",
+      );
+    }
+  }
+
+  async #readReviewEvidence(scope: Readonly<{
+    projectSessionId: ProjectSessionId;
+    coordinationRunId: CoordinationRunId;
+  }>): Promise<ConsoleClosedProjectionRead<readonly ReviewEvidenceReadV1[]>> {
+    if (!this.#binding.ok) {
+      return closedProjectionUnavailable("operation-not-negotiated");
+    }
+    const read = this.#binding.port.reviewEvidenceList ?? null;
+    if (read === null) {
+      return closedProjectionUnavailable("operation-not-negotiated");
+    }
+    const entries: ReviewEvidenceReadV1[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    try {
+      for (let page = 0; page < MAX_CLOSED_PROJECTION_PAGES; page += 1) {
+        const result = await read({
+          schemaVersion: 1,
+          ...scope,
+          targetGeneration: null,
+          slot: null,
+          pageSize: 100,
+          cursor,
+        });
+        const code = failureCode(result);
+        if (code !== null) {
+          return closedProjectionUnavailable("read-error", code);
+        }
+        const pageResult = result as unknown as ReviewEvidenceListPageShape;
+        entries.push(...pageResult.entries);
+        const nextCursor = pageResult.nextCursor;
+        if (nextCursor === null) return { state: "current", value: entries };
+        if (nextCursor === cursor || seen.has(nextCursor)) {
+          return closedProjectionUnavailable("contract-invalid", "cursor-cycle");
+        }
+        seen.add(nextCursor);
+        cursor = nextCursor;
+      }
+      return closedProjectionUnavailable("contract-invalid", "page-limit");
+    } catch (error) {
+      return closedProjectionUnavailable(
+        "read-error",
+        failureCode(error) ?? "transport-failure",
+      );
+    }
+  }
+
+  async #readRouteRecovery(
+    scope: Readonly<{
+      projectSessionId: ProjectSessionId;
+      coordinationRunId: CoordinationRunId;
+    }>,
+    actionRef: ProviderActionRefV1,
+  ): Promise<ConsoleClosedProjectionRead<ProviderRouteIntegrityRecoveryProjectionV1>> {
+    if (!this.#binding.ok) {
+      return closedProjectionUnavailable("operation-not-negotiated");
+    }
+    const read = this.#binding.port.providerRouteIntegrityRecoveryRead ?? null;
+    if (read === null) {
+      return closedProjectionUnavailable("operation-not-negotiated");
+    }
+    try {
+      const result = await read({ schemaVersion: 1, ...scope, actionRef });
+      const code = failureCode(result);
+      return code !== null
+        ? closedProjectionUnavailable("read-error", code)
+        : { state: "current", value: result };
+    } catch (error) {
+      return closedProjectionUnavailable(
+        "read-error",
+        failureCode(error) ?? "transport-failure",
+      );
+    }
+  }
+
+  async #readTopology(
+    scope: Readonly<{
+      projectSessionId: ProjectSessionId;
+      coordinationRunId: CoordinationRunId;
+    }>,
+    taskId: TaskId,
+  ): Promise<ConsoleTopologyProjection> {
+    const read = this.#binding.ok
+      ? this.#binding.port.topologyWaveCurrentRead ?? null
+      : null;
+    if (read === null) {
+      return {
+        taskId,
+        coordinationRunId: scope.coordinationRunId,
+        read: closedProjectionUnavailable("operation-not-negotiated"),
+      };
+    }
+    try {
+      return {
+        taskId,
+        coordinationRunId: scope.coordinationRunId,
+        read: {
+          state: "current",
+          value: await read({ schemaVersion: 1, ...scope, taskId }),
+        },
+      };
+    } catch (error) {
+      return {
+        taskId,
+        coordinationRunId: scope.coordinationRunId,
+        read: closedProjectionUnavailable(
+          "read-error",
+          failureCode(error) ?? "transport-failure",
+        ),
+      };
+    }
+  }
+
+  async #readContextPressure(
+    scope: Readonly<{
+      projectSessionId: ProjectSessionId;
+      coordinationRunId: CoordinationRunId;
+    }>,
+    agentId: AgentId,
+  ): Promise<ConsoleContextPressureProjection> {
+    const read = this.#binding.ok
+      ? this.#binding.port.providerContextPressureRead ?? null
+      : null;
+    if (read === null) {
+      return {
+        agentId,
+        coordinationRunId: scope.coordinationRunId,
+        read: closedProjectionUnavailable("operation-not-negotiated"),
+      };
+    }
+    try {
+      return {
+        agentId,
+        coordinationRunId: scope.coordinationRunId,
+        read: {
+          state: "current",
+          value: await read({ schemaVersion: 1, ...scope, agentId }),
+        },
+      };
+    } catch (error) {
+      return {
+        agentId,
+        coordinationRunId: scope.coordinationRunId,
+        read: closedProjectionUnavailable(
+          "read-error",
+          failureCode(error) ?? "transport-failure",
+        ),
+      };
+    }
   }
 
   async #loadPages(snapshotRevision: number): Promise<ConsoleViewPages> {

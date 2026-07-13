@@ -153,29 +153,33 @@ export type LaunchAdapterOutcomeV1 = LaunchAdapterOutcomeCommon & {
       };
 };
 
-type ProviderActionRefV1Common = {
+export type ProviderActionRefV1 = {
+  adapterId: string;
+  actionId: ProviderActionId;
+};
+
+type LaunchProviderActionJournalRefV1Common = {
   schemaVersion: 1;
   projectSessionId: ProjectSessionId;
   coordinationRunId: CoordinationRunId;
-  providerAdapterId: string;
-  providerActionId: ProviderActionId;
+  actionRef: ProviderActionRefV1;
   providerContractDigest: Sha256Digest;
   custodyAttemptGeneration: number;
   journalRevision: number;
 };
 
-export type ProviderActionRefV1 =
-  | (ProviderActionRefV1Common & {
+export type LaunchProviderActionJournalRefV1 =
+  | (LaunchProviderActionJournalRefV1Common & {
       journalState: "prepared" | "dispatched" | "accepted";
       outcomeKind: null;
       outcomeDigest: null;
     })
-  | (ProviderActionRefV1Common & {
+  | (LaunchProviderActionJournalRefV1Common & {
       journalState: "terminal";
       outcomeKind: "terminal-success" | "terminal-no-effect";
       outcomeDigest: Sha256Digest;
     })
-  | (ProviderActionRefV1Common & {
+  | (LaunchProviderActionJournalRefV1Common & {
       journalState: "ambiguous";
       outcomeKind: "ambiguous";
       outcomeDigest: Sha256Digest;
@@ -380,31 +384,34 @@ const launchAdapterOutcomeBaseCodec = objectCodec({
   ...launchOutcomeCommonCodecs,
   outcome: unionOf([terminalSuccessCodec, terminalNoEffectCodec, ambiguousOutcomeCodec]),
 });
-const providerActionRefCommonCodecs = {
+const providerActionRefBaseCodec = objectCodec({
+  adapterId: defineIdentifierCodec("claude-agent-sdk"),
+  actionId: defineIdentifierCodec("provider_action_01"),
+});
+const launchProviderActionJournalRefCommonCodecs = {
   schemaVersion: literal(1),
   projectSessionId: defineIdentifierCodec("ps_01"),
   coordinationRunId: defineIdentifierCodec("run_01"),
-  providerAdapterId: defineIdentifierCodec("claude-agent-sdk"),
-  providerActionId: defineIdentifierCodec("provider_action_01"),
+  actionRef: providerActionRefBaseCodec,
   providerContractDigest: sha256,
   custodyAttemptGeneration: integer({ minimum: 1 }),
   journalRevision: integer({ minimum: 1 }),
 };
-const providerActionRefBaseCodec = unionOf([
+const launchProviderActionJournalRefBaseCodec = unionOf([
   objectCodec({
-    ...providerActionRefCommonCodecs,
+    ...launchProviderActionJournalRefCommonCodecs,
     journalState: enumeration(["prepared", "dispatched", "accepted"]),
     outcomeKind: literal(null),
     outcomeDigest: literal(null),
   }),
   objectCodec({
-    ...providerActionRefCommonCodecs,
+    ...launchProviderActionJournalRefCommonCodecs,
     journalState: literal("terminal"),
     outcomeKind: enumeration(["terminal-success", "terminal-no-effect"]),
     outcomeDigest: sha256,
   }),
   objectCodec({
-    ...providerActionRefCommonCodecs,
+    ...launchProviderActionJournalRefCommonCodecs,
     journalState: literal("ambiguous"),
     outcomeKind: literal("ambiguous"),
     outcomeDigest: sha256,
@@ -445,6 +452,12 @@ export const PROVIDER_ACTION_REF_V1_CODEC: Codec<ProviderActionRefV1> = parserBa
   providerActionRefBaseCodec,
   (value, path) => parseProviderActionRefV1(value, path),
   parseProviderActionRefV1(providerActionRefBaseCodec.example),
+);
+
+export const LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC: Codec<LaunchProviderActionJournalRefV1> = parserBacked(
+  launchProviderActionJournalRefBaseCodec,
+  (value, path) => parseLaunchProviderActionJournalRefV1(value, path),
+  parseLaunchProviderActionJournalRefV1(launchProviderActionJournalRefBaseCodec.example),
 );
 
 export function parseLaunchPacketV1(value: unknown, path = "launchPacketV1"): LaunchPacketV1 {
@@ -776,12 +789,22 @@ export function parseLaunchAdapterOutcomeV1(
 }
 
 export function parseProviderActionRefV1(value: unknown, path = "providerActionRefV1"): ProviderActionRefV1 {
+  const record = strictRecord(value, path, ["adapterId", "actionId"]);
+  return {
+    adapterId: parseIdentifier<"AdapterId">(record.adapterId, `${path}.adapterId`),
+    actionId: parseIdentifier<"ProviderActionId">(record.actionId, `${path}.actionId`),
+  };
+}
+
+export function parseLaunchProviderActionJournalRefV1(
+  value: unknown,
+  path = "launchProviderActionJournalRefV1",
+): LaunchProviderActionJournalRefV1 {
   const record = strictRecord(value, path, [
     "schemaVersion",
     "projectSessionId",
     "coordinationRunId",
-    "providerAdapterId",
-    "providerActionId",
+    "actionRef",
     "providerContractDigest",
     "custodyAttemptGeneration",
     "journalRevision",
@@ -792,12 +815,11 @@ export function parseProviderActionRefV1(value: unknown, path = "providerActionR
   if (safeInteger(record.schemaVersion, `${path}.schemaVersion`, 1) !== 1) {
     throw new TypeError(`${path}.schemaVersion must equal 1`);
   }
-  const common: ProviderActionRefV1Common = {
+  const common: LaunchProviderActionJournalRefV1Common = {
     schemaVersion: 1,
     projectSessionId: parseIdentifier<"ProjectSessionId">(record.projectSessionId, `${path}.projectSessionId`),
     coordinationRunId: parseIdentifier<"CoordinationRunId">(record.coordinationRunId, `${path}.coordinationRunId`),
-    providerAdapterId: parseIdentifier<"AdapterId">(record.providerAdapterId, `${path}.providerAdapterId`),
-    providerActionId: parseIdentifier<"ProviderActionId">(record.providerActionId, `${path}.providerActionId`),
+    actionRef: parseProviderActionRefV1(record.actionRef, `${path}.actionRef`),
     providerContractDigest: parseSha256Digest(record.providerContractDigest, `${path}.providerContractDigest`),
     custodyAttemptGeneration: safeInteger(record.custodyAttemptGeneration, `${path}.custodyAttemptGeneration`, 1),
     journalRevision: safeInteger(record.journalRevision, `${path}.journalRevision`, 1),

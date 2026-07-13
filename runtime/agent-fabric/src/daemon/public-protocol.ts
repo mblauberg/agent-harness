@@ -12,7 +12,7 @@ import {
   parseIdentifier,
   parseJsonValue,
   parseOperationInputForPrincipal,
-  parseOperationResult,
+  parseOperationResultForInput,
   parseProtocolInitializeRequest,
   strictRecord,
   type FabricOperation,
@@ -204,7 +204,19 @@ export function servePublicProtocolConnection(
       const operation = request.operation as ProtocolOperation;
       const input = parseOperationInputForPrincipal(operation, context.principal.kind, request.input);
       const dispatched = await options.dispatch(context, operation, input);
-      const result = parseOperationResult(operation, dispatched);
+      const result = parseOperationResultForInput(
+        operation,
+        input,
+        dispatched,
+        context.principal.kind === "agent"
+          ? {
+              kind: "agent",
+              agentId: context.principal.agentId,
+              projectSessionId: context.principal.projectSessionId,
+              runId: context.principal.runId,
+            }
+          : { kind: context.principal.kind },
+      );
       assertOperationResultFeatureShape(operation, context.features, result);
       await write({ id: request.id, operation, ok: true, result });
       try {
