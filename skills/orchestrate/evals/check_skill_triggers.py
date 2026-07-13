@@ -108,14 +108,15 @@ def parse_topology_cases(path):
     if raw["schema_version"] != 1 or raw["target_skill"] != "orchestrate":
         raise ValueError("topology value case identity is invalid")
     cases = raw["cases"]
-    if not isinstance(cases, list) or len(cases) < 8:
-        raise ValueError("topology value cases require at least eight cases")
+    if not isinstance(cases, list) or len(cases) < 9:
+        raise ValueError("topology value cases require at least nine cases")
 
     ids = set()
     prompts = set()
     outcomes = {"parallel": 0, "serial": 0}
     tags = set()
     isolators = {"isolates-value-gate": 0, "isolates-structural-gate": 0}
+    specialist_regressions = 0
     bool_factors = TOPOLOGY_FACTOR_KEYS - {
         "expected_information_gain",
         "coordination_shared_state_tool_density_cost",
@@ -169,16 +170,29 @@ def parse_topology_cases(path):
                     "structural-gate isolator does not isolate the structural conjunct"
                 )
             isolators["isolates-structural-gate"] += 1
+        if "single-specialist-regression" in case["tags"]:
+            if (
+                "failing-parallel-gate" not in case["tags"]
+                or (structural_gate and value_gate)
+                or expected != "serial"
+                or "one specialist" not in prompt.lower()
+            ):
+                raise ValueError(
+                    "single-specialist regression must fail the parallel gate and stay serial"
+                )
+            specialist_regressions += 1
 
     required_tags = {
         "decomposable", "bounded", "tightly-coupled", "shared-error",
         "overlapping-writes", "tool-density", "isolates-value-gate",
-        "isolates-structural-gate",
+        "isolates-structural-gate", "failing-parallel-gate",
+        "single-specialist-regression",
     }
     if (
-        outcomes["parallel"] < 2 or outcomes["serial"] < 6
+        outcomes["parallel"] < 2 or outcomes["serial"] < 7
         or not required_tags <= tags
         or any(count != 1 for count in isolators.values())
+        or specialist_regressions != 1
     ):
         raise ValueError("topology value cases lack required parallel/serial boundary coverage")
     return cases

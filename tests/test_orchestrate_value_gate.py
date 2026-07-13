@@ -129,6 +129,39 @@ def test_orchestrate_topology_cases_kill_each_single_gate_mutant():
     assert value_only_misses == [structural_isolator["id"]]
 
 
+def test_failed_parallel_gate_can_route_to_one_serial_specialist():
+    text = " ".join(SKILL.read_text().lower().split())
+    assert "parallel fan-out only after the decomposition/value gate passes" in text
+    assert "before parallel dispatch" in text
+    assert "serial ownership with the chair or one specialist" in text
+    assert "delegate only after the decomposition/value gate passes" not in text
+
+    cases = yaml.safe_load(CASES.read_text())["cases"]
+    regression = next(
+        case for case in cases
+        if "single-specialist-regression" in case["tags"]
+    )
+    assert "failing-parallel-gate" in regression["tags"]
+    factors = regression["factors"]
+    structural_gate = all(
+        factors[key]
+        for key in (
+            "independent_information",
+            "stable_interfaces",
+            "non_overlapping_writes",
+            "independently_checkable_returns",
+        )
+    )
+    value_gate = (
+        factors["expected_information_gain"]
+        > factors["coordination_shared_state_tool_density_cost"]
+    )
+
+    assert not (structural_gate and value_gate)
+    assert regression["expected_topology"] == "serial"
+    assert "one specialist" in regression["prompt"].lower()
+
+
 def test_orchestrate_static_checker_rejects_a_false_parallel_value_claim(tmp_path):
     data = yaml.safe_load(CASES.read_text())
     shared_error = next(

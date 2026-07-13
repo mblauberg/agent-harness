@@ -11,8 +11,8 @@ One chair adapts topology: decompose -> waves -> reduce -> gate.
 
 ## Rules
 
-- **Delegate only after the decomposition/value gate passes.** Bounded is
-  insufficient.
+- **Use parallel fan-out only after the decomposition/value gate passes.**
+  Bounded is insufficient.
 - Preflight dependencies and shared errors.
 - **No concurrent shared-state writes.** Partition authorised writers into
   repository `.worktrees/<task-agent>`; otherwise use a serial applier.
@@ -32,7 +32,7 @@ One chair adapts topology: decompose -> waves -> reduce -> gate.
 
 ## When This Pays
 
-Before dispatch, require:
+Before parallel dispatch, require:
 
 - independent information or artefacts;
 - stable interfaces and dependencies;
@@ -41,10 +41,9 @@ Before dispatch, require:
 - expected information gain greater than coordination, shared-state and
   tool-density cost.
 
-If any structural condition fails or value is not positive, keep serial
-ownership with the chair or one specialist. Shared errors and tightly coupled
-work stay serial. Choose the smallest topology that passes; every topology has
-one chair.
+If this parallel gate fails, keep serial ownership with the chair or one
+specialist. Shared errors and tightly coupled work stay serial. Choose the
+smallest topology that passes; every topology has one chair.
 
 ## Adaptive Loop
 

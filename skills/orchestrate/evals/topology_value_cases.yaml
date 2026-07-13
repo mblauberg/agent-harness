@@ -45,6 +45,17 @@ cases:
       expected_information_gain: 3
       coordination_shared_state_tool_density_cost: 1
     expected_topology: serial
+  - id: topology-serial-single-specialist
+    prompt: "Route this tightly coupled one-file repair to one specialist because its return cannot be checked independently until the preceding edit settles."
+    tags: [failing-parallel-gate, single-specialist-regression]
+    factors:
+      independent_information: false
+      stable_interfaces: false
+      non_overlapping_writes: true
+      independently_checkable_returns: false
+      expected_information_gain: 1
+      coordination_shared_state_tool_density_cost: 2
+    expected_topology: serial
   - id: topology-serial-tightly-coupled
     prompt: "Repair one state-machine transition whose next edit depends on reproducing the preceding result."
     tags: [tightly-coupled]
