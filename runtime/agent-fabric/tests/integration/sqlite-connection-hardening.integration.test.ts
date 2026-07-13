@@ -107,6 +107,11 @@ describe("SQLite connection hardening", () => {
       expect(database.pragma("trusted_schema", { simple: true })).toBe(0);
       expect(database.pragma("busy_timeout", { simple: true })).toBe(5_000);
       expect(database.pragma("journal_mode", { simple: true })).toBe("wal");
+      expect(database.prepare(`
+        SELECT fabric_topology_plan_digest(?) AS digest
+      `).get('{"a":1,"planDigest":"omitted"}')).toEqual({
+        digest: `sha256:${createHash("sha256").update('{"a":1}').digest("hex")}`,
+      });
       expect((await lstat(path)).mode & 0o777).toBe(0o600);
       for (const sibling of [`${path}-wal`, `${path}-shm`]) {
         await expect(lstat(sibling).then((metadata) => metadata.mode & 0o777)).resolves.toBe(0o600);

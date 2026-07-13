@@ -72,6 +72,48 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function canonicalJson(value: unknown): string {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "string"
+  ) return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("canonical JSON number is not finite");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => (
+      `${JSON.stringify(key)}:${canonicalJson(record[key])}`
+    )).join(",")}}`;
+  }
+  throw new TypeError("value is not JSON-compatible");
+}
+
+function topologyPlanDigest(planJson: unknown): string | null {
+  if (typeof planJson !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(planJson);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const body = { ...(parsed as Record<string, unknown>) };
+    delete body.planDigest;
+    return `sha256:${sha256(canonicalJson(body))}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Connection-local deterministic functions used by the pinned schema. */
+export function registerFabricSqlFunctions(database: Database.Database): void {
+  database.function(
+    "fabric_topology_plan_digest",
+    { deterministic: true },
+    topologyPlanDigest,
+  );
+}
+
 function artifactUrl(directory: "migrations" | "schemas", filename: string): URL {
   const candidates = [
     new URL(`../../${directory}/${filename}`, import.meta.url),
@@ -360,6 +402,7 @@ function createPrivateDatabaseClone(databasePath: string): Readonly<{
 export function applyMigrations(
   database: Database.Database,
 ): { applied: number[]; currentVersion: 1 } {
+  registerFabricSqlFunctions(database);
   if (userSchemaObjectCount(database) > 0) {
     assertCurrentSchema(database);
     return { applied: [], currentVersion: 1 };

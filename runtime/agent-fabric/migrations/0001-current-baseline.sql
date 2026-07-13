@@ -15,6 +15,7 @@ CREATE TABLE agent_adapter_bindings (
   contract_version INTEGER NOT NULL DEFAULT 1,
   bound_at INTEGER NOT NULL,
   PRIMARY KEY (run_id, agent_id),
+  UNIQUE (run_id, agent_id, adapter_id),
   FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id)
 );
 
@@ -36,8 +37,8 @@ CREATE TABLE agent_bridge_state (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (run_id, agent_id),
   FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
-  FOREIGN KEY (run_id, action_id) REFERENCES provider_agent_custody(run_id, action_id),
-  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_agent_custody(adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_agent_custody(run_id, adapter_id, action_id),
   FOREIGN KEY (capability_hash) REFERENCES capabilities(token_hash),
   CHECK ((provider_session_ref IS NULL)=(provider_session_generation IS NULL)),
   CHECK (
@@ -82,7 +83,12 @@ CREATE TABLE artifacts (
   source_kind TEXT NOT NULL
     CHECK (source_kind IN ('project-file','run-file','git-private-diff')),
   evidence_kind TEXT NOT NULL
-    CHECK (evidence_kind IN ('artifact','diff','test','review','receipt')),
+    CHECK (evidence_kind IN (
+      'artifact','diff','test','review','receipt',
+      'delivery-requirement-map.v1','implementation-delivery-manifest.v1',
+      'coordination-gate-snapshot.v1','discovery-surface.v1',
+      'adapter-effective-configuration.v1'
+    )),
   relative_path TEXT NOT NULL,
   sha256 TEXT NOT NULL
     CHECK (length(sha256)=71 AND substr(sha256,1,7)='sha256:'),
@@ -486,18 +492,6 @@ CREATE TABLE commands (
   PRIMARY KEY (run_id, actor_agent_id, command_id)
 );
 
-CREATE TABLE cross_family_review_evidence (
-  evidence_id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(run_id),
-  reviewer_agent_id TEXT NOT NULL,
-  provider_family TEXT NOT NULL,
-  status TEXT NOT NULL,
-  independent INTEGER NOT NULL CHECK (independent IN (0, 1)),
-  relative_path TEXT NOT NULL,
-  sha256 TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-
 CREATE TABLE daemon_global_state (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   revision INTEGER NOT NULL CHECK (revision >= 1)
@@ -855,29 +849,675 @@ CREATE TABLE lifecycle_operations (
 CREATE TABLE lifecycle_rotation_custody (
   run_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
+  custody_id TEXT NOT NULL,
   command_id TEXT NOT NULL,
-  action_id TEXT NOT NULL,
-  adapter_id TEXT NOT NULL,
-  task_id TEXT NOT NULL,
+  provider_action_adapter_id TEXT NOT NULL,
+  provider_action_id TEXT NOT NULL,
+  recovery_source_kind TEXT NOT NULL
+    CHECK (recovery_source_kind IN ('none','custody','generation-loss')),
+  recovery_from_custody_id TEXT,
+  recovery_from_generation_loss_id TEXT,
+  bridge_owner_kind TEXT NOT NULL CHECK (bridge_owner_kind IN ('child','chair')),
+  state TEXT NOT NULL CHECK (state IN (
+    'awaiting-boundary','prepared','dispatched','accepted','ambiguous',
+    'provider-terminal','committing','finalized'
+  )),
+  terminal_disposition TEXT CHECK (terminal_disposition IS NULL OR terminal_disposition IN (
+    'adopted','no-effect','quarantined','superseded','abandoned'
+  )),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  caller_turn_lease_id TEXT,
+  caller_turn_generation INTEGER CHECK (
+    caller_turn_generation IS NULL OR caller_turn_generation >= 1
+  ),
+  predecessor_turn_set_digest TEXT NOT NULL,
+  quarantined_write_set_digest TEXT NOT NULL,
+  delivery_cut_watermark INTEGER NOT NULL CHECK (delivery_cut_watermark >= 0),
+  adoption_delivery_set_digest TEXT NOT NULL,
+  checkpoint_ref TEXT NOT NULL,
+  checkpoint_digest TEXT NOT NULL,
+  checkpoint_validation_revision INTEGER NOT NULL CHECK (checkpoint_validation_revision >= 1),
   task_revision INTEGER NOT NULL CHECK (task_revision >= 1),
-  checkpoint_sha256 TEXT NOT NULL CHECK (length(checkpoint_sha256) = 64),
-  prior_resume_reference TEXT NOT NULL,
-  next_provider_session_generation INTEGER NOT NULL CHECK (next_provider_session_generation >= 2),
-  precondition_digest TEXT NOT NULL CHECK (length(precondition_digest) = 64),
-  freeze_reason TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('prepared','provider-terminal','finalized','unreconciled')),
-  replacement_resume_reference TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, agent_id, command_id),
-  UNIQUE (run_id, action_id),
+  mailbox_revision INTEGER NOT NULL CHECK (mailbox_revision >= 0),
+  child_set_digest TEXT NOT NULL,
+  open_work_set_digest TEXT NOT NULL,
+  source_provider_session_ref TEXT NOT NULL,
+  source_capability_hash TEXT NOT NULL,
+  source_custody_action_id TEXT NOT NULL,
+  source_adapter_id TEXT NOT NULL,
+  source_adapter_contract_digest TEXT NOT NULL,
+  source_bridge_row_id TEXT NOT NULL,
+  source_bridge_revision INTEGER NOT NULL CHECK (source_bridge_revision >= 1),
+  source_provider_generation INTEGER NOT NULL CHECK (source_provider_generation >= 1),
+  source_principal_generation INTEGER NOT NULL CHECK (source_principal_generation >= 1),
+  source_bridge_generation INTEGER NOT NULL CHECK (source_bridge_generation >= 1),
+  source_project_session_generation INTEGER,
+  source_run_generation INTEGER,
+  source_chair_lease_generation INTEGER,
+  target_provider_generation INTEGER NOT NULL CHECK (target_provider_generation >= 1),
+  target_principal_generation INTEGER NOT NULL CHECK (target_principal_generation >= 1),
+  target_bridge_generation INTEGER NOT NULL CHECK (target_bridge_generation >= 1),
+  replacement_adapter_id TEXT NOT NULL,
+  replacement_contract_digest TEXT NOT NULL,
+  staged_capability_hash TEXT NOT NULL,
+  launch_attest_challenge_digest TEXT NOT NULL,
+  precondition_digest TEXT NOT NULL,
+  terminal_evidence_digest TEXT,
+  PRIMARY KEY (run_id, agent_id, custody_id),
+  UNIQUE (run_id, agent_id, custody_id, revision),
+  UNIQUE (provider_action_adapter_id, provider_action_id),
+  UNIQUE (run_id, command_id),
   FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
-  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id)
+  FOREIGN KEY (provider_action_adapter_id, provider_action_id)
+    REFERENCES provider_actions(adapter_id, action_id),
+  FOREIGN KEY (source_adapter_id, source_custody_action_id)
+    REFERENCES provider_actions(adapter_id, action_id),
+  FOREIGN KEY (run_id, agent_id, recovery_from_custody_id)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id),
+  FOREIGN KEY (run_id, agent_id, recovery_from_generation_loss_id)
+    REFERENCES lifecycle_generation_losses(run_id, agent_id, generation_loss_id),
+  CHECK ((caller_turn_lease_id IS NULL) = (caller_turn_generation IS NULL)),
+  CHECK ((state = 'finalized') = (terminal_disposition IS NOT NULL)),
+  CHECK ((state IN ('provider-terminal','committing','finalized')) =
+    (terminal_evidence_digest IS NOT NULL)),
+  CHECK ((bridge_owner_kind = 'chair' AND
+      source_project_session_generation IS NOT NULL AND
+      source_run_generation IS NOT NULL AND
+      source_chair_lease_generation IS NOT NULL) OR
+    (bridge_owner_kind = 'child' AND
+      source_project_session_generation IS NULL AND
+      source_run_generation IS NULL AND
+      source_chair_lease_generation IS NULL)),
+  CHECK ((recovery_source_kind = 'none' AND
+      recovery_from_custody_id IS NULL AND
+      recovery_from_generation_loss_id IS NULL) OR
+    (recovery_source_kind = 'custody' AND
+      recovery_from_custody_id IS NOT NULL AND
+      recovery_from_generation_loss_id IS NULL) OR
+    (recovery_source_kind = 'generation-loss' AND
+      recovery_from_custody_id IS NULL AND
+      recovery_from_generation_loss_id IS NOT NULL))
 );
 
-CREATE UNIQUE INDEX lifecycle_rotation_one_active_per_agent
+CREATE UNIQUE INDEX one_nonfinal_lifecycle_custody_per_agent
   ON lifecycle_rotation_custody(run_id, agent_id)
-  WHERE state IN ('prepared','provider-terminal','unreconciled');
+  WHERE state != 'finalized';
+
+CREATE TABLE agent_lifecycle_identity_high_water (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1),
+  principal_generation INTEGER NOT NULL CHECK (principal_generation >= 1),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (run_id, agent_id),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id)
+);
+
+CREATE TABLE agent_lifecycle_bridge_high_water (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  bridge_owner_kind TEXT NOT NULL CHECK (bridge_owner_kind IN ('child','chair')),
+  bridge_generation INTEGER NOT NULL CHECK (bridge_generation >= 1),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (run_id, agent_id, bridge_owner_kind),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id)
+);
+
+CREATE TABLE agent_lifecycle_context_high_water (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1),
+  context_revision INTEGER NOT NULL CHECK (context_revision >= 0),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (run_id, agent_id, provider_generation),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id)
+);
+
+CREATE TRIGGER agent_lifecycle_identity_high_water_insert
+BEFORE INSERT ON agent_lifecycle_identity_high_water
+WHEN NEW.revision <> 1
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_identity_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_identity_high_water_update
+BEFORE UPDATE ON agent_lifecycle_identity_high_water
+WHEN NEW.run_id IS NOT OLD.run_id
+  OR NEW.agent_id IS NOT OLD.agent_id
+  OR NEW.revision <> OLD.revision + 1
+  OR NEW.provider_generation NOT IN (OLD.provider_generation, OLD.provider_generation + 1)
+  OR NEW.principal_generation NOT IN (OLD.principal_generation, OLD.principal_generation + 1)
+  OR (NEW.provider_generation = OLD.provider_generation AND
+      NEW.principal_generation = OLD.principal_generation)
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_identity_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_identity_high_water_delete
+BEFORE DELETE ON agent_lifecycle_identity_high_water
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_identity_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_bridge_high_water_insert
+BEFORE INSERT ON agent_lifecycle_bridge_high_water
+WHEN NEW.revision <> 1
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_bridge_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_bridge_high_water_update
+BEFORE UPDATE ON agent_lifecycle_bridge_high_water
+WHEN NEW.run_id IS NOT OLD.run_id
+  OR NEW.agent_id IS NOT OLD.agent_id
+  OR NEW.bridge_owner_kind IS NOT OLD.bridge_owner_kind
+  OR NEW.revision <> OLD.revision + 1
+  OR NEW.bridge_generation <> OLD.bridge_generation + 1
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_bridge_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_bridge_high_water_delete
+BEFORE DELETE ON agent_lifecycle_bridge_high_water
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_bridge_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_context_high_water_insert
+BEFORE INSERT ON agent_lifecycle_context_high_water
+WHEN NEW.revision <> 1
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_context_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_context_high_water_update
+BEFORE UPDATE ON agent_lifecycle_context_high_water
+WHEN NEW.run_id IS NOT OLD.run_id
+  OR NEW.agent_id IS NOT OLD.agent_id
+  OR NEW.provider_generation IS NOT OLD.provider_generation
+  OR NEW.revision <> OLD.revision + 1
+  OR NEW.context_revision <= OLD.context_revision
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_context_high_water_cas');
+END;
+
+CREATE TRIGGER agent_lifecycle_context_high_water_delete
+BEFORE DELETE ON agent_lifecycle_context_high_water
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_context_high_water_cas');
+END;
+
+CREATE TABLE provider_context_observation_audit (
+  observation_id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1),
+  context_revision INTEGER NOT NULL CHECK (context_revision >= 0),
+  classification TEXT NOT NULL CHECK (classification IN (
+    'generation-advance','context-advance','replay','reordered-observation'
+  )),
+  evidence_digest TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  UNIQUE (run_id, agent_id, source_event_id),
+  UNIQUE (run_id, agent_id, source_event_id, provider_generation,
+    context_revision, evidence_digest),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id)
+);
+
+CREATE TABLE lifecycle_generation_losses (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  generation_loss_id TEXT NOT NULL,
+  loss_kind TEXT NOT NULL CHECK (loss_kind IN ('generation-advance','context-advance')),
+  state TEXT NOT NULL CHECK (state IN (
+    'open','recovery-in-progress','recovered-adopted','abandoned'
+  )),
+  abandon_kind TEXT CHECK (abandon_kind IS NULL OR abandon_kind IN (
+    'direct-open','recovery-attempt'
+  )),
+  recovery_action_adapter_id TEXT,
+  recovery_action_id TEXT,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  old_provider_session_ref TEXT NOT NULL,
+  new_provider_session_ref TEXT NOT NULL,
+  old_provider_generation INTEGER NOT NULL CHECK (old_provider_generation >= 1),
+  new_provider_generation INTEGER NOT NULL CHECK (new_provider_generation >= 1),
+  old_context_revision INTEGER CHECK (old_context_revision IS NULL OR old_context_revision >= 0),
+  new_context_revision INTEGER NOT NULL CHECK (new_context_revision >= 0),
+  source_custody_action_id TEXT NOT NULL,
+  source_adapter_id TEXT NOT NULL,
+  source_adapter_contract_digest TEXT NOT NULL,
+  source_principal_generation INTEGER NOT NULL CHECK (source_principal_generation >= 1),
+  source_bridge_generation INTEGER NOT NULL CHECK (source_bridge_generation >= 1),
+  bridge_owner_kind TEXT NOT NULL CHECK (bridge_owner_kind IN ('child','chair')),
+  source_bridge_row_id TEXT NOT NULL,
+  source_bridge_revision INTEGER NOT NULL CHECK (source_bridge_revision >= 1),
+  source_capability_hash TEXT NOT NULL,
+  source_project_session_generation INTEGER,
+  source_run_generation INTEGER,
+  source_chair_lease_generation INTEGER,
+  checkpoint_state TEXT NOT NULL CHECK (checkpoint_state IN ('absent','invalid','last-validated')),
+  checkpoint_ref TEXT,
+  checkpoint_digest TEXT,
+  loss_evidence_digest TEXT NOT NULL,
+  terminal_evidence_digest TEXT,
+  active_recovery_custody_id TEXT,
+  PRIMARY KEY (run_id, agent_id, generation_loss_id),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (recovery_action_adapter_id, recovery_action_id)
+    REFERENCES lifecycle_rotation_custody(provider_action_adapter_id, provider_action_id),
+  FOREIGN KEY (source_adapter_id, source_custody_action_id)
+    REFERENCES provider_actions(adapter_id, action_id),
+  FOREIGN KEY (run_id, agent_id, active_recovery_custody_id)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id),
+  CHECK ((recovery_action_adapter_id IS NULL) = (recovery_action_id IS NULL)),
+  CHECK ((checkpoint_state = 'last-validated') = (checkpoint_ref IS NOT NULL)),
+  CHECK ((checkpoint_ref IS NULL) = (checkpoint_digest IS NULL)),
+  CHECK ((loss_kind = 'generation-advance' AND
+      new_provider_generation > old_provider_generation) OR
+    (loss_kind = 'context-advance' AND
+      new_provider_generation = old_provider_generation AND
+      old_context_revision IS NOT NULL AND
+      new_context_revision > old_context_revision)),
+  CHECK ((state IN ('recovered-adopted','abandoned')) =
+    (terminal_evidence_digest IS NOT NULL)),
+  CHECK ((state = 'open' AND abandon_kind IS NULL AND
+      recovery_action_id IS NULL AND active_recovery_custody_id IS NULL) OR
+    (state = 'recovery-in-progress' AND abandon_kind IS NULL AND
+      recovery_action_id IS NOT NULL AND active_recovery_custody_id IS NOT NULL) OR
+    (state = 'recovered-adopted' AND abandon_kind IS NULL AND
+      recovery_action_id IS NOT NULL) OR
+    (state = 'abandoned' AND abandon_kind = 'direct-open' AND
+      recovery_action_id IS NULL AND active_recovery_custody_id IS NULL) OR
+    (state = 'abandoned' AND abandon_kind = 'recovery-attempt' AND
+      recovery_action_id IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX one_nonterminal_generation_loss_per_agent
+  ON lifecycle_generation_losses(run_id, agent_id)
+  WHERE state IN ('open','recovery-in-progress');
+
+CREATE TABLE lifecycle_custody_adoption_deliveries (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  custody_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  delivery_id TEXT NOT NULL,
+  delivery_generation INTEGER NOT NULL CHECK (delivery_generation >= 1),
+  recipient_agent_id TEXT NOT NULL,
+  source_state TEXT NOT NULL CHECK (source_state IN ('ready','claimed')),
+  active_owner INTEGER NOT NULL CHECK (active_owner IN (0,1)),
+  PRIMARY KEY (run_id, agent_id, custody_id, ordinal),
+  UNIQUE (run_id, agent_id, custody_id, delivery_id, delivery_generation),
+  FOREIGN KEY (run_id, agent_id, custody_id)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id),
+  FOREIGN KEY (run_id, recipient_agent_id) REFERENCES agents(run_id, agent_id)
+);
+
+CREATE UNIQUE INDEX one_nonfinal_custody_per_delivery_generation
+  ON lifecycle_custody_adoption_deliveries(run_id, delivery_id, delivery_generation)
+  WHERE active_owner = 1;
+
+CREATE TABLE agent_lifecycle_recovery_capability_issues (
+  issue_id TEXT PRIMARY KEY,
+  capability_hash TEXT NOT NULL UNIQUE,
+  operator_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  session_revision INTEGER NOT NULL CHECK (session_revision >= 1),
+  session_generation INTEGER NOT NULL CHECK (session_generation >= 1),
+  run_revision INTEGER NOT NULL CHECK (run_revision >= 1),
+  recovery_source_kind TEXT NOT NULL CHECK (recovery_source_kind IN ('custody','generation-loss')),
+  old_custody_id TEXT,
+  old_action_adapter_id TEXT,
+  old_action_id TEXT,
+  old_custody_revision INTEGER,
+  generation_loss_id TEXT,
+  generation_loss_revision INTEGER,
+  checkpoint_digest TEXT NOT NULL,
+  source_provider_session_ref TEXT NOT NULL,
+  source_capability_hash TEXT NOT NULL,
+  source_custody_action_id TEXT NOT NULL,
+  source_adapter_id TEXT NOT NULL,
+  source_adapter_contract_digest TEXT NOT NULL,
+  source_bridge_row_id TEXT NOT NULL,
+  source_bridge_revision INTEGER NOT NULL CHECK (source_bridge_revision >= 1),
+  source_provider_generation INTEGER NOT NULL CHECK (source_provider_generation >= 1),
+  source_principal_generation INTEGER NOT NULL CHECK (source_principal_generation >= 1),
+  source_bridge_generation INTEGER NOT NULL CHECK (source_bridge_generation >= 1),
+  source_project_session_generation INTEGER,
+  source_run_generation INTEGER,
+  source_chair_lease_generation INTEGER,
+  bridge_owner_kind TEXT NOT NULL CHECK (bridge_owner_kind IN ('child','chair')),
+  parent_capability_id TEXT NOT NULL,
+  consequential_gate_id TEXT NOT NULL,
+  path TEXT NOT NULL CHECK (path = 'fresh-rotate'),
+  status TEXT NOT NULL CHECK (status IN ('active','consumed','revoked','expired')),
+  issued_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL CHECK (expires_at > issued_at),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (operator_id) REFERENCES operator_principals(operator_id),
+  FOREIGN KEY (project_id) REFERENCES projects(project_id),
+  FOREIGN KEY (session_id) REFERENCES project_sessions(project_session_id),
+  FOREIGN KEY (parent_capability_id) REFERENCES operator_capabilities(capability_id),
+  FOREIGN KEY (consequential_gate_id) REFERENCES scoped_gates(gate_id),
+  CHECK ((recovery_source_kind = 'custody' AND old_custody_id IS NOT NULL AND
+      old_action_adapter_id IS NOT NULL AND old_action_id IS NOT NULL AND
+      old_custody_revision IS NOT NULL AND generation_loss_id IS NULL AND
+      generation_loss_revision IS NULL) OR
+    (recovery_source_kind = 'generation-loss' AND old_custody_id IS NULL AND
+      old_action_adapter_id IS NULL AND old_action_id IS NULL AND
+      old_custody_revision IS NULL AND generation_loss_id IS NOT NULL AND
+      generation_loss_revision IS NOT NULL))
+);
+
+CREATE TRIGGER agent_lifecycle_recovery_capability_issues_binding_insert
+BEFORE INSERT ON agent_lifecycle_recovery_capability_issues
+WHEN NEW.status <> 'active'
+  OR NEW.path <> 'fresh-rotate'
+  OR NOT EXISTS (
+    SELECT 1
+      FROM projects project
+      JOIN project_sessions session
+        ON session.project_id = project.project_id
+      JOIN runs run
+        ON run.project_session_id = session.project_session_id
+      JOIN agents agent
+        ON agent.run_id = run.run_id
+       AND agent.agent_id = NEW.agent_id
+      JOIN operator_principals principal
+        ON principal.operator_id = NEW.operator_id
+       AND principal.project_id = project.project_id
+       AND principal.project_session_id = session.project_session_id
+       AND principal.project_authority_generation = project.authority_generation
+       AND principal.state = 'active'
+      JOIN operator_capabilities parent
+        ON parent.capability_id = NEW.parent_capability_id
+       AND parent.operator_id = principal.operator_id
+       AND parent.project_id = project.project_id
+       AND parent.project_session_id = session.project_session_id
+       AND parent.project_authority_generation = project.authority_generation
+       AND parent.session_generation = session.generation
+       AND parent.principal_generation = principal.principal_generation
+       AND parent.kind = 'session'
+       AND parent.revoked_at IS NULL
+       AND parent.issued_at <= NEW.issued_at
+       AND parent.expires_at >= NEW.expires_at
+       AND json_valid(parent.operations_json)
+       AND EXISTS (
+         SELECT 1 FROM json_each(parent.operations_json)
+          WHERE type = 'text' AND value = 'agent-lifecycle-recovery-issue'
+       )
+      JOIN scoped_gates gate
+        ON gate.gate_id = NEW.consequential_gate_id
+       AND gate.project_session_id = session.project_session_id
+       AND gate.coordination_run_id = run.run_id
+       AND gate.scope_kind = 'run'
+       AND gate.scope_task_id IS NULL
+       AND gate.human_required = 1
+       AND gate.status = 'approved'
+       AND gate.resolved_by_operator_id = principal.operator_id
+       AND gate.dedupe_key = 'agent-lifecycle-recovery:' || run.run_id || ':' ||
+         agent.agent_id || ':' || COALESCE(NEW.old_custody_id, NEW.generation_loss_id)
+       AND json_valid(gate.enforcement_points_json)
+       AND EXISTS (
+         SELECT 1 FROM json_each(gate.enforcement_points_json)
+          WHERE type = 'text' AND value = 'agent-lifecycle-recovery-issue'
+       )
+     WHERE project.project_id = NEW.project_id
+       AND session.project_session_id = NEW.session_id
+       AND session.revision = NEW.session_revision
+       AND session.generation = NEW.session_generation
+       AND run.run_id = NEW.run_id
+       AND run.revision = NEW.run_revision
+  )
+  OR NOT (
+    (NEW.recovery_source_kind = 'custody' AND EXISTS (
+      SELECT 1 FROM lifecycle_rotation_custody custody
+       WHERE custody.run_id = NEW.run_id
+         AND custody.agent_id = NEW.agent_id
+         AND custody.custody_id = NEW.old_custody_id
+         AND custody.revision = NEW.old_custody_revision
+         AND custody.provider_action_adapter_id = NEW.old_action_adapter_id
+         AND custody.provider_action_id = NEW.old_action_id
+         AND custody.checkpoint_digest = NEW.checkpoint_digest
+         AND custody.source_provider_session_ref = NEW.source_provider_session_ref
+         AND custody.source_capability_hash = NEW.source_capability_hash
+         AND custody.source_custody_action_id = NEW.source_custody_action_id
+         AND custody.source_adapter_id = NEW.source_adapter_id
+         AND custody.source_adapter_contract_digest = NEW.source_adapter_contract_digest
+         AND custody.source_bridge_row_id = NEW.source_bridge_row_id
+         AND custody.source_bridge_revision = NEW.source_bridge_revision
+         AND custody.source_provider_generation = NEW.source_provider_generation
+         AND custody.source_principal_generation = NEW.source_principal_generation
+         AND custody.source_bridge_generation = NEW.source_bridge_generation
+         AND custody.source_project_session_generation IS NEW.source_project_session_generation
+         AND custody.source_run_generation IS NEW.source_run_generation
+         AND custody.source_chair_lease_generation IS NEW.source_chair_lease_generation
+         AND custody.bridge_owner_kind = NEW.bridge_owner_kind
+    )) OR
+    (NEW.recovery_source_kind = 'generation-loss' AND EXISTS (
+      SELECT 1 FROM lifecycle_generation_losses loss
+       WHERE loss.run_id = NEW.run_id
+         AND loss.agent_id = NEW.agent_id
+         AND loss.generation_loss_id = NEW.generation_loss_id
+         AND loss.revision = NEW.generation_loss_revision
+         AND loss.state = 'open'
+         AND loss.checkpoint_state = 'last-validated'
+         AND loss.checkpoint_digest = NEW.checkpoint_digest
+         AND loss.old_provider_session_ref = NEW.source_provider_session_ref
+         AND loss.source_capability_hash = NEW.source_capability_hash
+         AND loss.source_custody_action_id = NEW.source_custody_action_id
+         AND loss.source_adapter_id = NEW.source_adapter_id
+         AND loss.source_adapter_contract_digest = NEW.source_adapter_contract_digest
+         AND loss.source_bridge_row_id = NEW.source_bridge_row_id
+         AND loss.source_bridge_revision = NEW.source_bridge_revision
+         AND loss.old_provider_generation = NEW.source_provider_generation
+         AND loss.source_principal_generation = NEW.source_principal_generation
+         AND loss.source_bridge_generation = NEW.source_bridge_generation
+         AND loss.source_project_session_generation IS NEW.source_project_session_generation
+         AND loss.source_run_generation IS NEW.source_run_generation
+         AND loss.source_chair_lease_generation IS NEW.source_chair_lease_generation
+         AND loss.bridge_owner_kind = NEW.bridge_owner_kind
+    ))
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_recovery_issue_binding');
+END;
+
+CREATE VIEW agent_lifecycle_recovery_capability_issue_current AS
+SELECT issue.issue_id
+  FROM agent_lifecycle_recovery_capability_issues issue
+  JOIN projects project
+    ON project.project_id = issue.project_id
+  JOIN project_sessions session
+    ON session.project_session_id = issue.session_id
+   AND session.project_id = project.project_id
+   AND session.revision = issue.session_revision
+   AND session.generation = issue.session_generation
+  JOIN runs run
+    ON run.project_session_id = session.project_session_id
+   AND run.run_id = issue.run_id
+   AND run.revision = issue.run_revision
+  JOIN operator_principals principal
+    ON principal.operator_id = issue.operator_id
+   AND principal.project_id = project.project_id
+   AND principal.project_session_id = session.project_session_id
+   AND principal.project_authority_generation = project.authority_generation
+   AND principal.state = 'active'
+  JOIN operator_capabilities parent
+    ON parent.capability_id = issue.parent_capability_id
+   AND parent.operator_id = principal.operator_id
+   AND parent.project_id = project.project_id
+   AND parent.project_session_id = session.project_session_id
+   AND parent.project_authority_generation = project.authority_generation
+   AND parent.session_generation = session.generation
+   AND parent.principal_generation = principal.principal_generation
+   AND parent.kind = 'session'
+   AND parent.revoked_at IS NULL
+   AND parent.expires_at >= issue.expires_at
+   AND json_valid(parent.operations_json)
+   AND EXISTS (
+     SELECT 1 FROM json_each(parent.operations_json)
+      WHERE type = 'text' AND value = 'agent-lifecycle-recovery-issue'
+   )
+  JOIN scoped_gates gate
+    ON gate.gate_id = issue.consequential_gate_id
+   AND gate.project_session_id = session.project_session_id
+   AND gate.coordination_run_id = run.run_id
+   AND gate.scope_kind = 'run'
+   AND gate.scope_task_id IS NULL
+   AND gate.human_required = 1
+   AND gate.status = 'approved'
+   AND gate.resolved_by_operator_id = principal.operator_id
+   AND gate.dedupe_key = 'agent-lifecycle-recovery:' || run.run_id || ':' ||
+     issue.agent_id || ':' || COALESCE(issue.old_custody_id, issue.generation_loss_id)
+   AND json_valid(gate.enforcement_points_json)
+   AND EXISTS (
+     SELECT 1 FROM json_each(gate.enforcement_points_json)
+      WHERE type = 'text' AND value = 'agent-lifecycle-recovery-issue'
+   )
+ WHERE issue.status = 'active'
+ AND issue.issued_at <= CAST(unixepoch('subsec') * 1000 AS INTEGER)
+ AND issue.expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
+ AND EXISTS (
+   SELECT 1 FROM agents agent
+    WHERE agent.run_id = issue.run_id AND agent.agent_id = issue.agent_id
+ )
+ AND (
+   (issue.recovery_source_kind = 'custody' AND EXISTS (
+     SELECT 1 FROM lifecycle_rotation_custody custody
+      WHERE custody.run_id = issue.run_id
+        AND custody.agent_id = issue.agent_id
+        AND custody.custody_id = issue.old_custody_id
+        AND custody.revision = issue.old_custody_revision
+        AND custody.provider_action_adapter_id = issue.old_action_adapter_id
+        AND custody.provider_action_id = issue.old_action_id
+        AND custody.checkpoint_digest = issue.checkpoint_digest
+        AND custody.source_provider_session_ref = issue.source_provider_session_ref
+        AND custody.source_capability_hash = issue.source_capability_hash
+        AND custody.source_custody_action_id = issue.source_custody_action_id
+        AND custody.source_adapter_id = issue.source_adapter_id
+        AND custody.source_adapter_contract_digest = issue.source_adapter_contract_digest
+        AND custody.source_bridge_row_id = issue.source_bridge_row_id
+        AND custody.source_bridge_revision = issue.source_bridge_revision
+        AND custody.source_provider_generation = issue.source_provider_generation
+        AND custody.source_principal_generation = issue.source_principal_generation
+        AND custody.source_bridge_generation = issue.source_bridge_generation
+        AND custody.source_project_session_generation IS issue.source_project_session_generation
+        AND custody.source_run_generation IS issue.source_run_generation
+        AND custody.source_chair_lease_generation IS issue.source_chair_lease_generation
+        AND custody.bridge_owner_kind = issue.bridge_owner_kind
+   )) OR
+   (issue.recovery_source_kind = 'generation-loss' AND EXISTS (
+     SELECT 1 FROM lifecycle_generation_losses loss
+      WHERE loss.run_id = issue.run_id
+        AND loss.agent_id = issue.agent_id
+        AND loss.generation_loss_id = issue.generation_loss_id
+        AND loss.revision = issue.generation_loss_revision
+        AND loss.state = 'open'
+        AND loss.checkpoint_state = 'last-validated'
+        AND loss.checkpoint_digest = issue.checkpoint_digest
+        AND loss.old_provider_session_ref = issue.source_provider_session_ref
+        AND loss.source_capability_hash = issue.source_capability_hash
+        AND loss.source_custody_action_id = issue.source_custody_action_id
+        AND loss.source_adapter_id = issue.source_adapter_id
+        AND loss.source_adapter_contract_digest = issue.source_adapter_contract_digest
+        AND loss.source_bridge_row_id = issue.source_bridge_row_id
+        AND loss.source_bridge_revision = issue.source_bridge_revision
+        AND loss.old_provider_generation = issue.source_provider_generation
+        AND loss.source_principal_generation = issue.source_principal_generation
+        AND loss.source_bridge_generation = issue.source_bridge_generation
+        AND loss.source_project_session_generation IS issue.source_project_session_generation
+        AND loss.source_run_generation IS issue.source_run_generation
+        AND loss.source_chair_lease_generation IS issue.source_chair_lease_generation
+        AND loss.bridge_owner_kind = issue.bridge_owner_kind
+   ))
+ );
+
+CREATE TRIGGER agent_lifecycle_recovery_capability_issues_status_update
+BEFORE UPDATE ON agent_lifecycle_recovery_capability_issues
+WHEN OLD.status <> 'active'
+  OR NEW.status NOT IN ('consumed','revoked','expired')
+  OR (NEW.status = 'consumed' AND NOT EXISTS (
+    SELECT 1 FROM agent_lifecycle_recovery_capability_issue_current current
+     WHERE current.issue_id = OLD.issue_id
+  ))
+  OR NEW.issue_id IS NOT OLD.issue_id
+  OR NEW.capability_hash IS NOT OLD.capability_hash
+  OR NEW.operator_id IS NOT OLD.operator_id
+  OR NEW.project_id IS NOT OLD.project_id
+  OR NEW.session_id IS NOT OLD.session_id
+  OR NEW.run_id IS NOT OLD.run_id
+  OR NEW.agent_id IS NOT OLD.agent_id
+  OR NEW.session_revision IS NOT OLD.session_revision
+  OR NEW.session_generation IS NOT OLD.session_generation
+  OR NEW.run_revision IS NOT OLD.run_revision
+  OR NEW.recovery_source_kind IS NOT OLD.recovery_source_kind
+  OR NEW.old_custody_id IS NOT OLD.old_custody_id
+  OR NEW.old_action_adapter_id IS NOT OLD.old_action_adapter_id
+  OR NEW.old_action_id IS NOT OLD.old_action_id
+  OR NEW.old_custody_revision IS NOT OLD.old_custody_revision
+  OR NEW.generation_loss_id IS NOT OLD.generation_loss_id
+  OR NEW.generation_loss_revision IS NOT OLD.generation_loss_revision
+  OR NEW.checkpoint_digest IS NOT OLD.checkpoint_digest
+  OR NEW.source_provider_session_ref IS NOT OLD.source_provider_session_ref
+  OR NEW.source_capability_hash IS NOT OLD.source_capability_hash
+  OR NEW.source_custody_action_id IS NOT OLD.source_custody_action_id
+  OR NEW.source_adapter_id IS NOT OLD.source_adapter_id
+  OR NEW.source_adapter_contract_digest IS NOT OLD.source_adapter_contract_digest
+  OR NEW.source_bridge_row_id IS NOT OLD.source_bridge_row_id
+  OR NEW.source_bridge_revision IS NOT OLD.source_bridge_revision
+  OR NEW.source_provider_generation IS NOT OLD.source_provider_generation
+  OR NEW.source_principal_generation IS NOT OLD.source_principal_generation
+  OR NEW.source_bridge_generation IS NOT OLD.source_bridge_generation
+  OR NEW.source_project_session_generation IS NOT OLD.source_project_session_generation
+  OR NEW.source_run_generation IS NOT OLD.source_run_generation
+  OR NEW.source_chair_lease_generation IS NOT OLD.source_chair_lease_generation
+  OR NEW.bridge_owner_kind IS NOT OLD.bridge_owner_kind
+  OR NEW.parent_capability_id IS NOT OLD.parent_capability_id
+  OR NEW.consequential_gate_id IS NOT OLD.consequential_gate_id
+  OR NEW.path IS NOT OLD.path
+  OR NEW.issued_at IS NOT OLD.issued_at
+  OR NEW.expires_at IS NOT OLD.expires_at
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_recovery_issue_status');
+END;
+
+CREATE TRIGGER agent_lifecycle_recovery_capability_issues_immutable_delete
+BEFORE DELETE ON agent_lifecycle_recovery_capability_issues
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_agent_lifecycle_recovery_issue_status');
+END;
+
+CREATE TABLE agent_lifecycle_recovery_retirements (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  recovery_intent_id TEXT NOT NULL,
+  recovery_source_kind TEXT NOT NULL CHECK (recovery_source_kind IN ('custody','generation-loss')),
+  old_custody_id TEXT,
+  generation_loss_id TEXT,
+  abandon_kind TEXT NOT NULL CHECK (abandon_kind IN ('direct-open','recovery-attempt')),
+  recovery_action_adapter_id TEXT,
+  recovery_action_id TEXT,
+  old_terminal_disposition TEXT,
+  abandon_reason TEXT NOT NULL,
+  consequence_digest TEXT NOT NULL,
+  direct_human_attestation_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, recovery_intent_id),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
+  CHECK ((recovery_action_adapter_id IS NULL) = (recovery_action_id IS NULL)),
+  CHECK ((recovery_source_kind = 'custody' AND old_custody_id IS NOT NULL AND
+      generation_loss_id IS NULL) OR
+    (recovery_source_kind = 'generation-loss' AND old_custody_id IS NULL AND
+      generation_loss_id IS NOT NULL)),
+  CHECK ((abandon_kind = 'direct-open' AND recovery_action_id IS NULL) OR
+    (abandon_kind = 'recovery-attempt' AND recovery_action_id IS NOT NULL))
+);
 
 CREATE TABLE mailbox_state (
   run_id TEXT NOT NULL,
@@ -910,17 +1550,6 @@ CREATE TABLE messages (
   expires_at INTEGER,
   created_at INTEGER NOT NULL,
   UNIQUE (run_id, sender_id, dedupe_key)
-);
-
-CREATE TABLE model_routing_evidence (
-  evidence_id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(run_id),
-  action_id TEXT NOT NULL,
-  relative_path TEXT NOT NULL,
-  sha256 TEXT NOT NULL,
-  receipt_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  UNIQUE (run_id, action_id)
 );
 
 CREATE TABLE notification_attempts (
@@ -1465,10 +2094,8 @@ CREATE TABLE project_session_launch_custody (
     REFERENCES operator_commands(operator_id, command_id),
   FOREIGN KEY (capability_hash) REFERENCES capabilities(token_hash),
   FOREIGN KEY (reservation_id) REFERENCES resource_reservations(reservation_id),
-  FOREIGN KEY (coordination_run_id, provider_action_id)
-    REFERENCES provider_actions(run_id, action_id),
-  FOREIGN KEY (provider_adapter_id, provider_action_id)
-    REFERENCES provider_actions(adapter_id, action_id),
+  FOREIGN KEY (coordination_run_id, provider_adapter_id, provider_action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id),
   FOREIGN KEY (retry_of_provider_adapter_id, retry_of_provider_action_id)
     REFERENCES provider_actions(adapter_id, action_id),
   CHECK (
@@ -1561,7 +2188,15 @@ CREATE TABLE provider_actions (
   budget_settlement_json TEXT CHECK (budget_settlement_json IS NULL OR json_valid(budget_settlement_json)),
   budget_state TEXT CHECK (budget_state IS NULL OR budget_state IN ('reserved','settled','usage-unknown')),
   budget_started_at INTEGER CHECK (budget_started_at IS NULL OR budget_started_at >= 0),
-  PRIMARY KEY (run_id, action_id),
+  finding_capacity_reservation_digest TEXT CHECK (
+    finding_capacity_reservation_digest IS NULL OR (
+      length(finding_capacity_reservation_digest) = 71 AND
+      substr(finding_capacity_reservation_digest, 1, 7) = 'sha256:' AND
+      substr(finding_capacity_reservation_digest, 8) NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (run_id, adapter_id, action_id),
   CHECK (
     (task_id IS NULL AND budget_authority_id IS NULL AND budget_reservation_json IS NULL
       AND budget_settlement_json IS NULL AND budget_state IS NULL AND budget_started_at IS NULL) OR
@@ -1575,7 +2210,13 @@ CREATE TABLE provider_actions (
   CHECK (budget_state<>'usage-unknown' OR status IN ('ambiguous','terminal','quarantined')),
   CHECK (budget_state IS NULL OR status NOT IN ('terminal','quarantined') OR budget_state IN ('settled','usage-unknown')),
   CHECK (budget_state IS NULL OR status<>'quarantined' OR budget_state='usage-unknown'),
-  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id)
+  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id, finding_capacity_reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      run_id, adapter_id, action_id, reservation_digest
+    )
 );
 
 CREATE TABLE provider_agent_custody (
@@ -1594,10 +2235,10 @@ CREATE TABLE provider_agent_custody (
   requested_provider_session_ref TEXT,
   intent_digest TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, action_id),
-  UNIQUE (adapter_id, action_id),
-  FOREIGN KEY (run_id, action_id) REFERENCES provider_actions(run_id, action_id),
-  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_actions(adapter_id, action_id),
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id),
   FOREIGN KEY (run_id, actor_agent_id) REFERENCES agents(run_id, agent_id),
   FOREIGN KEY (run_id, target_agent_id) REFERENCES agents(run_id, agent_id),
   FOREIGN KEY (authority_id) REFERENCES authorities(authority_id),
@@ -1627,7 +2268,10 @@ CREATE TABLE provider_lifecycle_intents (
   provider_resume_reference TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, action_id)
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id)
 );
 
 CREATE TABLE provider_session_turn_leases (
@@ -1635,14 +2279,16 @@ CREATE TABLE provider_session_turn_leases (
   agent_id TEXT NOT NULL,
   provider_session_generation INTEGER NOT NULL CHECK (provider_session_generation >= 1),
   turn_lease_generation INTEGER NOT NULL CHECK (turn_lease_generation >= 1),
+  adapter_id TEXT NOT NULL,
   action_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('active', 'quarantined', 'released')),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (run_id, agent_id, turn_lease_generation),
-  UNIQUE (run_id, action_id),
+  UNIQUE (adapter_id, action_id),
   FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
-  FOREIGN KEY (run_id, action_id) REFERENCES provider_actions(run_id, action_id)
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id)
 );
 
 CREATE TABLE provider_state (
@@ -2358,11 +3004,8 @@ CREATE INDEX operator_lifecycle_receipts_by_authority
 
 CREATE INDEX projection_cursor ON operator_projection_cursors(project_session_id, schema_version, cursor);
 
-CREATE UNIQUE INDEX provider_actions_global_adapter_action
-  ON provider_actions(adapter_id, action_id);
-
 CREATE INDEX provider_actions_unresolved
-  ON provider_actions(run_id, updated_at, action_id)
+  ON provider_actions(run_id, updated_at, adapter_id, action_id)
   WHERE status IN ('prepared', 'dispatched', 'ambiguous');
 
 CREATE INDEX provider_agent_custody_by_target
@@ -3017,12 +3660,6 @@ AFTER INSERT ON child_bridge_losses
 BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
-
-CREATE TRIGGER global_revision_cross_family_review_evidence_delete AFTER DELETE ON cross_family_review_evidence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
-
-CREATE TRIGGER global_revision_cross_family_review_evidence_insert AFTER INSERT ON cross_family_review_evidence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
-
-CREATE TRIGGER global_revision_cross_family_review_evidence_update AFTER UPDATE ON cross_family_review_evidence BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
 CREATE TRIGGER global_revision_events_delete AFTER DELETE ON events BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
@@ -4222,5 +4859,2679 @@ WHEN EXISTS (
    WHERE w.state='active' AND p.canonical_prefix=NEW.canonical_prefix
 )
 BEGIN SELECT RAISE(ABORT, 'AFAB_0004_WRITER_OVERLAP'); END;
+
+-- Spec 04 v1.30 current review, lifecycle-routing and delivery catalogue.
+-- These relations replace the retired caller-authored routing/review evidence stores.
+
+CREATE UNIQUE INDEX artifacts_exact_revision
+  ON artifacts(artifact_id, revision);
+
+CREATE UNIQUE INDEX run_authority_exact_ref
+  ON run_authority_revisions(
+    project_session_id, coordination_run_id, authority_revision, authority_ref
+  );
+
+CREATE TABLE artifact_publication_lineage (
+  artifact_id TEXT NOT NULL,
+  artifact_revision INTEGER NOT NULL CHECK (artifact_revision >= 1),
+  run_id TEXT NOT NULL,
+  publisher_agent_id TEXT NOT NULL,
+  publisher_principal_generation INTEGER NOT NULL CHECK (publisher_principal_generation >= 1),
+  publisher_bridge_generation INTEGER NOT NULL CHECK (publisher_bridge_generation >= 1),
+  provider_custody_adapter_id TEXT NOT NULL,
+  provider_custody_action_id TEXT NOT NULL,
+  provider_session_generation INTEGER NOT NULL CHECK (provider_session_generation >= 1),
+  adapter_contract_digest TEXT NOT NULL,
+  provider_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  route_receipt_digest TEXT,
+  state TEXT NOT NULL CHECK (state IN ('proved','unproved')),
+  reason TEXT,
+  lineage_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (artifact_id, artifact_revision),
+  UNIQUE (artifact_id, artifact_revision, lineage_digest),
+  FOREIGN KEY (artifact_id, artifact_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (run_id, publisher_agent_id) REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (provider_custody_adapter_id, provider_custody_action_id)
+    REFERENCES provider_actions(adapter_id, action_id),
+  CHECK ((state = 'proved') = (reason IS NULL))
+);
+
+CREATE TABLE provider_session_lineage (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  principal_generation INTEGER NOT NULL CHECK (principal_generation >= 1),
+  bridge_owner_kind TEXT NOT NULL CHECK (bridge_owner_kind IN ('child','chair')),
+  bridge_row_id TEXT NOT NULL,
+  bridge_generation INTEGER NOT NULL CHECK (bridge_generation >= 1),
+  provider_session_ref TEXT NOT NULL,
+  provider_session_generation INTEGER NOT NULL CHECK (provider_session_generation >= 1),
+  adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  provider_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  route_receipt_digest TEXT,
+  owner_kind TEXT NOT NULL CHECK (owner_kind IN ('chair-launch','retained-child')),
+  owner_action_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('active','retired')),
+  lineage_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, provider_session_generation),
+  FOREIGN KEY (run_id, agent_id) REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (adapter_id, owner_action_id) REFERENCES provider_actions(adapter_id, action_id)
+);
+
+CREATE TABLE delivery_run_starts (
+  project_session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  delivery_run_id TEXT NOT NULL,
+  repository_object_format TEXT NOT NULL CHECK (repository_object_format IN ('sha1','sha256')),
+  approved_base_object_id TEXT NOT NULL,
+  authority_digest TEXT NOT NULL,
+  created_revision INTEGER NOT NULL CHECK (created_revision >= 1),
+  PRIMARY KEY (project_session_id, run_id, delivery_run_id),
+  FOREIGN KEY (project_session_id, run_id) REFERENCES runs(project_session_id, run_id)
+);
+
+CREATE TABLE delivery_requirement_maps (
+  run_id TEXT NOT NULL,
+  delivery_run_id TEXT NOT NULL,
+  map_generation INTEGER NOT NULL CHECK (map_generation >= 1),
+  closure_digest TEXT NOT NULL,
+  catalogue_digest TEXT NOT NULL,
+  accepted_scope_artifact_id TEXT NOT NULL,
+  accepted_scope_revision INTEGER NOT NULL CHECK (accepted_scope_revision >= 1),
+  accepted_scope_digest TEXT NOT NULL,
+  source_set_digest TEXT NOT NULL,
+  requirement_set_digest TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  artifact_revision INTEGER NOT NULL CHECK (artifact_revision >= 1),
+  content_digest TEXT NOT NULL UNIQUE,
+  current INTEGER NOT NULL CHECK (current IN (0,1)),
+  private_cas_path TEXT NOT NULL,
+  PRIMARY KEY (run_id, delivery_run_id, map_generation),
+  FOREIGN KEY (accepted_scope_artifact_id, accepted_scope_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (artifact_id, artifact_revision) REFERENCES artifacts(artifact_id, revision)
+);
+
+CREATE UNIQUE INDEX one_current_delivery_requirement_map
+  ON delivery_requirement_maps(run_id, delivery_run_id)
+  WHERE current = 1;
+
+CREATE TABLE coordination_gate_snapshots (
+  run_id TEXT NOT NULL,
+  delivery_run_id TEXT NOT NULL,
+  snapshot_generation INTEGER NOT NULL CHECK (snapshot_generation >= 1),
+  event_watermark INTEGER NOT NULL CHECK (event_watermark >= 0),
+  chair_snapshot_digest TEXT NOT NULL,
+  authority_digest TEXT NOT NULL,
+  accepted_scope_digest TEXT NOT NULL,
+  requirement_map_digest TEXT NOT NULL,
+  gate_closure_digest TEXT NOT NULL,
+  objective_evidence_digest TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  artifact_revision INTEGER NOT NULL CHECK (artifact_revision >= 1),
+  content_digest TEXT NOT NULL UNIQUE,
+  private_cas_path TEXT NOT NULL,
+  PRIMARY KEY (run_id, delivery_run_id, snapshot_generation),
+  FOREIGN KEY (artifact_id, artifact_revision) REFERENCES artifacts(artifact_id, revision)
+);
+
+CREATE TABLE implementation_delivery_manifests (
+  run_id TEXT NOT NULL,
+  delivery_run_id TEXT NOT NULL,
+  seal_generation INTEGER NOT NULL CHECK (seal_generation >= 1),
+  command_id TEXT NOT NULL,
+  snapshot_generation INTEGER NOT NULL CHECK (snapshot_generation >= 1),
+  profile_digest TEXT NOT NULL,
+  accepted_scope_digest TEXT NOT NULL,
+  requirement_map_digest TEXT NOT NULL,
+  evidence_closure_digest TEXT NOT NULL,
+  base_object_id TEXT NOT NULL,
+  head_object_id TEXT NOT NULL,
+  head_tree_id TEXT NOT NULL,
+  index_tree_id TEXT NOT NULL,
+  repository_source_state_digest TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  artifact_revision INTEGER NOT NULL CHECK (artifact_revision >= 1),
+  content_digest TEXT NOT NULL UNIQUE,
+  publication_lineage_digest TEXT NOT NULL,
+  private_cas_path TEXT NOT NULL,
+  PRIMARY KEY (run_id, delivery_run_id, seal_generation),
+  UNIQUE (run_id, command_id),
+  FOREIGN KEY (artifact_id, artifact_revision) REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (artifact_id, artifact_revision, publication_lineage_digest)
+    REFERENCES artifact_publication_lineage(artifact_id, artifact_revision, lineage_digest)
+);
+
+CREATE TABLE delivery_review_bases (
+  run_id TEXT NOT NULL,
+  delivery_run_id TEXT NOT NULL,
+  review_basis_revision INTEGER NOT NULL CHECK (review_basis_revision >= 1),
+  manifest_artifact_id TEXT NOT NULL,
+  manifest_artifact_revision INTEGER NOT NULL CHECK (manifest_artifact_revision >= 1),
+  manifest_digest TEXT NOT NULL,
+  snapshot_digest TEXT NOT NULL,
+  profile_digest TEXT NOT NULL,
+  repository_source_state_digest TEXT NOT NULL,
+  requirement_map_digest TEXT NOT NULL,
+  evidence_closure_digest TEXT NOT NULL,
+  current INTEGER NOT NULL CHECK (current IN (0,1)),
+  basis_digest TEXT NOT NULL UNIQUE,
+  PRIMARY KEY (run_id, delivery_run_id, review_basis_revision),
+  FOREIGN KEY (manifest_artifact_id, manifest_artifact_revision)
+    REFERENCES artifacts(artifact_id, revision)
+);
+
+CREATE UNIQUE INDEX one_current_delivery_review_basis
+  ON delivery_review_bases(run_id, delivery_run_id)
+  WHERE current = 1;
+
+CREATE TABLE review_target_preparation_high_water (
+  run_id TEXT PRIMARY KEY,
+  preparation_generation INTEGER NOT NULL CHECK (preparation_generation >= 0),
+  target_generation INTEGER NOT NULL CHECK (target_generation >= 0),
+  bundle_generation INTEGER NOT NULL CHECK (bundle_generation >= 0),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  FOREIGN KEY (run_id) REFERENCES runs(run_id)
+);
+
+CREATE TABLE review_target_preparations (
+  run_id TEXT NOT NULL,
+  preparation_id TEXT NOT NULL,
+  preparation_generation INTEGER NOT NULL CHECK (preparation_generation >= 1),
+  owner_command_id TEXT NOT NULL,
+  semantic_input_digest TEXT NOT NULL,
+  full_input_digest TEXT NOT NULL,
+  actor_principal_digest TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  expected_target_generation INTEGER NOT NULL CHECK (expected_target_generation >= 0),
+  delivery_manifest_artifact_id TEXT NOT NULL,
+  delivery_manifest_artifact_revision INTEGER NOT NULL CHECK (delivery_manifest_artifact_revision >= 1),
+  reserved_target_generation INTEGER NOT NULL CHECK (reserved_target_generation >= 1),
+  reserved_bundle_generation INTEGER NOT NULL CHECK (reserved_bundle_generation >= 1),
+  state TEXT NOT NULL CHECK (state IN (
+    'prepared','building','built','succeeded','conflicted','failed'
+  )),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  worker_claim_generation INTEGER NOT NULL DEFAULT 0 CHECK (worker_claim_generation >= 0),
+  worker_instance_id TEXT,
+  worker_lease_expires_at INTEGER,
+  captured_precondition_digest TEXT,
+  progress_kind TEXT CHECK (progress_kind IS NULL OR progress_kind IN ('phase-only','verified-build-items')),
+  progress_plan_digest TEXT,
+  progress_total INTEGER CHECK (progress_total IS NULL OR progress_total >= 0),
+  progress_completed INTEGER CHECK (progress_completed IS NULL OR progress_completed >= 0),
+  built_bundle_digest TEXT,
+  built_manifest_root_digest TEXT,
+  terminal_kind TEXT,
+  terminal_code TEXT,
+  terminal_evidence_digest TEXT,
+  target_generation INTEGER CHECK (target_generation IS NULL OR target_generation >= 1),
+  accepted_receipt_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, preparation_id),
+  UNIQUE (run_id, preparation_generation),
+  UNIQUE (run_id, reserved_target_generation),
+  UNIQUE (run_id, reserved_bundle_generation),
+  UNIQUE (owner_command_id),
+  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id),
+  FOREIGN KEY (delivery_manifest_artifact_id, delivery_manifest_artifact_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  CHECK ((progress_total IS NULL) = (progress_completed IS NULL)),
+  CHECK (progress_completed IS NULL OR progress_completed <= progress_total),
+  CHECK ((worker_instance_id IS NULL) = (worker_lease_expires_at IS NULL)),
+  CHECK ((state = 'succeeded') = (target_generation IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX one_active_review_target_preparation_per_run
+  ON review_target_preparations(run_id)
+  WHERE state IN ('prepared','building','built');
+
+CREATE TABLE review_bundles (
+  run_id TEXT NOT NULL,
+  bundle_generation INTEGER NOT NULL CHECK (bundle_generation >= 1),
+  delivery_run_id TEXT NOT NULL,
+  review_basis_revision INTEGER NOT NULL CHECK (review_basis_revision >= 1),
+  review_basis_digest TEXT NOT NULL,
+  delivery_artifact_id TEXT NOT NULL,
+  delivery_artifact_revision INTEGER NOT NULL CHECK (delivery_artifact_revision >= 1),
+  base_object_id TEXT NOT NULL,
+  head_object_id TEXT NOT NULL,
+  head_tree_id TEXT NOT NULL,
+  index_tree_id TEXT NOT NULL,
+  review_diff_codec_digest TEXT NOT NULL,
+  review_diff_rules_digest TEXT NOT NULL,
+  review_diff_set_digest TEXT NOT NULL,
+  repository_source_state_digest TEXT NOT NULL,
+  publication_lineage_digest TEXT NOT NULL,
+  coverage_digest TEXT NOT NULL,
+  manifest_body_digest TEXT NOT NULL,
+  manifest_root_digest TEXT NOT NULL,
+  bundle_digest TEXT NOT NULL UNIQUE,
+  bundle_search_index_digest TEXT NOT NULL,
+  risk_read_map_digest TEXT NOT NULL,
+  mandatory_read_set_digest TEXT NOT NULL,
+  mandatory_read_count INTEGER NOT NULL CHECK (mandatory_read_count BETWEEN 0 AND 80),
+  mandatory_read_bytes INTEGER NOT NULL CHECK (mandatory_read_bytes BETWEEN 0 AND 6291456),
+  changed_path_count INTEGER NOT NULL CHECK (changed_path_count BETWEEN 0 AND 4096),
+  required_evidence_count INTEGER NOT NULL CHECK (required_evidence_count BETWEEN 0 AND 1024),
+  carried_finding_count INTEGER NOT NULL CHECK (carried_finding_count >= 0),
+  object_count INTEGER NOT NULL CHECK (object_count BETWEEN 0 AND 16384),
+  chunk_count INTEGER NOT NULL CHECK (chunk_count BETWEEN 0 AND 32768),
+  total_object_bytes INTEGER NOT NULL CHECK (total_object_bytes BETWEEN 0 AND 67108864),
+  manifest_page_bytes INTEGER NOT NULL CHECK (manifest_page_bytes BETWEEN 0 AND 1048576),
+  search_index_bytes INTEGER NOT NULL CHECK (search_index_bytes BETWEEN 0 AND 4194304),
+  risk_map_bytes INTEGER NOT NULL CHECK (risk_map_bytes BETWEEN 0 AND 262144),
+  private_manifest_body_path TEXT NOT NULL,
+  private_manifest_root_path TEXT NOT NULL,
+  private_bundle_ref_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, bundle_generation),
+  FOREIGN KEY (run_id, delivery_run_id, review_basis_revision)
+    REFERENCES delivery_review_bases(run_id, delivery_run_id, review_basis_revision),
+  FOREIGN KEY (delivery_artifact_id, delivery_artifact_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (delivery_artifact_id, delivery_artifact_revision, publication_lineage_digest)
+    REFERENCES artifact_publication_lineage(artifact_id, artifact_revision, lineage_digest)
+);
+
+CREATE TABLE review_bundle_objects (
+  bundle_digest TEXT NOT NULL,
+  object_digest TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 0 AND 16777216),
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  PRIMARY KEY (bundle_digest, object_digest),
+  UNIQUE (bundle_digest, ordinal),
+  FOREIGN KEY (bundle_digest) REFERENCES review_bundles(bundle_digest)
+);
+
+CREATE TABLE review_bundle_chunks (
+  bundle_digest TEXT NOT NULL,
+  object_digest TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  chunk_digest TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 1 AND 65536),
+  private_chunk_path TEXT NOT NULL,
+  PRIMARY KEY (bundle_digest, object_digest, ordinal),
+  FOREIGN KEY (bundle_digest, object_digest)
+    REFERENCES review_bundle_objects(bundle_digest, object_digest)
+);
+
+CREATE TABLE review_bundle_manifest_pages (
+  bundle_digest TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 15),
+  page_digest TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 1 AND 65536),
+  private_page_path TEXT NOT NULL,
+  PRIMARY KEY (bundle_digest, ordinal),
+  UNIQUE (bundle_digest, page_digest),
+  FOREIGN KEY (bundle_digest) REFERENCES review_bundles(bundle_digest)
+);
+
+CREATE TABLE review_finding_sets (
+  finding_set_digest TEXT PRIMARY KEY CHECK (
+    length(finding_set_digest) = 71 AND substr(finding_set_digest, 1, 7) = 'sha256:' AND
+    substr(finding_set_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  finding_count INTEGER NOT NULL CHECK (finding_count >= 0),
+  page_count INTEGER NOT NULL CHECK (page_count BETWEEN 0 AND 16),
+  canonical_byte_length INTEGER NOT NULL CHECK (canonical_byte_length BETWEEN 0 AND 1048576),
+  created_at INTEGER NOT NULL,
+  CHECK ((finding_count = 0) = (page_count = 0)),
+  CHECK (
+    (finding_count = 0 AND page_count = 0 AND
+      finding_set_digest = 'sha256:58afae1b74b0f7295f280a34196c2e092e4040016e64927e132f99356b48b7a2' AND
+      canonical_byte_length = 47) OR
+    (finding_count > 0 AND page_count > 0 AND canonical_byte_length > 0)
+  )
+);
+
+CREATE TABLE review_finding_pages (
+  page_digest TEXT PRIMARY KEY CHECK (
+    length(page_digest) = 71 AND substr(page_digest, 1, 7) = 'sha256:' AND
+    substr(page_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  member_count INTEGER NOT NULL CHECK (member_count >= 1),
+  canonical_byte_length INTEGER NOT NULL CHECK (canonical_byte_length BETWEEN 1 AND 65536),
+  private_page_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE review_finding_set_pages (
+  finding_set_digest TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 15),
+  page_digest TEXT NOT NULL,
+  member_count INTEGER NOT NULL CHECK (member_count >= 1),
+  first_finding_digest TEXT,
+  last_finding_digest TEXT,
+  PRIMARY KEY (finding_set_digest, ordinal),
+  UNIQUE (finding_set_digest, page_digest),
+  FOREIGN KEY (finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (page_digest) REFERENCES review_finding_pages(page_digest),
+  CHECK (first_finding_digest IS NOT NULL AND last_finding_digest IS NOT NULL),
+  CHECK (
+    length(first_finding_digest) = 71 AND substr(first_finding_digest, 1, 7) = 'sha256:' AND
+    substr(first_finding_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  CHECK (
+    length(last_finding_digest) = 71 AND substr(last_finding_digest, 1, 7) = 'sha256:' AND
+    substr(last_finding_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  )
+);
+
+CREATE TABLE review_finding_members (
+  page_digest TEXT NOT NULL,
+  member_ordinal INTEGER NOT NULL CHECK (member_ordinal >= 0),
+  finding_digest TEXT NOT NULL CHECK (
+    length(finding_digest) = 71 AND substr(finding_digest, 1, 7) = 'sha256:' AND
+    substr(finding_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  finding_id TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('P0','P1','P2')),
+  safe_record_json TEXT NOT NULL CHECK (json_valid(safe_record_json)),
+  PRIMARY KEY (page_digest, member_ordinal),
+  UNIQUE (page_digest, finding_digest, finding_id),
+  FOREIGN KEY (page_digest) REFERENCES review_finding_pages(page_digest)
+);
+
+CREATE TRIGGER review_finding_members_closed_insert
+BEFORE INSERT ON review_finding_members
+WHEN json_type(NEW.safe_record_json) <> 'object'
+  OR NEW.safe_record_json <> json(NEW.safe_record_json)
+  OR EXISTS (
+    SELECT 1
+      FROM json_tree(NEW.safe_record_json) object
+      JOIN json_tree(NEW.safe_record_json) earlier ON earlier.parent = object.id
+      JOIN json_tree(NEW.safe_record_json) later
+        ON later.parent = object.id AND later.id > earlier.id
+     WHERE object.type = 'object'
+       AND CAST(earlier.key AS TEXT) >= CAST(later.key AS TEXT)
+  )
+  OR (SELECT COUNT(*) FROM json_each(NEW.safe_record_json)) <> 12
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.safe_record_json)
+     WHERE key NOT IN (
+       'evidence','findingDigest','findingId','originActionRef','originBundleDigest',
+       'originDeliveryManifestRef','originDeliveryReviewBasisDigest',
+       'originResultDigest','originTargetGeneration','repairCurrency','severity','summary'
+     )
+  )
+  OR json_extract(NEW.safe_record_json, '$.findingDigest') IS NOT NEW.finding_digest
+  OR json_extract(NEW.safe_record_json, '$.findingId') IS NOT NEW.finding_id
+  OR json_extract(NEW.safe_record_json, '$.severity') IS NOT NEW.severity
+  OR length(CAST(NEW.finding_id AS BLOB)) NOT BETWEEN 1 AND 64
+  OR COALESCE(json_type(NEW.safe_record_json, '$.summary'), '') <> 'text'
+  OR length(CAST(json_extract(NEW.safe_record_json, '$.summary') AS BLOB)) NOT BETWEEN 1 AND 256
+  OR COALESCE(json_type(NEW.safe_record_json, '$.evidence'), '') <> 'text'
+  OR length(CAST(json_extract(NEW.safe_record_json, '$.evidence') AS BLOB)) NOT BETWEEN 1 AND 768
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originTargetGeneration'), '') <> 'integer'
+  OR json_extract(NEW.safe_record_json, '$.originTargetGeneration') < 1
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originDeliveryManifestRef'), '') <> 'text'
+  OR length(CAST(json_extract(
+    NEW.safe_record_json, '$.originDeliveryManifestRef'
+  ) AS BLOB)) NOT BETWEEN 1 AND 256
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originResultDigest'), '') <> 'text'
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originDeliveryReviewBasisDigest'), '') <> 'text'
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originBundleDigest'), '') <> 'text'
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.safe_record_json) scalar
+     WHERE scalar.key IN (
+       'originResultDigest','originDeliveryReviewBasisDigest','originBundleDigest'
+     ) AND (
+       length(CAST(scalar.value AS TEXT)) <> 71 OR
+       substr(CAST(scalar.value AS TEXT), 1, 7) <> 'sha256:' OR
+       substr(CAST(scalar.value AS TEXT), 8) GLOB '*[^0-9a-f]*'
+     )
+  )
+  OR (SELECT COUNT(*) FROM json_each(NEW.safe_record_json, '$.originActionRef')) <> 2
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.safe_record_json, '$.originActionRef')
+     WHERE key NOT IN ('actionId','adapterId')
+  )
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originActionRef.adapterId'), '') <> 'text'
+  OR COALESCE(json_type(NEW.safe_record_json, '$.originActionRef.actionId'), '') <> 'text'
+  OR length(CAST(json_extract(
+    NEW.safe_record_json, '$.originActionRef.adapterId'
+  ) AS BLOB)) NOT BETWEEN 1 AND 256
+  OR length(CAST(json_extract(
+    NEW.safe_record_json, '$.originActionRef.actionId'
+  ) AS BLOB)) NOT BETWEEN 1 AND 256
+  OR (SELECT COUNT(*) FROM json_each(NEW.safe_record_json, '$.repairCurrency')) <> 3
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.safe_record_json, '$.repairCurrency')
+     WHERE key NOT IN ('evidenceRefs','kind','originRepositorySourceStateDigest')
+  )
+  OR json_extract(NEW.safe_record_json, '$.repairCurrency.kind') NOT IN (
+    'repository-source','registered-evidence','mixed'
+  )
+  OR COALESCE(json_type(
+    NEW.safe_record_json, '$.repairCurrency.originRepositorySourceStateDigest'
+  ), '') NOT IN ('null','text')
+  OR (json_type(NEW.safe_record_json,
+      '$.repairCurrency.originRepositorySourceStateDigest') = 'text' AND (
+    length(json_extract(NEW.safe_record_json,
+      '$.repairCurrency.originRepositorySourceStateDigest')) <> 71 OR
+    substr(json_extract(NEW.safe_record_json,
+      '$.repairCurrency.originRepositorySourceStateDigest'), 1, 7) <> 'sha256:' OR
+    substr(json_extract(NEW.safe_record_json,
+      '$.repairCurrency.originRepositorySourceStateDigest'), 8) GLOB '*[^0-9a-f]*'
+  ))
+  OR COALESCE(json_type(NEW.safe_record_json, '$.repairCurrency.evidenceRefs'), '') <> 'array'
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.safe_record_json, '$.repairCurrency.evidenceRefs') evidence
+     WHERE evidence.type <> 'object'
+        OR (SELECT COUNT(*) FROM json_each(evidence.value)) <> 3
+        OR EXISTS (
+          SELECT 1 FROM json_each(evidence.value)
+           WHERE key NOT IN ('contentDigest','evidenceRef','evidenceRevision')
+        )
+        OR COALESCE(json_type(evidence.value, '$.evidenceRef'), '') <> 'text'
+        OR length(CAST(json_extract(
+          evidence.value, '$.evidenceRef'
+        ) AS BLOB)) NOT BETWEEN 1 AND 256
+        OR COALESCE(json_type(evidence.value, '$.evidenceRevision'), '') <> 'integer'
+        OR json_extract(evidence.value, '$.evidenceRevision') < 1
+        OR COALESCE(json_type(evidence.value, '$.contentDigest'), '') <> 'text'
+        OR length(json_extract(evidence.value, '$.contentDigest')) <> 71
+        OR substr(json_extract(evidence.value, '$.contentDigest'), 1, 7) <> 'sha256:'
+        OR substr(json_extract(evidence.value, '$.contentDigest'), 8) GLOB '*[^0-9a-f]*'
+  )
+  OR EXISTS (
+    SELECT 1
+      FROM json_each(NEW.safe_record_json, '$.repairCurrency.evidenceRefs') earlier
+      JOIN json_each(NEW.safe_record_json, '$.repairCurrency.evidenceRefs') later
+        ON CAST(later.key AS INTEGER) = CAST(earlier.key AS INTEGER) + 1
+     WHERE json_extract(earlier.value, '$.evidenceRef') >
+           json_extract(later.value, '$.evidenceRef')
+        OR (json_extract(earlier.value, '$.evidenceRef') =
+            json_extract(later.value, '$.evidenceRef') AND
+            json_extract(earlier.value, '$.evidenceRevision') >=
+            json_extract(later.value, '$.evidenceRevision'))
+  )
+  OR NOT (
+    (json_extract(NEW.safe_record_json, '$.repairCurrency.kind') = 'repository-source'
+      AND json_type(NEW.safe_record_json,
+        '$.repairCurrency.originRepositorySourceStateDigest') = 'text'
+      AND json_array_length(NEW.safe_record_json, '$.repairCurrency.evidenceRefs') = 0) OR
+    (json_extract(NEW.safe_record_json, '$.repairCurrency.kind') = 'registered-evidence'
+      AND json_type(NEW.safe_record_json,
+        '$.repairCurrency.originRepositorySourceStateDigest') = 'null'
+      AND json_array_length(NEW.safe_record_json, '$.repairCurrency.evidenceRefs') > 0) OR
+    (json_extract(NEW.safe_record_json, '$.repairCurrency.kind') = 'mixed'
+      AND json_type(NEW.safe_record_json,
+        '$.repairCurrency.originRepositorySourceStateDigest') = 'text'
+      AND json_array_length(NEW.safe_record_json, '$.repairCurrency.evidenceRefs') > 0)
+  )
+  OR NEW.member_ordinal <> COALESCE((
+    SELECT MAX(member_ordinal) + 1 FROM review_finding_members
+     WHERE page_digest = NEW.page_digest
+  ), 0)
+  OR NEW.member_ordinal >= (
+    SELECT member_count FROM review_finding_pages WHERE page_digest = NEW.page_digest
+  )
+  OR EXISTS (
+    SELECT 1 FROM review_finding_members prior
+     WHERE prior.page_digest = NEW.page_digest
+       AND prior.member_ordinal = NEW.member_ordinal - 1
+       AND (prior.finding_digest > NEW.finding_digest OR
+         (prior.finding_digest = NEW.finding_digest AND prior.finding_id >= NEW.finding_id))
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_review_finding_member_closed');
+END;
+
+CREATE TRIGGER review_finding_set_pages_closed_insert
+BEFORE INSERT ON review_finding_set_pages
+WHEN NEW.ordinal <> COALESCE((
+    SELECT MAX(ordinal) + 1 FROM review_finding_set_pages
+     WHERE finding_set_digest = NEW.finding_set_digest
+  ), 0)
+  OR NEW.ordinal >= (
+    SELECT page_count FROM review_finding_sets
+     WHERE finding_set_digest = NEW.finding_set_digest
+  )
+  OR NOT EXISTS (
+    SELECT 1
+      FROM review_finding_pages page
+     WHERE page.page_digest = NEW.page_digest
+       AND page.member_count = NEW.member_count
+       AND page.member_count = (
+         SELECT COUNT(*) FROM review_finding_members member
+          WHERE member.page_digest = page.page_digest
+       )
+       AND page.canonical_byte_length = (
+         SELECT length(CAST(
+           '{"members":[' || group_concat(member.safe_record_json, ',') ||
+           '],"schemaVersion":1}' AS BLOB
+         ))
+           FROM (
+             SELECT safe_record_json
+               FROM review_finding_members
+              WHERE page_digest = page.page_digest
+              ORDER BY member_ordinal
+           ) member
+       )
+       AND NEW.first_finding_digest = (
+         SELECT finding_digest FROM review_finding_members
+          WHERE page_digest = page.page_digest ORDER BY member_ordinal LIMIT 1
+       )
+       AND NEW.last_finding_digest = (
+         SELECT finding_digest FROM review_finding_members
+          WHERE page_digest = page.page_digest ORDER BY member_ordinal DESC LIMIT 1
+       )
+  )
+  OR EXISTS (
+    SELECT 1 FROM review_finding_set_pages prior
+     WHERE prior.finding_set_digest = NEW.finding_set_digest
+       AND prior.ordinal = NEW.ordinal - 1
+       AND prior.last_finding_digest >= NEW.first_finding_digest
+  )
+  OR NEW.member_count + COALESCE((
+    SELECT SUM(member_count) FROM review_finding_set_pages
+     WHERE finding_set_digest = NEW.finding_set_digest
+  ), 0) > (
+    SELECT finding_count FROM review_finding_sets
+     WHERE finding_set_digest = NEW.finding_set_digest
+  )
+  OR (
+    NEW.ordinal + 1 = (
+      SELECT page_count FROM review_finding_sets
+       WHERE finding_set_digest = NEW.finding_set_digest
+    ) AND (
+      SELECT canonical_byte_length FROM review_finding_sets
+       WHERE finding_set_digest = NEW.finding_set_digest
+    ) <> (
+      SELECT length(CAST(
+        '{"findingCount":' || (
+          SELECT finding_count FROM review_finding_sets
+           WHERE finding_set_digest = NEW.finding_set_digest
+        ) || ',"pages":[' || group_concat(entry, ',') || '],"schemaVersion":1}'
+        AS BLOB
+      ))
+        FROM (
+          SELECT ordinal,
+            '{"firstFindingDigest":' || json_quote(first_finding_digest) ||
+            ',"lastFindingDigest":' || json_quote(last_finding_digest) ||
+            ',"memberCount":' || member_count ||
+            ',"ordinal":' || ordinal ||
+            ',"pageDigest":' || json_quote(page_digest) || '}' AS entry
+            FROM review_finding_set_pages
+           WHERE finding_set_digest = NEW.finding_set_digest
+          UNION ALL
+          SELECT NEW.ordinal,
+            '{"firstFindingDigest":' || json_quote(NEW.first_finding_digest) ||
+            ',"lastFindingDigest":' || json_quote(NEW.last_finding_digest) ||
+            ',"memberCount":' || NEW.member_count ||
+            ',"ordinal":' || NEW.ordinal ||
+            ',"pageDigest":' || json_quote(NEW.page_digest) || '}'
+          ORDER BY ordinal
+        ) ordered_pages
+    )
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_page_closed');
+END;
+
+CREATE TRIGGER review_finding_sets_immutable_update
+BEFORE UPDATE ON review_finding_sets
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_sets_immutable_delete
+BEFORE DELETE ON review_finding_sets
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_pages_immutable_update
+BEFORE UPDATE ON review_finding_pages
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_pages_immutable_delete
+BEFORE DELETE ON review_finding_pages
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_set_pages_immutable_update
+BEFORE UPDATE ON review_finding_set_pages
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_set_pages_immutable_delete
+BEFORE DELETE ON review_finding_set_pages
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_members_immutable_update
+BEFORE UPDATE ON review_finding_members
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE TRIGGER review_finding_members_immutable_delete
+BEFORE DELETE ON review_finding_members
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_graph_immutable'); END;
+
+CREATE VIEW review_finding_sets_complete AS
+SELECT finding_set.*
+  FROM review_finding_sets finding_set
+ WHERE finding_set.page_count = (
+   SELECT COUNT(*) FROM review_finding_set_pages set_page
+    WHERE set_page.finding_set_digest = finding_set.finding_set_digest
+ )
+   AND finding_set.finding_count = COALESCE((
+     SELECT SUM(set_page.member_count) FROM review_finding_set_pages set_page
+      WHERE set_page.finding_set_digest = finding_set.finding_set_digest
+   ), 0)
+   AND NOT EXISTS (
+     SELECT 1
+       FROM review_finding_set_pages set_page
+       JOIN review_finding_pages page ON page.page_digest = set_page.page_digest
+      WHERE set_page.finding_set_digest = finding_set.finding_set_digest
+        AND (
+          set_page.member_count <> page.member_count OR
+          page.member_count <> (
+            SELECT COUNT(*) FROM review_finding_members member
+             WHERE member.page_digest = page.page_digest
+          ) OR
+          set_page.first_finding_digest <> (
+            SELECT finding_digest FROM review_finding_members member
+             WHERE member.page_digest = page.page_digest
+             ORDER BY member.member_ordinal LIMIT 1
+          ) OR
+          set_page.last_finding_digest <> (
+            SELECT finding_digest FROM review_finding_members member
+             WHERE member.page_digest = page.page_digest
+             ORDER BY member.member_ordinal DESC LIMIT 1
+          )
+        )
+   );
+
+CREATE TABLE provider_action_pair_preflights (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  owner_digest TEXT NOT NULL,
+  actor_principal_digest TEXT NOT NULL,
+  input_digest TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('resolving','admitted','released')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (adapter_id, action_id, owner_digest),
+  UNIQUE (run_id, adapter_id, action_id),
+  UNIQUE (run_id, adapter_id, action_id, owner_digest),
+  FOREIGN KEY (run_id) REFERENCES runs(run_id)
+);
+
+CREATE TABLE review_finding_capacity_reservations (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL CHECK (target_generation >= 1),
+  slot TEXT NOT NULL CHECK (slot IN ('native','other-primary','cursor-grok','agy-gemini')),
+  owner_digest TEXT NOT NULL,
+  finding_window_mode TEXT NOT NULL CHECK (finding_window_mode IN ('normal','resolution-only')),
+  prior_open_finding_set_digest TEXT NOT NULL,
+  maximum_new_findings INTEGER NOT NULL CHECK (maximum_new_findings BETWEEN 0 AND 32),
+  maximum_new_finding_bytes INTEGER NOT NULL CHECK (maximum_new_finding_bytes >= 0),
+  reservation_digest TEXT NOT NULL CHECK (
+    length(reservation_digest) = 71 AND
+    substr(reservation_digest, 1, 7) = 'sha256:' AND
+    substr(reservation_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  state TEXT NOT NULL CHECK (state IN ('preflight','attached','released','settled')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (adapter_id, action_id, reservation_digest),
+  UNIQUE (run_id, adapter_id, action_id, reservation_digest),
+  FOREIGN KEY (run_id, adapter_id, action_id, owner_digest)
+    REFERENCES provider_action_pair_preflights(
+      run_id, adapter_id, action_id, owner_digest
+    ),
+  FOREIGN KEY (prior_open_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  CHECK ((finding_window_mode = 'resolution-only') =
+    (maximum_new_findings = 0 AND maximum_new_finding_bytes = 0))
+);
+
+CREATE TRIGGER review_finding_capacity_reservations_complete_insert
+BEFORE INSERT ON review_finding_capacity_reservations
+WHEN NOT EXISTS (
+  SELECT 1 FROM review_finding_sets_complete complete
+   WHERE complete.finding_set_digest = NEW.prior_open_finding_set_digest
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TRIGGER review_finding_capacity_reservations_complete_update
+BEFORE UPDATE OF prior_open_finding_set_digest ON review_finding_capacity_reservations
+WHEN NOT EXISTS (
+  SELECT 1 FROM review_finding_sets_complete complete
+   WHERE complete.finding_set_digest = NEW.prior_open_finding_set_digest
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TRIGGER review_finding_capacity_reservations_state_update
+BEFORE UPDATE ON review_finding_capacity_reservations
+WHEN NOT (
+    (OLD.state = 'preflight' AND NEW.state IN ('attached','released')) OR
+    (OLD.state = 'attached' AND NEW.state IN ('settled','released'))
+  )
+  OR NEW.adapter_id IS NOT OLD.adapter_id
+  OR NEW.action_id IS NOT OLD.action_id
+  OR NEW.run_id IS NOT OLD.run_id
+  OR NEW.target_generation IS NOT OLD.target_generation
+  OR NEW.slot IS NOT OLD.slot
+  OR NEW.owner_digest IS NOT OLD.owner_digest
+  OR NEW.finding_window_mode IS NOT OLD.finding_window_mode
+  OR NEW.prior_open_finding_set_digest IS NOT OLD.prior_open_finding_set_digest
+  OR NEW.maximum_new_findings IS NOT OLD.maximum_new_findings
+  OR NEW.maximum_new_finding_bytes IS NOT OLD.maximum_new_finding_bytes
+  OR NEW.reservation_digest IS NOT OLD.reservation_digest
+  OR NEW.created_at IS NOT OLD.created_at
+  OR NEW.updated_at <= OLD.updated_at
+  OR (NEW.state = 'attached' AND NOT EXISTS (
+    SELECT 1 FROM provider_actions action
+     WHERE action.run_id = NEW.run_id
+       AND action.adapter_id = NEW.adapter_id
+       AND action.action_id = NEW.action_id
+       AND action.finding_capacity_reservation_digest = NEW.reservation_digest
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_review_finding_capacity_reservation_state');
+END;
+
+CREATE TRIGGER review_finding_capacity_reservations_state_delete
+BEFORE DELETE ON review_finding_capacity_reservations
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_review_finding_capacity_reservation_state');
+END;
+
+CREATE TABLE review_terminal_sequence_high_water (
+  run_id TEXT PRIMARY KEY,
+  terminal_sequence INTEGER NOT NULL CHECK (terminal_sequence >= 0),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  FOREIGN KEY (run_id) REFERENCES runs(run_id)
+);
+
+CREATE TABLE review_certification_cuts (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL CHECK (target_generation >= 1),
+  predecessor_binding_generation INTEGER NOT NULL CHECK (predecessor_binding_generation >= 1),
+  predecessor_binding_digest TEXT NOT NULL,
+  terminal_sequence_high_water INTEGER NOT NULL CHECK (terminal_sequence_high_water >= 0),
+  lifecycle_custody_agent_id TEXT NOT NULL,
+  lifecycle_custody_id TEXT NOT NULL,
+  lifecycle_custody_revision INTEGER NOT NULL CHECK (lifecycle_custody_revision >= 1),
+  lifecycle_adoption_evidence_digest TEXT NOT NULL,
+  cut_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, target_generation, lifecycle_custody_agent_id,
+    lifecycle_custody_id, lifecycle_custody_revision),
+  UNIQUE (run_id, target_generation, lifecycle_custody_agent_id,
+    lifecycle_custody_id, lifecycle_custody_revision,
+    predecessor_binding_generation, cut_digest),
+  FOREIGN KEY (run_id, lifecycle_custody_agent_id, lifecycle_custody_id,
+      lifecycle_custody_revision)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id, revision)
+);
+
+CREATE TABLE review_completion_targets (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL CHECK (target_generation >= 1),
+  preparation_id TEXT NOT NULL UNIQUE,
+  review_subject_digest TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  reviewed_artifact_id TEXT NOT NULL,
+  reviewed_artifact_revision INTEGER NOT NULL CHECK (reviewed_artifact_revision >= 1),
+  publication_lineage_digest TEXT NOT NULL,
+  delivery_review_basis_revision INTEGER NOT NULL CHECK (delivery_review_basis_revision >= 1),
+  delivery_review_basis_digest TEXT NOT NULL,
+  repository_source_state_digest TEXT NOT NULL,
+  bundle_generation INTEGER NOT NULL CHECK (bundle_generation >= 1),
+  bundle_digest TEXT NOT NULL,
+  manifest_body_digest TEXT NOT NULL,
+  manifest_root_digest TEXT NOT NULL,
+  coverage_digest TEXT NOT NULL,
+  bundle_search_index_digest TEXT NOT NULL,
+  risk_read_map_digest TEXT NOT NULL,
+  mandatory_read_set_digest TEXT NOT NULL,
+  mandatory_read_count INTEGER NOT NULL CHECK (mandatory_read_count BETWEEN 0 AND 80),
+  mandatory_read_bytes INTEGER NOT NULL CHECK (mandatory_read_bytes BETWEEN 0 AND 6291456),
+  object_count INTEGER NOT NULL CHECK (object_count BETWEEN 0 AND 16384),
+  chunk_count INTEGER NOT NULL CHECK (chunk_count BETWEEN 0 AND 32768),
+  total_object_bytes INTEGER NOT NULL CHECK (total_object_bytes BETWEEN 0 AND 67108864),
+  profile_id TEXT NOT NULL,
+  profile_schema_digest TEXT NOT NULL,
+  resolved_profile_digest TEXT NOT NULL,
+  initial_chair_binding_digest TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('current','superseded')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, target_generation),
+  UNIQUE (run_id, target_generation, review_subject_digest),
+  UNIQUE (run_id, review_subject_digest),
+  FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, task_id),
+  FOREIGN KEY (reviewed_artifact_id, reviewed_artifact_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (reviewed_artifact_id, reviewed_artifact_revision, publication_lineage_digest)
+    REFERENCES artifact_publication_lineage(artifact_id, artifact_revision, lineage_digest),
+  FOREIGN KEY (run_id, bundle_generation) REFERENCES review_bundles(run_id, bundle_generation)
+);
+
+CREATE UNIQUE INDEX one_current_review_completion_target_per_run
+  ON review_completion_targets(run_id)
+  WHERE state = 'current';
+
+CREATE TABLE review_target_chair_bindings (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL CHECK (target_generation >= 1),
+  binding_generation INTEGER NOT NULL CHECK (binding_generation >= 1),
+  predecessor_binding_generation INTEGER,
+  predecessor_binding_digest TEXT,
+  predecessor_certification_cut_sequence INTEGER,
+  predecessor_certification_cut_digest TEXT,
+  predecessor_certification_cut_custody_agent_id TEXT,
+  predecessor_certification_cut_custody_id TEXT,
+  predecessor_certification_cut_custody_revision INTEGER,
+  agent_id TEXT NOT NULL,
+  principal_generation INTEGER NOT NULL CHECK (principal_generation >= 1),
+  chair_lease_generation INTEGER NOT NULL CHECK (chair_lease_generation >= 1),
+  provider_session_generation INTEGER NOT NULL CHECK (provider_session_generation >= 1),
+  bridge_generation INTEGER NOT NULL CHECK (bridge_generation >= 1),
+  adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  model_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  review_subject_digest TEXT NOT NULL,
+  route_receipt_digest TEXT NOT NULL,
+  profile_digest TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  reviewed_artifact_id TEXT NOT NULL,
+  delivery_review_basis_digest TEXT NOT NULL,
+  repository_source_state_digest TEXT NOT NULL,
+  bundle_digest TEXT NOT NULL,
+  lifecycle_custody_id TEXT,
+  lifecycle_custody_revision INTEGER,
+  checkpoint_digest TEXT,
+  lifecycle_adoption_evidence_digest TEXT,
+  binding_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, target_generation, binding_generation),
+  UNIQUE (run_id, target_generation, binding_generation, binding_digest),
+  FOREIGN KEY (run_id, target_generation, review_subject_digest)
+    REFERENCES review_completion_targets(run_id, target_generation, review_subject_digest),
+  FOREIGN KEY (run_id, target_generation,
+      predecessor_certification_cut_custody_agent_id,
+      predecessor_certification_cut_custody_id,
+      predecessor_certification_cut_custody_revision,
+      predecessor_binding_generation, predecessor_certification_cut_digest)
+    REFERENCES review_certification_cuts(run_id, target_generation,
+      lifecycle_custody_agent_id, lifecycle_custody_id,
+      lifecycle_custody_revision, predecessor_binding_generation, cut_digest),
+  FOREIGN KEY (run_id, agent_id, lifecycle_custody_id, lifecycle_custody_revision)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id, revision),
+  CHECK ((binding_generation = 1 AND predecessor_binding_generation IS NULL AND
+      predecessor_binding_digest IS NULL AND
+      predecessor_certification_cut_sequence IS NULL AND
+      predecessor_certification_cut_digest IS NULL AND
+      predecessor_certification_cut_custody_agent_id IS NULL AND
+      predecessor_certification_cut_custody_id IS NULL AND
+      predecessor_certification_cut_custody_revision IS NULL AND
+      lifecycle_custody_id IS NULL AND lifecycle_custody_revision IS NULL AND
+      checkpoint_digest IS NULL AND lifecycle_adoption_evidence_digest IS NULL) OR
+    (binding_generation > 1 AND predecessor_binding_generation = binding_generation - 1 AND
+      predecessor_binding_digest IS NOT NULL AND
+      predecessor_certification_cut_sequence IS NOT NULL AND
+      predecessor_certification_cut_digest IS NOT NULL AND
+      predecessor_certification_cut_custody_agent_id = agent_id AND
+      predecessor_certification_cut_custody_id IS NOT NULL AND
+      predecessor_certification_cut_custody_revision IS NOT NULL AND
+      lifecycle_custody_id = predecessor_certification_cut_custody_id AND
+      lifecycle_custody_revision = predecessor_certification_cut_custody_revision AND
+      checkpoint_digest IS NOT NULL AND lifecycle_adoption_evidence_digest IS NOT NULL))
+);
+
+CREATE TABLE review_target_chair_binding_heads (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  active_binding_generation INTEGER NOT NULL CHECK (active_binding_generation >= 1),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (run_id, target_generation),
+  FOREIGN KEY (run_id, target_generation, active_binding_generation)
+    REFERENCES review_target_chair_bindings(run_id, target_generation, binding_generation)
+);
+
+CREATE TABLE review_target_rebind_receipts (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  lifecycle_custody_agent_id TEXT NOT NULL,
+  lifecycle_custody_id TEXT NOT NULL,
+  lifecycle_custody_revision INTEGER NOT NULL,
+  command_id TEXT NOT NULL,
+  review_subject_digest TEXT NOT NULL,
+  prior_binding_generation INTEGER NOT NULL CHECK (prior_binding_generation >= 1),
+  new_binding_generation INTEGER NOT NULL CHECK (new_binding_generation >= 2),
+  prior_binding_digest TEXT NOT NULL,
+  new_binding_digest TEXT NOT NULL,
+  lifecycle_adoption_digest TEXT NOT NULL,
+  bundle_digest TEXT NOT NULL,
+  profile_digest TEXT NOT NULL,
+  slot_head_set_digest TEXT NOT NULL,
+  open_and_repair_finding_set_digest TEXT NOT NULL,
+  rebind_receipt_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, target_generation, lifecycle_custody_agent_id,
+    lifecycle_custody_id, lifecycle_custody_revision),
+  UNIQUE (command_id),
+  FOREIGN KEY (run_id, target_generation, review_subject_digest)
+    REFERENCES review_completion_targets(run_id, target_generation, review_subject_digest),
+  FOREIGN KEY (run_id, target_generation, prior_binding_generation)
+    REFERENCES review_target_chair_bindings(run_id, target_generation, binding_generation),
+  FOREIGN KEY (run_id, target_generation, new_binding_generation)
+    REFERENCES review_target_chair_bindings(run_id, target_generation, binding_generation),
+  FOREIGN KEY (run_id, lifecycle_custody_agent_id, lifecycle_custody_id,
+      lifecycle_custody_revision)
+    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id, revision),
+  CHECK (new_binding_generation = prior_binding_generation + 1)
+);
+
+CREATE TABLE review_certifying_slot_availability_revisions (
+  project_session_id TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  profile_schema_digest TEXT NOT NULL,
+  target_chair_family TEXT NOT NULL,
+  slot TEXT NOT NULL CHECK (slot IN ('native','other-primary','cursor-grok','agy-gemini')),
+  adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  provider_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  source_mode TEXT NOT NULL,
+  runtime_identity_digest TEXT NOT NULL,
+  platform_identity_digest TEXT NOT NULL,
+  availability_revision INTEGER NOT NULL CHECK (availability_revision >= 1),
+  state TEXT NOT NULL CHECK (state IN ('available','unavailable')),
+  reason TEXT CHECK (reason IS NULL OR reason IN (
+    'adapter-inactive','contract-mismatch','confinement-unproved',
+    'portal-unavailable','provider-runtime-unavailable'
+  )),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_session_id, profile_id, profile_schema_digest,
+    target_chair_family, slot, adapter_id, adapter_contract_digest,
+    provider_family, model, source_mode, runtime_identity_digest,
+    platform_identity_digest, availability_revision),
+  CHECK ((state = 'available') = (reason IS NULL))
+);
+
+CREATE TABLE review_certifying_slot_availability_heads (
+  project_session_id TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  profile_schema_digest TEXT NOT NULL,
+  target_chair_family TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  provider_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  source_mode TEXT NOT NULL,
+  runtime_identity_digest TEXT NOT NULL,
+  platform_identity_digest TEXT NOT NULL,
+  current_availability_revision INTEGER NOT NULL CHECK (current_availability_revision >= 1),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (project_session_id, profile_id, profile_schema_digest,
+    target_chair_family, slot, adapter_id, adapter_contract_digest,
+    provider_family, model, source_mode, runtime_identity_digest,
+    platform_identity_digest),
+  FOREIGN KEY (project_session_id, profile_id, profile_schema_digest,
+      target_chair_family, slot, adapter_id, adapter_contract_digest,
+      provider_family, model, source_mode, runtime_identity_digest,
+      platform_identity_digest, current_availability_revision)
+    REFERENCES review_certifying_slot_availability_revisions(
+      project_session_id, profile_id, profile_schema_digest,
+      target_chair_family, slot, adapter_id, adapter_contract_digest,
+      provider_family, model, source_mode, runtime_identity_digest,
+      platform_identity_digest, availability_revision)
+);
+
+CREATE TABLE review_profile_snapshots (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  profile_id TEXT NOT NULL,
+  profile_schema_digest TEXT NOT NULL,
+  profile_catalogue_digest TEXT NOT NULL,
+  target_chair_family TEXT NOT NULL,
+  resolved_profile_json TEXT NOT NULL CHECK (json_valid(resolved_profile_json)),
+  resolved_profile_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, target_generation),
+  FOREIGN KEY (run_id, target_generation) REFERENCES review_completion_targets(run_id, target_generation)
+);
+
+CREATE TABLE review_profile_slots (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  slot TEXT NOT NULL CHECK (slot IN ('native','other-primary','cursor-grok','agy-gemini')),
+  ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 3),
+  adapter_class TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  provider_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  requested_effort TEXT,
+  resolved_effort_kind TEXT NOT NULL CHECK (resolved_effort_kind IN ('applied','inapplicable')),
+  resolved_effort_value TEXT,
+  source_mode TEXT NOT NULL,
+  runtime_identity_digest TEXT NOT NULL,
+  platform_identity_digest TEXT NOT NULL,
+  maximum_provider_turns INTEGER NOT NULL CHECK (maximum_provider_turns >= 1),
+  maximum_internal_steps INTEGER NOT NULL CHECK (maximum_internal_steps >= 1),
+  maximum_portal_reads INTEGER NOT NULL CHECK (maximum_portal_reads >= 1),
+  reviewer_family_relation TEXT NOT NULL CHECK (reviewer_family_relation IN (
+    'same-family-exempt','distinct-family-proved','same-family-forbidden','family-unproved'
+  )),
+  slot_json TEXT NOT NULL CHECK (json_valid(slot_json)),
+  slot_digest TEXT NOT NULL,
+  PRIMARY KEY (run_id, target_generation, slot),
+  UNIQUE (run_id, target_generation, ordinal),
+  FOREIGN KEY (run_id, target_generation) REFERENCES review_profile_snapshots(run_id, target_generation),
+  CHECK ((resolved_effort_kind = 'applied') = (resolved_effort_value IS NOT NULL)),
+  CHECK ((slot = 'native' AND reviewer_family_relation = 'same-family-exempt') OR
+    (slot != 'native' AND reviewer_family_relation = 'distinct-family-proved'))
+);
+
+CREATE TABLE review_portal_process_custody (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  contract_digest TEXT NOT NULL,
+  daemon_instance_id TEXT NOT NULL,
+  supervisor_pid INTEGER NOT NULL CHECK (supervisor_pid > 0),
+  supervisor_start_time INTEGER NOT NULL,
+  provider_root_pid INTEGER NOT NULL CHECK (provider_root_pid > 0),
+  provider_root_start_time INTEGER NOT NULL,
+  process_group_id INTEGER NOT NULL CHECK (process_group_id > 0),
+  session_id INTEGER NOT NULL CHECK (session_id > 0),
+  executable_identity_digest TEXT NOT NULL,
+  ancestry_manifest_digest TEXT NOT NULL,
+  custody_directory_path TEXT NOT NULL,
+  custody_directory_device TEXT NOT NULL,
+  custody_directory_inode TEXT NOT NULL,
+  socket_basename TEXT NOT NULL,
+  socket_file_digest TEXT NOT NULL,
+  capsule_basename TEXT NOT NULL,
+  capsule_file_digest TEXT NOT NULL,
+  control_fd_number INTEGER NOT NULL CHECK (control_fd_number = 3),
+  connection_state TEXT NOT NULL CHECK (connection_state IN ('waiting','consumed','closed')),
+  process_state TEXT NOT NULL CHECK (process_state IN (
+    'preparing','running','terminating','cleaned','integrity-failure'
+  )),
+  cleanup_generation INTEGER NOT NULL CHECK (cleanup_generation >= 0),
+  cleanup_evidence_digest TEXT,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_action_pair_preflights(adapter_id, action_id),
+  CHECK (instr(socket_basename, '/') = 0 AND socket_basename NOT IN ('.','..')),
+  CHECK (instr(capsule_basename, '/') = 0 AND capsule_basename NOT IN ('.','..')),
+  CHECK ((process_state IN ('cleaned','integrity-failure')) =
+    (cleanup_evidence_digest IS NOT NULL))
+);
+
+CREATE TABLE provider_failure_substitution_events (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  event_generation INTEGER NOT NULL CHECK (event_generation >= 1),
+  run_id TEXT NOT NULL,
+  requested_family TEXT NOT NULL,
+  requested_model TEXT NOT NULL,
+  resolved_adapter_id TEXT,
+  resolved_family TEXT,
+  resolved_model TEXT,
+  code TEXT NOT NULL CHECK (code IN (
+    'adapter-unavailable','adapter-contract-mismatch','provider-unavailable',
+    'provider-timeout','provider-rejected','provider-response-invalid',
+    'route-rejected','model-unavailable','capability-unavailable',
+    'quota-exhausted','substitution-applied','optional-leg-degraded'
+  )),
+  evidence_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id, event_generation),
+  FOREIGN KEY (adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(adapter_id, action_id),
+  CHECK ((resolved_adapter_id IS NULL) = (resolved_family IS NULL)),
+  CHECK ((resolved_family IS NULL) = (resolved_model IS NULL))
+);
+
+CREATE TABLE provider_action_routes (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  certifying_review INTEGER NOT NULL CHECK (certifying_review IN (0,1)),
+  target_generation INTEGER,
+  slot TEXT,
+  slot_head_generation INTEGER,
+  attempt_generation INTEGER,
+  reviewed_artifact_id TEXT,
+  reviewed_artifact_revision INTEGER,
+  publication_lineage_digest TEXT,
+  bundle_digest TEXT,
+  manifest_root_digest TEXT,
+  coverage_digest TEXT,
+  bundle_search_index_digest TEXT,
+  risk_read_map_digest TEXT,
+  mandatory_read_set_digest TEXT,
+  profile_digest TEXT,
+  profile_schema_digest TEXT,
+  final_prompt_digest TEXT,
+  chair_binding_generation INTEGER,
+  route_request_json TEXT NOT NULL CHECK (json_valid(route_request_json)),
+  route_request_digest TEXT NOT NULL,
+  route_receipt_json TEXT NOT NULL CHECK (json_valid(route_receipt_json)),
+  route_receipt_digest TEXT NOT NULL,
+  requested_adapter_id TEXT NOT NULL,
+  resolved_adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  provider_family TEXT NOT NULL,
+  model TEXT NOT NULL,
+  requested_effort TEXT,
+  resolved_effort_kind TEXT NOT NULL CHECK (resolved_effort_kind IN ('applied','inapplicable')),
+  resolved_effort_value TEXT,
+  capability_snapshot_generation INTEGER NOT NULL CHECK (capability_snapshot_generation >= 1),
+  capability_snapshot_digest TEXT NOT NULL,
+  capability_body_digest TEXT NOT NULL,
+  effective_configuration_id TEXT NOT NULL,
+  effective_configuration_revision INTEGER NOT NULL CHECK (effective_configuration_revision >= 1),
+  effective_configuration_ref_digest TEXT NOT NULL,
+  requested_configuration_digest TEXT NOT NULL,
+  effective_route_configuration_digest TEXT NOT NULL,
+  deployed_route_admission_json TEXT NOT NULL CHECK (json_valid(deployed_route_admission_json)),
+  deployed_route_admission_digest TEXT NOT NULL,
+  route_policy_revision INTEGER NOT NULL CHECK (route_policy_revision >= 1),
+  harness_revision INTEGER NOT NULL CHECK (harness_revision >= 1),
+  harness_digest TEXT NOT NULL,
+  context_policy_revision INTEGER NOT NULL CHECK (context_policy_revision >= 1),
+  context_policy_digest TEXT NOT NULL,
+  permission_profile_digest TEXT NOT NULL,
+  discovery_surface_evidence_id TEXT NOT NULL,
+  discovery_surface_evidence_revision INTEGER NOT NULL CHECK (discovery_surface_evidence_revision >= 1),
+  discovery_surface_digest TEXT NOT NULL,
+  admission_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id),
+  FOREIGN KEY (adapter_id, capability_snapshot_generation,
+      capability_snapshot_digest, capability_body_digest)
+    REFERENCES adapter_capability_snapshots(adapter_id, snapshot_generation,
+      snapshot_digest, capability_body_digest),
+  FOREIGN KEY (effective_configuration_id, effective_configuration_revision,
+      effective_configuration_ref_digest)
+    REFERENCES adapter_effective_configurations(configuration_id,
+      configuration_revision, configuration_digest),
+  FOREIGN KEY (discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest)
+    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision, manifest_digest),
+  CHECK (requested_adapter_id = adapter_id AND resolved_adapter_id = adapter_id),
+  CHECK ((resolved_effort_kind = 'applied') = (resolved_effort_value IS NOT NULL)),
+  CHECK (resolved_effort_kind != 'inapplicable' OR requested_effort IS NULL),
+  CHECK ((certifying_review = 0 AND target_generation IS NULL AND slot IS NULL AND
+      slot_head_generation IS NULL AND attempt_generation IS NULL AND
+      reviewed_artifact_id IS NULL AND reviewed_artifact_revision IS NULL AND
+      publication_lineage_digest IS NULL AND bundle_digest IS NULL AND
+      manifest_root_digest IS NULL AND coverage_digest IS NULL AND
+      profile_digest IS NULL AND profile_schema_digest IS NULL AND
+      final_prompt_digest IS NULL AND chair_binding_generation IS NULL) OR
+    (certifying_review = 1 AND target_generation IS NOT NULL AND
+      slot IN ('native','other-primary','cursor-grok','agy-gemini') AND
+      slot_head_generation IS NOT NULL AND attempt_generation IS NOT NULL AND
+      reviewed_artifact_id IS NOT NULL AND reviewed_artifact_revision IS NOT NULL AND
+      publication_lineage_digest IS NOT NULL AND bundle_digest IS NOT NULL AND
+      manifest_root_digest IS NOT NULL AND coverage_digest IS NOT NULL AND
+      profile_digest IS NOT NULL AND profile_schema_digest IS NOT NULL AND
+      final_prompt_digest IS NOT NULL AND chair_binding_generation IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX one_nonterminal_certifying_action_per_slot_head
+  ON provider_action_routes(run_id, target_generation, slot, slot_head_generation)
+  WHERE certifying_review = 1;
+
+CREATE TABLE provider_review_terminal_journal (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  slot TEXT NOT NULL,
+  attempt_generation INTEGER NOT NULL CHECK (attempt_generation >= 1),
+  terminal_kind TEXT NOT NULL CHECK (terminal_kind IN (
+    'safe-answer','unusable-answer','provider-terminal-failure',
+    'terminal-no-effect','integrity-terminal','retired-unknown'
+  )),
+  terminal_sequence INTEGER NOT NULL CHECK (terminal_sequence >= 1),
+  terminal_input_digest TEXT NOT NULL,
+  private_answer_digest TEXT,
+  private_result_digest TEXT,
+  private_adapter_result_digest TEXT,
+  authenticated_usage_digest TEXT,
+  read_journal_digest TEXT,
+  public_terminal_projection_digest TEXT NOT NULL,
+  evidence_mutation_receipt_digest TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (adapter_id, action_id, target_generation, slot, attempt_generation),
+  UNIQUE (run_id, terminal_sequence),
+  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_action_routes(adapter_id, action_id)
+);
+
+CREATE TABLE provider_review_results (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  result_kind TEXT NOT NULL CHECK (result_kind IN (
+    'safe-answer','unusable-answer','provider-terminal-failure'
+  )),
+  provider_answer_digest TEXT,
+  provider_answer_length INTEGER CHECK (provider_answer_length IS NULL OR provider_answer_length >= 0),
+  safe_result_json TEXT CHECK (safe_result_json IS NULL OR json_valid(safe_result_json)),
+  result_digest TEXT NOT NULL UNIQUE,
+  finding_set_digest TEXT,
+  resolved_finding_set_digest TEXT,
+  classifier_digest TEXT,
+  secret_selector_digest TEXT,
+  failure_code TEXT CHECK (failure_code IS NULL OR failure_code IN (
+    'max-turns-exhausted','provider-rejected','terminal-no-answer','adapter-terminal-failure'
+  )),
+  private_diagnostic_digest TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  FOREIGN KEY (adapter_id, action_id)
+    REFERENCES provider_review_terminal_journal(adapter_id, action_id),
+  CHECK ((result_kind = 'safe-answer' AND provider_answer_digest IS NOT NULL AND
+      provider_answer_length IS NOT NULL AND safe_result_json IS NOT NULL AND
+      finding_set_digest IS NOT NULL AND resolved_finding_set_digest IS NOT NULL AND
+      classifier_digest IS NOT NULL AND secret_selector_digest IS NOT NULL AND
+      failure_code IS NULL AND private_diagnostic_digest IS NULL) OR
+    (result_kind = 'unusable-answer' AND provider_answer_digest IS NOT NULL AND
+      provider_answer_length IS NOT NULL AND safe_result_json IS NULL AND
+      finding_set_digest IS NULL AND resolved_finding_set_digest IS NULL AND
+      classifier_digest IS NOT NULL AND secret_selector_digest IS NOT NULL AND
+      failure_code IS NULL AND private_diagnostic_digest IS NULL) OR
+    (result_kind = 'provider-terminal-failure' AND provider_answer_digest IS NULL AND
+      provider_answer_length IS NULL AND safe_result_json IS NULL AND
+      finding_set_digest IS NULL AND resolved_finding_set_digest IS NULL AND
+      classifier_digest IS NULL AND secret_selector_digest IS NULL AND
+      failure_code IS NOT NULL AND private_diagnostic_digest IS NOT NULL))
+);
+
+CREATE TRIGGER provider_review_results_complete_finding_sets
+BEFORE INSERT ON provider_review_results
+WHEN NEW.result_kind = 'safe-answer' AND (
+  NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.resolved_finding_set_digest
+  )
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TABLE review_slot_heads (
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  slot TEXT NOT NULL CHECK (slot IN ('native','other-primary','cursor-grok','agy-gemini')),
+  head_generation INTEGER NOT NULL CHECK (head_generation >= 0),
+  head_evidence_id TEXT,
+  latest_attempt_generation INTEGER NOT NULL CHECK (latest_attempt_generation >= 0),
+  latest_action_adapter_id TEXT,
+  latest_action_id TEXT,
+  latest_action_state TEXT,
+  open_finding_set_digest TEXT NOT NULL,
+  repair_required_finding_set_digest TEXT NOT NULL,
+  prior_target_generation INTEGER,
+  prior_target_head_evidence_id TEXT,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, target_generation, slot),
+  FOREIGN KEY (run_id, target_generation) REFERENCES review_completion_targets(run_id, target_generation),
+  FOREIGN KEY (open_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (repair_required_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  CHECK ((latest_action_adapter_id IS NULL) = (latest_action_id IS NULL)),
+  CHECK ((latest_action_id IS NULL) = (latest_action_state IS NULL)),
+  CHECK ((head_generation = 0) = (head_evidence_id IS NULL))
+);
+
+CREATE TRIGGER review_slot_heads_complete_finding_sets_insert
+BEFORE INSERT ON review_slot_heads
+WHEN NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.open_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.repair_required_finding_set_digest
+  )
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TRIGGER review_slot_heads_complete_finding_sets_update
+BEFORE UPDATE OF open_finding_set_digest,repair_required_finding_set_digest ON review_slot_heads
+WHEN NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.open_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.repair_required_finding_set_digest
+  )
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TABLE provider_review_evidence (
+  run_id TEXT NOT NULL,
+  evidence_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  slot TEXT NOT NULL,
+  prior_head_generation INTEGER NOT NULL CHECK (prior_head_generation >= 0),
+  new_head_generation INTEGER NOT NULL CHECK (new_head_generation >= 1),
+  prior_evidence_id TEXT,
+  prior_open_finding_set_digest TEXT NOT NULL,
+  provider_resolved_finding_set_digest TEXT NOT NULL,
+  accepted_resolved_finding_set_digest TEXT NOT NULL,
+  current_finding_set_digest TEXT NOT NULL,
+  new_open_finding_set_digest TEXT NOT NULL,
+  repair_required_finding_set_digest TEXT NOT NULL,
+  reservation_digest TEXT NOT NULL,
+  terminal_sequence INTEGER NOT NULL CHECK (terminal_sequence >= 1),
+  certification_basis_at_terminal_digest TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  result_digest TEXT NOT NULL,
+  route_receipt_digest TEXT NOT NULL,
+  bundle_digest TEXT NOT NULL,
+  coverage_digest TEXT NOT NULL,
+  profile_digest TEXT NOT NULL,
+  chair_binding_generation INTEGER NOT NULL CHECK (chair_binding_generation >= 1),
+  route_observation_digest TEXT,
+  actual_route_identity_digest TEXT,
+  task_id TEXT NOT NULL,
+  answer_digest TEXT NOT NULL,
+  read_coverage_digest TEXT NOT NULL,
+  reviewer_family_relation TEXT NOT NULL CHECK (reviewer_family_relation IN (
+    'same-family-exempt','distinct-family-proved','same-family-forbidden','family-unproved'
+  )),
+  certifying INTEGER NOT NULL CHECK (certifying IN (0,1)),
+  evidence_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, evidence_id),
+  UNIQUE (run_id, target_generation, slot, new_head_generation),
+  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_review_results(adapter_id, action_id),
+  FOREIGN KEY (run_id, target_generation, slot)
+    REFERENCES review_slot_heads(run_id, target_generation, slot),
+  FOREIGN KEY (prior_open_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (provider_resolved_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (accepted_resolved_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (current_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (new_open_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (repair_required_finding_set_digest) REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY (run_id, adapter_id, action_id, reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      run_id, adapter_id, action_id, reservation_digest
+    ),
+  CHECK (new_head_generation = prior_head_generation + 1),
+  CHECK (actual_route_identity_digest IS NULL OR route_observation_digest IS NOT NULL)
+);
+
+CREATE TRIGGER provider_review_evidence_complete_finding_sets
+BEFORE INSERT ON provider_review_evidence
+WHEN NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.prior_open_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.provider_resolved_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.accepted_resolved_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.current_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.new_open_finding_set_digest
+  ) OR NOT EXISTS (
+    SELECT 1 FROM review_finding_sets_complete complete
+     WHERE complete.finding_set_digest = NEW.repair_required_finding_set_digest
+  )
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_review_finding_set_incomplete'); END;
+
+CREATE TABLE review_evidence_annotations (
+  run_id TEXT NOT NULL,
+  evidence_id TEXT NOT NULL,
+  annotation_revision INTEGER NOT NULL CHECK (annotation_revision >= 1),
+  prior_annotation_revision INTEGER,
+  command_id TEXT NOT NULL UNIQUE,
+  chair_binding_generation INTEGER NOT NULL CHECK (chair_binding_generation >= 1),
+  disposition TEXT NOT NULL CHECK (disposition IN (
+    'substantiated','unsubstantiated','duplicate','needs-more-evidence'
+  )),
+  note TEXT NOT NULL CHECK (length(CAST(note AS BLOB)) <= 512),
+  note_digest TEXT NOT NULL,
+  annotation_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, evidence_id, annotation_revision),
+  FOREIGN KEY (run_id, evidence_id) REFERENCES provider_review_evidence(run_id, evidence_id),
+  CHECK ((annotation_revision = 1 AND prior_annotation_revision IS NULL) OR
+    (annotation_revision > 1 AND prior_annotation_revision = annotation_revision - 1))
+);
+
+CREATE TABLE review_evidence_annotation_heads (
+  run_id TEXT NOT NULL,
+  evidence_id TEXT NOT NULL,
+  current_annotation_revision INTEGER NOT NULL CHECK (current_annotation_revision >= 1),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (run_id, evidence_id),
+  FOREIGN KEY (run_id, evidence_id, current_annotation_revision)
+    REFERENCES review_evidence_annotations(run_id, evidence_id, annotation_revision)
+);
+
+CREATE TABLE route_integrity_recoveries (
+  run_id TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  recovery_generation INTEGER NOT NULL CHECK (recovery_generation >= 1),
+  owner_daemon_generation INTEGER NOT NULL CHECK (owner_daemon_generation >= 1),
+  state TEXT NOT NULL CHECK (state IN (
+    'detected','inspecting','terminal-proved-no-effect','terminal-proved-usage',
+    'awaiting-human-retire','terminal-retired-unknown'
+  )),
+  reason TEXT NOT NULL CHECK (reason IN (
+    'intact-effect-ambiguity','route-row-missing','route-row-conflict',
+    'route-receipt-mismatch','target-binding-invalid','bundle-binding-invalid',
+    'prompt-binding-invalid','profile-binding-invalid','lineage-binding-invalid'
+  )),
+  terminal_disposition TEXT CHECK (terminal_disposition IS NULL OR
+    terminal_disposition IN (
+      'proved-no-effect-release','exact-usage-settled',
+      'conservative-full-ceiling-settled','full-ceiling-retired'
+    )),
+  reservation_id TEXT NOT NULL,
+  reservation_digest TEXT NOT NULL,
+  route_state TEXT NOT NULL CHECK (route_state IN ('present','missing','integrity-failed')),
+  route_receipt_digest TEXT,
+  recovery_evidence_digest TEXT,
+  lookup_state TEXT NOT NULL CHECK (lookup_state IN ('not-attempted','in-flight','completed')),
+  lookup_evidence_digest TEXT,
+  settlement_digest TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_action_pair_preflights(adapter_id, action_id),
+  CHECK ((route_state = 'present' AND route_receipt_digest IS NOT NULL AND
+      recovery_evidence_digest IS NULL) OR
+    (route_state IN ('missing','integrity-failed') AND route_receipt_digest IS NULL AND
+      recovery_evidence_digest IS NOT NULL)),
+  CHECK ((lookup_state = 'completed') = (lookup_evidence_digest IS NOT NULL)),
+  CHECK ((state IN ('detected','inspecting','awaiting-human-retire') AND
+      terminal_disposition IS NULL AND settlement_digest IS NULL) OR
+    (state = 'terminal-proved-no-effect' AND
+      terminal_disposition = 'proved-no-effect-release' AND settlement_digest IS NOT NULL) OR
+    (state = 'terminal-proved-usage' AND terminal_disposition IN (
+      'exact-usage-settled','conservative-full-ceiling-settled'
+    ) AND settlement_digest IS NOT NULL) OR
+    (state = 'terminal-retired-unknown' AND
+      terminal_disposition = 'full-ceiling-retired' AND settlement_digest IS NOT NULL))
+);
+
+CREATE TABLE adapter_capability_snapshots (
+  adapter_id TEXT NOT NULL,
+  snapshot_generation INTEGER NOT NULL CHECK (snapshot_generation >= 1),
+  snapshot_id TEXT NOT NULL UNIQUE,
+  adapter_contract_digest TEXT NOT NULL,
+  host_id TEXT NOT NULL,
+  host_version TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN (
+    'runtime-discovery','version-pinned-conformance','unavailable'
+  )),
+  observed_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL CHECK (expires_at > observed_at),
+  capability_body_digest TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),
+  snapshot_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, snapshot_generation),
+  UNIQUE (adapter_id, snapshot_generation, snapshot_digest, capability_body_digest)
+);
+
+CREATE TABLE adapter_capability_current (
+  adapter_id TEXT PRIMARY KEY,
+  snapshot_generation INTEGER NOT NULL CHECK (snapshot_generation >= 1),
+  snapshot_digest TEXT NOT NULL,
+  capability_body_digest TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  FOREIGN KEY (adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest)
+    REFERENCES adapter_capability_snapshots(adapter_id, snapshot_generation,
+      snapshot_digest, capability_body_digest)
+);
+
+CREATE TABLE discovery_surface_manifests (
+  evidence_id TEXT NOT NULL,
+  evidence_revision INTEGER NOT NULL CHECK (evidence_revision >= 1),
+  artifact_path TEXT NOT NULL,
+  artifact_digest TEXT NOT NULL,
+  host_id TEXT NOT NULL,
+  host_version TEXT NOT NULL,
+  provider_profile TEXT NOT NULL,
+  raw_native_mode TEXT NOT NULL,
+  permission_profile_digest TEXT NOT NULL,
+  manifest_json TEXT NOT NULL CHECK (json_valid(manifest_json)),
+  manifest_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (evidence_id, evidence_revision),
+  UNIQUE (evidence_id, evidence_revision, manifest_digest),
+  FOREIGN KEY (evidence_id, evidence_revision) REFERENCES artifacts(artifact_id, revision),
+  CHECK (artifact_digest = manifest_digest)
+);
+
+CREATE TABLE adapter_activation_subjects (
+  adapter_id TEXT NOT NULL,
+  activation_id TEXT NOT NULL,
+  activation_revision INTEGER NOT NULL CHECK (activation_revision >= 1),
+  evidence_id TEXT NOT NULL,
+  evidence_revision INTEGER NOT NULL CHECK (evidence_revision >= 1),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, activation_id, activation_revision),
+  UNIQUE (evidence_id, evidence_revision),
+  FOREIGN KEY (evidence_id, evidence_revision) REFERENCES artifacts(artifact_id, revision)
+);
+
+CREATE TABLE adapter_provider_smoke_subjects (
+  adapter_id TEXT NOT NULL,
+  smoke_id TEXT NOT NULL,
+  action_adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  evidence_id TEXT NOT NULL,
+  evidence_revision INTEGER NOT NULL CHECK (evidence_revision >= 1),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, smoke_id),
+  UNIQUE (action_adapter_id, action_id),
+  UNIQUE (evidence_id, evidence_revision),
+  FOREIGN KEY (evidence_id, evidence_revision) REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (action_adapter_id, action_id)
+    REFERENCES provider_action_pair_preflights(adapter_id, action_id)
+);
+
+CREATE TABLE adapter_effective_configurations (
+  configuration_id TEXT NOT NULL,
+  configuration_revision INTEGER NOT NULL CHECK (configuration_revision >= 1),
+  adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  executable_identity_digest TEXT NOT NULL,
+  capability_snapshot_generation INTEGER NOT NULL CHECK (capability_snapshot_generation >= 1),
+  capability_snapshot_digest TEXT NOT NULL,
+  capability_body_digest TEXT NOT NULL,
+  subject_kind TEXT NOT NULL CHECK (subject_kind IN ('activation','provider-smoke','provider-action')),
+  subject_ref_digest TEXT NOT NULL,
+  subject_activation_id TEXT,
+  subject_activation_revision INTEGER,
+  subject_smoke_id TEXT,
+  subject_action_adapter_id TEXT,
+  subject_action_id TEXT,
+  activation_configuration_id TEXT,
+  activation_configuration_revision INTEGER,
+  activation_configuration_digest TEXT,
+  requested_configuration_digest TEXT NOT NULL,
+  effective_configuration_digest TEXT NOT NULL,
+  permission_profile_digest TEXT NOT NULL,
+  discovery_surface_evidence_id TEXT NOT NULL,
+  discovery_surface_evidence_revision INTEGER NOT NULL,
+  evidence_id TEXT NOT NULL,
+  evidence_revision INTEGER NOT NULL CHECK (evidence_revision >= 1),
+  configuration_json TEXT NOT NULL CHECK (json_valid(configuration_json)),
+  configuration_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (configuration_id, configuration_revision),
+  UNIQUE (configuration_id, configuration_revision, configuration_digest),
+  UNIQUE (evidence_id, evidence_revision),
+  FOREIGN KEY (evidence_id, evidence_revision) REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (adapter_id, capability_snapshot_generation,
+      capability_snapshot_digest, capability_body_digest)
+    REFERENCES adapter_capability_snapshots(adapter_id, snapshot_generation,
+      snapshot_digest, capability_body_digest),
+  FOREIGN KEY (discovery_surface_evidence_id, discovery_surface_evidence_revision)
+    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision),
+  FOREIGN KEY (adapter_id, subject_activation_id, subject_activation_revision)
+    REFERENCES adapter_activation_subjects(adapter_id, activation_id, activation_revision),
+  FOREIGN KEY (adapter_id, subject_smoke_id)
+    REFERENCES adapter_provider_smoke_subjects(adapter_id, smoke_id),
+  FOREIGN KEY (subject_action_adapter_id, subject_action_id)
+    REFERENCES provider_action_pair_preflights(adapter_id, action_id),
+  FOREIGN KEY (activation_configuration_id, activation_configuration_revision,
+      activation_configuration_digest)
+    REFERENCES adapter_effective_configurations(configuration_id,
+      configuration_revision, configuration_digest),
+  CHECK ((subject_kind = 'activation' AND subject_activation_id IS NOT NULL AND
+      subject_activation_revision IS NOT NULL AND subject_smoke_id IS NULL AND
+      subject_action_adapter_id IS NULL AND subject_action_id IS NULL) OR
+    (subject_kind = 'provider-smoke' AND subject_activation_id IS NULL AND
+      subject_activation_revision IS NULL AND subject_smoke_id IS NOT NULL AND
+      subject_action_adapter_id IS NULL AND subject_action_id IS NULL) OR
+    (subject_kind = 'provider-action' AND subject_activation_id IS NULL AND
+      subject_activation_revision IS NULL AND subject_smoke_id IS NULL AND
+      subject_action_adapter_id IS NOT NULL AND
+      subject_action_adapter_id = adapter_id AND subject_action_id IS NOT NULL)),
+  CHECK ((subject_kind = 'activation' AND activation_configuration_id IS NULL AND
+      activation_configuration_revision IS NULL AND activation_configuration_digest IS NULL) OR
+    (subject_kind IN ('provider-smoke','provider-action') AND
+      activation_configuration_id IS NOT NULL AND
+      activation_configuration_revision IS NOT NULL AND
+      activation_configuration_digest IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX one_effective_configuration_per_activation_subject
+  ON adapter_effective_configurations(adapter_id, subject_activation_id, subject_activation_revision)
+  WHERE subject_kind = 'activation';
+
+CREATE UNIQUE INDEX one_effective_configuration_per_smoke_subject
+  ON adapter_effective_configurations(adapter_id, subject_smoke_id)
+  WHERE subject_kind = 'provider-smoke';
+
+CREATE UNIQUE INDEX one_effective_configuration_per_provider_action
+  ON adapter_effective_configurations(subject_action_adapter_id, subject_action_id)
+  WHERE subject_kind = 'provider-action';
+
+CREATE TABLE provider_action_route_dispatches (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  dispatch_ordinal INTEGER NOT NULL CHECK (dispatch_ordinal >= 1),
+  admission_digest TEXT NOT NULL,
+  capability_snapshot_generation INTEGER NOT NULL CHECK (capability_snapshot_generation >= 1),
+  capability_snapshot_digest TEXT NOT NULL,
+  capability_body_digest TEXT NOT NULL,
+  effective_configuration_id TEXT NOT NULL,
+  effective_configuration_revision INTEGER NOT NULL CHECK (effective_configuration_revision >= 1),
+  effective_configuration_ref_digest TEXT NOT NULL,
+  permission_profile_digest TEXT NOT NULL,
+  discovery_surface_evidence_id TEXT NOT NULL,
+  discovery_surface_evidence_revision INTEGER NOT NULL CHECK (discovery_surface_evidence_revision >= 1),
+  dispatched_at INTEGER NOT NULL,
+  dispatch_json TEXT NOT NULL CHECK (json_valid(dispatch_json)),
+  dispatch_digest TEXT NOT NULL UNIQUE,
+  PRIMARY KEY (adapter_id, action_id, dispatch_ordinal),
+  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_action_routes(adapter_id, action_id),
+  FOREIGN KEY (adapter_id, capability_snapshot_generation,
+      capability_snapshot_digest, capability_body_digest)
+    REFERENCES adapter_capability_snapshots(adapter_id, snapshot_generation,
+      snapshot_digest, capability_body_digest),
+  FOREIGN KEY (effective_configuration_id, effective_configuration_revision,
+      effective_configuration_ref_digest)
+    REFERENCES adapter_effective_configurations(configuration_id,
+      configuration_revision, configuration_digest),
+  FOREIGN KEY (discovery_surface_evidence_id, discovery_surface_evidence_revision)
+    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision)
+);
+
+CREATE TABLE provider_action_route_observations (
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  admission_digest TEXT NOT NULL,
+  observation_json TEXT NOT NULL CHECK (json_valid(observation_json)),
+  observation_digest TEXT NOT NULL UNIQUE,
+  observed_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  FOREIGN KEY (adapter_id, action_id) REFERENCES provider_action_routes(adapter_id, action_id)
+);
+
+CREATE TABLE coordination_policy_revisions (
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  policy_revision INTEGER NOT NULL CHECK (policy_revision >= 1),
+  policy_ref TEXT NOT NULL CHECK (
+    length(policy_ref) = 71 AND substr(policy_ref, 1, 7) = 'sha256:' AND
+    substr(policy_ref, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  policy_digest TEXT NOT NULL CHECK (
+    length(policy_digest) = 71 AND substr(policy_digest, 1, 7) = 'sha256:' AND
+    substr(policy_digest, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_session_id, coordination_run_id, policy_revision),
+  UNIQUE (project_session_id, coordination_run_id, policy_revision,
+    policy_ref, policy_digest),
+  FOREIGN KEY (project_session_id, coordination_run_id)
+    REFERENCES runs(project_session_id, run_id)
+);
+
+CREATE TABLE coordination_policy_current (
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  policy_revision INTEGER NOT NULL CHECK (policy_revision >= 1),
+  policy_ref TEXT NOT NULL,
+  policy_digest TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (project_session_id, coordination_run_id),
+  FOREIGN KEY (project_session_id, coordination_run_id, policy_revision,
+      policy_ref, policy_digest)
+    REFERENCES coordination_policy_revisions(project_session_id,
+      coordination_run_id, policy_revision, policy_ref, policy_digest)
+);
+
+CREATE TRIGGER coordination_policy_revisions_contiguous_insert
+BEFORE INSERT ON coordination_policy_revisions
+WHEN NEW.policy_revision <> COALESCE((
+  SELECT MAX(policy_revision) + 1
+    FROM coordination_policy_revisions
+   WHERE project_session_id = NEW.project_session_id
+     AND coordination_run_id = NEW.coordination_run_id
+), 1)
+  OR NEW.policy_revision > COALESCE((
+    SELECT policy_revision + 1
+      FROM coordination_policy_current
+     WHERE project_session_id = NEW.project_session_id
+       AND coordination_run_id = NEW.coordination_run_id
+  ), 1)
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_revision_contiguous');
+END;
+
+CREATE TRIGGER coordination_policy_revisions_immutable_update
+BEFORE UPDATE ON coordination_policy_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_history_immutable');
+END;
+
+CREATE TRIGGER coordination_policy_revisions_immutable_delete
+BEFORE DELETE ON coordination_policy_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_history_immutable');
+END;
+
+CREATE TRIGGER coordination_policy_current_insert
+BEFORE INSERT ON coordination_policy_current
+WHEN NEW.revision <> 1 OR NEW.policy_revision <> (
+  SELECT MAX(policy_revision)
+    FROM coordination_policy_revisions
+   WHERE project_session_id = NEW.project_session_id
+     AND coordination_run_id = NEW.coordination_run_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_current_cas');
+END;
+
+CREATE TRIGGER coordination_policy_current_update
+BEFORE UPDATE ON coordination_policy_current
+WHEN NEW.project_session_id IS NOT OLD.project_session_id
+  OR NEW.coordination_run_id IS NOT OLD.coordination_run_id
+  OR NEW.revision <> OLD.revision + 1
+  OR NEW.policy_revision <> OLD.policy_revision + 1
+  OR NEW.policy_revision <> (
+    SELECT MAX(policy_revision)
+      FROM coordination_policy_revisions
+     WHERE project_session_id = NEW.project_session_id
+       AND coordination_run_id = NEW.coordination_run_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_current_cas');
+END;
+
+CREATE TRIGGER coordination_policy_current_delete
+BEFORE DELETE ON coordination_policy_current
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_coordination_policy_current_cas');
+END;
+
+CREATE TABLE topology_wave_plans (
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  wave_id TEXT NOT NULL,
+  wave_revision INTEGER NOT NULL CHECK (wave_revision >= 1),
+  predecessor_wave_id TEXT,
+  predecessor_wave_revision INTEGER,
+  predecessor_plan_digest TEXT,
+  chair_agent_id TEXT NOT NULL,
+  principal_generation INTEGER NOT NULL CHECK (principal_generation >= 1),
+  chair_lease_generation INTEGER NOT NULL CHECK (chair_lease_generation >= 1),
+  authority_revision INTEGER NOT NULL CHECK (authority_revision >= 1),
+  authority_ref TEXT NOT NULL,
+  authority_digest TEXT NOT NULL,
+  policy_revision INTEGER NOT NULL CHECK (policy_revision >= 1),
+  policy_ref TEXT NOT NULL,
+  policy_digest TEXT NOT NULL,
+  rationale_evidence_id TEXT NOT NULL,
+  rationale_evidence_revision INTEGER NOT NULL CHECK (rationale_evidence_revision >= 1),
+  state TEXT NOT NULL CHECK (state IN (
+    'proposed','approved','started','completed','superseded','cancelled'
+  )),
+  plan_json TEXT NOT NULL CHECK (json_valid(plan_json)),
+  plan_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_session_id, coordination_run_id, task_id, wave_id, wave_revision),
+  UNIQUE (project_session_id, coordination_run_id, task_id, wave_revision),
+  UNIQUE (project_session_id, coordination_run_id, task_id,
+    wave_id, wave_revision, plan_digest),
+  FOREIGN KEY (rationale_evidence_id, rationale_evidence_revision)
+    REFERENCES artifacts(artifact_id, revision),
+  FOREIGN KEY (coordination_run_id, task_id) REFERENCES tasks(run_id, task_id),
+  FOREIGN KEY (coordination_run_id, chair_agent_id) REFERENCES agents(run_id, agent_id),
+  FOREIGN KEY (project_session_id, coordination_run_id, authority_revision, authority_ref)
+    REFERENCES run_authority_revisions(project_session_id, coordination_run_id,
+      authority_revision, authority_ref),
+  FOREIGN KEY (project_session_id, coordination_run_id, policy_revision,
+      policy_ref, policy_digest)
+    REFERENCES coordination_policy_revisions(project_session_id,
+      coordination_run_id, policy_revision, policy_ref, policy_digest),
+  FOREIGN KEY (project_session_id, coordination_run_id, task_id,
+      predecessor_wave_id, predecessor_wave_revision, predecessor_plan_digest)
+    REFERENCES topology_wave_plans(project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest),
+  CHECK ((wave_revision = 1 AND predecessor_wave_id IS NULL AND
+      predecessor_wave_revision IS NULL AND predecessor_plan_digest IS NULL) OR
+    (wave_revision > 1 AND predecessor_wave_id IS NOT NULL AND
+      predecessor_wave_revision IS NOT NULL AND predecessor_plan_digest IS NOT NULL))
+);
+
+CREATE TRIGGER topology_wave_plans_codec_insert
+BEFORE INSERT ON topology_wave_plans
+WHEN
+  json_type(NEW.plan_json) <> 'object'
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json)) <> 22
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json)
+     WHERE key NOT IN (
+       'schemaVersion','projectSessionId','coordinationRunId','taskId','waveId',
+       'waveRevision','predecessor','dependencies','decomposability','topology',
+       'chair','stageOwners','writePartitions','contention','budget','stopConditions',
+       'authority','policy','state','rationaleRef','createdAt','planDigest'
+     )
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.schemaVersion'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.schemaVersion') IS NOT 1
+  OR COALESCE(json_type(NEW.plan_json, '$.projectSessionId'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.projectSessionId') IS NOT NEW.project_session_id
+  OR COALESCE(json_type(NEW.plan_json, '$.coordinationRunId'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.coordinationRunId') IS NOT NEW.coordination_run_id
+  OR COALESCE(json_type(NEW.plan_json, '$.taskId'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.taskId') IS NOT NEW.task_id
+  OR COALESCE(json_type(NEW.plan_json, '$.waveId'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.waveId') IS NOT NEW.wave_id
+  OR COALESCE(json_type(NEW.plan_json, '$.waveRevision'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.waveRevision') IS NOT NEW.wave_revision
+  OR COALESCE(json_type(NEW.plan_json, '$.predecessor'), '') NOT IN ('null','object')
+  OR COALESCE(json_type(NEW.plan_json, '$.dependencies'), '') <> 'array'
+  OR COALESCE(json_type(NEW.plan_json, '$.decomposability'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.topology'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.chair'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.stageOwners'), '') <> 'array'
+  OR COALESCE(json_type(NEW.plan_json, '$.writePartitions'), '') <> 'array'
+  OR COALESCE(json_type(NEW.plan_json, '$.contention'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.budget'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.stopConditions'), '') <> 'array'
+  OR COALESCE(json_type(NEW.plan_json, '$.authority'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.policy'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.state'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.state') IS NOT NEW.state
+  OR COALESCE(json_type(NEW.plan_json, '$.rationaleRef'), '') <> 'object'
+  OR COALESCE(json_type(NEW.plan_json, '$.createdAt'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.createdAt') IS NOT NEW.created_at
+  OR COALESCE(json_type(NEW.plan_json, '$.planDigest'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.planDigest') IS NOT NEW.plan_digest
+  OR length(NEW.plan_digest) <> 71
+  OR substr(NEW.plan_digest, 1, 7) <> 'sha256:'
+  OR substr(NEW.plan_digest, 8) GLOB '*[^0-9a-f]*'
+  OR fabric_topology_plan_digest(NEW.plan_json) IS NOT NEW.plan_digest
+  OR NEW.plan_json <> json(NEW.plan_json)
+  OR EXISTS (
+    SELECT 1
+      FROM json_tree(NEW.plan_json) object
+      JOIN json_tree(NEW.plan_json) earlier ON earlier.parent = object.id
+      JOIN json_tree(NEW.plan_json) later
+        ON later.parent = object.id AND later.id > earlier.id
+     WHERE object.type = 'object'
+       AND CAST(earlier.key AS TEXT) >= CAST(later.key AS TEXT)
+  )
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.chair')) <> 3
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.chair')
+     WHERE key NOT IN ('agentId','chairLeaseGeneration','principalGeneration')
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.chair.agentId'), '') <> 'text'
+  OR COALESCE(json_type(NEW.plan_json, '$.chair.principalGeneration'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.chair.principalGeneration') < 1
+  OR json_extract(NEW.plan_json, '$.chair.agentId') IS NOT NEW.chair_agent_id
+  OR json_extract(NEW.plan_json, '$.chair.principalGeneration') IS NOT NEW.principal_generation
+  OR COALESCE(json_type(NEW.plan_json, '$.chair.chairLeaseGeneration'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.chair.chairLeaseGeneration') < 1
+  OR json_extract(NEW.plan_json, '$.chair.chairLeaseGeneration') IS NOT NEW.chair_lease_generation
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.authority')) <> 3
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.authority')
+     WHERE key NOT IN ('authorityDigest','authorityRef','authorityRevision')
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.authority.authorityRevision'), '') <> 'integer'
+  OR COALESCE(json_type(NEW.plan_json, '$.authority.authorityRef'), '') <> 'text'
+  OR COALESCE(json_type(NEW.plan_json, '$.authority.authorityDigest'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.authority.authorityRevision') IS NOT NEW.authority_revision
+  OR json_extract(NEW.plan_json, '$.authority.authorityRef') IS NOT NEW.authority_ref
+  OR json_extract(NEW.plan_json, '$.authority.authorityDigest') IS NOT NEW.authority_digest
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.policy')) <> 3
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.policy')
+     WHERE key NOT IN ('policyDigest','policyRef','policyRevision')
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.policy.policyRevision'), '') <> 'integer'
+  OR COALESCE(json_type(NEW.plan_json, '$.policy.policyRef'), '') <> 'text'
+  OR COALESCE(json_type(NEW.plan_json, '$.policy.policyDigest'), '') <> 'text'
+  OR json_extract(NEW.plan_json, '$.policy.policyRevision') IS NOT NEW.policy_revision
+  OR json_extract(NEW.plan_json, '$.policy.policyRef') IS NOT NEW.policy_ref
+  OR json_extract(NEW.plan_json, '$.policy.policyDigest') IS NOT NEW.policy_digest
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.rationaleRef')) <> 2
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.rationaleRef')
+     WHERE key NOT IN ('evidenceId','evidenceRevision')
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.rationaleRef.evidenceId'), '') <> 'text'
+  OR COALESCE(json_type(NEW.plan_json, '$.rationaleRef.evidenceRevision'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.rationaleRef.evidenceRevision') < 1
+  OR json_extract(NEW.plan_json, '$.rationaleRef.evidenceId') IS NOT NEW.rationale_evidence_id
+  OR json_extract(NEW.plan_json, '$.rationaleRef.evidenceRevision') IS NOT NEW.rationale_evidence_revision
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.decomposability')) <> 2
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.decomposability')
+     WHERE key NOT IN ('evidenceRef','kind')
+  )
+  OR json_extract(NEW.plan_json, '$.decomposability.kind') NOT IN (
+    'atomic','decomposable','conditionally-decomposable'
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.decomposability.evidenceRef'), '') <> 'text'
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.topology')) <> 3
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.topology')
+     WHERE key NOT IN ('executionShape','maximumConcurrentAgents','mode')
+  )
+  OR json_extract(NEW.plan_json, '$.topology.executionShape') NOT IN (
+    'single-owner','fabric-explicit','host-native'
+  )
+  OR json_extract(NEW.plan_json, '$.topology.mode') NOT IN (
+    'serial','parallel','fan-out-fan-in','dynamic'
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.topology.maximumConcurrentAgents'), '') <> 'integer'
+  OR json_extract(NEW.plan_json, '$.topology.maximumConcurrentAgents') < 1
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.contention')) <> 3
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.contention')
+     WHERE key NOT IN ('evidenceRef','mode','serializationOwnerAgentId')
+  )
+  OR json_extract(NEW.plan_json, '$.contention.mode') NOT IN (
+    'none','serialized','disjoint-partitions'
+  )
+  OR COALESCE(json_type(NEW.plan_json, '$.contention.evidenceRef'), '') <> 'text'
+  OR COALESCE(json_type(NEW.plan_json, '$.contention.serializationOwnerAgentId'), '')
+       NOT IN ('null','text')
+  OR (json_extract(NEW.plan_json, '$.contention.mode') = 'serialized') IS NOT
+     (json_type(NEW.plan_json, '$.contention.serializationOwnerAgentId') = 'text')
+  OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.budget')) <> 4
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.budget')
+     WHERE key NOT IN (
+       'maximumParallelAgents','providerTurns','toolCalls','wallClockSeconds'
+     )
+  )
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.budget')
+     WHERE type <> 'integer' OR value < 0
+  )
+  OR json_extract(NEW.plan_json, '$.budget.maximumParallelAgents') < 1
+  OR json_extract(NEW.plan_json, '$.budget.maximumParallelAgents') >
+     json_extract(NEW.plan_json, '$.topology.maximumConcurrentAgents')
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.dependencies') dependency
+     WHERE dependency.type <> 'object'
+        OR (SELECT COUNT(*) FROM json_each(dependency.value)) <> 3
+        OR EXISTS (
+          SELECT 1 FROM json_each(dependency.value)
+           WHERE key NOT IN ('dependencyTaskId','evidenceRef','requiredState')
+        )
+        OR COALESCE(json_type(dependency.value, '$.dependencyTaskId'), '') <> 'text'
+        OR COALESCE(json_type(dependency.value, '$.evidenceRef'), '') <> 'text'
+        OR json_extract(dependency.value, '$.requiredState') NOT IN ('ready','completed')
+  )
+  OR EXISTS (
+    SELECT 1
+      FROM json_each(NEW.plan_json, '$.dependencies') earlier
+      JOIN json_each(NEW.plan_json, '$.dependencies') later
+        ON CAST(later.key AS INTEGER) = CAST(earlier.key AS INTEGER) + 1
+     WHERE json_extract(earlier.value, '$.dependencyTaskId') >=
+           json_extract(later.value, '$.dependencyTaskId')
+  )
+  OR json_array_length(NEW.plan_json, '$.stageOwners') < 1
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+     WHERE owner.type <> 'object'
+        OR (SELECT COUNT(*) FROM json_each(owner.value)) <> 4
+        OR EXISTS (
+          SELECT 1 FROM json_each(owner.value)
+           WHERE key NOT IN ('ownerAgentId','stageId','taskId','writePartitionId')
+        )
+        OR COALESCE(json_type(owner.value, '$.ownerAgentId'), '') <> 'text'
+        OR COALESCE(json_type(owner.value, '$.stageId'), '') <> 'text'
+        OR COALESCE(json_type(owner.value, '$.taskId'), '') <> 'text'
+        OR COALESCE(json_type(owner.value, '$.writePartitionId'), '') NOT IN ('null','text')
+  )
+  OR EXISTS (
+    SELECT 1
+      FROM json_each(NEW.plan_json, '$.stageOwners') earlier
+      JOIN json_each(NEW.plan_json, '$.stageOwners') later
+        ON CAST(later.key AS INTEGER) = CAST(earlier.key AS INTEGER) + 1
+     WHERE json_extract(earlier.value, '$.stageId') >=
+           json_extract(later.value, '$.stageId')
+  )
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.writePartitions') partition
+     WHERE partition.type <> 'object'
+        OR (SELECT COUNT(*) FROM json_each(partition.value)) <> 5
+        OR EXISTS (
+          SELECT 1 FROM json_each(partition.value)
+           WHERE key NOT IN ('authorityRef','mode','ownerAgentId','partitionId','pathSetDigest')
+        )
+        OR COALESCE(json_type(partition.value, '$.authorityRef'), '') <> 'text'
+        OR json_extract(partition.value, '$.authorityRef') IS NOT NEW.authority_ref
+        OR json_extract(partition.value, '$.mode') NOT IN ('exclusive-write','shared-read')
+        OR COALESCE(json_type(partition.value, '$.ownerAgentId'), '') <> 'text'
+        OR COALESCE(json_type(partition.value, '$.partitionId'), '') <> 'text'
+        OR COALESCE(json_type(partition.value, '$.pathSetDigest'), '') <> 'text'
+        OR length(json_extract(partition.value, '$.pathSetDigest')) <> 71
+        OR substr(json_extract(partition.value, '$.pathSetDigest'), 1, 7) <> 'sha256:'
+        OR substr(json_extract(partition.value, '$.pathSetDigest'), 8) GLOB '*[^0-9a-f]*'
+  )
+  OR EXISTS (
+    SELECT 1
+      FROM json_each(NEW.plan_json, '$.writePartitions') earlier
+      JOIN json_each(NEW.plan_json, '$.writePartitions') later
+        ON CAST(later.key AS INTEGER) = CAST(earlier.key AS INTEGER) + 1
+     WHERE json_extract(earlier.value, '$.partitionId') >=
+           json_extract(later.value, '$.partitionId')
+  )
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+     WHERE json_type(owner.value, '$.writePartitionId') = 'text'
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(NEW.plan_json, '$.writePartitions') partition
+          WHERE json_extract(partition.value, '$.partitionId') =
+                json_extract(owner.value, '$.writePartitionId')
+            AND json_extract(partition.value, '$.ownerAgentId') =
+                json_extract(owner.value, '$.ownerAgentId')
+       )
+  )
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.writePartitions') partition
+     WHERE NOT EXISTS (
+       SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+        WHERE json_extract(owner.value, '$.writePartitionId') =
+              json_extract(partition.value, '$.partitionId')
+          AND json_extract(owner.value, '$.ownerAgentId') =
+              json_extract(partition.value, '$.ownerAgentId')
+     )
+  )
+  OR json_array_length(NEW.plan_json, '$.stopConditions') < 1
+  OR EXISTS (
+    SELECT 1 FROM json_each(NEW.plan_json, '$.stopConditions') condition
+     WHERE condition.type <> 'object'
+        OR (SELECT COUNT(*) FROM json_each(condition.value)) <> 3
+        OR EXISTS (
+          SELECT 1 FROM json_each(condition.value)
+           WHERE key NOT IN ('conditionId','kind','predicateRef')
+        )
+        OR COALESCE(json_type(condition.value, '$.conditionId'), '') <> 'text'
+        OR json_extract(condition.value, '$.kind') NOT IN (
+          'objective-complete','gate-failed','budget-exhausted','human-gate'
+        )
+        OR COALESCE(json_type(condition.value, '$.predicateRef'), '') <> 'text'
+  )
+  OR EXISTS (
+    SELECT 1
+      FROM json_each(NEW.plan_json, '$.stopConditions') earlier
+      JOIN json_each(NEW.plan_json, '$.stopConditions') later
+        ON CAST(later.key AS INTEGER) = CAST(earlier.key AS INTEGER) + 1
+     WHERE json_extract(earlier.value, '$.conditionId') >=
+           json_extract(later.value, '$.conditionId')
+  )
+  OR (NEW.wave_revision = 1 AND json_type(NEW.plan_json, '$.predecessor') <> 'null')
+  OR (NEW.wave_revision > 1 AND (
+    json_type(NEW.plan_json, '$.predecessor') <> 'object'
+    OR (SELECT COUNT(*) FROM json_each(NEW.plan_json, '$.predecessor')) <> 7
+    OR EXISTS (
+      SELECT 1 FROM json_each(NEW.plan_json, '$.predecessor')
+       WHERE key NOT IN (
+         'coordinationRunId','planDigest','projectSessionId','schemaVersion',
+         'taskId','waveId','waveRevision'
+       )
+    )
+    OR json_extract(NEW.plan_json, '$.predecessor.schemaVersion') IS NOT 1
+    OR json_extract(NEW.plan_json, '$.predecessor.projectSessionId') IS NOT NEW.project_session_id
+    OR json_extract(NEW.plan_json, '$.predecessor.coordinationRunId') IS NOT NEW.coordination_run_id
+    OR json_extract(NEW.plan_json, '$.predecessor.taskId') IS NOT NEW.task_id
+    OR json_extract(NEW.plan_json, '$.predecessor.waveId') IS NOT NEW.predecessor_wave_id
+    OR json_extract(NEW.plan_json, '$.predecessor.waveRevision') IS NOT NEW.predecessor_wave_revision
+    OR json_extract(NEW.plan_json, '$.predecessor.planDigest') IS NOT NEW.predecessor_plan_digest
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_topology_wave_plan_codec');
+END;
+
+CREATE TRIGGER topology_wave_plans_currency_insert
+BEFORE INSERT ON topology_wave_plans
+WHEN json_type(NEW.plan_json) = 'object'
+  AND (SELECT COUNT(*) FROM json_each(NEW.plan_json)) = 22
+  AND json_type(NEW.plan_json, '$.stageOwners') = 'array'
+  AND json_type(NEW.plan_json, '$.writePartitions') = 'array'
+  AND json_type(NEW.plan_json, '$.dependencies') = 'array'
+  AND json_type(NEW.plan_json, '$.decomposability.evidenceRef') = 'text'
+  AND json_type(NEW.plan_json, '$.contention.evidenceRef') = 'text'
+  AND (
+NOT EXISTS (
+  SELECT 1
+    FROM runs run
+    JOIN agents chair
+      ON chair.run_id = run.run_id
+     AND chair.agent_id = run.chair_agent_id
+    JOIN authorities authority
+      ON authority.authority_id = chair.authority_id
+     AND authority.run_id = run.run_id
+    JOIN run_chair_leases chair_lease
+      ON chair_lease.project_session_id = run.project_session_id
+     AND chair_lease.run_id = run.run_id
+     AND chair_lease.lease_id = run.chair_lease_id
+     AND chair_lease.holder_agent_id = run.chair_agent_id
+     AND chair_lease.generation = run.chair_generation
+     AND chair_lease.status = 'active'
+    JOIN agent_lifecycle_identity_high_water identity_high_water
+      ON identity_high_water.run_id = run.run_id
+     AND identity_high_water.agent_id = run.chair_agent_id
+    JOIN coordination_policy_current policy_current
+      ON policy_current.project_session_id = run.project_session_id
+     AND policy_current.coordination_run_id = run.run_id
+   WHERE run.project_session_id = NEW.project_session_id
+     AND run.run_id = NEW.coordination_run_id
+     AND run.chair_agent_id = NEW.chair_agent_id
+     AND run.chair_generation = NEW.chair_lease_generation
+     AND run.authority_revision = NEW.authority_revision
+     AND run.authority_ref = NEW.authority_ref
+     AND NEW.authority_digest = NEW.authority_ref
+     AND NEW.authority_digest = 'sha256:' || authority.authority_hash
+     AND identity_high_water.principal_generation = NEW.principal_generation
+     AND policy_current.policy_revision = NEW.policy_revision
+     AND policy_current.policy_ref = NEW.policy_ref
+     AND policy_current.policy_digest = NEW.policy_digest
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+   WHERE NOT EXISTS (
+     SELECT 1 FROM agents current_agent
+      WHERE current_agent.run_id = NEW.coordination_run_id
+        AND current_agent.agent_id = json_extract(owner.value, '$.ownerAgentId')
+        AND current_agent.lifecycle <> 'archived'
+   )
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.stageOwners') owner
+   WHERE NOT EXISTS (
+     SELECT 1 FROM tasks current_task
+      WHERE current_task.run_id = NEW.coordination_run_id
+        AND current_task.task_id = json_extract(owner.value, '$.taskId')
+   )
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.writePartitions') partition
+   WHERE NOT EXISTS (
+     SELECT 1
+       FROM agents owner
+       JOIN authorities owner_authority
+         ON owner_authority.authority_id = owner.authority_id
+        AND owner_authority.run_id = owner.run_id
+      WHERE owner.run_id = NEW.coordination_run_id
+        AND owner.agent_id = json_extract(partition.value, '$.ownerAgentId')
+        AND 'sha256:' || owner_authority.authority_hash =
+          json_extract(partition.value, '$.authorityRef')
+   )
+)
+OR EXISTS (
+  SELECT 1 FROM json_each(NEW.plan_json, '$.dependencies') dependency
+   WHERE NOT EXISTS (
+     SELECT 1 FROM tasks dependency_task
+      WHERE dependency_task.run_id = NEW.coordination_run_id
+        AND dependency_task.task_id = json_extract(
+          dependency.value, '$.dependencyTaskId'
+        )
+        AND (
+          (json_extract(dependency.value, '$.requiredState') = 'ready'
+            AND dependency_task.state = 'ready') OR
+          (json_extract(dependency.value, '$.requiredState') = 'completed'
+            AND dependency_task.state = 'complete')
+        )
+   )
+   OR NOT (
+     json_extract(dependency.value, '$.evidenceRef') =
+       json_extract(dependency.value, '$.dependencyTaskId')
+     OR EXISTS (
+       SELECT 1
+         FROM artifacts evidence
+         JOIN project_sessions evidence_session
+           ON evidence_session.project_id = evidence.project_id
+        WHERE evidence_session.project_session_id = NEW.project_session_id
+          AND evidence.registry_state = 'active'
+          AND (evidence.artifact_id = json_extract(dependency.value, '$.evidenceRef')
+            OR evidence.sha256 = json_extract(dependency.value, '$.evidenceRef'))
+          AND (evidence.project_session_id IS NULL OR
+            evidence.project_session_id = NEW.project_session_id)
+          AND (evidence.run_id IS NULL OR evidence.run_id = NEW.coordination_run_id)
+     )
+   )
+)
+OR NOT EXISTS (
+  SELECT 1
+    FROM artifacts evidence
+    JOIN project_sessions evidence_session
+      ON evidence_session.project_id = evidence.project_id
+   WHERE evidence_session.project_session_id = NEW.project_session_id
+     AND evidence.registry_state = 'active'
+     AND (evidence.artifact_id = json_extract(
+       NEW.plan_json, '$.decomposability.evidenceRef'
+     ) OR evidence.sha256 = json_extract(
+       NEW.plan_json, '$.decomposability.evidenceRef'
+     ))
+     AND (evidence.project_session_id IS NULL OR
+       evidence.project_session_id = NEW.project_session_id)
+     AND (evidence.run_id IS NULL OR evidence.run_id = NEW.coordination_run_id)
+)
+OR NOT EXISTS (
+  SELECT 1
+    FROM artifacts evidence
+    JOIN project_sessions evidence_session
+      ON evidence_session.project_id = evidence.project_id
+   WHERE evidence_session.project_session_id = NEW.project_session_id
+     AND evidence.registry_state = 'active'
+     AND (evidence.artifact_id = json_extract(
+       NEW.plan_json, '$.contention.evidenceRef'
+     ) OR evidence.sha256 = json_extract(
+       NEW.plan_json, '$.contention.evidenceRef'
+     ))
+     AND (evidence.project_session_id IS NULL OR
+       evidence.project_session_id = NEW.project_session_id)
+     AND (evidence.run_id IS NULL OR evidence.run_id = NEW.coordination_run_id)
+)
+OR NOT EXISTS (
+  SELECT 1
+    FROM artifacts rationale
+    JOIN project_sessions rationale_session
+      ON rationale_session.project_id = rationale.project_id
+   WHERE rationale_session.project_session_id = NEW.project_session_id
+     AND rationale.artifact_id = NEW.rationale_evidence_id
+     AND rationale.revision = NEW.rationale_evidence_revision
+     AND rationale.registry_state = 'active'
+     AND (rationale.project_session_id IS NULL OR
+       rationale.project_session_id = NEW.project_session_id)
+     AND (rationale.run_id IS NULL OR rationale.run_id = NEW.coordination_run_id)
+)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_topology_wave_plan_currency');
+END;
+
+CREATE TABLE topology_wave_current (
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  wave_id TEXT NOT NULL,
+  wave_revision INTEGER NOT NULL CHECK (wave_revision >= 1),
+  plan_digest TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (project_session_id, coordination_run_id, task_id),
+  FOREIGN KEY (project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+    REFERENCES topology_wave_plans(project_session_id, coordination_run_id,
+      task_id, wave_id, wave_revision, plan_digest)
+);
+
+CREATE TRIGGER topology_wave_plans_contiguous_insert
+BEFORE INSERT ON topology_wave_plans
+WHEN
+  (NEW.wave_revision = 1 AND EXISTS (
+    SELECT 1 FROM topology_wave_plans prior
+     WHERE prior.project_session_id = NEW.project_session_id
+       AND prior.coordination_run_id = NEW.coordination_run_id
+       AND prior.task_id = NEW.task_id
+  ))
+  OR (NEW.wave_revision > 1 AND NOT EXISTS (
+    SELECT 1
+      FROM topology_wave_current current
+     WHERE current.project_session_id = NEW.project_session_id
+       AND current.coordination_run_id = NEW.coordination_run_id
+       AND current.task_id = NEW.task_id
+       AND current.wave_revision = NEW.wave_revision - 1
+       AND current.wave_id = NEW.predecessor_wave_id
+       AND current.wave_revision = NEW.predecessor_wave_revision
+       AND current.plan_digest = NEW.predecessor_plan_digest
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_topology_wave_plan_contiguous');
+END;
+
+CREATE TRIGGER topology_wave_current_insert
+BEFORE INSERT ON topology_wave_current
+WHEN NEW.revision <> 1 OR NEW.wave_revision <> 1
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_topology_wave_current_cas');
+END;
+
+CREATE TRIGGER topology_wave_current_update
+BEFORE UPDATE ON topology_wave_current
+WHEN NEW.project_session_id IS NOT OLD.project_session_id
+  OR NEW.coordination_run_id IS NOT OLD.coordination_run_id
+  OR NEW.task_id IS NOT OLD.task_id
+  OR NEW.revision <> OLD.revision + 1
+  OR NEW.wave_revision <> OLD.wave_revision + 1
+  OR NOT EXISTS (
+    SELECT 1 FROM topology_wave_plans next
+     WHERE next.project_session_id = NEW.project_session_id
+       AND next.coordination_run_id = NEW.coordination_run_id
+       AND next.task_id = NEW.task_id
+       AND next.wave_id = NEW.wave_id
+       AND next.wave_revision = NEW.wave_revision
+       AND next.plan_digest = NEW.plan_digest
+       AND next.predecessor_wave_id = OLD.wave_id
+       AND next.predecessor_wave_revision = OLD.wave_revision
+       AND next.predecessor_plan_digest = OLD.plan_digest
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_topology_wave_current_cas');
+END;
+
+CREATE TRIGGER topology_wave_current_delete
+BEFORE DELETE ON topology_wave_current
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_topology_wave_current_cas');
+END;
+
+CREATE TABLE topology_wave_append_receipts (
+  command_id TEXT PRIMARY KEY,
+  request_digest TEXT NOT NULL,
+  actor_principal_digest TEXT NOT NULL,
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  prior_wave_id TEXT,
+  prior_wave_revision INTEGER,
+  prior_plan_digest TEXT,
+  wave_id TEXT NOT NULL,
+  wave_revision INTEGER NOT NULL CHECK (wave_revision >= 1),
+  plan_digest TEXT NOT NULL,
+  pointer_revision INTEGER NOT NULL CHECK (pointer_revision >= 1),
+  receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json)),
+  receipt_digest TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (project_session_id, coordination_run_id, task_id,
+      wave_id, wave_revision, plan_digest)
+    REFERENCES topology_wave_plans(project_session_id, coordination_run_id,
+      task_id, wave_id, wave_revision, plan_digest),
+  CHECK ((prior_wave_id IS NULL) = (prior_wave_revision IS NULL)),
+  CHECK ((prior_wave_revision IS NULL) = (prior_plan_digest IS NULL))
+);
+
+CREATE TABLE provider_context_pressure_current (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1),
+  context_revision INTEGER NOT NULL CHECK (context_revision >= 0),
+  observation_source_event_id TEXT NOT NULL,
+  pressure TEXT NOT NULL CHECK (pressure IN ('low','medium','high','unknown')),
+  source TEXT NOT NULL CHECK (source IN ('native-exact','native-estimated','hook-boundary','unavailable')),
+  confidence TEXT NOT NULL CHECK (confidence IN ('exact','estimated','unknown')),
+  window_tokens INTEGER CHECK (window_tokens IS NULL OR window_tokens >= 0),
+  used_tokens INTEGER CHECK (used_tokens IS NULL OR used_tokens >= 0),
+  remaining_tokens INTEGER CHECK (remaining_tokens IS NULL OR remaining_tokens >= 0),
+  observed_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL CHECK (expires_at > observed_at),
+  evidence_digest TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  PRIMARY KEY (run_id, agent_id),
+  FOREIGN KEY (run_id, agent_id, adapter_id)
+    REFERENCES agent_adapter_bindings(run_id, agent_id, adapter_id),
+  FOREIGN KEY (run_id, agent_id, observation_source_event_id,
+      provider_generation, context_revision, evidence_digest)
+    REFERENCES provider_context_observation_audit(run_id, agent_id, source_event_id,
+      provider_generation, context_revision, evidence_digest),
+  CHECK (source != 'unavailable' OR
+    (pressure = 'unknown' AND confidence = 'unknown' AND window_tokens IS NULL AND
+      used_tokens IS NULL AND remaining_tokens IS NULL)),
+  CHECK (source != 'native-exact' OR
+    (confidence = 'exact' AND window_tokens IS NOT NULL AND
+      used_tokens IS NOT NULL AND remaining_tokens IS NOT NULL AND
+      used_tokens + remaining_tokens = window_tokens)),
+  CHECK (source != 'native-estimated' OR
+    (confidence = 'estimated' AND window_tokens IS NOT NULL AND
+      used_tokens IS NOT NULL AND remaining_tokens IS NOT NULL AND
+      used_tokens + remaining_tokens = window_tokens)),
+  CHECK (source != 'hook-boundary' OR
+    (confidence IN ('exact','estimated') AND
+      ((window_tokens IS NULL AND used_tokens IS NULL AND remaining_tokens IS NULL) OR
+       (window_tokens IS NOT NULL AND used_tokens IS NOT NULL AND
+        remaining_tokens IS NOT NULL AND used_tokens + remaining_tokens = window_tokens)))),
+  CHECK (confidence != 'unknown' OR pressure = 'unknown')
+);
+
+CREATE TRIGGER provider_action_route_dispatches_point_of_use
+BEFORE INSERT ON provider_action_route_dispatches
+WHEN NOT EXISTS (
+  SELECT 1
+    FROM provider_action_routes route
+    JOIN adapter_capability_snapshots admitted_snapshot
+      ON admitted_snapshot.adapter_id = route.adapter_id
+     AND admitted_snapshot.snapshot_generation = route.capability_snapshot_generation
+     AND admitted_snapshot.snapshot_digest = route.capability_snapshot_digest
+     AND admitted_snapshot.capability_body_digest = route.capability_body_digest
+    JOIN adapter_capability_snapshots dispatch_snapshot
+      ON dispatch_snapshot.adapter_id = NEW.adapter_id
+     AND dispatch_snapshot.snapshot_generation = NEW.capability_snapshot_generation
+     AND dispatch_snapshot.snapshot_digest = NEW.capability_snapshot_digest
+     AND dispatch_snapshot.capability_body_digest = NEW.capability_body_digest
+    JOIN adapter_capability_current current_snapshot
+      ON current_snapshot.adapter_id = NEW.adapter_id
+     AND current_snapshot.snapshot_generation = NEW.capability_snapshot_generation
+     AND current_snapshot.snapshot_digest = NEW.capability_snapshot_digest
+     AND current_snapshot.capability_body_digest = NEW.capability_body_digest
+    JOIN adapter_effective_configurations configuration
+      ON configuration.configuration_id = NEW.effective_configuration_id
+     AND configuration.configuration_revision = NEW.effective_configuration_revision
+     AND configuration.configuration_digest = NEW.effective_configuration_ref_digest
+   WHERE route.adapter_id = NEW.adapter_id
+     AND route.action_id = NEW.action_id
+     AND route.admission_digest = NEW.admission_digest
+     AND route.capability_body_digest = NEW.capability_body_digest
+     AND route.effective_configuration_id = NEW.effective_configuration_id
+     AND route.effective_configuration_revision = NEW.effective_configuration_revision
+     AND route.effective_configuration_ref_digest = NEW.effective_configuration_ref_digest
+     AND route.permission_profile_digest = NEW.permission_profile_digest
+     AND route.discovery_surface_evidence_id = NEW.discovery_surface_evidence_id
+     AND route.discovery_surface_evidence_revision = NEW.discovery_surface_evidence_revision
+     AND admitted_snapshot.adapter_contract_digest = dispatch_snapshot.adapter_contract_digest
+     AND admitted_snapshot.host_id = dispatch_snapshot.host_id
+     AND dispatch_snapshot.expires_at > NEW.dispatched_at
+     AND configuration.subject_kind = 'provider-action'
+     AND configuration.subject_action_adapter_id = NEW.adapter_id
+     AND configuration.subject_action_id = NEW.action_id
+     AND configuration.permission_profile_digest = NEW.permission_profile_digest
+     AND configuration.discovery_surface_evidence_id = NEW.discovery_surface_evidence_id
+     AND configuration.discovery_surface_evidence_revision = NEW.discovery_surface_evidence_revision
+     AND NEW.dispatch_ordinal = COALESCE((
+       SELECT MAX(prior.dispatch_ordinal) + 1
+         FROM provider_action_route_dispatches prior
+        WHERE prior.adapter_id = NEW.adapter_id AND prior.action_id = NEW.action_id
+     ), 1)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_provider_action_route_dispatch_point_of_use');
+END;
+
+CREATE TRIGGER provider_action_route_observations_parent_equality
+BEFORE INSERT ON provider_action_route_observations
+WHEN NOT EXISTS (
+  SELECT 1 FROM provider_action_routes route
+   WHERE route.adapter_id = NEW.adapter_id
+     AND route.action_id = NEW.action_id
+     AND route.admission_digest = NEW.admission_digest
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INVARIANT_provider_action_route_observation_parent');
+END;
+
+CREATE TRIGGER adapter_capability_snapshots_immutable_update
+BEFORE UPDATE ON adapter_capability_snapshots
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER adapter_capability_snapshots_immutable_delete
+BEFORE DELETE ON adapter_capability_snapshots
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER adapter_effective_configurations_immutable_update
+BEFORE UPDATE ON adapter_effective_configurations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER adapter_effective_configurations_immutable_delete
+BEFORE DELETE ON adapter_effective_configurations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER artifact_publication_lineage_immutable_update
+BEFORE UPDATE ON artifact_publication_lineage
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER artifact_publication_lineage_immutable_delete
+BEFORE DELETE ON artifact_publication_lineage
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER coordination_gate_snapshots_immutable_update
+BEFORE UPDATE ON coordination_gate_snapshots
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER coordination_gate_snapshots_immutable_delete
+BEFORE DELETE ON coordination_gate_snapshots
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER discovery_surface_manifests_immutable_update
+BEFORE UPDATE ON discovery_surface_manifests
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER discovery_surface_manifests_immutable_delete
+BEFORE DELETE ON discovery_surface_manifests
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER implementation_delivery_manifests_immutable_update
+BEFORE UPDATE ON implementation_delivery_manifests
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER implementation_delivery_manifests_immutable_delete
+BEFORE DELETE ON implementation_delivery_manifests
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_action_route_dispatches_immutable_update
+BEFORE UPDATE ON provider_action_route_dispatches
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_action_route_dispatches_immutable_delete
+BEFORE DELETE ON provider_action_route_dispatches
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_action_route_observations_immutable_update
+BEFORE UPDATE ON provider_action_route_observations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_action_route_observations_immutable_delete
+BEFORE DELETE ON provider_action_route_observations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_action_routes_immutable_update
+BEFORE UPDATE ON provider_action_routes
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_action_routes_immutable_delete
+BEFORE DELETE ON provider_action_routes
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_context_observation_audit_immutable_update
+BEFORE UPDATE ON provider_context_observation_audit
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_context_observation_audit_immutable_delete
+BEFORE DELETE ON provider_context_observation_audit
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_review_evidence_immutable_update
+BEFORE UPDATE ON provider_review_evidence
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_review_evidence_immutable_delete
+BEFORE DELETE ON provider_review_evidence
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_review_results_immutable_update
+BEFORE UPDATE ON provider_review_results
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_review_results_immutable_delete
+BEFORE DELETE ON provider_review_results
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_review_terminal_journal_immutable_update
+BEFORE UPDATE ON provider_review_terminal_journal
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER provider_review_terminal_journal_immutable_delete
+BEFORE DELETE ON provider_review_terminal_journal
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_bundles_immutable_update
+BEFORE UPDATE ON review_bundles
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_bundles_immutable_delete
+BEFORE DELETE ON review_bundles
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_certification_cuts_immutable_update
+BEFORE UPDATE ON review_certification_cuts
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_certification_cuts_immutable_delete
+BEFORE DELETE ON review_certification_cuts
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_evidence_annotations_immutable_update
+BEFORE UPDATE ON review_evidence_annotations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_evidence_annotations_immutable_delete
+BEFORE DELETE ON review_evidence_annotations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_target_chair_bindings_immutable_update
+BEFORE UPDATE ON review_target_chair_bindings
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER review_target_chair_bindings_immutable_delete
+BEFORE DELETE ON review_target_chair_bindings
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER topology_wave_append_receipts_immutable_update
+BEFORE UPDATE ON topology_wave_append_receipts
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER topology_wave_append_receipts_immutable_delete
+BEFORE DELETE ON topology_wave_append_receipts
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER topology_wave_plans_immutable_update
+BEFORE UPDATE ON topology_wave_plans
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
+
+CREATE TRIGGER topology_wave_plans_immutable_delete
+BEFORE DELETE ON topology_wave_plans
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_current_history_immutable'); END;
 
 INSERT INTO daemon_global_state(singleton, revision) VALUES (1, 1);
