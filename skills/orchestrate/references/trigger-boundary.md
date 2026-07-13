@@ -36,9 +36,9 @@ Treat these as hints, not automatic triggers:
 - `compare outputs` when the user only wants a short opinion;
 - `use web searches` without source breadth, deep research, audit, or verification need.
 
-Decision rule: the cheap mistake is under-delegation, not over-delegation. If the task is genuinely
-one small local edit or one tightly coupled debug step, do it yourself. Otherwise, any positive
-trigger — or two ambiguous hints plus nontrivial stakes or breadth — means orchestrate, and size the
-fan-out to the decomposition rather than negotiating yourself down to a single pass. State the
-decomposition, keep workers bounded, and pilot a slice when cost is uncertain. Hierarchy for show is
-still waste: the fan-out must map to real independent slices or angles.
+Decision rule: a positive trigger means evaluate orchestration, not automatically fan out. Apply the
+entrypoint's decomposition/value gate. Parallel work requires independent information, stable
+interfaces, non-overlapping writes, independently checkable returns, and expected information gain
+above coordination, shared-state and tool-density cost. Otherwise keep serial ownership. State the
+decomposition, keep workers bounded, and pilot a slice when value is uncertain. Hierarchy for show is
+still waste: every worker must map to a useful independent slice or angle.
