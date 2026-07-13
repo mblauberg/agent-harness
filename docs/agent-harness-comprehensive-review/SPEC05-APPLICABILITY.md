@@ -22,7 +22,7 @@ link; current local checks are reported below instead.
 
 The pack does not justify a broad architecture, build-system, retention,
 installer, replay or TUI decomposition inside the current delivery. Those
-changes need a fresh scope and review session. This delivery owns three narrow
+changes need a fresh scope and review session. This delivery owns four narrow
 responses:
 
 1. F-005 is fixed by making the root README report 33 portable skills and by
@@ -35,12 +35,16 @@ responses:
    while the shipped static scanner is Python-specific. A TypeScript delivery
    must not claim that scanner as TypeScript SAST evidence without a truthful
    tool, version and scope record.
+4. F-018 is resolved for the portable orchestration surface by isolated commit
+   `97d74d9dc92fe4073b2f42f97203ad1655ec9d0e`. Parallel fan-out now requires
+   separable interfaces and writes, independently checkable returns and
+   expected information gain greater than coordination cost; failing cases stay
+   with the chair or one serial specialist. Nine topology fixtures and their
+   static checker cover the serial/parallel boundary.
 
-F-018 is relevant to this run's coordination quality: parallel work should be
-chosen only when interfaces and writes are separable and the expected review or
-information gain exceeds coordination cost. Any portable skill/evaluation
-change is a separately owned current-run patch; this documentation branch does
-not overlap that writer.
+The owned v0.36/v1.31 exact-read, portal-custody and lifecycle-receipt
+amendments reinforce F-001 and F-027's existing classifications. They do not
+complete runtime implementation or justify reclassifying another finding.
 
 ## Finding matrix
 
@@ -69,7 +73,7 @@ be applied in this delivery without amending a binding specification.
 | F-015 | Conflict | The approved four-slot profile requires Cursor/Grok and Agy/Gemini alongside native and Claude review. Removing those adapters would contradict this delivery. |
 | F-016 | Conflict | Spec 05 mandates its four certifying slots. A general risk-adjusted review policy may be scoped later but cannot weaken the current profile. |
 | F-017 | Deferred | Changing scope questioning across the portable skill library is harness-wide interaction design, not a Spec 05 repair. |
-| F-018 | Current | Apply the expected-information-gain versus coordination-cost rule during this run. A narrow skill/evaluation patch, if retained, must use its own writer and tests. |
+| F-018 | Resolved | Isolated commit `97d74d9dc92fe4073b2f42f97203ad1655ec9d0e` adds the explicit parallel fan-out value gate, nine static topology fixtures and mutation-style boundary tests. Its final independent native review was clean; this does not certify unrelated runtime work. |
 | F-019 | Deferred | Typed emergency and irreproducible-incident exceptions alter diagnosis policy and require separate safety design. |
 | F-020 | Resolved | Spec 05 already binds direct cutover with no legacy decoder or vintage retry. Generalising that pre-release rule in the refactor skill is follow-on skill work. |
 | F-021 | Deferred | A machine-readable TDD exception record changes delivery receipts and validators and should be designed across profiles. |
@@ -111,8 +115,9 @@ Use this dependency order for the larger work:
    F-029;
 6. installer, hooks, CLI and supply chain: F-024, F-026, F-040, F-043 and
    F-045;
-7. skill-policy changes: F-017 through F-025 and F-044; and
-8. spec-gated futures: F-014, F-016, F-030 through F-032 and F-046.
+7. remaining skill-policy changes: F-017, F-019, F-021, F-022, F-025 and
+   F-044; and
+8. spec-gated futures: F-014, F-016, F-023, F-030 through F-032 and F-046.
 
 ## Local overlay validation
 
@@ -127,6 +132,21 @@ The documentation/test overlay passed these focused checks in the isolated
 
 These checks validate this overlay only. They are not Spec 05 runtime, provider,
 security or human-acceptance evidence.
+
+F-018's separately owned patch was verified at
+`97d74d9dc92fe4073b2f42f97203ad1655ec9d0e`:
+
+- `PYTHONPATH=. pytest tests/test_orchestrate_value_gate.py -q`: 5 passed;
+- `python3 skills/orchestrate/evals/check_skill_triggers.py`: pass with 23
+  doctrine cases, 21 reference cases and 9 topology cases;
+- `python3 scripts/check_harness.py`: pass with 33 skills and clean fixtures,
+  links and sidecars;
+- `PYTHONPATH=. pytest -q`: 444 passed; and
+- final independent native review: clean, with no substantiated P0-P2.
+
+This evidence certifies only the portable skill/evaluation repair. It does not
+claim that the Spec 05 protocol, daemon, Console, provider or acceptance gates
+are complete.
 
 ## Evidence boundary and review reconciliation
 

@@ -15,7 +15,8 @@ The original limitation above remains part of the review record. A later local
 reconciliation against Specs 01 v0.36, 04 v1.31 and 05 v1.13 is recorded in
 [`SPEC05-APPLICABILITY.md`](SPEC05-APPLICABILITY.md). It classifies all 46
 findings, separates current narrow repairs from resolved, deferred and
-conflicting recommendations, and routes the larger changes to a fresh session.
+conflicting recommendations, records the isolated F-018 orchestration-value
+repair, and routes the larger changes to a fresh session.
 Files under [`proposals/`](proposals/) remain design artefacts rather than
 accepted harness policy. `ARTIFACT_MANIFEST.json` and `VALIDATION.*` are the
 immutable receipts for import commit
