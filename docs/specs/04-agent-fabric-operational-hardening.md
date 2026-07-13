@@ -1,13 +1,25 @@
 # Agent fabric operational hardening
 
-Status: Console daemon-lifecycle, provider-budget, review-snapshot, route-lineage, decision-projection, seat-generation and answer-bearing review extension approved; implementation in progress; final human acceptance pending
-Version: 1.30
+Status: Draft v1.31 amendment under P1 repair; implementation and final human acceptance pending
+Version: 1.31
 Date: 13 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.30 closes capability-body refresh, discovery-manifest, effective-
+Version 1.31 is a draft amendment pending repair and fresh independent review
+of its externally authenticated lifecycle-receipt persistence. It owns the
+daemon and persistence side of the final Console read
+surface. It adds indexed current-preparation and provider-route reads, binds
+every task/agent/evidence/activity projection to its exact project/session/run scope,
+and uses the immutable per-run route ordinal watermark to keep pagination
+coherent. It also closes portal cleanup around same-filesystem trusted claims,
+pre-artifact intent, an exact pre-exec registration/ACK and provider-exec
+closure, a closed provider launch/source-contract grammar, durable HOME/temp/
+entry/directory phases and kind-specific identity. Lifecycle terminal and
+review-adoption decisions additionally require an external append-only receipt
+authority. It adds no
+legacy schema, automatic router or second projection store. Version 1.30 closes capability-body refresh, discovery-manifest, effective-
 configuration, actual review identity, context-pressure and topology-wave
 persistence. It also repairs the authority/cut composite keys and retains one
 daemon owner without a legacy path. Version 1.29 persists the shared capability and deployed-route codecs, binds
@@ -2713,17 +2725,30 @@ The private bundle owner uses these logical current relations:
 
 ~~~sql
 review_target_preparation_high_water(
-  run_id PRIMARY KEY, preparation_generation, target_generation,
-  bundle_generation, revision
+  run_id PRIMARY KEY,
+  preparation_generation INTEGER NOT NULL CHECK(preparation_generation >= 0),
+  target_generation INTEGER NOT NULL CHECK(target_generation >= 0),
+  bundle_generation INTEGER NOT NULL CHECK(bundle_generation >= 0),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  CHECK(preparation_generation = target_generation),
+  CHECK(target_generation = bundle_generation)
 )
 
 review_target_preparations(
-  run_id, preparation_id, preparation_generation,
+  run_id, preparation_id,
+  preparation_generation INTEGER NOT NULL CHECK(preparation_generation >= 1),
   owner_command_id, semantic_input_digest, full_input_digest,
   actor_principal_digest, task_id, expected_target_generation,
-  delivery_manifest_artifact_id, delivery_manifest_artifact_revision,
-  reserved_target_generation, reserved_bundle_generation,
-  state, revision, worker_claim_generation, worker_instance_id,
+  delivery_manifest_artifact_id,
+  delivery_manifest_artifact_revision INTEGER NOT NULL
+    CHECK(delivery_manifest_artifact_revision >= 1),
+  reserved_target_generation INTEGER NOT NULL
+    CHECK(reserved_target_generation >= 1),
+  reserved_bundle_generation INTEGER NOT NULL
+    CHECK(reserved_bundle_generation >= 1),
+  state, revision INTEGER NOT NULL CHECK(revision >= 1),
+  worker_claim_generation INTEGER NOT NULL
+    CHECK(worker_claim_generation >= 0), worker_instance_id,
   worker_lease_expires_at, captured_precondition_digest,
   progress_kind, progress_plan_digest, progress_total, progress_completed,
   built_bundle_digest, built_manifest_root_digest,
@@ -2733,7 +2758,9 @@ review_target_preparations(
   UNIQUE(run_id, preparation_generation),
   UNIQUE(run_id, reserved_target_generation),
   UNIQUE(run_id, reserved_bundle_generation),
-  UNIQUE(owner_command_id)
+  UNIQUE(owner_command_id),
+  CHECK(preparation_generation = reserved_target_generation),
+  CHECK(reserved_target_generation = reserved_bundle_generation)
 )
 CREATE UNIQUE INDEX one_active_review_target_preparation_per_run
   ON review_target_preparations(run_id)
@@ -2805,22 +2832,50 @@ review_finding_members(
 )
 
 provider_action_pair_preflights(
-  adapter_id, action_id, run_id, owner_digest,
-  actor_principal_digest, input_digest, state, created_at, updated_at,
+  adapter_id NOT NULL, action_id NOT NULL,
+  scope_kind NOT NULL CHECK(scope_kind IN ('provider-smoke','run-action')),
+  run_id,
+  owner_digest NOT NULL, actor_principal_digest NOT NULL, input_digest NOT NULL,
+  state NOT NULL CHECK(state IN ('resolving','admitted','released')),
+  created_at NOT NULL, updated_at NOT NULL,
   PRIMARY KEY(adapter_id, action_id),
-  UNIQUE(adapter_id, action_id, owner_digest)
+  UNIQUE(adapter_id, action_id, owner_digest),
+  UNIQUE(run_id, adapter_id, action_id),
+  UNIQUE(run_id, adapter_id, action_id, owner_digest),
+  FOREIGN KEY(run_id) REFERENCES runs(run_id),
+  CHECK(
+    (scope_kind = 'provider-smoke' AND run_id IS NULL) OR
+    (scope_kind = 'run-action' AND run_id IS NOT NULL)
+  )
 )
 
 review_finding_capacity_reservations(
-  adapter_id, action_id, run_id, target_generation, slot,
-  owner_digest,
-  finding_window_mode, prior_open_finding_set_digest,
-  maximum_new_findings, maximum_new_finding_bytes,
-  reservation_digest, state, created_at, updated_at,
+  adapter_id NOT NULL, action_id NOT NULL, run_id NOT NULL,
+  target_generation NOT NULL CHECK(target_generation >= 1),
+  slot NOT NULL CHECK(slot IN
+    ('native','other-primary','cursor-grok','agy-gemini')),
+  attempt_generation CHECK(
+    attempt_generation IS NULL OR attempt_generation >= 1),
+  owner_digest NOT NULL,
+  finding_window_mode NOT NULL, prior_open_finding_set_digest NOT NULL,
+  maximum_new_findings NOT NULL, maximum_new_finding_bytes NOT NULL,
+  reservation_digest NOT NULL,
+  state NOT NULL CHECK(state IN ('preflight','attached','released','settled')),
+  created_at NOT NULL, updated_at NOT NULL,
   PRIMARY KEY(adapter_id, action_id),
   UNIQUE(adapter_id, action_id, reservation_digest),
-  FOREIGN KEY(adapter_id, action_id, owner_digest)
-    REFERENCES provider_action_pair_preflights(adapter_id, action_id, owner_digest)
+  UNIQUE(run_id, target_generation, slot, attempt_generation),
+  UNIQUE(adapter_id, action_id, run_id, target_generation, slot,
+    attempt_generation, reservation_digest),
+  FOREIGN KEY(run_id, adapter_id, action_id, owner_digest)
+    REFERENCES provider_action_pair_preflights(
+      run_id, adapter_id, action_id, owner_digest),
+  FOREIGN KEY(run_id, target_generation, slot)
+    REFERENCES review_slot_heads(run_id, target_generation, slot),
+  CHECK(
+    (state IN ('preflight','released') AND attempt_generation IS NULL) OR
+    (state IN ('attached','settled') AND attempt_generation IS NOT NULL)
+  )
 )
 
 review_terminal_sequence_high_water(
@@ -2832,17 +2887,28 @@ review_certification_cuts(
   predecessor_binding_digest, terminal_sequence_high_water,
   lifecycle_custody_agent_id, lifecycle_custody_id,
   lifecycle_custody_revision, lifecycle_adoption_evidence_digest,
+  lifecycle_review_decision_digest, lifecycle_review_authority_receipt_digest,
   cut_digest, created_at,
   PRIMARY KEY(run_id, target_generation, lifecycle_custody_agent_id,
     lifecycle_custody_id, lifecycle_custody_revision),
   UNIQUE(cut_digest),
   UNIQUE(run_id, target_generation, lifecycle_custody_agent_id,
     lifecycle_custody_id, lifecycle_custody_revision,
-    predecessor_binding_generation, cut_digest),
+    predecessor_binding_generation,lifecycle_review_decision_digest,
+    lifecycle_review_authority_receipt_digest,cut_digest),
+  UNIQUE(run_id,target_generation,lifecycle_custody_agent_id,
+    lifecycle_custody_id,lifecycle_custody_revision,
+    predecessor_binding_generation,cut_digest),
   FOREIGN KEY(run_id, lifecycle_custody_agent_id, lifecycle_custody_id,
       lifecycle_custody_revision)
-    REFERENCES lifecycle_rotation_custody(
-      run_id, agent_id, custody_id, revision)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      run_id, agent_id, custody_id, revision),
+  FOREIGN KEY(lifecycle_review_authority_receipt_digest,run_id,
+      lifecycle_custody_agent_id,lifecycle_custody_id,
+      lifecycle_custody_revision,lifecycle_review_decision_digest,cut_digest)
+    REFERENCES lifecycle_review_authority_bindings(
+      receipt_digest,run_id,agent_id,custody_id,custody_revision,
+      review_decision_digest,certification_cut_digest)
 )
 
 review_completion_targets(
@@ -2878,7 +2944,8 @@ review_target_chair_bindings(
   route_receipt_digest, profile_digest, task_id, reviewed_artifact_id,
   delivery_review_basis_digest, repository_source_state_digest, bundle_digest,
   lifecycle_custody_id, lifecycle_custody_revision, checkpoint_digest,
-  lifecycle_adoption_evidence_digest,
+  lifecycle_adoption_evidence_digest,lifecycle_review_decision_digest,
+  lifecycle_review_authority_receipt_digest,
   binding_digest, created_at,
   PRIMARY KEY(run_id, target_generation, binding_generation),
   UNIQUE(run_id, target_generation, binding_generation, binding_digest),
@@ -2897,8 +2964,14 @@ review_target_chair_bindings(
       predecessor_binding_generation, cut_digest),
   FOREIGN KEY(run_id, agent_id, lifecycle_custody_id,
       lifecycle_custody_revision)
-    REFERENCES lifecycle_rotation_custody(
-      run_id, agent_id, custody_id, revision)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      run_id, agent_id, custody_id, revision),
+  FOREIGN KEY(lifecycle_review_authority_receipt_digest,run_id,agent_id,
+      lifecycle_custody_id,lifecycle_custody_revision,
+      lifecycle_review_decision_digest,predecessor_certification_cut_digest)
+    REFERENCES lifecycle_review_authority_bindings(
+      receipt_digest,run_id,agent_id,custody_id,custody_revision,
+      review_decision_digest,certification_cut_digest)
 )
 
 review_target_chair_binding_heads(
@@ -2914,6 +2987,8 @@ review_target_rebind_receipts(
   lifecycle_custody_id, lifecycle_custody_revision, command_id,
   review_subject_digest, prior_binding_generation, new_binding_generation,
   prior_binding_digest, new_binding_digest, lifecycle_adoption_digest,
+  lifecycle_review_decision_digest,lifecycle_certification_cut_digest,
+  lifecycle_review_authority_receipt_digest,
   bundle_digest, profile_digest, slot_head_set_digest,
   open_and_repair_finding_set_digest, rebind_receipt_digest, created_at,
   PRIMARY KEY(run_id, target_generation, lifecycle_custody_agent_id,
@@ -2932,8 +3007,15 @@ review_target_rebind_receipts(
       run_id, target_generation, binding_generation),
   FOREIGN KEY(run_id, lifecycle_custody_agent_id, lifecycle_custody_id,
       lifecycle_custody_revision)
-    REFERENCES lifecycle_rotation_custody(
+    REFERENCES lifecycle_rotation_custody_revisions(
       run_id, agent_id, custody_id, revision),
+  FOREIGN KEY(lifecycle_review_authority_receipt_digest,run_id,
+      lifecycle_custody_agent_id,lifecycle_custody_id,
+      lifecycle_custody_revision,lifecycle_review_decision_digest,
+      lifecycle_certification_cut_digest)
+    REFERENCES lifecycle_review_authority_bindings(
+      receipt_digest,run_id,agent_id,custody_id,custody_revision,
+      review_decision_digest,certification_cut_digest),
   CHECK(new_binding_generation = prior_binding_generation + 1)
 )
 
@@ -3149,7 +3231,8 @@ old target.
 
 `review_target_chair_bindings` is insert-only. Generation one is created with
 the target; later generations require the exact prior binding foreign key and
-one finalized adopted `lifecycle_rotation_custody` row for the same agent.
+one finalized adopted `lifecycle_rotation_custody_revisions` row for the same
+agent whose head points to that exact journal revision.
 Triggers require contiguous generation and equality of adapter, contract,
 family, model, profile, task, artifact, review basis, repository source and
 bundle. They require the exact predecessor binding digest and certification-cut
@@ -3175,6 +3258,19 @@ portal/lookup I/O. The true-chair adoption transaction invokes this same store
 mutation directly; an exact later command joins the existing custody-keyed
 receipt. Wrong or non-adopted custody, crossed agent/generation/subject, stale
 pointer/head, duplicate generation or changed replay changes nothing.
+
+Every successor binding, certification cut and rebind receipt equality-copies
+the Spec 01 lifecycle review-decision digest and externally authenticated
+receipt digest. They are inserted only inside the post-authority lifecycle apply
+and composite-reference `lifecycle_review_authority_bindings`, which in turn
+binds the exact immutable reservation, ordinal-two intent/authority receipt,
+finalized custody revision and apply. Subject custody, adoption evidence,
+decision, cut/null and linked recovery-loss decision byte-equal the reserved
+rows. The separately verified scope/namespace checkpoint proves external
+membership; a point read alone cannot. Missing authority/row, stale chain,
+crossed receipt or verification failure is lifecycle integrity failure and
+inserts no review row. The mutable lifecycle decision audit is corroboration
+only.
 
 Every certifying first terminal transaction increments
 `review_terminal_sequence_high_water` and stores that stable sequence in the
@@ -3203,16 +3299,27 @@ existing integrity/stale blocker, never a fabricated predecessor-cut.
 
 `review_finding_capacity_reservations` is a pre-router child of the pair
 preflight, not of `provider_actions`. Its closed state is
-`preflight|attached|released|settled`. The row binds the global pair plus owner
-digest before resolver execution. The later provider-action insert foreign-keys
-its exact reservation digest and atomically moves it from `preflight` to
-`attached`; resolver/admission failure moves it to `released`, returns its
+`preflight|attached|released|settled`. The pre-router row binds the global pair,
+run, target, closed slot and owner/reservation digests with null attempt
+generation. After a successful resolver result, the one binding admission/
+dispatch transaction from Spec 01 CAS-increments the slot head, assigns that
+positive attempt to the reservation exactly once, inserts action and route, and
+moves the reservation from `preflight` to `attached`; none can commit alone.
+That null-to-positive attach is the only tuple finalisation. Thereafter run,
+target, slot, attempt and digest are immutable. Resolver/admission failure moves
+the reservation to `released` with attempt still null, returns its
 physical capacity exactly once and creates no provider action, route or budget
 row. Exact retry observes the released route failure; a new action pair may
 reserve normally. Startup releases only expired preflight rows after proving no
 matching action/route, while attached rows remain owned by terminal/recovery
 settlement. Released/settled rows are immutable audit/replay history and consume
-zero live capacity.
+zero live capacity. Thus only successful dispatch consumes a contiguous attempt
+generation, exactly as Spec 01 sections 32.19.4 and 32.19.6 require.
+After attach, every terminal branch writes only `settled`, including the
+`proved-no-effect-release` disposition: that disposition returns the complete
+physical capacity but does not use the pre-admission `released` state. `released`
+is reachable only from `preflight` with null attempt generation; no attached
+path nulls or changes its attempt custody.
 
 The append-only availability revision/head tables are the safe current
 activation projection keyed by the complete project-session/profile/schema/
@@ -3307,35 +3414,1861 @@ mcp(agent-fabric-review-bundle/review_bundle_search). Every other model mcp,
 command, filesystem, shell, browser/web/network, resource and prompt effect is
 denied. Exact-empty list probes remain permitted as above.
 
-The current baseline adds one process-custody owner:
+The current baseline separates pre-process filesystem intent from process
+custody so no artifact or child exists without a durable locator:
 
 ~~~sql
+review_portal_provider_launch_policies(
+  adapter_id NOT NULL, contract_digest NOT NULL,
+  launch_policy_json NOT NULL, launch_policy_digest NOT NULL,
+  created_at NOT NULL,
+  PRIMARY KEY(adapter_id,contract_digest),
+  UNIQUE(adapter_id,contract_digest,launch_policy_digest),
+  UNIQUE(launch_policy_digest)
+)
+
+review_portal_provider_activation_roots(
+  daemon_instance_id NOT NULL,
+  role NOT NULL CHECK(role IN ('synthetic-home','synthetic-temp')),
+  canonical_path NOT NULL, device NOT NULL, inode NOT NULL,
+  root_contract_json NOT NULL, root_contract_digest NOT NULL,
+  created_at NOT NULL,
+  PRIMARY KEY(daemon_instance_id,role),
+  UNIQUE(root_contract_digest),
+  UNIQUE(daemon_instance_id,role,root_contract_digest)
+)
+
+review_portal_provider_launch_source_contract_sets(
+  adapter_id NOT NULL, action_id NOT NULL, daemon_instance_id NOT NULL,
+  member_count NOT NULL CHECK(member_count >= 1),
+  source_contract_set_digest NOT NULL,
+  state NOT NULL CHECK(state IN ('building','sealed')),
+  revision NOT NULL CHECK(revision IN (1,2)), created_at NOT NULL,
+  sealed_at,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(source_contract_set_digest),
+  UNIQUE(adapter_id,action_id,daemon_instance_id,source_contract_set_digest),
+  UNIQUE(adapter_id,action_id,daemon_instance_id,member_count,
+    source_contract_set_digest,state),
+  CHECK((state='building' AND revision=1 AND sealed_at IS NULL) OR
+        (state='sealed' AND revision=2 AND sealed_at IS NOT NULL))
+)
+
+review_portal_provider_launch_source_contracts(
+  adapter_id NOT NULL, action_id NOT NULL, daemon_instance_id NOT NULL,
+  source_contract_set_digest NOT NULL,
+  ordinal NOT NULL CHECK(ordinal >= 1),
+  source_selector NOT NULL, source_contract_kind NOT NULL CHECK(
+    source_contract_kind IN ('effective-configuration-field',
+      'activated-executable','action-identity','review-socket',
+      'synthetic-home','synthetic-temp','credential-capsule','empty-cwd',
+      'policy-stdin-mode','adapter-secret-version')),
+  path_class NOT NULL, source_contract_json NOT NULL,
+  source_contract_digest NOT NULL, created_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id,ordinal),
+  UNIQUE(adapter_id,action_id,source_selector,source_contract_digest),
+  UNIQUE(adapter_id,action_id,source_contract_digest),
+  UNIQUE(adapter_id,action_id,daemon_instance_id,
+    source_contract_set_digest,source_contract_kind,source_contract_digest),
+  FOREIGN KEY(adapter_id,action_id,daemon_instance_id,
+      source_contract_set_digest)
+    REFERENCES review_portal_provider_launch_source_contract_sets(
+      adapter_id,action_id,daemon_instance_id,source_contract_set_digest)
+)
+
+review_portal_provider_launch_envelopes(
+  adapter_id NOT NULL, action_id NOT NULL, contract_digest NOT NULL,
+  daemon_instance_id NOT NULL,
+  configuration_subject_kind NOT NULL CHECK(
+    configuration_subject_kind='provider-action'),
+  configuration_id NOT NULL, configuration_revision NOT NULL,
+  configuration_digest NOT NULL, effective_configuration_digest NOT NULL,
+  executable_identity_digest NOT NULL,
+  launch_policy_digest NOT NULL, launch_envelope_json NOT NULL,
+  launch_envelope_digest NOT NULL, source_contract_member_count NOT NULL,
+  source_contract_set_digest NOT NULL,
+  source_contract_set_state NOT NULL CHECK(source_contract_set_state='sealed'),
+  created_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(launch_envelope_digest),
+  UNIQUE(adapter_id,action_id,daemon_instance_id,launch_envelope_digest,
+    source_contract_set_digest),
+  UNIQUE(adapter_id,action_id,configuration_subject_kind,contract_digest,
+    configuration_id,configuration_revision,configuration_digest,
+    effective_configuration_digest,executable_identity_digest,
+    launch_envelope_digest,daemon_instance_id,source_contract_set_digest),
+  FOREIGN KEY(adapter_id,action_id,configuration_subject_kind,contract_digest,
+      configuration_id,configuration_revision,configuration_digest,
+      effective_configuration_digest,executable_identity_digest)
+    REFERENCES adapter_effective_configurations(
+      subject_action_adapter_id,subject_action_id,subject_kind,
+      adapter_contract_digest,configuration_id,configuration_revision,
+      configuration_digest,effective_configuration_digest,
+      executable_identity_digest),
+  FOREIGN KEY(adapter_id,contract_digest,launch_policy_digest)
+    REFERENCES review_portal_provider_launch_policies(
+      adapter_id,contract_digest,launch_policy_digest),
+  FOREIGN KEY(adapter_id,action_id,daemon_instance_id,
+      source_contract_member_count,source_contract_set_digest,
+      source_contract_set_state)
+    REFERENCES review_portal_provider_launch_source_contract_sets(
+      adapter_id,action_id,daemon_instance_id,member_count,
+      source_contract_set_digest,state)
+)
+
+review_portal_provider_exec_closures(
+  adapter_id NOT NULL, action_id NOT NULL, contract_digest NOT NULL,
+  daemon_instance_id NOT NULL,
+  configuration_subject_kind NOT NULL CHECK(
+    configuration_subject_kind='provider-action'),
+  configuration_id NOT NULL, configuration_revision NOT NULL,
+  configuration_digest NOT NULL, effective_configuration_digest NOT NULL,
+  executable_identity_digest NOT NULL,
+  launch_envelope_digest NOT NULL, source_contract_set_digest NOT NULL,
+  provider_closure_json NOT NULL, provider_closure_digest NOT NULL,
+  created_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(adapter_id,action_id,contract_digest,daemon_instance_id,
+    provider_closure_digest),
+  UNIQUE(adapter_id,action_id,contract_digest,daemon_instance_id,
+    provider_closure_digest,launch_envelope_digest,source_contract_set_digest),
+  UNIQUE(provider_closure_digest),
+  FOREIGN KEY(adapter_id,action_id,configuration_subject_kind,contract_digest,
+      configuration_id,configuration_revision,configuration_digest,
+      effective_configuration_digest,executable_identity_digest,
+      launch_envelope_digest,daemon_instance_id,source_contract_set_digest)
+    REFERENCES review_portal_provider_launch_envelopes(
+      adapter_id,action_id,configuration_subject_kind,contract_digest,
+      configuration_id,configuration_revision,
+      configuration_digest,effective_configuration_digest,
+      executable_identity_digest,launch_envelope_digest,daemon_instance_id,
+      source_contract_set_digest)
+)
+
+review_portal_filesystem_directory_name_claims(
+  recovery_root_device NOT NULL, recovery_root_inode NOT NULL,
+  directory_basename NOT NULL,
+  adapter_id NOT NULL, action_id NOT NULL,
+  role NOT NULL CHECK(role IN ('custody','claim')),
+  PRIMARY KEY(recovery_root_device,recovery_root_inode,directory_basename),
+  UNIQUE(adapter_id,action_id,role),
+  UNIQUE(adapter_id,action_id,role,recovery_root_device,
+    recovery_root_inode,directory_basename)
+)
+
+review_portal_action_artifact_name_claims(
+  daemon_instance_id NOT NULL,
+  artifact_role NOT NULL CHECK(
+    artifact_role IN ('synthetic-home','synthetic-temp')),
+  activated_root_contract_digest NOT NULL, basename NOT NULL,
+  adapter_id NOT NULL, action_id NOT NULL,
+  name_role NOT NULL CHECK(name_role IN ('canonical','claim')),
+  PRIMARY KEY(activated_root_contract_digest,basename),
+  UNIQUE(adapter_id,action_id,artifact_role,name_role),
+  UNIQUE(adapter_id,action_id,artifact_role,name_role,daemon_instance_id,
+    activated_root_contract_digest,basename),
+  FOREIGN KEY(daemon_instance_id,artifact_role,
+      activated_root_contract_digest)
+    REFERENCES review_portal_provider_activation_roots(
+      daemon_instance_id,role,root_contract_digest),
+  CHECK(basename NOT IN ('','.','..') AND instr(basename,'/')=0)
+)
+
+review_portal_action_artifact_intents(
+  adapter_id NOT NULL, action_id NOT NULL, daemon_instance_id NOT NULL,
+  role NOT NULL CHECK(role IN ('synthetic-home','synthetic-temp')),
+  source_contract_set_digest NOT NULL, source_contract_digest NOT NULL,
+  activated_root_contract_digest NOT NULL,
+  canonical_path NOT NULL, canonical_basename NOT NULL,
+  canonical_path_digest NOT NULL,
+  entry_manifest_digest NOT NULL,
+  canonical_name_role NOT NULL CHECK(canonical_name_role='canonical'),
+  claim_basename NOT NULL,
+  claim_name_role NOT NULL CHECK(claim_name_role='claim'),
+  artifact_intent_digest NOT NULL, created_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id,role),
+  UNIQUE(artifact_intent_digest),
+  UNIQUE(activated_root_contract_digest,canonical_path),
+  UNIQUE(activated_root_contract_digest,canonical_basename),
+  UNIQUE(activated_root_contract_digest,claim_basename),
+  UNIQUE(adapter_id,action_id,role,daemon_instance_id,
+    source_contract_set_digest,source_contract_digest,
+    activated_root_contract_digest,canonical_path,canonical_basename,
+    canonical_path_digest,
+    entry_manifest_digest,canonical_name_role,claim_basename,
+    claim_name_role,artifact_intent_digest),
+  FOREIGN KEY(adapter_id,action_id,daemon_instance_id,
+      source_contract_set_digest,role,source_contract_digest)
+    REFERENCES review_portal_provider_launch_source_contracts(
+      adapter_id,action_id,daemon_instance_id,source_contract_set_digest,
+      source_contract_kind,source_contract_digest),
+  FOREIGN KEY(daemon_instance_id,role,activated_root_contract_digest)
+    REFERENCES review_portal_provider_activation_roots(
+      daemon_instance_id,role,root_contract_digest),
+  FOREIGN KEY(adapter_id,action_id,role,canonical_name_role,
+      daemon_instance_id,activated_root_contract_digest,canonical_basename)
+    REFERENCES review_portal_action_artifact_name_claims(
+      adapter_id,action_id,artifact_role,name_role,daemon_instance_id,
+      activated_root_contract_digest,basename),
+  FOREIGN KEY(adapter_id,action_id,role,claim_name_role,
+      daemon_instance_id,activated_root_contract_digest,claim_basename)
+    REFERENCES review_portal_action_artifact_name_claims(
+      adapter_id,action_id,artifact_role,name_role,daemon_instance_id,
+      activated_root_contract_digest,basename),
+  CHECK(canonical_basename <> claim_basename),
+  CHECK(canonical_basename NOT IN ('','.','..') AND
+    claim_basename NOT IN ('','.','..') AND
+    instr(canonical_basename,'/')=0 AND instr(claim_basename,'/')=0)
+)
+
+review_portal_action_artifact_states(
+  adapter_id NOT NULL, action_id NOT NULL,
+  role NOT NULL CHECK(role IN ('synthetic-home','synthetic-temp')),
+  artifact_intent_digest NOT NULL,
+  phase NOT NULL CHECK(phase IN
+    ('reserved','captured','claimed','removed','integrity-failure')),
+  capture_kind CHECK(capture_kind IS NULL OR capture_kind IN
+    ('complete','partial-recovery')),
+  actual_device, actual_inode, actual_link_count,
+  actual_entry_manifest_digest, actual_identity_digest,
+  cleanup_evidence_digest, revision NOT NULL CHECK(revision >= 1),
+  updated_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id,role),
+  FOREIGN KEY(adapter_id,action_id,role,artifact_intent_digest)
+    REFERENCES review_portal_action_artifact_intents(
+      adapter_id,action_id,role,artifact_intent_digest),
+  CHECK(
+    (phase='reserved' AND capture_kind IS NULL AND
+      actual_device IS NULL AND actual_inode IS NULL AND
+      actual_link_count IS NULL AND actual_entry_manifest_digest IS NULL AND
+      actual_identity_digest IS NULL AND cleanup_evidence_digest IS NULL) OR
+    (phase IN ('captured','claimed') AND capture_kind IS NOT NULL AND
+      actual_device IS NOT NULL AND
+      actual_inode IS NOT NULL AND actual_link_count IS NOT NULL AND
+      actual_entry_manifest_digest IS NOT NULL AND
+      actual_identity_digest IS NOT NULL AND cleanup_evidence_digest IS NULL) OR
+    (phase IN ('removed','integrity-failure') AND
+      cleanup_evidence_digest IS NOT NULL)
+  )
+)
+
+review_portal_filesystem_custody_intents(
+  adapter_id NOT NULL, action_id NOT NULL, contract_digest NOT NULL,
+  daemon_instance_id NOT NULL,
+  recovery_root_path NOT NULL, recovery_root_device NOT NULL,
+  recovery_root_inode NOT NULL, recovery_root_identity_digest NOT NULL,
+  custody_directory_role NOT NULL CHECK(custody_directory_role='custody'),
+  custody_directory_basename NOT NULL,
+  custody_directory_contract_digest NOT NULL,
+  claim_directory_role NOT NULL CHECK(claim_directory_role='claim'),
+  claim_directory_basename NOT NULL,
+  socket_basename NOT NULL, capsule_basename NOT NULL,
+  expected_capsule_content_digest NOT NULL,
+  provider_closure_digest NOT NULL, launch_envelope_digest NOT NULL,
+  source_contract_set_digest NOT NULL, launch_nonce_digest NOT NULL,
+  home_artifact_role NOT NULL CHECK(home_artifact_role='synthetic-home'),
+  home_artifact_intent_digest NOT NULL,
+  temp_artifact_role NOT NULL CHECK(temp_artifact_role='synthetic-temp'),
+  temp_artifact_intent_digest NOT NULL,
+  claim_name_codec NOT NULL CHECK(
+    claim_name_codec='agent-fabric-custody-claim-v1'),
+  intent_digest NOT NULL, created_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(launch_nonce_digest),
+  UNIQUE(adapter_id,action_id,intent_digest),
+  UNIQUE(adapter_id,action_id,intent_digest,contract_digest,daemon_instance_id,
+    provider_closure_digest,launch_envelope_digest,source_contract_set_digest,
+    launch_nonce_digest,home_artifact_role,home_artifact_intent_digest,
+    temp_artifact_role,temp_artifact_intent_digest,
+    recovery_root_path,recovery_root_device,recovery_root_inode,
+    recovery_root_identity_digest,custody_directory_basename,
+    custody_directory_contract_digest,claim_directory_basename,
+    socket_basename,capsule_basename,expected_capsule_content_digest,
+    claim_name_codec),
+  FOREIGN KEY(adapter_id,action_id,custody_directory_role,
+      recovery_root_device,recovery_root_inode,custody_directory_basename)
+    REFERENCES review_portal_filesystem_directory_name_claims(
+      adapter_id,action_id,role,recovery_root_device,recovery_root_inode,
+      directory_basename),
+  FOREIGN KEY(adapter_id,action_id,contract_digest,daemon_instance_id,
+      provider_closure_digest,launch_envelope_digest,source_contract_set_digest)
+    REFERENCES review_portal_provider_exec_closures(
+      adapter_id,action_id,contract_digest,daemon_instance_id,
+      provider_closure_digest,launch_envelope_digest,
+      source_contract_set_digest),
+  FOREIGN KEY(adapter_id,action_id,home_artifact_role,
+      home_artifact_intent_digest)
+    REFERENCES review_portal_action_artifact_intents(
+      adapter_id,action_id,role,artifact_intent_digest),
+  FOREIGN KEY(adapter_id,action_id,temp_artifact_role,
+      temp_artifact_intent_digest)
+    REFERENCES review_portal_action_artifact_intents(
+      adapter_id,action_id,role,artifact_intent_digest),
+  FOREIGN KEY(adapter_id,action_id,claim_directory_role,
+      recovery_root_device,recovery_root_inode,claim_directory_basename)
+    REFERENCES review_portal_filesystem_directory_name_claims(
+      adapter_id,action_id,role,recovery_root_device,recovery_root_inode,
+      directory_basename),
+  CHECK(substr(recovery_root_path,1,1)='/'),
+  CHECK(custody_directory_basename <> claim_directory_basename),
+  CHECK(socket_basename <> capsule_basename),
+  CHECK(instr(custody_directory_basename,'/')=0 AND
+    instr(claim_directory_basename,'/')=0 AND
+    instr(socket_basename,'/')=0 AND instr(capsule_basename,'/')=0),
+  CHECK(custody_directory_basename NOT IN ('','.','..') AND
+    claim_directory_basename NOT IN ('','.','..') AND
+    socket_basename NOT IN ('','.','..') AND
+    capsule_basename NOT IN ('','.','..'))
+)
+
+review_portal_filesystem_custody_state(
+  adapter_id NOT NULL, action_id NOT NULL,
+  state NOT NULL CHECK(state IN
+    ('open','cleaned','integrity-failure')),
+  revision NOT NULL CHECK(revision >= 1), cleanup_evidence_digest,
+  updated_at NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  FOREIGN KEY(adapter_id,action_id)
+    REFERENCES review_portal_filesystem_custody_intents(adapter_id,action_id),
+  CHECK((state IN ('cleaned','integrity-failure')) =
+    (cleanup_evidence_digest IS NOT NULL))
+)
+
 review_portal_process_custody(
-  adapter_id, action_id, contract_digest, daemon_instance_id,
-  supervisor_pid, supervisor_start_time, provider_root_pid,
-  provider_root_start_time, process_group_id, session_id,
-  executable_identity_digest, ancestry_manifest_digest,
-  custody_directory_path, custody_directory_device, custody_directory_inode,
-  socket_basename, socket_file_digest, capsule_basename,
-  capsule_file_digest, control_fd_number,
-  connection_state, process_state, cleanup_generation,
-  cleanup_evidence_digest, revision, created_at, updated_at,
-  PRIMARY KEY(adapter_id, action_id)
+  adapter_id NOT NULL, action_id NOT NULL, contract_digest NOT NULL,
+  daemon_instance_id NOT NULL, filesystem_intent_digest NOT NULL,
+  launch_nonce_digest NOT NULL, launch_action_binding_digest NOT NULL,
+  launch_registration_digest NOT NULL,
+  process_custody_launch_digest NOT NULL, launch_ack_digest NOT NULL,
+  launch_row_revision NOT NULL CHECK(launch_row_revision=1),
+  supervisor_pid NOT NULL CHECK(supervisor_pid > 0),
+  supervisor_start_time NOT NULL CHECK(supervisor_start_time > 0),
+  provider_root_pid NOT NULL CHECK(provider_root_pid > 0),
+  provider_root_start_time NOT NULL CHECK(provider_root_start_time > 0),
+  process_group_id NOT NULL CHECK(process_group_id > 0),
+  session_id NOT NULL CHECK(session_id > 0),
+  supervisor_executable_identity_digest NOT NULL,
+  launch_stub_identity_digest NOT NULL, provider_closure_digest NOT NULL,
+  launch_envelope_digest NOT NULL, source_contract_set_digest NOT NULL,
+  home_artifact_role NOT NULL CHECK(home_artifact_role='synthetic-home'),
+  home_artifact_intent_digest NOT NULL,
+  temp_artifact_role NOT NULL CHECK(temp_artifact_role='synthetic-temp'),
+  temp_artifact_intent_digest NOT NULL,
+  ancestry_manifest_digest NOT NULL,
+  recovery_root_path NOT NULL, recovery_root_device NOT NULL,
+  recovery_root_inode NOT NULL, recovery_root_identity_digest NOT NULL,
+  custody_directory_basename NOT NULL,
+  custody_directory_contract_digest NOT NULL,
+  claim_directory_basename NOT NULL,
+  custody_directory_device NOT NULL, custody_directory_inode NOT NULL,
+  claim_directory_device NOT NULL,
+  claim_directory_inode NOT NULL,
+  claim_name_codec NOT NULL CHECK(
+    claim_name_codec='agent-fabric-custody-claim-v1'),
+  socket_basename NOT NULL, socket_claim_basename NOT NULL,
+  socket_file_device NOT NULL, socket_file_inode NOT NULL,
+  socket_link_count NOT NULL CHECK(socket_link_count=1),
+  socket_identity_digest NOT NULL,
+  socket_cleanup_state NOT NULL,
+  capsule_basename NOT NULL, capsule_claim_basename NOT NULL,
+  capsule_file_device NOT NULL, capsule_file_inode NOT NULL,
+  capsule_link_count NOT NULL CHECK(capsule_link_count=1),
+  capsule_content_digest NOT NULL, capsule_cleanup_state NOT NULL,
+  control_fd_number NOT NULL CHECK(control_fd_number=3),
+  registration_fd_number NOT NULL CHECK(registration_fd_number=4),
+  provider_exec_fd_number NOT NULL CHECK(provider_exec_fd_number=5),
+  provider_cwd_fd_number NOT NULL CHECK(provider_cwd_fd_number=6),
+  executable_parent_fd_number NOT NULL CHECK(executable_parent_fd_number=7),
+  connection_state NOT NULL CHECK(
+    connection_state IN ('waiting','consumed','closed')),
+  process_state NOT NULL CHECK(process_state IN
+    ('preparing','running','terminating','cleaned','integrity-failure')),
+  directory_cleanup_state NOT NULL,
+  directory_cleanup_evidence_digest,
+  cleanup_generation NOT NULL CHECK(cleanup_generation >= 0),
+  cleanup_evidence_digest, revision NOT NULL CHECK(revision >= 1),
+  created_at NOT NULL, updated_at NOT NULL,
+  PRIMARY KEY(adapter_id, action_id),
+  UNIQUE(launch_nonce_digest),
+  FOREIGN KEY(adapter_id,action_id,filesystem_intent_digest,
+      contract_digest,daemon_instance_id,provider_closure_digest,
+      launch_envelope_digest,source_contract_set_digest,launch_nonce_digest,
+      home_artifact_role,home_artifact_intent_digest,
+      temp_artifact_role,temp_artifact_intent_digest,
+      recovery_root_path,recovery_root_device,recovery_root_inode,
+      recovery_root_identity_digest,custody_directory_basename,
+      custody_directory_contract_digest,claim_directory_basename,
+      socket_basename,capsule_basename,capsule_content_digest,
+      claim_name_codec)
+    REFERENCES review_portal_filesystem_custody_intents(
+      adapter_id,action_id,intent_digest,
+      contract_digest,daemon_instance_id,provider_closure_digest,
+      launch_envelope_digest,source_contract_set_digest,launch_nonce_digest,
+      home_artifact_role,home_artifact_intent_digest,
+      temp_artifact_role,temp_artifact_intent_digest,
+      recovery_root_path,recovery_root_device,recovery_root_inode,
+      recovery_root_identity_digest,custody_directory_basename,
+      custody_directory_contract_digest,claim_directory_basename,
+      socket_basename,capsule_basename,expected_capsule_content_digest,
+      claim_name_codec),
+  CHECK(claim_directory_basename <> custody_directory_basename),
+  CHECK(claim_directory_device = custody_directory_device),
+  CHECK(claim_directory_inode <> custody_directory_inode),
+  CHECK(socket_basename <> capsule_basename),
+  CHECK(socket_claim_basename <> capsule_claim_basename),
+  CHECK(socket_claim_basename NOT IN (socket_basename,capsule_basename)),
+  CHECK(capsule_claim_basename NOT IN (socket_basename,capsule_basename)),
+  CHECK(instr(socket_basename,'/')=0 AND
+    instr(socket_claim_basename,'/')=0 AND
+    instr(capsule_basename,'/')=0 AND
+    instr(capsule_claim_basename,'/')=0),
+  CHECK(socket_basename NOT IN ('','.','..') AND
+    socket_claim_basename NOT IN ('','.','..') AND
+    capsule_basename NOT IN ('','.','..') AND
+    capsule_claim_basename NOT IN ('','.','..')),
+  CHECK(socket_cleanup_state IN
+    ('canonical','claimed','removed','integrity-failure')),
+  CHECK(capsule_cleanup_state IN
+    ('canonical','claimed','removed','integrity-failure')),
+  CHECK(directory_cleanup_state IN
+    ('active','children-removed','canonical-removed','removed',
+     'integrity-failure')),
+  CHECK((directory_cleanup_state='active') =
+    (directory_cleanup_evidence_digest IS NULL)),
+  CHECK(directory_cleanup_state NOT IN
+    ('children-removed','canonical-removed','removed') OR
+    (socket_cleanup_state='removed' AND capsule_cleanup_state='removed')),
+  CHECK(process_state <> 'cleaned' OR directory_cleanup_state='removed'),
+  CHECK(directory_cleanup_state <> 'removed' OR
+    process_state IN ('cleaned','integrity-failure')),
+  CHECK((process_state IN ('cleaned','integrity-failure')) =
+    (cleanup_evidence_digest IS NOT NULL))
 )
 ~~~
 
-Identity/path fields are immutable. The canonical custody directory path,
-device/inode and relative socket/capsule basenames are private crash-locating
-data; only their nonsecret correlation digests may cross internal boundaries
-and none is public/model-visible. `control_fd_number` is always 3.
+All displayed locator/identity path, device, inode, basename and kind-specific
+digest fields are nonnull and immutable. Phase evidence digests are null only in
+their declared pre-evidence state and become immutable nonnull values in the
+owning state CAS. Before any per-action HOME/temp directory, custody/claim
+directory, filesystem portal socket, capsule or process exists, one transaction
+reserves their four role/name claims, inserts the exact HOME/temp artifact
+intents and their `reserved` states,
+reserves both globally unique recovery-root child names and inserts the
+immutable filesystem intent plus `open` state. `open` with no
+process row is the reserved arm; `open` with its exact process row is the
+process-bound arm. Process-row existence, not a separately mutable flag, is the
+atomic ownership transition.
+Daemon-created anonymous stdio pipes/socketpairs or an OS-owned PTY may be
+captured for the closure before that transaction only while every endpoint
+remains in the daemon, no child exists and no project/provider namespace entry
+is created. Transaction failure closes them; daemon death lets the kernel close
+them, leaving no recoverable path or external effect. The HOME/temp, listener
+path, capsule and custody directories remain strictly post-intent.
+Exactly two role-distinct name claims must join each intent; orphan, missing,
+crossed or post-insert-mutated claims are rejected, and neither claim is reused
+while its immutable intent remains registered.
+It binds an already-opened 0700 daemon recovery root by path/device/inode plus
+all create-exclusive relative basenames and expected capsule digest. The daemon
+then creates the canonical and distinct 0700 claim directories only beneath
+that no-follow root, writes/binds each artifact and fsyncs every file/directory/
+parent before launch. A crash while reserved can see absent or partially created
+objects but no provider has executed; recovery uses the exact root/intent and
+the same trusted-claim revalidation, removes only a proved daemon-created object,
+fsyncs the root after each removal and CASes the open/no-process state to cleaned.
+It permits only the two reserved recovery-root directory basenames/their two
+declared children plus the exact HOME/temp paths/manifests named by the two
+artifact intents; any extra, crossed or substituted object records integrity
+failure without deletion. Fully captured
+identities, contract and daemon instance are equality-copied through the
+displayed composite FK when the process row is inserted in the pre-ACK
+transaction. That row is nondeletable and its identity fields are immutable.
+Only it then owns live cleanup; state becomes cleaned or integrity-failed only
+after the matching process/directory and both action-artifact terminals, and is
+never a second owner.
+Direct-SQL fixtures reject process insertion against non-open state, crossed
+intent/contract/daemon/root/name/content, a process-less process-bound claim and
+delete/reversion. It provisions both
+directories on the same filesystem while sharing neither inode nor basename,
+and current-build activation probes same-mount
+atomic no-replace rename plus provider denial of read/list/write access to the
+claim namespace. The row also persists both claim basenames and
+`claim_name_codec=agent-fabric-custody-claim-v1`. For each entry the claim name
+is `.agent-fabric-claim-` plus lowercase hex SHA-256 of the ASCII bytes
+`agent-fabric-custody-claim-v1` followed by one `0x00` byte, then the canonical-
+basename UTF-8 bytes,
+u64be(device), u64be(inode), one kind byte (`0x00` socket, `0x01` regular file)
+and the raw 32 digest bytes, concatenated in that order. The Rust boundary
+recomputes and equality-checks the persisted name. Admission rejects either
+claim name matching any canonical name or the other claim name. Thus executable
+upgrade cannot silently change a live record's locator.
+`socket_identity_digest` is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-custody-socket-v1` followed by one `0x00` byte, then
+`u64be(device) || u64be(inode)`. The entry must be `S_IFSOCK`;
+`capsule_content_digest` is `sha256:` plus lowercase
+SHA-256 of the exact bounded regular-file bytes and the persisted device/inode
+must also match. Both persisted link counts are exactly one. Golden vectors pin both exact domain preimages, the socket
+digest and both claim names across Rust and TypeScript. No socket-content digest
+exists. Failure refuses launch and
+leaves capability false. These
+private crash-locating fields never cross internal boundaries; only their
+nonsecret correlation digests may do so, and none is public/model-visible.
+
+The HOME/temp artifact intent is independently reproducible.
+`artifact_intent_digest` uses domain
+`agent-fabric-portal-action-artifact-intent-v1`, `0x00` and JCS of every
+immutable intent-row field except that digest and `created_at`. Its claim name
+is `.agent-fabric-action-claim-` plus lowercase SHA-256 hex of the ASCII bytes
+`agent-fabric-portal-action-artifact-claim-v1`, `0x00`, role UTF-8, one `0x00`,
+canonical-path-digest raw bytes, activated-root-contract-digest raw bytes and
+source-contract-digest raw bytes. Home and temp claim names are distinct direct
+siblings of their canonical action directory beneath the exact same cited
+activated root. The root is never exposed; outer confinement grants the
+provider only its canonical child and current-build canaries deny parent/claim
+lookup, open and mutation. Same-root sibling rename supplies the proved atomic
+same-filesystem boundary without an unstored claim-root locator.
+
+After creating a directory no-follow and fsyncing its manifest/root, the daemon
+captures device, inode, the root's positive observed link count and the actual
+entry-manifest digest, which includes every entry's actual link count.
+The captured manifest is exactly:
+
+~~~yaml
+reviewPortalActionArtifactCapturedManifestV1:
+  schemaVersion: 1
+  role: synthetic-home | synthetic-temp
+  captureKind: complete | partial-recovery
+  expectedEntryCountDec: nonnegative
+  capturedEntryCountDec: nonnegative
+  entries:
+    - ordinalDec: positive-contiguous
+      relativePath: exact-source-relative-path
+      fileType: directory | regular
+      modeOctal: "0700" | "0600"
+      actualLinkCountDec: positive
+      contentLengthDec: nonnegative | null
+      contentDigest: exact-sha256 | null
+~~~
+
+Entries preserve source-manifest ordinal order. Directory content fields are
+null; regular files have actual link count one and equality-copy source length/
+digest. Expected count equals the source count. Complete capture has captured
+count equal expected; partial recovery has a strictly smaller captured count and
+the exact source prefix. Temp is the complete zero/zero/empty arm. The
+`actual_entry_manifest_digest` uses domain
+`agent-fabric-portal-action-artifact-captured-manifest-v1`, `0x00` and JCS of
+this complete object. Rust/TypeScript goldens cover empty temp, zero/nonzero
+HOME, nested-directory link counts and every valid prefix; permutation,
+nonprefix and guessed-link mutants fail.
+`actual_identity_digest` uses domain
+`agent-fabric-portal-action-artifact-identity-v1`, `0x00` and JCS of exactly
+`[role,captureKind,deviceDec,inodeDec,linkCountDec,
+actualEntryManifestDigest,sourceContractDigest]`. `captureKind` is `complete`
+after normal construction or `partial-recovery` only while recovering a
+reserved pre-process crash. Captured root identity and manifest never change.
+Process insert/ACK requires both roles captured as `complete` and exact intent/
+envelope/source-contract equality; process and intent copy both artifact-intent
+digests.
+
+The exact phase/presence machine is:
+
+- `reserved` with canonical and claim both absent writes no-effect cleanup
+  evidence and CASes directly to `removed`. With canonical present and claim
+  absent, recovery opens it no-follow and accepts only the complete expected
+  pre-exec manifest or an exact no-extra ordinal prefix produced by the
+  deterministic parent-before-child builder; it captures the corresponding
+  kind and CASes to `captured`. Any claim presence or unproved canonical object
+  is integrity failure;
+- `captured` accepts either the exact canonical inode with claim absent, in
+  which case it renames canonical to claim no-replace and fsyncs the root, or
+  canonical absent with that exact inode already at claim, the crash-after-
+  rename arm. It then CASes to `claimed`. Both present, both absent or another
+  inode is integrity failure;
+- `claimed` accepts canonical absent plus the exact claimed root, removes it as
+  below, fsyncs the root and CASes to `removed`; canonical and claim both absent
+  is the crash-after-remove arm and also fsyncs before that CAS. Any canonical
+  reappearance, crossed inode or both present is integrity failure; and
+- `removed` requires both names absent. `integrity-failure` never deletes.
+
+Before provider exec, a partial prefix never becomes process-bound. After the
+provider root is killed and reaped, provider-created cache/temp descendants and
+content drift inside the proved root are expected: cleanup first atomically
+claims the unchanged root inode, then performs a bounded no-follow postorder
+walk using retained directory FDs. It may unlink arbitrary descendant names,
+regular hard links, symlinks, sockets and regular files without following or
+reading them, but never crosses the root device, a nested mount, descriptor
+identity or the activated-root boundary. The activated adapter contract pins
+and enforces lifetime quotas no larger than 65,536 descendants, depth 32 and
+1 GiB allocated bytes; exceeding a quota is integrity failure, not unbounded
+work. Reserved pre-process recovery remains strict-prefix only because no
+provider has run. Every removed child/directory and final parent is fsynced; a
+closed cleanup-evidence manifest binds encountered relative path/type/device/
+inode, deletion order and final absence without exposing file content.
+
+Crash/direct-SQL fixtures cover absent `reserved -> removed`, every entry-
+creation prefix, complete/partial capture, before/after rename/fsync/CAS,
+before/after every child and root removal, provider-created cache/temp/symlink/
+socket entries, quota and nested-mount rejection, both accepted crash-presence
+arms and every crossed name/inode/root combination.
+
+The activated adapter contract registers exactly one immutable certifying
+provider launch policy. `launch_policy_json` byte-equals RFC 8785 JCS of this
+closed object; `launch_policy_digest` is `sha256:` plus lowercase SHA-256 of the
+ASCII bytes `agent-fabric-portal-provider-launch-policy-v1`, one `0x00` byte and
+those exact JCS bytes:
+
+~~~yaml
+reviewPortalProviderLaunchPolicyV1:
+  schemaVersion: 1
+  adapterId: exact-adapter
+  contractDigest: exact-contract
+  argv:
+    maxCountDec: positive
+    maxTotalUtf8BytesDec: positive
+    template:
+      - ordinalDec: positive-contiguous
+        tokenKind: fixed-literal | option-name | sourced-value
+        exactValue: exact-nul-free-utf8 | null
+        exactValueDigest: exact-sha256 | null
+        optionValueSlotOrdinalsDec: [strictly-increasing-positive-decimal]
+        ownerOptionOrdinalDec: nonnegative
+        ownerOptionValueIndexDec: nonnegative
+        sourceKind: none | resolved-model | resolved-effort |
+          executable-path | action-locator | stdin-mode | synthetic-path
+        sourceSelector: none | effective-config-model |
+          effective-config-effort | activated-executable-path |
+          review-socket-locator | review-action-id | review-contract-digest |
+          provider-stdin-mode | synthetic-home-path | synthetic-temp-path |
+          credential-capsule-path | empty-cwd-path
+        pathClass: not-path | review-socket | synthetic-home |
+          synthetic-temp | credential-capsule | empty-cwd | executable
+        sourceContractRule: none | effective-configuration-field |
+          effective-configuration-executable | action-identity |
+          action-review-socket | action-synthetic-home |
+          action-synthetic-temp | action-credential-capsule |
+          activation-empty-cwd | launch-policy-stdin-mode
+        slotDigest: exact-digest
+    forbidUnknownOption: true
+    forbidShellOrInterpreterEval: true
+    forbidWorkspaceCwdConfigPluginMcpToolOverrides: true
+  environment:
+    maxCountDec: positive
+    maxTotalValueBytesDec: positive
+    admitted:
+      - name: exact-name
+        sourceKind: fixed-literal | synthetic-home | synthetic-temp |
+          credential-capsule | action-locator | adapter-secret
+        sourceSelector: policy-fixed-literal | daemon-synthetic-home |
+          daemon-synthetic-temp | prospective-credential-capsule |
+          review-socket-locator | review-action-id | review-contract-digest |
+          adapter-secret-version
+        pathClass: not-path | review-socket | synthetic-home |
+          synthetic-temp | credential-capsule
+        allowEmpty: true | false
+        fixedValue: exact-nul-free-utf8 | null
+        fixedValueDigest: exact-sha256 | null
+        sourceContractRule: none | action-synthetic-home |
+          action-synthetic-temp | action-credential-capsule |
+          action-review-socket | action-identity | adapter-secret-version
+        entryDigest: exact-digest
+    inheritParent: false
+    mandatoryDeniedNames: [BASH_ENV, ENV, GIT_CONFIG, GIT_CONFIG_COUNT,
+      GIT_DIR, GIT_WORK_TREE, LD_AUDIT, LD_LIBRARY_PATH, LD_PRELOAD,
+      NODE_OPTIONS, PERL5OPT, PYTHONINSPECT, PYTHONPATH, RUBYOPT]
+    mandatoryDeniedPrefixes: [DYLD_, GIT_CONFIG_KEY_, GIT_CONFIG_VALUE_]
+  pathClasses:
+    synthetic-home: action-private-directory-under-activated-home-root
+    synthetic-temp: action-private-directory-under-activated-temp-root
+    credential-capsule: action-private-regular-file-under-custody-directory
+    empty-cwd: activation-owned-empty-read-only-directory
+    review-socket: action-private-unix-socket-under-custody-directory
+    executable: effective-configuration-opened-executable
+    real-home-user-project-workspace-provider-source: denied
+~~~
+
+`argv.template` is the complete ordered grammar, including argv[0], every
+literal, every option and every option/positional value. Its ordinals are
+positive and contiguous. Each entry has exactly the displayed fields and the
+following closed truth table:
+
+- `fixed-literal` has non-null `exactValue`/matching digest, an empty option-
+  slot array, zero owner ordinals, and `none`/`none`/`not-path`/null source
+  fields and `sourceContractRule=none`;
+- `option-name` has non-null exact option spelling/matching digest, a nonempty
+  strictly increasing unique list of the sourced-value ordinals it owns, zero
+  owner ordinals, and the same null source fields. Its declared arity is exactly
+  that list's length; and
+- `sourced-value` has null exact value fields and an empty option-slot array.
+  A positional value uses owner/index zero. An option value names one earlier
+  `option-name` ordinal and its positive one-based index, and the inverse option
+  list must name that ordinal in the same position. Its non-`none` source kind,
+  selector, path class and source-contract rule must match the closed selector
+  table below. No other combination exists.
+
+`slotDigest` is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-provider-launch-policy-argv-slot-v1`, one `0x00` byte and
+RFC 8785 JCS of the complete slot object with only `slotDigest` omitted.
+Consequently option name, arity, value ownership, source and path class are one
+contract-pinned unit, rather than labels supplied by an action. Fixed literal
+and option values are pinned both in clear and by digest; they are nonsecret.
+
+`environment.admitted` is strictly increasing by raw UTF-8 `name`, names are
+unique, and every entry has exactly the displayed fields. `fixed-literal` uses
+selector `policy-fixed-literal`, `not-path`, non-null fixed value/matching digest
+and source-contract rule `none`. Every other arm has null fixed fields and a
+non-`none` exact source-contract rule. Its selector uniquely selects its source
+kind; synthetic/capsule/socket selectors use the identically named path class,
+while action-id, contract-digest and adapter-secret use `not-path`.
+`entryDigest` uses domain
+`agent-fabric-portal-provider-launch-policy-environment-entry-v1`, `0x00` and
+JCS of the complete entry with only `entryDigest` omitted. Mandatory denied-name
+and denied-prefix arrays are each strictly increasing by raw UTF-8 bytes and
+duplicate-free. Every option-value ordinal array is also strictly increasing
+and duplicate-free. JCS object-key ordering is not used as a substitute for
+these array invariants.
+
+Selectors have exactly this policy mapping:
+
+| selector | source kind | path class | source-contract rule |
+|---|---|---|---|
+| `none` | `none` | `not-path` | `none` |
+| `effective-config-model` | `resolved-model` | `not-path` | `effective-configuration-field` |
+| `effective-config-effort` | `resolved-effort` | `not-path` | `effective-configuration-field` |
+| `activated-executable-path` | `executable-path` | `executable` | `effective-configuration-executable` |
+| `review-socket-locator` | `action-locator` | `review-socket` | `action-review-socket` |
+| `review-action-id` / `review-contract-digest` | `action-locator` | `not-path` | `action-identity` |
+| `provider-stdin-mode` | `stdin-mode` | `not-path` | `launch-policy-stdin-mode` |
+| `synthetic-home-path` | `synthetic-path` | `synthetic-home` | `action-synthetic-home` |
+| `synthetic-temp-path` | `synthetic-path` | `synthetic-temp` | `action-synthetic-temp` |
+| `credential-capsule-path` | `synthetic-path` | `credential-capsule` | `action-credential-capsule` |
+| `empty-cwd-path` | `synthetic-path` | `empty-cwd` | `activation-empty-cwd` |
+| `policy-fixed-literal` | `fixed-literal` | `not-path` | `none` |
+| `daemon-synthetic-home` | `synthetic-home` | `synthetic-home` | `action-synthetic-home` |
+| `daemon-synthetic-temp` | `synthetic-temp` | `synthetic-temp` | `action-synthetic-temp` |
+| `prospective-credential-capsule` | `credential-capsule` | `credential-capsule` | `action-credential-capsule` |
+| `adapter-secret-version` | `adapter-secret` | `not-path` | `adapter-secret-version` |
+
+The environment `review-socket-locator`, `review-action-id` and
+`review-contract-digest` selectors reuse the matching argv tuples. No selector
+may appear under any other kind/class/rule tuple.
+
+A contract may narrow the displayed selectors or add denied names/prefixes; it
+may not remove a mandatory denial. The exact template leaves no unknown option,
+arity or free literal. Shell/interpreter evaluation, arbitrary command strings
+and any cwd/workspace/config/plugin/MCP/tool or real user/HOME/project/provider-
+source path override are structurally unrepresentable. The trusted activation
+loader, not an action caller, inserts the one policy row and recomputes every
+entry/slot/policy digest; it is immutable and nondeletable while any
+configuration/envelope cites it.
+
+The policy is contract-global. It contains only the displayed stable rule
+enums, never an action path, daemon instance, current inode, secret version or
+prospective artifact identity. Every `*Dec` in policy, envelope, source-contract
+and closure JSON is a canonical unsigned decimal string with no leading zero;
+positive excludes `"0"`. Template/source-contract ordinals are contiguous and
+unique. All other digest-bearing arrays are either explicitly ordered above or
+strictly increasing by their stated raw UTF-8/digest key and duplicate-free;
+no implementation-defined set iteration may enter a digest preimage.
+
+`launch_envelope_json` byte-equals RFC 8785 JCS of this exact closed action
+object:
+
+~~~yaml
+reviewPortalProviderLaunchEnvelopeV1:
+  schemaVersion: 1
+  adapterId: exact-adapter
+  actionId: exact-action
+  contractDigest: exact-contract
+  daemonInstanceId: exact-daemon
+  configurationId: exact-id
+  configurationRevisionDec: positive
+  configurationDigest: exact-digest
+  effectiveConfigurationDigest: exact-digest
+  executableIdentityDigest: exact-digest
+  launchPolicyDigest: exact-policy-digest
+  sourceContractMemberCountDec: positive
+  sourceContractSetDigest: exact-digest
+  sourceContractSetState: sealed
+  sourceContracts:
+    - ordinalDec: positive-contiguous
+      sourceSelector: exact-policy-selector
+      sourceContractKind: effective-configuration-field |
+        activated-executable | action-identity | review-socket |
+        synthetic-home | synthetic-temp | credential-capsule | empty-cwd |
+        policy-stdin-mode | adapter-secret-version
+      pathClass: exact-policy-path-class
+      sourceContract: exact-closed-arm-object
+      sourceContractDigest: exact-digest
+  argv:
+    - ordinalDec: positive-contiguous
+      policySlotDigest: exact-digest
+      tokenKind: fixed-literal | option-name | sourced-value
+      value: exact-nul-free-utf8
+      valueLengthDec: nonnegative
+      valueDigest: exact-sha256
+      ownerOptionOrdinalDec: nonnegative
+      ownerOptionValueIndexDec: nonnegative
+      sourceKind: none | resolved-model | resolved-effort | executable-path |
+        action-locator | stdin-mode | synthetic-path
+      sourceSelector: none | effective-config-model |
+        effective-config-effort | activated-executable-path |
+        review-socket-locator | review-action-id | review-contract-digest |
+        provider-stdin-mode | synthetic-home-path | synthetic-temp-path |
+        credential-capsule-path | empty-cwd-path
+      pathClass: not-path | review-socket | synthetic-home | synthetic-temp |
+        credential-capsule | empty-cwd | executable
+      sourceContractRule: exact-policy-rule
+      sourceContractDigest: exact-digest | null
+      sourceIdentityDigest: exact-digest
+  environment:
+    - name: exact-name
+      valueLengthDec: nonnegative
+      valueDigest: exact-sha256
+      sourceKind: fixed-literal | synthetic-home | synthetic-temp |
+        credential-capsule | action-locator | adapter-secret
+      sourceSelector: policy-fixed-literal | daemon-synthetic-home |
+        daemon-synthetic-temp | prospective-credential-capsule |
+        review-socket-locator | review-action-id | review-contract-digest |
+        adapter-secret-version
+      pathClass: not-path | review-socket | synthetic-home |
+        synthetic-temp | credential-capsule
+      sourceContractRule: exact-policy-rule
+      sourceContractDigest: exact-digest | null
+      sourceIdentityDigest: exact-digest
+~~~
+
+Every envelope argv row equality-copies its policy slot digest, token/owner
+fields, source selector, path class and source-contract rule. Fixed-literal and option-name values
+must byte-equal their policy value. A sourced value is derived only from its
+selector and references the one matching source-contract child digest; it
+cannot relabel itself. Every environment row equality-copies the
+matching policy entry's name/source selector/path class and, for fixed literals,
+must byte-equal the policy value. The envelope has exactly all policy template
+and environment rows and no other argv token or environment name. Fixed rows
+use a null source-contract digest; every nonfixed row uses the digest of exactly
+one `sourceContracts` member whose selector/kind/path class satisfies its policy
+rule.
+
+Every `sourceContracts` member has exactly the displayed wrapper and one closed
+arm object. Effective-configuration field, executable, action-identity, policy-
+stdin and secret-version arms contain respectively the exact effective-
+configuration field/value commitment, opened-executable identity/closure
+commitment, action/contract semantic value, policy slot/value commitment, or
+private secret id/revision/version commitment. Filesystem arms contain the
+prospective canonical path, parent/root identity digest, basename, expected
+file type, owner/mode/ACL/xattr/mount policy, link count and expected content
+digest where applicable. `review-socket` requires socket/link-count one;
+`credential-capsule` requires regular/0600/link-count one and the expected
+capsule-content digest; synthetic HOME requires a private 0700 directory with
+only its exact auth/config manifest, synthetic temp requires a private 0700
+empty directory under its activated root, and empty cwd equality-copies
+the activation-owned 0500/empty/read-only contract. No prospective arm contains
+a guessed child inode.
+
+`sourceContract` is exactly this common closed object; `bindingKind` byte-equals
+the enclosing `sourceContractKind`, and `binding` is exactly one object from the
+exhaustive list below:
+
+~~~yaml
+reviewPortalLaunchSourceContractV1:
+  schemaVersion: 1
+  adapterId: exact-outer-adapter
+  actionId: exact-outer-action
+  contractDigest: exact-outer-contract
+  daemonInstanceId: exact-outer-daemon
+  sourceSelector: exact-outer-selector
+  sourceContractKind: exact-outer-kind
+  pathClass: exact-outer-path-class
+  bindingKind: exact-outer-kind
+  binding: exact-kind-object-below
+~~~
+
+The `effective-configuration-field` object is:
+
+~~~yaml
+reviewPortalEffectiveConfigurationFieldSourceV1:
+  fieldName: model | effort
+  effectiveConfigurationDigest: exact-envelope-digest
+  fieldValue: exact-nul-free-utf8
+  fieldValueLengthDec: nonnegative
+  fieldValueDigest: exact-sha256
+~~~
+
+`fieldName=model` is permitted only for selector `effective-config-model` and
+`fieldName=effort` only for `effective-config-effort`; the value/length/digest
+byte-equal the corresponding envelope argv row and effective configuration.
+
+The `activated-executable` object is:
+
+~~~yaml
+reviewPortalActivatedExecutableSourceV1:
+  effectiveConfigurationDigest: exact-envelope-digest
+  executableIdentityDigest: exact-envelope-digest
+  canonicalPath: exact-absolute-path
+  canonicalPathDigest: exact-sha256
+  transitiveExecutableClosureDigest: exact-closure-digest
+~~~
+
+It is permitted only for `activated-executable-path`; the path byte-equals
+argv[0], and identity/closure byte-equal the no-follow opened executable fields
+in the provider closure; this introduces no second executable-closure digest.
+`canonicalPathDigest` is `sha256:` plus lowercase
+SHA-256 of `agent-fabric-portal-canonical-path-v1`, `0x00` and the exact UTF-8
+path bytes. This is also the definition wherever that field appears below.
+
+The `action-identity` object is:
+
+~~~yaml
+reviewPortalActionIdentitySourceV1:
+  identityKind: action-id | contract-digest
+  exactValue: exact-nul-free-utf8
+  exactValueLengthDec: nonnegative
+  exactValueDigest: exact-sha256
+~~~
+
+The kind/selector is respectively `action-id`/`review-action-id` or `contract-
+digest`/`review-contract-digest`; `exactValue` byte-equals the common outer
+action ID or contract digest and its envelope value.
+
+The `review-socket` object is:
+
+~~~yaml
+reviewPortalProspectiveSocketSourceV1:
+  recoveryRootPath: exact-intent-root-path
+  recoveryRootIdentityDigest: exact-intent-root-identity
+  custodyDirectoryBasename: exact-intent-basename
+  custodyDirectoryContractDigest: exact-digest
+  canonicalPath: exact-prospective-path
+  canonicalPathDigest: exact-sha256
+  basename: exact-intent-socket-basename
+  fileType: unix-socket
+  socketType: stream
+  modeOctal: "0600"
+  linkCountDec: "1"
+  listenerOwner: typescript-daemon
+  providerRole: connecting-client
+~~~
+
+The path is the byte-exact canonical join of recovery root, custody basename and
+socket basename; its directory is prospective and no child inode appears.
+
+`recoveryRootIdentityDigest` is `sha256:` plus lowercase SHA-256 of the ASCII
+bytes `agent-fabric-portal-recovery-root-identity-v1`, one `0x00` byte and RFC
+8785 JCS of exactly this object:
+
+~~~yaml
+reviewPortalRecoveryRootIdentityV1:
+  canonicalPath: exact-intent-recovery-root-path
+  deviceDec: nonnegative
+  inodeDec: positive
+~~~
+
+All three fields equality-copy the opened recovery-root FD and intent columns.
+`custodyDirectoryContractDigest` is formed the same way with domain
+`agent-fabric-portal-prospective-custody-directory-v1` and JCS of exactly:
+
+~~~yaml
+reviewPortalProspectiveCustodyDirectoryContractV1:
+  adapterId: exact-outer-adapter
+  actionId: exact-outer-action
+  daemonInstanceId: exact-outer-daemon
+  recoveryRootIdentityDigest: exact-digest-above
+  basename: exact-intent-custody-basename
+  fileType: directory
+  ownerUidDec: nonnegative
+  ownerGidDec: nonnegative
+  modeOctal: "0700"
+  socketBasename: exact-intent-socket-basename
+  capsuleBasename: exact-intent-capsule-basename
+  exactChildRoles: [socket, credential-capsule]
+  exclusiveCreateNoFollow: true
+~~~
+
+`exactChildRoles` has that literal order. Intent, socket and capsule source arms
+equality-copy both digests; Rust/TypeScript goldens cross root path/device/inode,
+action, daemon, directory name, child name, owner and role order.
+
+The daemon first registers each synthetic root as this exact immutable object:
+
+~~~yaml
+reviewPortalActivatedSyntheticRootV1:
+  schemaVersion: 1
+  daemonInstanceId: exact-outer-daemon
+  role: synthetic-home | synthetic-temp
+  canonicalPath: exact-absolute-path
+  deviceDec: nonnegative
+  inodeDec: positive
+  ownerUidDec: nonnegative
+  ownerGidDec: nonnegative
+  modeOctal: "0700"
+  acl: []
+  mountIdentity:
+    platform: darwin | linux
+    mountPointPath: exact-canonical-path
+    deviceDec: nonnegative
+    fsidWordsDec: [exactly-two-u32-bit-pattern-decimal-values]
+    filesystemType: exact-lowercase-ascii-kernel-type
+    mountFlags:
+      - strictly-ordered-subset-of: [read-only, no-suid, no-device, no-exec,
+          synchronous, no-atime, journaled, local]
+~~~
+
+Its `rootContractDigest` is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-activated-synthetic-root-v1`, one `0x00` byte and JCS of
+that complete object. Root JSON/digest and path/device/inode byte-equal the
+immutable activation row. The mount object uses the same unsigned fsid,
+known-flag ordering and unknown-flag rejection rules as the exact cwd mount
+identity below. Role, daemon, path/stat/owner/mode/ACL/mount permutations have
+cross-language goldens.
+
+`synthetic-home` uses this exact object:
+
+~~~yaml
+reviewPortalProspectiveSyntheticHomeSourceV1:
+  role: synthetic-home
+  activatedRoot: exact-reviewPortalActivatedSyntheticRootV1-object
+  activatedRootContractDigest: exact-defined-root-digest
+  canonicalPath: exact-action-private-path
+  canonicalPathDigest: exact-sha256
+  basename: exact-action-derived-basename
+  fileType: directory
+  ownerUidDec: nonnegative
+  ownerGidDec: nonnegative
+  modeOctal: "0700"
+  aclDigest: exact-empty-acl-digest
+  entryCountDec: nonnegative
+  entries:
+    - ordinalDec: positive-contiguous
+      relativePath: exact-normalised-relative-path
+      fileType: directory | regular
+      modeOctal: "0700" | "0600"
+      linkCountPolicy: positive-observed-after-create | exactly-one
+      contentLengthDec: nonnegative | null
+      contentDigest: exact-sha256 | null
+  entryManifestDigest: exact-digest
+  xattrCountDec: "0"
+  xattrSetDigest: exact-empty-xattr-set-digest
+  mountIdentityDigest: exact-digest
+  exclusiveCreateNoFollow: true
+~~~
+
+The home path is one direct action-derived child of its named activated root;
+root stat/owner/ACL/mount come from activation rather than caller input. Entries
+are strictly increasing by raw UTF-8 relative path, unique, parent-before-child,
+contain no empty/`.`/`..` segment and are only daemon-generated auth/config
+content admitted by the adapter contract. Directories have mode 0700 and null
+content fields and use `positive-observed-after-create`; regular files have mode
+0600, `exactly-one` and exact non-null length/digest. Prospective manifest bytes
+contain no guessed directory link count. The artifact-custody capture persists
+each actual positive directory count and revalidates it during cleanup.
+`entryCountDec` equals array length and may be zero only for an adapter requiring
+no auth/config file. `entryManifestDigest` uses domain
+`agent-fabric-portal-synthetic-home-entry-manifest-v1`, `0x00` and JCS of the
+complete entries array. Symlinks, regular-file hard links, devices and extra
+files are forbidden. Directory alias denial uses exclusive no-follow creation
+beneath the retained activation root plus mount/namespace custody checks; it
+never assumes a POSIX directory has link count one. Linux/macOS goldens cover
+nested directories with their platform-observed positive counts.
+
+`synthetic-temp` is separate and exactly empty:
+
+~~~yaml
+reviewPortalProspectiveSyntheticTempSourceV1:
+  role: synthetic-temp
+  activatedRoot: exact-reviewPortalActivatedSyntheticRootV1-object
+  activatedRootContractDigest: exact-defined-root-digest
+  canonicalPath: exact-action-private-path
+  canonicalPathDigest: exact-sha256
+  basename: exact-action-derived-basename
+  fileType: directory
+  ownerUidDec: nonnegative
+  ownerGidDec: nonnegative
+  modeOctal: "0700"
+  aclDigest: exact-empty-acl-digest
+  entryCountDec: "0"
+  entrySetDigest: exact-empty-entry-set-digest
+  xattrCountDec: "0"
+  xattrSetDigest: exact-empty-xattr-set-digest
+  mountIdentityDigest: exact-digest
+  exclusiveCreateNoFollow: true
+~~~
+
+It is one direct action-derived child of the activated temp root and remains
+empty through post-ACK validation. Cross-language goldens cover empty and
+nonempty HOME manifests, nested parent ordering, and the empty temp arm.
+
+The `credential-capsule` object is:
+
+~~~yaml
+reviewPortalProspectiveCredentialCapsuleSourceV1:
+  recoveryRootPath: exact-intent-root-path
+  recoveryRootIdentityDigest: exact-intent-root-identity
+  custodyDirectoryBasename: exact-intent-basename
+  custodyDirectoryContractDigest: exact-digest
+  canonicalPath: exact-prospective-path
+  canonicalPathDigest: exact-sha256
+  basename: exact-intent-capsule-basename
+  directoryModeOctal: "0700"
+  fileType: regular
+  fileModeOctal: "0600"
+  linkCountDec: "1"
+  expectedContentDigest: exact-intent-capsule-content-digest
+  exclusiveCreateNoFollow: true
+~~~
+
+The path is the byte-exact canonical join of recovery root, custody basename and
+capsule basename and equality-copies the intent/closure prospective capsule.
+
+The `empty-cwd` object is:
+
+~~~yaml
+reviewPortalActivationEmptyCwdSourceV1:
+  canonicalPath: exact-closure-cwd-path
+  fileType: directory
+  deviceDec: nonnegative
+  inodeDec: positive
+  ownerUidDec: nonnegative
+  ownerGidDec: nonnegative
+  modeOctal: "0500"
+  aclDigest: exact-empty-acl-digest
+  filesystemFlags: []
+  entryCountDec: "0"
+  entrySetDigest: exact-empty-entry-set-digest
+  xattrCountDec: "0"
+  xattrSetDigest: exact-empty-xattr-set-digest
+  mountIdentityDigest: exact-digest
+  readOnlyEnforcementDigest: exact-digest
+  provenance: daemon-activation-empty-cwd
+  daemonInstanceId: exact-outer-daemon
+  contractDigest: exact-outer-contract
+~~~
+
+It byte-equals the later closure `cwd` object and contains actual activation-
+owned directory identity, not an action-created prospective inode. Its common
+outer daemon/contract must equal its two identically named fields.
+
+The `policy-stdin-mode` object is:
+
+~~~yaml
+reviewPortalPolicyStdinModeSourceV1:
+  launchPolicyDigest: exact-policy-digest
+  policySlotDigest: exact-slot-digest
+  exactValue: exact-nul-free-utf8
+  exactValueLengthDec: nonnegative
+  exactValueDigest: exact-sha256
+~~~
+
+Its value byte-equals the selected contract-pinned stdin mode and envelope row.
+
+The `adapter-secret-version` object is:
+
+~~~yaml
+reviewPortalAdapterSecretVersionSourceV1:
+  configurationId: exact-configuration-id
+  configurationRevisionDec: positive
+  effectiveConfigurationDigest: exact-envelope-digest
+  secretId: exact-private-secret-id
+  secretRevisionDec: positive
+  secretMaterialDigest: exact-private-digest
+  secretVersionCommitmentDigest: exact-private-digest
+~~~
+
+It is permitted only for selector `adapter-secret-version`; the commitment is
+recomputed from the effective configuration's selected secret version and
+material digest. It contains neither material nor environment value bytes.
+`secretMaterialDigest` is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-adapter-secret-material-v1`, one `0x00` byte and the exact
+raw secret bytes. `secretVersionCommitmentDigest` uses domain
+`agent-fabric-portal-adapter-secret-version-v1`, `0x00` and RFC 8785 JCS of
+exactly `[adapterId,configurationId,configurationRevisionDec,
+effectiveConfigurationDigest,secretId,secretRevisionDec,secretMaterialDigest]`.
+Both digests remain private; daemon and stub recompute them from the selected
+version, and goldens include leading-zero raw bytes and crossed revisions.
+
+No field is optional and no additional field is admitted in the common object
+or any arm. The arm's common outer identities are equality-checked before its
+member digest. Rust and TypeScript share one golden and one crossed-identity/
+wrong-field negative for every arm, plus home-versus-temp, action-id-versus-
+contract, model-versus-effort and prospective-versus-actual-inode negatives.
+
+Each child `source_contract_json` byte-equals JCS of the complete common
+`reviewPortalLaunchSourceContractV1` object, including its exact arm object.
+`source_contract_digest` uses domain
+`agent-fabric-portal-launch-source-contract-v1`, `0x00` and JCS of the complete
+envelope member wrapper -- exactly `ordinalDec`, `sourceSelector`,
+`sourceContractKind`, `pathClass` and that parsed common `sourceContract` --
+with only `sourceContractDigest` omitted. The child row's integer ordinal is
+rendered to its canonical `ordinalDec`; its selector/kind/path-class columns
+must byte-equal the wrapper/common-object values. `sourceContractSetDigest` uses domain
+`agent-fabric-portal-launch-source-contract-set-v1`, `0x00` and JCS of the
+ordinal-ordered array of canonical persisted `sha256:` plus 64 lowercase-
+hexadecimal member-digest strings. Rust/TypeScript golden vectors include an
+empty-leading-byte digest and reject raw-byte, base64, uppercase and bare-hex
+encodings. The relational child rows
+are exactly the envelope array: contiguous, no missing/extra/duplicate selector
+or digest. They first reference one `building` header. A generated sealing
+trigger recomputes every child JCS/digest and the ordered set root, requires
+exactly `member_count` rows with ordinals `1..member_count`, then performs the
+only header transition `building/revision 1 -> sealed/revision 2`. A sealed
+header and all its rows are immutable and nondeletable. An envelope can reference
+only the exact sealed header/member-count/root through its composite FK, so a
+zero, partial or reordered set cannot admit an envelope. The daemon commits
+set rows, seal, envelope, closure and custody intent in one transaction; every
+failure rolls the whole transaction back.
+
+Each `sourceIdentityDigest` is `sha256:` plus lowercase SHA-256 of its arm's
+ASCII domain label, one `0x00` byte and RFC 8785 JCS of the exact array shown:
+
+| source arm | domain suffix after `agent-fabric-portal-launch-source-` | exact JCS array |
+|---|---|---|
+| fixed argv/environment value | `fixed-literal-v1` | `[launchPolicyDigest,policySlotOrEnvironmentEntryDigest,valueDigest]` |
+| resolved model | `resolved-model-v1` | `[effectiveConfigurationDigest,"model",sourceContractDigest,valueDigest]` |
+| resolved effort | `resolved-effort-v1` | `[effectiveConfigurationDigest,"effort",sourceContractDigest,valueDigest]` |
+| activated executable path | `activated-executable-v1` | `[effectiveConfigurationDigest,executableIdentityDigest,sourceContractDigest,canonicalPathDigest,valueDigest]` |
+| stdin mode | `stdin-mode-v1` | `[launchPolicyDigest,policySlotDigest,sourceContractDigest,valueDigest]` |
+| synthetic home/temp/empty cwd | `synthetic-root-v1` | `[daemonInstanceId,pathClass,sourceContractDigest,canonicalPathDigest,valueDigest]` |
+| prospective credential capsule | `prospective-capsule-v1` | `[adapterId,actionId,sourceContractDigest,expectedCapsuleContentDigest,valueDigest]` |
+| action locator | `action-locator-v1` | `[adapterId,actionId,contractDigest,sourceSelector,sourceContractDigest,valueDigest]` |
+| adapter secret version | `adapter-secret-version-v1` | `[adapterId,secretId,secretRevisionDec,secretVersionCommitmentDigest,sourceContractDigest,valueDigest]` |
+
+The full domain is the prefix plus the displayed suffix. The prospective-
+capsule contract is the pre-intent path/name/mode/type/link-count/content
+contract below, never a guessed inode. Synthetic-root contracts bind the
+activation-owned root path/stat/owner/mode/ACL/mount/empty-state/read-only
+commitment. The action-locator contract binds its semantic role and prospective
+object contract. The adapter-secret commitment is the effective
+configuration's private secret-id/revision/material-digest commitment; raw
+secret bytes never enter policy, envelope, closure or logs. Fixed option-name
+rows use the fixed-value arm. These are the only source identity preimages.
+Rust/TypeScript golden and negative vectors cover the activated-executable arm,
+including crossed effective configuration, executable identity, canonical path,
+source contract and argv[0] bytes.
+
+Envelope admission recomputes every source contract and identity from the
+outer adapter/action/contract/daemon, the effective configuration, activated
+root contracts, policy, daemon-owned locators and private secret version. It
+rejects an inner outer-identity mismatch. The exec closure equality-copies the
+complete source-contract array/set digest. The custody intent equality-copies
+the envelope/set digests and recomputes prospective home/temp/socket/capsule
+paths, names, types, modes, link counts and content digests from those children;
+the process-custody row equality-copies the same digests. Generated immutable
+triggers plus the daemon's pre-commit closed-object validator reject any crossed
+action/daemon/configuration, substituted arm, missing child, or envelope-
+closure-intent field mismatch. Actual post-create identities may refine only
+the matching prospective arm and must preserve its contract; they never replace
+or self-certify it.
+
+`launch_envelope_digest` is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-provider-launch-envelope-v1`, one `0x00` byte and those JCS
+bytes. The trusted renderer derives the envelope only from the exact provider-
+action effective configuration, activated contract/policy and daemon-owned
+action locators/secrets; caller argv/environment is never an input. It validates
+every argv value/slot/owner/source identity, path class, limit, environment
+name/source/value identity
+and mandatory denial, then stores the envelope through the displayed composite
+FKs. The exec closure equality-copies `launchEnvelopeDigest`; its raw ordered
+argv rows and environment name/length/value-digest/source-selector/path-class/
+source-identity sequence must byte-equal the envelope. Daemon and stub hash
+their actual argv/environment bytes and
+require that equality before registration and after ACK. Configuration A with
+self-consistent argv/environment B, inherited parent environment, loader
+variables, real HOME/XDG/config paths or unsafe flags is terminal no-exec.
+
+The provider exec closure is also closed and independently reproducible.
+`provider_closure_json` byte-equals RFC 8785 JCS of exactly this private object;
+every `*Dec` value is a canonical unsigned decimal string, all paths are
+absolute canonical UTF-8 with no NUL, `argv` order is executable order, and the
+environment/FD arrays use the stated order with no duplicate:
+
+~~~yaml
+reviewPortalProviderExecClosureV1:
+  adapterId: exact-adapter
+  actionId: exact-action
+  contractDigest: exact-activated-contract
+  daemonInstanceId: exact-daemon
+  launchEnvelopeDigest: exact-digest
+  sourceContractMemberCountDec: positive
+  sourceContractSetDigest: exact-digest
+  sourceContractSetState: sealed
+  sourceContracts: exact-byte-for-byte-envelope-source-contract-array
+  configuration:
+    configurationId: exact-id
+    configurationRevisionDec: positive
+    configurationDigest: exact-digest
+    effectiveConfigurationDigest: exact-digest
+    executableIdentityDigest: exact-digest
+  executable:
+    identityDigest: exact-digest
+    canonicalPath: exact-path
+    parentPath: exact-path
+    basename: one-name
+    parentDeviceDec: nonnegative
+    parentInodeDec: positive
+    deviceDec: nonnegative
+    inodeDec: positive
+    modeDec: positive
+    sizeDec: nonnegative
+    contentDigest: exact-sha256
+    codeIdentityDigest: exact-digest
+    transitiveExecutableClosureDigest: exact-digest
+  argv:
+    - ordinalDec: positive-contiguous
+      policySlotDigest: exact-digest
+      tokenKind: fixed-literal | option-name | sourced-value
+      value: exact-nul-free-utf8
+      valueLengthDec: nonnegative
+      valueDigest: exact-sha256
+      ownerOptionOrdinalDec: nonnegative
+      ownerOptionValueIndexDec: nonnegative
+      sourceKind: none | resolved-model | resolved-effort | executable-path |
+        action-locator | stdin-mode | synthetic-path
+      sourceSelector: exact-policy-selector
+      pathClass: exact-policy-path-class
+      sourceContractRule: exact-policy-rule
+      sourceContractDigest: exact-digest | null
+      sourceIdentityDigest: exact-digest
+  cwd:
+    canonicalPath: exact-path
+    fileType: directory
+    deviceDec: nonnegative
+    inodeDec: positive
+    ownerUidDec: nonnegative
+    ownerGidDec: nonnegative
+    modeOctal: "0500"
+    aclDigest: exact-empty-acl-digest
+    filesystemFlags: []
+    entryCountDec: "0"
+    entrySetDigest: exact-empty-entry-set-digest
+    xattrCountDec: "0"
+    xattrSetDigest: exact-empty-xattr-set-digest
+    mountIdentityDigest: exact-digest
+    readOnlyEnforcementDigest: exact-digest
+    provenance: daemon-activation-empty-cwd
+    daemonInstanceId: exact-daemon
+    contractDigest: exact-contract
+  environment:
+    - name: exact-utf8-name
+      valueLengthDec: nonnegative
+      valueDigest: exact-sha256
+      sourceKind: fixed-literal | synthetic-home | synthetic-temp |
+        credential-capsule | action-locator | adapter-secret
+      sourceSelector: exact-policy-selector
+      pathClass: exact-policy-path-class
+      sourceContractRule: exact-policy-rule
+      sourceContractDigest: exact-digest | null
+      sourceIdentityDigest: exact-digest
+  capsule:
+    directoryPath: exact-path
+    directoryModeOctal: "0700"
+    basename: exact-basename
+    fileType: regular
+    fileModeOctal: "0600"
+    linkCountDec: "1"
+    contentDigest: exact-sha256
+  stdio:
+    - fdDec: "0"
+      purpose: stdin
+      identityDigest: exact-digest
+      topologyAttestation: reviewPortalStdioTopologyAttestationV1
+    - fdDec: "1"
+      purpose: stdout
+      identityDigest: exact-digest
+      topologyAttestation: reviewPortalStdioTopologyAttestationV1
+    - fdDec: "2"
+      purpose: stderr
+      identityDigest: exact-digest
+      topologyAttestation: reviewPortalStdioTopologyAttestationV1
+  providerInheritedFdNumbersDec: ["0", "1", "2"]
+  preExecFds:
+    - {fdDec: "4", purpose: launch-handshake, disposition: close-before-exec}
+    - {fdDec: "5", purpose: provider-executable, disposition: cloexec}
+    - {fdDec: "6", purpose: provider-cwd, disposition: cloexec}
+    - {fdDec: "7", purpose: executable-parent, disposition: cloexec}
+~~~
+
+For certifying portal actions, the effective configuration's formerly opaque
+`executableIdentityDigest` is specialised to
+`agent-fabric-portal-executable-identity-v1`. It is `sha256:` plus lowercase
+SHA-256 of the ASCII bytes of that label, one `0x00` byte and RFC 8785 JCS of
+the exact `executable` object above with only `identityDigest` omitted. The
+closure's `executable.identityDigest`, the effective-configuration value and
+the value recomputed by both daemon and stub from the opened executable must be
+byte-equal. The stub obtains path/parent/basename, stat fields and content from
+the actual FD/path; it independently invokes the activated platform code-
+identity verifier and transitive executable-closure verifier for their two
+digests. Copying those two digests from configuration without verifying the
+actual executable is forbidden. Thus a self-consistent closure built from
+configuration A and executable B cannot be inserted or registered.
+
+The cwd is one daemon-activation-owned empty directory created before any
+provider action, then opened no-follow as FD 6 and made mode 0500. It is not a
+workspace, HOME, auth, project or provider directory. `aclDigest`,
+`entrySetDigest` and `xattrSetDigest` hash, under respectively
+`agent-fabric-portal-empty-acl-v1`,
+`agent-fabric-portal-empty-directory-entry-set-v1` and
+`agent-fabric-portal-empty-xattr-set-v1` plus one `0x00`, RFC 8785 JCS of the
+exact empty array. `mountIdentityDigest` uses the activated platform's closed
+mount identity. It is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-cwd-mount-identity-v1`, one `0x00` byte and RFC 8785 JCS
+of exactly this object:
+
+~~~yaml
+reviewPortalCwdMountIdentityV1:
+  platform: darwin | linux
+  mountPointPath: exact-canonical-path
+  deviceDec: nonnegative
+  fsidWordsDec: [exactly-two-u32-bit-pattern-decimal-values]
+  filesystemType: exact-lowercase-ascii-kernel-type
+  mountFlags:
+    - strictly-ordered-subset-of: [read-only, no-suid, no-device, no-exec,
+        synchronous, no-atime, journaled, local]
+~~~
+
+The two fsid words are decoded to their unsigned 32-bit bit patterns before
+decimal encoding; native signedness, padding and endian never enter the
+preimage. Unknown persistent mount flags fail activation rather than disappear.
+Rust/TypeScript golden vectors cover both platform arms, high-bit fsid words,
+flag permutations and different native padding/endian layouts.
+`readOnlyEnforcementDigest` hashes the
+ASCII bytes `agent-fabric-portal-cwd-read-only-v1`, one `0x00` byte and JCS of
+this exact object:
+
+~~~yaml
+reviewPortalCwdReadOnlyEnforcementV1:
+  platformIdentityDigest: exact-digest
+  mountIdentityDigest: exact-digest
+  canonicalPath: exact-path
+  deviceDec: nonnegative
+  inodeDec: positive
+  ownerUidDec: nonnegative
+  ownerGidDec: nonnegative
+  modeOctal: "0500"
+  aclDigest: exact-empty-acl-digest
+  filesystemFlags: []
+  outerSandboxContractDigest: exact-contract-digest
+  enumerateEmptyCanaryDigest: exact-current-build-digest
+  createWriteRenameDeleteMetadataDenyCanaryDigest: exact-current-build-digest
+~~~
+
+The daemon insert and stub independently enumerate FD 6 and require exactly no
+entry other than kernel `.`/`..`, no xattr, exact directory/stat/owner/mode/ACL/
+mount identity and the activated read/write/metadata-denial evidence. The stub
+does so immediately before registration, again after ACK and once more after
+`fchdir(FD 6)` adjacent to exec; it also proves the canonical path still names
+that FD. Replacement, population, symlink, mount, mode, owner, ACL, xattr,
+sandbox or denial-canary drift is terminal no-exec. The provider receives no
+directory FD, and capability is false unless current-build confinement canaries
+prove it cannot populate or mutate the cwd after exec.
+
+Each `stdio[].identityDigest` is `sha256:` plus lowercase SHA-256 of the ASCII
+bytes `agent-fabric-portal-stdio-fd-identity-v1`, one `0x00` byte and RFC 8785
+JCS of this exact kind-tagged object derived from the actual descriptor:
+
+~~~yaml
+reviewPortalStdioFdIdentityV1:
+  fdDec: "0" | "1" | "2"
+  purpose: stdin | stdout | stderr
+  fileType: fifo | unix-stream | unix-seqpacket | character
+  deviceDec: nonnegative
+  inodeDec: positive
+  rdevDec: nonnegative
+  modeDec: positive
+  accessMode: read-only | write-only | read-write
+  statusFlags: [append | nonblocking | synchronous | data-synchronous]
+  descriptorFlags: []
+  canonicalDevicePath: exact-path | null
+  localEndpointDigest: exact-sha256 | null
+  peerEndpointDigest: exact-sha256 | null
+  peerCredentialDigest: exact-sha256 | null
+~~~
+
+Each adjacent `topologyAttestation` is this exact object. Its `digest` is
+`sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-stdio-topology-attestation-v1`, one `0x00` byte and RFC
+8785 JCS of the object with only `digest` omitted:
+
+~~~yaml
+reviewPortalStdioTopologyAttestationV1:
+  digest: exact-sha256
+  daemonInstanceId: exact-daemon
+  adapterId: exact-adapter
+  actionId: exact-action
+  contractDigest: exact-contract
+  purpose: stdin | stdout | stderr
+  topology: daemon-pipe | daemon-socketpair | daemon-pty | dev-null
+  localIdentityDigest: exact-stdio-fd-identity-digest
+  retention: daemon-until-provider-terminal
+  peerDescriptor:
+    oneOf:
+      - null
+      - owner: daemon
+        ownerPidDec: positive
+        ownerStartTimeDec: positive
+        fdDec: nonnegative
+        fileType: fifo | unix-stream | unix-seqpacket | character
+        deviceDec: nonnegative
+        inodeDec: positive
+        rdevDec: nonnegative
+        modeDec: positive
+        accessMode: read-only | write-only | read-write
+        statusFlags: [append | nonblocking | synchronous | data-synchronous]
+        descriptorFlags: [cloexec]
+        canonicalDevicePath: exact-path | null
+        localEndpointDigest: exact-sha256 | null
+        peerEndpointDigest: exact-sha256 | null
+        peerCredentialDigest: exact-sha256 | null
+~~~
+
+The root daemon/action/contract and purpose equal the enclosing closure/stdio
+entry, and `localIdentityDigest` equals that entry's `identityDigest`. Dev-null
+alone has null peer; every daemon-created topology has the exact nonnull daemon
+peer descriptor above. Peer `descriptorFlags` is exactly `[cloexec]`, so it
+cannot leak if the daemon later launches another process.
+
+The three endpoint fields are null for FIFO/character and nonnull for a
+socket. A local or peer endpoint digest hashes, under respectively
+`agent-fabric-portal-fd-local-endpoint-v1` or
+`agent-fabric-portal-fd-peer-endpoint-v1` plus one `0x00`, RFC 8785 JCS of this
+closed object:
+
+~~~yaml
+reviewPortalFdEndpointV1:
+  platform: darwin | linux
+  family: AF_UNIX
+  socketType: stream | seqpacket
+  addressKind: unnamed | pathname | abstract
+  addressLengthDec: nonnegative
+  addressBase64url: unpadded-base64url-of-exact-logical-address-bytes
+~~~
+
+The effective `sun_path` span comes from the returned socket-address length, not
+`sizeof(sockaddr_un)`. Unnamed has zero length/empty bytes. Pathname removes
+exactly one terminal NUL when present and rejects any embedded NUL. Linux
+abstract retains its leading NUL and every later byte. No native padding,
+uninitialised byte or host-endian integer enters the preimage.
+
+`peerCredentialDigest` hashes the ASCII domain
+`agent-fabric-portal-fd-peer-credential-v1`, one `0x00` byte and RFC 8785 JCS of
+exactly one closed arm:
+
+~~~yaml
+reviewPortalFdPeerCredentialV1:
+  oneOf:
+    - platform: darwin
+      pidDec: positive
+      effectiveUidDec: nonnegative
+      groupIdsDec: [strictly-increasing-nonnegative]
+      auditTokenWordsDec: [exactly-eight-u32-decimal-values]
+    - platform: linux
+      pidDec: positive
+      uidDec: nonnegative
+      gidDec: nonnegative
+~~~
+
+Fields are decoded from kernel APIs before hashing; native credential-struct
+padding/endian is forbidden. `statusFlags` is the strictly ordered observed subset of the four
+displayed semantic flags; any other persistent status flag fails activation.
+The exact empty `descriptorFlags` proves stdio survives exec without
+`FD_CLOEXEC`. Creation-only flags are not part of `F_GETFL` and have no field.
+Daemon and stub derive this local object independently; fd number/purpose/type/
+stat/access/flags/local-endpoint/observable-peer mismatch fails before
+registration and again after ACK. The stub does not derive or claim visibility
+of the daemon-private `topologyAttestation.peerDescriptor`.
+Rust/TypeScript vectors cover unnamed, terminal-NUL pathname, embedded-NUL
+rejection, Linux abstract addresses, returned-length truncation and deliberately
+different native padding/endian layouts that must canonicalise identically.
+
+Stdio is an admitted daemon-created topology, never an arbitrary inherited
+vnode or connection. The daemon alone derives each exact topology attestation
+from both descriptors while it owns them, embeds it beside the local identity
+in the closure, and revalidates its retained peer immediately before the
+process-row commit/ACK. The challenge's `providerClosureDigest` therefore binds
+the attestation, its local-identity digest and the action/contract/daemon tuple
+seen by the stub. The stub independently derives and rechecks only its local
+identity; copying either local digest without that check is forbidden.
+Pipe endpoints must share exact device/inode and opposite access. Socketpairs
+must be the two exact endpoints and prove the declared daemon peer credentials.
+A PTY must bind its daemon-created master/slave pair and contract-pinned device
+identity. Dev-null requires the attestation's null peer and local canonical path
+exactly `/dev/null`, revalidated as the platform's null character device.
+
+Purpose/access admission is closed: stdin is daemon-pipe read-only,
+daemon-socketpair/daemon-pty read-write or `/dev/null` read-only; stdout/stderr
+are daemon-pipe write-only, daemon-socketpair/daemon-pty read-write or
+`/dev/null` write-only. Regular files, unrelated character devices, FIFOs not
+created for this action, arbitrary sockets/TTYs, wrong-direction endpoints and
+any descriptor whose vnode/endpoint is derived from a project, user, HOME,
+auth or provider path are no-exec. The daemon retains every peer; it never hands
+one to the supervisor. Closure insertion cannot accept caller-supplied
+provenance.
+
+`argv` contains at least one element, `argv[0]` is the configured executable
+argument, and every element is NUL-free UTF-8. The environment array is
+strictly increasing by raw UTF-8 name bytes; each name is nonempty and contains
+neither NUL nor `=`, and each exact value is NUL-free. No duplicate is allowed.
+`valueDigest` is `sha256:` plus lowercase SHA-256 of the exact value bytes and
+the private closure row is never public, logged or model-visible. `stdio` and
+`preExecFds` have exactly the displayed order and membership. The closure has
+no unknown key. `provider_closure_digest` is `sha256:` plus lowercase SHA-256
+of the ASCII bytes `agent-fabric-portal-provider-closure-v1`, one `0x00` byte
+and those exact JCS bytes. Its row composite-foreign-keys the one provider-
+action effective configuration, action pair and activated contract; the intent
+and process row equality-copy that same digest. Intent triggers additionally
+require the capsule directory path to be the recovery-root/custody-basename
+join and equality-copy its basename and expected content digest; the fixed
+0700/0600/regular/single-link policy admits no alternative. Insert triggers
+recompute the JCS/digest and every displayed configuration/action/contract/
+daemon field. Triggers recompute every `topologyAttestation.digest`, equality-
+copy its daemon/adapter/action/contract/purpose/local-identity values to the
+enclosing closure and stdio entry, enforce the exact topology/peer-null arm and
+reject caller-supplied attestation evidence.
+
+The closure's capsule arm is prospective: it binds the canonical intended path,
+basename, exact modes/type/link policy and expected content, never a device or
+inode that cannot exist before intent. Its directory path is the byte-exact join
+of the already canonical recovery-root path and reserved custody basename; it
+does not claim `realpath` of a not-yet-created directory. Before intent commit, the daemon opens
+the executable and its parent no-follow, opens the cwd, captures stdio, closes
+all unlisted descriptors and builds the closure from the actual argv/environment
+bytes it will give the stub. Only after the intent/open transaction commits may
+it create/fsync the capsule and directories and capture their actual device/
+inode/link/content identities into process custody. The pinned stub inherits
+the closure values in private memory plus executable FD 5, cwd FD 6 and
+executable-parent FD 7. Immediately
+before registration it independently rehashes the executable through FD 5,
+revalidates its parent/basename with FD 7, enumerates the complete FD table,
+revalidates cwd/stdio and opens the actual capsule no-follow to prove it meets
+every prospective capsule field, reconstructs the exact argv/environment and
+closure JCS and equality-checks both expected closure bytes and digest. After a
+valid ACK it repeats that derivation, capsule proof and equality check, uses FD 6 for `fchdir`,
+performs one final no-follow executable path-to-FD identity check and invokes
+the executable with those same argv/environment bytes with no intervening
+callback or provider code. Platforms with an identity-stable exec-from-FD
+primitive must use it; otherwise the activated contract must prove the final
+daemon-private executable path cannot be mutated by the provider and run the
+last check immediately adjacent to `execve`. Failure keeps capability false.
+FDs 5, 6 and 7 are close-on-exec and FD 4 is already closed, so provider entry
+has exactly 0, 1 and 2. The stub never owns supervisor control FD 3. Swapped executable/path/inode/content/code
+identity, argv, environment value/order, cwd, capsule, stdio, extra/missing FD
+or post-ACK substitution is terminal no-exec.
+
+`control_fd_number` is always 3 and identifies the supervisor-only daemon
+channel; the stub never inherits it. Its pre-exec-only
+`registration_fd_number` is always 4; provider-executable, cwd and executable-
+parent FDs are always 5, 6 and 7.
+The daemon obtains exactly 32 raw bytes from the OS CSPRNG before the intent
+transaction. `launch_nonce_digest` is `sha256:` plus lowercase SHA-256 of the
+ASCII bytes `agent-fabric-portal-launch-nonce-v1`, one `0x00` byte and those raw
+nonce bytes. `intent_digest` is `sha256:` plus lowercase SHA-256 of the ASCII
+bytes `agent-fabric-portal-filesystem-intent-v1`, one `0x00` byte and RFC 8785
+JCS of the closed row object containing that nonce digest and every other
+immutable intent field except `intent_digest` itself. The digest is globally unique; a collision or attempted
+reuse aborts setup. Raw nonce bytes exist only in daemon memory and the private
+FD-4 exchange, are never logged or persisted, and are destroyed when that
+exchange closes. Reserved-arm recovery never reconstructs or reuses them.
+
+`launch_action_binding_digest` is `sha256:` plus lowercase SHA-256 of the ASCII
+bytes `agent-fabric-portal-action-binding-v1`, one `0x00` byte and RFC 8785 JCS
+of this exact array, in order:
+
+~~~json
+["reviewPortalLaunchActionBindingV1", "adapterId", "actionId",
+ "contractDigest", "daemonInstanceId", "filesystemIntentDigest",
+ "launchNonceDigest", "providerClosureDigest", "launchEnvelopeDigest",
+ "sourceContractSetDigest", "homeArtifactIntentDigest",
+ "tempArtifactIntentDigest"]
+~~~
+
+The quoted field labels above denote their exact row values, not literal
+placeholder strings. All persisted SHA-256 values use `sha256:` plus 64
+lowercase hexadecimal characters. A wire field named `*Digest` is the raw 32
+bytes decoded from that representation.
+
+FD 4 is one private `AF_UNIX/SOCK_STREAM` socketpair created with close-on-exec.
+The daemon endpoint is never inherited. The supervisor closes its duplicate of
+the child endpoint immediately after fork; only the pinned launch stub retains
+it. Before fork, the supervisor receives and pins the expected action-binding,
+intent, stub-identity and provider-closure digests in private launch memory.
+The handshake uses exactly these three binary frames; integers are unsigned
+64-bit big-endian and every magic includes its displayed terminal NUL:
+
+~~~text
+launchChallengeV1 — exactly 136 bytes
+  0..7     ASCII "AFCHAL1\0"
+  8..39    raw launch nonce
+  40..71   launchActionBindingDigest
+  72..103  filesystemIntentDigest
+  104..135 providerClosureDigest
+
+launchRegistrationV1 — exactly 216 bytes
+  0..7     ASCII "AFREGV1\0"
+  8..39    raw launch nonce
+  40..71   launchActionBindingDigest
+  72..103  filesystemIntentDigest
+  104..111 supervisorPid
+  112..119 supervisorStartTime
+  120..127 providerRootPid
+  128..135 providerRootStartTime
+  136..143 processGroupId
+  144..151 sessionId
+  152..183 launchStubIdentityDigest
+  184..215 providerClosureDigest
+
+launchAckV1 — exactly 208 bytes
+  0..7     ASCII "AFACKV1\0"
+  8..39    raw launch nonce
+  40..71   launchActionBindingDigest
+  72..103  filesystemIntentDigest
+  104..135 launchRegistrationDigest
+  136..167 processCustodyLaunchDigest
+  168..175 launchRowRevision
+  176..207 providerClosureDigest
+~~~
+
+The daemon writes exactly one challenge. The stub validates its magic, nonce
+length and all three expected digests before changing process topology, then
+establishes the group/session, captures the six positive process integers,
+writes exactly one registration and calls `shutdown(SHUT_WR)`. The daemon reads
+that direction to EOF and accepts only exactly 216 bytes; EOF/timeout before
+216, any byte after 216, a second frame, a nonpositive or out-of-signed-64-bit
+integer, crossed digest, wrong nonce, wrong directly observed PID/start/PGID/
+session/parentage or wrong independently measured stub/provider identity fails
+without a custody insert or ACK. `launch_registration_digest` is `sha256:` plus
+lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-launch-registration-v1`, one `0x00` byte and the exact 216
+registration bytes.
+
+`process_custody_launch_digest` is `sha256:` plus lowercase SHA-256 of the ASCII
+bytes `agent-fabric-portal-process-custody-launch-v1`, one `0x00` byte and RFC
+8785 JCS of this exact array in order. Every SQL integer is represented in the
+array as its canonical unsigned base-10 string with no sign or leading zero;
+the displayed nulls are JSON nulls:
+
+~~~json
+["reviewPortalProcessCustodyLaunchV1",
+ "adapterId", "actionId", "contractDigest", "daemonInstanceId",
+ "filesystemIntentDigest", "launchNonceDigest",
+ "launchActionBindingDigest", "launchRegistrationDigest", "1",
+ "supervisorPid", "supervisorStartTime", "providerRootPid",
+ "providerRootStartTime", "processGroupId", "sessionId",
+ "supervisorExecutableIdentityDigest", "launchStubIdentityDigest",
+ "providerClosureDigest", "launchEnvelopeDigest", "sourceContractSetDigest",
+ "synthetic-home", "homeArtifactIntentDigest", "synthetic-temp",
+ "tempArtifactIntentDigest",
+ "ancestryManifestDigest", "recoveryRootPath",
+ "recoveryRootDevice", "recoveryRootInode", "recoveryRootIdentityDigest",
+ "custodyDirectoryBasename", "custodyDirectoryContractDigest",
+ "claimDirectoryBasename", "custodyDirectoryDevice",
+ "custodyDirectoryInode", "claimDirectoryDevice", "claimDirectoryInode",
+ "agent-fabric-custody-claim-v1", "socketBasename",
+ "socketClaimBasename", "socketFileDevice", "socketFileInode", "1",
+ "socketIdentityDigest", "canonical", "capsuleBasename",
+ "capsuleClaimBasename", "capsuleFileDevice", "capsuleFileInode", "1",
+ "capsuleContentDigest", "canonical", "3", "4", "5", "6", "7", "waiting",
+ "preparing", "active", null, "0", null, "1", "createdAt", "updatedAt"]
+~~~
+
+Again, camel-case labels denote exact corresponding row values; quoted enum and
+fixed-number values are literal. The first `"1"` is
+`launch_row_revision`; the final `"1"` is the initial mutable row `revision`.
+The launch digest deliberately excludes itself and `launch_ack_digest`, making
+the construction acyclic. `createdAt` and `updatedAt` are the exact canonical
+stored timestamps and are equal at insertion.
+
+Golden vectors cover every binding/registration/launch/ACK digest with distinct
+envelope-daemon and source-set values. Negative fixtures cross an otherwise
+self-consistent envelope, closure, intent or process row from another daemon,
+action or set, omit/duplicate/reorder a source-contract child, and mutate one
+prospective path/type/mode/link/content field; every arm is terminal no-exec
+before ACK.
+
+The daemon constructs the ACK from that committed launch object.
+`launch_ack_digest` is `sha256:` plus lowercase SHA-256 of the ASCII bytes
+`agent-fabric-portal-launch-ack-v1`, one `0x00` byte and the exact 208 ACK
+bytes. One transaction inserts the row with both computed digests,
+`launch_row_revision=revision=1` and the displayed initial states. Only after
+that transaction commits may the daemon write the one ACK and call
+`shutdown(SHUT_WR)`. The stub reads the daemon direction to EOF after the
+challenge already consumed and accepts only exactly 208 remaining bytes with
+all nonce/action/intent/registration/revision/provider-closure fields equal.
+Partial, trailing, duplicate, replayed or crossed ACK input closes FD 4 and
+exits without provider exec. A valid ACK also closes FD 4 completely before the
+final parent-liveness check and in-place exec. The entire exchange has the
+contract-pinned 5,000-ms monotonic deadline; EOF/HUP or expiry at any stage is
+terminal no-exec.
+
 connection_state is `waiting|consumed|closed`; process_state is
 `preparing|running|terminating|cleaned|integrity-failure`. Only the owning
 supervisor/recovery CAS may advance them. The daemon starts the provider child
-stopped, establishes its dedicated group/session and per-action socket, obtains
-the supervisor/provider PID plus start times and complete executable/ancestry
-identity, and commits custody before continue/exec. Rust supervisor FD 3 is the
-private daemon control channel and is `CLOEXEC` before provider exec; provider
-configuration or children never inherit it.
+by first creating/retaining the per-action listener, a one-use registration
+socketpair and the pinned supervisor with control FD 3. The supervisor forks a
+pinned Rust launch stub, not provider code, and passes only the other registration
+endpoint as FD 4. The stub establishes its dedicated group/session, reports its
+exact registration directly to the daemon, then remains blocked pre-exec while
+watching both daemon and parent liveness. The daemon validates that report,
+commits the complete custody row with the exact nonce/action/registration/row/
+ACK digests above, and sends the one matching ACK. Only then may the stub close
+FD 4, recheck parent liveness and exec the pinned provider closure in place.
+EOF, mismatch or parent death before ACK exits without exec. Thus no
+provider code exists before durable custody. Rust supervisor FD 3 is its
+exclusive private daemon control channel; it never passes to the stub. Stub FD
+4 is closed and its fixed executable/cwd/parent FDs 5–7 are close-on-exec;
+provider configuration or children inherit none of FDs 3–7.
+Every phase, identity, generation and revision column displayed as nonnull is
+validated by direct-SQL NULL negatives; wrong type/socket substitution, claim-
+name version/collision, hard-link aliasing, crossed evidence/state and partial terminal rows also
+fail before recovery logic.
+Checked-in Rust and TypeScript golden vectors freeze all three frame byte
+sequences and the nonce, action-binding, registration, process-custody-launch
+and ACK digest preimages/results. Cross-language tests cover every byte offset
+and half-close. Wrong magic/length/order, partial EOF at every boundary,
+trailing byte, duplicate frame, zero/overflow integer, stale or repeated nonce,
+cross-action/contract/intent/daemon/provider-closure/stub/PID/start/PGID/session,
+old row revision, ACK-before-commit and ACK replay on a fresh FD are mandatory
+no-exec negatives.
+Closure fixtures independently derive the digest in Rust and TypeScript and
+then swap the effective configuration, executable path/device/inode/content/
+code identity, argv element/order, environment name/value/order, cwd, capsule,
+stdio and each inherited/pre-exec FD both before registration and after ACK;
+configuration-A with an initially self-consistent envelope-B, inherited parent
+environment, every mandatory denied name/prefix, unsafe option and wrong
+name/source/path class are separate pre-closure no-exec negatives;
+source/project/auth-file stdin, project-file stdout/stderr, arbitrary socket/TTY,
+forged topology/peer attestation and every wrong purpose/access-mode pairing are
+also covered. Every variant is no-exec.
+
+For each entry the daemon alone owns an independent persisted
+`canonical -> claimed -> removed` cleanup phase; `integrity-failure` is terminal.
+It constructs every native call only from the persisted row, never caller paths.
+The Rust boundary verifies the persisted v1 claim basename, opens both
+directories no-follow and equality-checks both identities. Capture, the final
+canonical check, post-rename claim revalidation and the pre-unlink check all
+require the persisted `st_nlink=1` for both socket and capsule. Under persisted
+canonical phase, exact canonical plus absent claim is atomically renamed with
+no-replace and revalidated inside the trusted namespace; absent canonical plus
+exact claim is the crash-after-rename recovery arm. Both return claimed evidence,
+after which the owner fsyncs both canonical and claim directories and only then
+CASes claimed durably; unlink is not admitted before that CAS. Canonical
+with both absent is integrity failure, not success. Under persisted claimed
+phase, canonical must be absent; an exact claim is unlinked and both absent is
+the crash-after-unlink recovery arm. The owner fsyncs the claim directory before
+CASing removed. Persisted removed requires both absent. Both present, any wrong
+claim, source substitution, changed directory identity, illegal phase/presence,
+cross-device layout or unavailable atomic no-replace support records integrity
+failure and keeps certifying capability false. Canonical and claim directory
+removal occurs only after both entry phases are durably removed and both opened
+directories have been fsynced. The owner then CASes `active -> children-removed`
+with nonnull phase evidence before any `rmdir`. In that phase it removes only
+the canonical directory, fsyncs its parent and CASes `canonical-removed`; an
+absent canonical directory is accepted as crash-after-rmdir only while the exact
+claim directory still exists. Only from canonical-removed may it remove the
+claim directory, fsync its parent and CAS `removed`; claim absence is then the
+crash-after-rmdir arm. Removed requires both absent. Any other phase/presence is
+integrity failure. `process_state=cleaned` is committed only with directory
+removed. A prior PID/start or other process-integrity failure remains
+`process_state=integrity-failure` even when identity-safe path cleanup later
+reaches directory removed; cleanup never erases terminal evidence or re-enables
+capability. Exact replay after that final CAS is inert. PID-reuse plus successful
+path-removal is a direct database/recovery fixture.
 
 On Darwin the TypeScript broker obtains `LOCAL_PEERTOKEN` and `LOCAL_PEERPID`
 and equality-checks UID, PID/start time, PGID/session, ancestry beneath the
@@ -3347,15 +5280,35 @@ parses JSON-RPC/MCP, rejects duplicate keys, applies policy, debits ledgers and
 journals canonical bytes.
 
 Control EOF/HUP, deadline, cancellation or provider exit makes the supervisor
-TERM the complete process group, wait 250 ms, KILL, reap and remove socket/
-capsule paths. The daemon watches supervisor death and performs the same
-bounded cleanup. Startup first verifies exact PID plus start time before a
-signal; mismatch records integrity-failure and disables capability rather than
-signalling another process. Path cleanup opens the persisted directory no-
-follow, verifies device/inode, rejects absolute/traversing basenames and checks
-file type/digest before unlink/remove; digest-only location is invalid. A surviving supervisor observes FD-3 closure after
-daemon death. Canaries cover daemon-only, supervisor-only and combined crash,
-PID reuse, TERM/KILL/reap/remove, and failed `setsid`, double-fork,
+TERM the complete process group, wait 250 ms, KILL and reap, then close its
+descriptors. As the provider-root parent it retains the group leader unreaped
+through TERM, the bounded wait, KILL and descendant-absence proof, so the PID/
+PGID cannot be reused between proof and signal; only then may it reap. It never removes persisted socket/capsule paths because it cannot
+advance daemon-owned cleanup phases. The daemon watches supervisor death and is
+the sole phase-aware path-cleanup owner; after daemon death, restart resumes from
+the unchanged custody row. PID/start inspection is observation, never signal
+authority. Any daemon signal to a process it does not directly parent requires
+an OS identity-stable handle, acquired before provider continue and retained for
+the action, that cannot retarget after exit. If the supervisor dies or the daemon
+restarts without such a valid handle, the daemon never signals orphaned persisted
+PIDs/PGIDs; on Darwin this is the required no-signal path unless an activated
+build proves an equivalent primitive. A live or ambiguous record is quarantined
+with capability false until the surviving direct-parent supervisor finishes or exact absence is proved.
+Mismatch records integrity failure without signalling. Path cleanup uses the canonical-to-trusted-claim
+transition above; direct unlink from the canonical namespace and digest-only
+location are invalid. A surviving supervisor observes FD-3 closure after daemon
+death without removing custody paths. Canaries cover daemon-only, supervisor-only and combined crash, crash
+after Phase-A intent/name commit and after each directory create, listener bind,
+capsule write/fsync and parent fsync; before/after process-row promotion; at
+fork, before/after stub report, custody commit and ACK; and prove no provider
+exec or untracked child on every pre-ACK failure; they also cover crash
+before/after each entry fsync, hard-link alias before canonical claim and after
+claim attempt, claim-phase and removed-phase CAS, after each directory `rmdir` and
+after final cleaned CAS, exact claimed retry, source/claim substitution,
+canonical-both-absent and duplicate-presence refusal, cross-device provisioning
+denial, PID reuse and exit/reuse exactly between observation and attempted
+restart or supervisor-death signal (zero signal), retained-unreaped-leader supervisor TERM/KILL/reap
+plus daemon-owned remove, and failed `setsid`, `setpgid`/job-control group split, double-fork,
 daemonisation and reparent escape. Any surviving descendant/listener/capsule or
 unprovable startup cleanup advertises false.
 
@@ -3370,7 +5323,8 @@ every negative, broker identity/one-use binding and crash cleanup. Direct Claude
 and Codex run the same source/auth/shell/write/web/MCP/bundle-crossing negatives
 and identical ledger/result-shape checks; success by one never certifies the
 other. Every pinned provider/helper/trampoline descendant must fail `setsid`,
-double-fork, reparent and equivalent daemonisation escape; group cleanup alone
+`setpgid`/job-control group split, double-fork, reparent and equivalent
+daemonisation escape; group cleanup alone
 is not proof.
 Hardened wrappers mediate native effects; stock/tool-policy-only CLI advertises
 false. Provider auth/config never appears in model-visible env/files/tools.
@@ -3710,19 +5664,41 @@ action, whether its joins are intact or contradictory:
 
 ~~~sql
 route_integrity_recoveries(
-  run_id, adapter_id, action_id,
+  run_id NOT NULL, adapter_id NOT NULL, action_id NOT NULL, task_id NOT NULL,
+  route_ordinal NOT NULL CHECK(route_ordinal >= 1),
+  target_generation NOT NULL CHECK(target_generation >= 1),
+  slot NOT NULL CHECK(slot IN
+    ('native','other-primary','cursor-grok','agy-gemini')),
+  attempt_generation NOT NULL CHECK(attempt_generation >= 1),
   recovery_generation, owner_daemon_generation,
-  state, reason, terminal_disposition, reservation_id, reservation_digest,
+  state, reason, terminal_disposition,
+  reservation_digest NOT NULL,
   route_state, route_receipt_digest, recovery_evidence_digest,
   lookup_state, lookup_evidence_digest, settlement_digest,
   created_at, updated_at,
-  PRIMARY KEY(adapter_id, action_id)
+  PRIMARY KEY(adapter_id, action_id),
+  FOREIGN KEY(adapter_id, action_id, run_id, task_id, route_ordinal)
+    REFERENCES provider_actions(
+      adapter_id, action_id, run_id, task_id, route_ordinal),
+  FOREIGN KEY(adapter_id, action_id, run_id, target_generation, slot,
+      attempt_generation, reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      adapter_id, action_id, run_id, target_generation, slot,
+      attempt_generation, reservation_digest)
 )
 ~~~
 
 State is detected, inspecting, terminal-proved-no-effect,
 terminal-proved-usage, awaiting-human-retire or terminal-retired-unknown. The
-row joins the exact daemon-global action pair, run and reservation/digest.
+row joins the exact daemon-global action pair, run and reservation digest; no
+second free-form reservation identifier exists.
+Its task/ordinal/target/slot/attempt tuple is daemon-derived at insert from the
+affected certifying action's immutable action/reservation/head custody and never
+changes; baseline triggers reject any tuple, pair, run or digest mutation. The
+displayed composite foreign keys, not mapper prose, bind both custody owners; this
+tuple remains trustworthy when the route row itself is missing or integrity-
+failed. It supplies the existing public recovery read and scoped route-list
+filters without reconstructing route bytes.
 reason and terminal
 disposition use the exact closed receipt-v2 enums. lookup_state is not-
 attempted, in-flight or completed, with evidence digest non-null exactly for
@@ -3748,12 +5724,13 @@ no reader, receipt exporter or Console projection may infer or reconstruct a
 route from provider, action, bundle or prompt remnants.
 
 The service runs before generic provider recovery. Prepared with durable
-zero-dispatch proof releases the full reservation and terminalises no-effect.
+zero-dispatch proof returns the full reservation, writes `settled`, and
+terminalises no-effect.
 Every dispatched/accepted/ambiguous state permits at most one bounded pair-keyed
 lookup when supported. Exact safe/unusable/failure terminal input enters the
 ordinary action-bound terminaliser; complete authenticated usage settles
 exactly and absent/partial usage charges the remaining spendable reservation.
-Authenticated closed no-effect releases. A proved effect with an unverifiable
+Authenticated closed no-effect returns full capacity under `settled`. A proved effect with an unverifiable
 binding conservatively settles as integrity-terminal. Absent, timeout,
 malformed, conflict or unavailable lookup enters awaiting-human-retire and
 retains the reservation. No branch reconstructs route/bundle/prompt,
@@ -3807,7 +5784,9 @@ Deterministic verification covers:
   review-subject JCS golden/permutation/extra/omission/equality-copy fixtures
   fail every crossed nested bundle/profile field;
 - contract-bound Claude/Codex/Cursor/Agy exact server/tool/helper/broker sandbox
-  canaries, peer credentials, stopped-child persistence, FD-3 closure,
+  canaries, peer credentials, stopped-child persistence, exact provider-closure
+  derivation/substitution negatives, supervisor-FD-3 isolation and stub-FD-4–
+  FD-7 closure,
   daemon/supervisor/startup/PID-reuse cleanup, empty list probes, denied extra
   methods/effects and no cross-bundle portal read;
 - structural Python/TypeScript route-schema parity, post-router admission
@@ -3829,7 +5808,9 @@ Deterministic verification covers:
   receipt; and
 - every certifying-action recovery branch, bounded lookup, conservative
   consumption, direct-human retirement, liveness exit, generic-recovery
-  exclusion and absence of redispatch/reconstruction.
+  exclusion and absence of redispatch/reconstruction. Direct-SQL shape tests
+  prove digest-only reservation custody and reject any free-form
+  `reservation_id` column or mapper input.
 
 The current catalogue explicitly rejects provider_review_packets,
 model_routing_receipts, cross_family_reviews, modelRoutingReceipts,
@@ -3838,7 +5819,8 @@ recordCrossFamilyReviewEvidence and fabric.v1.review-evidence.record.
 
 ### 9.22 Asynchronous lifecycle rotation persistence
 
-Spec 01 section 32.20 owns observable behaviour. lifecycle_rotation_custody is
+Spec 01 section 32.20 owns observable behaviour.
+`lifecycle_rotation_custodies` plus its append-only revisions and exact head is
 the dedicated owner for rotate/compact provider and bridge effects, including a
 true chair rotation.
 
@@ -3868,16 +5850,18 @@ provider_context_observation_audit(
     context_revision, evidence_digest)
 )
 
-lifecycle_rotation_custody(
-  run_id, agent_id, custody_id, command_id,
-  provider_action_adapter_id, provider_action_id,
+lifecycle_rotation_custodies(
+  project_session_id, run_id, agent_id, custody_id, command_id,
+  admission_digest, provider_action_adapter_id, provider_action_id,
   recovery_source_kind, recovery_from_custody_id,
-  recovery_from_generation_loss_id,
-  bridge_owner_kind, state, terminal_disposition, revision,
-  caller_turn_lease_id, caller_turn_generation,
+  recovery_from_custody_revision, recovery_from_generation_loss_id,
+  recovery_from_generation_loss_revision, recovery_source_ref_digest,
+  recovery_source_journal_digest,
+  bridge_owner_kind, caller_turn_lease_id, caller_turn_generation,
   predecessor_turn_set_digest, quarantined_write_set_digest,
   delivery_cut_watermark, adoption_delivery_set_digest,
   checkpoint_ref, checkpoint_digest, checkpoint_validation_revision,
+  checkpoint_validation_digest, checkpoint_validation_key,
   task_revision, mailbox_revision, child_set_digest, open_work_set_digest,
   source_provider_session_ref, source_capability_hash,
   source_custody_action_id, source_adapter_id, source_adapter_contract_digest,
@@ -3885,43 +5869,1209 @@ lifecycle_rotation_custody(
   source_provider_generation, source_principal_generation,
   source_bridge_generation, source_project_session_generation,
   source_run_generation, source_chair_lease_generation,
-  target_provider_generation,
-  target_principal_generation, target_bridge_generation,
-  replacement_adapter_id, replacement_contract_digest,
-  staged_capability_hash, launch_attest_challenge_digest,
-  precondition_digest, terminal_evidence_digest,
-  PRIMARY KEY(run_id, agent_id, custody_id),
-  UNIQUE(run_id, agent_id, custody_id, revision),
-  UNIQUE(provider_action_adapter_id, provider_action_id),
-  CHECK(terminal_disposition IS NULL OR terminal_disposition IN
-    ('adopted','no-effect','quarantined','superseded','abandoned')),
-  CHECK((state = 'finalized') = (terminal_disposition IS NOT NULL)),
-  CHECK((recovery_source_kind = 'none' AND
+  target_provider_generation, target_principal_generation,
+  target_bridge_generation, replacement_adapter_id,
+  replacement_contract_digest, staged_capability_hash,
+  launch_attest_challenge_digest, precondition_digest,
+  origin_fresh_handoff_id, origin_fresh_handoff_digest,
+  origin_operation, origin_fresh_apply_plan_digest,
+  creation_json, creation_digest, created_at,
+  PRIMARY KEY(run_id,agent_id,custody_id),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id),
+  UNIQUE(provider_action_adapter_id,provider_action_id),
+  UNIQUE(creation_digest),
+  CHECK((recovery_source_kind='none' AND
       recovery_from_custody_id IS NULL AND
-      recovery_from_generation_loss_id IS NULL) OR
-    (recovery_source_kind = 'custody' AND
+      recovery_from_custody_revision IS NULL AND
+      recovery_from_generation_loss_id IS NULL AND
+      recovery_from_generation_loss_revision IS NULL AND
+      recovery_source_ref_digest IS NULL AND
+      recovery_source_journal_digest IS NULL AND
+      origin_fresh_handoff_id IS NULL AND origin_fresh_handoff_digest IS NULL AND
+      origin_operation IS NULL AND origin_fresh_apply_plan_digest IS NULL) OR
+    (recovery_source_kind='custody' AND
       recovery_from_custody_id IS NOT NULL AND
-      recovery_from_generation_loss_id IS NULL) OR
-    (recovery_source_kind = 'generation-loss' AND
+      recovery_from_custody_revision IS NOT NULL AND
+      recovery_from_generation_loss_id IS NULL AND
+      recovery_from_generation_loss_revision IS NULL AND
+      recovery_source_ref_digest IS NOT NULL AND
+      recovery_source_journal_digest IS NOT NULL AND
+      origin_fresh_handoff_id IS NOT NULL AND
+      origin_fresh_handoff_digest IS NOT NULL AND
+      origin_operation='fresh-rotate' AND
+      origin_fresh_apply_plan_digest IS NOT NULL) OR
+    (recovery_source_kind='generation-loss' AND
       recovery_from_custody_id IS NULL AND
-      recovery_from_generation_loss_id IS NOT NULL)),
-  FOREIGN KEY(provider_action_adapter_id, provider_action_id)
-    REFERENCES provider_actions(adapter_id, action_id),
-  FOREIGN KEY(source_adapter_id, source_custody_action_id)
-    REFERENCES provider_actions(adapter_id, action_id),
-  FOREIGN KEY(run_id, agent_id, recovery_from_custody_id)
-    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id),
-  FOREIGN KEY(run_id, agent_id, recovery_from_generation_loss_id)
-    REFERENCES lifecycle_generation_losses(run_id, agent_id, generation_loss_id)
+      recovery_from_custody_revision IS NULL AND
+      recovery_from_generation_loss_id IS NOT NULL AND
+      recovery_from_generation_loss_revision IS NOT NULL AND
+      recovery_source_ref_digest IS NOT NULL AND
+      recovery_source_journal_digest IS NOT NULL AND
+      origin_fresh_handoff_id IS NOT NULL AND
+      origin_fresh_handoff_digest IS NOT NULL AND
+      origin_operation='fresh-rotate' AND
+      origin_fresh_apply_plan_digest IS NOT NULL)),
+  CHECK((checkpoint_validation_digest IS NULL AND
+      checkpoint_validation_key='none') OR
+    (checkpoint_validation_digest IS NOT NULL AND
+      checkpoint_validation_key=checkpoint_validation_digest)),
+  CHECK(origin_fresh_handoff_id IS NULL OR
+    (provider_action_adapter_id=replacement_adapter_id AND
+      replacement_contract_digest IS NOT NULL)),
+  FOREIGN KEY(provider_action_adapter_id,provider_action_id)
+    REFERENCES provider_actions(adapter_id,action_id),
+  FOREIGN KEY(source_adapter_id,source_custody_action_id)
+    REFERENCES provider_actions(adapter_id,action_id),
+  FOREIGN KEY(project_session_id,run_id,agent_id,recovery_from_custody_id,
+      recovery_from_custody_revision,recovery_source_ref_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,source_ref_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,
+      recovery_from_generation_loss_id,recovery_from_generation_loss_revision,
+      recovery_source_ref_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      source_ref_digest),
+  FOREIGN KEY(origin_fresh_handoff_id,origin_fresh_handoff_digest,
+      project_session_id,run_id,agent_id,recovery_source_kind,
+      recovery_source_ref_digest,recovery_source_journal_digest,custody_id,
+      provider_action_adapter_id,provider_action_id,checkpoint_ref,
+      checkpoint_digest,checkpoint_validation_key,replacement_contract_digest,
+      origin_operation,target_provider_generation,target_principal_generation,
+      target_bridge_generation,admission_digest,origin_fresh_apply_plan_digest)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,handoff_digest,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+      new_custody_id,provider_action_adapter_id,provider_action_id,checkpoint_ref,
+      checkpoint_digest,checkpoint_validation_key,adapter_contract_digest,
+      operation,reserved_provider_generation,reserved_principal_generation,
+      reserved_bridge_generation,admission_digest,fresh_apply_plan_digest)
+    DEFERRABLE INITIALLY DEFERRED
 )
+
+lifecycle_rotation_custody_revisions(
+  project_session_id, run_id, agent_id, custody_id,
+  revision CHECK(revision >= 1), prior_revision, prior_journal_digest,
+  state CHECK(state IN ('awaiting-boundary','prepared','dispatched','accepted',
+    'ambiguous','provider-terminal','committing','finalized')),
+  disposition_code CHECK(disposition_code IN
+    ('none','adopted','no-effect','quarantined','superseded','abandoned')),
+  proof_kind CHECK(proof_kind IN ('none','zero-dispatch-no-effect',
+    'predispatch-superseded','postterminal-adoption-cas-superseded',
+    'fresh-handoff-superseded','provider-terminal','provider-no-effect',
+    'integrity-quarantine','confirmed-abandon')),
+  terminal_evidence_digest,
+  semantic_json, semantic_digest, source_ref_digest,
+  origin_fresh_apply_id, origin_fresh_apply_digest,
+  receipt_batch_id, receipt_apply_id, receipt_apply_digest,
+  journal_json, journal_digest, recorded_at,
+  PRIMARY KEY(run_id,agent_id,custody_id,revision),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    source_ref_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    semantic_digest,source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    semantic_digest,source_ref_digest,journal_digest,origin_fresh_apply_id,
+    origin_fresh_apply_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,state,
+    disposition_code,semantic_digest,source_ref_digest,journal_digest),
+  UNIQUE(semantic_digest), UNIQUE(source_ref_digest), UNIQUE(journal_digest),
+  CHECK((revision=1 AND prior_revision IS NULL AND
+      prior_journal_digest IS NULL) OR
+    (revision>1 AND prior_revision=revision-1 AND
+      prior_journal_digest IS NOT NULL)),
+  CHECK((state='finalized')=(disposition_code<>'none')),
+  CHECK((state='finalized')=
+    (receipt_batch_id IS NOT NULL AND receipt_apply_id IS NOT NULL AND
+      receipt_apply_digest IS NOT NULL)),
+  CHECK((receipt_batch_id IS NULL)=(receipt_apply_id IS NULL)),
+  CHECK((receipt_batch_id IS NULL)=(receipt_apply_digest IS NULL)),
+  CHECK((origin_fresh_apply_id IS NULL)=(origin_fresh_apply_digest IS NULL)),
+  CHECK(origin_fresh_apply_id IS NULL OR
+    (revision=1 AND state<>'finalized' AND receipt_batch_id IS NULL)),
+  CHECK((state IN ('provider-terminal','committing','finalized'))=
+    (terminal_evidence_digest IS NOT NULL)),
+  CHECK((state='finalized')=(proof_kind<>'none')),
+  FOREIGN KEY(project_session_id,run_id,agent_id,custody_id)
+    REFERENCES lifecycle_rotation_custodies(
+      project_session_id,run_id,agent_id,custody_id),
+  FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,prior_revision,
+      prior_journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,journal_digest),
+  FOREIGN KEY(receipt_batch_id,receipt_apply_id,project_session_id,run_id,agent_id,
+      custody_id,revision,semantic_digest,source_ref_digest)
+    REFERENCES lifecycle_receipt_custody_effects(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,custody_id,
+      final_revision,final_semantic_digest,final_source_ref_digest)
+    DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(receipt_apply_id,receipt_apply_digest,receipt_batch_id)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,receipt_batch_id)
+    DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(receipt_apply_id,receipt_batch_id)
+    REFERENCES lifecycle_transition_applies(apply_id,receipt_batch_id)
+    DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(origin_fresh_apply_id,origin_fresh_apply_digest,custody_id,
+      semantic_digest,source_ref_digest)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,new_custody_id,new_custody_semantic_digest,
+      new_custody_source_ref_digest)
+    DEFERRABLE INITIALLY DEFERRED
+)
+
+lifecycle_rotation_custody_heads(
+  project_session_id, run_id, agent_id, custody_id, current_revision,
+  state, disposition_code, semantic_digest, source_ref_digest, journal_digest,
+  terminal CHECK(terminal IN (0,1)), head_revision,
+  PRIMARY KEY(run_id,agent_id,custody_id),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id),
+  FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,current_revision,
+      state,disposition_code,semantic_digest,source_ref_digest,journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,state,
+      disposition_code,semantic_digest,source_ref_digest,journal_digest),
+  CHECK((terminal=1)=(state='finalized'))
+)
+
 CREATE UNIQUE INDEX one_nonfinal_lifecycle_custody_per_agent
-  ON lifecycle_rotation_custody(run_id, agent_id)
-  WHERE state != 'finalized';
+  ON lifecycle_rotation_custody_heads(run_id,agent_id)
+  WHERE terminal=0;
+
+lifecycle_admitted_run_scopes(
+  project_id, project_session_id, run_id, authority_id,
+  admission_digest, admitted_at,
+  PRIMARY KEY(project_session_id,run_id),
+  UNIQUE(project_id,project_session_id,run_id),
+  UNIQUE(project_session_id,run_id,authority_id)
+)
+
+lifecycle_receipt_scope_checkpoints(
+  project_session_id, run_id, authority_id,
+  receipt_count CHECK(receipt_count >= 0),
+  head_authority_sequence CHECK(head_authority_sequence >= 0),
+  head_receipt_digest, ordered_record_set_digest,
+  checkpoint_json, checkpoint_digest, attestation, verified_at,
+  PRIMARY KEY(project_session_id,run_id,receipt_count),
+  UNIQUE(checkpoint_digest),
+  UNIQUE(project_session_id,run_id,checkpoint_digest),
+  UNIQUE(project_session_id,run_id,receipt_count,checkpoint_digest,
+    head_receipt_digest),
+  UNIQUE(project_session_id,run_id,authority_id,receipt_count,
+    checkpoint_digest,head_receipt_digest),
+  UNIQUE(project_session_id,run_id,authority_id,receipt_count,
+    head_authority_sequence,head_receipt_digest,ordered_record_set_digest,
+    checkpoint_digest),
+  CHECK(receipt_count=head_authority_sequence),
+  CHECK((receipt_count=0)=(head_receipt_digest IS NULL)),
+  FOREIGN KEY(project_session_id,run_id,authority_id)
+    REFERENCES lifecycle_admitted_run_scopes(
+      project_session_id,run_id,authority_id)
+)
+
+lifecycle_receipt_scope_heads(
+  project_session_id, run_id, authority_id, receipt_count,
+  head_authority_sequence, head_receipt_digest,
+  ordered_record_set_digest, checkpoint_digest, revision,
+  PRIMARY KEY(project_session_id,run_id),
+  FOREIGN KEY(project_session_id,run_id,checkpoint_digest)
+    REFERENCES lifecycle_receipt_scope_checkpoints(
+      project_session_id,run_id,checkpoint_digest),
+  FOREIGN KEY(project_session_id,run_id,authority_id,receipt_count,
+      head_authority_sequence,head_receipt_digest,ordered_record_set_digest,
+      checkpoint_digest)
+    REFERENCES lifecycle_receipt_scope_checkpoints(
+      project_session_id,run_id,authority_id,receipt_count,
+      head_authority_sequence,head_receipt_digest,ordered_record_set_digest,
+      checkpoint_digest)
+)
+
+lifecycle_receipt_namespace_checkpoints(
+  project_id, authority_id, scope_count CHECK(scope_count >= 0),
+  ordered_scope_head_set_digest, checkpoint_json, checkpoint_digest,
+  attestation, verified_at,
+  PRIMARY KEY(project_id,checkpoint_digest),
+  UNIQUE(checkpoint_digest),
+  UNIQUE(project_id,checkpoint_digest,authority_id),
+  UNIQUE(project_id,authority_id,scope_count,ordered_scope_head_set_digest,
+    checkpoint_digest)
+)
+
+lifecycle_receipt_namespace_members(
+  project_id, checkpoint_digest, ordinal CHECK(ordinal >= 1),
+  project_session_id, run_id, authority_id, scope_checkpoint_digest, receipt_count,
+  head_receipt_digest,
+  PRIMARY KEY(project_id,checkpoint_digest,ordinal),
+  UNIQUE(project_id,checkpoint_digest,project_session_id,run_id),
+  CHECK(receipt_count >= 1 AND head_receipt_digest IS NOT NULL),
+  FOREIGN KEY(project_id,checkpoint_digest,authority_id)
+    REFERENCES lifecycle_receipt_namespace_checkpoints(
+      project_id,checkpoint_digest,authority_id),
+  FOREIGN KEY(project_id,project_session_id,run_id)
+    REFERENCES lifecycle_admitted_run_scopes(
+      project_id,project_session_id,run_id),
+  FOREIGN KEY(project_session_id,run_id,authority_id,receipt_count,
+      scope_checkpoint_digest,head_receipt_digest)
+    REFERENCES lifecycle_receipt_scope_checkpoints(
+      project_session_id,run_id,authority_id,receipt_count,checkpoint_digest,
+      head_receipt_digest)
+)
+
+lifecycle_receipt_namespace_heads(
+  project_id PRIMARY KEY, authority_id, scope_count,
+  ordered_scope_head_set_digest, checkpoint_digest, head_revision,
+  FOREIGN KEY(project_id,authority_id,scope_count,
+      ordered_scope_head_set_digest,checkpoint_digest)
+    REFERENCES lifecycle_receipt_namespace_checkpoints(
+      project_id,authority_id,scope_count,ordered_scope_head_set_digest,
+      checkpoint_digest)
+)
+
+lifecycle_recovery_retirement_plans(
+  retirement_id PRIMARY KEY, revision CHECK(revision=1),
+  project_session_id, run_id, agent_id, custody_id, custody_revision,
+  custody_source_ref_digest, custody_journal_digest,
+  finalized_disposition CHECK(finalized_disposition IN
+    ('no-effect','superseded','quarantined')),
+  finalized_terminal_evidence_digest, admission_digest,
+  transition_proof_json, transition_proof_digest,
+  mutation_plan_json, mutation_plan_digest, retirement_evidence_digest,
+  planned_apply_id UNIQUE, recorded_at, plan_json, retirement_plan_digest UNIQUE,
+  UNIQUE(retirement_id,revision,retirement_plan_digest),
+  UNIQUE(retirement_id,retirement_plan_digest,planned_apply_id),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,custody_revision),
+  UNIQUE(retirement_id,retirement_plan_digest,planned_apply_id,
+    project_session_id,run_id,agent_id,mutation_plan_digest),
+  UNIQUE(retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
+    custody_id,custody_revision,custody_source_ref_digest,custody_journal_digest,
+    finalized_disposition,retirement_plan_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,custody_revision,
+      finalized_disposition,custody_source_ref_digest,custody_journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,disposition_code,
+      source_ref_digest,journal_digest)
+)
+
+lifecycle_receipt_batches(
+  batch_id PRIMARY KEY, planned_apply_id UNIQUE,
+  project_session_id, run_id, agent_id,
+  transition_kind CHECK(transition_kind IN
+    ('custody-terminal','generation-loss-terminal',
+      'custody-recovery-retirement')),
+  effects_set_digest, mutation_plan_digest,
+  transition_replay_json, transition_replay_digest,
+  ordered_subject_set_digest,
+  receipt_intent_count CHECK(receipt_intent_count IN (1,2)),
+  review_adoption_reservation_id, review_adoption_reservation_digest,
+  fresh_handoff_id, fresh_handoff_digest,
+  recovery_retirement_id, recovery_retirement_plan_digest, created_at,
+  UNIQUE(project_session_id,run_id,agent_id,transition_replay_digest),
+  UNIQUE(batch_id,planned_apply_id),
+  UNIQUE(batch_id,transition_kind,receipt_intent_count),
+  UNIQUE(batch_id,planned_apply_id,transition_replay_digest,
+    mutation_plan_digest),
+  UNIQUE(batch_id,project_session_id,run_id),
+  UNIQUE(batch_id,project_session_id,run_id,agent_id),
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id),
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+    review_adoption_reservation_digest),
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+    transition_kind),
+  UNIQUE(batch_id,planned_apply_id,transition_replay_digest,
+    mutation_plan_digest,fresh_handoff_id,fresh_handoff_digest),
+  CHECK((review_adoption_reservation_id IS NULL)=
+    (review_adoption_reservation_digest IS NULL)),
+  CHECK((fresh_handoff_id IS NULL)=(fresh_handoff_digest IS NULL)),
+  CHECK((recovery_retirement_id IS NULL)=
+    (recovery_retirement_plan_digest IS NULL)),
+  CHECK((transition_kind='custody-recovery-retirement')=
+    (recovery_retirement_id IS NOT NULL)),
+  CHECK((receipt_intent_count=2)=
+    (review_adoption_reservation_id IS NOT NULL)),
+  FOREIGN KEY(review_adoption_reservation_id,
+      review_adoption_reservation_digest)
+    REFERENCES lifecycle_review_adoption_reservations(
+      reservation_id,reservation_digest),
+  FOREIGN KEY(fresh_handoff_id,fresh_handoff_digest,planned_apply_id)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,handoff_digest,planned_apply_id),
+  FOREIGN KEY(recovery_retirement_id,recovery_retirement_plan_digest,
+      planned_apply_id,project_session_id,run_id,agent_id,mutation_plan_digest)
+    REFERENCES lifecycle_recovery_retirement_plans(
+      retirement_id,retirement_plan_digest,planned_apply_id,
+      project_session_id,run_id,agent_id,mutation_plan_digest)
+)
+
+lifecycle_receipt_custody_effects(
+  batch_id, ordinal CHECK(ordinal=1), role CHECK(role='primary'),
+  transition_kind CHECK(transition_kind='custody-terminal'),
+  planned_apply_id, project_session_id, run_id, agent_id, custody_id,
+  pre_revision CHECK(pre_revision >= 1), pre_journal_digest,
+  final_revision CHECK(final_revision >= 2), final_semantic_digest,
+  final_source_ref_digest, effect_digest,
+  PRIMARY KEY(batch_id,ordinal), UNIQUE(batch_id), UNIQUE(effect_digest),
+  UNIQUE(batch_id,effect_digest),
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+    custody_id,final_revision,final_semantic_digest,final_source_ref_digest),
+  FOREIGN KEY(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      transition_kind)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      transition_kind),
+  FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,pre_revision,
+      pre_journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,journal_digest),
+  CHECK(final_revision=pre_revision+1)
+)
+
+lifecycle_receipt_generation_loss_effects(
+  batch_id, ordinal CHECK(ordinal IN (1,2)),
+  role CHECK(role IN ('primary','linked')), planned_apply_id,
+  batch_transition_kind,
+  project_session_id, run_id, agent_id, generation_loss_id,
+  pre_revision CHECK(pre_revision >= 1), pre_journal_digest,
+  final_revision CHECK(final_revision >= 2), final_semantic_digest,
+  final_source_ref_digest, effect_digest,
+  PRIMARY KEY(batch_id,ordinal), UNIQUE(batch_id,role), UNIQUE(effect_digest),
+  UNIQUE(batch_id,role,effect_digest),
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+    generation_loss_id,final_revision,final_semantic_digest,
+    final_source_ref_digest),
+  FOREIGN KEY(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      batch_transition_kind)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      transition_kind),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      pre_revision,pre_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      journal_digest),
+  CHECK(final_revision=pre_revision+1),
+  CHECK((role='primary' AND ordinal=1 AND
+      batch_transition_kind='generation-loss-terminal') OR
+    (role='linked' AND ordinal=2 AND
+      batch_transition_kind='custody-terminal'))
+)
+
+lifecycle_receipt_recovery_retirement_effects(
+  batch_id PRIMARY KEY, ordinal CHECK(ordinal=1), role CHECK(role='primary'),
+  transition_kind CHECK(transition_kind='custody-recovery-retirement'),
+  planned_apply_id, project_session_id, run_id, agent_id,
+  retirement_id UNIQUE, retirement_plan_digest,
+  custody_id, custody_revision, custody_source_ref_digest,
+  custody_journal_digest, finalized_disposition,
+  effect_digest UNIQUE,
+  UNIQUE(batch_id,effect_digest),
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+    retirement_id,retirement_plan_digest,custody_id,custody_revision,
+    custody_source_ref_digest,custody_journal_digest,finalized_disposition,
+    effect_digest),
+  FOREIGN KEY(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      transition_kind)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      transition_kind),
+  FOREIGN KEY(retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
+      custody_id,custody_revision,custody_source_ref_digest,
+      custody_journal_digest,finalized_disposition,retirement_plan_digest)
+    REFERENCES lifecycle_recovery_retirement_plans(
+      retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
+      custody_id,custody_revision,custody_source_ref_digest,
+      custody_journal_digest,finalized_disposition,retirement_plan_digest)
+)
+
+lifecycle_receipt_intents(
+  batch_id, ordinal CHECK(ordinal IN (1,2)),
+  batch_transition_kind, batch_intent_count,
+  kind CHECK(kind IN ('custody-terminal','generation-loss-terminal',
+    'custody-recovery-retirement','review-adoption-decision')),
+  project_session_id, run_id, agent_id,
+  subject_owner_kind CHECK(subject_owner_kind IN
+    ('custody','generation-loss','recovery-retirement')),
+  subject_owner_id, subject_owner_revision CHECK(subject_owner_revision >= 1),
+  subject_json, subject_digest, intent_digest, created_at,
+  PRIMARY KEY(batch_id,ordinal), UNIQUE(intent_digest),
+  UNIQUE(intent_digest,batch_id,ordinal,project_session_id,run_id,agent_id,
+    kind,subject_owner_kind,subject_owner_id,subject_owner_revision,
+    subject_digest),
+  UNIQUE(kind,project_session_id,run_id,agent_id,subject_owner_kind,
+    subject_owner_id,subject_owner_revision),
+  FOREIGN KEY(batch_id,project_session_id,run_id,agent_id)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,project_session_id,run_id,agent_id),
+  FOREIGN KEY(batch_id,batch_transition_kind,batch_intent_count)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,transition_kind,receipt_intent_count),
+  CHECK((ordinal=1 AND kind=batch_transition_kind) OR
+    (ordinal=2 AND batch_transition_kind='custody-terminal' AND
+      batch_intent_count=2 AND kind='review-adoption-decision'))
+)
+
+lifecycle_authority_receipts(
+  intent_digest PRIMARY KEY, batch_id, ordinal,
+  project_session_id, run_id, agent_id, kind, subject_owner_kind,
+  subject_owner_id, subject_owner_revision, subject_digest,
+  authority_id, authority_sequence CHECK(authority_sequence >= 1),
+  previous_authority_sequence, previous_receipt_digest,
+  receipt_json, receipt_digest UNIQUE, attestation, verified_at,
+  UNIQUE(project_session_id,run_id,authority_id,authority_sequence),
+  UNIQUE(project_session_id,run_id,authority_id,authority_sequence,
+    receipt_digest),
+  UNIQUE(batch_id,ordinal,intent_digest,subject_digest,receipt_digest),
+  UNIQUE(receipt_digest,kind,project_session_id,run_id,agent_id,
+    subject_owner_kind,subject_owner_id,subject_owner_revision),
+  UNIQUE(receipt_digest,intent_digest,batch_id,ordinal,kind,project_session_id,
+    run_id,agent_id,subject_owner_kind,subject_owner_id,subject_owner_revision,
+    subject_digest),
+  UNIQUE(kind,project_session_id,run_id,agent_id,subject_owner_kind,
+    subject_owner_id,subject_owner_revision),
+  FOREIGN KEY(intent_digest,batch_id,ordinal,project_session_id,run_id,agent_id,
+      kind,subject_owner_kind,subject_owner_id,subject_owner_revision,
+      subject_digest)
+    REFERENCES lifecycle_receipt_intents(
+      intent_digest,batch_id,ordinal,project_session_id,run_id,agent_id,kind,
+      subject_owner_kind,subject_owner_id,subject_owner_revision,subject_digest),
+  FOREIGN KEY(project_session_id,run_id,authority_id)
+    REFERENCES lifecycle_admitted_run_scopes(
+      project_session_id,run_id,authority_id),
+  FOREIGN KEY(project_session_id,run_id,authority_id,
+      previous_authority_sequence,previous_receipt_digest)
+    REFERENCES lifecycle_authority_receipts(
+      project_session_id,run_id,authority_id,authority_sequence,receipt_digest),
+  CHECK((authority_sequence=1 AND previous_authority_sequence IS NULL AND
+      previous_receipt_digest IS NULL) OR
+    (authority_sequence>1 AND
+      previous_authority_sequence=authority_sequence-1 AND
+      previous_receipt_digest IS NOT NULL))
+)
+
+lifecycle_receipt_batch_completions(
+  batch_id PRIMARY KEY, transition_kind, receipt_intent_count,
+  ordinal_one CHECK(ordinal_one=1), ordinal_one_intent_digest,
+  ordinal_one_subject_digest,
+  ordinal_one_receipt_digest,
+  ordinal_two CHECK(ordinal_two IS NULL OR ordinal_two=2),
+  ordinal_two_intent_digest, ordinal_two_subject_digest,
+  ordinal_two_receipt_digest,
+  primary_custody_effect_digest,
+  primary_loss_effect_role CHECK(
+    primary_loss_effect_role IS NULL OR primary_loss_effect_role='primary'),
+  primary_loss_effect_digest, primary_retirement_effect_digest,
+  linked_loss_effect_role CHECK(
+    linked_loss_effect_role IS NULL OR linked_loss_effect_role='linked'),
+  linked_loss_effect_digest, ordered_authority_receipt_set_digest,
+  completion_json, completion_digest UNIQUE, completed_at,
+  UNIQUE(batch_id,completion_digest,ordered_authority_receipt_set_digest),
+  FOREIGN KEY(batch_id,transition_kind,receipt_intent_count)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,transition_kind,receipt_intent_count),
+  FOREIGN KEY(batch_id,ordinal_one,ordinal_one_intent_digest,
+      ordinal_one_subject_digest,ordinal_one_receipt_digest)
+    REFERENCES lifecycle_authority_receipts(
+      batch_id,ordinal,intent_digest,subject_digest,receipt_digest),
+  FOREIGN KEY(batch_id,ordinal_two,ordinal_two_intent_digest,
+      ordinal_two_subject_digest,ordinal_two_receipt_digest)
+    REFERENCES lifecycle_authority_receipts(
+      batch_id,ordinal,intent_digest,subject_digest,receipt_digest),
+  FOREIGN KEY(batch_id,primary_custody_effect_digest)
+    REFERENCES lifecycle_receipt_custody_effects(batch_id,effect_digest),
+  FOREIGN KEY(batch_id,primary_loss_effect_role,primary_loss_effect_digest)
+    REFERENCES lifecycle_receipt_generation_loss_effects(
+      batch_id,role,effect_digest),
+  FOREIGN KEY(batch_id,primary_retirement_effect_digest)
+    REFERENCES lifecycle_receipt_recovery_retirement_effects(
+      batch_id,effect_digest),
+  FOREIGN KEY(batch_id,linked_loss_effect_role,linked_loss_effect_digest)
+    REFERENCES lifecycle_receipt_generation_loss_effects(
+      batch_id,role,effect_digest),
+  CHECK((receipt_intent_count=1 AND ordinal_two IS NULL AND
+      ordinal_two_intent_digest IS NULL AND
+      ordinal_two_subject_digest IS NULL AND ordinal_two_receipt_digest IS NULL) OR
+    (receipt_intent_count=2 AND ordinal_two=2 AND
+      ordinal_two_intent_digest IS NOT NULL AND
+      ordinal_two_subject_digest IS NOT NULL AND
+      ordinal_two_receipt_digest IS NOT NULL)),
+  CHECK((linked_loss_effect_role IS NULL)=(linked_loss_effect_digest IS NULL)),
+  CHECK((transition_kind='custody-terminal' AND
+      primary_custody_effect_digest IS NOT NULL AND
+      primary_loss_effect_role IS NULL AND primary_loss_effect_digest IS NULL AND
+      primary_retirement_effect_digest IS NULL) OR
+    (transition_kind='generation-loss-terminal' AND
+      primary_custody_effect_digest IS NULL AND
+      primary_loss_effect_role='primary' AND
+      primary_loss_effect_digest IS NOT NULL AND
+      primary_retirement_effect_digest IS NULL AND
+      linked_loss_effect_digest IS NULL) OR
+    (transition_kind='custody-recovery-retirement' AND
+      primary_custody_effect_digest IS NULL AND
+      primary_loss_effect_role IS NULL AND primary_loss_effect_digest IS NULL AND
+      primary_retirement_effect_digest IS NOT NULL AND
+      linked_loss_effect_digest IS NULL))
+)
+
+lifecycle_review_authority_bindings(
+  receipt_digest PRIMARY KEY, intent_digest UNIQUE, batch_id UNIQUE,
+  ordinal CHECK(ordinal=2), subject_digest,
+  kind CHECK(kind='review-adoption-decision'),
+  subject_owner_kind CHECK(subject_owner_kind='custody'),
+  project_session_id, run_id, agent_id, custody_id, custody_revision,
+  review_reservation_digest, review_decision_digest,
+  certification_cut_digest, certification_cut_key,
+  decision_loss_after_id, decision_loss_after_revision,
+  decision_loss_after_semantic_digest, decision_loss_after_source_ref_digest,
+  decision_loss_after_key,
+  apply_id UNIQUE,
+  UNIQUE(receipt_digest,run_id,agent_id,custody_id,custody_revision,
+    review_decision_digest,certification_cut_digest),
+  FOREIGN KEY(receipt_digest,intent_digest,batch_id,ordinal,kind,
+      project_session_id,run_id,agent_id,subject_owner_kind,custody_id,
+      custody_revision,subject_digest)
+    REFERENCES lifecycle_authority_receipts(
+      receipt_digest,intent_digest,batch_id,ordinal,kind,project_session_id,run_id,
+      agent_id,subject_owner_kind,subject_owner_id,subject_owner_revision,
+      subject_digest),
+  FOREIGN KEY(batch_id,apply_id,project_session_id,run_id,agent_id,
+      review_reservation_digest)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      review_adoption_reservation_digest),
+  FOREIGN KEY(run_id,agent_id,custody_id,custody_revision)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      run_id,agent_id,custody_id,revision),
+  FOREIGN KEY(review_reservation_digest,project_session_id,run_id,agent_id,
+      custody_id,custody_revision,review_decision_digest,certification_cut_key,
+      decision_loss_after_key)
+    REFERENCES lifecycle_review_adoption_reservations(
+      reservation_digest,project_session_id,run_id,agent_id,custody_id,
+      finalized_custody_revision,review_decision_digest,certification_cut_key,
+      decision_loss_after_key),
+  FOREIGN KEY(review_reservation_digest,decision_loss_after_id,
+      decision_loss_after_revision,decision_loss_after_semantic_digest,
+      decision_loss_after_source_ref_digest)
+    REFERENCES lifecycle_review_adoption_reservations(
+      reservation_digest,decision_loss_after_id,decision_loss_after_revision,
+      decision_loss_after_semantic_digest,decision_loss_after_source_ref_digest),
+  FOREIGN KEY(apply_id,batch_id)
+    REFERENCES lifecycle_transition_applies(apply_id,receipt_batch_id),
+  CHECK(certification_cut_key IS NOT NULL AND
+    decision_loss_after_key IS NOT NULL),
+  CHECK((certification_cut_digest IS NULL AND certification_cut_key='none') OR
+    (certification_cut_digest IS NOT NULL AND
+      certification_cut_key=certification_cut_digest)),
+  CHECK((decision_loss_after_key='none' AND decision_loss_after_id IS NULL AND
+      decision_loss_after_revision IS NULL AND
+      decision_loss_after_semantic_digest IS NULL AND
+      decision_loss_after_source_ref_digest IS NULL) OR
+    (decision_loss_after_key<>'none' AND decision_loss_after_id IS NOT NULL AND
+      decision_loss_after_revision IS NOT NULL AND
+      decision_loss_after_semantic_digest IS NOT NULL AND
+      decision_loss_after_source_ref_digest=decision_loss_after_key))
+)
+
+lifecycle_receipt_batch_authorizations(
+  batch_id PRIMARY KEY, project_session_id, run_id, batch_completion_digest,
+  ordered_authority_receipt_set_digest, verified_scope_checkpoint_digest,
+  authorized_at, authorization_digest UNIQUE,
+  UNIQUE(batch_id,verified_scope_checkpoint_digest),
+  UNIQUE(batch_id,ordered_authority_receipt_set_digest,
+    verified_scope_checkpoint_digest),
+  UNIQUE(batch_id,batch_completion_digest,
+    ordered_authority_receipt_set_digest,verified_scope_checkpoint_digest),
+  FOREIGN KEY(batch_id,project_session_id,run_id)
+    REFERENCES lifecycle_receipt_batches(batch_id,project_session_id,run_id),
+  FOREIGN KEY(batch_id,batch_completion_digest,
+      ordered_authority_receipt_set_digest)
+    REFERENCES lifecycle_receipt_batch_completions(
+      batch_id,completion_digest,ordered_authority_receipt_set_digest),
+  FOREIGN KEY(project_session_id,run_id,verified_scope_checkpoint_digest)
+    REFERENCES lifecycle_receipt_scope_checkpoints(
+      project_session_id,run_id,checkpoint_digest)
+)
+
+lifecycle_transition_applies(
+  apply_id PRIMARY KEY,
+  apply_kind CHECK(apply_kind IN ('terminal','terminal-fresh','fresh')),
+  receipt_batch_id UNIQUE, batch_completion_digest, transition_replay_digest,
+  ordered_authority_receipt_set_digest, verified_scope_checkpoint_digest,
+  applied_mutation_plan_digest,
+  fresh_handoff_id UNIQUE, fresh_handoff_digest,
+  fresh_project_session_id, fresh_run_id, fresh_agent_id, fresh_source_mode,
+  fresh_apply_plan_digest, new_custody_id UNIQUE, new_custody_semantic_digest,
+  new_custody_source_ref_digest, fresh_generation_loss_id,
+  fresh_generation_loss_after_revision,
+  fresh_generation_loss_after_semantic_digest,
+  fresh_generation_loss_after_source_ref_digest, local_write_set_digest,
+  apply_json, apply_digest UNIQUE, applied_at,
+  UNIQUE(apply_id,apply_digest),
+  UNIQUE(apply_id,apply_digest,apply_kind),
+  UNIQUE(apply_id,receipt_batch_id),
+  UNIQUE(apply_id,apply_digest,receipt_batch_id),
+  UNIQUE(apply_id,fresh_handoff_id),
+  UNIQUE(apply_id,apply_digest,fresh_handoff_id),
+  UNIQUE(apply_id,apply_digest,fresh_handoff_id,apply_kind),
+  UNIQUE(apply_id,apply_digest,new_custody_id,new_custody_semantic_digest,
+    new_custody_source_ref_digest),
+  UNIQUE(apply_id,apply_digest,fresh_project_session_id,fresh_run_id,
+    fresh_agent_id,fresh_generation_loss_id,
+    fresh_generation_loss_after_revision,
+    fresh_generation_loss_after_semantic_digest,
+    fresh_generation_loss_after_source_ref_digest),
+  FOREIGN KEY(receipt_batch_id,apply_id,transition_replay_digest,
+      applied_mutation_plan_digest)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,planned_apply_id,transition_replay_digest,mutation_plan_digest),
+  FOREIGN KEY(receipt_batch_id,apply_id,transition_replay_digest,
+      applied_mutation_plan_digest,fresh_handoff_id,fresh_handoff_digest)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,planned_apply_id,transition_replay_digest,mutation_plan_digest,
+      fresh_handoff_id,fresh_handoff_digest),
+  FOREIGN KEY(receipt_batch_id,batch_completion_digest,
+      ordered_authority_receipt_set_digest,verified_scope_checkpoint_digest)
+    REFERENCES lifecycle_receipt_batch_authorizations(
+      batch_id,batch_completion_digest,ordered_authority_receipt_set_digest,
+      verified_scope_checkpoint_digest),
+  FOREIGN KEY(fresh_handoff_id,fresh_handoff_digest,apply_id,
+      fresh_project_session_id,fresh_run_id,fresh_agent_id,fresh_source_mode,
+      new_custody_id,
+      new_custody_semantic_digest,new_custody_source_ref_digest,
+      fresh_apply_plan_digest,fresh_generation_loss_id,
+      fresh_generation_loss_after_revision,
+      fresh_generation_loss_after_semantic_digest,
+      fresh_generation_loss_after_source_ref_digest)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,
+      agent_id,source_mode,new_custody_id,new_custody_semantic_digest,
+      new_custody_source_ref_digest,
+      fresh_apply_plan_digest,affected_generation_loss_id,
+      affected_generation_loss_after_revision,
+      affected_generation_loss_after_semantic_digest,
+      affected_generation_loss_after_source_ref_digest),
+  CHECK((apply_kind='terminal' AND receipt_batch_id IS NOT NULL AND
+      batch_completion_digest IS NOT NULL AND
+      transition_replay_digest IS NOT NULL AND
+      ordered_authority_receipt_set_digest IS NOT NULL AND
+      verified_scope_checkpoint_digest IS NOT NULL AND
+      applied_mutation_plan_digest IS NOT NULL AND fresh_handoff_id IS NULL AND
+      fresh_handoff_digest IS NULL AND fresh_project_session_id IS NULL AND
+      fresh_run_id IS NULL AND fresh_agent_id IS NULL AND
+      fresh_source_mode IS NULL AND fresh_apply_plan_digest IS NULL AND
+      new_custody_id IS NULL AND new_custody_semantic_digest IS NULL AND
+      new_custody_source_ref_digest IS NULL AND
+      fresh_generation_loss_id IS NULL AND
+      fresh_generation_loss_after_revision IS NULL AND
+      fresh_generation_loss_after_semantic_digest IS NULL AND
+      fresh_generation_loss_after_source_ref_digest IS NULL) OR
+    (apply_kind='terminal-fresh' AND receipt_batch_id IS NOT NULL AND
+      batch_completion_digest IS NOT NULL AND
+      transition_replay_digest IS NOT NULL AND
+      ordered_authority_receipt_set_digest IS NOT NULL AND
+      verified_scope_checkpoint_digest IS NOT NULL AND
+      applied_mutation_plan_digest IS NOT NULL AND fresh_handoff_id IS NOT NULL AND
+      fresh_handoff_digest IS NOT NULL AND fresh_project_session_id IS NOT NULL AND
+      fresh_run_id IS NOT NULL AND fresh_agent_id IS NOT NULL AND
+      fresh_source_mode='terminalize-nonfinal-custody' AND
+      fresh_apply_plan_digest IS NOT NULL AND
+      new_custody_id IS NOT NULL AND new_custody_semantic_digest IS NOT NULL AND
+      new_custody_source_ref_digest IS NOT NULL AND
+      ((fresh_generation_loss_id IS NULL AND
+          fresh_generation_loss_after_revision IS NULL AND
+          fresh_generation_loss_after_semantic_digest IS NULL AND
+          fresh_generation_loss_after_source_ref_digest IS NULL) OR
+        (fresh_generation_loss_id IS NOT NULL AND
+          fresh_generation_loss_after_revision IS NOT NULL AND
+          fresh_generation_loss_after_semantic_digest IS NOT NULL AND
+          fresh_generation_loss_after_source_ref_digest IS NOT NULL))) OR
+    (apply_kind='fresh' AND receipt_batch_id IS NULL AND
+      batch_completion_digest IS NULL AND
+      transition_replay_digest IS NULL AND
+      ordered_authority_receipt_set_digest IS NULL AND
+      verified_scope_checkpoint_digest IS NULL AND
+      applied_mutation_plan_digest IS NOT NULL AND fresh_handoff_id IS NOT NULL AND
+      fresh_handoff_digest IS NOT NULL AND fresh_project_session_id IS NOT NULL AND
+      fresh_run_id IS NOT NULL AND fresh_agent_id IS NOT NULL AND
+      fresh_source_mode IN ('reuse-final-custody','open-generation-loss') AND
+      fresh_apply_plan_digest IS NOT NULL AND
+      new_custody_id IS NOT NULL AND new_custody_semantic_digest IS NOT NULL AND
+      new_custody_source_ref_digest IS NOT NULL AND
+      applied_mutation_plan_digest=fresh_apply_plan_digest AND
+      ((fresh_source_mode='reuse-final-custody' AND
+          fresh_generation_loss_id IS NULL AND
+          fresh_generation_loss_after_revision IS NULL AND
+          fresh_generation_loss_after_semantic_digest IS NULL AND
+          fresh_generation_loss_after_source_ref_digest IS NULL) OR
+        (fresh_source_mode='open-generation-loss' AND
+          fresh_generation_loss_id IS NOT NULL AND
+          fresh_generation_loss_after_revision IS NOT NULL AND
+          fresh_generation_loss_after_semantic_digest IS NOT NULL AND
+          fresh_generation_loss_after_source_ref_digest IS NOT NULL))))
+)
+
+lifecycle_review_adoption_reservations(
+  reservation_id PRIMARY KEY, reservation_digest UNIQUE,
+  project_session_id, run_id, agent_id, custody_id,
+  finalized_custody_revision, target_generation,
+  predecessor_binding_generation, predecessor_binding_digest,
+  terminal_sequence_high_water, lifecycle_adoption_evidence_digest,
+  review_decision_json, review_decision_digest,
+  certification_cut_json, certification_cut_digest, certification_cut_key,
+  recovery_source_kind CHECK(
+    recovery_source_kind IN ('none','custody','generation-loss')),
+  recovery_from_custody_id, recovery_from_custody_revision,
+  recovery_from_generation_loss_id, recovery_from_generation_loss_revision,
+  recovery_source_ref_digest,
+  decision_loss_after_id, decision_loss_after_revision,
+  decision_loss_after_semantic_digest, decision_loss_after_source_ref_digest,
+  decision_loss_after_key,
+  recovery_source_decision_json, recovery_source_decision_digest,
+  local_write_set_digest, reservation_json, created_at,
+  UNIQUE(reservation_id,reservation_digest),
+  UNIQUE(reservation_digest,project_session_id,run_id,agent_id,custody_id,
+    finalized_custody_revision,review_decision_digest,certification_cut_key,
+    decision_loss_after_key),
+  UNIQUE(reservation_digest,decision_loss_after_id,decision_loss_after_revision,
+    decision_loss_after_semantic_digest,decision_loss_after_source_ref_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,
+    finalized_custody_revision),
+  CHECK(certification_cut_key IS NOT NULL AND
+    decision_loss_after_key IS NOT NULL),
+  FOREIGN KEY(project_session_id,run_id,agent_id,custody_id)
+    REFERENCES lifecycle_rotation_custodies(
+      project_session_id,run_id,agent_id,custody_id),
+  CHECK((certification_cut_digest IS NULL AND certification_cut_key='none') OR
+    (certification_cut_digest IS NOT NULL AND
+      certification_cut_key=certification_cut_digest)),
+  CHECK((recovery_source_kind='none' AND
+      recovery_from_custody_id IS NULL AND
+      recovery_from_custody_revision IS NULL AND
+      recovery_from_generation_loss_id IS NULL AND
+      recovery_from_generation_loss_revision IS NULL AND
+      recovery_source_ref_digest IS NULL AND
+      decision_loss_after_id IS NULL AND decision_loss_after_revision IS NULL AND
+      decision_loss_after_semantic_digest IS NULL AND
+      decision_loss_after_source_ref_digest IS NULL AND
+      decision_loss_after_key='none' AND
+      recovery_source_decision_json IS NULL AND
+      recovery_source_decision_digest IS NULL) OR
+    (recovery_source_kind='custody' AND
+      recovery_from_custody_id IS NOT NULL AND
+      recovery_from_custody_revision IS NOT NULL AND
+      recovery_from_generation_loss_id IS NULL AND
+      recovery_from_generation_loss_revision IS NULL AND
+      recovery_source_ref_digest IS NOT NULL AND
+      decision_loss_after_id IS NULL AND decision_loss_after_revision IS NULL AND
+      decision_loss_after_semantic_digest IS NULL AND
+      decision_loss_after_source_ref_digest IS NULL AND
+      decision_loss_after_key='none' AND
+      recovery_source_decision_json IS NOT NULL AND
+      recovery_source_decision_digest IS NOT NULL) OR
+    (recovery_source_kind='generation-loss' AND
+      recovery_from_custody_id IS NULL AND
+      recovery_from_custody_revision IS NULL AND
+      recovery_from_generation_loss_id IS NOT NULL AND
+      recovery_from_generation_loss_revision IS NOT NULL AND
+      recovery_source_ref_digest IS NOT NULL AND
+      decision_loss_after_id=recovery_from_generation_loss_id AND
+      decision_loss_after_revision IS NOT NULL AND
+      decision_loss_after_semantic_digest IS NOT NULL AND
+      decision_loss_after_source_ref_digest IS NOT NULL AND
+      decision_loss_after_key=decision_loss_after_source_ref_digest AND
+      recovery_source_decision_json IS NOT NULL AND
+      recovery_source_decision_digest IS NOT NULL)),
+  FOREIGN KEY(project_session_id,run_id,agent_id,recovery_from_custody_id,
+      recovery_from_custody_revision,recovery_source_ref_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,
+      source_ref_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,
+      recovery_from_generation_loss_id,recovery_from_generation_loss_revision,
+      recovery_source_ref_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,
+      revision,source_ref_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,decision_loss_after_id,
+      decision_loss_after_revision,decision_loss_after_semantic_digest,
+      decision_loss_after_source_ref_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      semantic_digest,source_ref_digest)
+)
+
+lifecycle_fresh_rotation_preparations(
+  preparation_id PRIMARY KEY, attempt_id UNIQUE, issue_id UNIQUE,
+  project_session_id, run_id, agent_id,
+  recovery_source_kind CHECK(
+    recovery_source_kind IN ('custody','generation-loss')),
+  old_custody_id, old_custody_revision,
+  generation_loss_id, generation_loss_revision,
+  recovery_source_ref_digest, source_journal_digest,
+  provider_action_adapter_id, provider_action_id,
+  checkpoint_ref, checkpoint_digest, checkpoint_validation_digest,
+  checkpoint_validation_key,
+  adapter_contract_digest, operation,
+  reserved_provider_generation, reserved_principal_generation,
+  reserved_bridge_generation, preparation_json, preparation_digest,
+  created_at,
+  UNIQUE(preparation_id,preparation_digest),
+  UNIQUE(preparation_id,attempt_id,issue_id,project_session_id,run_id,agent_id,
+    recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+    preparation_digest),
+  UNIQUE(preparation_id,attempt_id,issue_id,project_session_id,run_id,agent_id,
+    recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+    provider_action_adapter_id,provider_action_id,checkpoint_ref,
+    checkpoint_digest,checkpoint_validation_digest,checkpoint_validation_key,
+    adapter_contract_digest,
+    operation,reserved_provider_generation,reserved_principal_generation,
+    reserved_bridge_generation,preparation_digest),
+  UNIQUE(preparation_id,attempt_id,issue_id,project_session_id,run_id,agent_id,
+    recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+    provider_action_adapter_id,provider_action_id,checkpoint_ref,
+    checkpoint_digest,checkpoint_validation_key,adapter_contract_digest,operation,
+    reserved_provider_generation,reserved_principal_generation,
+    reserved_bridge_generation,preparation_digest),
+  UNIQUE(provider_action_adapter_id,provider_action_id),
+  FOREIGN KEY(issue_id,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES agent_lifecycle_recovery_capability_issues(
+      issue_id,project_session_id,run_id,agent_id,recovery_source_kind,
+      recovery_source_ref_digest,source_journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,old_custody_id,
+      old_custody_revision,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,
+      source_ref_digest,journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      generation_loss_revision,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,
+      revision,source_ref_digest,journal_digest),
+  CHECK((checkpoint_validation_digest IS NULL AND
+      checkpoint_validation_key='none') OR
+    (checkpoint_validation_digest IS NOT NULL AND
+      checkpoint_validation_key=checkpoint_validation_digest)),
+  CHECK((recovery_source_kind='custody' AND old_custody_id IS NOT NULL AND
+      old_custody_revision IS NOT NULL AND generation_loss_id IS NULL AND
+      generation_loss_revision IS NULL) OR
+    (recovery_source_kind='generation-loss' AND old_custody_id IS NULL AND
+      old_custody_revision IS NULL AND generation_loss_id IS NOT NULL AND
+      generation_loss_revision IS NOT NULL))
+)
+
+lifecycle_fresh_recovery_handoffs(
+  handoff_id PRIMARY KEY, preparation_id UNIQUE, attempt_id UNIQUE,
+  preparation_digest, issue_id UNIQUE, project_session_id, run_id, agent_id,
+  source_mode CHECK(source_mode IN ('terminalize-nonfinal-custody',
+    'reuse-final-custody','open-generation-loss')),
+  recovery_source_kind CHECK(
+    recovery_source_kind IN ('custody','generation-loss')),
+  old_custody_id, old_custody_revision,
+  generation_loss_id, generation_loss_revision,
+  recovery_source_ref_digest, source_journal_digest,
+  new_custody_id UNIQUE, planned_apply_id UNIQUE, new_custody_semantic_digest,
+  new_custody_source_ref_digest,
+  affected_generation_loss_id, affected_generation_loss_before_revision,
+  affected_generation_loss_before_state,
+  affected_generation_loss_before_source_ref_digest,
+  affected_generation_loss_before_journal_digest,
+  affected_generation_loss_after_revision,
+  affected_generation_loss_after_semantic_digest,
+  affected_generation_loss_after_source_ref_digest,
+  provider_action_adapter_id, provider_action_id,
+  checkpoint_ref, checkpoint_digest, checkpoint_validation_digest,
+  checkpoint_validation_key,
+  adapter_contract_digest, operation,
+  reserved_provider_generation, reserved_principal_generation,
+  reserved_bridge_generation, admission_digest,
+  fresh_apply_plan_json, fresh_apply_plan_digest,
+  handoff_json, handoff_digest UNIQUE, created_at,
+  UNIQUE(handoff_id,handoff_digest),
+  UNIQUE(handoff_id,handoff_digest,planned_apply_id),
+  UNIQUE(handoff_id,provider_action_adapter_id,provider_action_id),
+  UNIQUE(handoff_id,admission_digest,fresh_apply_plan_digest),
+  UNIQUE(handoff_id,handoff_digest,project_session_id,run_id,agent_id,
+    source_mode,recovery_source_kind,old_custody_id,old_custody_revision,
+    generation_loss_id,generation_loss_revision,recovery_source_ref_digest,
+    source_journal_digest,new_custody_id,provider_action_adapter_id,
+    provider_action_id,checkpoint_ref,checkpoint_digest,
+    checkpoint_validation_digest,checkpoint_validation_key,
+    adapter_contract_digest,operation,
+    reserved_provider_generation,reserved_principal_generation,
+    reserved_bridge_generation,admission_digest,fresh_apply_plan_digest),
+  UNIQUE(handoff_id,handoff_digest,project_session_id,run_id,agent_id,
+    recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+    new_custody_id,provider_action_adapter_id,provider_action_id,checkpoint_ref,
+    checkpoint_digest,checkpoint_validation_key,adapter_contract_digest,operation,
+    reserved_provider_generation,reserved_principal_generation,
+    reserved_bridge_generation,admission_digest,fresh_apply_plan_digest),
+  UNIQUE(handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,
+    agent_id,source_mode,new_custody_id,new_custody_semantic_digest,
+    new_custody_source_ref_digest,
+    fresh_apply_plan_digest,affected_generation_loss_id,
+    affected_generation_loss_after_revision,
+    affected_generation_loss_after_semantic_digest,
+    affected_generation_loss_after_source_ref_digest),
+  UNIQUE(handoff_id,preparation_id,attempt_id,issue_id,project_session_id,
+    run_id,agent_id,source_mode,recovery_source_kind,recovery_source_ref_digest,
+    source_journal_digest,preparation_digest,fresh_apply_plan_digest,
+    handoff_digest),
+  UNIQUE(provider_action_adapter_id,provider_action_id),
+  FOREIGN KEY(preparation_id,attempt_id,issue_id,project_session_id,run_id,
+      agent_id,recovery_source_kind,recovery_source_ref_digest,
+      source_journal_digest,preparation_digest)
+    REFERENCES lifecycle_fresh_rotation_preparations(
+      preparation_id,attempt_id,issue_id,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+      preparation_digest),
+  FOREIGN KEY(preparation_id,attempt_id,issue_id,project_session_id,run_id,
+      agent_id,recovery_source_kind,recovery_source_ref_digest,
+      source_journal_digest,provider_action_adapter_id,provider_action_id,
+      checkpoint_ref,checkpoint_digest,checkpoint_validation_digest,
+      checkpoint_validation_key,
+      adapter_contract_digest,operation,reserved_provider_generation,
+      reserved_principal_generation,reserved_bridge_generation,
+      preparation_digest)
+    REFERENCES lifecycle_fresh_rotation_preparations(
+      preparation_id,attempt_id,issue_id,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+      provider_action_adapter_id,provider_action_id,checkpoint_ref,
+      checkpoint_digest,checkpoint_validation_digest,checkpoint_validation_key,
+      adapter_contract_digest,
+      operation,reserved_provider_generation,reserved_principal_generation,
+      reserved_bridge_generation,preparation_digest),
+  FOREIGN KEY(preparation_id,attempt_id,issue_id,project_session_id,run_id,
+      agent_id,recovery_source_kind,recovery_source_ref_digest,
+      source_journal_digest,provider_action_adapter_id,provider_action_id,
+      checkpoint_ref,checkpoint_digest,checkpoint_validation_key,
+      adapter_contract_digest,operation,
+      reserved_provider_generation,reserved_principal_generation,
+      reserved_bridge_generation,preparation_digest)
+    REFERENCES lifecycle_fresh_rotation_preparations(
+      preparation_id,attempt_id,issue_id,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+      provider_action_adapter_id,provider_action_id,checkpoint_ref,
+      checkpoint_digest,checkpoint_validation_key,adapter_contract_digest,operation,
+      reserved_provider_generation,reserved_principal_generation,
+      reserved_bridge_generation,preparation_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,old_custody_id,
+      old_custody_revision,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,
+      source_ref_digest,journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      generation_loss_revision,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      source_ref_digest,journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,affected_generation_loss_id,
+      affected_generation_loss_before_revision,
+      affected_generation_loss_before_state,
+      affected_generation_loss_before_source_ref_digest,
+      affected_generation_loss_before_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      state,source_ref_digest,journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,affected_generation_loss_id,
+      affected_generation_loss_before_revision,
+      affected_generation_loss_before_state,old_custody_id,
+      affected_generation_loss_before_source_ref_digest,
+      affected_generation_loss_before_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,state,
+      active_recovery_custody_id,source_ref_digest,journal_digest),
+  CHECK((checkpoint_validation_digest IS NULL AND
+      checkpoint_validation_key='none') OR
+    (checkpoint_validation_digest IS NOT NULL AND
+      checkpoint_validation_key=checkpoint_validation_digest)),
+  CHECK((source_mode='terminalize-nonfinal-custody' AND
+      recovery_source_kind='custody' AND
+      old_custody_id IS NOT NULL AND old_custody_revision IS NOT NULL AND
+      generation_loss_id IS NULL AND generation_loss_revision IS NULL AND
+      ((affected_generation_loss_id IS NULL AND
+          affected_generation_loss_before_revision IS NULL AND
+          affected_generation_loss_before_state IS NULL AND
+          affected_generation_loss_before_source_ref_digest IS NULL AND
+          affected_generation_loss_before_journal_digest IS NULL AND
+          affected_generation_loss_after_revision IS NULL AND
+          affected_generation_loss_after_semantic_digest IS NULL AND
+          affected_generation_loss_after_source_ref_digest IS NULL) OR
+        (affected_generation_loss_id IS NOT NULL AND
+          affected_generation_loss_before_revision IS NOT NULL AND
+          affected_generation_loss_before_state='recovery-in-progress' AND
+          affected_generation_loss_before_source_ref_digest IS NOT NULL AND
+          affected_generation_loss_before_journal_digest IS NOT NULL AND
+          affected_generation_loss_after_revision=
+            affected_generation_loss_before_revision+1 AND
+          affected_generation_loss_after_semantic_digest IS NOT NULL AND
+          affected_generation_loss_after_source_ref_digest IS NOT NULL))) OR
+    (source_mode='reuse-final-custody' AND recovery_source_kind='custody' AND
+      old_custody_id IS NOT NULL AND old_custody_revision IS NOT NULL AND
+      generation_loss_id IS NULL AND generation_loss_revision IS NULL AND
+      affected_generation_loss_id IS NULL AND
+      affected_generation_loss_before_revision IS NULL AND
+      affected_generation_loss_before_state IS NULL AND
+      affected_generation_loss_before_source_ref_digest IS NULL AND
+      affected_generation_loss_before_journal_digest IS NULL AND
+      affected_generation_loss_after_revision IS NULL AND
+      affected_generation_loss_after_semantic_digest IS NULL AND
+      affected_generation_loss_after_source_ref_digest IS NULL) OR
+    (source_mode='open-generation-loss' AND
+      recovery_source_kind='generation-loss' AND old_custody_id IS NULL AND
+      old_custody_revision IS NULL AND generation_loss_id IS NOT NULL AND
+      generation_loss_revision IS NOT NULL AND
+      affected_generation_loss_id=generation_loss_id AND
+      affected_generation_loss_before_revision=generation_loss_revision AND
+      affected_generation_loss_before_state='open' AND
+      affected_generation_loss_before_source_ref_digest=
+        recovery_source_ref_digest AND
+      affected_generation_loss_before_journal_digest=source_journal_digest AND
+      affected_generation_loss_after_revision=generation_loss_revision+1 AND
+      affected_generation_loss_after_semantic_digest IS NOT NULL AND
+      affected_generation_loss_after_source_ref_digest IS NOT NULL))
+)
+
+lifecycle_fresh_rotation_commits(
+  commit_id PRIMARY KEY, handoff_id UNIQUE, preparation_id UNIQUE,
+  handoff_digest, preparation_digest, attempt_id UNIQUE, issue_id UNIQUE,
+  project_session_id, run_id, agent_id,
+  source_mode, recovery_source_kind, recovery_source_ref_digest,
+  source_journal_digest, new_custody_id UNIQUE,
+  new_custody_revision CHECK(new_custody_revision=1),
+  new_custody_semantic_digest, new_custody_source_ref_digest,
+  new_custody_journal_digest,
+  generation_loss_after_id, generation_loss_after_revision,
+  generation_loss_after_semantic_digest,
+  generation_loss_after_source_ref_digest, generation_loss_after_journal_digest,
+  provider_action_adapter_id, provider_action_id,
+  checkpoint_ref, checkpoint_digest, checkpoint_validation_digest,
+  checkpoint_validation_key,
+  adapter_contract_digest, operation,
+  reserved_provider_generation, reserved_principal_generation,
+  reserved_bridge_generation,
+  admission_digest, fresh_apply_plan_digest,
+  apply_kind CHECK(apply_kind IN ('terminal-fresh','fresh')), fresh_apply_digest,
+  source_terminal_receipt_apply_digest, apply_id UNIQUE,
+  commit_json, commit_digest UNIQUE, created_at,
+  UNIQUE(handoff_id,preparation_id,attempt_id,issue_id,project_session_id,
+    run_id,agent_id,source_mode,recovery_source_kind,recovery_source_ref_digest,
+    source_journal_digest,preparation_digest,fresh_apply_plan_digest),
+  FOREIGN KEY(handoff_id,preparation_id,attempt_id,issue_id,
+      project_session_id,run_id,agent_id,source_mode,recovery_source_kind,
+      recovery_source_ref_digest,source_journal_digest,preparation_digest,
+      fresh_apply_plan_digest,handoff_digest)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,preparation_id,attempt_id,issue_id,project_session_id,run_id,
+      agent_id,source_mode,recovery_source_kind,recovery_source_ref_digest,
+      source_journal_digest,preparation_digest,fresh_apply_plan_digest,
+      handoff_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,new_custody_id,
+      new_custody_revision,new_custody_semantic_digest,
+      new_custody_source_ref_digest,new_custody_journal_digest,apply_id,
+      fresh_apply_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,semantic_digest,
+      source_ref_digest,journal_digest,origin_fresh_apply_id,
+      origin_fresh_apply_digest),
+  FOREIGN KEY(handoff_id,handoff_digest,apply_id,project_session_id,run_id,
+      agent_id,source_mode,new_custody_id,new_custody_semantic_digest,
+      new_custody_source_ref_digest,fresh_apply_plan_digest,
+      generation_loss_after_id,generation_loss_after_revision,
+      generation_loss_after_semantic_digest,
+      generation_loss_after_source_ref_digest)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,
+      agent_id,source_mode,new_custody_id,new_custody_semantic_digest,
+      new_custody_source_ref_digest,fresh_apply_plan_digest,
+      affected_generation_loss_id,affected_generation_loss_after_revision,
+      affected_generation_loss_after_semantic_digest,
+      affected_generation_loss_after_source_ref_digest),
+  FOREIGN KEY(apply_id,fresh_apply_digest,project_session_id,run_id,agent_id,
+      generation_loss_after_id,generation_loss_after_revision,
+      generation_loss_after_semantic_digest,
+      generation_loss_after_source_ref_digest)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,fresh_project_session_id,fresh_run_id,fresh_agent_id,
+      fresh_generation_loss_id,fresh_generation_loss_after_revision,
+      fresh_generation_loss_after_semantic_digest,
+      fresh_generation_loss_after_source_ref_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_after_id,
+      generation_loss_after_revision,generation_loss_after_semantic_digest,
+      generation_loss_after_source_ref_digest,
+      generation_loss_after_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      semantic_digest,source_ref_digest,journal_digest),
+  FOREIGN KEY(handoff_id,provider_action_adapter_id,provider_action_id)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,provider_action_adapter_id,provider_action_id),
+  FOREIGN KEY(handoff_id,handoff_digest,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+      new_custody_id,provider_action_adapter_id,provider_action_id,checkpoint_ref,
+      checkpoint_digest,checkpoint_validation_key,adapter_contract_digest,operation,
+      reserved_provider_generation,reserved_principal_generation,
+      reserved_bridge_generation,admission_digest,fresh_apply_plan_digest)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,handoff_digest,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,source_journal_digest,
+      new_custody_id,provider_action_adapter_id,provider_action_id,checkpoint_ref,
+      checkpoint_digest,checkpoint_validation_key,adapter_contract_digest,operation,
+      reserved_provider_generation,reserved_principal_generation,
+      reserved_bridge_generation,admission_digest,fresh_apply_plan_digest),
+  FOREIGN KEY(handoff_id,admission_digest,fresh_apply_plan_digest)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,admission_digest,fresh_apply_plan_digest),
+  FOREIGN KEY(apply_id,handoff_id)
+    REFERENCES lifecycle_transition_applies(apply_id,fresh_handoff_id),
+  FOREIGN KEY(apply_id,fresh_apply_digest,handoff_id,apply_kind)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,fresh_handoff_id,apply_kind),
+  FOREIGN KEY(apply_id,source_terminal_receipt_apply_digest,handoff_id)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,fresh_handoff_id),
+  CHECK((checkpoint_validation_digest IS NULL AND
+      checkpoint_validation_key='none') OR
+    (checkpoint_validation_digest IS NOT NULL AND
+      checkpoint_validation_key=checkpoint_validation_digest)),
+  CHECK((source_mode='terminalize-nonfinal-custody' AND
+      apply_kind='terminal-fresh' AND
+      source_terminal_receipt_apply_digest=fresh_apply_digest AND
+      ((generation_loss_after_id IS NULL AND
+          generation_loss_after_revision IS NULL AND
+          generation_loss_after_semantic_digest IS NULL AND
+          generation_loss_after_source_ref_digest IS NULL AND
+          generation_loss_after_journal_digest IS NULL) OR
+        (generation_loss_after_id IS NOT NULL AND
+          generation_loss_after_revision IS NOT NULL AND
+          generation_loss_after_semantic_digest IS NOT NULL AND
+          generation_loss_after_source_ref_digest IS NOT NULL AND
+          generation_loss_after_journal_digest IS NOT NULL))) OR
+    (source_mode='reuse-final-custody' AND apply_kind='fresh' AND
+      source_terminal_receipt_apply_digest IS NULL AND
+      generation_loss_after_id IS NULL AND
+      generation_loss_after_revision IS NULL AND
+      generation_loss_after_semantic_digest IS NULL AND
+      generation_loss_after_source_ref_digest IS NULL AND
+      generation_loss_after_journal_digest IS NULL) OR
+    (source_mode='open-generation-loss' AND apply_kind='fresh' AND
+      source_terminal_receipt_apply_digest IS NULL AND
+      generation_loss_after_id IS NOT NULL AND
+      generation_loss_after_revision IS NOT NULL AND
+      generation_loss_after_semantic_digest IS NOT NULL AND
+      generation_loss_after_source_ref_digest IS NOT NULL AND
+      generation_loss_after_journal_digest IS NOT NULL)),
+  CHECK(source_mode IN ('terminalize-nonfinal-custody',
+    'reuse-final-custody','open-generation-loss')),
+  CHECK(recovery_source_kind IN ('custody','generation-loss'))
+)
 
 lifecycle_generation_losses(
-  run_id, agent_id, generation_loss_id, loss_kind, state,
-  abandon_kind, recovery_action_adapter_id, recovery_action_id,
-  revision, old_provider_session_ref,
+  project_session_id, run_id, agent_id, generation_loss_id, loss_kind,
+  old_provider_session_ref,
   new_provider_session_ref, old_provider_generation,
   new_provider_generation, old_context_revision, new_context_revision,
   source_custody_action_id, source_adapter_id, source_adapter_contract_digest,
@@ -3930,31 +7080,149 @@ lifecycle_generation_losses(
   source_project_session_generation, source_run_generation,
   source_chair_lease_generation,
   checkpoint_state, checkpoint_ref, checkpoint_digest,
-  loss_evidence_digest, active_recovery_custody_id,
-  PRIMARY KEY(run_id, agent_id, generation_loss_id),
-  CHECK((recovery_action_adapter_id IS NULL) = (recovery_action_id IS NULL)),
+  loss_evidence_digest, creation_json, creation_digest, created_at,
+  PRIMARY KEY(run_id,agent_id,generation_loss_id),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id),
+  UNIQUE(creation_digest),
   CHECK(loss_kind IN ('generation-advance','context-advance')),
-  CHECK((state = 'open' AND abandon_kind IS NULL AND
-      recovery_action_id IS NULL AND active_recovery_custody_id IS NULL) OR
-    (state = 'recovery-in-progress' AND abandon_kind IS NULL AND
-      recovery_action_id IS NOT NULL AND active_recovery_custody_id IS NOT NULL) OR
-    (state = 'recovered-adopted' AND abandon_kind IS NULL AND
-      recovery_action_id IS NOT NULL) OR
-    (state = 'abandoned' AND abandon_kind = 'direct-open' AND
-      recovery_action_id IS NULL AND active_recovery_custody_id IS NULL) OR
-    (state = 'abandoned' AND abandon_kind = 'recovery-attempt' AND
-      recovery_action_id IS NOT NULL)),
-  FOREIGN KEY(recovery_action_adapter_id, recovery_action_id)
-    REFERENCES lifecycle_rotation_custody(
-      provider_action_adapter_id, provider_action_id),
   FOREIGN KEY(source_adapter_id, source_custody_action_id)
-    REFERENCES provider_actions(adapter_id, action_id),
-  FOREIGN KEY(run_id, agent_id, active_recovery_custody_id)
-    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id)
+    REFERENCES provider_actions(adapter_id,action_id)
 )
+
+lifecycle_generation_loss_revisions(
+  project_session_id, run_id, agent_id, generation_loss_id,
+  revision CHECK(revision >= 1), prior_revision, prior_journal_digest,
+  state CHECK(state IN
+    ('open','recovery-in-progress','recovered-adopted','abandoned')),
+  abandon_kind_code CHECK(
+    abandon_kind_code IN ('none','direct-open','recovery-attempt')),
+  recovery_action_adapter_id, recovery_action_id, active_recovery_custody_id,
+  terminal_evidence_digest, semantic_json, semantic_digest, source_ref_digest,
+  origin_fresh_apply_id, origin_fresh_apply_digest,
+  receipt_batch_id, receipt_apply_id, receipt_apply_digest,
+  journal_json, journal_digest, recorded_at,
+  PRIMARY KEY(run_id,agent_id,generation_loss_id,revision),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    source_ref_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    semantic_digest,source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    semantic_digest,source_ref_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,state,
+    source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,state,
+    active_recovery_custody_id,source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    semantic_digest,source_ref_digest,journal_digest,origin_fresh_apply_id,
+    origin_fresh_apply_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,state,
+    abandon_kind_code,recovery_action_adapter_id,recovery_action_id,
+    active_recovery_custody_id,semantic_digest,source_ref_digest,journal_digest),
+  UNIQUE(semantic_digest), UNIQUE(source_ref_digest), UNIQUE(journal_digest),
+  CHECK((revision=1 AND prior_revision IS NULL AND
+      prior_journal_digest IS NULL) OR
+    (revision>1 AND prior_revision=revision-1 AND
+      prior_journal_digest IS NOT NULL)),
+  CHECK((receipt_batch_id IS NULL)=(receipt_apply_id IS NULL)),
+  CHECK((receipt_batch_id IS NULL)=(receipt_apply_digest IS NULL)),
+  CHECK((origin_fresh_apply_id IS NULL)=(origin_fresh_apply_digest IS NULL)),
+  CHECK((revision=1 AND state='open' AND receipt_batch_id IS NULL AND
+      origin_fresh_apply_id IS NULL) OR
+    (revision>1 AND
+      ((receipt_batch_id IS NOT NULL AND origin_fresh_apply_id IS NULL) OR
+        (receipt_batch_id IS NULL AND origin_fresh_apply_id IS NOT NULL)))),
+  CHECK(origin_fresh_apply_id IS NULL OR state='recovery-in-progress'),
+  CHECK(state NOT IN ('recovered-adopted','abandoned') OR
+    receipt_batch_id IS NOT NULL),
+  CHECK((state='open' AND abandon_kind_code='none' AND
+      recovery_action_id IS NULL AND active_recovery_custody_id IS NULL AND
+      terminal_evidence_digest IS NULL) OR
+    (state='recovery-in-progress' AND abandon_kind_code='none' AND
+      recovery_action_id IS NOT NULL AND
+      active_recovery_custody_id IS NOT NULL AND
+      terminal_evidence_digest IS NULL) OR
+    (state='recovered-adopted' AND abandon_kind_code='none' AND
+      recovery_action_id IS NOT NULL AND
+      active_recovery_custody_id IS NOT NULL AND
+      terminal_evidence_digest IS NOT NULL) OR
+    (state='abandoned' AND abandon_kind_code='direct-open' AND
+      recovery_action_id IS NULL AND active_recovery_custody_id IS NULL AND
+      terminal_evidence_digest IS NOT NULL) OR
+    (state='abandoned' AND abandon_kind_code='recovery-attempt' AND
+      recovery_action_id IS NOT NULL AND
+      active_recovery_custody_id IS NOT NULL AND
+      terminal_evidence_digest IS NOT NULL)),
+  CHECK((recovery_action_adapter_id IS NULL)=(recovery_action_id IS NULL)),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id)
+    REFERENCES lifecycle_generation_losses(
+      project_session_id,run_id,agent_id,generation_loss_id),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      prior_revision,prior_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      journal_digest),
+  FOREIGN KEY(recovery_action_adapter_id,recovery_action_id)
+    REFERENCES lifecycle_rotation_custodies(
+      provider_action_adapter_id,provider_action_id),
+  FOREIGN KEY(run_id,agent_id,active_recovery_custody_id)
+    REFERENCES lifecycle_rotation_custodies(run_id,agent_id,custody_id),
+  FOREIGN KEY(receipt_batch_id,receipt_apply_id,project_session_id,run_id,agent_id,
+      generation_loss_id,revision,semantic_digest,source_ref_digest)
+    REFERENCES lifecycle_receipt_generation_loss_effects(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+      generation_loss_id,final_revision,final_semantic_digest,
+      final_source_ref_digest)
+    DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(receipt_apply_id,receipt_apply_digest,receipt_batch_id)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,receipt_batch_id)
+    DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(receipt_apply_id,receipt_batch_id)
+    REFERENCES lifecycle_transition_applies(apply_id,receipt_batch_id)
+    DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(origin_fresh_apply_id,origin_fresh_apply_digest,
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      semantic_digest,source_ref_digest)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,fresh_project_session_id,fresh_run_id,fresh_agent_id,
+      fresh_generation_loss_id,fresh_generation_loss_after_revision,
+      fresh_generation_loss_after_semantic_digest,
+      fresh_generation_loss_after_source_ref_digest)
+    DEFERRABLE INITIALLY DEFERRED
+)
+
+lifecycle_generation_loss_heads(
+  project_session_id, run_id, agent_id, generation_loss_id, current_revision,
+  state, abandon_kind_code, recovery_action_adapter_id, recovery_action_id,
+  active_recovery_custody_id, semantic_digest, source_ref_digest,
+  journal_digest, terminal CHECK(terminal IN (0,1)), head_revision,
+  PRIMARY KEY(run_id,agent_id,generation_loss_id),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      current_revision,semantic_digest,source_ref_digest,journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      semantic_digest,source_ref_digest,journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      current_revision,state,abandon_kind_code,recovery_action_adapter_id,
+      recovery_action_id,active_recovery_custody_id,semantic_digest,
+      source_ref_digest,journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,state,
+      abandon_kind_code,recovery_action_adapter_id,recovery_action_id,
+      active_recovery_custody_id,semantic_digest,source_ref_digest,
+      journal_digest),
+  CHECK((terminal=1)=(state IN ('recovered-adopted','abandoned')))
+)
+
 CREATE UNIQUE INDEX one_nonterminal_generation_loss_per_agent
-  ON lifecycle_generation_losses(run_id, agent_id)
-  WHERE state IN ('open','recovery-in-progress');
+  ON lifecycle_generation_loss_heads(run_id,agent_id)
+  WHERE terminal=0;
 
 lifecycle_custody_adoption_deliveries(
   run_id, agent_id, custody_id, ordinal, delivery_id,
@@ -3962,7 +7230,7 @@ lifecycle_custody_adoption_deliveries(
   PRIMARY KEY(run_id, agent_id, custody_id, ordinal),
   UNIQUE(run_id, agent_id, custody_id, delivery_id, delivery_generation),
   FOREIGN KEY(run_id, agent_id, custody_id)
-    REFERENCES lifecycle_rotation_custody(run_id, agent_id, custody_id)
+    REFERENCES lifecycle_rotation_custodies(run_id, agent_id, custody_id)
 )
 CREATE UNIQUE INDEX one_nonfinal_custody_per_delivery_generation
   ON lifecycle_custody_adoption_deliveries(run_id, delivery_id,
@@ -3970,11 +7238,12 @@ CREATE UNIQUE INDEX one_nonfinal_custody_per_delivery_generation
   WHERE active_owner = 1;
 
 agent_lifecycle_recovery_capability_issues(
-  issue_id, capability_hash, operator_id, project_id, session_id, run_id,
+  issue_id, capability_hash, operator_id, project_id, project_session_id, run_id,
   agent_id, session_revision, session_generation, run_revision,
   recovery_source_kind, old_custody_id, old_action_adapter_id, old_action_id,
   old_custody_revision,
   generation_loss_id, generation_loss_revision,
+  recovery_source_ref_digest, source_journal_digest,
   checkpoint_digest, source_provider_session_ref, source_capability_hash,
   source_custody_action_id, source_adapter_id, source_adapter_contract_digest,
   source_bridge_row_id, source_bridge_revision, source_provider_generation,
@@ -3982,19 +7251,148 @@ agent_lifecycle_recovery_capability_issues(
   source_project_session_generation, source_run_generation,
   source_chair_lease_generation, bridge_owner_kind,
   parent_capability_id, consequential_gate_id,
-  path, status, issued_at, expires_at,
-  PRIMARY KEY(issue_id), UNIQUE(capability_hash)
+  path CHECK(path='fresh-rotate'), issuance_json, issuance_digest,
+  issued_at, expires_at,
+  PRIMARY KEY(issue_id), UNIQUE(capability_hash), UNIQUE(issuance_digest),
+  UNIQUE(issue_id,project_session_id,run_id,agent_id,
+    recovery_source_kind,recovery_source_ref_digest,source_journal_digest),
+  CHECK((recovery_source_kind='custody' AND old_custody_id IS NOT NULL AND
+      old_custody_revision IS NOT NULL AND generation_loss_id IS NULL AND
+      generation_loss_revision IS NULL) OR
+    (recovery_source_kind='generation-loss' AND old_custody_id IS NULL AND
+      old_custody_revision IS NULL AND generation_loss_id IS NOT NULL AND
+      generation_loss_revision IS NOT NULL)),
+  FOREIGN KEY(project_session_id,run_id,agent_id,old_custody_id,
+      old_custody_revision,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,
+      source_ref_digest,journal_digest),
+  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
+      generation_loss_revision,recovery_source_ref_digest,source_journal_digest)
+    REFERENCES lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      source_ref_digest,journal_digest)
+)
+
+agent_lifecycle_recovery_issue_revocations(
+  issue_id PRIMARY KEY, revocation_kind CHECK(
+    revocation_kind IN ('operator-revoked','source-stale')),
+  evidence_digest, revoked_at,
+  FOREIGN KEY(issue_id)
+    REFERENCES agent_lifecycle_recovery_capability_issues(issue_id)
 )
 
 agent_lifecycle_recovery_retirements(
-  run_id, agent_id, recovery_intent_id, recovery_source_kind,
-  old_custody_id, generation_loss_id, abandon_kind,
-  recovery_action_adapter_id, recovery_action_id,
-  old_terminal_disposition, abandon_reason, consequence_digest,
-  direct_human_attestation_digest, created_at,
-  PRIMARY KEY(run_id, agent_id, recovery_intent_id)
+  retirement_id PRIMARY KEY, project_session_id, run_id, agent_id,
+  retirement_plan_digest, custody_id, custody_revision,
+  custody_source_ref_digest, custody_journal_digest, finalized_disposition,
+  admission_digest, retirement_evidence_digest, retirement_effect_digest,
+  receipt_batch_id UNIQUE, receipt_apply_id UNIQUE, receipt_apply_digest,
+  retirement_json, retirement_digest UNIQUE, created_at,
+  UNIQUE(retirement_id,receipt_batch_id,receipt_apply_id,receipt_apply_digest),
+  UNIQUE(retirement_digest),
+  FOREIGN KEY(retirement_id,receipt_apply_id,project_session_id,run_id,agent_id,
+      custody_id,custody_revision,custody_source_ref_digest,
+      custody_journal_digest,finalized_disposition,retirement_plan_digest)
+    REFERENCES lifecycle_recovery_retirement_plans(
+      retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
+      custody_id,custody_revision,custody_source_ref_digest,
+      custody_journal_digest,finalized_disposition,retirement_plan_digest),
+  FOREIGN KEY(receipt_batch_id,receipt_apply_id,project_session_id,run_id,agent_id,
+      retirement_id,retirement_plan_digest,custody_id,custody_revision,
+      custody_source_ref_digest,custody_journal_digest,finalized_disposition,
+      retirement_effect_digest)
+    REFERENCES lifecycle_receipt_recovery_retirement_effects(
+      batch_id,planned_apply_id,project_session_id,run_id,agent_id,retirement_id,
+      retirement_plan_digest,custody_id,custody_revision,
+      custody_source_ref_digest,custody_journal_digest,finalized_disposition,
+      effect_digest),
+  FOREIGN KEY(receipt_apply_id,receipt_apply_digest,receipt_batch_id)
+    REFERENCES lifecycle_transition_applies(
+      apply_id,apply_digest,receipt_batch_id)
 )
 ~~~
+
+Lifecycle receipt persistence implements Spec 01 section 9.4.1 without a
+mutable row that can disagree with its history. Custody and generation-loss
+identity rows are immutable; every state edge appends one semantic/journal
+revision and CASes the exact head to that foreign-keyed tuple. Revision one has
+no predecessor, every successor names revision minus one and its journal digest,
+and no terminal head accepts another successor. All shown tables are `STRICT`;
+the generated DDL marks every field nonnull except the exact discriminator/null
+arms shown here and in Spec 01. UPDATE/DELETE is denied for identity, revision,
+batch, effect, intent, authority-receipt, checkpoint, authorization,
+reservation, handoff, commit and apply rows. Only head pointers use guarded
+UPDATE.
+
+The TypeScript daemon validates closed RFC 8785 JCS, every Spec 01 domain-
+separated digest, authority attestation and cross-object equality before opening
+the write transaction. SQLite enforces identities, exact composite foreign keys,
+arm nullability, monotonic revisions, legal edge/cardinality and immutable rows.
+No trigger invokes a JavaScript hash UDF: production keeps
+`PRAGMA trusted_schema=OFF`, so cryptographic validation cannot be delegated to
+an unsafe/unavailable application-defined trigger function. Direct-SQL negative
+fixtures still prove every relational and state invariant.
+
+The prepare transaction locks the exact current head/source rows, verifies one
+closed proof, and writes an immutable review reservation or fresh handoff first
+when applicable. It then writes one immutable batch, its exact primary/linked
+effects and one or two immutable intents. A custody batch has exactly one primary
+custody effect and at most one linked loss effect; a standalone direct-open loss
+batch has exactly one primary loss effect. Adopted true-chair custody alone has
+ordinal-two review intent/reservation. No lifecycle, provider, review, archive,
+history, audit or issue-consumption mutation occurs before authority. No external
+call occurs while SQLite is locked.
+
+The worker point-reads before append, appends only on authoritative absence and
+point-reads again after a return, throw or timeout. Exact verified results insert
+separate immutable `lifecycle_authority_receipts`; intent rows never mutate.
+Once all declared receipts belong to one verified pinned scope checkpoint, one
+`lifecycle_receipt_batch_authorizations` row is inserted. The apply transaction
+then equality-checks the current journal and complete semantic write/effect set,
+appends final revision journal(s), advances exact heads, performs every reserved
+review/archive/fresh write and inserts one `lifecycle_transition_applies` row.
+Derived state is prepared, authority-complete or applied from child-row
+existence; no state column duplicates it. Exact pre-state or exact post-state
+replay succeeds; any third state fails integrity. Provider no-effect/history/
+audit and linked loss state are never changed before apply.
+
+Hydration is read-only and starts at the authenticated project namespace, not
+local custody rows. It resolves every historical scope checkpoint named by that
+pinned namespace, pages each immutable checkpoint through the 256-row API and
+reconciles the exact external set against local pending/applied intents. Whole-
+custody/run deletion, extra external rows, missing committed receipts, chain/
+head/count/set drift, crossed authority or invalid attestation is
+`SNAPSHOT_INVALID`. A pending intent alone may be externally absent. Only after
+successful hydration may `LifecycleReceiptRecoveryService` resume append or
+apply; point lookup is response-loss recovery, never completeness proof.
+
+The review reservation is immutable and has no batch back-pointer or mutable
+consumed state; its exact batch points one way to it and the apply proves
+consumption. It freezes decision/cut/high-water/predecessor at the adoption
+linearization point while permitting later provider terminals as post-cut.
+Review cut, successor binding and rebind receipt equality-copy the decision and
+ordinal-two external receipt; recovery never rereads later high-water or re-
+enters the review owner.
+
+Fresh preparation and handoff are immutable. A nonfinal awaiting-boundary/
+prepared custody with zero dispatch uses `fresh-handoff-superseded`: the source
+and issue remain unchanged while its custody-terminal batch is pending, then one
+`terminal-fresh` apply finalizes the source, creates new custody revision one,
+inserts the commit and derives issue consumption. A finalized custody or open
+generation loss uses one `fresh` apply from the same handoff; the loss moves to
+recovery-in-progress, not terminal. Issue state is derived as active, commit-
+pending, consumed, revoked or expired; a handoff freezes later revoke/expiry.
+Composite keys enforce the preparation/handoff/commit/issue/source/custody/
+action bijection and both source arms without nullable-FK vacuity.
+
+Verification mutates every proof arm and arm discriminator; faults each
+prepare/append/reread/receipt/checkpoint/authorization/apply statement; injects
+success-then-throw, invalid attestation and live-head advance during pinned
+paging; deletes whole custody/run histories; advances review high-water after
+reservation; and crosses request, semantic/journal revision, source, linked loss,
+issue, preparation, handoff, commit, decision, cut, effect, receipt and apply.
+Every changed-input replay fails for the right reason.
 
 Context observation classification is closed: `generation-advance`, `context-
 advance`, `replay` or `reordered-observation`. Adapter input is a positive
@@ -4010,16 +7408,17 @@ Only provider/context high-water moves from this telemetry. Principal and bridge
 high-water move solely from authenticated daemon custody reservation/adoption
 tuples; provider integers cannot infer either authority generation.
 
-`abandon_kind` is null outside terminal abandoned. Direct `open -> abandoned`
+`abandon_kind_code` is the nonnull sentinel `none` outside terminal abandoned.
+Direct `open -> abandoned`
 requires `direct-open` and both recovery-action columns null. Abandon from
 recovery-in-progress requires `recovery-attempt` and a complete global provider
 action pair equal to the active recovery custody. Recovered-adopted and every
-nonterminal state require null abandon kind. Composite CHECK/foreign keys reject
+nonterminal state require `none`. Composite CHECK/foreign keys reject
 half-null, crossed adapter/action and invented direct-open actions.
-`lifecycle_generation_losses` has no free terminal-disposition column: public
-disposition is derived exactly from state plus abandon kind. Custody terminal
-disposition is null before finalized and exactly one closed value at finalized;
-state/disposition triggers enforce the Spec 01 edge table. Partial unique
+`lifecycle_generation_loss_revisions` has no free terminal-disposition column:
+public disposition is derived exactly from state plus abandon kind. Custody
+`disposition_code` is `none` before finalized and exactly one closed terminal
+value at finalized; journal/head triggers enforce the Spec 01 edge table. Partial unique
 indexes prevent a second nonfinal custody or nonterminal loss for one agent.
 
 Adoption-delivery history is unique inside its custody. `active_owner=1` only
@@ -4169,21 +7568,24 @@ The private local issuer for agent-lifecycle-recovery-takeover requires the
 same local subject's current session capability containing
 agent-lifecycle-recovery-issue plus one independently attested consequential
 gate bound to the exact recovery, validates the complete row binding above and
-returns plaintext once while persisting only its hash. Its statuses are active,
-consumed, revoked and expired. The narrow issue authorises only fresh-rotate;
+returns plaintext once while persisting only its hash. Its derived statuses are
+active, commit-pending, consumed, revoked and expired; no mutable status column
+duplicates the issue/handoff/commit/revocation facts. The narrow issue authorises only fresh-rotate;
 generic session or takeover capabilities cannot reach Commit.
 agent-lifecycle-recovery intent rows additionally bind path, exact replacement
 adapter/activated contract/distinct canonical action pair, current daemon-validated checkpoint
 row/vector and proposed high-water reservation. Preview changes no lifecycle
-or provider state. fresh-rotate Commit consumes the issue and inserts a
-distinct null-caller awaiting-boundary custody with an immutable recovery-from
-custody-or-loss link after all predecessor turns are terminal. A nonfinal custody predecessor may take
-its legal superseded edge; a finalized no-effect/quarantined/superseded row is
-never mutated. Commit performs no provider call.
+or provider state. Fresh-rotate Commit first persists the immutable handoff. A
+nonfinal zero-dispatch predecessor becomes commit-pending until its externally
+authorized terminal-fresh apply atomically supersedes it and inserts the
+distinct null-caller awaiting-boundary custody/commit. A finalized custody or
+open loss uses the direct fresh apply; finalized rows are never mutated and the
+open loss moves to recovery-in-progress. Commit performs no provider call.
 
 abandon instead requires exact session cancel authority, a consequential gate
-and independent destructive direct-human attestation. Its one transaction
-moves a nonfinal custody through abandoned, or preserves a finalized custody
+and independent destructive direct-human attestation. It first prepares the
+exact terminal batch; only post-authority apply moves a nonfinal custody through
+abandoned or preserves a finalized custody
 and inserts agent_lifecycle_recovery_retirements; an open loss takes direct-open
 abandon with no recovery pair, while a recovery-in-progress loss takes recovery-
 attempt abandon with its exact pair. It archives the agent; revokes
@@ -4338,7 +7740,8 @@ adapter_provider_smoke_subjects(
 
 adapter_effective_configurations(
   configuration_id, configuration_revision,
-  adapter_id TEXT NOT NULL, adapter_contract_digest, executable_identity_digest,
+  adapter_id TEXT NOT NULL, adapter_contract_digest NOT NULL,
+  executable_identity_digest NOT NULL,
   capability_snapshot_generation, capability_snapshot_digest,
   capability_body_digest,
   subject_kind TEXT NOT NULL CHECK(subject_kind IN
@@ -4356,6 +7759,10 @@ adapter_effective_configurations(
   UNIQUE(configuration_id, configuration_revision, configuration_digest),
   UNIQUE(evidence_id, evidence_revision),
   UNIQUE(configuration_digest),
+  UNIQUE(subject_action_adapter_id,subject_action_id,subject_kind,
+    adapter_contract_digest,configuration_id,configuration_revision,
+    configuration_digest,effective_configuration_digest,
+    executable_identity_digest),
   FOREIGN KEY(evidence_id, evidence_revision)
     REFERENCES artifacts(artifact_id, revision),
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
@@ -4777,3 +8184,265 @@ fixtures for crossed artifact revision, agent adapter, topology task/chair,
 rationale registration and route discovery-surface identities. No child relies
 on trigger prose where the displayed composite foreign key can enforce the
 relationship.
+
+### 9.24 Exact Console read persistence and daemon owner
+
+The daemon is the sole owner of the section 32.22 read surface. It reuses the
+current baseline, the existing operator snapshot revision and existing route
+and preparation codecs. No Console database, materialised route copy,
+action-ID-only lookup, legacy projection or migration shim is permitted.
+
+`review-target-preparation.current.read` authenticates the point-of-use
+operator credential for the exact project/session/run, proves the credential's
+project ID, then reads `review_target_preparation_high_water`. An existing run
+with no high-water row, or generation zero with no preparation row, maps to
+unavailable. A missing or zero high water while any preparation row exists for
+that run is integrity failure, as is any unequal preparation/target/bundle
+high-water triple. A positive equal triple must equal the run's greatest stored
+preparation generation, have exactly one matching row, and equal that row's
+reserved target and bundle generations. A NULL, negative or otherwise out-of-
+domain high-water or preparation generation is always integrity failure; no
+aggregate may hide it. The same read transaction first rejects invalid-domain
+rows, then compares all three high waters, `MAX(preparation_generation)` and the
+matching row. Both active and terminal rows are eligible; state is not a locator
+filter. The existing per-ID read mapper
+produces the nested value so
+phase, progress and terminal correlation cannot drift. The wrapper generation
+equals the high-water/row generation, while the accepted receipt reproduces
+the exact session/run and preparation ID. Operation failures use the existing
+closed `reviewTargetPreparationReadErrorV1` codec unchanged.
+
+Stable route-list membership uses an allocation ordinal, not the daemon-global
+projection revision. The current squashed baseline extends its existing
+relations as follows; these are current columns, not a compatibility migration:
+
+~~~sql
+provider_route_list_high_water(
+  run_id PRIMARY KEY, route_ordinal NOT NULL, revision NOT NULL,
+  FOREIGN KEY(run_id) REFERENCES runs(run_id),
+  CHECK(route_ordinal >= 0), CHECK(revision >= 1)
+)
+
+provider_actions(
+  ...existing pair-keyed columns...,
+  route_ordinal, route_listed_at,
+  UNIQUE(run_id, route_ordinal),
+  UNIQUE(adapter_id, action_id, run_id, task_id, route_ordinal),
+  CHECK((task_id IS NULL) = (route_ordinal IS NULL)),
+  CHECK((route_ordinal IS NULL) = (route_listed_at IS NULL)),
+  CHECK(route_ordinal IS NULL OR route_ordinal >= 1)
+)
+
+provider_action_routes(
+  adapter_id NOT NULL, action_id NOT NULL, run_id NOT NULL, task_id NOT NULL,
+  route_ordinal NOT NULL,
+  certifying_review NOT NULL CHECK(certifying_review IN (0, 1)),
+  target_generation, slot, attempt_generation, reservation_digest,
+  created_at NOT NULL,
+  ...existing route/admission/configuration columns...,
+  PRIMARY KEY(adapter_id, action_id),
+  UNIQUE(run_id, route_ordinal),
+  FOREIGN KEY(adapter_id, action_id, run_id, task_id, route_ordinal)
+    REFERENCES provider_actions(
+      adapter_id, action_id, run_id, task_id, route_ordinal),
+  FOREIGN KEY(adapter_id, action_id, run_id, target_generation, slot,
+      attempt_generation, reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      adapter_id, action_id, run_id, target_generation, slot,
+      attempt_generation, reservation_digest),
+  FOREIGN KEY(run_id, target_generation, slot)
+    REFERENCES review_slot_heads(run_id, target_generation, slot),
+  CHECK(route_ordinal >= 1),
+  CHECK(
+    (certifying_review = 1 AND
+      target_generation IS NOT NULL AND slot IS NOT NULL AND
+      attempt_generation IS NOT NULL AND reservation_digest IS NOT NULL) OR
+    (certifying_review = 0 AND
+      target_generation IS NULL AND slot IS NULL AND
+      attempt_generation IS NULL AND reservation_digest IS NULL)
+  )
+)
+~~~
+
+Task-bound answer-bearing action admission increments the run high water,
+keeps it equal to the run's greatest allocated route ordinal and equality-
+copies that positive ordinal to action and route in the same transaction. It
+also writes the action's immutable `route_listed_at` and equality-copies that
+timestamp to the route row's `created_at`; every read arm exposes
+that action column as `createdAt`, including when the route row is missing or
+untrusted. The route row's own `created_at` remains internal and is equality-
+checked against `route_listed_at` when present; it does not extend or replace
+the canonical nested `providerRouteV1` shape.
+Resolver/preflight failure that creates no action allocates no
+ordinal. Ordinals never recycle. The provider action survives legitimate route
+missing/integrity recovery and therefore remains the list membership owner.
+Task-bound provider-action rows cannot be deleted and their run, task, ordinal
+and `route_listed_at` fields are immutable; current-baseline triggers abort
+either mutation.
+Every route, dispatch, observation or recovery-state advance also increments
+that action's existing `journal_revision`; the read wrapper exposes it as
+`routeRevision`. No route bytes or freshness label is copied into another
+store.
+
+The current baseline adds these supporting indexes:
+
+~~~sql
+CREATE INDEX review_target_preparations_current_lookup
+  ON review_target_preparations(
+    run_id, preparation_generation DESC, preparation_id
+  );
+
+CREATE INDEX provider_actions_operator_route_page
+  ON provider_actions(run_id, route_ordinal, adapter_id, action_id)
+  WHERE route_ordinal IS NOT NULL;
+
+CREATE INDEX provider_action_routes_operator_task_page
+  ON provider_action_routes(
+    run_id, task_id, route_ordinal, adapter_id, action_id
+  );
+
+CREATE INDEX provider_action_routes_operator_review_page
+  ON provider_action_routes(
+    run_id, target_generation, slot, route_ordinal, adapter_id, action_id
+  ) WHERE certifying_review = 1;
+~~~
+
+The route read starts from exact `(adapter_id,action_id)` in
+`provider_actions`, then equality-joins task/run/requested session and left-
+joins the pair-keyed route, dispatch, observation and live route-recovery
+owner. An exact action pair whose `route_ordinal` is null is not an answer-
+bearing route-list member and returns `NOT_FOUND`; its lack of route/recovery is
+legitimate. An intact listed row maps through the existing full
+`PROVIDER_ROUTE_V1_CODEC`.
+A recovery-owned missing/integrity-failed state maps the null route/evidence
+arm and copies immutable action `route_listed_at` to wrapper `createdAt`. No
+route plus no exact recovery evidence is an operation integrity error, not an
+invented missing arm. Every child is pair-keyed; no caller-stamped
+adapter ID and no action-only query may participate. Crossed parents are scope
+or integrity errors, never partial route objects.
+
+Route list starts from exact authenticated run actions with nonnull route
+ordinal. Every page scans at most 256 consecutive unfiltered members strictly
+after the cursor's last-scanned tuple and at or below the watermark. It first
+classifies each scanned member through either the canonical present route or the
+composite-FK-bound recovery arm. Any orphaned, crossed or unparseable member
+fails the whole list with `INTEGRITY_FAILURE`. Only then does it apply nullable
+task, target and slot predicates in SQL. Target/slot filters join either the
+immutable certifying route fields or the exact daemon-derived recovery-custody
+tuple; they never trust a route whose integrity failed or silently exclude an
+unclassifiable member. Its immutable order is
+`(route_ordinal,adapter_id,action_id)`. The first
+page captures `provider_route_list_high_water.route_ordinal` and applies
+`route_ordinal <= :watermark` to its rows in the same SQLite read transaction;
+later pages bind and apply the same watermark. A missing high-water row while
+any run action has a nonnull route ordinal, or a stored high water that differs
+from the greatest allocated ordinal (zero when there is no such action), is
+`INTEGRITY_FAILURE`, never an empty or truncated page. Greatest ordinal is read
+by the declared route-page index's last key, not a whole-set count.
+A missing high-water row when the run has no nonnull route ordinal is exactly
+watermark zero.
+In the first-page read transaction, before any nullable filter, the daemon
+begins incremental contiguity proof at ordinal one. Each later bounded
+scan begins at the authenticated cursor's last-scanned ordinal plus one; every
+row must equal the expected successor. Missing that successor at or below the
+watermark is `INTEGRITY_FAILURE`, and the cursor becomes null only when last-
+scanned equals a positive watermark; watermark zero returns null immediately.
+Unique positive ordinals plus the non-delete/
+immutability triggers complete the proof without a whole-run count.
+Continuous appends therefore
+cannot force resnapshot or starve progress. Each page derives the latest pair-
+keyed state, action journal
+revision and freshness at its single `readAt`; all item read clocks equal the
+page clock. The authenticated opaque cursor binds capability/principal,
+operation, project/session/run, filters, watermark and last-scanned ordering tuple;
+decode validates its closed version, bounds and strict forward progress before
+query construction. Request and result use the same closed opaque cursor codec
+with a 1,024-byte UTF-8 maximum and bind the last-scanned, not merely last-
+returned, tuple. `pageSize` is at most 8. Generated schema bounds prove the
+complete encoded RPC response containing 8 maximal routes, actual request ID
+and maximal next cursor fits the negotiated 1,048,576-byte maximum. The bound
+uses the exact JSON encoder and worst legal UTF-8-to-JSON expansion, including
+six wire bytes for an escapable one-byte control character, maximal numeric/
+timestamp values and every key/delimiter/final LF; schema examples are not the
+bound. The scan stops before another member once the requested `pageSize` matches (at most 8)
+are collected or after 256 members.
+It advances the cursor across classified nonmatches; an empty page with a
+nonnull cursor is progress, and null means the watermark was exhausted. No
+ordinal is classified twice in one traversal; watermark zero is immediately
+exhausted. Reads never persist freshness or
+duplicate route bytes.
+
+Operator projection source queries are likewise exactly scoped. Work, Agent and
+Activity
+rows join `projects -> project_sessions -> runs -> tasks|agents`; source rows,
+summary builders, detail references and detail readers carry the same project/
+session/run/local-ID tuple. Activity message-body refs and reads equality-carry
+that tuple, and embedded task/agent IDs inherit it. Evidence derives the closed project/session/run
+scope arm from its actual nullable registration columns and always includes
+project ID; nonnull Evidence task ID requires the run arm. It never flattens on `evidence_id` alone, never invents a run for a
+project file or private Git diff, and never drops those approved Evidence rows.
+The existing projection transaction constructs the section 32.22 composite ID
+with the pinned view prefix and rejects duplicate item IDs before publication.
+Detail reads equality-check outer scope, detail-ref scope and source row at the
+requested snapshot. Run-local IDs reused under another run therefore coexist
+without collision and cannot cross-select.
+Work source pages order by
+`(project_id,project_session_id,run_id,task_id)` and Agent source pages by
+`(project_id,project_session_id,run_id,agent_id)`. The existing numeric cursor
+is the position in that exact snapshot order; local-ID-only ordering is
+forbidden. Activity pages retain reverse source revision and total tie-break by
+`(source_revision DESC,project_id,project_session_id,run_id,event_id)`.
+
+The operation registry declares all three as operator-only under
+`console-read-identity.v1`. The current Console requires that feature and the
+1,048,576-byte frame maximum during initialize; absence is incompatible, not a
+legacy fallback. When the daemon's offered registry contains the feature,
+current-project operator `read` credential provisioning shall preissue all
+three exact operation names; initialize never mints them. Initialize intersects
+those preissued operations with the negotiated required feature and operator
+principal, and current-Console initialize fails incompatible unless the
+resulting `allowedOperations` contains all three. Every request carries that credential and project ID;
+point-of-use authentication revalidates
+project authority generation, active seat, project/session/run, principal
+generation, operation subset and expiry. These reads do not require or mint
+chair authority. The private control protocol exposes no new mutation or
+filesystem path.
+
+Implementation is TDD. Database fixtures deliberately reuse task and agent IDs
+across two runs. Distinct Activity rows in both runs prove row/summary/detail/
+message-body reads
+must stay in the exact run. Evidence retains its globally unique artifact ID while a
+cross-scope detail request must fail for the right reason. Tests cover absent/
+zero/positive, NULL/negative, crossed-triple and lagging high water, NULL/
+negative or crossed reserved preparation generations, active and every terminal
+preparation state, pair-
+keyed route reads, declared columns and conjunctive indexes, ordinal allocation
+and non-reuse, continuous-append page progress, generic versus certifying
+filters, missing/integrity-failed recovery arms, cursor/filter/principal/
+watermark substitution, expired capability freshness, action journal revision
+on every route child change, closed error/digest arms, maximal digest item IDs,
+maximal single-route frame fit, worst-case 8-route page fit and a no-
+action-ID-only-query source assertion. Frame limits use a maximal 1,024-byte
+request/result cursor. Negative route-arm fixtures reject null
+and half-null certifying identity plus crossed/null/mutated recovery custody and
+crossed present-route target/slot/attempt/reservation custody, plus direct-SQL
+null high-water/route identity. Attempt-allocation fixtures reject
+gap, reuse, crossed capacity target/slot, null owner/state, nonnull preflight/
+released state and split slot-head/reservation/
+action/route admission commit. An interior ordinal-gap fixture on a later page fails before
+task, target or slot filtering; crash/restart tests prove admitted action
+membership cannot be deleted or renumbered.
+An exact non-answer-bearing action-pair read returns `NOT_FOUND`, while only a
+nonnull-ordinal member lacking both route and recovery fails integrity.
+Target/slot filters cannot hide that orphan, and multi-page Work/Agent/Activity fixtures
+with reused local IDs prove total-order pagination without gaps or replay.
+A selective-filter load fixture accepts empty progress pages, scans no more than
+256 members per page and classifies every ordinal at most once.
+The zero-watermark fixture returns an empty page with null cursor immediately.
+Initialize fixtures reject a missing feature, each missing preissued or
+intersected operation and a narrowed frame maximum; the positive arm returns all
+three, and a wrong-reason negative proves initialize never adds an operation to
+the credential.
+Protocol/daemon contract tests prove the nested preparation and present route
+values are produced by their existing codecs. Full migration generation,
+foreign-key check, schema, runtime, evaluation and load gates remain binding.
