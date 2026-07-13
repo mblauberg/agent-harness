@@ -1,11 +1,17 @@
 # Agent fabric traceability
 
-Status: delivery contract
-Source: [accepted specification](../specs/01-agent-fabric.md) version 0.3
-Test root: `runtime/agent-fabric/`
+Status: delivery contract; implementation, integrated verification, provider
+review and final human acceptance remain pending
+Protocol source: [Spec 01 v0.36](../specs/01-agent-fabric.md)
+Daemon-hardening context: [Spec 04 v1.31](../specs/04-agent-fabric-operational-hardening.md)
+Delivery context: [Spec 05 v1.13](../specs/05-project-fabric-console.md)
+Test roots: `runtime/agent-fabric/`, `runtime/agent-fabric-protocol/` and
+`runtime/agent-fabric-console/`
 
-This runbook maps every accepted requirement and acceptance scenario to its
-implemented Vitest evidence. A listed test path is mandatory from its introduction
+This runbook maps the Spec 01 requirements and acceptance scenarios below to
+planned or implemented Vitest evidence. It is not a complete Spec 04 or Spec 05
+conformance receipt and does not prove integrated verification, provider review
+or human acceptance. A listed test path is mandatory from its introduction
 stage onward. Absence, skip, todo or quarantine of a deterministic test fails
 that stage. Several requirements may share one public-behaviour test; the test
 name must identify each mapped ID.

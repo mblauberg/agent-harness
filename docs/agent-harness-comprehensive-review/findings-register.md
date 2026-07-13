@@ -61,7 +61,7 @@
 
 ### F-001 — The managed Codex and Claude paths are compiled as read-only, so the core Fabric cannot yet serve as the general managed implementation plane.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Provider execution
 
 **Evidence surfaces**
@@ -76,7 +76,7 @@
 
 ### F-002 — The Fabric class is a roughly 7,400-line transaction façade combining policy, SQL, provider execution, recovery, budgets, barriers and projections.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Fabric architecture
 
 **Evidence surfaces**
@@ -89,7 +89,7 @@
 
 ### F-003 — Portable adapter policy and machine-local executable paths, digests, platform and local observations are mixed in tracked configuration.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Configuration
 
 **Evidence surfaces**
@@ -103,7 +103,7 @@
 
 ### F-004 — Lifecycle, review and authority rules are repeated across HARNESS.md, skills, specifications, validators and runbooks.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Lifecycle
 
 **Evidence surfaces**
@@ -120,7 +120,7 @@
 
 ### F-005 — The README says 34 skills while the canonical catalogue contains 33; the harness check counts skills but does not validate the README assertion.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Product truth
 
 **Evidence surfaces**
@@ -134,7 +134,7 @@
 
 ### F-006 — All five active specifications still report implementation, integrated verification, provider review or human acceptance as pending/in progress.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Assurance
 
 **Evidence surfaces**
@@ -147,7 +147,7 @@
 
 ### F-007 — The security catalogue declares secret scanning, SAST, licence, provenance, prompt-injection and other checks, while the shipped static scanner is a narrow Python AST pattern check.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Security
 
 **Evidence surfaces**
@@ -161,7 +161,7 @@
 
 ### F-008 — Retention is report/archive-only and deliberately has no apply/delete path, which prevents governed pruning of owned ephemeral and operational state.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Retention
 
 **Evidence surfaces**
@@ -175,7 +175,7 @@
 
 ### F-009 — There is no typed, human-approved backlog queue connecting scope, readiness, authority, expiry and execution.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Autonomy
 
 **Evidence surfaces**
@@ -189,7 +189,7 @@
 
 ### F-010 — The requested request-understanding/decomposition/model-selection behaviour is not represented as a small typed intake decision owned by the runtime.
 
-**Priority:** P0  
+**Priority:** P0
 **Theme:** Intake
 
 **Evidence surfaces**
@@ -205,7 +205,7 @@
 
 ### F-011 — Four local Node packages use separate lockfiles and recursively install/build one another; there is no root workspace task graph.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Build system
 
 **Evidence surfaces**
@@ -220,7 +220,7 @@
 
 ### F-012 — The Console has good model/controller separation, but index.ts still combines Unicode handling, layout, rendering and mouse interaction across roughly 1,800 lines.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Console
 
 **Evidence surfaces**
@@ -233,7 +233,7 @@
 
 ### F-013 — The Fabric package exports a broad set of daemon, Git, Herdr, operator, routing, profile and domain internals from its root.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Package API
 
 **Evidence surfaces**
@@ -246,7 +246,7 @@
 
 ### F-014 — Routing combines dated model aliases, regex family inference and limited runtime discovery; capability and outcome feedback are not a full closed loop.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Model routing
 
 **Evidence surfaces**
@@ -260,7 +260,7 @@
 
 ### F-015 — The activation surface carries five active adapters and additional broker concepts while the two primary implementation paths remain incomplete.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Provider scope
 
 **Evidence surfaces**
@@ -275,7 +275,7 @@
 
 ### F-016 — Other-primary review is broadly mandatory for substantial work, which is simple but can be costly and insensitive to oracle strength.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Review policy
 
 **Evidence surfaces**
@@ -290,7 +290,7 @@
 
 ### F-017 — The scope skill's one-question-per-round rule can make broad collaboration unnecessarily serial.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Scoping
 
 **Evidence surfaces**
@@ -303,7 +303,7 @@
 
 ### F-018 — The orchestration skill defaults to fan-out for bounded work without an explicit expected-information-gain/coordination-cost test.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Orchestration
 
 **Evidence surfaces**
@@ -316,7 +316,7 @@
 
 ### F-019 — No permanent fix without a reproduction/root cause is a strong default but lacks typed emergency and irreproducible-incident exceptions.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Diagnosis
 
 **Evidence surfaces**
@@ -329,7 +329,7 @@
 
 ### F-020 — The seam-first default can encourage transitional compatibility layers even in a pre-release project without consumers.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Refactoring
 
 **Evidence surfaces**
@@ -343,7 +343,7 @@
 
 ### F-021 — The TDD skill has some exceptions but does not define a uniform machine-readable exception record across delivery.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** TDD
 
 **Evidence surfaces**
@@ -356,7 +356,7 @@
 
 ### F-022 — The autonomous-lab contract emphasises continuation until a human STOP, which risks unproductive re-enumeration or budget exhaustion.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Long-running work
 
 **Evidence surfaces**
@@ -369,7 +369,7 @@
 
 ### F-023 — Normative specs carry extensive amendment history, increasing context load and making current requirements harder to identify.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Specifications
 
 **Evidence surfaces**
@@ -384,7 +384,7 @@
 
 ### F-024 — The installer is safe about ownership but writes absolute repository paths and depends on Bash/POSIX and symlinks.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Installation
 
 **Evidence surfaces**
@@ -398,7 +398,7 @@
 
 ### F-025 — The global AGENTS file requires reading the whole constitution for orchestration decisions and makes `$caveman` the universal default style.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Instructions
 
 **Evidence surfaces**
@@ -412,7 +412,7 @@
 
 ### F-026 — Provider lifecycle hooks are not generated from one canonical hook policy and are not integrated as a standard Fabric attestation/receipt surface.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Hooks
 
 **Evidence surfaces**
@@ -426,7 +426,7 @@
 
 ### F-027 — Private files and Unix sockets do not by themselves isolate arbitrary processes running under the same operating-system identity.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Threat model
 
 **Evidence surfaces**
@@ -441,7 +441,7 @@
 
 ### F-028 — Typed Git and stable actions are strong, but there is no single uniform staged-effect model covering all external mutations.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Effects
 
 **Evidence surfaces**
@@ -455,7 +455,7 @@
 
 ### F-029 — The helper requires explicit flags for every create/remove even though the policy permits a human-approved envelope; the runtime cannot yet prove the envelope automatically.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Worktrees
 
 **Evidence surfaces**
@@ -469,7 +469,7 @@
 
 ### F-030 — Budgets are recorded, but route selection and topology do not yet learn systematically from cost, latency, review yield and outcome.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Economics
 
 **Evidence surfaces**
@@ -483,7 +483,7 @@
 
 ### F-031 — Events and projections exist, but operator replay/time-travel is not a first-class Console capability.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Observability
 
 **Evidence surfaces**
@@ -497,7 +497,7 @@
 
 ### F-032 — Fabric tracks provider sessions, but there is no complete provider-neutral contract for projecting task/model/effort/topology into native Codex and Claude UIs.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Native UX
 
 **Evidence surfaces**
@@ -511,7 +511,7 @@
 
 ### F-033 — Strict TypeScript settings are strong, but no explicit dependency-boundary test was identified for runtime contexts.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Architecture tests
 
 **Evidence surfaces**
@@ -525,7 +525,7 @@
 
 ### F-034 — Package scripts include typecheck/build/test but no visible lint, format check or coverage threshold.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Quality tooling
 
 **Evidence surfaces**
@@ -539,7 +539,7 @@
 
 ### F-035 — CI is Ubuntu-only while production configuration and IPC/file-mode behaviour are macOS/POSIX specific.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Portability
 
 **Evidence surfaces**
@@ -554,7 +554,7 @@
 
 ### F-036 — The review could not verify current-head checks or branch protection from available connector evidence, despite a substantive CI workflow.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Repository governance
 
 **Evidence surfaces**
@@ -568,7 +568,7 @@
 
 ### F-037 — CODEOWNERS assigns the repository to a single individual, so code-owner approval cannot provide independent human review.
 
-**Priority:** P1  
+**Priority:** P1
 **Theme:** Repository governance
 
 **Evidence surfaces**
@@ -581,7 +581,7 @@
 
 ### F-038 — No CONTRIBUTING.md was found at the baseline, despite public visibility and substantial maintenance rules.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Contribution
 
 **Evidence surfaces**
@@ -595,7 +595,7 @@
 
 ### F-039 — There is no governed notes inbox with promotion/expiry, while the user intends agents to retain random decisions and ideas.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Notes and memory
 
 **Evidence surfaces**
@@ -609,7 +609,7 @@
 
 ### F-040 — Dependency audit and action pinning are strong, but no release SBOM, provenance attestation or signed release workflow was identified.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Supply chain
 
 **Evidence surfaces**
@@ -623,7 +623,7 @@
 
 ### F-041 — Normal tests intentionally use fakes and do not prove live login, provider calls or human Console identification.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Provider assurance
 
 **Evidence surfaces**
@@ -637,7 +637,7 @@
 
 ### F-042 — Exact executable versions and digests improve assurance but create frequent maintenance churn and can conflate compatibility with one workstation.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Compatibility
 
 **Evidence surfaces**
@@ -651,7 +651,7 @@
 
 ### F-043 — The control plane is tied to Unix sockets and POSIX identity/file-mode concepts.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** IPC
 
 **Evidence surfaces**
@@ -666,7 +666,7 @@
 
 ### F-044 — Forcing every description to start with 'Use' and include an exclusion in the first 250 characters improves routing discipline but makes semantic metadata depend on prose shape.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Skill metadata
 
 **Evidence surfaces**
@@ -679,7 +679,7 @@
 
 ### F-045 — Status, doctor, installer planning, model routing, worktrees and retention are separate commands without a unified product CLI.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Operations
 
 **Evidence surfaces**
@@ -695,7 +695,7 @@
 
 ### F-046 — Retrospective and evaluation primitives exist, but there is no governed runtime loop that converts observations into falsifiable harness proposals.
 
-**Priority:** P2  
+**Priority:** P2
 **Theme:** Self-improvement
 
 **Evidence surfaces**

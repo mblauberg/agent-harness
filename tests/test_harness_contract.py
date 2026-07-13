@@ -208,6 +208,9 @@ def test_engineering_docs_requires_visual_diagram_qa():
 def test_readme_catalogue_contains_every_portable_skill():
     skills = {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
     readme = (ROOT / "README.md").read_text()
+    headline_count = re.search(r"\*\*(\d+) reusable Agent Skills\b", readme)
+    assert headline_count, "README headline must publish the portable-skill count"
+    assert int(headline_count.group(1)) == len(skills)
     catalogue = readme.split("<!-- skill-catalogue:start -->", 1)[1].split(
         "<!-- skill-catalogue:end -->", 1
     )[0]

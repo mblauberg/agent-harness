@@ -1,13 +1,26 @@
 # Agent Harness comprehensive review pack
 
-**Repository:** `mblauberg/agent-harness`  
-**Baseline:** `main` at `0ea935f8ccaad550d8db0f9ea40324f58bdda569`  
-**Review date:** 13 July 2026  
+**Repository:** `mblauberg/agent-harness`
+**Baseline:** `main` at `0ea935f8ccaad550d8db0f9ea40324f58bdda569`
+**Review date:** 13 July 2026
 **Review mode:** static repository inspection through the connected GitHub interface, supplemented by current primary-source research.
 
 ## Important limitation
 
 I could not obtain a local checkout in the execution environment, so I did **not** run the repository's tests, build, daemon, provider smokes, Console, installer, or security scripts. Findings about behaviour are based on source, configuration, tests, specifications, runbooks and repository metadata. Proposed files are design artefacts: they have been syntax-checked where practical, but have not been integrated or executed against the repository.
+
+## Current Spec 05 applicability
+
+The original limitation above remains part of the review record. A later local
+reconciliation against Specs 01 v0.36, 04 v1.31 and 05 v1.13 is recorded in
+[`SPEC05-APPLICABILITY.md`](SPEC05-APPLICABILITY.md). It classifies all 46
+findings, separates current narrow repairs from resolved, deferred and
+conflicting recommendations, and routes the larger changes to a fresh session.
+Files under [`proposals/`](proposals/) remain design artefacts rather than
+accepted harness policy. `ARTIFACT_MANIFEST.json` and `VALIDATION.*` are the
+immutable receipts for import commit
+`798c800a57176e817a62c0f5690b63a5d7ed25f5`; they intentionally do not
+inventory this later overlay.
 
 ## Recommended reading order
 

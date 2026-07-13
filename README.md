@@ -2,7 +2,7 @@
 
 # Agent Harness
 
-**34 reusable Agent Skills for scoped, verified delivery with Claude Code and Codex.**
+**33 reusable Agent Skills for scoped, verified delivery with Claude Code and Codex.**
 
 [![CI](https://github.com/mblauberg/agent-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mblauberg/agent-harness/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/github/license/mblauberg/agent-harness)](LICENSE)
