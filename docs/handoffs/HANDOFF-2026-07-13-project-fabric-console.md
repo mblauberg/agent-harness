@@ -258,24 +258,13 @@ load, audit, MCP and provider-review matrix has not run.
 Run from the final commit:
 
 ```sh
-npm --prefix runtime/agent-fabric-protocol ci
-npm --prefix runtime/agent-fabric-protocol run check
-
-npm --prefix runtime/agent-fabric ci
-npm --prefix runtime/agent-fabric run check
-npm --prefix runtime/agent-fabric run test:evaluation
-npm --prefix runtime/agent-fabric run test:load
-npm --prefix runtime/agent-fabric audit --omit=dev --audit-level=high
-
-npm --prefix runtime/agent-fabric-console ci
-npm --prefix runtime/agent-fabric-console run check
-npm --prefix runtime/agent-fabric-console run test:evaluation
-npm --prefix runtime/agent-fabric-console run test:load
-npm --prefix runtime/agent-fabric-console audit --omit=dev --audit-level=high
-
-npm --prefix runtime/agent-fabric-herdr ci
-npm --prefix runtime/agent-fabric-herdr run check
-npm --prefix runtime/agent-fabric-herdr audit --omit=dev --audit-level=high
+npm ci --no-audit --no-fund
+npm run build
+npm run check
+npm run test:evaluation
+npm run test:load
+npm audit --omit=dev --audit-level=high
+npm audit --audit-level=high
 
 (
   cd runtime/agent-fabric-review-portal-supervisor

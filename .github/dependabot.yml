@@ -8,7 +8,7 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
-    directory: /runtime/agent-fabric
+    directory: /
     schedule:
       interval: weekly
       day: monday
@@ -18,40 +18,7 @@ updates:
         update-types:
           - "version-update:semver-major"
     groups:
-      fabric-development-dependencies:
+      workspace-development-dependencies:
         dependency-type: development
-      fabric-production-dependencies:
+      workspace-production-dependencies:
         dependency-type: production
-
-  - package-ecosystem: npm
-    directory: /runtime/agent-fabric-protocol
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
-    ignore:
-      - dependency-name: "@types/node"
-        update-types:
-          - "version-update:semver-major"
-
-  - package-ecosystem: npm
-    directory: /runtime/agent-fabric-console
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
-    ignore:
-      - dependency-name: "@types/node"
-        update-types:
-          - "version-update:semver-major"
-
-  - package-ecosystem: npm
-    directory: /runtime/agent-fabric-herdr
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
-    ignore:
-      - dependency-name: "@types/node"
-        update-types:
-          - "version-update:semver-major"

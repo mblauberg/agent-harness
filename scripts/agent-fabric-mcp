@@ -26,4 +26,4 @@ if [ -f "$FABRIC_ROOT/dist/mcp/main.js" ]; then
 fi
 
 # Source-tree fallback for development checkouts without a build.
-exec node --import "$FABRIC_ROOT/node_modules/tsx/dist/loader.mjs" "$FABRIC_ROOT/src/mcp/main.ts" "$@"
+exec node --import "$AGENTS_ROOT/node_modules/tsx/dist/loader.mjs" "$FABRIC_ROOT/src/mcp/main.ts" "$@"

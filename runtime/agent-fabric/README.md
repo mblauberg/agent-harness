@@ -42,17 +42,15 @@ Important boundaries:
 
 ## Development
 
+Run from the repository root. The root lockfile and project-reference build are
+the only supported install and build path.
+
 ```sh
-npm install
+npm ci --no-audit --no-fund
+npm run build
 npm run check
 npm run test:evaluation
 npm run test:load
-npm run schema:check
-
-npm --prefix ../agent-fabric-console run check
-npm --prefix ../agent-fabric-console run test:evaluation
-npm --prefix ../agent-fabric-console run test:load
-npm --prefix ../agent-fabric-herdr run check
 ```
 
 Normal tests use temporary databases and fake provider boundaries. They do not

@@ -1,0 +1,39 @@
+{
+  "name": "@local/provenant-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0 <25",
+    "npm": ">=11.12.1 <12"
+  },
+  "packageManager": "npm@11.12.1",
+  "workspaces": [
+    "runtime/agent-fabric-protocol",
+    "runtime/agent-fabric",
+    "runtime/agent-fabric-herdr",
+    "runtime/agent-fabric-console"
+  ],
+  "scripts": {
+    "clean": "tsc -b tsconfig.json --clean",
+    "build:types": "tsc -b tsconfig.json",
+    "schema:write": "node runtime/agent-fabric-protocol/scripts/write-schema.mjs --write",
+    "schema:check:generated": "node runtime/agent-fabric-protocol/scripts/write-schema.mjs --check",
+    "build": "tsc -b tsconfig.json && npm run schema:write",
+    "pretypecheck": "npm run build",
+    "typecheck": "npm run typecheck:workspaces",
+    "typecheck:workspaces": "npm run typecheck --workspaces --if-present",
+    "pretest": "npm run build",
+    "test": "npm run test:workspaces",
+    "test:workspaces": "npm run test --workspaces --if-present",
+    "test:evaluation": "npm run test:evaluation --workspaces --if-present",
+    "test:load": "npm run test:load --workspaces --if-present",
+    "check": "npm run build && npm run typecheck:workspaces && npm run schema:check --workspace=@local/agent-fabric && npm run test:workspaces",
+    "audit": "npm audit --omit=dev --audit-level=high",
+    "audit:all": "npm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "tsx": "4.23.1",
+    "typescript": "7.0.2"
+  }
+}

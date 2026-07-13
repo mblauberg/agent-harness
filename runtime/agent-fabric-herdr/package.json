@@ -19,11 +19,11 @@
     }
   },
   "scripts": {
-    "check:protocol": "npm --prefix ../agent-fabric-protocol ci --ignore-scripts --no-audit --no-fund && npm --prefix ../agent-fabric-protocol run build",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check": "npm run check:protocol && npm run typecheck && npm run build && npm run test"
+    "precheck": "npm run build --include-workspace-root",
+    "check": "npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {
     "@local/agent-fabric-protocol": "file:../agent-fabric-protocol"
