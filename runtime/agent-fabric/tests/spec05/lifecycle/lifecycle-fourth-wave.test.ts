@@ -246,6 +246,7 @@ describe("Spec 05 narrow recovery issue", () => {
       adapterContractDigest: digest("replacement-contract"),
       operation: "launch",
       checkpoint,
+      checkpointArtifactRef: domain.inspectLoss(PROJECT, RUN, lossId).checkpointRef,
     });
 
     expect((domain as any).inspectRecoveryIssue(issue.issueId)).toMatchObject({ status: "active" });
@@ -277,6 +278,7 @@ describe("Spec 05 exact fresh attempt correlation", () => {
       issueId: firstIssue.issueId, capability: `capability:${firstPair.actionId}`, pair: firstPair,
       adapterContractDigest: digest("replacement-contract"), operation: "launch",
       checkpoint: domain.inspectLoss(PROJECT, RUN, lossId).checkpoint,
+      checkpointArtifactRef: domain.inspectLoss(PROJECT, RUN, lossId).checkpointRef!,
     });
     const first = domain.commitFreshRotation({ projectSessionId: PROJECT, runId: RUN, lossId, pair: firstPair, attemptId: firstIssue.issueId });
     await domain.driveRotation(PROJECT, RUN, first.custodyRef);
@@ -291,6 +293,7 @@ describe("Spec 05 exact fresh attempt correlation", () => {
       issueId: secondIssue.issueId, capability: `capability:${secondPair.actionId}`, pair: secondPair,
       adapterContractDigest: digest("replacement-contract"), operation: "launch",
       checkpoint: domain.inspectLoss(PROJECT, RUN, lossId).checkpoint,
+      checkpointArtifactRef: domain.inspectLoss(PROJECT, RUN, lossId).checkpointRef!,
     });
     const second = domain.commitFreshRotation({ projectSessionId: PROJECT, runId: RUN, lossId, pair: secondPair, attemptId: secondIssue.issueId });
     const replay = domain.commitFreshRotation({ projectSessionId: PROJECT, runId: RUN, lossId, pair: secondPair, attemptId: secondIssue.issueId });
@@ -424,6 +427,26 @@ describe("Spec 05 exact snapshot correlations", () => {
     const historical = snapshot.custodies.find((custody: any) => custody.commandId === "historical-first");
     historical.disposition = "no-effect";
     historical.history[historical.history.length - 1] = "no-effect";
+    snapshot.audits.find((event: any) =>
+      event.kind === "lifecycle-custody-finalized" && event.sourceId === historical.custodyRef
+    ).detail = "pre-dispatch-zero-effect";
+    const proofDigest = digest("forged-no-effect-proof");
+    historical.terminalEvidence = {
+      schemaVersion: 1,
+      disposition: "no-effect",
+      detail: "pre-dispatch-zero-effect",
+      proofDigest,
+      terminalEvidenceDigest: lifecycleDigest({
+        schemaVersion: 1,
+        custodyRef: historical.custodyRef,
+        requestDigest: historical.requestDigest,
+        pair: historical.pair,
+        disposition: "no-effect",
+        detail: "pre-dispatch-zero-effect",
+        proofDigest,
+        history: historical.history,
+      }),
+    };
 
     expect(() => LifecycleRotationDomain.hydrate({ provider }, seal(snapshot)))
       .toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));

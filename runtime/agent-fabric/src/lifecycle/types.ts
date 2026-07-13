@@ -325,8 +325,27 @@ export interface LifecycleRecoveryCheckpointValidationPort {
     readonly agentId: string;
     readonly lossId: string;
     readonly checkpointState: Exclude<RecoveryCheckpointState, "last-validated">;
+    readonly checkpointArtifactRef: string;
     readonly checkpoint: LifecycleCheckpoint;
-  }): boolean;
+    readonly issueId: string;
+    readonly consequentialGateId: string;
+    readonly consequentialGateDigest: LifecycleDigest;
+  }): LifecycleRecoveryCheckpointValidationReceipt | null;
+}
+
+export interface LifecycleRecoveryCheckpointValidationReceipt {
+  readonly schemaVersion: 1;
+  readonly checkpointRef: string;
+  readonly checkpointDigest: LifecycleDigest;
+  readonly validationRevision: number;
+  readonly validationEvidenceDigest: LifecycleDigest;
+}
+
+export interface LifecycleRecoveryCheckpointBinding extends LifecycleRecoveryCheckpointValidationReceipt {
+  readonly issueId: string;
+  readonly recoverySourceRef: string;
+  readonly consequentialGateId: string;
+  readonly consequentialGateDigest: LifecycleDigest;
 }
 
 export interface LifecycleAgentView {
@@ -380,8 +399,18 @@ export interface LifecycleCustodyView {
   readonly launchChallenge: LifecycleDigest;
   readonly history: readonly string[];
   readonly checkpoint: LifecycleCheckpoint;
+  readonly checkpointValidation: LifecycleRecoveryCheckpointBinding | null;
   readonly candidate: ReplacementCandidate | null;
   readonly reviewDecision: ReviewAdoptionDecision | null;
+  readonly terminalEvidence: LifecycleCustodyTerminalEvidence | null;
+}
+
+export interface LifecycleCustodyTerminalEvidence {
+  readonly schemaVersion: 1;
+  readonly disposition: CustodyDisposition;
+  readonly detail: string;
+  readonly proofDigest: LifecycleDigest;
+  readonly terminalEvidenceDigest: LifecycleDigest;
 }
 
 export interface LifecycleHighWaterView {
@@ -433,6 +462,8 @@ export interface GenerationLossView {
   readonly checkpointState: RecoveryCheckpointState;
   readonly checkpointRef: string | null;
   readonly checkpointDigest: LifecycleDigest | null;
+  readonly checkpointValidationRevision: number | null;
+  readonly checkpointValidationEvidenceDigest: LifecycleDigest | null;
   readonly checkpoint: LifecycleCheckpoint;
   readonly fencedCheckpoint: LifecycleCheckpoint;
   readonly checkpointWriteRevision: number;
@@ -456,6 +487,7 @@ export interface FreshRotationPrepareRequest {
   readonly adapterContractDigest: LifecycleDigest;
   readonly operation: string;
   readonly checkpoint: LifecycleCheckpoint;
+  readonly checkpointArtifactRef: string;
 }
 
 export interface FreshRotationPreparation {
@@ -468,6 +500,7 @@ export interface FreshRotationPreparation {
   readonly lossId: string;
   readonly pair: ProviderActionPair;
   readonly checkpoint: LifecycleCheckpoint;
+  readonly checkpointValidation: LifecycleRecoveryCheckpointBinding;
   readonly adapterContractDigest: LifecycleDigest;
   readonly operation: string;
   readonly reservedProviderGeneration: number;
@@ -522,6 +555,26 @@ export interface LifecycleArchivalPlan {
   readonly planDigest: LifecycleDigest;
 }
 
+export interface LifecycleRecoveryRetirement {
+  readonly schemaVersion: 1;
+  readonly retirementId: string;
+  readonly projectSessionId: string;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly issueId: string;
+  readonly recoverySourceKind: "custody" | "generation-loss";
+  readonly recoverySourceRef: string;
+  readonly abandonKind: "nonfinal-custody" | "finalized-custody" | "direct-open" | "recovery-attempt";
+  readonly actionPair: ProviderActionPair | null;
+  readonly oldTerminalDisposition: CustodyDisposition | null;
+  readonly abandonReason: string;
+  readonly consequenceDigest: LifecycleDigest;
+  readonly sourceCheckpointDigest: LifecycleDigest;
+  readonly directHumanAttestationDigest: LifecycleDigest;
+  readonly requestDigest: LifecycleDigest;
+  readonly retirementDigest: LifecycleDigest;
+}
+
 export interface AbandonLossRequest {
   readonly projectSessionId: string;
   readonly runId: string;
@@ -554,6 +607,9 @@ export interface LifecycleAgentSnapshot extends LifecycleAgentSeed {
   readonly lifecycle: AgentLifecycleState;
   readonly claimsFrozen: boolean;
   readonly archivalPlan: LifecycleArchivalPlan | null;
+  readonly recoveryCheckpointDigest: LifecycleDigest | null;
+  readonly recoveryCheckpointValidationRevision: number | null;
+  readonly recoveryCheckpointValidationEvidenceDigest: LifecycleDigest | null;
 }
 
 export interface LifecycleCustodySnapshot {
@@ -577,6 +633,7 @@ export interface LifecycleCustodySnapshot {
   readonly reservedPrincipalGeneration: number;
   readonly reservedBridgeGeneration: number;
   readonly checkpoint: LifecycleCheckpoint;
+  readonly checkpointValidation: LifecycleRecoveryCheckpointBinding | null;
   readonly candidate: ReplacementCandidate | null;
   readonly launchChallenge: LifecycleDigest;
   readonly recoveryFromLossId: string | null;
@@ -591,6 +648,7 @@ export interface LifecycleCustodySnapshot {
   readonly history: readonly string[];
   readonly acceptance: RotationAcceptance;
   readonly reviewDecision: ReviewAdoptionDecision | null;
+  readonly terminalEvidence: LifecycleCustodyTerminalEvidence | null;
 }
 
 export interface LifecycleGenerationLossSnapshot extends GenerationLossView {}
@@ -622,6 +680,7 @@ export interface LifecycleDomainSnapshotV1 {
     readonly custodyRef: string;
   }[];
   readonly recoveryIssues: readonly LifecycleRecoveryIssue[];
+  readonly recoveryRetirements: readonly LifecycleRecoveryRetirement[];
   readonly snapshotDigest: LifecycleDigest;
 }
 

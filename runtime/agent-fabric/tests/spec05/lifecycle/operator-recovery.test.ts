@@ -141,7 +141,8 @@ function recoveryDomain(provider: LifecycleProviderPort): LifecycleRotationDomai
 function preview(domain: LifecycleRotationDomain, lossId: string, actionPair = pair) {
   const issueId = attemptId(actionPair);
   const capability = `capability:${actionPair.actionId}`;
-  const checkpoint = domain.inspectLoss(PROJECT, "run-recovery", lossId).checkpoint;
+  const loss = domain.inspectLoss(PROJECT, "run-recovery", lossId);
+  const checkpoint = loss.checkpoint;
   domain.registerRecoveryIssue(freshRecoveryIssue({
     issueId,
     capability,
@@ -165,6 +166,7 @@ function preview(domain: LifecycleRotationDomain, lossId: string, actionPair = p
     adapterContractDigest: digest("replacement-contract"),
     operation: "launch",
     checkpoint,
+    checkpointArtifactRef: loss.checkpointRef!,
   });
 }
 
@@ -239,6 +241,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
     const lossId = openLoss(domain);
     const currentCheckpoint = domain.checkpoint(PROJECT, "run-recovery", "chair");
     const lossCheckpoint = domain.inspectLoss(PROJECT, "run-recovery", lossId).checkpoint;
+    const checkpointArtifactRef = domain.inspectLoss(PROJECT, "run-recovery", lossId).checkpointRef!;
     const issueId = attemptId(pair);
     const capability = `capability:${pair.actionId}`;
     domain.registerRecoveryIssue(freshRecoveryIssue({
@@ -266,6 +269,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
       adapterContractDigest: digest("replacement-contract"),
       operation: "launch",
       checkpoint: currentCheckpoint,
+      checkpointArtifactRef,
     })).toThrow(expect.objectContaining({ code: "CHECKPOINT_MISMATCH" }));
     expect(domain.prepareFreshRotation({
       projectSessionId: PROJECT,
@@ -277,6 +281,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
       adapterContractDigest: digest("replacement-contract"),
       operation: "launch",
       checkpoint: lossCheckpoint,
+      checkpointArtifactRef,
     })).toMatchObject({ checkpoint: lossCheckpoint });
 
     const tampered = structuredClone(domain.snapshot()) as any;
@@ -290,9 +295,9 @@ describe("Spec 05 operator generation-loss recovery", () => {
   });
 
   it.each(["absent", "invalid"] as const)(
-    "requires read-only checkpoint validation before fresh recovery from an %s loss checkpoint",
+    "persists one gate-bound checkpoint artifact validation before fresh recovery from an %s loss checkpoint",
     (checkpointState) => {
-      const checkpointValidator = { validate: vi.fn(() => false) };
+      const checkpointValidator = { validate: vi.fn(() => null) };
       const domain = new LifecycleRotationDomain({
         provider: new RecoveryProvider(),
         recoveryAuthority: trustedRecoveryAuthority,
@@ -306,6 +311,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
       const checkpoint = domain.inspectLoss(PROJECT, "run-recovery", lossId).checkpoint;
       const issueId = attemptId(pair);
       const capability = `capability:${pair.actionId}`;
+      const checkpointArtifactRef = `checkpoint:recovered:${checkpointState}`;
       domain.registerRecoveryIssue(freshRecoveryIssue({
         issueId,
         capability,
@@ -330,11 +336,19 @@ describe("Spec 05 operator generation-loss recovery", () => {
         adapterContractDigest: digest("replacement-contract"),
         operation: "launch",
         checkpoint,
-      })).toThrow(expect.objectContaining({ code: "RECOVERY_CHECKPOINT_VALIDATION_REQUIRED" }));
+        checkpointArtifactRef,
+      } as never)).toThrow(expect.objectContaining({ code: "RECOVERY_CHECKPOINT_VALIDATION_REQUIRED" }));
       expect(checkpointValidator.validate).toHaveBeenCalledTimes(1);
 
-      checkpointValidator.validate.mockReturnValue(true);
-      expect(domain.prepareFreshRotation({
+      const validation = {
+        schemaVersion: 1 as const,
+        checkpointRef: checkpointArtifactRef,
+        checkpointDigest: checkpoint.checkpointDigest,
+        validationRevision: 7,
+        validationEvidenceDigest: digest(`checkpoint-validation:${checkpointState}`),
+      };
+      checkpointValidator.validate.mockReturnValue(validation as never);
+      const prepared = domain.prepareFreshRotation({
         projectSessionId: PROJECT,
         runId: "run-recovery",
         lossId,
@@ -344,19 +358,53 @@ describe("Spec 05 operator generation-loss recovery", () => {
         adapterContractDigest: digest("replacement-contract"),
         operation: "launch",
         checkpoint,
-      })).toMatchObject({ checkpoint });
+        checkpointArtifactRef,
+      } as never);
+      expect(prepared).toMatchObject({
+        checkpoint,
+        checkpointValidation: {
+          ...validation,
+          issueId,
+          recoverySourceRef: lossId,
+          consequentialGateId: `gate:${issueId}`,
+          consequentialGateDigest: digest(`gate:${issueId}`),
+        },
+      });
       expect(domain.inspectLoss(PROJECT, "run-recovery", lossId)).toMatchObject({
         checkpointState,
         checkpointRef: null,
         checkpointDigest: null,
       });
+      domain.commitFreshRotation({
+        projectSessionId: PROJECT,
+        runId: "run-recovery",
+        lossId,
+        pair,
+        attemptId: issueId,
+      });
+      expect(checkpointValidator.validate).toHaveBeenCalledTimes(2);
       expect(() => LifecycleRotationDomain.hydrate({
         provider: new RecoveryProvider(),
         recoveryAuthority: trustedRecoveryAuthority,
-        recoveryCheckpoint: checkpointValidator,
       }, JSON.parse(JSON.stringify(domain.snapshot())) as ReturnType<typeof domain.snapshot>)).not.toThrow();
+      expect(checkpointValidator.validate).toHaveBeenCalledTimes(2);
     },
   );
+
+  it("does not float a stale last-validated checkpoint reference onto a later generation loss", () => {
+    const domain = recoveryDomain(new RecoveryProvider());
+    domain.advanceRevision(PROJECT, "run-recovery", "chair", "task");
+
+    const loss = domain.inspectLoss(PROJECT, "run-recovery", openLoss(domain));
+
+    expect(loss).toMatchObject({
+      checkpointState: "invalid",
+      checkpointRef: null,
+      checkpointDigest: null,
+      checkpointValidationRevision: null,
+      checkpointValidationEvidenceDigest: null,
+    });
+  });
 
   it("previews without mutation, then Commit creates an asynchronous fresh custody", async () => {
     const provider = new RecoveryProvider();
@@ -433,6 +481,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
       adapterContractDigest: digest("replacement-contract"),
       operation: "launch",
       checkpoint,
+      checkpointArtifactRef: domain.inspectLoss(PROJECT, "run-recovery", lossId).checkpointRef!,
     })).toThrow(expect.objectContaining({ code: "RECOVERY_ACTION_PAIR_INVALID" }));
     preview(domain, lossId);
     domain.advanceRevision(PROJECT, "run-recovery", "chair", "task");
@@ -467,7 +516,10 @@ describe("Spec 05 operator generation-loss recovery", () => {
     preview(domain, lossId);
     const accepted = domain.commitFreshRotation({ projectSessionId: PROJECT, runId: "run-recovery", lossId, pair, attemptId: attemptId(pair) });
 
-    await expect(domain.driveRotation(PROJECT, "run-recovery", accepted.custodyRef)).resolves.toMatchObject({ disposition: "no-effect" });
+    await expect(domain.driveRotation(PROJECT, "run-recovery", accepted.custodyRef)).resolves.toMatchObject({
+      disposition: "no-effect",
+      history: ["awaiting-boundary", "prepared", "dispatched", "provider-terminal", "no-effect"],
+    });
     expect(domain.inspectLoss(PROJECT, "run-recovery", lossId)).toMatchObject({ state: "open", actionPair: null });
     const second = preview(domain, lossId, { ...pair, actionId: "operator:fresh-rotate:chair:second" });
     expect(second).toMatchObject({
@@ -486,14 +538,19 @@ describe("Spec 05 operator generation-loss recovery", () => {
       .toThrow(expect.objectContaining({ code: "RECOVERY_ABANDON_FORBIDDEN" }));
     const authority = abandonAuthority(lossId);
     domain.registerRecoveryIssue(abandonRecoveryIssue(authority, lossId, null));
-    expect(domain.abandonLoss({
+    const request = {
       projectSessionId: PROJECT,
       runId: "run-recovery",
       lossId,
       authority,
       expectedArchivalPlanDigest: plan.planDigest,
       expectedSourceCheckpointDigest: plan.sourceCheckpointDigest,
-    })).toMatchObject({ state: "abandoned", actionPair: null });
+    };
+    const first = domain.abandonLoss(request);
+    expect(first).toMatchObject({ state: "abandoned", actionPair: null });
+    const auditCount = domain.snapshot().audits.length;
+    expect(domain.abandonLoss(request)).toEqual(first);
+    expect(domain.snapshot().audits).toHaveLength(auditCount);
     expect(domain.inspectAgent(PROJECT, "run-recovery", "chair")).toMatchObject({
       lifecycle: "archived",
       writes: [{ state: "revoked-abandoned" }],

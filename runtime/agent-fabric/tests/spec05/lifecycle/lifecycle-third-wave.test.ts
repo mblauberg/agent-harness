@@ -189,6 +189,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
       "principalHighWater",
       "providerHighWater",
       "recoveryIssues",
+      "recoveryRetirements",
       "schemaVersion",
       "snapshotDigest",
     ]);
@@ -211,6 +212,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
     ["audit field", (snapshot: any) => { snapshot.audits.push({ kind: "forged", projectSessionId: PROJECT, runId: "run-third", agentId: "chair", sourceId: "x", detail: "x" }); }],
     ["fresh preview collection", (snapshot: any) => { snapshot.freshRotations.push({ forged: true }); }],
     ["fresh commit collection", (snapshot: any) => { snapshot.freshRotationCommitDigests.push({ forged: true }); }],
+    ["recovery retirement collection", (snapshot: any) => { snapshot.recoveryRetirements.push({ forged: true }); }],
   ])("rejects an unsealed %s tamper", (_label, mutate) => {
     const domain = new LifecycleRotationDomain({ provider: new TerminalProvider() }, [seed()]);
     const tampered = structuredClone(domain.snapshot()) as any;
@@ -270,7 +272,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     });
   });
 
-  it("rolls back lifecycle, decision and finalization when the transaction owner throws", async () => {
+  it("keeps lifecycle adoption committed when the review transaction owner throws afterward", async () => {
     const provider = new TerminalProvider();
     const domain = new LifecycleRotationDomain({
       provider,
@@ -284,21 +286,25 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     const accepted = request(domain);
     domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
 
-    await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).rejects.toThrow("review transaction rollback");
+    await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).resolves.toMatchObject({
+      phase: "finalized",
+      disposition: "adopted",
+      reviewDecision: { kind: "rebound" },
+    });
     expect(domain.inspectAgent(PROJECT, "run-third", "chair")).toMatchObject({
-      lifecycle: "suspended",
-      provider: { providerGeneration: 1 },
-      principalGeneration: 1,
-      bridgeGeneration: 1,
+      lifecycle: "ready",
+      provider: { providerGeneration: 2 },
+      principalGeneration: 2,
+      bridgeGeneration: 2,
     });
     expect(domain.inspectCustody(PROJECT, "run-third", accepted.custodyRef)).toMatchObject({
-      phase: "provider-terminal",
-      disposition: null,
-      reviewDecision: null,
+      phase: "finalized",
+      disposition: "adopted",
+      reviewDecision: { kind: "rebound" },
     });
   });
 
-  it("rolls back when the transaction owner returns without committing", async () => {
+  it("adopts without a review decision when the transaction owner returns without committing", async () => {
     const provider = new TerminalProvider();
     const domain = new LifecycleRotationDomain({
       provider,
@@ -307,16 +313,18 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     const accepted = request(domain);
     domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
 
-    await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).rejects.toMatchObject({
-      code: "REVIEW_ADOPTION_DECISION_INVALID",
+    await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).resolves.toMatchObject({
+      phase: "finalized",
+      disposition: "adopted",
+      reviewDecision: null,
     });
     expect(domain.inspectAgent(PROJECT, "run-third", "chair")).toMatchObject({
-      lifecycle: "suspended",
-      provider: { providerGeneration: 1 },
+      lifecycle: "ready",
+      provider: { providerGeneration: 2 },
     });
     expect(domain.inspectCustody(PROJECT, "run-third", accepted.custodyRef)).toMatchObject({
-      phase: "provider-terminal",
-      disposition: null,
+      phase: "finalized",
+      disposition: "adopted",
       reviewDecision: null,
     });
   });
@@ -363,6 +371,7 @@ describe("Spec 05 asynchronous operator fresh rotation", () => {
       adapterContractDigest: digest("replacement-contract"),
       operation: "launch",
       checkpoint,
+      checkpointArtifactRef: domain.inspectLoss(PROJECT, "run-third", lossId).checkpointRef!,
     });
 
     expect(domain.inspectLoss(PROJECT, "run-third", lossId)).toMatchObject({ state: "open", actionPair: null });

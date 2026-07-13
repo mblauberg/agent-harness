@@ -398,7 +398,7 @@ describe("Spec 05 lifecycle adoption", () => {
     });
   });
 
-  it("does not swallow a malformed transaction-owner review decision", async () => {
+  it("adopts without review rebind when the transaction owner supplies a malformed decision", async () => {
     const provider = new RecordingProvider();
     provider.result = terminalCandidate;
     const domain = new LifecycleRotationDomain({
@@ -414,12 +414,14 @@ describe("Spec 05 lifecycle adoption", () => {
     const accepted = request(domain);
     domain.markTurnTerminal(PROJECT, "run-1", "chair", "turn-caller");
 
-    await expect(domain.driveRotation(PROJECT, "run-1", accepted.custodyRef)).rejects.toMatchObject({
-      code: "REVIEW_ADOPTION_DECISION_INVALID",
+    await expect(domain.driveRotation(PROJECT, "run-1", accepted.custodyRef)).resolves.toMatchObject({
+      phase: "finalized",
+      disposition: "adopted",
+      reviewDecision: null,
     });
     expect(domain.inspectAgent(PROJECT, "run-1", "chair")).toMatchObject({
-      lifecycle: "suspended",
-      provider: { providerGeneration: 1 },
+      lifecycle: "ready",
+      provider: { providerGeneration: 2 },
     });
   });
 

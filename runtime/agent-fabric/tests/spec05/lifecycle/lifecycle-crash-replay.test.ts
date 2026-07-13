@@ -454,7 +454,7 @@ describe("Spec 05 lifecycle terminal dispositions", () => {
       expectedArchivalPlanDigest: plan.planDigest,
       expectedSourceCheckpointDigest: plan.sourceCheckpointDigest,
     })).toThrow(expect.objectContaining({ code: "RECOVERY_ACTION_PAIR_MISMATCH" }));
-    expect(domain.abandonCustody({
+    const request = {
       projectSessionId: PROJECT,
       custodyRef: accepted.custodyRef,
       runId: "run-crash",
@@ -462,7 +462,74 @@ describe("Spec 05 lifecycle terminal dispositions", () => {
       authority,
       expectedArchivalPlanDigest: plan.planDigest,
       expectedSourceCheckpointDigest: plan.sourceCheckpointDigest,
-    })).toMatchObject({ phase: "finalized", disposition: "abandoned" });
+    };
+    const first = domain.abandonCustody(request);
+    expect(first).toMatchObject({ phase: "finalized", disposition: "abandoned" });
+    const auditCount = domain.snapshot().audits.length;
+    expect(domain.abandonCustody(request)).toEqual(first);
+    expect(domain.snapshot().audits).toHaveLength(auditCount);
     expect(domain.inspectAgent(PROJECT, "run-crash", "chair")).toMatchObject({ lifecycle: "archived", claimsFrozen: true });
+  });
+
+  it("retires an already-final custody without rewriting it and hydrates the durable retirement", () => {
+    const ports = {
+      provider: new JournalProvider(),
+      recoveryAuthority: trustedRecoveryAuthority,
+    };
+    const domain = new LifecycleRotationDomain(ports, [seed()]);
+    const accepted = admitted(domain);
+    const custody = domain.inspectCustody(PROJECT, "run-crash", accepted.custodyRef);
+    domain.markTurnTerminal(PROJECT, "run-crash", "chair", "caller");
+    domain.proveNoEffect(PROJECT, "run-crash", accepted.custodyRef, {
+      pair: custody.pair,
+      dispatchRecorded: false,
+      evidenceDigest: digest("final-before-retirement"),
+    });
+    const before = domain.inspectCustody(PROJECT, "run-crash", accepted.custodyRef);
+    const plan = domain.previewCustodyAbandonment(PROJECT, "run-crash", accepted.custodyRef);
+    const authorityPreimage = {
+      projectSessionId: PROJECT,
+      runId: "run-crash",
+      agentId: "chair",
+      sessionGeneration: 1,
+      operations: ["session.cancel"] as const,
+    };
+    const authority = {
+      ...authorityPreimage,
+      authorityDigest: lifecycleDigest(authorityPreimage),
+      consequentialGateId: "gate:retire-final",
+      consequentialGateDigest: digest("gate:retire-final"),
+      consequentialGateRecoverySourceRef: accepted.custodyRef,
+      directHumanConfirmation: {
+        reason: "confirmed final custody retirement",
+        attestationDigest: digest("human:retire-final"),
+      },
+    };
+    domain.registerRecoveryIssue(abandonRecoveryIssue(authority, accepted.custodyRef, custody.pair));
+    const request = {
+      projectSessionId: PROJECT,
+      runId: "run-crash",
+      custodyRef: accepted.custodyRef,
+      pair: custody.pair,
+      authority,
+      expectedArchivalPlanDigest: plan.planDigest,
+      expectedSourceCheckpointDigest: plan.sourceCheckpointDigest,
+    };
+
+    expect(domain.abandonCustody(request)).toEqual(before);
+    expect(domain.snapshot().recoveryRetirements).toMatchObject([{
+      recoverySourceKind: "custody",
+      recoverySourceRef: accepted.custodyRef,
+      oldTerminalDisposition: "no-effect",
+      abandonKind: "finalized-custody",
+      actionPair: custody.pair,
+    }]);
+    const restored = LifecycleRotationDomain.hydrate(ports, domain.snapshot());
+    expect(restored.inspectCustody(PROJECT, "run-crash", accepted.custodyRef)).toEqual(before);
+    expect(restored.inspectAgent(PROJECT, "run-crash", "chair")).toMatchObject({
+      lifecycle: "archived",
+      claimsFrozen: true,
+    });
+    expect(restored.abandonCustody(request)).toEqual(before);
   });
 });
