@@ -351,7 +351,7 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
         status="tool_not_found"
         rc=127
       else
-        cursor-agent -p --trust --mode plan --sandbox enabled --output-format text \
+        cursor-agent -p --trust --mode ask --sandbox enabled --output-format text \
           ${model:+--model "$model"} "$(cat "$PROMPT_TMP")" </dev/null >"$raw" 2>"$diag"; rc=$?
       fi ;;
     kiro)

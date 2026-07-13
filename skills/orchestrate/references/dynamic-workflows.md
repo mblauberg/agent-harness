@@ -85,7 +85,7 @@ A workflow saved to `.claude/workflows/` (project) or `~/.claude/workflows/` (pe
 - [ ] `meta` is the first statement and a pure literal (no variables/calls/spreads/interpolation).
 - [ ] No `Date.now()`, argless `new Date()`, or `Math.random()` anywhere.
 - [ ] No hard-coded dated model IDs in the script body (route by tier/family instead).
-- [ ] No banned/unsafe CLI flags in cross-family dispatch (read-only/plan modes enforced).
+- [ ] No banned/unsafe CLI flags in cross-family dispatch (documented read-only modes enforced).
 - [ ] Reads `args` as a value, not stringified JSON; guards loops on `budget.total` (not `remaining()`).
 - [ ] Writes go through the run-dir + serial applier; high-risk paths escalate, never auto-apply.
 
