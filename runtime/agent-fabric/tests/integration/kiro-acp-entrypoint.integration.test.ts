@@ -19,7 +19,7 @@ describe("Kiro ACP provider entrypoint", () => {
     temporaryDirectories.push(directory);
     const wrapper = fileURLToPath(new URL("../../src/adapters/providers/optional/kiro-acp.ts", import.meta.url));
     const fake = fileURLToPath(new URL("../support/kiro-acp-fake.ts", import.meta.url));
-    const loader = fileURLToPath(new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url));
+    const loader = fileURLToPath(import.meta.resolve("tsx"));
     const transcript = join(directory, "provider-transcript.jsonl");
     const transport = new AdapterProcessTransport({
       command: [

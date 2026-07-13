@@ -27,7 +27,7 @@ async function fixture(scenario = "happy", overrides: Partial<KiroAcpClientOptio
   temporaryDirectories.push(directory);
   const transcript = join(directory, "transcript.jsonl");
   const source = fileURLToPath(new URL("../support/kiro-acp-fake.ts", import.meta.url));
-  const loader = fileURLToPath(new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url));
+  const loader = fileURLToPath(import.meta.resolve("tsx"));
   const client = new KiroAcpStdioClient({
     executable: process.execPath,
     args: ["--import", loader, source, scenario, transcript],

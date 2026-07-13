@@ -16,7 +16,7 @@ adapters:
       installed_version: "0.3.207"
       resolved_artifact: "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.207.tgz"
       lock_integrity_sha512: "y0PkQRmQBi96MHiN5Xzfq+GaddxCZCqI/cXEQBLYBLXGa4i1nDSlulQqkMBj2RorrrSGQJ6Wdw+uhu6OfHNPzA=="
-      entrypoint: "runtime/agent-fabric/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+      entrypoint: "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
       entrypoint_sha256: "7f12ca8bcc75fcdb4e32a75653cd1d4b773fc48327179d4beaaf5af37fa44944"
       executable: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
       executable_sha256: "1397a062c6889675055e3314dd956376ac51262a7734ad9e819c26975d71547a"
@@ -28,7 +28,7 @@ adapters:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
       protocol_version: "sdk-0.3.207/cli-2.1.207"
-      schema_source: "runtime/agent-fabric/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts"
+      schema_source: "node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts"
       schema_sha256: "96897d0a7cf010109a219d14a5b0a3746d08a299d4c7c2241986c8a321c1a96f"
       capability_fixture_version: 1
     runtime_range:

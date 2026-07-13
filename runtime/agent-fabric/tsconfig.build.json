@@ -2,9 +2,14 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "allowImportingTsExtensions": false,
+    "composite": true,
     "noEmit": false,
-    "rootDir": "src"
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo"
   },
+  "references": [
+    { "path": "../agent-fabric-protocol/tsconfig.build.json" }
+  ],
   "include": ["src/**/*.ts"],
   "exclude": ["tests", "dist", "node_modules", "vitest.config.ts"]
 }

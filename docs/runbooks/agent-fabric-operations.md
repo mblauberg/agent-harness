@@ -23,25 +23,12 @@ release or publication.
 ## Preflight
 
 ```sh
-npm --prefix runtime/agent-fabric-protocol ci
-npm --prefix runtime/agent-fabric-protocol run check
-
-npm --prefix runtime/agent-fabric ci
-npm --prefix runtime/agent-fabric run check
-npm --prefix runtime/agent-fabric run test:evaluation
-npm --prefix runtime/agent-fabric run test:load
-npm --prefix runtime/agent-fabric audit --omit=dev --audit-level=high
-
-npm --prefix runtime/agent-fabric-console ci
-npm --prefix runtime/agent-fabric-console run check
-npm --prefix runtime/agent-fabric-console run test:evaluation
-npm --prefix runtime/agent-fabric-console run test:load
-npm --prefix runtime/agent-fabric-console audit --omit=dev --audit-level=high
-
-npm --prefix runtime/agent-fabric-herdr ci
-npm --prefix runtime/agent-fabric-herdr run check
-npm --prefix runtime/agent-fabric-herdr audit --omit=dev --audit-level=high
-
+npm ci --no-audit --no-fund
+npm run build
+npm run check
+npm run test:evaluation
+npm run test:load
+npm audit --omit=dev --audit-level=high
 scripts/check-harness
 git diff --check
 python3 skills/deliver/scripts/validate_delivery.py \
@@ -137,7 +124,7 @@ below; MCP tool responses and the SQLite-backed fabric remain authoritative.
 Build and verify the standalone Console before attaching it to live state:
 
 ```sh
-npm --prefix runtime/agent-fabric-console run check
+npm run check --workspace=@local/agent-fabric-console
 node runtime/agent-fabric-console/dist/cli.js --help
 node runtime/agent-fabric-console/dist/cli.js --project "$PWD"
 ```

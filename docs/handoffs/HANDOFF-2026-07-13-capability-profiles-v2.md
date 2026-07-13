@@ -98,7 +98,9 @@ Commit `6748ceb` owns the current read-only projection:
 Before and after V2 work, run:
 
 ```sh
-npm --prefix runtime/agent-fabric test -- \
+npm ci
+npm run build
+npm exec --workspace=@local/agent-fabric -- vitest run \
   tests/acceptance/stage3/provider-permission-goldens.acceptance.test.ts \
   tests/unit/primary-provider-adapters.unit.test.ts
 ```
@@ -155,20 +157,22 @@ Prefer the accepted root-workspace commands introduced by Lane B. The stable
 package-level minimum is:
 
 ```sh
-npm --prefix runtime/agent-fabric-protocol run check
+npm ci
+npm run build
+npm run check --workspace=@local/agent-fabric-protocol
 PYTHONPATH=. "$HOME/miniforge3/bin/python" -m pytest -q \
   tests/test_delivery_contract.py
-npm --prefix runtime/agent-fabric run schema:check
-npm --prefix runtime/agent-fabric run typecheck
-npm --prefix runtime/agent-fabric run build
-npm --prefix runtime/agent-fabric test -- \
+npm run schema:check --workspace=@local/agent-fabric
+npm run typecheck --workspace=@local/agent-fabric
+npm run build --workspace=@local/agent-fabric
+npm exec --workspace=@local/agent-fabric -- vitest run \
   tests/acceptance/stage3/provider-permission-goldens.acceptance.test.ts \
   tests/unit/primary-provider-adapters.unit.test.ts \
   tests/unit/schema-validation.unit.test.ts \
   tests/integration/public-authority-contract.integration.test.ts \
   tests/acceptance/stage1/authority-algebra.acceptance.test.ts \
   tests/acceptance/stage3/provider-session-boundary.acceptance.test.ts
-npm --prefix runtime/agent-fabric test
+npm test --workspace=@local/agent-fabric
 scripts/check-harness
 git diff --check
 BASE=<recorded-post-A-B-base>

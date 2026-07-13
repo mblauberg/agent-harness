@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./runtime/agent-fabric-protocol/tsconfig.build.json" },
+    { "path": "./runtime/agent-fabric/tsconfig.build.json" },
+    { "path": "./runtime/agent-fabric-herdr/tsconfig.build.json" },
+    { "path": "./runtime/agent-fabric-console/tsconfig.build.json" }
+  ]
+}
