@@ -62,7 +62,8 @@ or `oauth_safe_mode`.
   `--disable-slash-commands`, `--no-session-persistence`, `--permission-mode plan`, the same safe read tools, and
   the same verifier system prompt.
 - `codex`: `exec -s read-only --ephemeral`.
-- `cursor`: `--mode plan --sandbox enabled`; current help documents plan/ask as read-only modes.
+- `cursor`: `--mode ask --sandbox enabled`; current help documents ask as
+  read-only, while current headless plan mode can exit without an answer.
 - `kiro`: disabled by default in the dispatcher. Enable only with `CF_DISPATCH_ENABLE_KIRO=1`; no hard
   read-only mode was verified in current local help.
 - `copilot`: disabled by default in the dispatcher. Guaranteed prompt-only review requires all tools
@@ -127,7 +128,7 @@ Examples:
 - non-Claude orchestrator needing Claude verifier -> dispatcher-managed `claude` route; prefer `--bare`
   when `ANTHROPIC_API_KEY`/`apiKeyHelper` exists, otherwise OAuth safe mode if already logged in.
 - Codex verifier -> `codex exec -s read-only -m <model> -c model_reasoning_effort=<level>`.
-- Cursor scout -> `cursor-agent -p --mode plan --sandbox enabled --model <model>`.
+- Cursor scout -> `cursor-agent -p --mode ask --sandbox enabled --model <model>`.
 - Gemini-family scout -> an `orchestrate` task through the activated Agent
   Fabric `agy` adapter; retain its route/action receipt.
 

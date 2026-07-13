@@ -430,7 +430,12 @@ def test_cursor_distinct_model_records_adapter_and_provider_family():
         assert record["resolved_model"] == "cursor-grok-4.5-high"
         assert record["certification_eligible"] is True
         assert record["cross_family"] is True
-        assert "--trust" in args_file.read_text(encoding="utf-8").splitlines()
+        cursor_args = args_file.read_text(encoding="utf-8").splitlines()
+        assert "--trust" in cursor_args
+        assert "--sandbox" in cursor_args
+        assert "enabled" in cursor_args
+        assert "--mode" in cursor_args
+        assert cursor_args[cursor_args.index("--mode") + 1] == "ask"
 
 
 def test_explicit_output_path_preserves_adapter_failure_diagnostics():
