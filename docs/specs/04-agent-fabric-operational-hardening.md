@@ -1,13 +1,15 @@
 # Agent fabric operational hardening
 
-Status: Draft v1.31 amendment under P1 repair; implementation and final human acceptance pending
+Status: Draft v1.31 amendment under re-audit and repair; implementation and
+final human acceptance pending
 Version: 1.31
 Date: 13 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.31 is a draft amendment pending repair and fresh independent review
+Version 1.31 is a draft amendment pending a fresh anchored audit, repair and
+independent review
 of its externally authenticated lifecycle-receipt persistence. It owns the
 daemon and persistence side of the final Console read
 surface. It adds indexed current-preparation and provider-route reads, binds

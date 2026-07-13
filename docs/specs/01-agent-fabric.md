@@ -1,6 +1,7 @@
 # Shared agent fabric
 
-Status: Draft v0.36 amendment under P1 repair; implementation and final human acceptance pending
+Status: Draft v0.36 amendment under re-audit and repair; implementation and
+final human acceptance pending
 Version: 0.36
 Date: 13 July 2026
 Chair for this design stage: Codex
@@ -8,7 +9,8 @@ Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.36 is a draft amendment pending repair and fresh independent review
+Version 0.36 is a draft amendment pending a fresh anchored audit, repair and
+independent review
 of its externally authenticated lifecycle-receipt design. It completes the
 Console read surface without adding authority. It
 adds an exact current-preparation locator, pair-keyed provider-route read and

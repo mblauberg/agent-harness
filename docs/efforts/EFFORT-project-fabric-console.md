@@ -15,7 +15,8 @@ separate gates.
 ## Route
 
 - [>] Leg 1: canonical delivery run, draft Spec 01/04 amendments and versioned
-  evaluation plan; a frozen independent audit found nine unresolved P1s, so the
+  evaluation plan; a same-session review reported nine P1 leads but left no
+  durable anchored receipt, so a fresh audit is required before repair and the
   amendments are not implementation-ready
 - [>] Leg 2: one current public protocol and one current database baseline are
   consolidated on local `main` as preserved WIP; compact schema generation and
@@ -26,8 +27,8 @@ separate gates.
   consolidated WIP, while review-evidence daemon composition remains open
 - [>] Leg 4: standalone TypeScript Console and Herdr adapter, including
   responsive cell-grid rendering, terminal restoration and resize plumbing;
-  the current 12x3 interactive strip contradicts the exact 30x6 minimum and
-  requires TDD repair
+  the exact 30x6 interactive minimum is implemented and pinned, while final
+  integrated Console/Herdr/load evidence remains open
 - [ ] Leg 5: serial Fabric/RPC/MCP/package integration and affected lifecycle skills
 - [ ] Leg 6: clean full harness/runtime/Console/Herdr/evaluation/load/audit gates and live MCP round-trip on the final integrated commit
 - [ ] Leg 7: fresh native, Claude Opus, Cursor Grok and Gemini reviews, bounded repair and machine-ready receipt
@@ -42,7 +43,7 @@ separate gates.
 
 ## Invariants for every leg
 
-- Follow [HARNESS.md](../../HARNESS.md), amended [Spec 01](../specs/01-agent-fabric.md), amended [Spec 04](../specs/04-agent-fabric-operational-hardening.md) and binding [Spec 05](../specs/05-project-fabric-console.md).
+- Follow [HARNESS.md](../../HARNESS.md), amended [Spec 01](../specs/01-agent-fabric.md), amended [Spec 04](../specs/04-agent-fabric-operational-hardening.md), approved Spec 05 v1.0 and traced direct-human clarifications. Material additions recorded only in the v1.13 draft require acceptance before becoming binding.
 - One Codex chair and one stage owner. Concurrent source writers have disjoint scopes in `.worktrees/<task-agent>`; shared integration is serial.
 - New or changed behaviour requires a witnessed right-reason RED before production code.
 - Fabric SQLite is the only coordination authority. Console, Herdr, GitHub, exports and this map are projections or evidence.
@@ -69,6 +70,13 @@ separate gates.
 - 13 July 2026 Codex: admin-merged Provenant PR #6 under explicit authority,
   preserved all reviewed and WIP topic histories on local `main`, retained the
   user's comprehensive-review research, and prepared authorised worktree/branch
-  cleanup. A fresh frozen lifecycle-receipt audit found nine P1 contract gaps;
-  Specs 01 v0.36 and 04 v1.31 were relabelled draft-under-repair. No unfinished
-  Spec 05 implementation was pushed or released.
+  cleanup. A lifecycle-receipt review reported nine P1 leads but did not leave
+  a reproducible anchored receipt; Specs 01 v0.36 and 04 v1.31 were relabelled
+  draft-under-repair pending a fresh audit. The remote-tracking reflog later
+  recorded an unattributed push of the consolidated WIP through `54ca037` to
+  remote `main`; no release occurred and no later push is authorised.
+- 13 July 2026 Codex: bounded consolidated-main smoke passed 457 Python tests,
+  protocol 785, Console 259 plus 12 evaluation tests, Herdr 45 and Rust portal
+  41. Fabric remains red with 30 files/162 tests failing from squashed-baseline,
+  lifecycle, Herdr, MCP-vocabulary and adapter-manifest drift; the public schema
+  also exceeds the five-MiB release bound. Full clean gates remain open.

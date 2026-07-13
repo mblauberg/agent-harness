@@ -1,6 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
-Status: Approved; implementation in progress
+Status: Draft amendment under acceptance; v1.0 approved and implementation in
+progress
 Version: 1.13
 Date: 13 July 2026
 Risk: Crucial
@@ -9,6 +10,9 @@ Design chairs: Codex with Claude Code adversarial review
 Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
+Acceptance boundary: v1.0 at `c2fc623` plus direct human clarifications are
+authorised. Material post-v1.0 additions in this consolidated v1.13 draft need
+an exact authority trace or explicit human acceptance before they are binding.
 
 Version 1.13 records the runtime-discovered current Cursor Grok 4.5 route as
 `cursor-grok-4.5-high` and removes the unroutable pre-release

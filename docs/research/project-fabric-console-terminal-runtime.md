@@ -19,10 +19,9 @@ bounded repair. Do not add Go or C++ for the current Console.
 
 The decision-time TypeScript spike passed the required resize, input,
 hostile-text and terminal-restoration oracles, so the Rust fallback was not
-triggered. That is not final implementation evidence: the 13 July consolidated
-presenter still exposes an interactive `strip` mode down to 12x3, contrary to
-Spec 05's exact 30x6 minimum. The remaining repair and full Console/runtime/
-evaluation gates stay owned by Spec 05.
+triggered. The 13 July consolidated presenter now enforces Spec 05's exact
+30x6 interactive minimum: 30x6 renders `strip`, while 29x6 and 30x5 are inert.
+Full Console/runtime/evaluation gates remain owned by Spec 05.
 
 The 80x24 frame is the default/reference acceptance viewport, not a fixed
 terminal size. Runtime layout follows current dimensions. Exact compact and

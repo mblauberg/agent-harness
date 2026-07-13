@@ -15,19 +15,24 @@ Supersedes: `HANDOFF-2026-07-12-project-fabric-console.md`
 
 Approved baseline: `c2fc623`
 
-Consolidation checkpoint: `85f4613` (descendant of merge `941a72f`)
+Consolidation merge: `941a72f`
 
-Integration checkpoint: `392b96c`
+Prior handoff checkpoint: `2c72391`; research decisions continue through
+`54ca037`
 
-Authority: local implementation, review, branch consolidation and authorised
-worktree cleanup; no further push, release or deployment
+Authority: the human explicitly authorised local implementation, review, branch
+creation/merge/pruning and `.worktrees/<task-agent>` create/use/remove for
+disjoint Spec 05 lanes. No further push, release or deployment is authorised.
 
 ## Goal and truth boundary
 
-Finish binding Spec 05 v1.13, including its Spec 01/04 protocol and daemon
-extensions, responsive Console, MCP agent fabric, lifecycle skills,
-evaluations, load gates and four-family review. Stop for the human timed-
-usability gate and explicit final acceptance.
+Finish approved Spec 05 v1.0 at `c2fc623` plus the human's direct clarifications,
+including its Spec 01/04 protocol and daemon extensions, responsive Console,
+MCP agent fabric, lifecycle skills, evaluations, load gates and four-family
+review. Current v1.13 is a consolidated working amendment: trace each material
+post-v1.0 addition to direct human authority or obtain explicit acceptance
+before treating it as binding. Stop for the human timed-usability gate and
+explicit final acceptance.
 
 The previous handoff's automated-completion status is stale. This handoff
 replaces it.
@@ -48,13 +53,16 @@ direction.
   `0cdda475f1d23e9de0554b21bf2aa90feb8c8e92`.
 - The deleted PR topic ended at
   `15bedc90fcc5ace59c7a0a069c7f0cf7eceba1b4`.
-- The local consolidation merge is `941a72f`; the research decision checkpoint
-  is `85f4613`. The handoff/research commit follows both.
+- The consolidation merge is `941a72f`; the prior handoff checkpoint is
+  `2c72391`; research decisions continue through `54ca037`.
 - Raw comprehensive-review research is preserved at `fe9d229`; reconciled
   review-pack history is preserved at `392b96c`.
-- Every pre-consolidation topic branch was an ancestor of local `main` before
+- Every pre-consolidation topic branch was an ancestor of `main` before
   authorised pruning. Only the primary worktree should remain.
-- No unfinished implementation was pushed or released.
+- The remote-tracking reflog records an `update by push` that advanced
+  `origin/main` through consolidated WIP `54ca037` at 21:24:55 +1000 on
+  13 July; Git does not identify the actor. No later checkpoint is pushed and
+  nothing was released.
 
 The consolidation preserves work; it does not certify semantic compatibility
 or completion. Incorporated histories include:
@@ -76,7 +84,9 @@ until reconciled against repaired normative specs with new tests.
 
 ## Binding product decisions
 
-- Spec 05 v1.13 remains binding.
+- Spec 05 v1.0 at `c2fc623` is approved. Direct human clarifications remain
+  authoritative; material additions recorded only in v1.1-v1.13 require an
+  exact authority trace or explicit human acceptance.
 - `80x24` is the default/reference viewport, not a fixed terminal size.
 - The Console must dynamically reflow, preserve state on resize, support a
   minimum usable `30x6`, and become clipped/inert below it while retaining
@@ -98,11 +108,18 @@ Aider and OpenHands. Borrow explicit client/server seams, stable event identity,
 observable verification and inspectable histories; do not import another
 harness wholesale.
 
-## Frozen amendment audit
+## Transferred amendment-review leads
 
-The independent frozen audit found no P0 and no other P0–P2 outside these nine
-unresolved P1s. Do not call Spec 01 v0.36 or Spec 04 v1.31 accepted or
-implementation-ready until all nine are repaired and freshly reviewed.
+A same-session native review reported the nine P1 leads below and no other
+P0–P2. It did not leave a durable receipt recording its base tree, reviewer,
+checked/excluded surface and exact source anchors. These leads are therefore not
+a reproducible frozen audit or a proven-complete finding set.
+
+Before repair, run a fresh source-read-only audit against current `main` and
+persist an allowed-docs receipt with the commit/tree, reviewer family, scope,
+exclusions, exact anchors and findings. Do not access `.agent-run/AFAB-004`.
+Then repair every substantiated item and refreeze Specs 01/04. Until then, do
+not call Spec 01 v0.36 or Spec 04 v1.31 accepted or implementation-ready.
 
 1. Receiptless direct-fresh rollback: reuse-final/open-loss fresh applies lack
    external authentication. Add an authenticated direct-fresh subject/batch and
@@ -131,8 +148,8 @@ implementation-ready until all nine are repaired and freshly reviewed.
 
 ## Specification-size requirement
 
-At consolidation, Spec 01 is about 9,700 lines, Spec 04 about 8,450 and Spec 05
-1,461. The human requires a hard maximum of 1,000 lines per spec file/module.
+At this checkpoint, Spec 01 is 9,727 lines, Spec 04 is 8,450 and Spec 05 is
+1,465. The human requires a hard maximum of 1,000 lines per spec file/module.
 
 First repair and independently freeze the semantic amendment. Then mechanically
 split Specs 01, 04 and 05 into canonical families:
@@ -151,25 +168,44 @@ change does.
 
 ## Verified evidence and known failures
 
-No result below is final-main evidence.
+Current-main smoke ran on `54ca037`. Later changes in this checkpoint are docs
+only; this is bounded smoke evidence, not the required clean final-gate receipt.
 
-- Before consolidation, `python3 scripts/check_harness.py` and
-  `git diff --check` passed.
-- The public-release gate fails because
+- `$HOME/miniforge3/bin/python -m pytest` passed 457 tests. Static security,
+  delivery scenarios (19/19), skill-catalogue drift, `git diff --check` and the
+  worktree invariant passed.
+- `scripts/check-harness` passed skill, doctrine, input, probe and routing
+  checks, then stopped at the public-release gate because
   `runtime/agent-fabric-protocol/schemas/protocol.schema.json` is about
   6.06 MiB, above the 5 MiB limit. Compact deterministic generation; do not
   weaken the gate.
-- Branch-local orchestration evidence reported 444 Python tests green plus
-  harness/security/delivery checks and independent review.
-- Branch-local lifecycle evidence reported 240 tests/type/build/harness checks
-  green and a clean native review.
-- The Rust portal branch reported 18 tests and a clean native review. Its README
-  correctly keeps certifying capability disabled until daemon custody and
-  confinement integration are proved.
-- The merged Console has resize plumbing, but `responsiveModeFor` currently
-  admits an interactive `strip` at 12x3. That contradicts the binding 30x6
-  minimum and requires a first failing test plus repair.
-- All branch results were invalidated as final evidence by consolidation.
+- Protocol `npm run check` passed 46 files/785 tests.
+- Fabric schema/type/build and embedded-protocol checks passed, but its full
+  check failed: 148 files/1,045 tests passed; 30 files/162 tests failed with 14
+  errors. The squashed baseline lacks `model_routing_evidence`; Fabric expects
+  `lifecycle_rotation_custody.action_id`; Herdr paths hit foreign-key failures;
+  MCP operation vocabulary and the adapter wrapper manifest also drift.
+  Evaluation passed 12 and failed 2 tests; the single daemon load test passed.
+- The merged Console has resize plumbing and enforces the binding 30x6
+  interactive minimum: 30x6 renders `strip`, while 29x6 and 30x5 are inert.
+  Console checks passed 20 files/259 tests and evaluation passed 12 tests. Its
+  isolated load gate passed 5 tests in 4.42 seconds; a parallel-contended run
+  breached the five-second bound at 5.41 seconds, so performance evidence must
+  record host contention.
+- Herdr passed 10 files/45 tests. The Rust portal passed format, locked/offline
+  metadata, clippy with warnings denied and 41 tests. It remains non-certifying
+  until daemon custody and confinement integration are proved.
+- Local package audits, live daemon/MCP round trips and provider-family review
+  were not run in this bounded close-out.
+
+Remote-main CI run
+[`29246167835`](https://github.com/mblauberg/provenant/actions/runs/29246167835)
+targeted pushed `54ca037` and completed red. Herdr passed. Harness stopped at
+the oversized schema; Fabric reproduced the database/FK/package/MCP drift;
+Console took 7.18 seconds against its five-second resize bound; Ubuntu portal
+clippy found platform-specific dead code/conversion/name warnings; and macOS
+portal relay tests failed or hung until cancellation. Use the run logs as the
+remote repair baseline.
 
 PR #6 CI was not green:
 
@@ -185,16 +221,19 @@ load, audit, MCP and provider-review matrix has not run.
 
 1. Reopen live `main`; verify a clean status, this handoff, remote, branch and
    worktree inventory, and preservation of every incorporated commit.
-2. Repair the nine Spec 01/04 P1s with executable SQL/codec/race fixtures where
-   possible. Obtain a fresh exact native audit, then Claude Opus and Cursor
-   review. Do not implement against an unfrozen contract.
+2. Reproduce the amendment review on current `main`, persist its anchored audit
+   receipt, then repair every substantiated P0–P2 with executable
+   SQL/codec/race fixtures where possible. Obtain a fresh exact native audit,
+   then Claude Opus and Cursor review. Do not implement against an unfrozen
+   contract.
 3. Modularise Specs 01, 04 and 05 under the 1,000-line rule. Refresh the index,
    effort map, traceability and review-pack applicability.
 4. Reconcile preserved runtime code through TDD in disjoint lanes:
    - compact protocol/schema generation and exact reads;
    - current squashed database plus lifecycle receipt authority;
    - Rust portal-supervisor daemon integration and confinement;
-   - Console/Herdr projection, exact 30x6 boundary and dynamic resize; and
+   - Console/Herdr projection, dynamic resize and uncontended load stability;
+     and
    - MCP seat/fabric round trips, lifecycle skills and evaluations.
 5. Apply relevant comprehensive-review close-out:
    - F-007: record a real TypeScript SAST tool, version, scope and result;
@@ -246,8 +285,8 @@ npm --prefix runtime/agent-fabric-herdr audit --omit=dev --audit-level=high
   cargo test --locked --offline
 )
 
-PYTHONPATH=. pytest -q
-python3 scripts/check_harness.py
+PYTHONPATH=. "$HOME/miniforge3/bin/python" -m pytest -q
+scripts/check-harness
 scripts/public-release-check
 git diff --check
 ```
@@ -260,8 +299,9 @@ reruns. Older branch passes are not substitutes.
 
 Only these remain genuine human gates:
 
-1. Any material spec/one-way-door change beyond repair of the nine audited
-   defects.
+1. Acceptance of material v1.1-v1.13 additions without an exact direct-human
+   authority trace, plus any new material spec/one-way-door change outside the
+   accepted scope.
 2. Any lifting of the `.agent-run/AFAB-004` prohibition or appointment of an
    authorised receipt verifier.
 3. The human-recorded 80x24 timed-identification evaluation.
