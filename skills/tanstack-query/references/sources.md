@@ -1,6 +1,6 @@
 # Official sources and provenance
 
-This skill was independently authored for Agent Harness from official TanStack
+This skill was independently authored for Provenant from official TanStack
 Query v5 documentation. It does not copy or adapt
 `DeckardGer/tanstack-agent-skills` text or rule-file structure.
 

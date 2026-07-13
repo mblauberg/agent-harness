@@ -1,4 +1,4 @@
-# Global agent harness constitution
+# Provenant harness constitution
 
 Revised 2026-07-10. Platform/system policy and explicit human authority lead;
 the nearest project instruction may specialise or strengthen the global
@@ -79,10 +79,10 @@ Coverage is proportional:
 
 | Risk | Minimum review pressure |
 |---|---|
-| routine | chair plus objective/native checks |
-| substantial | fresh-context native review plus the other primary |
-| crucial | substantial coverage; attempt one distinct bonus family |
-| terminal | substantial coverage; attempt two distinct bonus families |
+| `routine` | chair plus objective/native checks |
+| `substantial` | fresh-context native review plus the other primary |
+| `crucial` | substantial coverage; attempt one distinct bonus family |
+| `terminal` | substantial coverage; attempt two distinct bonus families |
 
 The other primary is load-bearing for substantial+ review. Gemini, xAI and
 other bonus families are useful advisory pressure but never block on absence,

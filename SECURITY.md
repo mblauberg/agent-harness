@@ -2,11 +2,11 @@
 
 ## Scope
 
-Security reports may cover the harness scripts, skill instructions, model
-routing, receipt validators and bundled third-party components on the default
-branch. This project orchestrates tools that may execute commands or access
-local files; an instruction-level authority bypass is in scope even when it is
-not conventional application code.
+Security reports may cover Provenant's harness scripts, skill instructions,
+model routing, receipt validators and bundled third-party components on the
+default branch. This project orchestrates tools that may execute commands or
+access local files; an instruction-level authority bypass is in scope even
+when it is not conventional application code.
 
 ## Reporting
 

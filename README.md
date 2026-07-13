@@ -1,103 +1,148 @@
 <div align="center">
 
-# Agent Harness
+# Provenant
 
-**34 reusable Agent Skills for scoped, verified delivery with Claude Code and Codex.**
+**A gated delivery lifecycle for coding agents. Scope, verify, review, accept.**
 
-[![CI](https://github.com/mblauberg/agent-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mblauberg/agent-harness/actions/workflows/ci.yml)
-[![Licence: MIT](https://img.shields.io/github/license/mblauberg/agent-harness)](LICENSE)
+Coding agents improvise. This agent harness is 33 Agent Skills that make Claude
+Code and Codex follow one lifecycle instead: agree the spec, build it, verify it,
+have the other model review it, then stop for you.
+
+[![CI](https://github.com/mblauberg/provenant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mblauberg/provenant/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/github/license/mblauberg/provenant)](LICENSE)
 
 </div>
 
-Claude Code and Codex can each lead and cross-review substantial work; other
-models are optional.
+Status: a personal harness, used daily by its author. Interfaces change without
+notice.
 
-Platform policy and explicit human authority lead. Project instructions may
-strengthen the harness, but cannot silently expand authority, weaken safety
-gates or redefine global memory policy.
+## What this is
+
+An Agent Skill is a folder with a `SKILL.md`. Only its one-line description sits
+in permanent context (the whole 33-skill catalogue is budgeted under 8,000
+characters); the body loads when the task matches. This is an operating system
+for agent work, not a prompt collection: 33 skills, one constitution
+([`HARNESS.md`](HARNESS.md)), and scripts that install both into Claude Code and
+Codex.
+
+Over a bare agent you get scoped authority, deterministic checks before anything
+reaches you, review by the *other* model family, and hard stops at the decisions
+you should make. The objective is quality per human attention-hour. Good fit if
+unreviewed agent output is expensive for you; poor fit if you want a prompt pack
+to skim. One primary works, but the other is load-bearing for substantial review:
+running solo means accepting a recorded degradation.
 
 ## Quick start
 
-Clone, then install the skills and instruction bootstrap:
-
 ```sh
-git clone https://github.com/mblauberg/agent-harness.git "$HOME/.agents"
-export AGENTS_HOME="$HOME/.agents"
+git clone https://github.com/mblauberg/provenant.git "$HOME/.agents"
+export AGENTS_HOME="$HOME/.agents"   # put this in ~/.zshrc too: skills read it at runtime
 
-# Claude Code
 "$AGENTS_HOME/scripts/install-harness" --platform claude
-
-# Codex
 "$AGENTS_HOME/scripts/install-harness" --platform codex
+
+# confirm it worked (needs PyYAML and pytest): shows which primaries and
+# routes resolve, so you can see if cross-family review is live
+"$AGENTS_HOME/scripts/check-harness" --doctor
 ```
 
-The installer preserves unmanaged content and disables Codex's bundled
-`skill-creator`, leaving portable `skill-authoring` canonical.
-
-Inspect or reconcile without overwriting unmanaged content:
-
-```sh
-"$AGENTS_HOME/scripts/manage_installation.py" plan --target "$HOME/.codex/skills"
-"$AGENTS_HOME/scripts/manage_installation.py" reconcile \
-  --target "$HOME/.codex/skills" \
-  --renames "$AGENTS_HOME/config/skill-renames.json"
+```text
+~/.agents/                cloned once
+  HARNESS.md    the constitution
+  AGENTS.md     the bootstrap line
+  skills/       one folder per skill
+  scripts/      install, route, check
+  config/       risk, routing, profiles
+     |
+     |  scripts/install-harness
+     v
+  ~/.claude/skills/   symlinks
+  ~/.codex/skills/    symlinks
 ```
 
-Requires Git and an Agent Skills client. Checks use Python 3.11+, PyYAML and
-pytest. [Herdr](https://herdr.dev) enables observable paired work.
+If you already have a `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`, the
+installer keeps it, exits 3 and prints one bootstrap line to paste in. Skills
+still link; the exit code is expected.
+
+The Codex installer appends one block to `~/.codex/config.toml` disabling Codex's
+bundled `skill-creator`, leaving `skill-authoring` canonical; everything else in
+that file is preserved. To reverse an install, `manage_installation.py
+uninstall-managed --target <dir>` reclaims only harness-owned links.
+
+Requires Git, Python 3.11+ (the installer is Python) and an Agent Skills client.
+Cross-family review, the headline, needs **both** primaries installed and signed
+in: the harness reaches the other family through its provider adapter, falling
+back to a sandboxed `claude` or `codex exec` call. With one primary everything
+still runs, but the review leg records a skip.
+[`scripts/check-harness`](scripts/check-harness) also needs PyYAML and pytest;
+`runtime/` and the full CI gate need Node.js 24. [Herdr](https://herdr.dev) is
+optional and only observes.
+
+## See it work
+
+```text
+you    add rate limiting to the public API
+scope  writes the spec, acceptance criteria, risk tier and write paths
+       -- STOPS. You approve, revise or stop.
+you    approved
+impl   tdd for the new behaviour, then the change
+       runs the checks: 41 passed
+       Codex reviews the diff in a fresh context, having never written it
+       1 blocking finding: the limiter is not per-tenant
+       repairs, re-verifies, re-reviews: clean
+       -- STOPS. You accept, rescope or stop.
+```
+
+Nothing was released. That decision is yours.
 
 ## Lifecycle
 
 ```mermaid
 flowchart TB
-    accTitle: Agent harness lifecycle
-    accDescr: Work moves from context and human-approved intent through a delivery profile, evidence, independent review and acceptance to separately authorised release, observation and improvement.
-    S["session · establish context"] --> P["scope · specification and acceptance criteria"]
-    P --> H1{{"HUMAN · approve specification and authority"}}
-    H1 --> D["deliver · profile and typed RUN.json"]
-    D --> X["execute · implement or domain skills"]
-    X --> V["verify · deterministic checks and evals"]
-    V --> R["review · independent lenses and bounded repair"]
-    R --> H2{{"HUMAN · final acceptance"}}
-    H2 --> H3{{"HUMAN · authorise external action or promotion"}}
-    H3 --> L["external action · release or domain hand-off"]
-    L --> O["observe · profile-specific evidence"]
-    O --> T["retrospect · improve the next cycle"]
+    accTitle: The delivery loop and its three human gates
+    accDescr: After a session sets up clean context, the deliver kernel runs the loop top to bottom: scope writes the specification, a human gate approves it, implement writes the test first, verify runs deterministic checks, and review is the other model family reading the work in a fresh context. Two dotted edges return: the approval gate sends the plan back to scope, and a blocking review finding sends the work back to implement for a bounded repair. A human gate then accepts, which leads to retrospect and the next cycle. Release and observe sit outside the loop, reachable only through a third human gate that authorises the external action.
+    SC["scope · spec and acceptance criteria"] --> G1{{"HUMAN · approve the spec"}}
+    G1 -. "send back" .-> SC
+    G1 --> IM["implement · test first"]
+    IM --> VF["verify · deterministic checks"]
+    VF --> RV["review · the other model family"]
+    RV -. "blocking finding" .-> IM
+    RV --> G2{{"HUMAN · accept"}}
+    G2 --> RT["retrospect"]
+    G2 -. "only if it ships" .-> G3{{"HUMAN · authorise the action"}}
+    G3 --> RL["release · observe"]
+
+    classDef gate fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
+    class G1,G2,G3 gate
 ```
 
-| Stage | Output | Human decision |
-|---|---|---|
-| Session | Current context and authority | None |
-| Scope | Specification and acceptance criteria | Approve scope and one-way doors |
-| Deliver | Artifacts, evidence and independent review | Accept, rescope or stop |
-| External action | Deploy, share, file, publish or use decision | Authorise the named action |
-| Observe | Profile-specific outcome evidence | None; failure returns to diagnosis |
-| Retrospect | Improvements and promoted learning | Material changes return through scope |
-
-Failed checks return to execution. Blocking findings get at most two repair
-cycles; scope drift returns to the human. Failed observation opens `diagnose`.
-External or irreversible actions need separate authority.
+Gold hexagons are human gates; each can send the work back. `verify` is
+deterministic checks, and `review` is the other model family reading the diff in
+a fresh context, having never written it. The two dotted edges are the loop:
+the plan goes back to scope, a blocking finding goes back to implement. Release
+and observe sit outside the loop, behind their own gate. The loop is
+[`deliver`](skills/deliver/SKILL.md), the kernel binding one run to one receipt,
+and [`implement`](skills/implement/SKILL.md) is its software front door. Full
+lifecycle, every loop drawn: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Core workflows
 
-| Need | Skill | Result |
-|---|---|---|
-| Turn an idea into an approved contract | [`scope`](skills/scope/SKILL.md) | Specification, stories and acceptance criteria |
-| Deliver an approved cross-domain outcome | [`deliver`](skills/deliver/SKILL.md) | Artifacts, evidence, review and acceptance gate |
-| Deliver an approved change | [`implement`](skills/implement/SKILL.md) | Verified change, independent review and bounded repair |
-| Preserve behaviour while simplifying structure | [`refactor`](skills/refactor/SKILL.md) | Equivalence evidence, ownership reduction and safe deletion proof |
-| Investigate a failure | [`diagnose`](skills/diagnose/SKILL.md) | Evidence-backed cause without an unapproved permanent edit |
-| Review beyond the diff | [`code-review`](skills/code-review/SKILL.md) | Multi-lens findings with structural and architectural coverage |
-| Review a frontend without changing it | [`frontend-review`](skills/frontend-review/SKILL.md) | UI findings with tested and untested evidence coverage |
-| Coordinate parallel agents | [`orchestrate`](skills/orchestrate/SKILL.md) | Partitioned work, cross-family verification and synthesis |
-| Run a long, resumable effort | [`autonomous-lab`](skills/autonomous-lab/SKILL.md) | Crash-safe progress until a human stops the run |
-| Keep long work recoverable | [`session`](skills/session/SKILL.md) and [`work-map`](skills/work-map/SKILL.md) | Lean context, hand-offs and durable state |
-| Promote an accepted artifact | [`release`](skills/release/SKILL.md) | Authorised action, reversal and observation |
-| Improve the next cycle | [`retrospect`](skills/retrospect/SKILL.md) | Root-cause clusters, regression gates and promoted learning |
+| Need | Skill |
+|---|---|
+| Agree what to build | [`scope`](skills/scope/SKILL.md) |
+| Deliver an approved code change | [`implement`](skills/implement/SKILL.md) |
+| Deliver research, analysis or documents | [`deliver`](skills/deliver/SKILL.md) |
+| Find a root cause | [`diagnose`](skills/diagnose/SKILL.md) |
+| Review without changing the code | [`code-review`](skills/code-review/SKILL.md) |
+| Coordinate parallel agents | [`orchestrate`](skills/orchestrate/SKILL.md) |
+| Promote an accepted artifact | [`release`](skills/release/SKILL.md) |
 
 ## Skill library
 
 <!-- skill-catalogue:start -->
+<details>
+<summary>All 33 skills</summary>
+
 | Area | Skills |
 |---|---|
 | Delivery | [`session`](skills/session/SKILL.md), [`scope`](skills/scope/SKILL.md), [`deliver`](skills/deliver/SKILL.md), [`implement`](skills/implement/SKILL.md), [`tdd`](skills/tdd/SKILL.md), [`refactor`](skills/refactor/SKILL.md), [`diagnose`](skills/diagnose/SKILL.md), [`code-review`](skills/code-review/SKILL.md), [`evaluate`](skills/evaluate/SKILL.md), [`release`](skills/release/SKILL.md), [`retrospect`](skills/retrospect/SKILL.md), [`work-map`](skills/work-map/SKILL.md) |
@@ -107,58 +152,41 @@ External or irreversible actions need separate authority.
 | Web engineering | [`playwright`](skills/playwright/SKILL.md), [`react-performance`](skills/react-performance/SKILL.md), [`tanstack-query`](skills/tanstack-query/SKILL.md), [`typescript-clean-code`](skills/typescript-clean-code/SKILL.md), [`web-stack-conventions`](skills/web-stack-conventions/SKILL.md) |
 | Harness development | [`grill-me`](skills/grill-me/SKILL.md), [`skill-audit`](skills/skill-audit/SKILL.md), [`skill-authoring`](skills/skill-authoring/SKILL.md) |
 | Presentation | [`caveman`](skills/caveman/SKILL.md) |
+
+</details>
 <!-- skill-catalogue:end -->
 
-## Models and review
+## Review, profiles and safety
 
-| Role | Policy |
+The client you started is the session chair: it owns authority, run state, gates
+and synthesis. It fans out to subagents for depth and sends substantial work to
+the other primary for review in a fresh context. Coverage scales with risk:
+
+| Risk | Minimum review pressure |
 |---|---|
-| Session chair | Claude Code or Codex owns communication, authority and final synthesis |
-| Native workers | The chair's subagents provide parallel depth within partitioned scopes |
-| Other primary | Required independent review for substantial and higher-risk work |
-| Additional families | Gemini, xAI and other adapters provide non-blocking blind-spot checks |
-| Routing | Runtime capability discovery resolves `flagship`, `workhorse` and `scout` aliases |
+| `routine` | chair plus objective and native checks |
+| `substantial` | fresh-context native review plus the other primary |
+| `crucial` | substantial coverage, plus one distinct bonus family attempted |
+| `terminal` | substantial coverage, plus two distinct bonus families attempted |
 
-Evidence and corroboration—not model votes—make findings blocking. Missing
-optional providers are recorded and skipped.
+Bonus families (Gemini, xAI, others) never block on absence, quota or API
+failure, but at the top two tiers the *attempt* is owed and every skipped leg is
+recorded. Evidence and corroboration, not model votes, make a finding blocking.
 
-## Delivery profiles
+Each kind of work owes the evidence its delivery profile names: tests and code
+review for software, source coverage for research, recalculation for analysis,
+render checks for documents, behavioural evals for agent products
+([`config/delivery-profiles.json`](config/delivery-profiles.json)). Held-out
+cases replayed by `scripts/check-harness` cover the kernel.
 
-| Profile | Typical outputs | Minimum evidence shape |
-|---|---|---|
-| Software | Source, migrations, configuration | Tests plus code review |
-| Research | Report, dataset, evidence map | Source coverage plus source-quality review |
-| Analysis | Model, table, visualisation | Recalculation plus interpretation review |
-| Document | Markdown, DOCX, PDF, slides, sheets | Render checks plus audience-fit review |
-| Agent product | Prompts, tools, policies, eval sets | Tests, permissions, behavioural eval and red team |
-
-High-stakes work adds source-authority, privacy, qualified-review and explicit
-action controls. Profile rules live in
-[`config/delivery-profiles.json`](config/delivery-profiles.json); the neutral
-receipt and validator live with [`deliver`](skills/deliver/SKILL.md).
-
-Run the profile gate from any directory:
-
-```sh
-python3 "${AGENTS_HOME:-$HOME/.agents}/scripts/validate_delivery_scenarios.py"
-```
-
-## Safety
-
-| Boundary | Rule |
-|---|---|
-| Authority | Filesystem access, credentials and subscriptions never grant permission |
-| Git | No branch or worktree is created without direct human authorisation |
-| Concurrency | Agents never write the same source surface concurrently |
-| Knowledge | Durable facts live in project-owned specs, ADRs, runbooks and state files |
-| Release | Final acceptance and production promotion remain human decisions |
-
-See [`HARNESS.md`](HARNESS.md) for the operating contract and
-[`SECURITY.md`](SECURITY.md) for vulnerability reporting.
+Boundaries that always hold: access and credentials never grant permission; no
+branch or worktree without a human request or an approved authority envelope; no
+two agents writing one source surface; acceptance and promotion stay human
+([`HARNESS.md`](HARNESS.md)).
 
 [`Architecture`](docs/ARCHITECTURE.md) ·
-[`Research`](docs/research/skill-portfolio-practices-2026.md) ·
 [`Lifecycle spec`](docs/specs/02-adaptive-agent-harness.md) ·
+[`Research`](docs/research/skill-portfolio-practices-2026.md) ·
 [`Maintenance`](MAINTAINING.md) ·
 [`Acknowledgements`](ACKNOWLEDGEMENTS.md) ·
 [`Third-party notices`](THIRD_PARTY_NOTICES.md) ·

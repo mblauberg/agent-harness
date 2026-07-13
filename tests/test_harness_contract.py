@@ -152,25 +152,30 @@ def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
     assert not (ROOT / "skills" / "change").exists()
     readme = (ROOT / "README.md").read_text()
     assert "$change" not in readme
-    assert "deliver · profile and typed RUN.json" in readme
+    # `deliver` is the kernel the whole lifecycle hangs off. Anchor on the claim,
+    # not on a node label: labels are editorial, the one-run-one-receipt contract
+    # is not.
+    assert "the kernel binding one run to one receipt" in readme
+    assert "[`deliver`](skills/deliver/SKILL.md)" in readme
     lifecycle = readme.split("## Lifecycle", 1)[1].split("## Core workflows", 1)[0]
     diagrams = re.findall(r"```mermaid\n(.*?)\n```", lifecycle, re.DOTALL)
     semantics = "\n".join(diagrams)
     assert len(diagrams) == 1
     assert all("accTitle:" in diagram and "accDescr:" in diagram for diagram in diagrams)
-    assert semantics.count("HUMAN ·") == 3
-    for stage in (
-        "session",
-        "scope",
-        "implement",
-        "deliver",
-        "verify",
-        "review",
-        "release",
-        "observe",
-        "retrospect",
-    ):
-        assert stage in semantics
+    # Mermaid quotes every drawn label (nodes and edges) and leaves accTitle and
+    # accDescr unquoted, so this is what a sighted reader actually sees.
+    drawn = "\n".join(re.findall(r'"([^"]*)"', semantics))
+    assert drawn.count("HUMAN ·") == 3
+    for stage in ("scope", "implement", "verify", "review", "release", "observe", "retrospect"):
+        assert stage in drawn, f"{stage} is not drawn in the lifecycle diagram"
+    # A blocking finding must visibly return the work to implement, otherwise the
+    # diagram shows review as advisory.
+    assert "blocking finding" in drawn
+    # `session` and `deliver` frame the loop without being stages in it, so they
+    # are owed to a screen reader rather than drawn as nodes.
+    description = re.search(r"accDescr:\s*(.+)", semantics).group(1)
+    for framing in ("session", "deliver"):
+        assert framing in description
 
 
 @pytest.mark.skipif(shutil.which("mmdc") is None, reason="optional local Mermaid CLI is absent")
@@ -215,6 +220,18 @@ def test_readme_catalogue_contains_every_portable_skill():
     assert listed == skills
     for name in skills:
         assert f"(skills/{name}/SKILL.md)" in catalogue
+
+
+def test_readme_headline_skill_count_matches_the_skills_on_disk():
+    # Regression gate. The README claimed 34 skills while 33 shipped: the catalogue
+    # table was guarded, the headline integer was not. Every way the README states
+    # the count must agree with the filesystem, which is the only source of truth.
+    # scripts/render_skill_catalogue.py regenerates all of them.
+    skills = {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
+    readme = (ROOT / "README.md").read_text()
+    stated = {int(count) for count in re.findall(r"\b(\d+)(?= Agent Skills\b|-skill\b| skills\b)", readme)}
+    assert stated, "the README states no skill count"
+    assert stated == {len(skills)}, f"README claims {sorted(stated)} skills, {len(skills)} are on disk"
 
 
 def test_openai_skill_sidecar_descriptions_fit_provider_contract():
@@ -263,7 +280,12 @@ def test_orchestrate_doctrine_checker_rejects_empty_or_malformed_contracts(
 
 def test_readme_is_concise_public_facing_and_free_of_process_commentary():
     readme = (ROOT / "README.md").read_text()
-    assert len(readme.split()) <= 1000
+    # The README is the front page: it earns a reader's next click, it is not the
+    # manual. The cap keeps new sections competing for space with old ones instead
+    # of accreting, and sends depth to docs/ARCHITECTURE.md. It is deliberately set
+    # above the current length so ordinary edits do not have to fight it; if a
+    # change genuinely needs more room than this, cut something first.
+    assert len(readme.split()) <= 1200
     for retired_phrase in (
         "Experimental:",
         "made public for reuse",

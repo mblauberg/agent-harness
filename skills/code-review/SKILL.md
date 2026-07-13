@@ -8,7 +8,7 @@ description: "Use for source-read-only review of a PR, diff, commit, migration, 
 Review is source-read-only unless the user separately authorises fixes. A
 reviewer may write compressed findings and traces only to an explicitly assigned
 artifact directory. The diff is the entry point, not the boundary. Judge the
-resulting system, not just changed lines.
+resulting system, rather than the changed lines alone.
 
 ## Review
 
@@ -24,7 +24,7 @@ resulting system, not just changed lines.
    is mandatory; add security/privacy, data/concurrency,
    performance/reliability, tests, architecture, readability, UX/accessibility
    or operations only when activated by the dependency cone.
-5. For substantial+ or comprehensive work, use 2–4 blind independent agents
+5. For substantial+ or wide-surface work, use 2–4 blind independent agents
    with distinct primary lenses and deliberate overlap on the riskiest
    invariant. Then run an anonymised claim challenge and a fresh reduction.
    Never rank prose or majority-vote findings.

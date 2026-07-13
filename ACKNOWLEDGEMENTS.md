@@ -34,7 +34,7 @@ record.
 - The agentic lifecycle was informed by Google's *The New SDLC With Vibe
   Coding* [whitepaper](https://www.kaggle.com/whitepaper-the-new-SDLC-with-vibe-coding).
   The implementation, authority model and receipts in this repository are
-  original harness work.
+  original Provenant work.
 - The independent-panel pattern is inspired by
   [Andrej Karpathy's LLM Council](https://github.com/karpathy/llm-council).
   No council code is incorporated.
