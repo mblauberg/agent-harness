@@ -35,6 +35,8 @@ describe("current schema baseline", () => {
       "agent_lifecycle_recovery_capability_issues",
       "agent_lifecycle_recovery_retirements",
       "artifact_publication_lineage",
+      "coordination_policy_current",
+      "coordination_policy_revisions",
       "coordination_gate_snapshots",
       "delivery_requirement_maps",
       "delivery_review_bases",
@@ -87,6 +89,11 @@ describe("current schema baseline", () => {
     ] as const;
     expect(requiredTables.filter((table) => !tableNames.has(table))).toStrictEqual([]);
 
+    expect(database.prepare(`
+      SELECT name FROM sqlite_schema
+       WHERE type = 'view' AND name = 'review_finding_sets_complete'
+    `).get()).toEqual({ name: "review_finding_sets_complete" });
+
     for (const predecessorTable of [
       "cross_family_review_evidence",
       "cross_family_reviews",
@@ -125,6 +132,7 @@ describe("current schema baseline", () => {
       "adapter_capability_snapshots",
       "adapter_effective_configurations",
       "artifact_publication_lineage",
+      "coordination_policy_revisions",
       "coordination_gate_snapshots",
       "discovery_surface_manifests",
       "implementation_delivery_manifests",
@@ -138,6 +146,10 @@ describe("current schema baseline", () => {
       "review_bundles",
       "review_certification_cuts",
       "review_evidence_annotations",
+      "review_finding_members",
+      "review_finding_pages",
+      "review_finding_set_pages",
+      "review_finding_sets",
       "review_target_chair_bindings",
       "topology_wave_append_receipts",
       "topology_wave_plans",
