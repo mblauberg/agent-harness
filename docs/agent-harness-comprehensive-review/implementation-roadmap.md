@@ -1,5 +1,21 @@
 # Implementation roadmap
 
+> **Re-sequenced 2026-07-13** (scoping session, `SCOPING-SESSION.md`): the
+> adopted first tranche is codex-pair's 4-step staged path, not section 18's
+> single package: (1) authority-contract reconciliation + adapter
+> characterisation → (2) pure admission extraction into an `AuthorityCompiler`
+> (behaviour unchanged) → (3) **one-provider** write pilot gated on an
+> adversarial containment spike (worktree/sibling/symlink/network/settings)
+> → (4) second provider, then structural extraction. Foundations (root
+> workspace/build fix, truth drift) run in parallel from the consolidated
+> project-fabric-console handoff; Lane B owns the active foundation repair.
+> Tranche 0's "canonical manifest" item is **rejected**
+> — replaced by per-domain owners + drift checks (decision register D-006).
+> Tranche 5/7 intake-kernel and backlog-controller items are deferred until the
+> write pilot proves out; backlog is schema-first, store-pluggable (markdown
+> frontmatter or GitHub Issues per project convention). Retention: design and
+> class-tagging now, delete machinery after tranche 1.
+
 ## 1. Sequencing principle
 
 Order work by risk reduction and architectural leverage:
@@ -19,7 +35,7 @@ Use implementation tranches rather than one giant rewrite. Each tranche must be 
 flowchart LR
     T0[0 Truth and baselines] --> T1[1 Authority profiles]
     T1 --> T2[2 Provider-action extraction]
-    T0 --> T3[3 Root workspace/manifest]
+    T0 --> T3[3 Root workspace/domain drift gates]
     T2 --> T4[4 Fabric bounded modules]
     T3 --> T4
     T4 --> T5[5 Lifecycle/intake/backlog]
@@ -34,7 +50,7 @@ flowchart LR
 
 ### Scope
 
-- canonical manifest;
+- per-domain canonical owners and drift gates;
 - generated skill catalogue/count;
 - current spec conformance matrix;
 - portable/local config split design;
@@ -46,7 +62,7 @@ flowchart LR
 ### Tests/evidence
 
 - generated tree clean;
-- manifest/schema validation;
+- per-domain projection/schema validation;
 - README count generated;
 - no tracked machine-local paths;
 - CI/check metadata evidence;
@@ -234,7 +250,7 @@ Use reviewable vertical PRs, not one mega-PR.
 
 ### Early
 
-1. generated manifest/truth;
+1. per-domain truth owners and drift gates;
 2. config split;
 3. authority profile contract/tests;
 4. Codex compilation;

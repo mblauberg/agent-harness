@@ -28,6 +28,15 @@ Corrections and sharpenings recorded during verification:
 Live session evidence: `scripts/agent-fabric status` fails on this machine with
 `ERR_MODULE_NOT_FOUND: @local/agent-fabric-protocol` — F-011 is not theoretical.
 
+**Post-merge supersedence (same day):** the Spec 05 consolidation merge
+(`941a72f`, `main` → `54ca037`) landed after this annex was written. Per
+`SPEC05-APPLICABILITY.md`: **F-005, F-006 and F-018 are now RESOLVED**; F-027
+is resolved at spec level; F-033 partially (Console/Herdr seam tests exist).
+The annex verdicts above describe `babd47a` and remain correct for that
+baseline. Seam files for the write-profile work (`fabric.ts`, both provider
+adapters, `domain/types.ts`) were byte-identical across the merge
+(`challenges/codex-pair-round2.md`).
+
 ## Priority definitions
 
 - **P0:** Blocks the intended reliable, general two-primary implementation harness or undermines product truth.
