@@ -363,6 +363,76 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
       lifecycleCustodyRef: { custodyId: accepted.custodyRef },
     }]);
   });
+
+  it("persists integrity-stale evidence instead of claiming no target when target observation fails", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget() {
+          throw new Error("review target store unavailable");
+        },
+        commitReviewAdoption() {
+          throw new Error("review transaction unavailable");
+        },
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+
+    const adopted = await domain.driveRotation(PROJECT, "run-third", accepted.custodyRef);
+    expect(adopted).toMatchObject({
+      phase: "finalized",
+      disposition: "adopted",
+      reviewDecision: {
+        kind: "integrity-stale",
+        evidence: {
+          schemaVersion: 1,
+          runId: "run-third",
+          lifecycleCustodyRef: { custodyId: accepted.custodyRef },
+          reason: "target-read-failed",
+        },
+      },
+    });
+    const evidence = (adopted.reviewDecision as any).evidence;
+    const { evidenceDigest, ...preimage } = evidence;
+    expect(evidenceDigest).toBe(lifecycleDigest(preimage));
+    expect(domain.snapshot().reviewCertificationCuts).toEqual([]);
+
+    const restored = LifecycleRotationDomain.hydrate(
+      { provider },
+      JSON.parse(JSON.stringify(domain.snapshot())) as ReturnType<typeof domain.snapshot>,
+    );
+    expect(restored.inspectCustody(PROJECT, "run-third", accepted.custodyRef).reviewDecision)
+      .toEqual(adopted.reviewDecision);
+  });
+
+  it("persists integrity-stale evidence instead of claiming no target for a malformed target row", async () => {
+    const provider = new TerminalProvider();
+    const domain = new LifecycleRotationDomain({
+      provider,
+      reviewCertification: {
+        readCurrentTarget() {
+          return { ...currentReviewTarget(), targetGeneration: 0 } as never;
+        },
+        commitReviewAdoption() {},
+      },
+    }, [seed()]);
+    const accepted = request(domain);
+    domain.markTurnTerminal(PROJECT, "run-third", "chair", "caller");
+
+    await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).resolves.toMatchObject({
+      phase: "finalized",
+      disposition: "adopted",
+      reviewDecision: {
+        kind: "integrity-stale",
+        evidence: {
+          lifecycleCustodyRef: { custodyId: accepted.custodyRef },
+          reason: "target-snapshot-invalid",
+        },
+      },
+    });
+  });
 });
 
 describe("Spec 05 asynchronous operator fresh rotation", () => {

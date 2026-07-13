@@ -253,8 +253,21 @@ export interface LifecycleCustodyRef {
   readonly custodyRevision: number;
 }
 
+export interface ReviewCertificationIntegrityStaleEvidence {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly lifecycleCustodyRef: LifecycleCustodyRef;
+  readonly lifecycleAdoptionEvidenceDigest: LifecycleDigest;
+  readonly reason: "target-read-failed" | "target-snapshot-invalid";
+  readonly evidenceDigest: LifecycleDigest;
+}
+
 export type ReviewAdoptionDecision =
   | { readonly kind: "no-current-target" }
+  | {
+      readonly kind: "integrity-stale";
+      readonly evidence: ReviewCertificationIntegrityStaleEvidence;
+    }
   | {
       readonly kind: "rebound";
       readonly cut: ReviewCertificationCut;

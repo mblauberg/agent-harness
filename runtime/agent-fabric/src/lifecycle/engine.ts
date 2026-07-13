@@ -990,7 +990,8 @@ export class LifecycleRotationDomain {
       const custodyRef = source.lifecycleCustodyRef as LifecycleCustodyRef;
       const custody = domain.#custodies.get(custodyRef.custodyId);
       if (custody === undefined || custody.candidate === null || custody.disposition !== "adopted" ||
-        custody.reviewDecision === null || custody.reviewDecision.kind === "no-current-target") {
+        custody.reviewDecision === null ||
+        (custody.reviewDecision.kind !== "rebound" && custody.reviewDecision.kind !== "stale")) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "review certification cut lacks its adopted lifecycle custody");
       }
       const lifecycleCustodyRef = {
@@ -1025,7 +1026,7 @@ export class LifecycleRotationDomain {
       domain.#setUnique(domain.#reviewCertificationCuts, custody.custodyRef, Object.freeze(structuredClone(source)));
     }
     for (const custody of domain.#custodies.values()) {
-      const decisionOwnsCut = custody.reviewDecision !== null && custody.reviewDecision.kind !== "no-current-target";
+      const decisionOwnsCut = custody.reviewDecision?.kind === "rebound" || custody.reviewDecision?.kind === "stale";
       if (decisionOwnsCut !== domain.#reviewCertificationCuts.has(custody.custodyRef)) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision and lifecycle-owned certification cut diverged");
       }
@@ -3249,6 +3250,7 @@ export class LifecycleRotationDomain {
       launchAttestation: candidate.launchAttestation,
     });
     let target: ReviewCertificationTargetSnapshot | null = null;
+    let targetIntegrityReason: "target-read-failed" | "target-snapshot-invalid" | null = null;
     if (port !== undefined) {
       try {
         const observed = port.readCurrentTarget({
@@ -3265,9 +3267,12 @@ export class LifecycleRotationDomain {
           validDigest(observed.predecessorBindingDigest) && Number.isSafeInteger(observed.terminalSequenceHighWater) &&
           observed.terminalSequenceHighWater >= 0) {
           target = observed;
+        } else if (observed !== null) {
+          targetIntegrityReason = "target-snapshot-invalid";
         }
       } catch {
         target = null;
+        targetIntegrityReason = "target-read-failed";
       }
     }
     const cut = target === null
@@ -3285,9 +3290,23 @@ export class LifecycleRotationDomain {
           };
           return Object.freeze({ ...preimage, cutDigest: lifecycleDigest(preimage) });
         })();
-    const fallbackDecision: ReviewAdoptionDecision = cut === null
-      ? { kind: "no-current-target" }
-      : { kind: "stale", cut, reason: "same-subject-predicate-failed" };
+    const integrityEvidence = targetIntegrityReason === null
+      ? null
+      : (() => {
+          const preimage = {
+            schemaVersion: 1 as const,
+            runId: custody.runId,
+            lifecycleCustodyRef,
+            lifecycleAdoptionEvidenceDigest,
+            reason: targetIntegrityReason,
+          };
+          return Object.freeze({ ...preimage, evidenceDigest: lifecycleDigest(preimage) });
+        })();
+    const fallbackDecision: ReviewAdoptionDecision = cut !== null
+      ? { kind: "stale", cut, reason: "same-subject-predicate-failed" }
+      : integrityEvidence !== null
+        ? { kind: "integrity-stale", evidence: integrityEvidence }
+        : { kind: "no-current-target" };
     if (!commitLifecycleAdoption(fallbackDecision)) return false;
     if (cut !== null) this.#setUnique(this.#reviewCertificationCuts, custody.custodyRef, cut);
     if (port === undefined) return true;
@@ -3306,8 +3325,9 @@ export class LifecycleRotationDomain {
         lifecycleCustodyRef,
         lifecycleAdoptionEvidenceDigest,
       );
-      if ((cut === null && candidateDecision.kind !== "no-current-target") ||
+      if ((cut === null && canonicalJson(candidateDecision) !== canonicalJson(fallbackDecision)) ||
         (cut !== null && (candidateDecision.kind === "no-current-target" ||
+          candidateDecision.kind === "integrity-stale" ||
           canonicalJson(candidateDecision.cut) !== canonicalJson(cut)))) {
         throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "review decision crossed its lifecycle-owned certification cut");
       }
@@ -3344,6 +3364,24 @@ export class LifecycleRotationDomain {
     if (typed.kind === "no-current-target") {
       if (!hasExactKeys(typed, ["kind"])) {
         throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "no-target review decision must be exact");
+      }
+      return;
+    }
+    if (typed.kind === "integrity-stale") {
+      const evidence = typed.evidence;
+      if (!hasExactKeys(typed, ["kind", "evidence"]) || !hasExactKeys(evidence, [
+        "schemaVersion", "runId", "lifecycleCustodyRef", "lifecycleAdoptionEvidenceDigest", "reason", "evidenceDigest",
+      ])) {
+        throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "integrity-stale review decision must be exact");
+      }
+      const { evidenceDigest, ...preimage } = evidence;
+      if (evidence.schemaVersion !== 1 || evidence.runId !== runId ||
+        (evidence.reason !== "target-read-failed" && evidence.reason !== "target-snapshot-invalid") ||
+        !hasExactKeys(evidence.lifecycleCustodyRef, ["schemaVersion", "runId", "agentId", "custodyId", "custodyRevision"]) ||
+        canonicalJson(evidence.lifecycleCustodyRef) !== canonicalJson(lifecycleCustodyRef) ||
+        evidence.lifecycleAdoptionEvidenceDigest !== lifecycleAdoptionEvidenceDigest ||
+        !validDigest(evidenceDigest) || evidenceDigest !== lifecycleDigest(preimage)) {
+        throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "integrity-stale review evidence is crossed or malformed");
       }
       return;
     }
