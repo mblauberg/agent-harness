@@ -370,8 +370,9 @@ function presentHeader(dataset: FabricConsoleDataset): PresentedHeader {
 }
 
 function ageLabel(ageMs: number): string {
-  if (ageMs < 1_000) return "now";
-  const seconds = Math.floor(ageMs / 1_000);
+  const boundedAgeMs = Number.isFinite(ageMs) ? Math.max(0, ageMs) : 0;
+  if (boundedAgeMs < 1_000) return "now";
+  const seconds = Math.floor(boundedAgeMs / 1_000);
   if (seconds < 60) return `${String(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${String(minutes)}m`;
@@ -379,8 +380,26 @@ function ageLabel(ageMs: number): string {
   return `${String(hours)}h`;
 }
 
-function freshnessLabel(freshness: ConsoleFreshness): string {
-  return `${freshness.state.toUpperCase()} ${ageLabel(freshness.ageMs)}`;
+function ageAtRender(
+  observedAt: string,
+  minimumAgeMs: number,
+  dataset: FabricConsoleDataset,
+): number {
+  const observedAtMs = Date.parse(observedAt);
+  const derivedAgeMs = Number.isFinite(observedAtMs) &&
+      Number.isFinite(dataset.loadedAtMs)
+    ? dataset.loadedAtMs - observedAtMs
+    : 0;
+  return Math.max(0, minimumAgeMs, derivedAgeMs);
+}
+
+function freshnessLabel(
+  freshness: ConsoleFreshness,
+  dataset: FabricConsoleDataset,
+): string {
+  return `${freshness.state.toUpperCase()} ${
+    ageLabel(ageAtRender(freshness.observedAt, freshness.ageMs, dataset))
+  }`;
 }
 
 const URGENCY_MARKER: Readonly<Record<ConsoleUrgency, string>> = {
@@ -392,7 +411,24 @@ const URGENCY_MARKER: Readonly<Record<ConsoleUrgency, string>> = {
   normal: " ",
 };
 
-function summaryText(row: ConsoleRow): readonly [string, string] {
+function attentionGroupingLabel(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): string | null {
+  if (row.view !== "attention") return null;
+  const item = factValue(dataset.snapshot?.attention)?.find(
+    (candidate) => candidate.itemId === row.stableId,
+  );
+  if (item === undefined) return null;
+  return `x${String(item.duplicateCount)} grouped | source ${item.sourceFreshness} | last event ${
+    ageLabel(ageAtRender(item.lastEventAt, 0, dataset))
+  }`;
+}
+
+function summaryText(
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): readonly [string, string] {
   const summary = row.summary;
   if (summary === null) {
     const reason =
@@ -405,15 +441,17 @@ function summaryText(row: ConsoleRow): readonly [string, string] {
   }
   switch (summary.kind) {
     case "attention":
+      const grouping = attentionGroupingLabel(row, dataset);
+      const groupingSuffix = grouping === null ? "" : ` | ${grouping}`;
       if (summary.nativeNotification.kind === "feature-unavailable") {
         return [
           summary.title,
-          `${summary.label} | ${summary.priority} | notify unavailable/feature-not-negotiated`,
+          `${summary.label} | ${summary.priority} | notify unavailable/feature-not-negotiated${groupingSuffix}`,
         ];
       }
       return [
         summary.title,
-        `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}`,
+        `${summary.label} | ${summary.priority} | notify ${summary.nativeNotification.status}/${summary.nativeNotification.journalState}${groupingSuffix}`,
       ];
     case "project":
       return [
@@ -447,8 +485,9 @@ function presentRow(
   row: ConsoleRow,
   selected: boolean,
   canMutate: boolean,
+  dataset: FabricConsoleDataset,
 ): PresentedRow {
-  const [primary, secondary] = summaryText(row);
+  const [primary, secondary] = summaryText(row, dataset);
   return {
     view: row.view,
     stableId: row.stableId,
@@ -457,7 +496,7 @@ function presentRow(
     urgencyMarker: URGENCY_MARKER[row.urgency],
     primary,
     secondary,
-    freshness: freshnessLabel(row.freshness),
+    freshness: freshnessLabel(row.freshness, dataset),
     actionable:
       canMutate &&
       row.freshness.state === "live" &&
@@ -950,31 +989,59 @@ function evidenceReviewDetailLines(
   dataset: FabricConsoleDataset,
 ): readonly DetailLine[] {
   if (row.view !== "evidence") return [];
-  const evidence = dataset.spec05?.reviewRuns.flatMap((run) =>
-    run.evidence.state === "current"
-      ? run.evidence.value as unknown as readonly ReviewEvidenceShape[]
-      : []
-  ).find(({ record }) => record.evidenceId === row.stableId);
+  const reviewRuns = dataset.spec05?.reviewRuns ?? [];
+  const matchingRuns = reviewRuns.flatMap((run) =>
+    run.evidence.state !== "current"
+      ? []
+      : (run.evidence.value as unknown as readonly ReviewEvidenceShape[])
+        .filter(({ record }) => record.evidenceId === row.stableId)
+        .map((evidence) => ({
+          coordinationRunId: String(run.coordinationRunId),
+          evidence,
+        }))
+  );
+  const inspectionRunId =
+    dataset.inspection?.kind === "artifact" &&
+      dataset.inspection.state === "current" &&
+      dataset.inspection.binding.view === "evidence" &&
+      dataset.inspection.binding.itemId === row.stableId &&
+      dataset.inspection.result.coordinationRunId !== null
+      ? String(dataset.inspection.result.coordinationRunId)
+      : null;
+  const evidence = inspectionRunId === null
+    ? matchingRuns.length === 1
+      ? matchingRuns[0]?.evidence
+      : undefined
+    : matchingRuns.find(
+      ({ coordinationRunId }) => coordinationRunId === inspectionRunId,
+    )?.evidence;
+  if (evidence === undefined && matchingRuns.length > 0) {
+    return [{
+      label: "Review evidence",
+      value: "unavailable | coordination-run-binding-unavailable",
+    }];
+  }
   if (evidence === undefined) return [];
   const record = evidence.record;
   const currency = evidence.currency;
-  const routeProof = record.actualRouteIdentityDigest !== null
-    ? `proved | ${record.actualRouteIdentityDigest}`
-    : currency.blockerCodes.includes("actual-route-mismatch")
-      ? "mismatch | observed null"
-      : currency.blockerCodes.includes("actual-route-unproved")
-        ? "unproved | observed null"
-        : "observed null";
+  const routeProof = currency.blockerCodes.includes("actual-route-mismatch")
+    ? "Unknown | actual-route-mismatch"
+    : currency.blockerCodes.includes("actual-route-unproved")
+      ? "Unknown | actual-route-unproved"
+      : record.actualRouteIdentityDigest !== null &&
+          record.routeObservationDigest !== null
+        ? `proved | ${record.actualRouteIdentityDigest}`
+        : "Unknown | actual-route-unproved";
   return [
     {
       label: "Review target",
       value: `generation ${String(record.targetGeneration)} | slot ${record.slot}`,
     },
     {
-      label: "Actual review route",
+      label: "Admitted review route",
       value: `${record.endpointProvider} | ${record.providerFamily} | ${record.model}`,
     },
-    { label: "Actual route proof", value: routeProof },
+    { label: "Actual endpoint identity", value: routeProof },
     {
       label: "Actual route observation",
       value: observedNullable(record.routeObservationDigest),
@@ -995,7 +1062,7 @@ function detailLines(
   row: ConsoleRow,
   dataset: FabricConsoleDataset,
 ): PresentedDetail {
-  const [primary, secondary] = summaryText(row);
+  const [primary, secondary] = summaryText(row, dataset);
   const lines: Array<Readonly<{ label: string; value: string }>> = [
     { label: "ID", value: row.stableId },
     { label: "Revision", value: row.revision },
@@ -1003,9 +1070,10 @@ function detailLines(
     { label: "Summary", value: primary },
     { label: "State", value: secondary },
     { label: "Source", value: row.freshness.source },
-    { label: "Freshness", value: freshnessLabel(row.freshness) },
+    { label: "Freshness", value: freshnessLabel(row.freshness, dataset) },
   ];
   if (row.summary?.kind === "attention") {
+    const grouping = attentionGroupingLabel(row, dataset);
     const notification = row.summary.nativeNotification;
     if (notification.kind === "feature-unavailable") {
       lines.push({
@@ -1031,6 +1099,9 @@ function detailLines(
           } | observed ${notification.observedAt}`,
         },
       );
+    }
+    if (grouping !== null) {
+      lines.push({ label: "Attention grouping", value: grouping });
     }
   }
   if (row.actionAvailability.state === "read-only") {
@@ -1821,6 +1892,7 @@ export function presentFabricConsole(
         candidate,
         candidate.stableId === selected?.stableId,
         dataset.canMutate && dataset.connection.state === "live",
+        dataset,
       ),
     ),
     topAttention:
@@ -1831,6 +1903,7 @@ export function presentFabricConsole(
             controller.selectionByView.attention?.stableId ===
               dataset.pages.attention.rows[0].stableId,
             dataset.canMutate && dataset.connection.state === "live",
+            dataset,
           ),
     detail,
     actions,

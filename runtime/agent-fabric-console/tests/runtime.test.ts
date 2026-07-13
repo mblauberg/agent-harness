@@ -1492,6 +1492,52 @@ describe("Fabric Console runtime routing", () => {
     expect(detach).not.toHaveBeenCalled();
   });
 
+  it("reclamps stored master and detail offsets after a projection shrinks", () => {
+    const controller = new FakeController();
+    const first = controller.dataset.pages.attention.rows[0];
+    if (first === undefined) throw new Error("attention fixture unavailable");
+    controller.dataset = {
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        attention: {
+          ...controller.dataset.pages.attention,
+          rows: [
+            first,
+            { ...first, stableId: "attention:2" },
+            { ...first, stableId: "attention:3" },
+          ],
+        },
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({
+        scrollOffsetByView: { attention: 2 },
+        detailScrollOffsetByView: { attention: 50 },
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "projection-shrink",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    runtime.updateDataset(fixtureDataset(12));
+
+    expect(runtime.ui.scrollOffsetByView.attention).toBe(0);
+    const detail = runtime.frame.hitRegions.find(
+      ({ id }) => id === "detail:attention:attention:1",
+    );
+    expect(runtime.ui.detailScrollOffsetByView.attention).toBe(
+      detail?.scrollMaximum,
+    );
+    expect(runtime.ui.detailScrollOffsetByView.attention).toBeLessThan(50);
+    expect(runtime.frame.rows.join("\n")).toContain("Resume blocked task");
+  });
+
   it.each(["editor", "guided", "palette"] as const)(
     "keeps q editable in normal %s mode but honors the advertised inert detach binding",
     async (inputMode) => {

@@ -180,6 +180,10 @@ export class FabricConsoleRuntime {
   } | null = null;
   #inputFocusSession: Readonly<{ openerFocusId: string | null }> | null = null;
   #pendingReviewOpener: Readonly<{ focusId: string | null }> | null = null;
+  #inertWorkflowSettlement: {
+    review: FabricConsoleUiState["workflowReview"];
+    dataset: FabricConsoleDataset | null;
+  } | null = null;
   #closed = false;
   #closePromise: Promise<void> | null = null;
   #inputTail: Promise<void> = Promise.resolve();
@@ -397,6 +401,16 @@ export class FabricConsoleRuntime {
       this.#draw(this.#frame);
       return this.#frame;
     }
+    if (this.#inertWorkflowSettlement !== null) {
+      const settlement = this.#inertWorkflowSettlement;
+      this.#inertWorkflowSettlement = null;
+      if (settlement.dataset !== null) this.#applyDataset(settlement.dataset);
+      this.#applyWorkflowReview(settlement.review);
+      this.#clampMasterOffsets();
+      frame = this.#renderCurrentFrame();
+      this.#clampActiveDetailOffset(frame);
+      frame = this.#renderCurrentFrame();
+    }
     if (this.#restorableResizeFocus !== null) {
       const restorable = this.#restorableResizeFocus;
       const originalVisible = frame.hitRegions.some(
@@ -463,7 +477,23 @@ export class FabricConsoleRuntime {
   }
 
   updateDataset(dataset: FabricConsoleDataset): FabricConsoleFrame {
-    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
+    if (this.#closed) return this.#frame;
+    if (this.#frame.mode === "inert") {
+      if (this.#inertWorkflowSettlement !== null) {
+        this.#inertWorkflowSettlement = {
+          ...this.#inertWorkflowSettlement,
+          dataset,
+        };
+      }
+      return this.#frame;
+    }
+    this.#applyDataset(dataset);
+    this.#clampMasterOffsets();
+    this.#clampActiveDetailOffset(this.#renderCurrentFrame());
+    return this.repaint();
+  }
+
+  #applyDataset(dataset: FabricConsoleDataset): void {
     this.#controller.updateDataset(dataset);
     const confirmation = this.#ui.artifactConfirmation;
     const inspection = dataset.inspection;
@@ -479,7 +509,47 @@ export class FabricConsoleRuntime {
       this.#ui = { ...this.#ui, artifactConfirmation: null };
     }
     this.#pointer = { pressed: null };
-    return this.repaint();
+  }
+
+  #clampMasterOffsets(): void {
+    const scrollOffsetByView = { ...this.#ui.scrollOffsetByView };
+    let changed = false;
+    for (const view of FABRIC_VIEWS) {
+      const current = scrollOffsetByView[view];
+      if (current === undefined) continue;
+      const sessionChoiceCount = view === "project" &&
+          this.#controller.dataset.projectSessions?.selectedProjectSessionId === null
+        ? this.#controller.dataset.projectSessions.choices.length
+        : 0;
+      const maximum = Math.max(
+        0,
+        this.#controller.dataset.pages[view].rows.length + sessionChoiceCount - 1,
+      );
+      const clamped = Math.min(maximum, Math.max(0, Math.trunc(current)));
+      if (clamped !== current) {
+        scrollOffsetByView[view] = clamped;
+        changed = true;
+      }
+    }
+    if (changed) this.#ui = { ...this.#ui, scrollOffsetByView };
+  }
+
+  #clampActiveDetailOffset(frame: FabricConsoleFrame): void {
+    const view = this.#controller.state.activeView;
+    const current = this.#ui.detailScrollOffsetByView[view];
+    if (current === undefined) return;
+    const maximum = frame.hitRegions.find(
+      ({ id, kind }) => kind === "pager" && id.startsWith(`detail:${view}:`),
+    )?.scrollMaximum ?? 0;
+    const clamped = Math.min(maximum, Math.max(0, Math.trunc(current)));
+    if (clamped === current) return;
+    this.#ui = {
+      ...this.#ui,
+      detailScrollOffsetByView: {
+        ...this.#ui.detailScrollOffsetByView,
+        [view]: clamped,
+      },
+    };
   }
 
   setArtifactConfirmation(
@@ -545,6 +615,27 @@ export class FabricConsoleRuntime {
     review: FabricConsoleUiState["workflowReview"],
   ): FabricConsoleFrame {
     if (this.#closed || this.#frame.mode === "inert") return this.#frame;
+    this.#applyWorkflowReview(review);
+    return this.repaint();
+  }
+
+  settleWorkflowReview(
+    review: FabricConsoleUiState["workflowReview"],
+  ): FabricConsoleFrame {
+    if (this.#closed) return this.#frame;
+    if (this.#frame.mode === "inert") {
+      this.#inertWorkflowSettlement = {
+        review,
+        dataset: this.#inertWorkflowSettlement?.dataset ?? null,
+      };
+      return this.#frame;
+    }
+    return this.setWorkflowReview(review);
+  }
+
+  #applyWorkflowReview(
+    review: FabricConsoleUiState["workflowReview"],
+  ): void {
     const echoInput =
       review?.stage === "confirm" && review.confirmationMode === "echo";
     if (review === null) this.#pendingReviewOpener = null;
@@ -560,7 +651,6 @@ export class FabricConsoleRuntime {
         : null,
     };
     this.#setEditorActive?.(echoInput);
-    return this.repaint();
   }
 
   setFocus(focusId: string | null): FabricConsoleFrame {

@@ -6,6 +6,7 @@ import type {
   ProjectId,
   ProjectSession,
   ProjectSessionId,
+  ReviewEvidenceReadV1,
   RunProjection,
   Sha256Digest,
   Timestamp,
@@ -764,8 +765,8 @@ describe("structured presenter and responsive Fabric renderer", () => {
         ["Context tokens", "window 100000 | used 81000 | remaining 19000"],
       ],
       evidence: [
-        ["Actual review route", "openai | gpt | gpt-5.4"],
-        ["Actual route proof", `proved | ${digestB}`],
+        ["Admitted review route", "openai | gpt | gpt-5.4"],
+        ["Actual endpoint identity", `proved | ${digestB}`],
         ["Review currency", "target current | source current | chair current | profile current"],
       ],
     } as const;
@@ -795,6 +796,143 @@ describe("structured presenter and responsive Fabric renderer", () => {
         expected.map(([label, value]) => ({ label, value })),
       ));
     }
+  });
+
+  it("binds review evidence detail to the exact run and evidence ID pair", () => {
+    const current = closedProjectionDataset();
+    const exact = current.spec05?.reviewRuns[0];
+    if (exact === undefined || exact.evidence.state !== "current") {
+      throw new Error("closed review fixture unavailable");
+    }
+    const exactEvidence = exact.evidence.value as unknown as readonly ReviewEvidenceReadV1[];
+    const crossed = {
+      ...exact,
+      coordinationRunId: "AFAB-WRONG",
+      evidence: {
+        ...exact.evidence,
+        value: exactEvidence.map((entry) => ({
+          ...entry,
+          record: {
+            ...(entry.record as Readonly<Record<string, unknown>>),
+            endpointProvider: "crossed-provider",
+            providerFamily: "crossed-family",
+            model: "crossed-model",
+          },
+        })),
+      },
+    };
+    const dataset = {
+      ...current,
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding: {
+          view: "evidence",
+          itemId: "evidence-1",
+          itemRevision: revisionFromProtocol(7),
+          projectionRevision: revisionFromProtocol(11),
+        },
+        result: { coordinationRunId: "AFAB-004" },
+      },
+      spec05: {
+        ...current.spec05,
+        reviewRuns: [crossed, exact],
+      },
+    } as unknown as FabricConsoleDataset;
+    const base = controllerState();
+    const state: ConsoleControllerState = {
+      ...base,
+      activeView: "evidence",
+      selectionByView: {
+        ...base.selectionByView,
+        evidence: {
+          stableId: "evidence-1",
+          revision: revisionFromProtocol(7),
+        },
+      },
+    };
+
+    const detail = presentFabricConsole(
+      dataset,
+      state,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    ).detail?.lines ?? [];
+
+    expect(detail).toContainEqual({
+      label: "Admitted review route",
+      value: "openai | gpt | gpt-5.4",
+    });
+    expect(JSON.stringify(detail)).not.toContain("crossed-provider");
+
+    const ambiguous = presentFabricConsole(
+      {
+        ...dataset,
+        inspection: undefined,
+      } as unknown as FabricConsoleDataset,
+      state,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    ).detail?.lines ?? [];
+    expect(ambiguous).toContainEqual({
+      label: "Review evidence",
+      value: "unavailable | coordination-run-binding-unavailable",
+    });
+    expect(JSON.stringify(ambiguous)).not.toContain("crossed-provider");
+  });
+
+  it("renders an actual-route mismatch ahead of a contradictory non-null digest", () => {
+    const current = closedProjectionDataset();
+    const run = current.spec05?.reviewRuns[0];
+    if (run === undefined || run.evidence.state !== "current") {
+      throw new Error("closed review fixture unavailable");
+    }
+    const runEvidence = run.evidence.value as unknown as readonly ReviewEvidenceReadV1[];
+    const dataset = {
+      ...current,
+      spec05: {
+        ...current.spec05,
+        reviewRuns: [{
+          ...run,
+          evidence: {
+            ...run.evidence,
+            value: runEvidence.map((entry) => ({
+              ...entry,
+              currency: {
+                ...(entry.currency as Readonly<Record<string, unknown>>),
+                certifying: false,
+                blockerCodes: ["actual-route-mismatch"],
+              },
+            })),
+          },
+        }],
+      },
+    } as unknown as FabricConsoleDataset;
+    const base = controllerState();
+    const state: ConsoleControllerState = {
+      ...base,
+      activeView: "evidence",
+      selectionByView: {
+        ...base.selectionByView,
+        evidence: {
+          stableId: "evidence-1",
+          revision: revisionFromProtocol(7),
+        },
+      },
+    };
+    const detail = presentFabricConsole(
+      dataset,
+      state,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    ).detail?.lines ?? [];
+
+    expect(detail).toContainEqual({
+      label: "Actual endpoint identity",
+      value: "Unknown | actual-route-mismatch",
+    });
+    expect(detail.find(({ label }) => label === "Actual endpoint identity")?.value)
+      .not.toContain("proved");
   });
 
   it("requires an exact explicit terminal-neutralisation confirmation before evidence actions", () => {
@@ -1305,6 +1443,62 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(JSON.stringify(presentation)).not.toMatch(/\d+%|percentage/i);
   });
 
+  it("joins authoritative attention grouping metadata and ages quiet projections at render time", () => {
+    const base = richDataset();
+    const observedAtMs = Date.parse(timestamp);
+    if (base.snapshot === null) throw new Error("snapshot fixture unavailable");
+    const grouped: FabricConsoleDataset = {
+      ...base,
+      loadedAtMs: observedAtMs + 125_000,
+      snapshot: {
+        ...base.snapshot,
+        attention: {
+          freshness: "live",
+          source: "fabric",
+          revision: 11,
+          observedAt: timestamp,
+          value: [{
+            itemId: "attention:safety",
+            revision: 7,
+            label: "Approval",
+            priority: "safety-integrity",
+            title: "Approve quarantine recovery",
+            sourceFreshness: "snapshot",
+            lastEventAt: timestamp,
+            duplicateCount: 3,
+          }],
+        },
+      },
+    };
+
+    const presentation = presentFabricConsole(
+      grouped,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.masterRows[0]).toMatchObject({
+      freshness: "LIVE 2m",
+      secondary: expect.stringContaining("x3 grouped"),
+    });
+    expect(presentation.masterRows[0]?.secondary).toContain("source snapshot");
+    expect(presentation.masterRows[0]?.secondary).toContain("last event 2m");
+    expect(presentation.detail?.lines).toContainEqual({
+      label: "Attention grouping",
+      value: "x3 grouped | source snapshot | last event 2m",
+    });
+
+    const later = presentFabricConsole(
+      { ...grouped, loadedAtMs: observedAtMs + 185_000 },
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(later.masterRows[0]?.freshness).toBe("LIVE 3m");
+    expect(later.masterRows[0]?.secondary).toContain("last event 3m");
+  });
+
   it.each([
     ["available", "sent"],
     ["unavailable", "failed"],
@@ -1767,6 +1961,20 @@ describe("structured presenter and responsive Fabric renderer", () => {
       .toMatchObject({ enabled: true, rect: { y1: 5, y2: 5 } });
   });
 
+  it("reclamps an oversized master offset so a shrunken projection never renders blank", () => {
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ scrollOffsetByView: { attention: 999 } }),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(frame.rows.join("\n")).toContain("Approve quarantine recovery");
+    expect(frame.hitRegions.some(
+      ({ id }) => id === "row:attention:attention:safety",
+    )).toBe(true);
+  });
+
   it("allocates every mandatory 80x24 header field before clipping its value", () => {
     const frame = renderFabricConsoleFrame(
       datasetWithHeader({
@@ -2113,6 +2321,44 @@ describe("structured presenter and responsive Fabric renderer", () => {
     },
   );
 
+  it.each([
+    { columns: 30, rows: 6 },
+    { columns: 80, rows: 24 },
+  ] as const)(
+    "renders a redacted draft tail, cursor, byte count, and exact input hit region at $columns x $rows",
+    (viewport) => {
+      const secret = "afop_SUPERSECRET123456";
+      const draft = `${secret} command-suffix`;
+      const frame = renderFabricConsoleFrame(
+        richDataset(),
+        controllerState(),
+        createFabricUiState({
+          inputMode: "palette",
+          focusId: "input:palette",
+          draft,
+        }),
+        viewport,
+      );
+      const input = frame.hitRegions.find(({ id }) => id === "input:palette");
+      expect(input).toBeDefined();
+      if (input === undefined) return;
+      const renderedInput = frame.rows
+        .slice(input.rect.y1 - 1, input.rect.y2)
+        .map((line) => line.slice(input.rect.x1 - 1, input.rect.x2))
+        .join("\n");
+      const visible = frame.rows.join("\n");
+
+      expect(visible).not.toContain(secret);
+      expect(renderedInput).toContain("suffix");
+      expect(renderedInput).toContain("▏");
+      expect(renderedInput).toContain(`${String(Buffer.byteLength(draft))}B`);
+      expect(input).toMatchObject({
+        enabled: true,
+        rect: { x1: 1, y1: viewport.rows, x2: viewport.columns - 9, y2: viewport.rows },
+      });
+    },
+  );
+
   it("makes a full-size review modal pointer-local and removes underlying hit geometry", () => {
     const frame = renderFabricConsoleFrame(
       richDataset(),
@@ -2149,7 +2395,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
         id: "detach",
         kind: "detach",
         rect: { x1: 1, y1: 1, x2: 8, y2: 1 },
-        enabled: true,
+        enabled: false,
         geometryKey: visible.geometryKey,
         binding: null,
       },

@@ -172,6 +172,49 @@ function chromeText(text: string): string {
   return sanitizeDisplayText(text, { lineBreaks: "visible" });
 }
 
+const CAPABILITY_VALUE_PATTERN =
+  /\b(?:afb|afc|afop)_[A-Za-z0-9._~+/=-]{4,}\b/gu;
+
+function safeDraftText(text: string): string {
+  return chromeText(text).replaceAll(CAPABILITY_VALUE_PATTERN, "[REDACTED]");
+}
+
+function tailCells(text: string, columns: number): string {
+  if (columns <= 0) return "";
+  const clusters = [...splitGraphemes(text)];
+  const total = clusters.reduce(
+    (sum, grapheme) => sum + cellWidth(grapheme),
+    0,
+  );
+  if (total <= columns) return text;
+  const contentLimit = Math.max(0, columns - 1);
+  let rendered = "";
+  let used = 0;
+  for (const grapheme of clusters.toReversed()) {
+    const width = cellWidth(grapheme);
+    if (used + width > contentLimit) break;
+    rendered = grapheme + rendered;
+    used += width;
+  }
+  return `~${rendered}`;
+}
+
+function renderedDraftInput(
+  presentation: FabricConsolePresentation,
+  inputId: string,
+  columns: number,
+): string {
+  const marker = presentation.focusId === inputId ? ">" : " ";
+  const byteCount = ` ${String(Buffer.byteLength(presentation.draft))}B`;
+  const cursor = "▏";
+  const tailWidth = Math.max(
+    0,
+    columns - cellWidth(marker) - cellWidth(cursor) - cellWidth(byteCount),
+  );
+  const tail = tailCells(safeDraftText(presentation.draft), tailWidth);
+  return fitCells(`${marker}${tail}${cursor}${byteCount}`, columns);
+}
+
 function composeFields(
   columns: number,
   fields: readonly string[],
@@ -511,10 +554,6 @@ function renderFabricMaster(
   hitRegions: FabricHitRegion[],
   bounds: Rect,
 ): void {
-  const offset = Math.max(
-    0,
-    Math.trunc(ui.scrollOffsetByView[presentation.activeView] ?? 0),
-  );
   const sessionChoices =
     presentation.activeView === "project" &&
     dataset.projectSessions?.selectedProjectSessionId === null
@@ -524,9 +563,17 @@ function renderFabricMaster(
     ...sessionChoices.map((choice) => ({ kind: "session" as const, choice })),
     ...presentation.masterRows.map((item) => ({ kind: "row" as const, item })),
   ];
+  const visibleCapacity = bounds.y2 - bounds.y1 + 1;
+  const offset = Math.min(
+    Math.max(0, masterItems.length - visibleCapacity),
+    Math.max(
+      0,
+      Math.trunc(ui.scrollOffsetByView[presentation.activeView] ?? 0),
+    ),
+  );
   const visibleRows = masterItems.slice(
     offset,
-    offset + (bounds.y2 - bounds.y1 + 1),
+    offset + visibleCapacity,
   );
   for (const [index, visible] of visibleRows.entries()) {
     const y = bounds.y1 + index;
@@ -1194,13 +1241,13 @@ function renderFabricDetachRow(
     : presentation.focusId === "detach" ? ">Detach " : "[Detach]";
   const prefixWidth = Math.max(0, columns - 9);
   const inputId = `input:${presentation.inputMode}`;
-  const visiblePrefix = presentation.inputMode !== "browse" &&
-      presentation.focusId === inputId
-    ? `>${prefix}`
-    : prefix;
   const value = prefixWidth === 0
     ? label
-    : `${fitCells(chromeText(visiblePrefix), prefixWidth)} ${label}`;
+    : `${
+        presentation.inputMode === "browse"
+          ? fitCells(chromeText(prefix), prefixWidth)
+          : renderedDraftInput(presentation, inputId, prefixWidth)
+      } ${label}`;
   setFabricRow(rows, row, columns, value);
   if (presentation.inputMode !== "browse" && prefixWidth > 0) {
     hitRegions.push({
@@ -1481,7 +1528,7 @@ export function renderFabricConsoleFrame(
           id: "detach",
           kind: "detach",
           rect: { x1: 1, y1: 1, x2: 8, y2: 1 },
-          enabled: true,
+          enabled: false,
           geometryKey,
           binding: null,
         });

@@ -520,9 +520,12 @@ describe("versioned Console usability evaluation", () => {
       "attention-safety-gate",
     ]);
     expect(degraded.every(({ optionalIntegrationIndependent }) => optionalIntegrationIndependent)).toBe(true);
-    expect(degraded.every(({ dynamicResizeSafe, artifactReviewSafe }) => (
-      dynamicResizeSafe && artifactReviewSafe
+    expect(degraded.every(({ dynamicResizeSafe, spec17ProjectionSafe, artifactReviewSafe }) => (
+      dynamicResizeSafe && spec17ProjectionSafe && artifactReviewSafe
     ))).toBe(true);
+    expect(report.observations.every(({ spec17ProjectionSafe }) =>
+      spec17ProjectionSafe
+    )).toBe(true);
     expect(manifest.fixtures.find(({ id }) => id === "gate-degraded-stale-conflict"))
       .toMatchObject({
         evidenceReview: {
@@ -539,6 +542,45 @@ describe("versioned Console usability evaluation", () => {
         .some(({ duplicateCount }) => duplicateCount > 1),
     ).toBe(true);
   });
+
+  it.each([
+    ["review projection", "Review preparation", "current | synthetic"],
+    ["route mismatch", "Actual endpoint identity", `proved | ${flowDigest}`],
+    ["capability freshness", "Capability freshness", "available | synthetic"],
+    ["topology", "Topology execution", "serial | synthetic"],
+    ["context geometry", "Context tokens", "observed null"],
+  ] as const)(
+    "fails the Spec 17 %s geometry oracle when its exact detail is corrupted",
+    async (_case, targetLabel, replacement) => {
+      const manifest = parseUsabilityManifest(await manifestValue());
+      let mutationCount = 0;
+      const report = await evaluateUsabilityManifest(manifest, {
+        ...dependencies,
+        render: (dataset, controller, ui, viewport) => {
+          const frame = renderFabricConsoleFrame(dataset, controller, ui, viewport);
+          if (frame.presentation.detail === null) return frame;
+          const lines = frame.presentation.detail.lines.map((line) => {
+            if (line.label !== targetLabel) return line;
+            mutationCount += 1;
+            return { ...line, value: replacement };
+          });
+          return {
+            ...frame,
+            presentation: {
+              ...frame.presentation,
+              detail: { ...frame.presentation.detail, lines },
+            },
+          };
+        },
+      });
+
+      expect(mutationCount).toBeGreaterThan(0);
+      expect(report.observations.some(
+        ({ spec17ProjectionSafe }) => !spec17ProjectionSafe,
+      )).toBe(true);
+      expect(report.interactionPassed).toBe(false);
+    },
+  );
 
   it("rejects vacuous or ambiguous manifests before evaluation", async () => {
     const value = (await manifestValue()) as Record<string, unknown>;

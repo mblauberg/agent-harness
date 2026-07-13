@@ -935,6 +935,102 @@ describe("typed Console application bootstrap boundary", () => {
     await application.close("operator");
   });
 
+  it("reconciles an asynchronous workflow commit that completes during an inert resize", async () => {
+    const port = protocolPort();
+    const review: ConsoleWorkflowReview = {
+      workflowId: "workflow_inert_completion",
+      kind: "intake-draft-create",
+      source: "local-typed-preview",
+      stage: "review",
+      previewDigest: digest,
+      expectedRevision: "1" as never,
+      consequenceClass: "routine",
+      confirmationMode: "explicit",
+      summary: "intake-draft-create",
+      details: [{ label: "summary", value: '"Persist completion"' }],
+      evidence: [],
+      openedByEventId: "workflow-inert-1",
+      armedByEventId: null,
+      result: null,
+      failure: null,
+    };
+    const committedReview: ConsoleWorkflowReview = {
+      ...review,
+      stage: "committed",
+      armedByEventId: "workflow-inert-arm",
+      result: "intake-draft-create | inert_completion | r1",
+    };
+    let resolveCommit!: (value: {
+      reconnectProjectSessionId: null;
+      review: ConsoleWorkflowReview;
+    }) => void;
+    const deferredCommit = new Promise<{
+      reconnectProjectSessionId: null;
+      review: ConsoleWorkflowReview;
+    }>((resolve) => {
+      resolveCommit = resolve;
+    });
+    const commit = vi.fn(() => deferredCommit);
+    let sequence = 0;
+    const application = await startFabricConsoleApplication({
+      bootstrap: {
+        startOrAttach: async () => ({
+          status: "connected",
+          binding: currentBinding(port, false, null),
+          credential,
+          projectId,
+          workflowPlanner: {
+            capabilities: {
+              intake: { state: "available" },
+              gate: { state: "unavailable", reason: "fixture" },
+              launch: { state: "unavailable", reason: "fixture" },
+              git: { state: "unavailable", reason: "fixture" },
+              promotion: { state: "unavailable", reason: "fixture" },
+            },
+            prepare: vi.fn(async () => review),
+            prepareGuided: vi.fn(async () => review),
+            arm: vi.fn((current: ConsoleWorkflowReview, eventId: string) => ({
+              ...current,
+              stage: "confirm" as const,
+              armedByEventId: eventId,
+            })),
+            commit,
+          },
+          detach: async () => {},
+          close: async () => {},
+        }),
+      },
+      projectRoot: "/repo",
+      surface: "standalone",
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      eventId: () => `workflow-inert-${String(++sequence)}`,
+      confirmationId: () => "confirmation-workflow-inert",
+      ...runtimeDependencies,
+    });
+
+    await application.handleInput({ kind: "key", key: "text", text: ":" });
+    await application.handleInput({
+      kind: "paste",
+      text: '{"kind":"intake-draft-create","request":{"summary":"Persist completion"}}',
+    });
+    await application.handleInput({ kind: "key", key: "enter" });
+    await application.handleInput({ kind: "key", key: "enter" });
+    const completion = application.handleInput({ kind: "key", key: "text", text: "3" });
+    await vi.waitFor(() => expect(commit).toHaveBeenCalledOnce());
+
+    expect(application.resize({ columns: 29, rows: 5 }).mode).toBe("inert");
+    resolveCommit({ reconnectProjectSessionId: null, review: committedReview });
+    await completion;
+    expect(application.frame.mode).toBe("inert");
+
+    const restored = application.resize({ columns: 80, rows: 24 });
+    expect(restored.rows.join("\n")).toContain("REVIEW COMMITTED");
+    expect(restored.rows.join("\n")).toContain("inert_completion");
+    expect(commit).toHaveBeenCalledOnce();
+    await application.close("operator");
+  });
+
   it("opens a guided evidence workflow, preserves it across resize, and submits structured input", async () => {
     const port = protocolPort();
     const review: ConsoleWorkflowReview = {
