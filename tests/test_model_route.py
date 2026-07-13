@@ -216,7 +216,7 @@ def test_empty_runtime_capability_snapshot_fails_closed(tmp_path):
 
 def test_model_id_effort_uses_last_token_and_explicit_unresolved_fails():
     result, route = resolve(
-        "--adapter", "cursor", "--model", "grok-4.5-max-low", "--alias", "flagship",
+        "--adapter", "cursor", "--model", "cursor-grok-4.5-low", "--alias", "flagship",
         "--role", "reviewer", "--lead-family", "anthropic", "--require-distinct",
         "--adapter-gate", "direct-cli",
     )
@@ -263,7 +263,7 @@ def test_broker_route_records_endpoint_separately_from_model_family():
         "--adapter",
         "cursor",
         "--model",
-        "grok-4.5-xhigh",
+        "cursor-grok-4.5-high",
         "--alias",
         "flagship",
         "--role",
@@ -325,7 +325,7 @@ def test_agy_accepts_only_google_models_and_records_fabric_activation_metadata()
 
 
 def test_cursor_accepts_only_composer_and_grok_models():
-    for model, family in (("composer-2-high", "cursor-composer"), ("grok-4.5-xhigh", "xai")):
+    for model, family in (("composer-2-high", "cursor-composer"), ("cursor-grok-4.5-high", "xai")):
         allowed, allowed_route = resolve(
             "--adapter", "cursor", "--model", model, "--alias", "flagship", "--role", "worker",
             "--adapter-gate", "direct-cli",

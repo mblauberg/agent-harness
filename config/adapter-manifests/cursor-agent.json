@@ -24,7 +24,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/cursor-agent.js",
-      "sha256": "c8977d0fe88f855b594f23f8e976a45fe74ab8c143dd04426fcae761e6bc4618"
+      "sha256": "ba79234b62302c68f7f5a5bd5d912cd1cf132e1ab65bc6eb13ba3e05d85d8ff1"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/optional/invocations.js",

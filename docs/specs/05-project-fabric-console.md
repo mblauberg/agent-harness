@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.12
+Version: 1.13
 Date: 13 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,7 +10,9 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.12 closes the Console's exact topology, route-arm, capability-refresh,
+Version 1.13 records the runtime-discovered current Cursor Grok 4.5 route as
+`cursor-grok-4.5-high` and removes the unroutable pre-release
+`grok-4.5-xhigh` label instead of preserving a compatibility alias. Version 1.12 closes the Console's exact topology, route-arm, capability-refresh,
 actual-review-identity and context-pressure projections. It distinguishes
 unknown, observed null, inapplicable and configured default without inventing
 UI data. Version 1.11 adopts the mature continuity/routing research into the existing
@@ -540,7 +542,7 @@ provider-session/bridge generation, adapter/contract/family/model and the
 resolved checked-in `spec05-four-slot-v1` profile. Its slots are `native`,
 `other-primary`, `cursor-grok` and `agy-gemini`; for an OpenAI chair they
 resolve respectively to the native Codex route, Claude/Anthropic,
-cursor-agent/`grok-4.5-xhigh`/xAI and
+cursor-agent/`cursor-grok-4.5-high`/xAI and
 Agy/`Gemini 3.1 Pro (High)`/Google. Native is explicitly exempt from
 the reviewer-family relation; each external slot must differ from the target-chair
 family. Publisher eligibility separately proves the root publisher equals that

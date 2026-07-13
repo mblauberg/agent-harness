@@ -407,7 +407,7 @@ def test_cursor_distinct_model_records_adapter_and_provider_family():
                 "--tool",
                 "cursor",
                 "--model",
-                "grok-4.5-xhigh",
+                "cursor-grok-4.5-high",
                 "--orchestrator-family",
                 "openai",
                 "--out",
@@ -427,7 +427,7 @@ def test_cursor_distinct_model_records_adapter_and_provider_family():
         assert record["provider_family"] == "xai"
         assert record["endpoint_provider"] == "cursor"
         assert record["model_family"] == "xai"
-        assert record["resolved_model"] == "grok-4.5-xhigh"
+        assert record["resolved_model"] == "cursor-grok-4.5-high"
         assert record["certification_eligible"] is True
         assert record["cross_family"] is True
         assert "--trust" in args_file.read_text(encoding="utf-8").splitlines()
@@ -451,7 +451,7 @@ def test_explicit_output_path_preserves_adapter_failure_diagnostics():
                 "--tool",
                 "cursor",
                 "--model",
-                "grok-4.5-xhigh",
+                "cursor-grok-4.5-high",
                 "--orchestrator-family",
                 "openai",
                 "--out",

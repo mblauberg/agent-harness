@@ -10,7 +10,7 @@ describe("daemon adapter supervisor model admission", () => {
         environment: {},
         modelPolicy: {
           allowedFamilies: ["cursor-composer", "xai"],
-          allowedModelPatterns: ["composer-*", "grok-*"],
+          allowedModelPatterns: ["composer-*", "cursor-grok-*"],
           requiresExplicitModel: true,
         },
       },

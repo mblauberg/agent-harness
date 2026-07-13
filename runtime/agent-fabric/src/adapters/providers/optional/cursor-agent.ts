@@ -30,7 +30,7 @@ export function createCursorAgentAdapter(options: {
     modelPolicy: {
       adapterId: "cursor-agent",
       allowedFamilies: ["cursor-composer", "xai"],
-      allowedModelPatterns: ["composer-*", "grok-*"],
+      allowedModelPatterns: ["composer-*", "cursor-grok-*"],
     },
   });
 }

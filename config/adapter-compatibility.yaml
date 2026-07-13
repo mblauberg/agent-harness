@@ -217,9 +217,9 @@ adapters:
       bundle_entrypoint: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.09-a3815c0/index.js"
       bundle_entrypoint_sha256: "0312ba6ca62f6b18890745625e8a42513bd0002cd713beac4fb99e25e6ff7a92"
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/cursor-agent.js"
-      wrapper_entrypoint_sha256: "c8977d0fe88f855b594f23f8e976a45fe74ab8c143dd04426fcae761e6bc4618"
+      wrapper_entrypoint_sha256: "ba79234b62302c68f7f5a5bd5d912cd1cf132e1ab65bc6eb13ba3e05d85d8ff1"
       wrapper_manifest: "config/adapter-manifests/cursor-agent.json"
-      wrapper_manifest_sha256: "c67ec284d5c49ca044fb65b1f1ffe0b723645ae143b0711ab1a13df0c73cacb1"
+      wrapper_manifest_sha256: "226b85f2d1f0bc109ac821b664cf6c075b27e2a63f668893171eedaab1bc9f87"
     contract:
       adapter_version: 1
       protocol: cursor-agent-stream-json-cli
@@ -238,7 +238,7 @@ adapters:
         - xai
       allowed_model_patterns:
         - "composer-*"
-        - "grok-*"
+        - "cursor-grok-*"
       requires_explicit_model: true
     official_source_url: "https://cursor.com/docs/cli/overview"
     unresolved_pins: []

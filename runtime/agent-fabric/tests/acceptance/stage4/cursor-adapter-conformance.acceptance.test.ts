@@ -70,7 +70,7 @@ describe("Stage 4 Cursor adapter public contract", () => {
       await expect(
         validate({ ...base, modelId: "composer-2.5", modelFamily: "cursor-composer" }),
       ).resolves.toMatchObject({ valid: true, adapterId: "cursor-agent", modelFamily: "cursor-composer" });
-      await expect(validate({ ...base, modelId: "grok-4.5", modelFamily: "xai" })).resolves.toMatchObject({
+      await expect(validate({ ...base, modelId: "cursor-grok-4.5-high", modelFamily: "xai" })).resolves.toMatchObject({
         valid: true,
         adapterId: "cursor-agent",
         modelFamily: "xai",

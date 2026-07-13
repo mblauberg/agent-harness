@@ -68,7 +68,7 @@ function compatibilityEntry(input: {
     model_family_constraints: cursor
       ? {
           allowed: ["cursor-composer", "xai"],
-          allowed_model_patterns: ["composer-*", "grok-*"],
+          allowed_model_patterns: ["composer-*", "cursor-grok-*"],
           requires_explicit_model: true,
         }
       : {

@@ -85,13 +85,13 @@ describe("optional provider command boundaries", () => {
       buildCursorInvocation({
         executable: "/trusted/cursor-agent",
         cwd: ".",
-        model: "grok-4.5",
+        model: "cursor-grok-4.5-high",
         prompt: "review",
         mode: "plan",
       }),
     ).toEqual({
       executable: "/trusted/cursor-agent",
-      args: ["--print", "--output-format", "stream-json", "--sandbox", "enabled", "--trust", "--mode", "plan", "--model", "grok-4.5", "--workspace", ".", "review"],
+      args: ["--print", "--output-format", "stream-json", "--sandbox", "enabled", "--trust", "--mode", "plan", "--model", "cursor-grok-4.5-high", "--workspace", ".", "review"],
       cwd: ".",
     });
     expect(
@@ -161,7 +161,7 @@ describe("optional provider command boundaries", () => {
 
     await expect(boundary.spawn({
       cwd: "/admitted/cursor-project",
-      model: "grok-4.5",
+      model: "cursor-grok-4.5-high",
       prompt: "review",
       mode: "plan",
     })).resolves.toEqual({
@@ -233,10 +233,10 @@ describe("optional provider command boundaries", () => {
       executable: "/trusted/agy", model: "--unsafe", prompt: "review", mode: "plan",
     })).toThrow(/leading dash/u);
     expect(() => buildCursorInvocation({
-      executable: "/trusted/cursor", model: "grok-4", prompt: "--unsafe", mode: "plan",
+      executable: "/trusted/cursor", model: "cursor-grok-4.5-high", prompt: "--unsafe", mode: "plan",
     })).toThrow(/leading dash/u);
     expect(() => buildCursorInvocation({
-      executable: "/trusted/cursor", model: "grok-4", prompt: "review", mode: "plan", resumeReference: "--unsafe",
+      executable: "/trusted/cursor", model: "cursor-grok-4.5-high", prompt: "review", mode: "plan", resumeReference: "--unsafe",
     })).toThrow(/leading dash/u);
     expect(() => buildKiroAcpInvocation({
       executable: "/trusted/kiro", model: "--unsafe", agentEngine: "v2",

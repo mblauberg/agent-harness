@@ -203,7 +203,7 @@ describe("optional production provider wrappers", () => {
 
     for (const selection of [
       { model: "composer-2.5", modelFamily: "cursor-composer" },
-      { model: "grok-4.5", modelFamily: "xai" },
+      { model: "cursor-grok-4.5-high", modelFamily: "xai" },
     ]) {
       await expect(
         adapter.request("spawn", {
@@ -241,7 +241,7 @@ describe("optional production provider wrappers", () => {
     await expect(
       adapter.request("spawn", {
         actionId: "kiro-closed",
-        payload: { model: "grok-4.5", modelFamily: "xai", prompt: "wrong family" },
+        payload: { model: "cursor-grok-4.5-high", modelFamily: "xai", prompt: "wrong family" },
       }),
     ).rejects.toMatchObject({ code: "ADAPTER_FAMILY_FORBIDDEN" });
     await expect(
