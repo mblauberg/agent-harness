@@ -16,9 +16,13 @@ harness without rediscovering it from individual skills.
 
 ## Lifecycle and human gates
 
-Every run takes the same shape. The three gold gates are the only places a human
-must decide; everything inside the `deliver` kernel is agent work bound to one
-receipt.
+Every run takes the same shape; what scales with risk is review pressure. At
+`routine`, the chair plus objective and native checks are enough, so routine work
+can complete without the other family. From `substantial` up, the review leg owes
+both a fresh-context native reviewer and the other primary, and
+`skills/deliver/scripts/validate_delivery.py` fails any receipt that reaches
+acceptance missing either. The three gold gates are the only places a human must
+decide; everything inside the `deliver` kernel is agent work bound to one receipt.
 
 One palette carries the whole document. Every diagram below uses it, and no
 colour means two things:
@@ -33,14 +37,14 @@ colour means two things:
 | Red | an interrupt: it suspends a run, and recovery resumes the interrupted state |
 | Grey | inert: stopped, closed, or observing only |
 
-Green covers `verify`, `evaluate`, `review` and the other primary that performs
-the review, because each of them can stop a run. Purple is reserved for the
-bonus families, which never can.
+Green covers `verify`, `evaluate`, `review` and both load-bearing review legs, the
+fresh-context native reviewer and the other primary, because each of them can stop
+a run. Purple is reserved for the bonus families, which never can.
 
 ```mermaid
 flowchart TB
     accTitle: The full delivery lifecycle and its three human gates
-    accDescr: Session prepares context and scope produces the specification, risk tier and authority. A human gate approves the specification or sends it back to scope. Inside the deliver kernel, execute runs implement, tdd, refactor or diagnose, then deterministic verification runs, then a separate conditional evaluate gate runs only when behaviour is stochastic or judgement bearing, then an independent review by the other primary in a fresh context. A failed check or a blocking finding returns to execute for at most two repair cycles. The human acceptance gate accepts, rescopes or stops. Any external action needs a separate human authorisation before release and observation. A failed observation opens diagnose. Every path that returns work to scope, a structural review finding, a rescope at the acceptance gate, diagnostic evidence and the retrospect flywheel, converges on one back-to-scope collector rather than five separate return edges.
+    accDescr: Session prepares context and scope produces the specification, risk tier and authority. A human gate approves the specification or sends it back to scope. Inside the deliver kernel, execute runs implement, tdd, refactor or diagnose, then deterministic verification runs, then a separate conditional evaluate gate runs only when behaviour is stochastic or judgement bearing, then an independent review in a fresh context that never authored the work. Review pressure scales with risk: routine work needs only the chair and its native checks, while substantial and above owe both a fresh native reviewer and the other primary family. A failed check or a blocking finding returns to execute for at most two repair cycles. The human acceptance gate accepts, rescopes or stops. Any external action needs a separate human authorisation before release and observation. A failed observation opens diagnose. Every path that returns work to scope, a structural review finding, a rescope at the acceptance gate, diagnostic evidence and the retrospect flywheel, converges on one back-to-scope collector rather than five separate return edges.
     SE(["session"]) --> SC["scope<br/>spec, risk tier, authority"]
     SC --> G1{{"HUMAN GATE<br/>approve spec, risk tier, one-way doors"}}
     G1 -. "send back" .-> SC
@@ -54,7 +58,7 @@ flowchart TB
       Q -- "no" --> RV
       Q == "yes" ==> EV["evaluate<br/>repeatable judgement gate"]
       EV -. "failed" .-> EX
-      EV --> RV["review<br/>independent, other primary, fresh context"]
+      EV --> RV["review<br/>independent, fresh context<br/>native plus the other primary at substantial+"]
       RV -. "repair, at most 2 cycles" .-> EX
     end
 
@@ -89,9 +93,10 @@ one return edge into `scope` instead of five crossing the canvas.
 Two orderings in that picture are load-bearing. Deterministic verification runs
 first and always. `evaluate` is a separate conditional gate that runs only when
 behaviour is stochastic or judgement bearing, so deterministic checks come
-before judgement and the two are never fused into one box. Review is
-independent: a fresh context in the other primary family, never the author of
-the surface under review.
+before judgement and the two are never fused into one box. Review is independent:
+a fresh context, never the author of the surface under review. From `substantial`
+up that means two legs, a fresh native reviewer and the other primary family, and
+a receipt reaching acceptance without either one fails the machine gate.
 
 The lifecycle loops. A failed check returns to execution; a structural review
 finding may return to scope; production evidence may open a diagnosis and a new
@@ -225,13 +230,19 @@ Claude Code and Codex are equal primary orchestrators. Whichever harness the
 human starts is the session chair and owns authority, user communication, run
 state and synthesis. On substantial work it combines:
 
-1. native same-family subagents for parallel depth;
-2. the other primary family for independent, load-bearing review;
-3. optional Gemini, xAI or other families for dissent and blind-spot discovery.
+1. native same-family subagents for parallel depth, which author and so may never
+   certify;
+2. a fresh-context native reviewer that authored none of the surface under review;
+3. the other primary family for independent review;
+4. optional Gemini, xAI or other families for dissent and blind-spot discovery.
 
-Bonus-family failure never blocks the workflow. The other primary is required
-for the substantial review contract unless the human accepts an explicitly
-recorded degradation.
+Legs 2 and 3 both load-bear from `substantial` up.
+
+Bonus-family failure never blocks the workflow. The other primary is required for
+the substantial review contract, and there is no degradation note that buys past
+it: a run may execute without that leg, but `validate_delivery.py` rejects the
+receipt once it reaches acceptance. The only relief is a human-approved risk
+downgrade carrying an approver, a reason and evidence.
 Provider-backed external workers, including the other primary, Agy/Gemini and
 other bonus families, run through Agent Fabric. Direct CLIs are preflight or an
 explicitly recorded degraded fallback, not the primary answer-bearing path;
@@ -243,20 +254,22 @@ cannot.
 ```mermaid
 flowchart TB
     accTitle: Review topology, blocking and non-blocking legs
-    accDescr: The human starts one client, and that client is the session chair. The chair fans out to its own native subagents for parallel depth in the same family, and through Agent Fabric to the other primary family for independent review in a fresh context. The other primary is load-bearing for substantial work and above, so its leg is solid. Bonus families such as Gemini and xAI attach through the same fabric as advisory pressure, drawn dashed because they never block on absence, quota or failure; a skipped leg is recorded. Herdr observes and wakes, drawn dotted, and never decides. Only a participant that neither authored nor decided the surface may certify the review, which rules out the chair and its own native subagents; the rule is stated in the node labels rather than drawn as an edge.
+    accDescr: The human starts one client, and that client is the session chair. The chair fans out to native authoring subagents in its own family for parallel depth; because they write the work they may never certify it, and neither may the chair, which decides. Review then runs on two load-bearing legs from the substantial tier upwards. The first is a fresh-context native reviewer in the chair's own family that never authored the surface under review. The second reaches the other primary family through Agent Fabric. Both legs are drawn solid because either can block the run, and the delivery validator rejects a receipt that reaches acceptance missing either one. Bonus families such as Gemini and xAI attach through the same fabric as advisory pressure, drawn dashed because they never block on absence, quota or failure; a skipped leg is recorded. Herdr observes and wakes, drawn dotted, and never decides. Only a participant that neither authored nor decided the surface may sign the certificate.
     HU(["human"]) ==> CH
 
     CH["session chair<br/>the client the human started<br/>owns authority, run state, gates, synthesis<br/>it decides, so it never certifies"]
 
-    CH ==> SUB["native subagents<br/>same family, parallel depth<br/>they author, so they never certify"]
+    CH ==> SUB["native authoring subagents<br/>same family, parallel depth<br/>they author, so they never certify"]
     SUB ==> CH
 
-    CH ==> AF["Agent Fabric<br/>answer-bearing provider execution<br/>durable communication and receipts"]
+    CH ==> NRV["native reviewer<br/>same family, fresh context<br/>authored nothing, so it may certify"]
+    CH ==> AF["Agent Fabric<br/>answer-bearing execution<br/>durable communication, receipts"]
 
-    AF ==> OP["other primary<br/>Claude or Codex, whichever did not chair<br/>independent review in a fresh context"]
+    AF ==> OP["other primary<br/>Claude or Codex, not the chair<br/>independent review, fresh context"]
     AF -. "non-blocking" .-> BF["bonus families<br/>Gemini, xAI and others<br/>dissent and blind-spot pressure"]
 
-    OP ==> CERT{{"independent review certificate<br/>only a participant that neither authored<br/>nor decided the surface may certify it<br/>blocking findings need evidence and corroboration"}}
+    NRV == "substantial+" ==> CERT{{"independent review certificate<br/>both legs load-bear at substantial+<br/>only a participant that neither authored<br/>nor decided the surface may certify it<br/>blocking findings need evidence and corroboration"}}
+    OP == "substantial+" ==> CERT
     BF -. "advisory only, never blocks<br/>every skipped leg is recorded" .-> CERT
 
     CERT ==> CH
@@ -271,19 +284,24 @@ flowchart TB
     class HU human
     class CH,SUB actor
     class AF transport
-    class OP,CERT blocking
+    class NRV,OP,CERT blocking
     class BF advisory
     class HD inert
 ```
 
-Solid legs can block a run; dashed legs cannot. The independence rule is written
-into the nodes rather than drawn as an edge: the chair decides and its subagents
-author, so neither may certify, and only a participant that neither authored nor
-decided the surface signs the certificate. Blue marks exactly those participants
-that are disqualified from certifying their own work. Herdr sits outside the
-decision path entirely.
+Solid legs can block a run; dashed legs cannot. Both blocking legs are
+load-bearing from `substantial` up: `validate_delivery.py` rejects a receipt that
+reaches acceptance without a passing native review *and* a passing other-primary
+review, on distinct primary families with distinct evidence. The independence rule
+is written into the nodes rather than drawn as an edge: the chair decides and its
+authoring subagents write, so neither may certify. Blue marks exactly those
+participants disqualified from certifying their own work, which is why a native
+reviewer that opened a fresh context and authored nothing is green rather than
+blue. Herdr sits outside the decision path entirely.
 
-Paired-primary mode lets Claude and Codex rotate stage ownership through Herdr.
+Paired-primary mode lets Claude and Codex rotate stage ownership, coordinated
+through Agent Fabric, which owns answer-bearing execution and durable
+communication; Herdr only observes and wakes.
 It still has one chair and one active owner per stage, namespaced artifacts and
 non-overlapping write scopes. Pane transcripts are transport, not durable state.
 Pi is dormant by default until its provider, economics, permissions and receipt

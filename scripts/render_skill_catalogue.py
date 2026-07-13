@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import difflib
 from pathlib import Path
 import re
@@ -21,12 +22,13 @@ NOT_A_SKILL = {"_shared"}
 AREA_ROW = re.compile(r"^\|\s*(?P<area>[^|]+?)\s*\|\s*(?P<skills>.+?)\s*\|\s*$")
 SKILL_LINK = re.compile(r"`(?P<name>[a-z0-9][a-z0-9-]*)`\]\(skills/(?P<dir>[a-z0-9][a-z0-9-]*)/SKILL\.md\)")
 FENCE = re.compile(r"^\s*(```|~~~)")
-# Every way the README states the skill count. The catalogue block carries its own
-# count in the <summary> line, which render_block writes; these cover the prose.
-COUNT_PATTERNS = (
-    re.compile(r"\b(?P<count>\d+)(?= Agent Skills\b)"),
-    re.compile(r"\b(?P<count>\d+)(?=-skill\b)"),
-    re.compile(r"\b(?P<count>\d+)(?= skills\b)"),
+# Any number a reader would take as "how many skills there are". The number and the
+# noun may be separated by adjectives: the drift this gate exists to stop ("34 reusable
+# Agent Skills") survived an adjacency-only pattern precisely because "reusable" sat in
+# the gap. The gap admits lowercase words only, so punctuation ends it and unrelated
+# numbers ("Python 3.11+ ... an Agent Skills client") cannot be captured across it.
+COUNT_CLAIM = re.compile(
+    r"\b(?P<count>\d+)(?P<gap>[- ](?:[a-z]+[- ]){0,3})(?P<noun>Agent Skills|skills|skill)\b"
 )
 
 
@@ -49,10 +51,17 @@ def installed_skills() -> list[str]:
 
 
 def split_readme(text: str) -> tuple[str, str, str]:
-    start = text.find(START_MARKER)
-    end = text.find(END_MARKER)
-    if start == -1 or end == -1 or end < start:
-        raise CatalogueError(f"README is missing the {START_MARKER} / {END_MARKER} markers")
+    # Exactly one pair. A second block would sit outside the rendered region and drift
+    # unchecked, which is the same class of bug as an unguarded headline integer.
+    starts, ends = text.count(START_MARKER), text.count(END_MARKER)
+    if starts != 1 or ends != 1:
+        raise CatalogueError(
+            f"README needs exactly one {START_MARKER} / {END_MARKER} pair, "
+            f"found {starts} start and {ends} end markers"
+        )
+    start, end = text.find(START_MARKER), text.find(END_MARKER)
+    if end < start:
+        raise CatalogueError(f"README has {END_MARKER} before {START_MARKER}")
     return text[: start + len(START_MARKER)], text[start + len(START_MARKER) : end], text[end:]
 
 
@@ -76,6 +85,12 @@ def parse_areas(block: str) -> list[tuple[str, list[str]]]:
             areas.append((area, names))
     if not areas:
         raise CatalogueError("catalogue has no Area rows to preserve")
+    # Cardinality, not membership. A skill listed twice keeps the set identical while
+    # the table lies about the library, so compare counts and refuse duplicates.
+    listed = Counter(name for _, names in areas for name in names)
+    duplicated = sorted(name for name, times in listed.items() if times > 1)
+    if duplicated:
+        raise CatalogueError(f"catalogue lists these skill(s) more than once: {', '.join(duplicated)}")
     return areas
 
 
@@ -113,28 +128,40 @@ def render_block(assigned: list[tuple[str, list[str]]], count: int) -> str:
     return "\n".join(lines)
 
 
-def render_counts(text: str, count: int) -> str:
-    """Rewrite the headline integer in prose. Fenced blocks are sample output, so
-    they are left alone."""
+def render_counts(text: str, count: int) -> tuple[str, int]:
+    """Rewrite every stated skill count in prose, and report how many were found.
+    Fenced blocks are sample output, so they are left alone."""
     lines = text.splitlines(keepends=True)
     fenced = False
+    claims = 0
     for index, line in enumerate(lines):
         if FENCE.match(line):
             fenced = not fenced
             continue
         if fenced:
             continue
-        for pattern in COUNT_PATTERNS:
-            line = pattern.sub(str(count), line)
-        lines[index] = line
-    return "".join(lines)
+        claims += len(COUNT_CLAIM.findall(line))
+        lines[index] = COUNT_CLAIM.sub(
+            lambda match: f"{count}{match.group('gap')}{match.group('noun')}", line
+        )
+    return "".join(lines), claims
 
 
 def render(text: str) -> tuple[str, int, int]:
     skills = installed_skills()
     head, block, tail = split_readme(text)
     assigned = assign(skills, parse_areas(block))
-    rendered = render_counts(head, len(skills)) + render_block(assigned, len(skills)) + render_counts(tail, len(skills))
+    rendered_head, head_claims = render_counts(head, len(skills))
+    rendered_tail, tail_claims = render_counts(tail, len(skills))
+    # Fail closed. A README that states no count at all cannot drift, but it also
+    # cannot be checked: silence would make this gate pass by saying nothing, which
+    # is the failure mode it exists to prevent.
+    if head_claims + tail_claims == 0:
+        raise CatalogueError(
+            "README states no skill count in prose, so the headline cannot be verified. "
+            "State the count (for example '33 Agent Skills') outside a fenced block."
+        )
+    rendered = rendered_head + render_block(assigned, len(skills)) + rendered_tail
     return rendered, len(skills), sum(1 for _, names in assigned if names)
 
 

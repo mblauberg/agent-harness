@@ -74,5 +74,6 @@ existing installations: the installation manifest owner in
 global instructions point at by name. `AGENTS_HOME` and `$HOME/.agents` are
 unchanged, so no existing installation moves.
 
-[Unreleased]: https://github.com/mblauberg/provenant/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/mblauberg/provenant/releases/tag/v0.1.0
+Version links are deliberately absent: no release is tagged yet, and a link to a
+tag that does not exist is exactly the kind of unverified claim this release
+closes. Add them with the first `v0.1.0` tag.

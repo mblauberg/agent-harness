@@ -17,17 +17,21 @@ scripts/check-harness
 One command, and it must pass before you open a pull request. It runs the policy
 checks, the skill trigger fixtures, the shell parse, the release and
 static-security scanners, and the `pytest` suite in `tests/`. You need Python
-3.11+ with `pytest` and `pyyaml`. Changing anything under `runtime/` also means
-`npm run check` in that package, plus its evaluation and load suites. Paste the
-exact commands and results into the pull request: a gate you skipped is fine if
-you say so, a gate you imply is not.
+3.11+ with `pytest` and `pyyaml`, and Node.js 24: the suite always runs, and some
+of those tests shell out to `node`. Changing anything under `runtime/` also means
+`npm run check` in that package, plus its evaluation and load suites when that
+package provides them. Paste the exact commands and results into the pull request:
+a gate you skipped is fine if you say so, a gate you imply is not.
 
 ## Risk and authority
 
 The pull request template asks for a risk tier and an authorised write scope.
 Tiers come from [`config/risk-policy.json`](config/risk-policy.json) and run
-`routine`, `substantial`, `crucial`, `terminal`, set by blast radius,
-reversibility and how hard the change is to undo; the write scope names the
+`routine`, `substantial`, `crucial`, `terminal`. Seven factors set the tier, and a
+receipt must score every one of them: blast radius, reversibility, data
+sensitivity, migration, oracle quality, external effects and critical surface. The
+tier is the highest any single factor demands, so one regulated data set or one
+irreversible external effect lifts the whole change. The write scope names the
 paths your change may touch and the actions it must never take.
 
 The template also asks for an independent reviewer and model family. You are not
