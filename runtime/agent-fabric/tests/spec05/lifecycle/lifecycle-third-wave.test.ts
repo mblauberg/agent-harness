@@ -201,6 +201,7 @@ describe("Spec 05 lifecycle closed durable snapshot", () => {
       "custodyDispositionProofs",
       "freshRotationCommitDigests",
       "freshRotations",
+      "integrityReceiptOutbox",
       "losses",
       "principalHighWater",
       "providerHighWater",
@@ -310,7 +311,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     await expect(domain.driveRotation(PROJECT, "run-third", accepted.custodyRef)).resolves.toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
+      reviewDecision: { kind: "rebound" },
       reviewDecisionReceipt: { kind: "review-adoption-decision" },
       terminalReceipt: { kind: "custody-terminal" },
     });
@@ -323,7 +324,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
     expect(domain.inspectCustody(PROJECT, "run-third", accepted.custodyRef)).toMatchObject({
       phase: "finalized",
       disposition: "adopted",
-      reviewDecision: { kind: "stale", reason: "same-subject-predicate-failed" },
+      reviewDecision: { kind: "rebound" },
       reviewDecisionReceipt: { kind: "review-adoption-decision" },
       terminalReceipt: { kind: "custody-terminal" },
     });
@@ -420,7 +421,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
         runId: custody.runId,
         agentId: custody.agentId,
         custodyId: custody.custodyRef,
-        custodyRevision: 1,
+        custodyRevision: custody.custodyRevision,
       },
       lifecycleAdoptionEvidenceDigest: lifecycleDigest({
         projectSessionId: custody.projectSessionId,
@@ -429,7 +430,7 @@ describe("Spec 05 lifecycle atomic review adoption", () => {
           runId: custody.runId,
           agentId: custody.agentId,
           custodyId: custody.custodyRef,
-          custodyRevision: 1,
+          custodyRevision: custody.custodyRevision,
         },
         checkpoint: custody.checkpoint,
         successorProvider: custody.candidate.provider,

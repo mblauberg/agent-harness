@@ -505,7 +505,7 @@ describe("Spec 05 operator generation-loss recovery", () => {
       runId: custody.runId,
       agentId: custody.agentId,
       custodyId: custody.custodyRef,
-      custodyRevision: 1,
+      custodyRevision: custody.custodyRevision,
     };
     const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
       projectSessionId: custody.projectSessionId,
@@ -659,6 +659,92 @@ describe("Spec 05 operator generation-loss recovery", () => {
     });
     const snapshot = structuredClone(domain.snapshot()) as any;
     mutate(snapshot);
+    const { snapshotDigest: _ignored, ...preimage } = snapshot;
+
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it.each(["active", "revoked", "expired"] as const)(
+    "rejects a committed fresh issue rewritten to %s",
+    (status) => {
+      const provider = new RecoveryProvider();
+      const domain = recoveryDomain(provider);
+      const lossId = openLoss(domain);
+      preview(domain, lossId);
+      domain.commitFreshRotation({
+        projectSessionId: PROJECT,
+        runId: "run-recovery",
+        lossId,
+        pair,
+        attemptId: attemptId(pair),
+      });
+      const snapshot = structuredClone(domain.snapshot()) as any;
+      snapshot.recoveryIssues[0].status = status;
+      const { snapshotDigest: _ignored, ...preimage } = snapshot;
+
+      expect(() => LifecycleRotationDomain.hydrate(
+        { provider, recoveryAuthority: trustedRecoveryAuthority },
+        { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+      )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+    },
+  );
+
+  it.each([
+    ["without an attempt", false],
+    ["with only a preview", true],
+  ] as const)("rejects a consumed fresh issue %s", (_label, includePreview) => {
+    const provider = new RecoveryProvider();
+    const domain = recoveryDomain(provider);
+    const lossId = openLoss(domain);
+    if (includePreview) {
+      preview(domain, lossId);
+    } else {
+      const loss = domain.inspectLoss(PROJECT, "run-recovery", lossId);
+      domain.registerRecoveryIssue(freshRecoveryIssue({
+        issueId: attemptId(pair),
+        capability: `capability:${pair.actionId}`,
+        projectSessionId: PROJECT,
+        runId: "run-recovery",
+        agentId: "chair",
+        sessionGeneration: 3,
+        lossId,
+        pair,
+        adapterContractDigest: digest("replacement-contract"),
+        operation: "launch",
+        checkpointDigest: loss.checkpoint.checkpointDigest,
+      }));
+    }
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    snapshot.recoveryIssues[0].status = "consumed";
+    const { snapshotDigest: _ignored, ...preimage } = snapshot;
+
+    expect(() => LifecycleRotationDomain.hydrate(
+      { provider, recoveryAuthority: trustedRecoveryAuthority },
+      { ...preimage, snapshotDigest: lifecycleDigest(preimage) },
+    )).toThrow(expect.objectContaining({ code: "SNAPSHOT_INVALID" }));
+  });
+
+  it("rejects a finalized fresh attempt whose consumed issue is rewritten active", async () => {
+    const provider: LifecycleProviderPort = {
+      async dispatchReplacement() { return { status: "closed-no-effect", proofDigest: digest("historical-no-effect") }; },
+      async lookupReplacement() { return { status: "ambiguous" }; },
+    };
+    const domain = recoveryDomain(provider);
+    const lossId = openLoss(domain);
+    preview(domain, lossId);
+    const accepted = domain.commitFreshRotation({
+      projectSessionId: PROJECT,
+      runId: "run-recovery",
+      lossId,
+      pair,
+      attemptId: attemptId(pair),
+    });
+    await domain.driveRotation(PROJECT, "run-recovery", accepted.custodyRef);
+    const snapshot = structuredClone(domain.snapshot()) as any;
+    snapshot.recoveryIssues[0].status = "active";
     const { snapshotDigest: _ignored, ...preimage } = snapshot;
 
     expect(() => LifecycleRotationDomain.hydrate(

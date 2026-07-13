@@ -289,7 +289,7 @@ describe("Spec 05 lifecycle crash and replay", () => {
           runId: "run-crash",
           agentId: "chair",
           custodyId: accepted.custodyRef,
-          custodyRevision: 1,
+          custodyRevision: 6,
         },
       },
     });

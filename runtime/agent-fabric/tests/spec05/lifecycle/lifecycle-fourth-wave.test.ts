@@ -635,9 +635,11 @@ describe("Spec 05 exact snapshot correlations", () => {
     const snapshot = structuredClone(domain.snapshot()) as any;
     const custody = snapshot.custodies[0];
     custody.phase = "prepared";
+    custody.custodyRevision = 2;
     custody.disposition = null;
     custody.history = ["awaiting-boundary", "prepared"];
     custody.terminalEvidence = null;
+    custody.terminalReplay = null;
     custody.terminalReceipt = null;
     snapshot.custodyDispositionProofs = [];
     snapshot.audits = snapshot.audits.filter((event: any) =>

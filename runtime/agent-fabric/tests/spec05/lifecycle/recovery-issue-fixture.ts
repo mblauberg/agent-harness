@@ -5,8 +5,10 @@ import {
   type LifecycleAuthenticatedReceipt,
   type LifecycleAbandonAuthority,
   type LifecycleIntegrityReceiptAuthorityPort,
+  type LifecycleIntegrityReceiptLedger,
   type LifecycleIntegrityReceiptLookup,
   type LifecycleIntegrityReceiptRecord,
+  type LifecycleIntegrityReceiptScopeHead,
   type LifecycleIntegrityReceiptSubject,
   type LifecycleDomainPorts,
   type LifecycleDomainSnapshotV1,
@@ -22,9 +24,15 @@ export const trustedRecoveryAuthority: LifecycleRecoveryAuthorityPort = {
 };
 
 const RECEIPT_AUTHORITY_ID = "test:lifecycle-integrity-ledger";
+const RECEIPT_NAMESPACE_ID = "test:lifecycle-domain";
 const RECEIPT_AUTHORITY_SECRET = "test-only-receipt-authority-secret";
 const receiptLedger = new Map<string, LifecycleIntegrityReceiptRecord>();
 let receiptHead: LifecycleAuthenticatedReceipt | null = null;
+
+export function resetTrustedLifecycleIntegrityReceipts(): void {
+  receiptLedger.clear();
+  receiptHead = null;
+}
 
 function receiptLookupKey(lookup: LifecycleIntegrityReceiptLookup): string {
   return [lookup.kind, lookup.projectSessionId, lookup.runId, lookup.agentId, lookup.custodyRef].join("\u0000");
@@ -39,6 +47,61 @@ function receiptSubjectLookup(subject: LifecycleIntegrityReceiptSubject): Lifecy
     custodyRef: subject.kind === "custody-terminal"
       ? subject.custodyRef
       : subject.lifecycleCustodyRef.custodyId,
+  };
+}
+
+function ledgerSnapshot(): LifecycleIntegrityReceiptLedger {
+  const records = [...receiptLedger.values()]
+    .sort((left, right) => left.receipt.authoritySequence - right.receipt.authoritySequence)
+    .map((record) => structuredClone(record));
+  const scopes = new Map<string, LifecycleIntegrityReceiptRecord[]>();
+  for (const record of records) {
+    const key = `${record.subject.projectSessionId}\u0000${record.subject.runId}`;
+    const existing = scopes.get(key) ?? [];
+    existing.push(record);
+    scopes.set(key, existing);
+  }
+  const scopeHeads: LifecycleIntegrityReceiptScopeHead[] = [...scopes]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, scopeRecords]) => {
+      const first = scopeRecords[0] as LifecycleIntegrityReceiptRecord;
+      const last = scopeRecords.at(-1) as LifecycleIntegrityReceiptRecord;
+      const preimage = {
+        schemaVersion: 1 as const,
+        projectSessionId: first.subject.projectSessionId,
+        runId: first.subject.runId,
+        recordCount: scopeRecords.length,
+        firstAuthoritySequence: first.receipt.authoritySequence,
+        lastAuthoritySequence: last.receipt.authoritySequence,
+        receiptDigests: scopeRecords.map((record) => record.receipt.receiptDigest),
+      };
+      const { receiptDigests: _receiptDigests, ...head } = preimage;
+      return { ...head, headDigest: lifecycleDigest(preimage) };
+    });
+  const preimage = {
+    schemaVersion: 1 as const,
+    namespaceId: RECEIPT_NAMESPACE_ID,
+    authorityId: RECEIPT_AUTHORITY_ID,
+    sequenceHighWater: receiptHead?.authoritySequence ?? 0,
+    recordCount: records.length,
+    scopeHeads,
+    recordBindings: records.map((record) => ({
+      authoritySequence: record.receipt.authoritySequence,
+      subjectDigest: lifecycleDigest(record.subject),
+      receiptDigest: record.receipt.receiptDigest,
+    })),
+  };
+  const ledgerDigest = lifecycleDigest(preimage);
+  return {
+    schemaVersion: 1,
+    namespaceId: RECEIPT_NAMESPACE_ID,
+    authorityId: RECEIPT_AUTHORITY_ID,
+    sequenceHighWater: preimage.sequenceHighWater,
+    recordCount: records.length,
+    scopeHeads,
+    records,
+    ledgerDigest,
+    attestation: lifecycleDigest({ secret: RECEIPT_AUTHORITY_SECRET, ledgerDigest }),
   };
 }
 
@@ -84,6 +147,17 @@ export const trustedLifecycleIntegrityReceipts: LifecycleIntegrityReceiptAuthori
         receiptDigest: receipt.receiptDigest,
       });
   },
+  readLedger(): LifecycleIntegrityReceiptLedger {
+    return ledgerSnapshot();
+  },
+  verifyLedger(ledger: LifecycleIntegrityReceiptLedger): boolean {
+    const expected = ledgerSnapshot();
+    return lifecycleDigest(ledger) === lifecycleDigest(expected) &&
+      ledger.attestation === lifecycleDigest({
+        secret: RECEIPT_AUTHORITY_SECRET,
+        ledgerDigest: ledger.ledgerDigest,
+      });
+  },
 };
 
 export class ReceiptBackedLifecycleRotationDomain extends LifecycleRotationDomain {
@@ -92,8 +166,7 @@ export class ReceiptBackedLifecycleRotationDomain extends LifecycleRotationDomai
     agents: readonly LifecycleAgentSeed[],
     recoveryIssues: readonly LifecycleRecoveryIssue[] = [],
   ) {
-    receiptLedger.clear();
-    receiptHead = null;
+    resetTrustedLifecycleIntegrityReceipts();
     super({ ...ports, integrityReceipts: trustedLifecycleIntegrityReceipts }, agents, recoveryIssues);
   }
 

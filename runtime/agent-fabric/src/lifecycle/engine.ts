@@ -25,8 +25,12 @@ import {
   type LifecycleAuthenticatedReceipt,
   type LifecycleCustodyTerminalReceiptSubject,
   type LifecycleIntegrityReceiptSubject,
+  type LifecycleIntegrityReceiptIntent,
+  type LifecycleIntegrityReceiptLedger,
   type LifecycleIntegrityReceiptLookup,
   type LifecycleIntegrityReceiptRecord,
+  type LifecycleIntegrityReceiptScopeHead,
+  type LifecycleTerminalReceiptReplay,
   type LifecycleReviewDecisionReceiptSubject,
   type LifecycleDelivery,
   type LifecycleDigest,
@@ -94,6 +98,7 @@ interface MutableAgent {
 
 interface MutableCustody {
   readonly custodyRef: string;
+  custodyRevision: number;
   readonly commandId: string;
   readonly requestDigest: string;
   readonly projectSessionId: string;
@@ -130,6 +135,7 @@ interface MutableCustody {
   reviewDecision: ReviewAdoptionDecision | null;
   reviewDecisionReceipt: LifecycleAuthenticatedReceipt | null;
   terminalEvidence: LifecycleCustodyTerminalEvidence | null;
+  terminalReplay: LifecycleTerminalReceiptReplay | null;
   terminalReceipt: LifecycleAuthenticatedReceipt | null;
 }
 
@@ -348,6 +354,111 @@ function validAuthenticatedReceipt(
     receipt.receiptDigest === lifecycleDigest(receiptPreimage) && receipt.attestation.length > 0;
 }
 
+function validIntegritySubjectShape(subject: LifecycleIntegrityReceiptSubject): boolean {
+  if (subject.kind === "custody-terminal") {
+    return hasExactKeys(subject, [
+      "schemaVersion", "kind", "projectSessionId", "runId", "agentId", "custodyRef", "custodyRevision",
+      "requestDigest", "pair", "disposition", "terminalEvidenceDigest", "continuationDigest", "recoveryFromLossId",
+    ]) && subject.schemaVersion === 1 && subject.projectSessionId.length > 0 && subject.runId.length > 0 &&
+      subject.agentId.length > 0 && subject.custodyRef.length > 0 &&
+      Number.isSafeInteger(subject.custodyRevision) && subject.custodyRevision >= 1 &&
+      validDigest(subject.requestDigest) && validActionPair(subject.pair) &&
+      ["adopted", "no-effect", "superseded", "quarantined", "abandoned"].includes(subject.disposition) &&
+      validDigest(subject.terminalEvidenceDigest) && validDigest(subject.continuationDigest) &&
+      (subject.recoveryFromLossId === null || subject.recoveryFromLossId.length > 0);
+  }
+  const custodyRef = subject.lifecycleCustodyRef;
+  return hasExactKeys(subject, [
+    "schemaVersion", "kind", "projectSessionId", "runId", "agentId", "lifecycleCustodyRef",
+    "lifecycleAdoptionEvidenceDigest", "reviewDecisionDigest", "certificationCutDigest",
+    "recoveryFromLossId", "recoveryLossDecisionDigest",
+  ]) && subject.schemaVersion === 1 && subject.projectSessionId.length > 0 && subject.runId.length > 0 &&
+    subject.agentId.length > 0 && hasExactKeys(custodyRef, [
+      "schemaVersion", "runId", "agentId", "custodyId", "custodyRevision",
+    ]) && custodyRef.schemaVersion === 1 && custodyRef.runId === subject.runId &&
+    custodyRef.agentId === subject.agentId && custodyRef.custodyId.length > 0 &&
+    Number.isSafeInteger(custodyRef.custodyRevision) && custodyRef.custodyRevision >= 1 &&
+    validDigest(subject.lifecycleAdoptionEvidenceDigest) && validDigest(subject.reviewDecisionDigest) &&
+    (subject.certificationCutDigest === null || validDigest(subject.certificationCutDigest)) &&
+    (subject.recoveryFromLossId === null
+      ? subject.recoveryLossDecisionDigest === null
+      : subject.recoveryFromLossId.length > 0 && validDigest(subject.recoveryLossDecisionDigest as LifecycleDigest));
+}
+
+function integrityScopeHeads(
+  records: readonly LifecycleIntegrityReceiptRecord[],
+): readonly LifecycleIntegrityReceiptScopeHead[] {
+  const scopes = new Map<string, LifecycleIntegrityReceiptRecord[]>();
+  for (const record of records) {
+    const key = `${record.subject.projectSessionId}\u0000${record.subject.runId}`;
+    const existing = scopes.get(key) ?? [];
+    existing.push(record);
+    scopes.set(key, existing);
+  }
+  return [...scopes]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, scopeRecords]) => {
+      const first = scopeRecords[0] as LifecycleIntegrityReceiptRecord;
+      const last = scopeRecords.at(-1) as LifecycleIntegrityReceiptRecord;
+      const preimage = {
+        schemaVersion: 1 as const,
+        projectSessionId: first.subject.projectSessionId,
+        runId: first.subject.runId,
+        recordCount: scopeRecords.length,
+        firstAuthoritySequence: first.receipt.authoritySequence,
+        lastAuthoritySequence: last.receipt.authoritySequence,
+        receiptDigests: scopeRecords.map((record) => record.receipt.receiptDigest),
+      };
+      const { receiptDigests: _receiptDigests, ...head } = preimage;
+      return { ...head, headDigest: lifecycleDigest(preimage) };
+    });
+}
+
+function validIntegrityLedgerShape(ledger: LifecycleIntegrityReceiptLedger): boolean {
+  if (!hasExactKeys(ledger, [
+    "schemaVersion", "namespaceId", "authorityId", "sequenceHighWater", "recordCount", "scopeHeads",
+    "records", "ledgerDigest", "attestation",
+  ]) || ledger.schemaVersion !== 1 || ledger.namespaceId.length === 0 || ledger.authorityId.length === 0 ||
+    !Number.isSafeInteger(ledger.sequenceHighWater) || ledger.sequenceHighWater < 0 ||
+    !Number.isSafeInteger(ledger.recordCount) || ledger.recordCount < 0 ||
+    !Array.isArray(ledger.scopeHeads) || !Array.isArray(ledger.records) ||
+    ledger.recordCount !== ledger.records.length || ledger.sequenceHighWater !== ledger.records.length ||
+    !validDigest(ledger.ledgerDigest) || ledger.attestation.length === 0) return false;
+  const lookupKeys = new Set<string>();
+  for (const [index, record] of ledger.records.entries()) {
+    if (canonicalJson(Object.keys(record).sort()) !== canonicalJson(["receipt", "subject"]) ||
+      !validIntegritySubjectShape(record.subject) ||
+      !validAuthenticatedReceipt(record.subject, record.receipt) ||
+      record.receipt.authorityId !== ledger.authorityId || record.receipt.authoritySequence !== index + 1 ||
+      record.receipt.previousReceiptDigest !== (index === 0 ? null : ledger.records[index - 1]?.receipt.receiptDigest)) {
+      return false;
+    }
+    const key = integrityReceiptIntentId(record.subject);
+    if (lookupKeys.has(key)) return false;
+    lookupKeys.add(key);
+  }
+  const expectedScopeHeads = integrityScopeHeads(ledger.records);
+  if (canonicalJson(expectedScopeHeads) !== canonicalJson(ledger.scopeHeads)) return false;
+  if (!ledger.scopeHeads.every((scope) => hasExactKeys(scope, [
+    "schemaVersion", "projectSessionId", "runId", "recordCount", "firstAuthoritySequence",
+    "lastAuthoritySequence", "headDigest",
+  ]))) return false;
+  const preimage = {
+    schemaVersion: 1 as const,
+    namespaceId: ledger.namespaceId,
+    authorityId: ledger.authorityId,
+    sequenceHighWater: ledger.sequenceHighWater,
+    recordCount: ledger.recordCount,
+    scopeHeads: ledger.scopeHeads,
+    recordBindings: ledger.records.map((record) => ({
+      authoritySequence: record.receipt.authoritySequence,
+      subjectDigest: lifecycleDigest(record.subject),
+      receiptDigest: record.receipt.receiptDigest,
+    })),
+  };
+  return ledger.ledgerDigest === lifecycleDigest(preimage);
+}
+
 function dispositionProofFor(
   custody: MutableCustody,
   disposition: LifecycleCustodyDispositionProof["disposition"],
@@ -380,7 +491,7 @@ function reviewAdoptionDecisionEvidenceDigest(
     runId: custody.runId,
     agentId: custody.agentId,
     custodyId: custody.custodyRef,
-    custodyRevision: 1,
+    custodyRevision: custody.custodyRevision,
   };
   const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
     projectSessionId: custody.projectSessionId,
@@ -666,17 +777,27 @@ function actionKey(pair: ProviderActionPair): string {
   return `${pair.adapterId}\u0000${pair.actionId}`;
 }
 
-function integrityReceiptLookup(
-  custody: Pick<MutableCustody, "projectSessionId" | "runId" | "agentId" | "custodyRef">,
-  kind: LifecycleIntegrityReceiptLookup["kind"],
-): LifecycleIntegrityReceiptLookup {
+function integrityReceiptSubjectLookup(subject: LifecycleIntegrityReceiptSubject): LifecycleIntegrityReceiptLookup {
   return {
-    kind,
-    projectSessionId: custody.projectSessionId,
-    runId: custody.runId,
-    agentId: custody.agentId,
-    custodyRef: custody.custodyRef,
+    kind: subject.kind,
+    projectSessionId: subject.projectSessionId,
+    runId: subject.runId,
+    agentId: subject.agentId,
+    custodyRef: subject.kind === "custody-terminal"
+      ? subject.custodyRef
+      : subject.lifecycleCustodyRef.custodyId,
   };
+}
+
+function integrityReceiptIntentId(subject: LifecycleIntegrityReceiptSubject): string {
+  const lookup = integrityReceiptSubjectLookup(subject);
+  return [lookup.kind, lookup.projectSessionId, lookup.runId, lookup.agentId, lookup.custodyRef].join("\u0000");
+}
+
+function integrityReceiptTransactionId(
+  custody: Pick<MutableCustody, "projectSessionId" | "runId" | "agentId" | "custodyRef">,
+): string {
+  return [custody.projectSessionId, custody.runId, custody.agentId, custody.custodyRef].join("\u0000");
 }
 
 function retirementKey(kind: LifecycleRecoveryRetirement["recoverySourceKind"], sourceRef: string): string {
@@ -707,6 +828,7 @@ export class LifecycleRotationDomain {
   readonly #recoveryRetirements = new Map<string, LifecycleRecoveryRetirement>();
   readonly #reviewCertificationCuts = new Map<string, ReviewCertificationCut>();
   readonly #custodyDispositionProofs = new Map<string, LifecycleCustodyDispositionProof>();
+  readonly #integrityReceiptOutbox = new Map<string, LifecycleIntegrityReceiptIntent>();
 
   constructor(
     ports: LifecycleDomainPorts,
@@ -732,7 +854,7 @@ export class LifecycleRotationDomain {
       );
     }
     for (const source of recoveryIssues) {
-      if (!validRecoveryIssueShape(source)) {
+      if (!validRecoveryIssueShape(source) || source.status !== "active") {
         throw new LifecycleDomainError("RECOVERY_ISSUE_INVALID", "recovery issue must match the closed v1 schema");
       }
       if (!this.#agents.has(agentKey(source.projectSessionId, source.runId, source.agentId))) {
@@ -747,7 +869,7 @@ export class LifecycleRotationDomain {
       "schemaVersion", "agents", "custodies", "commands", "providerHighWater", "principalHighWater",
       "bridgeHighWater", "contextEvents", "losses", "audits", "freshRotations",
       "freshRotationCommitDigests", "recoveryIssues", "recoveryRetirements", "reviewCertificationCuts",
-      "custodyDispositionProofs", "snapshotDigest",
+      "custodyDispositionProofs", "integrityReceiptOutbox", "snapshotDigest",
     ];
     if (!hasExactKeys(snapshot, rootKeys) || snapshot.schemaVersion !== 1) {
       throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle snapshot root must match the exact v1 schema");
@@ -759,13 +881,14 @@ export class LifecycleRotationDomain {
     if (![snapshot.agents, snapshot.custodies, snapshot.commands, snapshot.providerHighWater,
       snapshot.principalHighWater, snapshot.bridgeHighWater, snapshot.contextEvents, snapshot.losses,
       snapshot.audits, snapshot.freshRotations, snapshot.freshRotationCommitDigests, snapshot.recoveryIssues,
-      snapshot.recoveryRetirements, snapshot.reviewCertificationCuts, snapshot.custodyDispositionProofs].every(Array.isArray)) {
+      snapshot.recoveryRetirements, snapshot.reviewCertificationCuts, snapshot.custodyDispositionProofs,
+      snapshot.integrityReceiptOutbox].every(Array.isArray)) {
       throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle snapshot collections must be arrays");
     }
-    if (snapshot.custodies.length > 0 && ports.integrityReceipts === undefined) {
+    if (ports.integrityReceipts === undefined) {
       throw new LifecycleDomainError(
         "SNAPSHOT_INVALID",
-        "lifecycle custody hydration requires its external append-only receipt authority",
+        "lifecycle hydration requires its external append-only receipt authority namespace",
       );
     }
     const domain = new LifecycleRotationDomain(ports, []);
@@ -858,14 +981,14 @@ export class LifecycleRotationDomain {
     }
     for (const source of snapshot.custodies) {
       if (!hasExactKeys(source, [
-        "custodyRef", "commandId", "requestDigest", "projectSessionId", "runId", "agentId", "phase", "disposition", "pair",
+        "custodyRef", "custodyRevision", "commandId", "requestDigest", "projectSessionId", "runId", "agentId", "phase", "disposition", "pair",
         "providerOperation", "adapterContractDigest", "stagedCapabilityHash", "sourceProvider", "sourceBinding",
         "sourcePrincipalGeneration", "sourceBridgeGeneration", "reservedProviderGeneration",
         "reservedPrincipalGeneration", "reservedBridgeGeneration", "checkpoint", "checkpointValidation", "candidate", "launchChallenge",
         "recoveryFromLossId", "recoveryAttemptId", "admissionKind", "requestAction", "admissionCheckpoint",
         "sourceWriteRevision", "sourceAuthorityRevision", "changedWriteCustodyIds",
         "callerTurnId", "history", "acceptance", "reviewDecision", "reviewDecisionReceipt",
-        "terminalEvidence", "terminalReceipt",
+        "terminalEvidence", "terminalReplay", "terminalReceipt",
       ])) throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle custody snapshot is not closed");
       if (domain.#custodies.has(source.custodyRef)) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "duplicate lifecycle custody");
@@ -877,6 +1000,8 @@ export class LifecycleRotationDomain {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "provider action identity must be the canonical pair");
       }
       if (
+        !Number.isSafeInteger(source.custodyRevision) || source.custodyRevision < 1 ||
+        source.custodyRevision !== source.history.length ||
         !validDigest(source.adapterContractDigest) || !validDigest(source.stagedCapabilityHash) ||
         !validDigest(source.launchChallenge) || source.acceptance.custodyRef !== source.custodyRef ||
         source.acceptance.commandId !== source.commandId || source.acceptance.agentId !== source.agentId ||
@@ -903,6 +1028,7 @@ export class LifecycleRotationDomain {
       )) throw new LifecycleDomainError("SNAPSHOT_INVALID", "replacement candidate snapshot is not closed");
       if ((source.phase === "finalized") !== (source.disposition !== null) ||
         (source.phase === "finalized") !== (source.terminalReceipt !== null) ||
+        (source.phase === "finalized") !== (source.terminalReplay !== null) ||
         (source.reviewDecision !== null && source.disposition !== "adopted") ||
         (source.reviewDecision === null) !== (source.reviewDecisionReceipt === null)) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "custody phase, disposition and review decision are inconsistent");
@@ -1038,7 +1164,7 @@ export class LifecycleRotationDomain {
           runId: source.runId,
           agentId: source.agentId,
           custodyId: source.custodyRef,
-          custodyRevision: 1,
+          custodyRevision: source.custodyRevision,
         };
         const evidenceDigest = lifecycleDigest({
           projectSessionId: source.projectSessionId,
@@ -1069,6 +1195,185 @@ export class LifecycleRotationDomain {
         history: [...source.history],
       });
     }
+    for (const source of snapshot.integrityReceiptOutbox) {
+      if (!hasExactKeys(source, [
+        "schemaVersion", "intentId", "transactionId", "subject", "receipt", "replay",
+      ]) || source.schemaVersion !== 1 || !validIntegritySubjectShape(source.subject) ||
+        source.intentId !== integrityReceiptIntentId(source.subject)) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle receipt intent is not closed or canonical");
+      }
+      const lookup = integrityReceiptSubjectLookup(source.subject);
+      const custody = domain.#custodies.get(lookup.custodyRef);
+      if (custody === undefined || custody.projectSessionId !== lookup.projectSessionId ||
+        custody.runId !== lookup.runId || custody.agentId !== lookup.agentId ||
+        source.transactionId !== integrityReceiptTransactionId(custody) ||
+        (source.receipt !== null && !validAuthenticatedReceipt(source.subject, source.receipt))) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "lifecycle receipt intent crossed its custody transaction");
+      }
+      if (source.replay.kind === "review-decision") {
+        if (!hasExactKeys(source.replay, ["kind", "decision"]) || source.subject.kind !== "review-adoption-decision" ||
+          custody.candidate === null) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending review receipt lacks its exact adoption decision");
+        }
+        const terminalIntent = snapshot.integrityReceiptOutbox.find((candidate) =>
+          candidate.transactionId === source.transactionId && candidate.subject.kind === "custody-terminal"
+        );
+        const finalRevision = custody.phase === "finalized"
+          ? custody.custodyRevision
+          : terminalIntent?.subject.kind === "custody-terminal"
+            ? terminalIntent.subject.custodyRevision
+            : null;
+        if (finalRevision === null) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending review receipt lacks its terminal transaction member");
+        }
+        const lifecycleCustodyRef: LifecycleCustodyRef = {
+          schemaVersion: 1,
+          runId: custody.runId,
+          agentId: custody.agentId,
+          custodyId: custody.custodyRef,
+          custodyRevision: finalRevision,
+        };
+        const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
+          projectSessionId: custody.projectSessionId,
+          lifecycleCustodyRef,
+          checkpoint: custody.checkpoint,
+          successorProvider: custody.candidate.provider,
+          successorPrincipalGeneration: custody.candidate.principalGeneration,
+          successorBridgeGeneration: custody.candidate.bridgeGeneration,
+          launchAttestation: custody.candidate.launchAttestation,
+        });
+        try {
+          domain.#assertReviewAdoptionDecision(
+            source.replay.decision,
+            custody.runId,
+            lifecycleCustodyRef,
+            lifecycleAdoptionEvidenceDigest,
+          );
+        } catch {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending review decision crossed its finalized custody revision");
+        }
+        const expectedReviewSubject: LifecycleReviewDecisionReceiptSubject = {
+          schemaVersion: 1,
+          kind: "review-adoption-decision",
+          projectSessionId: custody.projectSessionId,
+          runId: custody.runId,
+          agentId: custody.agentId,
+          lifecycleCustodyRef,
+          lifecycleAdoptionEvidenceDigest,
+          reviewDecisionDigest: lifecycleDigest(source.replay.decision),
+          certificationCutDigest: source.replay.decision.kind === "rebound" || source.replay.decision.kind === "stale"
+            ? source.replay.decision.cut.cutDigest
+            : null,
+          recoveryFromLossId: custody.recoveryFromLossId,
+          recoveryLossDecisionDigest: custody.recoveryFromLossId === null
+            ? null
+            : lifecycleDigest(source.replay.decision),
+        };
+        if (canonicalJson(expectedReviewSubject) !== canonicalJson(source.subject)) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending review receipt subject crossed its exact replay decision");
+        }
+      } else {
+        if (!hasExactKeys(source.replay, [
+          "kind", "disposition", "detail", "lifecycle", "proofDigest", "historyTransitions", "audits", "reviewDecision",
+        ]) || source.subject.kind !== "custody-terminal" || source.replay.detail.length === 0 ||
+          !validDigest(source.replay.proofDigest) || !Array.isArray(source.replay.historyTransitions) ||
+          !source.replay.historyTransitions.every((transition) =>
+            ["prepared", "dispatched", "accepted", "ambiguous", "provider-terminal", "committing"].includes(transition)
+          ) || !Array.isArray(source.replay.audits) ||
+          !source.replay.audits.every((audit) => hasExactKeys(audit, [
+            "kind", "projectSessionId", "runId", "agentId", "sourceId", "detail",
+          ]) && audit.projectSessionId === custody.projectSessionId && audit.runId === custody.runId &&
+            audit.agentId === custody.agentId && audit.sourceId === custody.custodyRef)) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending terminal receipt lacks its exact replay plan");
+        }
+        const owner = domain.#agents.get(agentKey(custody.projectSessionId, custody.runId, custody.agentId));
+        const noEffectAuditKind = source.replay.detail === "pre-dispatch-zero-effect"
+          ? "lifecycle-no-effect"
+          : source.replay.detail === "authenticated-provider-closed-no-effect"
+            ? "lifecycle-provider-no-effect"
+            : null;
+        const replaySemanticsValid = source.replay.kind === "terminal-adoption"
+          ? source.replay.disposition === "adopted" && source.replay.lifecycle === "ready" &&
+            source.replay.historyTransitions.length === 0 && source.replay.audits.length === 0 &&
+            owner !== undefined && (owner.role === "chair") === (source.replay.reviewDecision !== null)
+          : source.replay.kind === "terminal-abandon-custody" || source.replay.kind === "terminal-abandon-loss"
+            ? source.replay.disposition === "abandoned" && source.replay.lifecycle === "archived" &&
+              source.replay.historyTransitions.length === 0 && source.replay.audits.length === 0 &&
+              source.replay.reviewDecision === null
+            : source.replay.disposition !== "adopted" && source.replay.disposition !== "abandoned" &&
+              source.replay.reviewDecision === null &&
+              (noEffectAuditKind === null
+                ? source.replay.audits.length === 0
+                : source.replay.audits.length === 1 && source.replay.audits[0]?.kind === noEffectAuditKind &&
+                  source.replay.audits[0]?.detail === source.replay.proofDigest);
+        if (!replaySemanticsValid) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending terminal receipt continuation semantics are invalid");
+        }
+        const finalHistory = custody.phase === "finalized"
+          ? custody.history
+          : [...custody.history, ...source.replay.historyTransitions, source.replay.disposition];
+        const finalRevision = custody.phase === "finalized"
+          ? custody.custodyRevision
+          : custody.custodyRevision + source.replay.historyTransitions.length + 1;
+        if (source.replay.reviewDecision !== null) {
+          if (custody.candidate === null) {
+            throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending terminal adoption lacks its candidate");
+          }
+          const lifecycleCustodyRef: LifecycleCustodyRef = {
+            schemaVersion: 1,
+            runId: custody.runId,
+            agentId: custody.agentId,
+            custodyId: custody.custodyRef,
+            custodyRevision: finalRevision,
+          };
+          const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
+            projectSessionId: custody.projectSessionId,
+            lifecycleCustodyRef,
+            checkpoint: custody.checkpoint,
+            successorProvider: custody.candidate.provider,
+            successorPrincipalGeneration: custody.candidate.principalGeneration,
+            successorBridgeGeneration: custody.candidate.bridgeGeneration,
+            launchAttestation: custody.candidate.launchAttestation,
+          });
+          try {
+            domain.#assertReviewAdoptionDecision(
+              source.replay.reviewDecision,
+              custody.runId,
+              lifecycleCustodyRef,
+              lifecycleAdoptionEvidenceDigest,
+            );
+          } catch {
+            throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending terminal adoption decision is crossed");
+          }
+        }
+        const expectedEvidence = terminalEvidenceFor(
+          custody,
+          source.replay.disposition,
+          source.replay.detail,
+          source.replay.proofDigest,
+          finalHistory,
+        );
+        const expectedTerminalSubject: LifecycleCustodyTerminalReceiptSubject = {
+          schemaVersion: 1,
+          kind: "custody-terminal",
+          projectSessionId: custody.projectSessionId,
+          runId: custody.runId,
+          agentId: custody.agentId,
+          custodyRef: custody.custodyRef,
+          custodyRevision: finalRevision,
+          requestDigest: custody.requestDigest as LifecycleDigest,
+          pair: { ...custody.pair },
+          disposition: source.replay.disposition,
+          terminalEvidenceDigest: expectedEvidence.terminalEvidenceDigest,
+          continuationDigest: lifecycleDigest(source.replay),
+          recoveryFromLossId: custody.recoveryFromLossId,
+        };
+        if (canonicalJson(expectedTerminalSubject) !== canonicalJson(source.subject)) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending terminal receipt subject crossed its exact replay plan");
+        }
+      }
+      domain.#setUnique(domain.#integrityReceiptOutbox, source.intentId, Object.freeze(structuredClone(source)));
+    }
     for (const source of snapshot.reviewCertificationCuts) {
       if (!hasExactKeys(source, [
         "schemaVersion", "runId", "targetGeneration", "predecessorBindingGeneration",
@@ -1087,7 +1392,7 @@ export class LifecycleRotationDomain {
         runId: custody.runId,
         agentId: custody.agentId,
         custodyId: custody.custodyRef,
-        custodyRevision: 1,
+        custodyRevision: custody.custodyRevision,
       };
       const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
         projectSessionId: custody.projectSessionId,
@@ -1235,16 +1540,35 @@ export class LifecycleRotationDomain {
       }
       domain.#audits.push({ ...event });
     }
+    const receiptAuthority = ports.integrityReceipts as NonNullable<LifecycleDomainPorts["integrityReceipts"]>;
+    let authoritativeLedger: LifecycleIntegrityReceiptLedger;
+    try {
+      authoritativeLedger = receiptAuthority.readLedger();
+    } catch {
+      throw new LifecycleDomainError("SNAPSHOT_INVALID", "external lifecycle receipt ledger read failed");
+    }
+    let ledgerVerified = false;
+    try {
+      ledgerVerified = validIntegrityLedgerShape(authoritativeLedger) &&
+        receiptAuthority.verifyLedger(authoritativeLedger) &&
+        authoritativeLedger.records.every((record) =>
+          receiptAuthority.verifyReceipt(record.subject, record.receipt)
+        );
+    } catch {
+      ledgerVerified = false;
+    }
+    if (!ledgerVerified) {
+      throw new LifecycleDomainError("SNAPSHOT_INVALID", "external lifecycle receipt ledger is malformed or unauthenticated");
+    }
+    const authoritativeReceipts = new Map(
+      authoritativeLedger.records.map((record) => [integrityReceiptIntentId(record.subject), record] as const),
+    );
+    const reconciledExternalReceiptKeys = new Set<string>();
     for (const custody of domain.#custodies.values()) {
       const owner = domain.#agents.get(agentKey(custody.projectSessionId, custody.runId, custody.agentId));
-      let authoritativeDecisionReceipt: LifecycleIntegrityReceiptRecord | null = null;
-      try {
-        authoritativeDecisionReceipt = ports.integrityReceipts?.readReceipt(
-          integrityReceiptLookup(custody, "review-adoption-decision"),
-        ) ?? null;
-      } catch {
-        throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision receipt authority lookup failed");
-      }
+      const decisionReceiptKey = ["review-adoption-decision", custody.projectSessionId, custody.runId,
+        custody.agentId, custody.custodyRef].join("\u0000");
+      const authoritativeDecisionReceipt = authoritativeReceipts.get(decisionReceiptKey) ?? null;
       const decisionEvidence = domain.#audits.filter((event) =>
         event.kind === "lifecycle-review-adoption-decision" &&
         event.projectSessionId === custody.projectSessionId && event.runId === custody.runId &&
@@ -1271,9 +1595,11 @@ export class LifecycleRotationDomain {
         if (!decisionReceiptValid) {
           throw new LifecycleDomainError("SNAPSHOT_INVALID", "chair adoption review decision receipt is absent, crossed or unauthenticated");
         }
+        reconciledExternalReceiptKeys.add(decisionReceiptKey);
       } else if (decisionEvidence.length !== 0) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision evidence is not owned by an adopted chair custody");
-      } else if (custody.reviewDecisionReceipt !== null || authoritativeDecisionReceipt !== null) {
+      } else if (custody.reviewDecisionReceipt !== null ||
+        (authoritativeDecisionReceipt !== null && !domain.#integrityReceiptOutbox.has(decisionReceiptKey))) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "review decision receipt is not owned by an adopted chair custody");
       }
     }
@@ -1283,21 +1609,18 @@ export class LifecycleRotationDomain {
       throw new LifecycleDomainError("SNAPSHOT_INVALID", "finalized custody lacks its exact terminal evidence");
     }
     for (const custody of domain.#custodies.values()) {
-      let authoritativeTerminalReceipt: LifecycleIntegrityReceiptRecord | null = null;
-      try {
-        authoritativeTerminalReceipt = ports.integrityReceipts?.readReceipt(
-          integrityReceiptLookup(custody, "custody-terminal"),
-        ) ?? null;
-      } catch {
-        throw new LifecycleDomainError("SNAPSHOT_INVALID", "terminal custody receipt authority lookup failed");
-      }
+      const terminalReceiptKey = ["custody-terminal", custody.projectSessionId, custody.runId,
+        custody.agentId, custody.custodyRef].join("\u0000");
+      const authoritativeTerminalReceipt = authoritativeReceipts.get(terminalReceiptKey) ?? null;
       if (custody.phase !== "finalized") {
-        if (custody.terminalReceipt !== null || authoritativeTerminalReceipt !== null) {
+        if (custody.terminalReceipt !== null ||
+          (authoritativeTerminalReceipt !== null && !domain.#integrityReceiptOutbox.has(terminalReceiptKey))) {
           throw new LifecycleDomainError("SNAPSHOT_INVALID", "external terminal receipt contradicts mutable nonterminal custody state");
         }
         continue;
       }
-      if (custody.disposition === null || custody.terminalEvidence === null || custody.terminalReceipt === null) {
+      if (custody.disposition === null || custody.terminalEvidence === null || custody.terminalReplay === null ||
+        custody.terminalReceipt === null) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "finalized custody omitted its terminal receipt binding");
       }
       const subject: LifecycleCustodyTerminalReceiptSubject = {
@@ -1307,10 +1630,12 @@ export class LifecycleRotationDomain {
         runId: custody.runId,
         agentId: custody.agentId,
         custodyRef: custody.custodyRef,
+        custodyRevision: custody.custodyRevision,
         requestDigest: custody.requestDigest as LifecycleDigest,
         pair: { ...custody.pair },
         disposition: custody.disposition,
         terminalEvidenceDigest: custody.terminalEvidence.terminalEvidenceDigest,
+        continuationDigest: lifecycleDigest(custody.terminalReplay),
         recoveryFromLossId: custody.recoveryFromLossId,
       };
       let terminalReceiptValid = false;
@@ -1326,6 +1651,48 @@ export class LifecycleRotationDomain {
       if (!terminalReceiptValid) {
         throw new LifecycleDomainError("SNAPSHOT_INVALID", "terminal custody receipt is absent, crossed or unauthenticated");
       }
+      reconciledExternalReceiptKeys.add(terminalReceiptKey);
+    }
+    for (const [intentId, intent] of domain.#integrityReceiptOutbox) {
+      const authoritative = authoritativeReceipts.get(intentId) ?? null;
+      if (authoritative === null) {
+        if (intent.receipt !== null) {
+          throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending lifecycle receipt disappeared from its external ledger");
+        }
+        continue;
+      }
+      let intentVerified = false;
+      try {
+        intentVerified = canonicalJson(authoritative.subject) === canonicalJson(intent.subject) &&
+          (intent.receipt === null || canonicalJson(authoritative.receipt) === canonicalJson(intent.receipt)) &&
+          validAuthenticatedReceipt(intent.subject, authoritative.receipt) &&
+          receiptAuthority.verifyReceipt(intent.subject, authoritative.receipt);
+      } catch {
+        intentVerified = false;
+      }
+      if (!intentVerified) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "pending lifecycle receipt crossed its external ledger record");
+      }
+      domain.#integrityReceiptOutbox.set(intentId, Object.freeze({
+        ...intent,
+        receipt: Object.freeze(structuredClone(authoritative.receipt)),
+      }));
+      reconciledExternalReceiptKeys.add(intentId);
+    }
+    if ([...authoritativeReceipts.keys()].some((key) => !reconciledExternalReceiptKeys.has(key))) {
+      throw new LifecycleDomainError(
+        "SNAPSHOT_INVALID",
+        "external lifecycle receipt ledger contains a custody or run absent from the mutable snapshot",
+      );
+    }
+    for (const custody of domain.#custodies.values()) {
+      if (custody.phase !== "finalized" || custody.terminalReceipt === null) continue;
+      const transactionIntents = [...domain.#integrityReceiptOutbox.values()].filter((intent) =>
+        intent.transactionId === integrityReceiptTransactionId(custody)
+      );
+      const reviewComplete = custody.reviewDecisionReceipt !== null ||
+        !transactionIntents.some((intent) => intent.subject.kind === "review-adoption-decision");
+      if (reviewComplete) domain.#commitIntegrityReceiptTransaction(custody);
     }
     for (const source of snapshot.custodyDispositionProofs) {
       if (!hasExactKeys(source, [
@@ -1452,6 +1819,42 @@ export class LifecycleRotationDomain {
             "fresh-recovery custody lacks its exact immutable preview and commit-replay records",
           );
         }
+      }
+    }
+    for (const issue of domain.#recoveryIssues.values()) {
+      if (issue.path !== "fresh-rotate") continue;
+      const preparation = domain.#freshRotations.get(issue.issueId);
+      const commitRecord = domain.#freshRotationCommitDigests.get(issue.issueId);
+      const matchingCustodies = [...domain.#custodies.values()].filter((custody) =>
+        custody.admissionKind === "fresh-recovery" && custody.recoveryAttemptId === issue.issueId
+      );
+      const ownsCommittedAttempt = preparation !== undefined && commitRecord !== undefined && matchingCustodies.length === 1;
+      if ((issue.status === "consumed") !== ownsCommittedAttempt) {
+        throw new LifecycleDomainError(
+          "SNAPSHOT_INVALID",
+          "fresh recovery issue consumption is not bijective with one preview, commit and custody",
+        );
+      }
+      if (issue.status !== "consumed" && (commitRecord !== undefined || matchingCustodies.length !== 0)) {
+        throw new LifecycleDomainError(
+          "SNAPSHOT_INVALID",
+          "active, revoked or expired fresh recovery issue owns a committed attempt",
+        );
+      }
+      if (!ownsCommittedAttempt) continue;
+      const custody = matchingCustodies[0] as MutableCustody;
+      const loss = domain.#losses.get(issue.recoverySourceRef);
+      if (loss === undefined || custody.recoveryFromLossId !== loss.lossId ||
+        preparation?.lossId !== loss.lossId || commitRecord?.custodyRef !== custody.custodyRef) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "fresh recovery attempt crossed its source loss");
+      }
+      const isActiveAttempt = custody.phase !== "finalized";
+      if (isActiveAttempt !== (loss.state === "recovery-in-progress" &&
+        loss.activeRecoveryAttemptId === issue.issueId && loss.activeRecoveryCustodyRef === custody.custodyRef)) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "fresh recovery loss attempt is not exactly active or historical");
+      }
+      if (!isActiveAttempt && (loss.activeRecoveryAttemptId === issue.issueId || loss.activeRecoveryCustodyRef === custody.custodyRef)) {
+        throw new LifecycleDomainError("SNAPSHOT_INVALID", "finalized fresh recovery remains the active loss attempt");
       }
     }
     const retirementIds = new Set<string>();
@@ -1857,6 +2260,9 @@ export class LifecycleRotationDomain {
       custodyDispositionProofs: [...this.#custodyDispositionProofs.values()]
         .sort((left, right) => left.custodyRef.localeCompare(right.custodyRef))
         .map((proof) => structuredClone(proof)),
+      integrityReceiptOutbox: [...this.#integrityReceiptOutbox.values()]
+        .sort((left, right) => left.intentId.localeCompare(right.intentId))
+        .map((intent) => structuredClone(intent)),
     };
     return { ...preimage, snapshotDigest: lifecycleDigest(preimage) };
   }
@@ -1867,7 +2273,7 @@ export class LifecycleRotationDomain {
 
   registerRecoveryIssue(source: LifecycleRecoveryIssue): LifecycleRecoveryIssue {
     const verifier = this.#ports.recoveryAuthority;
-    if (!validRecoveryIssueShape(source) || verifier === undefined || !verifier.verifyIssue(source) ||
+    if (!validRecoveryIssueShape(source) || source.status !== "active" || verifier === undefined || !verifier.verifyIssue(source) ||
       !this.#agents.has(agentKey(source.projectSessionId, source.runId, source.agentId))) {
       throw new LifecycleDomainError("RECOVERY_ISSUE_INVALID", "only a trusted closed recovery issue may enter lifecycle custody");
     }
@@ -1995,6 +2401,7 @@ export class LifecycleRotationDomain {
     });
     const custody: MutableCustody = {
       custodyRef,
+      custodyRevision: 1,
       commandId: request.commandId,
       requestDigest,
       projectSessionId: request.projectSessionId,
@@ -2031,6 +2438,7 @@ export class LifecycleRotationDomain {
       reviewDecision: null,
       reviewDecisionReceipt: null,
       terminalEvidence: null,
+      terminalReplay: null,
       terminalReceipt: null,
     };
     this.#custodies.set(custodyRef, custody);
@@ -2074,6 +2482,7 @@ export class LifecycleRotationDomain {
     const custody = this.#custody(projectSessionId, runId, custodyRef);
     return {
       custodyRef: custody.custodyRef,
+      custodyRevision: custody.custodyRevision,
       projectSessionId: custody.projectSessionId,
       runId: custody.runId,
       commandId: custody.commandId,
@@ -2106,6 +2515,7 @@ export class LifecycleRotationDomain {
       reviewDecision: custody.reviewDecision === null ? null : structuredClone(custody.reviewDecision),
       reviewDecisionReceipt: custody.reviewDecisionReceipt === null ? null : structuredClone(custody.reviewDecisionReceipt),
       terminalEvidence: custody.terminalEvidence === null ? null : structuredClone(custody.terminalEvidence),
+      terminalReplay: custody.terminalReplay === null ? null : structuredClone(custody.terminalReplay),
       terminalReceipt: custody.terminalReceipt === null ? null : structuredClone(custody.terminalReceipt),
     };
   }
@@ -2135,8 +2545,7 @@ export class LifecycleRotationDomain {
         candidate.providerGeneration === custody.sourceProvider.providerGeneration && !terminalTurn(candidate)
       );
       if (predecessorLive) continue;
-      custody.phase = "prepared";
-      custody.history.push("prepared");
+      this.#transitionCustody(custody, "prepared");
       this.#ports.fault?.hit("after-prepare", custody.custodyRef);
       transitioned.push(this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef));
     }
@@ -2250,13 +2659,25 @@ export class LifecycleRotationDomain {
     const custody = this.#custody(_projectSessionId, _runId, _custodyRef);
     if (custody.phase === "finalized") return this.inspectCustody(_projectSessionId, _runId, _custodyRef);
     const agent = this.#agent(custody.projectSessionId, custody.runId, custody.agentId);
+    const pendingTerminal = this.#pendingReceiptIntent(custody, "custody-terminal");
+    if (pendingTerminal?.replay.kind === "terminal-finalize") {
+      const replay = pendingTerminal.replay;
+      return this.#finalize(
+        custody,
+        agent,
+        replay.disposition,
+        replay.detail,
+        replay.lifecycle,
+        replay.proofDigest,
+        { historyTransitions: replay.historyTransitions, audits: replay.audits },
+      );
+    }
     if (custody.phase === "awaiting-boundary") {
       const predecessorLive = agent.turns.some((turn) => !terminalTurn(turn));
       if (custody.callerTurnId !== null || predecessorLive) {
         throw new LifecycleDomainError("PREDECESSOR_TURN_ACTIVE", "replacement I/O cannot start before every predecessor turn terminates");
       }
-      custody.phase = "prepared";
-      custody.history.push("prepared");
+      this.#transitionCustody(custody, "prepared");
       this.#ports.fault?.hit("after-prepare", custody.custodyRef);
     }
     if (custody.phase === "prepared") {
@@ -2270,8 +2691,7 @@ export class LifecycleRotationDomain {
           lifecycleDigest({ source: custody.checkpoint, current: checkpointFor(agent) }),
         );
       }
-      custody.phase = "dispatched";
-      custody.history.push("dispatched");
+      this.#transitionCustody(custody, "dispatched");
       this.#ports.fault?.hit("after-dispatch-before-effect", custody.custodyRef);
       const observation = await this.#ports.provider.dispatchReplacement({
         pair: { ...custody.pair },
@@ -2333,8 +2753,16 @@ export class LifecycleRotationDomain {
       throw new LifecycleDomainError("ZERO_DISPATCH_PROOF_INVALID", "provider-dispatched custody requires provider proof");
     }
     const agent = this.#agent(custody.projectSessionId, custody.runId, custody.agentId);
-    this.#audit("lifecycle-no-effect", agent.projectSessionId, agent.runId, agent.agentId, custody.custodyRef, _proof.evidenceDigest);
-    return this.#finalize(custody, agent, "no-effect", "pre-dispatch-zero-effect", "ready", _proof.evidenceDigest);
+    return this.#finalize(custody, agent, "no-effect", "pre-dispatch-zero-effect", "ready", _proof.evidenceDigest, {
+      audits: [{
+        kind: "lifecycle-no-effect",
+        projectSessionId: agent.projectSessionId,
+        runId: agent.runId,
+        agentId: agent.agentId,
+        sourceId: custody.custodyRef,
+        detail: _proof.evidenceDigest,
+      }],
+    });
   }
 
   abandonCustody(_request: LifecycleCustodyAbandonment): LifecycleCustodyView {
@@ -2378,6 +2806,7 @@ export class LifecycleRotationDomain {
         "abandoned",
         _request.authority.directHumanConfirmation.reason,
         _request.authority.directHumanConfirmation.attestationDigest,
+        { kind: "terminal-abandon-custody", lifecycle: "archived" },
       );
     }
     this.#applyArchivalPlan(agent, plan);
@@ -2402,7 +2831,9 @@ export class LifecycleRotationDomain {
       requestDigest,
     });
     this.#recoveryRetirements.set(retirementRecordKey, retirement);
-    return this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+    const result = this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+    this.#commitIntegrityReceiptTransaction(custody);
+    return result;
   }
 
   observeContext(_observation: ContextObservation): ContextObservationResult {
@@ -2802,6 +3233,7 @@ export class LifecycleRotationDomain {
     });
     const custody: MutableCustody = {
       custodyRef,
+      custodyRevision: 1,
       commandId,
       requestDigest: replayDigest,
       projectSessionId: loss.projectSessionId,
@@ -2838,6 +3270,7 @@ export class LifecycleRotationDomain {
       reviewDecision: null,
       reviewDecisionReceipt: null,
       terminalEvidence: null,
+      terminalReplay: null,
       terminalReceipt: null,
     };
     this.#custodies.set(custodyRef, custody);
@@ -2915,6 +3348,7 @@ export class LifecycleRotationDomain {
     }
     const plan = this.#deriveArchivalPlan(agent, loss.lossId);
     this.#assertArchivalExpectation(plan, _request.expectedArchivalPlanDigest, _request.expectedSourceCheckpointDigest);
+    let terminalCustody: MutableCustody | null = null;
     if (loss.state === "recovery-in-progress") {
       const activeCustody = [...this.#custodies.values()].find((custody) =>
         custody.recoveryFromLossId === loss.lossId && custody.phase !== "finalized"
@@ -2927,7 +3361,9 @@ export class LifecycleRotationDomain {
         "abandoned",
         _request.authority.directHumanConfirmation.reason,
         _request.authority.directHumanConfirmation.attestationDigest,
+        { kind: "terminal-abandon-loss", lifecycle: "archived" },
       );
+      terminalCustody = activeCustody;
     }
     loss.state = "abandoned";
     loss.activeRecoveryAttemptId = null;
@@ -2961,7 +3397,9 @@ export class LifecycleRotationDomain {
       requestDigest,
     });
     this.#recoveryRetirements.set(retirementRecordKey, retirement);
-    return this.inspectLoss(loss.projectSessionId, loss.runId, loss.lossId);
+    const result = this.inspectLoss(loss.projectSessionId, loss.runId, loss.lossId);
+    if (terminalCustody !== null) this.#commitIntegrityReceiptTransaction(terminalCustody);
+    return result;
   }
 
   #deriveArchivalPlan(agent: MutableAgent, recoverySourceRef: string): LifecycleArchivalPlan {
@@ -3210,40 +3648,45 @@ export class LifecycleRotationDomain {
       if (custody.phase !== "dispatched" && custody.phase !== "accepted") {
         return this.#finalize(custody, agent, "quarantined", "provider-observation-invalid", "recovery-required", lifecycleDigest(observation));
       }
-      if (custody.phase !== "accepted") custody.history.push("accepted");
-      custody.phase = "accepted";
+      this.#transitionCustody(custody, "accepted");
       return this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
     }
     if (observation.status === "ambiguous") {
       if (!hasExactKeys(observation, ["status"])) {
         return this.#finalize(custody, agent, "quarantined", "provider-observation-invalid", "recovery-required", lifecycleDigest(observation));
       }
-      if (custody.phase !== "ambiguous") custody.history.push("ambiguous");
-      custody.phase = "ambiguous";
+      this.#transitionCustody(custody, "ambiguous");
       return this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
     }
     if (observation.status === "closed-no-effect") {
       if (!hasExactKeys(observation, ["status", "proofDigest"]) || !validDigest(observation.proofDigest)) {
         return this.#finalize(custody, agent, "quarantined", "provider-no-effect-proof-invalid", "recovery-required", lifecycleDigest(observation));
       }
-      custody.phase = "provider-terminal";
-      custody.history.push("provider-terminal");
-      this.#audit(
-        "lifecycle-provider-no-effect",
-        agent.projectSessionId,
-        agent.runId,
-        agent.agentId,
-        custody.custodyRef,
+      return this.#finalize(
+        custody,
+        agent,
+        "no-effect",
+        "authenticated-provider-closed-no-effect",
+        "ready",
         observation.proofDigest,
+        {
+          historyTransitions: ["provider-terminal"],
+          audits: [{
+            kind: "lifecycle-provider-no-effect",
+            projectSessionId: agent.projectSessionId,
+            runId: agent.runId,
+            agentId: agent.agentId,
+            sourceId: custody.custodyRef,
+            detail: observation.proofDigest,
+          }],
+        },
       );
-      return this.#finalize(custody, agent, "no-effect", "authenticated-provider-closed-no-effect", "ready", observation.proofDigest);
     }
     if (!hasExactKeys(observation, ["status", "candidate"]) || !this.#validCandidate(custody, observation.candidate)) {
       return this.#finalize(custody, agent, "quarantined", "replacement-attestation-invalid", "recovery-required", lifecycleDigest(observation));
     }
     custody.candidate = structuredClone(observation.candidate);
-    if (custody.phase !== "provider-terminal") custody.history.push("provider-terminal");
-    custody.phase = "provider-terminal";
+    this.#transitionCustody(custody, "provider-terminal");
     this.#ports.fault?.hit("after-provider-ack-before-commit", custody.custodyRef);
     return this.#commit(custody, agent);
   }
@@ -3268,8 +3711,7 @@ export class LifecycleRotationDomain {
     const reviewCutBefore = this.#reviewCertificationCuts.get(custody.custodyRef);
     const auditLengthBefore = this.#audits.length;
     if (custody.phase !== "committing") {
-      custody.phase = "committing";
-      custody.history.push("committing");
+      this.#transitionCustody(custody, "committing");
     }
     this.#ports.fault?.hit("after-commit-start", custody.custodyRef);
     const applyLifecycleAdoption = (decision: ReviewAdoptionDecision | null): boolean => {
@@ -3305,6 +3747,7 @@ export class LifecycleRotationDomain {
         "adopted",
         "replacement-adopted",
         lifecycleDigest(candidate.launchAttestation),
+        { kind: "terminal-adoption", lifecycle: "ready", reviewDecision: decision },
       );
       if (custody.recoveryFromLossId !== null) {
         const loss = this.#loss(custody.projectSessionId, custody.runId, custody.recoveryFromLossId);
@@ -3325,11 +3768,16 @@ export class LifecycleRotationDomain {
       }
     } catch (error) {
       this.#agents.set(agentKey(agent.projectSessionId, agent.runId, agent.agentId), agentBefore);
-      this.#custodies.set(custody.custodyRef, {
+      const restoredCustody: MutableCustody = {
         ...custodyBefore,
         acceptance: Object.freeze({ ...custodyBefore.acceptance }),
         history: [...custodyBefore.history],
-      });
+      };
+      const pendingTerminal = this.#pendingReceiptIntent(custody, "custody-terminal");
+      if (pendingTerminal?.replay.kind === "terminal-adoption") {
+        this.#transitionCustody(restoredCustody, "committing");
+      }
+      this.#custodies.set(custody.custodyRef, restoredCustody);
       if (linkedLossBefore !== null) this.#losses.set(linkedLossBefore.lossId, linkedLossBefore);
       if (reviewCutBefore === undefined) this.#reviewCertificationCuts.delete(custody.custodyRef);
       else this.#reviewCertificationCuts.set(custody.custodyRef, reviewCutBefore);
@@ -3343,7 +3791,9 @@ export class LifecycleRotationDomain {
       }));
     }
     this.#ports.fault?.hit("after-adoption-before-finalize", custody.custodyRef);
-    return this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+    const result = this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+    this.#commitIntegrityReceiptTransaction(custody);
+    return result;
   }
 
   #validCandidate(custody: MutableCustody, candidate: ReplacementCandidate): boolean {
@@ -3383,6 +3833,13 @@ export class LifecycleRotationDomain {
     return canonicalJson(candidate.launchAttestation) === canonicalJson(expected);
   }
 
+  #transitionCustody(custody: MutableCustody, phase: MutableCustody["phase"]): void {
+    if (custody.phase === phase) return;
+    custody.phase = phase;
+    custody.history.push(phase);
+    custody.custodyRevision += 1;
+  }
+
   #finalize(
     custody: MutableCustody,
     agent: MutableAgent,
@@ -3390,8 +3847,18 @@ export class LifecycleRotationDomain {
     detail: string,
     lifecycle: MutableAgent["lifecycle"],
     proofDigest: LifecycleDigest,
+    replay: {
+      readonly historyTransitions?: readonly string[];
+      readonly audits?: readonly LifecycleAuditEvent[];
+    } = {},
   ): LifecycleCustodyView {
-    this.#applyTerminalState(custody, disposition, detail, proofDigest);
+    this.#applyTerminalState(custody, disposition, detail, proofDigest, {
+      kind: "terminal-finalize",
+      lifecycle,
+      ...(replay.historyTransitions === undefined ? {} : { historyTransitions: replay.historyTransitions }),
+      ...(replay.audits === undefined ? {} : { audits: replay.audits }),
+    });
+    for (const audit of replay.audits ?? []) this.#audits.push(structuredClone(audit));
     if (disposition === "superseded" || disposition === "quarantined") {
       this.#setUnique(
         this.#custodyDispositionProofs,
@@ -3426,7 +3893,9 @@ export class LifecycleRotationDomain {
     agent.lifecycle = lifecycle === "ready" && activeLoss ? "recovery-required" : lifecycle;
     agent.claimsFrozen = agent.lifecycle !== "ready";
     this.#audit("lifecycle-custody-finalized", agent.projectSessionId, agent.runId, agent.agentId, custody.custodyRef, detail);
-    return this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+    const result = this.inspectCustody(custody.projectSessionId, custody.runId, custody.custodyRef);
+    this.#commitIntegrityReceiptTransaction(custody);
+    return result;
   }
 
   #applyTerminalState(
@@ -3434,9 +3903,28 @@ export class LifecycleRotationDomain {
     disposition: NonNullable<LifecycleCustodyView["disposition"]>,
     detail: string,
     proofDigest: LifecycleDigest,
+    replay: {
+      readonly kind?: LifecycleTerminalReceiptReplay["kind"];
+      readonly lifecycle?: MutableAgent["lifecycle"];
+      readonly historyTransitions?: readonly string[];
+      readonly audits?: readonly LifecycleAuditEvent[];
+      readonly reviewDecision?: ReviewAdoptionDecision | null;
+    } = {},
   ): void {
-    const history = [...custody.history, disposition];
+    const historyTransitions = [...(replay.historyTransitions ?? [])];
+    const history = [...custody.history, ...historyTransitions, disposition];
     const terminalEvidence = terminalEvidenceFor(custody, disposition, detail, proofDigest, history);
+    const finalCustodyRevision = custody.custodyRevision + historyTransitions.length + 1;
+    const terminalReplay: LifecycleTerminalReceiptReplay = {
+      kind: replay.kind ?? (disposition === "adopted" ? "terminal-adoption" : "terminal-finalize"),
+      disposition,
+      detail,
+      lifecycle: replay.lifecycle ?? (disposition === "adopted" ? "ready" : disposition === "abandoned" ? "archived" : "recovery-required"),
+      proofDigest,
+      historyTransitions,
+      audits: structuredClone(replay.audits ?? []),
+      reviewDecision: structuredClone(replay.reviewDecision ?? null),
+    };
     const subject: LifecycleCustodyTerminalReceiptSubject = {
       schemaVersion: 1,
       kind: "custody-terminal",
@@ -3444,21 +3932,32 @@ export class LifecycleRotationDomain {
       runId: custody.runId,
       agentId: custody.agentId,
       custodyRef: custody.custodyRef,
+      custodyRevision: finalCustodyRevision,
       requestDigest: custody.requestDigest as LifecycleDigest,
       pair: { ...custody.pair },
       disposition,
       terminalEvidenceDigest: terminalEvidence.terminalEvidenceDigest,
+      continuationDigest: lifecycleDigest(terminalReplay),
       recoveryFromLossId: custody.recoveryFromLossId,
     };
-    const terminalReceipt = this.#appendIntegrityReceipt(subject);
+    const terminalReceipt = this.#appendIntegrityReceipt(subject, terminalReplay);
+    this.#ports.fault?.hit("after-terminal-receipt-before-local-commit", custody.custodyRef);
+    for (const transition of historyTransitions) {
+      this.#transitionCustody(custody, transition as MutableCustody["phase"]);
+    }
     custody.phase = "finalized";
     custody.disposition = disposition;
     custody.history.push(disposition);
+    custody.custodyRevision += 1;
     custody.terminalEvidence = terminalEvidence;
+    custody.terminalReplay = Object.freeze(structuredClone(terminalReplay));
     custody.terminalReceipt = terminalReceipt;
   }
 
-  #appendIntegrityReceipt(subject: LifecycleIntegrityReceiptSubject): LifecycleAuthenticatedReceipt {
+  #appendIntegrityReceipt(
+    subject: LifecycleIntegrityReceiptSubject,
+    replay: LifecycleIntegrityReceiptIntent["replay"],
+  ): LifecycleAuthenticatedReceipt {
     const authority = this.#ports.integrityReceipts;
     if (authority === undefined) {
       throw new LifecycleDomainError(
@@ -3466,18 +3965,84 @@ export class LifecycleRotationDomain {
         "terminal and review decisions require the external append-only lifecycle receipt authority",
       );
     }
-    let receipt: LifecycleAuthenticatedReceipt;
+    const intentId = integrityReceiptIntentId(subject);
+    const transactionId = [subject.projectSessionId, subject.runId, subject.agentId,
+      subject.kind === "custody-terminal" ? subject.custodyRef : subject.lifecycleCustodyRef.custodyId].join("\u0000");
+    const proposed: LifecycleIntegrityReceiptIntent = Object.freeze({
+      schemaVersion: 1,
+      intentId,
+      transactionId,
+      subject: structuredClone(subject),
+      receipt: null,
+      replay: structuredClone(replay),
+    });
+    const existingIntent = this.#integrityReceiptOutbox.get(intentId);
+    if (existingIntent !== undefined &&
+      (canonicalJson(existingIntent.subject) !== canonicalJson(subject) ||
+        canonicalJson(existingIntent.replay) !== canonicalJson(replay) ||
+        existingIntent.transactionId !== transactionId)) {
+      throw new LifecycleDomainError(
+        "LIFECYCLE_RECEIPT_INTENT_CONFLICT",
+        "pending lifecycle receipt intent changed its immutable subject or replay plan",
+      );
+    }
+    if (existingIntent === undefined) this.#integrityReceiptOutbox.set(intentId, proposed);
+
+    const acceptRecord = (record: LifecycleIntegrityReceiptRecord | null): LifecycleAuthenticatedReceipt | null => {
+      if (record === null) return null;
+      let verified = false;
+      try {
+        verified = canonicalJson(record.subject) === canonicalJson(subject) &&
+          validAuthenticatedReceipt(subject, record.receipt) && authority.verifyReceipt(subject, record.receipt);
+      } catch {
+        verified = false;
+      }
+      if (!verified) {
+        throw new LifecycleDomainError(
+          "LIFECYCLE_RECEIPT_INVALID",
+          "external lifecycle receipt authority returned an invalid, crossed or unauthenticated record",
+        );
+      }
+      const receipt = Object.freeze(structuredClone(record.receipt));
+      this.#integrityReceiptOutbox.set(intentId, Object.freeze({
+        ...(this.#integrityReceiptOutbox.get(intentId) as LifecycleIntegrityReceiptIntent),
+        receipt,
+      }));
+      return receipt;
+    };
+
+    let authoritative: LifecycleIntegrityReceiptRecord | null;
     try {
-      receipt = authority.appendReceipt(structuredClone(subject));
+      authoritative = authority.readReceipt(integrityReceiptSubjectLookup(subject));
     } catch {
       throw new LifecycleDomainError(
         "LIFECYCLE_RECEIPT_APPEND_FAILED",
-        "external lifecycle receipt append failed",
+        "external lifecycle receipt authority could not reconcile the pending intent",
+      );
+    }
+    const prior = acceptRecord(authoritative);
+    if (prior !== null) return prior;
+
+    let appended: LifecycleAuthenticatedReceipt;
+    try {
+      appended = authority.appendReceipt(structuredClone(subject));
+    } catch {
+      let reconciled: LifecycleIntegrityReceiptRecord | null = null;
+      try {
+        reconciled = authority.readReceipt(integrityReceiptSubjectLookup(subject));
+      } catch {
+        reconciled = null;
+      }
+      const recovered = acceptRecord(reconciled);
+      if (recovered !== null) return recovered;
+      throw new LifecycleDomainError(
+        "LIFECYCLE_RECEIPT_APPEND_FAILED",
+        "external lifecycle receipt append failed without an authoritative committed record",
       );
     }
     let verified = false;
     try {
-      verified = validAuthenticatedReceipt(subject, receipt) && authority.verifyReceipt(subject, receipt);
+      verified = validAuthenticatedReceipt(subject, appended) && authority.verifyReceipt(subject, appended);
     } catch {
       verified = false;
     }
@@ -3487,7 +4052,33 @@ export class LifecycleRotationDomain {
         "external lifecycle receipt authority returned an invalid or unauthenticated receipt",
       );
     }
-    return Object.freeze(structuredClone(receipt));
+    const receipt = Object.freeze(structuredClone(appended));
+    this.#integrityReceiptOutbox.set(intentId, Object.freeze({
+      ...(this.#integrityReceiptOutbox.get(intentId) as LifecycleIntegrityReceiptIntent),
+      receipt,
+    }));
+    return receipt;
+  }
+
+  #pendingReceiptIntent(
+    custody: MutableCustody,
+    kind: LifecycleIntegrityReceiptSubject["kind"],
+  ): LifecycleIntegrityReceiptIntent | null {
+    const intent = this.#integrityReceiptOutbox.get([
+      kind,
+      custody.projectSessionId,
+      custody.runId,
+      custody.agentId,
+      custody.custodyRef,
+    ].join("\u0000"));
+    return intent === undefined ? null : structuredClone(intent);
+  }
+
+  #commitIntegrityReceiptTransaction(custody: MutableCustody): void {
+    const transactionId = integrityReceiptTransactionId(custody);
+    for (const [intentId, intent] of this.#integrityReceiptOutbox) {
+      if (intent.transactionId === transactionId) this.#integrityReceiptOutbox.delete(intentId);
+    }
   }
 
   #reviewDecisionReceiptSubject(
@@ -3500,7 +4091,7 @@ export class LifecycleRotationDomain {
       runId: custody.runId,
       agentId: custody.agentId,
       custodyId: custody.custodyRef,
-      custodyRevision: 1,
+      custodyRevision: custody.custodyRevision,
     };
     const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
       projectSessionId: custody.projectSessionId,
@@ -3550,7 +4141,7 @@ export class LifecycleRotationDomain {
       runId: custody.runId,
       agentId: custody.agentId,
       custodyId: custody.custodyRef,
-      custodyRevision: 1,
+      custodyRevision: custody.custodyRevision + (custody.phase === "finalized" ? 0 : 1),
     };
     const lifecycleAdoptionEvidenceDigest = lifecycleDigest({
       projectSessionId: custody.projectSessionId,
@@ -3561,6 +4152,54 @@ export class LifecycleRotationDomain {
       successorBridgeGeneration: candidate.bridgeGeneration,
       launchAttestation: candidate.launchAttestation,
     });
+    const pendingReview = this.#pendingReceiptIntent(custody, "review-adoption-decision");
+    const pendingTerminal = this.#pendingReceiptIntent(custody, "custody-terminal");
+    if (pendingReview !== null && pendingReview.replay.kind !== "review-decision") {
+      throw new LifecycleDomainError(
+        "LIFECYCLE_RECEIPT_INTENT_CONFLICT",
+        "pending review receipt omitted its exact decision replay",
+      );
+    }
+    const terminalReplayDecision = pendingTerminal?.replay.kind === "terminal-adoption"
+      ? pendingTerminal.replay.reviewDecision
+      : null;
+    const finalReplayDecision = pendingReview?.replay.kind === "review-decision"
+      ? pendingReview.replay.decision
+      : terminalReplayDecision;
+    if (terminalReplayDecision !== null && finalReplayDecision !== null) {
+      const terminalDecision = structuredClone(terminalReplayDecision);
+      const decision = structuredClone(finalReplayDecision);
+      this.#assertReviewAdoptionDecision(
+        terminalDecision,
+        custody.runId,
+        lifecycleCustodyRef,
+        lifecycleAdoptionEvidenceDigest,
+      );
+      this.#assertReviewAdoptionDecision(decision, custody.runId, lifecycleCustodyRef, lifecycleAdoptionEvidenceDigest);
+      if (!commitLifecycleAdoption(terminalDecision)) return false;
+      custody.reviewDecision = structuredClone(decision);
+      if (custody.recoveryFromLossId !== null) {
+        this.#loss(custody.projectSessionId, custody.runId, custody.recoveryFromLossId).reviewDecision = structuredClone(decision);
+      }
+      if (decision.kind === "rebound" || decision.kind === "stale") {
+        this.#setUnique(this.#reviewCertificationCuts, custody.custodyRef, decision.cut);
+      }
+      const decisionSubject = this.#reviewDecisionReceiptSubject(custody, candidate, decision);
+      custody.reviewDecisionReceipt = this.#appendIntegrityReceipt(decisionSubject, {
+        kind: "review-decision",
+        decision,
+      });
+      this.#ports.fault?.hit("after-review-receipt-before-local-commit", custody.custodyRef);
+      this.#audit(
+        "lifecycle-review-adoption-decision",
+        custody.projectSessionId,
+        custody.runId,
+        custody.agentId,
+        custody.custodyRef,
+        reviewAdoptionDecisionEvidenceDigest(custody, candidate, decision),
+      );
+      return true;
+    }
     let target: ReviewCertificationTargetSnapshot | null = null;
     let targetIntegrityReason: "target-read-failed" | "target-snapshot-invalid" | null = null;
     if (port !== undefined) {
@@ -3626,7 +4265,11 @@ export class LifecycleRotationDomain {
         throw new LifecycleDomainError("REVIEW_ADOPTION_DECISION_INVALID", "chair adoption lacks its final review decision");
       }
       const decisionSubject = this.#reviewDecisionReceiptSubject(custody, candidate, custody.reviewDecision);
-      custody.reviewDecisionReceipt = this.#appendIntegrityReceipt(decisionSubject);
+      custody.reviewDecisionReceipt = this.#appendIntegrityReceipt(decisionSubject, {
+        kind: "review-decision",
+        decision: custody.reviewDecision,
+      });
+      this.#ports.fault?.hit("after-review-receipt-before-local-commit", custody.custodyRef);
       this.#audit(
         "lifecycle-review-adoption-decision",
         custody.projectSessionId,
@@ -3677,7 +4320,7 @@ export class LifecycleRotationDomain {
         commitLifecycleAdoption: commitDecision,
       });
     } catch {
-      setDecision(fallbackDecision);
+      setDecision(decisionAttempted ? committedDecision : fallbackDecision);
     }
     persistDecisionEvidence();
     return true;

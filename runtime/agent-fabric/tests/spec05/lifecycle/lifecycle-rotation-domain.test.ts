@@ -345,7 +345,7 @@ describe("Spec 05 lifecycle adoption", () => {
           targetGeneration: 3,
           predecessorBindingGeneration: 2,
           terminalSequenceHighWater: 7,
-          lifecycleCustodyRef: { custodyId: accepted.custodyRef, custodyRevision: 1 },
+          lifecycleCustodyRef: { custodyId: accepted.custodyRef, custodyRevision: 6 },
         },
       },
     });

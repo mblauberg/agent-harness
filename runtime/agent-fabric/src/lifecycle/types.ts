@@ -303,6 +303,8 @@ export type LifecycleFaultLabel =
   | "after-provider-effect-before-ack"
   | "after-provider-ack-before-commit"
   | "after-commit-start"
+  | "after-terminal-receipt-before-local-commit"
+  | "after-review-receipt-before-local-commit"
   | "after-adoption-before-finalize";
 
 export interface LifecycleDomainPorts {
@@ -321,10 +323,12 @@ export interface LifecycleCustodyTerminalReceiptSubject {
   readonly runId: string;
   readonly agentId: string;
   readonly custodyRef: string;
+  readonly custodyRevision: number;
   readonly requestDigest: LifecycleDigest;
   readonly pair: ProviderActionPair;
   readonly disposition: CustodyDisposition;
   readonly terminalEvidenceDigest: LifecycleDigest;
+  readonly continuationDigest: LifecycleDigest;
   readonly recoveryFromLossId: string | null;
 }
 
@@ -370,6 +374,57 @@ export interface LifecycleIntegrityReceiptRecord {
   readonly receipt: LifecycleAuthenticatedReceipt;
 }
 
+export interface LifecycleIntegrityReceiptScopeHead {
+  readonly schemaVersion: 1;
+  readonly projectSessionId: string;
+  readonly runId: string;
+  readonly recordCount: number;
+  readonly firstAuthoritySequence: number | null;
+  readonly lastAuthoritySequence: number | null;
+  readonly headDigest: LifecycleDigest;
+}
+
+export interface LifecycleIntegrityReceiptLedger {
+  readonly schemaVersion: 1;
+  readonly namespaceId: string;
+  readonly authorityId: string;
+  readonly sequenceHighWater: number;
+  readonly recordCount: number;
+  readonly scopeHeads: readonly LifecycleIntegrityReceiptScopeHead[];
+  readonly records: readonly LifecycleIntegrityReceiptRecord[];
+  readonly ledgerDigest: LifecycleDigest;
+  readonly attestation: string;
+}
+
+export interface LifecycleTerminalReceiptReplay {
+  readonly kind:
+    | "terminal-finalize"
+    | "terminal-adoption"
+    | "terminal-abandon-custody"
+    | "terminal-abandon-loss";
+  readonly disposition: CustodyDisposition;
+  readonly detail: string;
+  readonly lifecycle: LifecycleAgentSnapshot["lifecycle"];
+  readonly proofDigest: LifecycleDigest;
+  readonly historyTransitions: readonly string[];
+  readonly audits: readonly LifecycleAuditEvent[];
+  readonly reviewDecision: ReviewAdoptionDecision | null;
+}
+
+export interface LifecycleReviewReceiptReplay {
+  readonly kind: "review-decision";
+  readonly decision: ReviewAdoptionDecision;
+}
+
+export interface LifecycleIntegrityReceiptIntent {
+  readonly schemaVersion: 1;
+  readonly intentId: string;
+  readonly transactionId: string;
+  readonly subject: LifecycleIntegrityReceiptSubject;
+  readonly receipt: LifecycleAuthenticatedReceipt | null;
+  readonly replay: LifecycleTerminalReceiptReplay | LifecycleReviewReceiptReplay;
+}
+
 /**
  * External append-only trust boundary. Append must be idempotent for an exact
  * subject and reject a changed subject for the same lookup key. Read and
@@ -381,6 +436,8 @@ export interface LifecycleIntegrityReceiptAuthorityPort {
   appendReceipt(subject: LifecycleIntegrityReceiptSubject): LifecycleAuthenticatedReceipt;
   readReceipt(lookup: LifecycleIntegrityReceiptLookup): LifecycleIntegrityReceiptRecord | null;
   verifyReceipt(subject: LifecycleIntegrityReceiptSubject, receipt: LifecycleAuthenticatedReceipt): boolean;
+  readLedger(): LifecycleIntegrityReceiptLedger;
+  verifyLedger(ledger: LifecycleIntegrityReceiptLedger): boolean;
 }
 
 export type LifecycleRecoveryIssueStatus = "active" | "consumed" | "revoked" | "expired";
@@ -475,6 +532,7 @@ export interface LifecycleAgentView {
 
 export interface LifecycleCustodyView {
   readonly custodyRef: string;
+  readonly custodyRevision: number;
   readonly projectSessionId: string;
   readonly runId: string;
   readonly commandId: string;
@@ -501,6 +559,7 @@ export interface LifecycleCustodyView {
   readonly reviewDecision: ReviewAdoptionDecision | null;
   readonly reviewDecisionReceipt: LifecycleAuthenticatedReceipt | null;
   readonly terminalEvidence: LifecycleCustodyTerminalEvidence | null;
+  readonly terminalReplay: LifecycleTerminalReceiptReplay | null;
   readonly terminalReceipt: LifecycleAuthenticatedReceipt | null;
 }
 
@@ -728,6 +787,7 @@ export interface LifecycleAgentSnapshot extends LifecycleAgentSeed {
 
 export interface LifecycleCustodySnapshot {
   readonly custodyRef: string;
+  readonly custodyRevision: number;
   readonly commandId: string;
   readonly requestDigest: string;
   readonly projectSessionId: string;
@@ -764,6 +824,7 @@ export interface LifecycleCustodySnapshot {
   readonly reviewDecision: ReviewAdoptionDecision | null;
   readonly reviewDecisionReceipt: LifecycleAuthenticatedReceipt | null;
   readonly terminalEvidence: LifecycleCustodyTerminalEvidence | null;
+  readonly terminalReplay: LifecycleTerminalReceiptReplay | null;
   readonly terminalReceipt: LifecycleAuthenticatedReceipt | null;
 }
 
@@ -799,6 +860,7 @@ export interface LifecycleDomainSnapshotV1 {
   readonly recoveryRetirements: readonly LifecycleRecoveryRetirement[];
   readonly reviewCertificationCuts: readonly ReviewCertificationCut[];
   readonly custodyDispositionProofs: readonly LifecycleCustodyDispositionProof[];
+  readonly integrityReceiptOutbox: readonly LifecycleIntegrityReceiptIntent[];
   readonly snapshotDigest: LifecycleDigest;
 }
 
