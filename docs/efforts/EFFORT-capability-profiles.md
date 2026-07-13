@@ -1,7 +1,8 @@
 # EFFORT: capability-compiled execution authority
 
 Updated: 13 July 2026
-Status: active — approved at the 2026-07-13 scoping session; characterisation-goldens leg complete
+Status: active — characterisation goldens integrated; V2 cutover blocked on
+accepted Lane A/B integration and a non-overlapping runtime baseline
 
 ## Destination
 
@@ -11,8 +12,9 @@ headless sessions can implement inside one owned worktree, with containment
 proven adversarially before any write profile ships. Direct V2 cutover, no
 backwards compatibility. Scope, evidence and challenge history live in
 [docs/agent-harness-comprehensive-review/SCOPING-SESSION.md](../agent-harness-comprehensive-review/SCOPING-SESSION.md)
-and `challenges/codex-pair-round2.md` (Step-1 work package, Step-3 containment
-checklist — both human-approved). Risk tier: crucial.
+and the [Step-1 work package and Step-3 containment
+checklist](../agent-harness-comprehensive-review/challenges/codex-pair-round2.md)
+(both human-approved). Risk tier: crucial.
 
 Parallelisation constraint: one chair, disjoint write scopes per lane. Lane C
 must not land `AuthorityEnvelopeV2` against an unfrozen spec contract (Lane A
@@ -38,6 +40,9 @@ spec-edit) leg, digest-bound to the ADRs and this map.
   freezes; re-run the seam diff after Lane B lands
   - [x] Characterisation goldens of the current read-only projection (done
     2026-07-13, commit `6748ceb`)
+  - [ ] Atomic `AuthorityEnvelopeV2` direct cutover — BLOCKED; resume from
+    [HANDOFF-2026-07-13-capability-profiles-v2.md](../handoffs/HANDOFF-2026-07-13-capability-profiles-v2.md)
+    only after the handoff's A/B/runtime gates pass
 - [ ] Lane D — runtime reconciliation: repair the failing fabric test families
   (database baseline drift, lifecycle custody, Herdr FKs, MCP vocabulary,
   wrapper manifest) via TDD in disjoint lanes; blocked by Lanes A and B
