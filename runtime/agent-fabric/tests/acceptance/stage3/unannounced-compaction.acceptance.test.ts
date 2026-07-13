@@ -1,4 +1,4 @@
-import { access, rm } from "node:fs/promises";
+import { access, readFile, rm } from "node:fs/promises";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +42,51 @@ describe("AC-009 Stage 3 unannounced provider compaction", () => {
        WHERE delivery.run_id=? AND delivery.recipient_id='leader'
          AND message.dedupe_key='delivery-freeze:ready-message'
     `).get(fixture.runId)).toEqual({ state: "ready", attempt_count: 0 });
+    proof.close();
+  });
+
+  it("settles policy-expired required delivery before enforcing a recipient freeze", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    await fixture.chair.sendMessage({
+      audience: { kind: "agents", agentIds: ["leader"] },
+      kind: "request",
+      body: "expire without becoming claimable",
+      requiresAck: true,
+      dedupeKey: "delivery-freeze:expired-message",
+      expiresAt: new Date(fixture.clock.now().getTime() + 100).toISOString(),
+      context: { kind: "task", taskId: fixture.leaderTask.taskId },
+    });
+    fixture.clock.advance(101);
+    const database = new Database(fixture.databasePath);
+    database.prepare(`
+      INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at)
+      VALUES (?, 'leader', 'operator-pause:independent', ?)
+    `).run(fixture.runId, fixture.clock.now().getTime());
+    database.close();
+
+    await expect(fixture.leader.receiveMessages({ limit: 1, visibilityTimeoutMs: 30_000 }))
+      .rejects.toMatchObject({ code: "CONTEXT_UNRECONCILED" });
+
+    const proof = new Database(fixture.databasePath, { readonly: true });
+    expect(proof.prepare(`
+      SELECT delivery.state,delivery.attempt_count,delivery.resolution_reason,
+             mailbox.contiguous_watermark
+        FROM deliveries delivery
+        JOIN messages message USING(message_id)
+        JOIN mailbox_state mailbox
+          ON mailbox.run_id=delivery.run_id AND mailbox.recipient_id=delivery.recipient_id
+       WHERE delivery.run_id=? AND delivery.recipient_id='leader'
+         AND message.dedupe_key='delivery-freeze:expired-message'
+    `).get(fixture.runId)).toEqual({
+      state: "expired",
+      attempt_count: 0,
+      resolution_reason: "message-expired-by-policy",
+      contiguous_watermark: 1,
+    });
     proof.close();
   });
 
@@ -398,6 +443,100 @@ describe("AC-009 Stage 3 unannounced provider compaction", () => {
     await expect(fixture.chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
       lifecycle: "context-unreconciled",
     });
+  });
+
+  it("supersedes a stale terminal replacement before a fresh checkpoint starts one distinct action", async () => {
+    const fixture = await createLifecycleFixture({ spawnDelayMs: 150 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const firstCheckpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "resume only after refreshing mailbox custody",
+    });
+    const first = fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint: firstCheckpoint,
+      commandId: "rotation:posteffect:first",
+    });
+    await vi.waitFor(() => {
+      const database = new Database(fixture.databasePath, { readonly: true });
+      const row = database.prepare(`
+        SELECT state FROM lifecycle_rotation_custody
+         WHERE run_id=? AND agent_id='leader' AND command_id='rotation:posteffect:first'
+      `).get(fixture.runId);
+      database.close();
+      expect(row).toBeDefined();
+    });
+    await fixture.chair.sendMessage({
+      audience: { kind: "agents", agentIds: ["leader"] },
+      kind: "request",
+      body: "mailbox mutation after provider dispatch",
+      requiresAck: true,
+      dedupeKey: "rotation:posteffect:mailbox-race",
+      context: { kind: "task", taskId: fixture.leaderTask.taskId },
+    });
+    await expect(first).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+
+    const freshCheckpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "supersede the stale successor and acknowledge this fresh checkpoint",
+    });
+    await expect(fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint: freshCheckpoint,
+      commandId: "rotation:posteffect:adopt",
+    })).resolves.toMatchObject({
+      lifecycle: "ready",
+      providerSessionGeneration: 2,
+      rotation: { kind: "replacement-session" },
+    });
+
+    const providerJournal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
+      actions: Record<string, { executionCount: number; effectCount: number }>;
+    };
+    expect(Object.keys(providerJournal.actions).sort()).toEqual([
+      "rotation:posteffect:adopt:spawn",
+      "rotation:posteffect:first:spawn",
+    ]);
+    expect(providerJournal.actions["rotation:posteffect:first:spawn"]).toMatchObject({
+      executionCount: 1,
+      effectCount: 1,
+    });
+    expect(providerJournal.actions["rotation:posteffect:adopt:spawn"]).toMatchObject({
+      executionCount: 1,
+      effectCount: 1,
+    });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    expect(database.prepare(`
+      SELECT state,history_json,resolution_json
+        FROM lifecycle_rotation_custody
+       WHERE run_id=? AND agent_id='leader' AND command_id='rotation:posteffect:first'
+    `).get(fixture.runId)).toEqual({
+      state: "superseded",
+      history_json: '["prepared","provider-terminal","unreconciled","fresh-checkpoint-superseded","superseded"]',
+      resolution_json: expect.stringContaining("rotation:posteffect:adopt"),
+    });
+    expect(database.prepare(`
+      SELECT state,replacement_resume_reference
+        FROM lifecycle_rotation_custody
+       WHERE run_id=? AND agent_id='leader' AND command_id='rotation:posteffect:adopt'
+    `).get(fixture.runId)).toMatchObject({
+      state: "finalized",
+      replacement_resume_reference: expect.stringContaining(":replacement:g2"),
+    });
+    database.close();
   });
 
   it.each(["task", "mailbox", "children", "provider", "write-custody"] as const)(

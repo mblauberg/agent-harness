@@ -1818,6 +1818,100 @@ export class Fabric {
     return this.#ambiguousLaunchOutcome(input, "conflict", record);
   }
 
+  async #recoverDispatchedLifecycleRotations(): Promise<{
+    reconciled: number;
+    quarantined: number;
+  }> {
+    const pending = this.#database.prepare(`
+      SELECT custody.run_id,custody.agent_id,custody.command_id,custody.action_id,
+             custody.adapter_id,action.status
+        FROM lifecycle_rotation_custody custody
+        JOIN provider_actions action
+          ON action.run_id=custody.run_id AND action.action_id=custody.action_id
+       WHERE custody.state IN ('prepared','provider-terminal','unreconciled')
+         AND action.status IN ('dispatched','accepted','ambiguous')
+       ORDER BY custody.created_at,custody.action_id
+    `).all();
+    let reconciled = 0;
+    let quarantined = 0;
+    for (const value of pending) {
+      const custody = rowOrNotFound(value, "dispatched lifecycle rotation");
+      const runId = stringField(custody, "run_id");
+      const agentId = stringField(custody, "agent_id");
+      const commandId = stringField(custody, "command_id");
+      const actionId = stringField(custody, "action_id");
+      const adapterId = stringField(custody, "adapter_id");
+      let lookup: unknown;
+      let candidate: ProviderActionResult;
+      try {
+        lookup = await this.#requestAdapter(adapterId, "lookup_action", { actionId });
+        candidate = providerActionResult(lookup, actionId);
+      } catch (error: unknown) {
+        const current = this.getProviderAction(runId, actionId);
+        candidate = quarantinedProviderAction(current);
+        lookup = { idempotencyProven: false };
+      }
+      const terminal = candidate.status === "terminal" && candidate.effectCount === 1 &&
+        isRow(candidate.result) && typeof candidate.result.resumeReference === "string";
+      const finalAction = terminal ? candidate : quarantinedProviderAction(candidate);
+      const resolution = canonicalJson({
+        schemaVersion: 1,
+        kind: terminal
+          ? "startup-retained-bridge-unavailable"
+          : "startup-provider-outcome-unresolved",
+        adapterId,
+        actionId,
+        observedStatus: candidate.status,
+        effectCount: candidate.effectCount,
+      });
+      this.#database.transaction(() => {
+        this.#persistProviderAction(runId, actionId, lookup, finalAction);
+        const historyStep = terminal ? "startup-lookup-terminal" : "startup-lookup-unresolved";
+        const changed = this.#database.prepare(`
+          UPDATE lifecycle_rotation_custody
+             SET state='quarantined',
+                 history_json=json_insert(
+                   json_insert(history_json,'$[#]',?),
+                   '$[#]','quarantined'
+                 ),
+                 resolution_json=?,
+                 replacement_resume_reference=COALESCE(?,replacement_resume_reference),
+                 updated_at=?
+           WHERE run_id=? AND agent_id=? AND command_id=?
+             AND state IN ('prepared','provider-terminal','unreconciled')
+        `).run(
+          historyStep,
+          resolution,
+          terminal && isRow(candidate.result) ? candidate.result.resumeReference : null,
+          this.#clock(),
+          runId,
+          agentId,
+          commandId,
+        );
+        if (changed.changes !== 1) {
+          throw new FabricError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "lifecycle startup custody changed during pair-key recovery",
+          );
+        }
+        this.#database.prepare(`
+          UPDATE agents SET lifecycle='context-unreconciled'
+           WHERE run_id=? AND agent_id=? AND lifecycle<>'archived'
+        `).run(runId, agentId);
+        this.#event(runId, "startup-lifecycle-action-quarantined", null, {
+          agentId,
+          commandId,
+          actionId,
+          adapterId,
+          terminalProviderEffect: terminal,
+        });
+      })();
+      if (terminal) reconciled += 1;
+      quarantined += 1;
+    }
+    return { reconciled, quarantined };
+  }
+
   async recoverStartupState(): Promise<{
     actionsReconciled: number;
     actionsQuarantined: number;
@@ -1832,6 +1926,7 @@ export class Fabric {
     await this.#herdr.recover();
     if (this.#herdrConfigured) await this.#herdr.runPresencePass();
     await this.#typedGit.recover();
+    const lifecycleRecovery = await this.#recoverDispatchedLifecycleRotations();
     const now = this.#clock();
     const deliveriesReleased = this.#database
       .prepare("UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE state = 'claimed' AND claim_deadline <= ?")
@@ -1865,6 +1960,10 @@ export class Fabric {
          AND NOT EXISTS (
            SELECT 1 FROM chair_bridge_recovery_custody c
             WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_rotation_custody c
+            WHERE c.run_id=p.run_id AND c.action_id=p.action_id
          )
        ORDER BY p.updated_at, p.action_id
     `).all(HERDR_CONTROL_ADAPTER_ID);
@@ -1918,7 +2017,13 @@ export class Fabric {
         sessionsDegraded += 1;
       }
     }
-    return { actionsReconciled, actionsQuarantined, leasesQuarantined: expiredLeases.length, sessionsDegraded, deliveriesReleased };
+    return {
+      actionsReconciled: actionsReconciled + lifecycleRecovery.reconciled,
+      actionsQuarantined: actionsQuarantined + lifecycleRecovery.quarantined,
+      leasesQuarantined: expiredLeases.length,
+      sessionsDegraded,
+      deliveriesReleased,
+    };
   }
 
   bindCurrentMcpSeats(input: CurrentMcpSeatBindingInput): CurrentMcpSeatBindingResult {
@@ -3448,13 +3553,7 @@ export class Fabric {
     requiresAck: boolean;
   }> {
     const now = this.#clock();
-    return this.#database.transaction(() => {
-      const freeze = this.#database.prepare(`
-        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-      `).get(runId, recipientId);
-      if (isRow(freeze)) {
-        throw new FabricError("CONTEXT_UNRECONCILED", "message delivery is frozen until lifecycle reconciliation");
-      }
+    this.#database.transaction(() => {
       const expiringRequiredMessageIds = this.#database.prepare(`
         SELECT DISTINCT delivery.message_id
           FROM deliveries delivery JOIN messages message USING(message_id)
@@ -3477,6 +3576,14 @@ export class Fabric {
           "UPDATE deliveries SET state = 'ready', claim_deadline = NULL WHERE run_id = ? AND recipient_id = ? AND state = 'claimed' AND claim_deadline <= ?",
         )
         .run(runId, recipientId, now);
+    })();
+    return this.#database.transaction(() => {
+      const freeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
+      `).get(runId, recipientId);
+      if (isRow(freeze)) {
+        throw new FabricError("CONTEXT_UNRECONCILED", "message delivery is frozen until lifecycle reconciliation");
+      }
       const rows = this.#database
         .prepare(
           "SELECT d.delivery_id, d.message_id, d.mailbox_sequence, d.attempt_count, m.body, m.sender_id, m.kind, m.requires_ack FROM deliveries d JOIN messages m ON m.message_id = d.message_id WHERE d.run_id = ? AND d.recipient_id = ? AND d.state = 'ready' ORDER BY d.mailbox_sequence LIMIT ?",
@@ -4685,7 +4792,12 @@ export class Fabric {
     const replacementReference = spawnAction.result.resumeReference;
     this.#database.prepare(`
       UPDATE lifecycle_rotation_custody
-         SET state='provider-terminal',replacement_resume_reference=?,updated_at=?
+         SET state='provider-terminal',
+             history_json=CASE
+               WHEN json_extract(history_json,'$[#-1]')='provider-terminal' THEN history_json
+               ELSE json_insert(history_json,'$[#]','provider-terminal')
+             END,
+             replacement_resume_reference=?,updated_at=?
        WHERE run_id=? AND agent_id=? AND command_id=?
          AND state IN ('prepared','unreconciled')
     `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
@@ -4754,7 +4866,8 @@ export class Fabric {
       ).run(runId, actorAgentId, generation, input.checkpoint.sha256);
       this.#database.prepare(`
         UPDATE lifecycle_rotation_custody
-           SET state='finalized',replacement_resume_reference=?,updated_at=?
+           SET state='finalized',history_json=json_insert(history_json,'$[#]','finalized'),
+               replacement_resume_reference=?,updated_at=?
          WHERE run_id=? AND agent_id=? AND command_id=?
       `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
       this.#recordLifecycleOperation(runId, input, priorReference, replacementReference);
@@ -6962,6 +7075,10 @@ export class Fabric {
       if (task.owner_agent_id !== input.agentId || task.revision !== input.taskRevision) {
         throw new FabricError("TASK_REVISION_CONFLICT", "lifecycle task custody changed before prepare");
       }
+      this.#database.prepare(`
+        UPDATE leases SET status='quarantined',updated_at=?
+         WHERE run_id=? AND holder_agent_id=? AND status='active'
+      `).run(this.#clock(), input.runId, input.agentId);
       const preconditionDigest = this.#lifecycleRotationPreconditionDigest(input.runId, input.agentId, input.taskId);
       const custodyFreezeReason = `lifecycle-rotation:${sha256(input.actionId).slice(0, 32)}`;
       if (sourceFreezeReason !== undefined) {
@@ -6985,8 +7102,9 @@ export class Fabric {
         INSERT INTO lifecycle_rotation_custody(
           run_id,agent_id,command_id,action_id,adapter_id,task_id,task_revision,
           checkpoint_sha256,prior_resume_reference,next_provider_session_generation,
-          precondition_digest,freeze_reason,state,created_at,updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'prepared',?,?)
+          precondition_digest,source_lifecycle,source_freeze_reason,freeze_reason,
+          state,history_json,created_at,updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'prepared','["prepared"]',?,?)
       `).run(
         input.runId,
         input.agentId,
@@ -6999,6 +7117,8 @@ export class Fabric {
         input.priorResumeReference,
         input.nextProviderSessionGeneration,
         preconditionDigest,
+        sourceLifecycle,
+        sourceFreezeReason ?? null,
         custodyFreezeReason,
         now,
         now,
@@ -7095,7 +7215,13 @@ export class Fabric {
   #markLifecycleRotationUnreconciled(runId: string, agentId: string, commandId: string): void {
     this.#database.transaction(() => {
       this.#database.prepare(`
-        UPDATE lifecycle_rotation_custody SET state='unreconciled',updated_at=?
+        UPDATE lifecycle_rotation_custody
+           SET state='unreconciled',
+               history_json=CASE
+                 WHEN json_extract(history_json,'$[#-1]')='unreconciled' THEN history_json
+                 ELSE json_insert(history_json,'$[#]','unreconciled')
+               END,
+               updated_at=?
          WHERE run_id=? AND agent_id=? AND command_id=? AND state<>'finalized'
       `).run(this.#clock(), runId, agentId, commandId);
       this.#database.prepare(`

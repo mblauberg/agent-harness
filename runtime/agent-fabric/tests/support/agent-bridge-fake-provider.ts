@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 
 import {
   FABRIC_OPERATIONS,
+  isActiveFabricOperation,
   NdjsonRpcTransport,
 } from "@local/agent-fabric-protocol";
 
@@ -206,6 +207,63 @@ input.on("line", (line) => {
       const action = journal.actions[String(request.params.actionId)];
       if (action === undefined) fail(request.id, "ACTION_NOT_FOUND", "action not found");
       else respond(request.id, action);
+      return;
+    }
+    if (request.method === "dispatch") {
+      const actionId = request.params.actionId;
+      const operation = request.params.operation;
+      const payload = request.params.payload;
+      if (typeof actionId !== "string" || typeof operation !== "string" || !isRecord(payload)) {
+        fail(request.id, "INVALID_PARAMS", "dispatch requires actionId, operation and payload");
+        return;
+      }
+      const fabricOperation = payload.fabricOperation;
+      const fabricInput = payload.fabricInput;
+      let result: Record<string, unknown>;
+      if (typeof fabricOperation === "string") {
+        if (!isActiveFabricOperation(fabricOperation) || retainedProtocol === undefined) {
+          result = {
+            fabricError: {
+              code: retainedProtocol === undefined ? "AGENT_BRIDGE_LOST" : "PROTOCOL_UNSUPPORTED",
+              message: "retained fake provider cannot invoke the requested Fabric operation",
+            },
+          };
+        } else {
+          try {
+            result = {
+              fabricResult: await retainedProtocol.call(fabricOperation, fabricInput ?? {}),
+            };
+          } catch (error: unknown) {
+            result = {
+              fabricError: {
+                code: typeof error === "object" && error !== null && "code" in error &&
+                    typeof error.code === "string"
+                  ? error.code
+                  : "RECOVERY_REQUIRED",
+                message: error instanceof Error ? error.message : String(error),
+              },
+            };
+          }
+        }
+      } else {
+        result = { completed: true };
+      }
+      const latest = load();
+      const publicPayload = { operation, payload };
+      const action: Action = {
+        actionId,
+        operation,
+        payloadHash: createHash("sha256").update(canonicalJson(publicPayload)).digest("hex"),
+        status: "terminal",
+        history: ["prepared", "dispatched", "accepted", "terminal"],
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: true,
+        result,
+      };
+      latest.actions[actionId] = action;
+      save(latest);
+      respond(request.id, action);
       return;
     }
     if (request.method === "retained_bridge_health") {

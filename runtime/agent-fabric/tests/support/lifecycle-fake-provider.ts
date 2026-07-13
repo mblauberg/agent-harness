@@ -267,8 +267,8 @@ input.on("line", (line) => {
     if (action === undefined) {
       fail(request.id, "ACTION_NOT_FOUND", "action does not exist");
     } else {
+      action.lookupCount = (action.lookupCount ?? 0) + 1;
       if (action.scenario === "ambiguous-review-concurrent-divergent") {
-        action.lookupCount = (action.lookupCount ?? 0) + 1;
         const lookupCount = action.lookupCount;
         const candidate = {
           ...action,
@@ -286,7 +286,6 @@ input.on("line", (line) => {
         return;
       }
       if (action.scenario === "ambiguous-review-usage-late") {
-        action.lookupCount = (action.lookupCount ?? 0) + 1;
         if (action.lookupCount >= 2 && isRecord(action.result)) {
           action.result.resourceUsage = {
             "cost:USD": 5,
@@ -294,8 +293,8 @@ input.on("line", (line) => {
             "output_tokens:fake": 4,
           };
         }
-        saveJournal(journal);
       }
+      saveJournal(journal);
       respond(request.id, action.scenario === "ambiguous-review-wrong-action-id"
         ? { ...action, actionId: `${action.actionId}:wrong` }
         : action);

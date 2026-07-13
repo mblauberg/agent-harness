@@ -1,9 +1,13 @@
 import { readFile, rm } from "node:fs/promises";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createLifecycleFixture, writeLifecycleCheckpoint } from "../../support/lifecycle-testkit.ts";
+import {
+  createLifecycleFixture,
+  reopenLifecycleFabric,
+  writeLifecycleCheckpoint,
+} from "../../support/lifecycle-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -157,6 +161,192 @@ describe("FR-013 Stage 3 checkpointed lifecycle requests", () => {
     expect(Buffer.byteLength((payload as { prompt: string }).prompt, "utf8")).toBeLessThanOrEqual(65_536);
   });
 
+  it("publishes the successor generation only with a retained provider-originated Fabric bridge", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "acknowledge the checkpoint through the successor Fabric bridge",
+    });
+
+    await expect(fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:rotate:retained-bridge",
+    })).resolves.toMatchObject({
+      lifecycle: "ready",
+      providerSessionGeneration: 2,
+    });
+
+    const database = new Database(fixture.databasePath, { readonly: true });
+    expect(database.prepare(`
+      SELECT bridge.bridge_state,bridge.provider_session_generation,
+             bridge.bridge_generation,bridge.capability_hash,
+             bridge.activation_evidence_digest,custody.principal_generation
+        FROM agent_bridge_state bridge
+        JOIN provider_agent_custody custody
+          ON custody.run_id=bridge.run_id AND custody.action_id=bridge.action_id
+       WHERE bridge.run_id=? AND bridge.agent_id='leader'
+    `).get(fixture.runId)).toMatchObject({
+      bridge_state: "active",
+      provider_session_generation: 2,
+      bridge_generation: expect.any(Number),
+      capability_hash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      activation_evidence_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      principal_generation: 2,
+    });
+    expect(database.prepare(`
+      SELECT principal_generation,revoked_at IS NOT NULL AS revoked
+        FROM capabilities WHERE run_id=? AND agent_id='leader'
+       ORDER BY principal_generation
+    `).all(fixture.runId)).toEqual([
+      { principal_generation: 1, revoked: 1 },
+      { principal_generation: 2, revoked: 0 },
+    ]);
+    database.close();
+  });
+
+  it("quarantines predecessor write custody before replacement provider I/O", async () => {
+    const fixture = await createLifecycleFixture({ spawnDelayMs: 100 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const lease = await fixture.leader.acquireWriteLease({
+      scope: ["src/leader"],
+      ttlMs: 60_000,
+      commandId: "lifecycle:rotate:write-lease",
+    });
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "recover write custody under the successor generation",
+    });
+    const accepted = await fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:rotate:write-custody-fence",
+    });
+    expect(accepted).toMatchObject({ lifecycle: "suspended", providerSessionGeneration: 1 });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    expect(database.prepare(`
+      SELECT status FROM leases WHERE run_id=? AND lease_id=?
+    `).get(fixture.runId, lease.leaseId)).toEqual({ status: "quarantined" });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM leases
+       WHERE run_id=? AND holder_agent_id='leader' AND status='active'
+    `).get(fixture.runId)).toEqual({ count: 0 });
+    database.close();
+    await vi.waitFor(async () => {
+      await expect(fixture.chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
+        lifecycle: "ready",
+        providerSessionGeneration: 2,
+      });
+    });
+  });
+
+  it("accepts rotation but defers replacement I/O until the predecessor provider turn releases", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const now = fixture.clock.now().getTime();
+    const database = new Database(fixture.databasePath);
+    database.exec(`
+      INSERT INTO provider_actions(
+        run_id,action_id,adapter_id,operation,target_agent_id,
+        provider_session_generation,turn_lease_generation,identity_hash,
+        payload_hash,payload_json,status,history_json,execution_count,
+        effect_count,idempotency_proven,updated_at
+      ) VALUES (
+        '${fixture.runId}','lifecycle-active-turn','fake-lifecycle','send_turn','leader',
+        1,1,'${"a".repeat(64)}','${"b".repeat(64)}','{}',
+        'dispatched','["prepared","dispatched"]',1,0,0,${now}
+      );
+      INSERT INTO provider_session_turn_leases(
+        run_id,agent_id,provider_session_generation,turn_lease_generation,
+        action_id,status,created_at,updated_at
+      ) VALUES (
+        '${fixture.runId}','leader',1,1,'lifecycle-active-turn','active',${now},${now}
+      );
+    `);
+    database.close();
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "wait for the active provider turn",
+    });
+
+    await expect(fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:rotate:active-turn-fence",
+    })).resolves.toMatchObject({
+      lifecycle: "suspended",
+      providerSessionGeneration: 1,
+    });
+
+    const waiting = new Database(fixture.databasePath, { readonly: true });
+    expect(waiting.prepare(`
+      SELECT state FROM lifecycle_rotation_custody
+       WHERE run_id=? AND command_id='lifecycle:rotate:active-turn-fence'
+    `).get(fixture.runId)).toEqual({ state: "prepared" });
+    expect(waiting.prepare(`
+      SELECT COUNT(*) AS count FROM provider_actions
+       WHERE run_id=? AND action_id='lifecycle:rotate:active-turn-fence:spawn'
+    `).get(fixture.runId)).toEqual({ count: 0 });
+    expect(waiting.prepare(`
+      SELECT status FROM provider_session_turn_leases
+       WHERE run_id=? AND action_id='lifecycle-active-turn'
+    `).get(fixture.runId)).toEqual({ status: "active" });
+    waiting.close();
+
+    const release = new Database(fixture.databasePath);
+    release.transaction(() => {
+      release.prepare(`
+        UPDATE provider_session_turn_leases SET status='released',updated_at=?
+         WHERE run_id=? AND action_id='lifecycle-active-turn' AND status='active'
+      `).run(fixture.clock.now().getTime(), fixture.runId);
+      release.prepare(`
+        UPDATE provider_actions
+           SET status='terminal',history_json='["prepared","dispatched","accepted","terminal"]',
+               effect_count=1,idempotency_proven=1,result_json='{"completed":true}',updated_at=?
+         WHERE run_id=? AND action_id='lifecycle-active-turn'
+      `).run(fixture.clock.now().getTime(), fixture.runId);
+    })();
+    release.close();
+
+    await vi.waitFor(async () => {
+      await expect(fixture.chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
+        lifecycle: "ready",
+        providerSessionGeneration: 2,
+      });
+    });
+    const proof = new Database(fixture.databasePath, { readonly: true });
+    expect(proof.prepare(`
+      SELECT status,execution_count,effect_count FROM provider_actions
+       WHERE run_id=? AND action_id='lifecycle:rotate:active-turn-fence:spawn'
+    `).get(fixture.runId)).toEqual({ status: "terminal", execution_count: 1, effect_count: 1 });
+    proof.close();
+  });
+
   it("reconciles a lost provider result with the same action and never repeats the effect", async () => {
     const fixture = await createLifecycleFixture({ spawnResultLost: true });
     cleanup.push(async () => {
@@ -290,6 +480,132 @@ describe("FR-013 Stage 3 checkpointed lifecycle requests", () => {
       executionCount: 1,
       effectCount: 1,
     });
+  });
+
+  it("records startup pre-dispatch no-effect without restoring a lost predecessor bridge", async () => {
+    let crash = true;
+    const fixture = await createLifecycleFixture({
+      fault: (label) => {
+        if (crash && label === "lifecycle-rotation:prepared") {
+          crash = false;
+          throw new Error("simulated process death after lifecycle prepare");
+        }
+      },
+    });
+    let reopened: Awaited<ReturnType<typeof reopenLifecycleFabric>> | undefined;
+    cleanup.push(async () => {
+      await reopened?.close();
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "restart from the proved no-effect prepare",
+    });
+    await expect(fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:startup:prepared-no-effect",
+    })).rejects.toThrow("simulated process death after lifecycle prepare");
+    await fixture.fabric.close();
+
+    reopened = await reopenLifecycleFabric(fixture);
+    await expect(reopened.recoverStartupState()).resolves.toMatchObject({
+      actionsQuarantined: 0,
+    });
+
+    const database = new Database(fixture.databasePath, { readonly: true });
+    expect(database.prepare(`
+      SELECT state,history_json,resolution_json
+        FROM lifecycle_rotation_custody
+       WHERE run_id=? AND agent_id='leader'
+         AND command_id='lifecycle:startup:prepared-no-effect'
+    `).get(fixture.runId)).toEqual({
+      state: "no-effect",
+      history_json: expect.stringContaining("no-effect"),
+      resolution_json: expect.stringContaining("startup-pre-dispatch-no-effect"),
+    });
+    expect(database.prepare(`
+      SELECT lifecycle FROM agents WHERE run_id=? AND agent_id='leader'
+    `).get(fixture.runId)).toEqual({ lifecycle: "context-unreconciled" });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM delivery_freezes
+       WHERE run_id=? AND agent_id='leader'
+    `).get(fixture.runId)).toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM provider_actions
+       WHERE run_id=? AND action_id='lifecycle:startup:prepared-no-effect:spawn'
+    `).get(fixture.runId)).toEqual({ count: 0 });
+    database.close();
+  });
+
+  it("recovers a dispatched lifecycle action only by its adapter pair key and quarantines lost bridge custody", async () => {
+    const fixture = await createLifecycleFixture({ spawnResultLost: true });
+    let reopened: Awaited<ReturnType<typeof reopenLifecycleFabric>> | undefined;
+    cleanup.push(async () => {
+      await reopened?.close();
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const checkpoint = await writeLifecycleCheckpoint(fixture, {
+      agentId: "leader",
+      inFlightChildren: ["child"],
+      openWork: ["leader-task"],
+      nextAction: "recover the exact dispatched lifecycle action",
+    });
+    await expect(fixture.leader.requestLifecycle({
+      action: "rotate",
+      agentId: "leader",
+      taskId: fixture.leaderTask.taskId,
+      taskRevision: fixture.leaderTask.revision,
+      checkpoint,
+      commandId: "lifecycle:startup:dispatched-lookup",
+    })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    await fixture.fabric.close();
+
+    reopened = await reopenLifecycleFabric(fixture);
+    await expect(reopened.recoverStartupState()).resolves.toMatchObject({
+      actionsQuarantined: 1,
+    });
+
+    const journal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
+      actions: Record<string, { executionCount: number; lookupCount?: number }>;
+      sessions: Record<string, { spawnRequests?: number }>;
+    };
+    expect(journal.actions["lifecycle:startup:dispatched-lookup:spawn"]).toMatchObject({
+      executionCount: 1,
+      lookupCount: 1,
+    });
+    expect(Object.values(journal.sessions)).toHaveLength(1);
+    expect(Object.values(journal.sessions)[0]).toMatchObject({ spawnRequests: 1 });
+
+    const database = new Database(fixture.databasePath, { readonly: true });
+    expect(database.prepare(`
+      SELECT status,history_json,execution_count,effect_count
+        FROM provider_actions
+       WHERE run_id=? AND action_id='lifecycle:startup:dispatched-lookup:spawn'
+    `).get(fixture.runId)).toEqual({
+      status: "terminal",
+      history_json: '["prepared","dispatched","accepted","terminal"]',
+      execution_count: 1,
+      effect_count: 1,
+    });
+    expect(database.prepare(`
+      SELECT state,history_json,resolution_json
+        FROM lifecycle_rotation_custody
+       WHERE run_id=? AND agent_id='leader'
+         AND command_id='lifecycle:startup:dispatched-lookup'
+    `).get(fixture.runId)).toEqual({
+      state: "quarantined",
+      history_json: '["prepared","unreconciled","startup-lookup-terminal","quarantined"]',
+      resolution_json: expect.stringContaining("startup-retained-bridge-unavailable"),
+    });
+    database.close();
   });
 
   it("keeps an ambiguous lifecycle effect unreconciled without dispatching it again", async () => {

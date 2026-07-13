@@ -864,8 +864,15 @@ CREATE TABLE lifecycle_rotation_custody (
   prior_resume_reference TEXT NOT NULL,
   next_provider_session_generation INTEGER NOT NULL CHECK (next_provider_session_generation >= 2),
   precondition_digest TEXT NOT NULL CHECK (length(precondition_digest) = 64),
+  source_lifecycle TEXT NOT NULL,
+  source_freeze_reason TEXT,
   freeze_reason TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('prepared','provider-terminal','finalized','unreconciled')),
+  state TEXT NOT NULL CHECK (state IN (
+    'prepared','provider-terminal','finalized','unreconciled',
+    'abandoned','superseded','quarantined'
+  )),
+  history_json TEXT NOT NULL CHECK (json_valid(history_json)),
+  resolution_json TEXT CHECK (resolution_json IS NULL OR json_valid(resolution_json)),
   replacement_resume_reference TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
