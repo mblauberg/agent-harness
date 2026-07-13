@@ -26,6 +26,7 @@ describe("launch contract schema and fixtures", () => {
     ["launchAdapterOutcomeV1", "terminalNoEffectOutcome"],
     ["launchAdapterOutcomeV1", "ambiguousOutcome"],
     ["providerActionRefV1", "providerActionRefV1"],
+    ["launchProviderActionJournalRefV1", "launchProviderActionJournalRefV1"],
   ] as const)("validates %s against fixture %s", (schemaName, fixtureName) => {
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     addFormats(ajv);
@@ -45,6 +46,11 @@ describe("launch contract schema and fixtures", () => {
     const validateProviderAction = ajv.compile(LAUNCH_CONTRACT_SCHEMAS.providerActionRefV1);
     expect(validateProviderAction({
       ...LAUNCH_CONTRACT_FIXTURES.providerActionRefV1,
+      journalState: "accepted",
+    })).toBe(false);
+    const validateJournal = ajv.compile(LAUNCH_CONTRACT_SCHEMAS.launchProviderActionJournalRefV1);
+    expect(validateJournal({
+      ...LAUNCH_CONTRACT_FIXTURES.launchProviderActionJournalRefV1,
       journalState: "accepted",
     })).toBe(false);
   });

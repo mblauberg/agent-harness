@@ -1,5 +1,7 @@
 import { FABRIC_OPERATIONS } from "./operations.js";
 import type { JsonValue } from "./primitives.js";
+import type { ProviderActionDispatchInputV1, ProviderActionResultV1 } from "./provider-action.js";
+import type { LifecycleAcceptedSuspendedV1, LifecycleCurrentStateV1 } from "./lifecycle.js";
 
 export type DisclosurePolicy =
   | { level: "allowed" }
@@ -82,21 +84,8 @@ export type LifecycleCheckpoint = {
   nextAction: string;
   providerResumeReference: string;
 };
-export type LifecycleResult = {
-  agentId: string;
-  lifecycle: string;
-  providerSessionGeneration: number;
-  rotation?: { kind: "in-place" | "replacement-session"; priorResumeReference: string };
-};
-export type ProviderActionResult = {
-  actionId: string;
-  status: "prepared" | "dispatched" | "accepted" | "terminal" | "ambiguous" | "quarantined";
-  history: readonly string[];
-  executionCount: number;
-  effectCount: number;
-  resultDigest?: string;
-  providerAnswer?: string;
-};
+export type LifecycleResult = LifecycleAcceptedSuspendedV1 | LifecycleCurrentStateV1;
+export type ProviderActionResult = ProviderActionResultV1;
 export type TeamCreateInput = {
   teamId: string;
   parentTeamId?: string;
@@ -193,10 +182,10 @@ export type BaselineOperationInputMap = {
   [FABRIC_OPERATIONS.releaseWriteLease]: { leaseId: string; expectedGeneration: number; commandId: string };
   [FABRIC_OPERATIONS.requestLifecycle]: { action: "compact" | "rotate" | "completion-ready" | "release"; agentId: string; taskId: string; taskRevision: number; checkpoint: LifecycleCheckpoint; commandId: string };
   [FABRIC_OPERATIONS.getAgentLifecycle]: { agentId: string };
-  [FABRIC_OPERATIONS.reportProviderState]: { agentId: string; providerSessionGeneration: number; contextRevision: string; checkpointSha256?: string; commandId: string };
-  [FABRIC_OPERATIONS.dispatchProviderAction]: { adapterId: string; actionId: string; operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer"; authorityId?: string; payload: Readonly<Record<string, JsonValue>>; commandId: string };
-  [FABRIC_OPERATIONS.reconcileProviderAction]: { actionId: string; commandId: string };
-  [FABRIC_OPERATIONS.getProviderAction]: { actionId: string };
+  [FABRIC_OPERATIONS.reportProviderState]: { agentId: string; providerSessionGeneration: number; contextRevision: number; checkpointSha256?: string; commandId: string };
+  [FABRIC_OPERATIONS.dispatchProviderAction]: ProviderActionDispatchInputV1;
+  [FABRIC_OPERATIONS.reconcileProviderAction]: { adapterId: string; actionId: string; expectedActionKind: "non-review" | "certifying-review"; commandId: string };
+  [FABRIC_OPERATIONS.getProviderAction]: { adapterId: string; actionId: string; expectedActionKind: "non-review" | "certifying-review" };
   [FABRIC_OPERATIONS.recordOperatorIntervention]: { source: "fabric" | "integration"; directInputProvenance: "complete" | "partial" | "unavailable"; taskRevision: number; summary: string; commandId: string };
   [FABRIC_OPERATIONS.recordVisibilityFailure]: { kind: "herdr-telemetry" | "observer-pane" | "interactive-tui"; agentId: string; commandId: string };
   [FABRIC_OPERATIONS.createTeam]: TeamCreateInput;
@@ -248,8 +237,8 @@ export type BaselineOperationResultMap = {
   [FABRIC_OPERATIONS.getWriteLease]: LeaseResult;
   [FABRIC_OPERATIONS.releaseWriteLease]: { leaseId: string; status: "released"; generation: number };
   [FABRIC_OPERATIONS.requestLifecycle]: LifecycleResult;
-  [FABRIC_OPERATIONS.getAgentLifecycle]: LifecycleResult;
-  [FABRIC_OPERATIONS.reportProviderState]: LifecycleResult;
+  [FABRIC_OPERATIONS.getAgentLifecycle]: LifecycleCurrentStateV1;
+  [FABRIC_OPERATIONS.reportProviderState]: LifecycleCurrentStateV1;
   [FABRIC_OPERATIONS.dispatchProviderAction]: ProviderActionResult;
   [FABRIC_OPERATIONS.reconcileProviderAction]: ProviderActionResult;
   [FABRIC_OPERATIONS.getProviderAction]: ProviderActionResult;

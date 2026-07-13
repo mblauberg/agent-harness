@@ -5,11 +5,11 @@ import {
   OPERATION_REGISTRY,
   assertProjectSessionLaunchCurrentState,
   parseLaunchAdapterOutcomeV1,
+  parseLaunchProviderActionJournalRefV1,
   parseLaunchPacketV1,
   parseLaunchResourcePlanV1,
   parseOperationInput,
   parseOperationResult,
-  parseProviderActionRefV1,
   parseProjectSessionLaunchCurrentState,
   requiredOperatorActionForIntent,
 } from "../src/index.js";
@@ -118,8 +118,7 @@ const providerActionRef = {
   schemaVersion: 1,
   projectSessionId: "ps_01",
   coordinationRunId: "run_launch_01",
-  providerAdapterId: "claude-agent-sdk",
-  providerActionId: "provider_action_launch_01",
+  actionRef: { adapterId: "claude-agent-sdk", actionId: "provider_action_launch_01" },
   providerContractDigest: digest,
   custodyAttemptGeneration: 1,
   journalRevision: 3,
@@ -346,8 +345,8 @@ describe("launch adapter outcome and provider-action reference", () => {
   });
 
   it("correlates journal state and outcome fields in the typed provider-action reference", () => {
-    expect(parseProviderActionRefV1(providerActionRef)).toStrictEqual(providerActionRef);
-    expect(() => parseProviderActionRefV1({
+    expect(parseLaunchProviderActionJournalRefV1(providerActionRef)).toStrictEqual(providerActionRef);
+    expect(() => parseLaunchProviderActionJournalRefV1({
       ...providerActionRef,
       journalState: "accepted",
     })).toThrowError(/outcomeKind|journalState/iu);
@@ -366,8 +365,8 @@ describe("launch adapter outcome and provider-action reference", () => {
       intentDigest: digest,
       phase: "dispatched",
       attemptGeneration: 1,
-      providerActionRef: pendingRef,
-    })).toMatchObject({ status: "pending", providerActionRef: pendingRef });
+      launchProviderActionJournalRef: pendingRef,
+    })).toMatchObject({ status: "pending", launchProviderActionJournalRef: pendingRef });
     const ambiguousRef = {
       ...providerActionRef,
       journalState: "ambiguous",
@@ -378,8 +377,8 @@ describe("launch adapter outcome and provider-action reference", () => {
       commandId: "command_launch_commit_01",
       intentDigest: digest,
       attemptGeneration: 1,
-      providerActionRef: ambiguousRef,
-    })).toMatchObject({ status: "ambiguous", providerActionRef: ambiguousRef });
+      launchProviderActionJournalRef: ambiguousRef,
+    })).toMatchObject({ status: "ambiguous", launchProviderActionJournalRef: ambiguousRef });
     expect(parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
       status: "committed",
       commandId: "command_launch_commit_01",
@@ -390,10 +389,10 @@ describe("launch adapter outcome and provider-action reference", () => {
         intentDigest: digest,
         beforeStateDigest: digest,
         afterStateDigest: digest,
-        providerActionRef,
+        launchProviderActionJournalRef: providerActionRef,
         evidenceRefs: [],
         committedAt: "2026-07-12T11:00:00Z",
       },
-    })).toMatchObject({ status: "committed", receipt: { providerActionRef } });
+    })).toMatchObject({ status: "committed", receipt: { launchProviderActionJournalRef: providerActionRef } });
   });
 });

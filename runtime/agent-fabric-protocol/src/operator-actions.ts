@@ -12,7 +12,8 @@ export {
   gitOperationVariant,
   isPreauthorisedGitOperationVariant,
 } from "./git-actions.js";
-import type { ProviderActionRefV1 } from "./launch.js";
+import type { LaunchProviderActionJournalRefV1, ProviderActionRefV1 } from "./launch.js";
+import type { AgentLifecycleRecoveryIntentV1 } from "./lifecycle.js";
 import type { OperatorAction, OperatorCapabilityCredential, OperatorMutationContext } from "./operator.js";
 import type {
   ArtifactRef,
@@ -193,6 +194,19 @@ export type PromotionIntent = {
   releaseBinding: ReleaseBinding;
 };
 
+export type ProviderRouteIntegrityRetireIntent = {
+  kind: "provider-route-integrity-retire";
+  projectSessionId: ProjectSessionId;
+  coordinationRunId: CoordinationRunId;
+  actionRef: ProviderActionRefV1;
+  recoveryGeneration: number;
+  expectedState: "awaiting-human-retire";
+  reservationDigest: Sha256Digest;
+  gateId: GateId;
+  expectedGateRevision: number;
+  directInputAttestationId: string;
+};
+
 function sameReleaseBinding(left: ReleaseBinding | undefined, right: ReleaseBinding): boolean {
   return left !== undefined &&
     left.acceptedDeliveryReceiptRef.path === right.acceptedDeliveryReceiptRef.path &&
@@ -229,7 +243,9 @@ export type OperatorActionIntent =
   | GitAuthoriseIntent
   | GitOperationDraftIntent
   | GitCustodyResolveIntent
+  | AgentLifecycleRecoveryIntentV1
   | RegisteredExternalEffectIntent
+  | ProviderRouteIntegrityRetireIntent
   | PromotionIntent;
 
 export function requiredOperatorActionForIntent(intent: OperatorActionIntent): OperatorAction {
@@ -247,7 +263,10 @@ export function requiredOperatorActionForIntent(intent: OperatorActionIntent): O
       : "git";
   }
   if (intent.kind === "git-custody-resolve") return "git-custody-resolve";
-  if (intent.kind === "registered-external-effect" || intent.kind === "promotion") return "external-effect";
+  if (intent.kind === "agent-lifecycle-recovery") {
+    return intent.path === "fresh-rotate" ? "agent-lifecycle-recovery-issue" : "cancel";
+  }
+  if (intent.kind === "registered-external-effect" || intent.kind === "provider-route-integrity-retire" || intent.kind === "promotion") return "external-effect";
   const exhaustive: never = intent;
   return exhaustive;
 }
@@ -268,7 +287,9 @@ export type OperatorAvailableAction =
   | "git-authorise"
   | "git-operation-draft"
   | "git-custody-resolve"
+  | "agent-lifecycle-recovery"
   | "registered-external-effect"
+  | "provider-route-integrity-retire"
   | "promotion";
 
 export type OperatorActionAvailability =
@@ -342,8 +363,8 @@ type OperatorActionReceiptBase = {
 };
 
 export type OperatorActionReceipt = OperatorActionReceiptBase & (
-  | { effectRef?: ArtifactRef; providerActionRef?: never }
-  | { effectRef?: ArtifactRef; providerActionRef: ProviderActionRefV1 }
+  | { effectRef?: ArtifactRef; launchProviderActionJournalRef?: never }
+  | { effectRef?: ArtifactRef; launchProviderActionJournalRef: LaunchProviderActionJournalRefV1 }
 );
 
 export type OperatorActionStatusRequest = {
@@ -372,7 +393,7 @@ export type OperatorActionStatus =
       intentDigest: Sha256Digest;
       phase: "prepared" | "dispatched" | "accepted" | "observing";
       attemptGeneration: number;
-      providerActionRef?: ProviderActionRefV1;
+      launchProviderActionJournalRef?: LaunchProviderActionJournalRefV1;
       gitCustody?: GitCustodyStatus;
     }
   | ({
@@ -381,9 +402,9 @@ export type OperatorActionStatus =
       intentDigest: Sha256Digest;
       attemptGeneration: number;
     } & (
-      | { effectRef: ArtifactRef; providerActionRef?: never }
-      | { effectRef?: ArtifactRef; providerActionRef: ProviderActionRefV1 }
-      | { effectRef?: ArtifactRef; providerActionRef?: never; gitCustody: GitCustodyStatus }
+      | { effectRef: ArtifactRef; launchProviderActionJournalRef?: never }
+      | { effectRef?: ArtifactRef; launchProviderActionJournalRef: LaunchProviderActionJournalRefV1 }
+      | { effectRef?: ArtifactRef; launchProviderActionJournalRef?: never; gitCustody: GitCustodyStatus }
     ))
   | {
       status: "conflict" | "quarantined";

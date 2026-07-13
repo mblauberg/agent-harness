@@ -9,7 +9,11 @@ import {
 import { protocolFailureMessage } from "./codec.js";
 import { negotiateProtocol, operationsForFeatures, type ProtocolFeature } from "./features.js";
 import { isFabricOperation, type FabricOperation } from "./operations.js";
-import { parseOperationInputForPrincipal, parseOperationResult } from "./operation-codecs.js";
+import {
+  parseOperationInputForPrincipal,
+  parseOperationResult,
+  parseOperationResultForInput,
+} from "./operation-codecs.js";
 import {
   ProtocolResultShapeError,
   assertOperationResultFeatureShape,
@@ -282,6 +286,7 @@ export class ProtocolRemoteError extends Error {
 
 type PendingCall = {
   operation: string;
+  input: unknown;
   state: "queued" | "in-flight";
   resolve(value: unknown): void;
   reject(error: Error): void;
@@ -415,7 +420,7 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
         this.#fail(new ProtocolTransportError("PROTOCOL_TIMEOUT", `in-flight protocol request timed out: ${operation}`));
       }, this.#limits.requestTimeoutMs);
       timer.unref();
-      this.#pending.set(id, { operation, state: "queued", resolve, reject, timer });
+      this.#pending.set(id, { operation, input, state: "queued", resolve, reject, timer });
     });
     this.#queue.push({ id, request });
     this.#drainQueue();
@@ -469,7 +474,12 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
       if (record.ok) {
         if (record.operation !== "initialize" && isFabricOperation(record.operation)) {
           try {
-            const parsed = parseOperationResult(record.operation, record.result);
+            const parsed = parseOperationResultForInput(
+              record.operation,
+              pending.input as never,
+              record.result,
+              this.principal,
+            );
             assertOperationResultFeatureShape(
               record.operation,
               this.#features,
