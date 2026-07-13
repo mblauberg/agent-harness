@@ -5985,6 +5985,8 @@ lifecycle_rotation_custody_revisions(
     origin_fresh_apply_digest),
   UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,state,
     disposition_code,semantic_digest,source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    disposition_code,source_ref_digest,journal_digest),
   UNIQUE(semantic_digest), UNIQUE(source_ref_digest), UNIQUE(journal_digest),
   CHECK((revision=1 AND prior_revision IS NULL AND
       prior_journal_digest IS NULL) OR

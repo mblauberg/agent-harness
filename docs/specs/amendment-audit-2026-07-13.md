@@ -169,6 +169,76 @@ leads is covered; other defect classes there are unverified.
 These are recorded for Lane D per the run's stop condition; Lane A repairs the
 normative spec text and its executable fixtures only.
 
+## Executable-fixture evidence (defects reproduced)
+
+Two deterministic stdlib-`sqlite3` harnesses under
+`.agent-run/CAPA-001/fixtures/` transcribe the cited DDL verbatim
+(`PRAGMA foreign_keys=ON`) and reproduce each substantiated defect; both exit 0
+on `python3` 3.14.3:
+
+- `fixtures_lifecycle.py` — LEAD1 ACCEPTED (fresh apply, zero external receipts);
+  LEAD3 CONFIRMED (prepare-time reservation insert blocked by FK); LEAD4 ACCEPTED
+  (terminal-fresh batch finalizes as plain terminal — confirms the chair
+  adjudication); LEAD6 ACCEPTED (bare apply commits); LEAD8 ACCEPTED (two issues
+  share a source; revoke-then-handoff and handoff-then-revoke both commit).
+- `fixtures_schema.py` — LEAD2 CONFIRMED (foreign key mismatch); LEAD5 ACCEPTED
+  (wrong-owner intent + mismatched effect); LEAD7 ACCEPTED (scope AND loss lying
+  heads — confirms the chair adjudication); MF04-1 CONFIRMED (foreign key
+  mismatch, P0); MF04-2 ACCEPTED; MF04-3 ACCEPTED.
+
+Eleven of the substantiated defects are thus reproducible from the spec text
+alone. Lead 9 is prose (no fixture). MF04-4/5/6 and MF01-1/3/4 fixtures not yet
+built.
+
+## Repair status (CAPA-001, as of commit c4eaa32)
+
+**Complete (committed):**
+- MF04-1 (P0) — 6-col UNIQUE declared on `run_authority_revisions`.
+- MF04-2 — `CHECK(action_adapter_id = adapter_id)` on
+  `adapter_provider_smoke_subjects`.
+- Lead 9 — `commit-pending` status (Spec 01 §32.20) and the
+  `recovery-in-progress -> open` edge (Spec 01 §32.20, Spec 04 §9.22); the
+  async-pipeline sub-item was already present (no change).
+- Lead 2 (FK-mismatch part) — 8-col
+  `UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,disposition_code,source_ref_digest,journal_digest)`
+  added to `lifecycle_rotation_custody_revisions` so the retirement-plan FK has a
+  valid parent key (was uninsertable: foreign key mismatch). Safe: `source_ref_digest`
+  is already globally UNIQUE, so this adds the exact FK index without a new data
+  constraint. **Evidence-carry columns through plan → effect → result remain
+  (deeper part of lead 2).**
+
+**Pending structural repair (needed before freeze; codex-certified):** these
+close only with multi-part DDL changes, not one-line additions, so they are
+deliberately not half-applied —
+- Lead 1 — new authenticated `fresh-origin` receipt subject/batch + zero-receipt
+  scope-discovery hydration rule (protocol addition).
+- Lead 2 (remaining) — evidence-carry columns (admission / transition-proof /
+  mutation-plan / finalized-terminal-evidence / retirement-evidence) bound
+  through plan → effect → result. (FK-mismatch part done above.)
+- Lead 3 — retarget the reservation FK to the same-prepare planned effect; bind
+  the materialized revision only post-apply.
+- Lead 4 — carry `transition_kind` into the apply; non-null sentinels so the
+  fresh-arm composite FK cannot be null-skipped (do NOT add plan equality).
+- Lead 5 — kind↔owner CHECK + intent→effect identity FKs + declared
+  membership/anti-extra.
+- Lead 6 — arm-specific post-state completeness trigger/marker on the apply.
+- Lead 7 — systemic head parity: restructure scope/loss/custody heads to
+  canonical pointers or non-null sentinels so the fuller FKs cannot be
+  null-vacuous; give `review_slot_heads` a real FK; publish
+  `provider_review_evidence` DDL (unifies with MF01-2).
+- Lead 8 — source single-flight (needs a derived-state column or trigger, since
+  the issues table has no state column) + reciprocal revocation/handoff guards.
+- MF04-3 (partial) — discriminator CHECK for triple nullability + adapter/kind on
+  the FK; MF04-4 (context-pressure vs rotation); MF04-5 (§9.23/§9.24 admission
+  order); MF04-6 (dispatch/observation route-admission binding).
+- MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
+  MF01-3 (`adapter_capability_snapshots.source` CHECK); MF01-4 (generic-route
+  recovery owner cross-reference).
+
+**Freeze gate:** Specs 01 v0.36 / 04 v1.31 are NOT frozen. Freeze (version-note
++ status update) happens only after every substantiated P0–P2 above is repaired
+and the codex certifying review is green.
+
 ## Baseline-contradiction parks (owner calls) — none yet
 
 No repair below is believed to contradict the human-approved baseline `c2fc623`.
