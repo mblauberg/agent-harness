@@ -1,0 +1,39 @@
+schema_version: 1
+target_skill: refactor
+cases:
+- id: rf001
+  relation: positive
+  prompt: Extract provider action handling into a deep module, preserve behaviour and delete the old path.
+  tags:
+  - direct
+  expected:
+    primary_skill: refactor
+    companion_skills:
+    - implement
+- id: rf002
+  relation: positive
+  prompt: This pre-release project has no consumers. Replace the old interface directly and prove equivalence without a compatibility adapter.
+  tags:
+  - direct
+  expected:
+    primary_skill: refactor
+    companion_skills:
+    - implement
+- id: rf003
+  relation: negative
+  prompt: Compare three architectures and recommend one without changing source.
+  tags:
+  - adjacent
+  expected:
+    primary_skill: architecture-review
+    companion_skills: []
+- id: rf004
+  relation: boundary
+  prompt: Implement one new behaviour and one structural cleanup, proving the changed and preserved contracts separately.
+  tags:
+  - composition
+  expected:
+    primary_skill: implement
+    companion_skills:
+    - tdd
+    - refactor

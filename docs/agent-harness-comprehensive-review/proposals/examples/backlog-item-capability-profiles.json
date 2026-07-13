@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "itemId": "AH-001-capability-profiles",
+  "title": "Capability-compiled provider execution and provider-action extraction",
+  "state": "scoped",
+  "outcome": "Enable safe offline implementation by both primary providers and create the first bounded Fabric command slice.",
+  "nonGoals": [
+    "network-enabled implementation",
+    "release/deployment",
+    "optional provider redesign",
+    "distributed Fabric"
+  ],
+  "acceptanceCriteria": [
+    "review-readonly preserves current behaviour",
+    "workspace-write-offline works only in one owned worktree",
+    "Codex and Claude pass provider conformance",
+    "provider payload cannot broaden authority",
+    "external effects remain impossible",
+    "provider-action handling is extracted and old logic deleted",
+    "recovery, receipt and budget invariants pass"
+  ],
+  "dependencies": [],
+  "value": {
+    "score": 5,
+    "rationale": "Closes the principal implementation gap and establishes the seam for the broader modular-monolith refactor."
+  },
+  "risk": {
+    "level": "high",
+    "factors": [
+      "write-authority",
+      "provider-parity",
+      "core-state-transition",
+      "recovery"
+    ]
+  },
+  "authorityTemplate": {
+    "repositories": [
+      "mblauberg/agent-harness"
+    ],
+    "writeScopes": [
+      "authority/profile modules",
+      "primary provider adapters",
+      "provider-action handlers/stores",
+      "related tests/docs"
+    ],
+    "profiles": [
+      "workspace-write-offline",
+      "review-readonly"
+    ],
+    "externalEffects": []
+  },
+  "approval": {
+    "status": "pending",
+    "approvedBy": null,
+    "approvedAt": null,
+    "expiresAt": null,
+    "scopeDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "execution": {
+    "requiredEvidence": [
+      "deterministic full gate",
+      "provider conformance",
+      "fault/recovery tests",
+      "fresh native review",
+      "other-primary review",
+      "human acceptance"
+    ],
+    "budgets": {
+      "provider_calls": 80,
+      "turns": 120,
+      "wall_clock_minutes": 480
+    },
+    "retryLimit": 2,
+    "stopConditions": [
+      "scope or authority expansion",
+      "network or external effect becomes necessary",
+      "provider enforcement unavailable",
+      "recovery invariant cannot be preserved"
+    ]
+  },
+  "freshness": {
+    "scopeRevision": 1,
+    "lastReviewedAt": "2026-07-13T06:00:00Z",
+    "maximumAgeDays": 14
+  },
+  "claim": null
+}

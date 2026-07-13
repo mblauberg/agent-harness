@@ -1,0 +1,41 @@
+schemaVersion: 1
+policyId: staged-external-effects
+effectKinds:
+- git-branch-create
+- git-push
+- pull-request-open
+- pull-request-update
+- pull-request-merge
+- package-publish
+- deployment
+- ticket-mutation
+- message-send
+- artefact-upload
+- infrastructure-change
+proposalRequires:
+- kind
+- target
+- operation
+- payloadDigest
+- preconditions
+- requiredGates
+- minimumCredentialClass
+- reversibility
+- idempotencyKey
+- lookupRecipe
+- expiresAt
+stages:
+- proposed
+- validated
+- gated
+- authorised
+- dispatched
+- reconciled
+- terminal
+- ambiguous
+- quarantined
+rules:
+  modelHoldsExecutorCredential: false
+  arbitraryShellOrUrl: false
+  retryAfterAmbiguity: lookup-before-retry
+  scopeBroadening: new-human-authority

@@ -1,0 +1,37 @@
+# Agent Harness comprehensive review pack
+
+**Repository:** `mblauberg/agent-harness`  
+**Baseline:** `main` at `0ea935f8ccaad550d8db0f9ea40324f58bdda569`  
+**Review date:** 13 July 2026  
+**Review mode:** static repository inspection through the connected GitHub interface, supplemented by current primary-source research.
+
+## Important limitation
+
+I could not obtain a local checkout in the execution environment, so I did **not** run the repository's tests, build, daemon, provider smokes, Console, installer, or security scripts. Findings about behaviour are based on source, configuration, tests, specifications, runbooks and repository metadata. Proposed files are design artefacts: they have been syntax-checked where practical, but have not been integrated or executed against the repository.
+
+## Recommended reading order
+
+1. [`COMPREHENSIVE_REVIEW.md`](COMPREHENSIVE_REVIEW.md) — integrated assessment and central recommendation.
+2. [`findings-register.md`](findings-register.md) — prioritised, file-level findings with acceptance tests.
+3. [`target-architecture.md`](target-architecture.md) — control, execution, effect, evidence and presentation planes.
+4. [`agentic-sdlc-operating-model.md`](agentic-sdlc-operating-model.md) — intake, scoping, execution, review, backlog and fresh-session policy.
+5. [`skill-portfolio-redesign.md`](skill-portfolio-redesign.md) — skill changes, additions, removals and executable-kernel separation.
+6. [`fabric-refactor-plan.md`](fabric-refactor-plan.md) — bounded-context decomposition of the Fabric without losing one transactional authority.
+7. [`console-and-observability.md`](console-and-observability.md) — TUI information architecture, projections, replay and provider-native visibility.
+8. [`tooling-installation-security.md`](tooling-installation-security.md) — workspace, installer, hooks, local trust, CI, release and supply-chain changes.
+9. [`implementation-roadmap.md`](implementation-roadmap.md) — dependency-ordered implementation tranches and completion criteria.
+10. [`decision-register.md`](decision-register.md) — recommended decisions and explicitly rejected alternatives.
+11. [`SOURCE_MAP.md`](SOURCE_MAP.md) — reviewed sources and evidence map.
+12. [`proposals/`](proposals/) — illustrative manifests, policies, JSON Schemas and rewritten instruction/skill files.
+
+## Central recommendation
+
+Evolve the project into a **capability-compiled modular monolith**:
+
+- provider-native APIs own model session mechanics;
+- Agent Fabric owns cross-provider authority, work state, evidence, reconciliation and durable control;
+- effect executors own external writes;
+- an append-only event stream and projections feed the Console, native provider UIs and desktop clients;
+- a generated manifest is the single source for skills, adapters, policies, documentation, installation and compatibility tests.
+
+Do not adopt a distributed workflow engine, make MCP the process-supervision bus, or add a large set of persona skills. The repository already has the right constitutional primitives. Its next gains come from consolidating duplicated policy, closing the read-only implementation gap, decomposing the large runtime modules and making operational truth generated and observable.

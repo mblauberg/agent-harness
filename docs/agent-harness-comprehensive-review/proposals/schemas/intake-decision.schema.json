@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/intake-decision.schema.json",
+  "title": "Harness intake decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "decisionId",
+    "createdAt",
+    "outcome",
+    "route",
+    "ambiguity",
+    "risk",
+    "authority",
+    "decomposition",
+    "evidence",
+    "humanAttention"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement",
+        "deliverables",
+        "acceptanceKnown"
+      ],
+      "properties": {
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deliverables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "acceptanceKnown": {
+          "type": "boolean"
+        },
+        "nonGoals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "route": {
+      "enum": [
+        "direct",
+        "scoped",
+        "incident",
+        "research",
+        "review-only"
+      ]
+    },
+    "ambiguity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "openDecisions"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "openDecisions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "factors",
+        "oneWayDoors"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "crucial"
+          ]
+        },
+        "factors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "oneWayDoors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "presentScopes",
+        "missingScopes"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "sufficient",
+            "partial",
+            "missing"
+          ]
+        },
+        "presentScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missingScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "decomposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parallelValue",
+        "coupling",
+        "candidateRoles"
+      ],
+      "properties": {
+        "parallelValue": {
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "coupling": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "candidateRoles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "taskClass",
+              "routeIntent"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "taskClass": {
+                "type": "string",
+                "minLength": 1
+              },
+              "routeIntent": {
+                "enum": [
+                  "flagship",
+                  "workhorse",
+                  "scout"
+                ]
+              },
+              "preferredFamily": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "effort": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deterministic",
+        "judgement"
+      ],
+      "properties": {
+        "deterministic": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "judgement": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "liveOrHuman": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "freshSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recommended": {
+          "type": "boolean"
+        },
+        "atPhase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "humanAttention": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "blocking",
+          "recommendedDefault"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "recommendedDefault": {
+            "type": "string"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
