@@ -102,7 +102,7 @@ fn leader_exit_during_grace_cannot_leave_a_term_resistant_descendant_alive() {
     command
         .args([
             "-c",
-            "trap 'exit 0' TERM; /bin/sh -c 'trap \"\" TERM; while :; do :; done' & printf '%s\\n' \"$!\"; while :; do :; done",
+            "trap 'exit 0' TERM; /bin/sh -c 'trap \"\" TERM; printf \"%s ready\\n\" \"$$\"; while :; do :; done' & while :; do :; done",
         ])
         .stdout(Stdio::piped());
     unsafe {
@@ -119,9 +119,12 @@ fn leader_exit_during_grace_cannot_leave_a_term_resistant_descendant_alive() {
         .read_line(&mut descendant_line)
         .expect("descendant pid line");
     let descendant_id = descendant_line
-        .trim()
+        .split_whitespace()
+        .next()
+        .expect("descendant ready PID")
         .parse::<i32>()
         .expect("descendant pid");
+    assert!(descendant_line.ends_with(" ready\n"));
     let process_id = i32::try_from(child.id()).expect("leader pid");
     let identity = observe_process(process_id).expect("leader identity");
 

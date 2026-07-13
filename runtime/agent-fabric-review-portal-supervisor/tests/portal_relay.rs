@@ -357,6 +357,57 @@ fn malformed_request_failure_propagation_is_deterministic_under_repetition() {
     }
 }
 
+#[test]
+fn immediate_broker_eof_never_masks_a_malformed_request() {
+    let _process_lock = lock_portal_process();
+    let mut delivered_inputs = 0;
+    for iteration in 0..500 {
+        let directory = socket_directory();
+        fs::create_dir(&directory).expect("private test directory");
+        let socket = directory.join("portal.sock");
+        let listener = UnixListener::bind(&socket).expect("bind broker");
+        let broker = thread::spawn(move || {
+            let (_stream, _) = listener.accept().expect("accept helper");
+        });
+
+        let mut child = Command::new(env!("CARGO_BIN_EXE_agent-fabric-review-portal-supervisor"))
+            .arg(PORTAL_MODE)
+            .env_clear()
+            .env(REVIEW_SOCKET_ENV, &socket)
+            .env(REVIEW_ACTION_ENV, "cursor/action-01")
+            .env(
+                REVIEW_CONTRACT_ENV,
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn helper");
+        if child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(b"invalid\r\n")
+            .is_ok()
+        {
+            delivered_inputs += 1;
+        }
+        let output = wait_with_output_bounded(child, Duration::from_secs(2));
+        broker.join().expect("broker completion");
+        fs::remove_dir_all(&directory).expect("test cleanup");
+
+        assert!(
+            !output.status.success(),
+            "iteration {iteration} returned success after immediate broker EOF"
+        );
+    }
+    assert!(
+        delivered_inputs >= 450,
+        "too few malformed inputs reached stdin"
+    );
+}
+
 #[allow(unsafe_code)]
 mod libc_test {
     #[repr(C)]

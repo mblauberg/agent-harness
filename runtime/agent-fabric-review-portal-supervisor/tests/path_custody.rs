@@ -3,7 +3,9 @@
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 
 use agent_fabric_review_portal_supervisor::{
     CustodyEntryKind, FileIdentity, inspect_custody_entry, remove_custody_entry,
@@ -93,6 +95,52 @@ fn rejects_a_swapped_or_symlinked_custody_directory() {
     fs::remove_dir_all(&retained).expect("cleanup retained directory");
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn never_unlinks_a_concurrently_swapped_in_entry() {
+    let mut successful_claims = 0;
+    for _iteration in 0..768 {
+        let directory = private_directory();
+        let metadata = fs::metadata(&directory).expect("directory metadata");
+        let directory_identity = FileIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        };
+        let capsule = directory.join("capsule");
+        let swap = directory.join("swap");
+        fs::write(&capsule, b"expected").expect("expected capsule");
+        fs::write(&swap, b"attacker").expect("attacker capsule");
+        let expected_inode = fs::metadata(&capsule).expect("expected metadata").ino();
+        let attacker_inode = fs::metadata(&swap).expect("attacker metadata").ino();
+        let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+            .expect("inspect expected capsule");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let swapper_stop = Arc::clone(&stop);
+        let swapper = thread::spawn(move || {
+            while !swapper_stop.load(Ordering::Acquire) {
+                let _ = libc_test::swap_paths(&capsule, &swap);
+            }
+        });
+        let removal = remove_custody_entry(&directory, directory_identity, "capsule", expected);
+        stop.store(true, Ordering::Release);
+        swapper.join().expect("swapper completion");
+
+        if removal.is_ok() {
+            successful_claims += 1;
+            let remaining_inode = fs::metadata(directory.join("swap"))
+                .expect("one stable remaining entry")
+                .ino();
+            assert_eq!(
+                remaining_inode, attacker_inode,
+                "cleanup deleted swapped-in attacker inode {attacker_inode}, leaving expected inode {expected_inode}"
+            );
+        }
+        fs::remove_dir_all(&directory).expect("cleanup");
+    }
+    assert!(successful_claims > 0, "swap canary never reached an unlink");
+}
+
 #[test]
 fn accepts_only_a_single_relative_cleanup_basename() {
     validate_cleanup_basename("portal.sock").expect("valid socket basename");
@@ -144,4 +192,52 @@ fn inspects_only_the_exact_private_directory_and_non_symlink_socket_or_file() {
 
     drop(listener);
     fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[allow(unsafe_code)]
+mod libc_test {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[cfg(target_os = "macos")]
+    unsafe extern "C" {
+        fn renamex_np(
+            old_path: *const std::os::raw::c_char,
+            new_path: *const std::os::raw::c_char,
+            flags: std::os::raw::c_uint,
+        ) -> std::os::raw::c_int;
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        fn renameat2(
+            old_directory: std::os::raw::c_int,
+            old_path: *const std::os::raw::c_char,
+            new_directory: std::os::raw::c_int,
+            new_path: *const std::os::raw::c_char,
+            flags: std::os::raw::c_uint,
+        ) -> std::os::raw::c_int;
+    }
+
+    pub fn swap_paths(old_path: &std::path::Path, new_path: &std::path::Path) -> bool {
+        const RENAME_EXCHANGE: std::os::raw::c_uint = 2;
+        let old_path = CString::new(old_path.as_os_str().as_bytes()).expect("old swap path");
+        let new_path = CString::new(new_path.as_os_str().as_bytes()).expect("new swap path");
+        #[cfg(target_os = "macos")]
+        // SAFETY: both paths are valid NUL-terminated test paths and RENAME_SWAP is atomic.
+        let result = unsafe { renamex_np(old_path.as_ptr(), new_path.as_ptr(), RENAME_EXCHANGE) };
+        #[cfg(target_os = "linux")]
+        // SAFETY: both paths are valid NUL-terminated absolute test paths and RENAME_EXCHANGE is
+        // atomic on the containing filesystem.
+        let result = unsafe {
+            renameat2(
+                -100,
+                old_path.as_ptr(),
+                -100,
+                new_path.as_ptr(),
+                RENAME_EXCHANGE,
+            )
+        };
+        result == 0
+    }
 }

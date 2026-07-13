@@ -5,7 +5,9 @@ use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 #[cfg(unix)]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(unix)]
 use std::thread;
 use std::time::Duration;
@@ -431,19 +433,90 @@ pub fn remove_custody_entry(
     validate_cleanup_basename(basename)?;
     let directory = open_private_custody_directory(directory, expected_directory)?;
     let actual_entry = inspect_custody_entry_at(&directory, basename)?;
-    if actual_entry.identity != expected_entry.identity || actual_entry.kind != expected_entry.kind
-    {
+    require_expected_custody_entry(actual_entry, expected_entry)?;
+    let basename = custody_basename_c_string(basename)?;
+    let claim_basename = custody_claim_basename(&basename, expected_entry);
+
+    // Atomically move the current name into a private, no-replace claim before the final
+    // validation. A concurrent swap can therefore make validation fail, but it cannot redirect
+    // the eventual unlink back to a replacement at the public basename.
+    unsafe_sys::rename_entry_no_replace_at(
+        directory.as_raw_fd(),
+        &basename,
+        directory.as_raw_fd(),
+        &claim_basename,
+    )?;
+    let claim_name = claim_basename
+        .to_str()
+        .map_err(|_| CustodyError::InvalidBasename)?;
+    let claimed_entry = match inspect_custody_entry_at(&directory, claim_name) {
+        Ok(entry) => entry,
+        Err(error) => {
+            restore_custody_claim(&directory, &claim_basename, &basename)?;
+            return Err(error);
+        }
+    };
+    if let Err(error) = require_expected_custody_entry(claimed_entry, expected_entry) {
+        restore_custody_claim(&directory, &claim_basename, &basename)?;
+        return Err(error);
+    }
+    unsafe_sys::unlink_entry_at(directory.as_raw_fd(), &claim_basename)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn require_expected_custody_entry(
+    actual: CustodyEntry,
+    expected: CustodyEntry,
+) -> Result<(), CustodyError> {
+    if actual.identity != expected.identity || actual.kind != expected.kind {
         return Err(CustodyError::EntryIdentityMismatch);
     }
-    if actual_entry.digest != expected_entry.digest {
+    if actual.digest != expected.digest {
         return Err(CustodyError::EntryDigestMismatch);
     }
-    let basename = custody_basename_c_string(basename)?;
-    let final_status = unsafe_sys::entry_status_at(directory.as_raw_fd(), &basename)?;
-    if entry_identity_and_kind(final_status)? != (expected_entry.identity, expected_entry.kind) {
-        return Err(CustodyError::EntryIdentityMismatch);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn custody_claim_basename(
+    basename: &std::ffi::CStr,
+    expected_entry: CustodyEntry,
+) -> std::ffi::CString {
+    use std::fmt::Write as _;
+
+    let mut claim_material = Vec::with_capacity(128);
+    claim_material.extend_from_slice(b"agent-fabric-custody-claim-v1\0");
+    claim_material.extend_from_slice(basename.to_bytes());
+    claim_material.extend_from_slice(&expected_entry.identity.device.to_be_bytes());
+    claim_material.extend_from_slice(&expected_entry.identity.inode.to_be_bytes());
+    claim_material.push(match expected_entry.kind {
+        CustodyEntryKind::Socket => 0,
+        CustodyEntryKind::RegularFile => 1,
+    });
+    claim_material.extend_from_slice(&expected_entry.digest);
+    let digest = sha256_bytes(&claim_material);
+    let mut claim = String::from(".agent-fabric-claim-");
+    for byte in digest {
+        write!(&mut claim, "{byte:02x}").expect("writing to a String cannot fail");
     }
-    unsafe_sys::unlink_entry_at(directory.as_raw_fd(), &basename)?;
+    std::ffi::CString::new(claim).expect("claim name is fixed lowercase ASCII")
+}
+
+#[cfg(unix)]
+fn restore_custody_claim(
+    directory: &std::fs::File,
+    claim_basename: &std::ffi::CStr,
+    original_basename: &std::ffi::CStr,
+) -> Result<(), CustodyError> {
+    use std::os::fd::AsRawFd;
+
+    unsafe_sys::rename_entry_no_replace_at(
+        directory.as_raw_fd(),
+        claim_basename,
+        directory.as_raw_fd(),
+        original_basename,
+    )?;
     Ok(())
 }
 
@@ -1293,28 +1366,37 @@ pub fn read_lf_frame<R: BufRead>(reader: &mut R) -> Result<Option<Vec<u8>>, Fram
 pub fn run_portal(config: &PortalConfig) -> Result<(), PortalRunError> {
     let stream = UnixStream::connect(&config.socket_path)?;
     let request_stream = stream.try_clone()?;
-    let request_failure = Arc::new(Mutex::new(None));
-    let request_thread_failure = Arc::clone(&request_failure);
-    thread::spawn(move || {
-        if let Err(error) = relay_requests(io::stdin(), &request_stream) {
-            // Publish the request failure before waking the response relay with socket shutdown.
-            // That ordering makes malformed-stdin failure deterministic rather than scheduler-
-            // dependent.
-            if let Ok(mut failure) = request_thread_failure.lock() {
-                *failure = Some(error);
+    unsafe_sys::mark_descriptor_nonblocking(0)?;
+    request_stream.set_write_timeout(Some(REAP_DEADLINE))?;
+    let stop_requests = Arc::new(AtomicBool::new(false));
+    let request_thread_stop = Arc::clone(&stop_requests);
+    let request_thread = thread::Builder::new()
+        .name("review-portal-request-relay".into())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                relay_requests_nonblocking(io::stdin(), &request_stream, &request_thread_stop)
+            }))
+            .unwrap_or_else(|_| {
+                Err(PortalRunError::Io(io::Error::other(
+                    "request relay panicked",
+                )))
+            });
+            if result.is_err() {
+                // Wake the response owner only after the request thread owns its terminal result.
+                // The owner always joins below, so an independent broker EOF cannot mask it.
+                let _ = request_stream.shutdown(std::net::Shutdown::Both);
             }
-            let _ = request_stream.shutdown(std::net::Shutdown::Both);
-        }
-    });
+            result
+        })?;
 
     let response_result = relay_responses(stream, io::stdout());
-    let request_result = request_failure
-        .lock()
-        .map_err(|_| PortalRunError::Io(io::Error::other("request relay state poisoned")))?
-        .take();
-    if let Some(error) = request_result {
-        return Err(error);
-    }
+    stop_requests.store(true, Ordering::Release);
+    let request_result = request_thread.join().map_err(|_| {
+        PortalRunError::Io(io::Error::other(
+            "request relay terminated without evidence",
+        ))
+    })?;
+    request_result?;
     response_result
 }
 
@@ -1332,18 +1414,53 @@ pub fn run_portal(_config: &PortalConfig) -> Result<(), PortalRunError> {
 }
 
 #[cfg(unix)]
-fn relay_requests<R: Read>(input: R, mut stream: &UnixStream) -> Result<(), PortalRunError> {
-    let mut reader = BufReader::new(input);
+fn relay_requests_nonblocking<R: Read>(
+    mut input: R,
+    mut stream: &UnixStream,
+    stop: &AtomicBool,
+) -> Result<(), PortalRunError> {
+    let mut frame = Vec::new();
+    let mut input_buffer = [0_u8; 8192];
     loop {
-        let frame = match read_lf_frame(&mut reader) {
-            Ok(Some(frame)) => frame,
-            Ok(None) => break,
+        match input.read(&mut input_buffer) {
+            Ok(0) => {
+                if !frame.is_empty() {
+                    return Err(FrameError::UnterminatedFrame.into());
+                }
+                if !stop.load(Ordering::Acquire) {
+                    stream.shutdown(std::net::Shutdown::Write)?;
+                }
+                return Ok(());
+            }
+            Ok(length) => {
+                for byte in &input_buffer[..length] {
+                    if *byte == b'\r' {
+                        return Err(FrameError::CarriageReturn.into());
+                    }
+                    if frame.len() == MAX_LF_FRAME_BYTES {
+                        return Err(FrameError::FrameTooLarge.into());
+                    }
+                    frame.push(*byte);
+                    if *byte == b'\n' {
+                        stream.write_all(&frame)?;
+                        frame.clear();
+                    }
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if stop.load(Ordering::Acquire) {
+                    return if frame.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(FrameError::UnterminatedFrame.into())
+                    };
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
             Err(error) => return Err(error.into()),
-        };
-        stream.write_all(&frame)?;
+        }
     }
-    stream.shutdown(std::net::Shutdown::Write)?;
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -1447,7 +1564,9 @@ mod unsafe_sys {
     pub const REGULAR_FILE_TYPE: u32 = 0o100_000;
     pub const SOCKET_FILE_TYPE: u32 = 0o140_000;
     const F_GETFD: c_int = 1;
+    const F_GETFL: c_int = 3;
     const F_SETFD: c_int = 2;
+    const F_SETFL: c_int = 4;
     const WNOHANG: c_int = 1;
 
     #[repr(C, align(8))]
@@ -1672,9 +1791,87 @@ mod unsafe_sys {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn rename_entry_no_replace_at(
+        old_directory: c_int,
+        old_name: &CStr,
+        new_directory: c_int,
+        new_name: &CStr,
+    ) -> io::Result<()> {
+        const RENAME_EXCLUSIVE: c_uint = 4;
+        // SAFETY: both names are NUL-terminated, both descriptors stay open for the call, and
+        // RENAME_EXCL atomically refuses to overwrite an existing claim.
+        if unsafe {
+            renameatx_np(
+                old_directory,
+                old_name.as_ptr(),
+                new_directory,
+                new_name.as_ptr(),
+                RENAME_EXCLUSIVE,
+            )
+        } == -1
+        {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn rename_entry_no_replace_at(
+        old_directory: c_int,
+        old_name: &CStr,
+        new_directory: c_int,
+        new_name: &CStr,
+    ) -> io::Result<()> {
+        const RENAME_NO_REPLACE: c_uint = 1;
+        // SAFETY: both names are NUL-terminated, both descriptors stay open for the call, and
+        // RENAME_NOREPLACE atomically refuses to overwrite an existing claim.
+        if unsafe {
+            renameat2(
+                old_directory,
+                old_name.as_ptr(),
+                new_directory,
+                new_name.as_ptr(),
+                RENAME_NO_REPLACE,
+            )
+        } == -1
+        {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub fn rename_entry_no_replace_at(
+        _old_directory: c_int,
+        _old_name: &CStr,
+        _new_directory: c_int,
+        _new_name: &CStr,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "atomic custody claims are unavailable on this platform",
+        ))
+    }
+
     pub fn descriptor_flags(descriptor: c_int) -> c_int {
         // SAFETY: F_GETFD takes no variadic argument and does not dereference memory.
         unsafe { fcntl(descriptor, F_GETFD) }
+    }
+
+    pub fn mark_descriptor_nonblocking(descriptor: c_int) -> io::Result<()> {
+        // SAFETY: F_GETFL takes no variadic argument and does not dereference memory.
+        let flags = unsafe { fcntl(descriptor, F_GETFL) };
+        if flags == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: F_SETFL consumes one integer variadic argument and does not dereference memory.
+        if unsafe { fcntl(descriptor, F_SETFL, flags | OPEN_NONBLOCK) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     pub fn set_descriptor_flags(descriptor: c_int, flags: c_int) -> c_int {
@@ -1980,6 +2177,28 @@ mod unsafe_sys {
             audit_token: *mut AuditToken,
             buffer: *mut std::os::raw::c_void,
             buffer_size: u32,
+        ) -> c_int;
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe extern "C" {
+        fn renameatx_np(
+            old_directory: c_int,
+            old_name: *const std::os::raw::c_char,
+            new_directory: c_int,
+            new_name: *const std::os::raw::c_char,
+            flags: c_uint,
+        ) -> c_int;
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        fn renameat2(
+            old_directory: c_int,
+            old_name: *const std::os::raw::c_char,
+            new_directory: c_int,
+            new_name: *const std::os::raw::c_char,
+            flags: c_uint,
         ) -> c_int;
     }
 
