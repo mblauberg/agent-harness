@@ -36,7 +36,8 @@ spec-edit) leg, digest-bound to the ADRs and this map.
   then `AuthorityEnvelopeV2` in protocol, delivery→Fabric mapper, direct V2
   cutover of all callers/tests/stored state (no dual parser), after Lane A
   freezes; re-run the seam diff after Lane B lands
-  - [x] Characterisation goldens of the current read-only projection
+  - [x] Characterisation goldens of the current read-only projection (done
+    2026-07-13, commit `6748ceb`)
 - [ ] Lane D — runtime reconciliation: repair the failing fabric test families
   (database baseline drift, lifecycle custody, Herdr FKs, MCP vocabulary,
   wrapper manifest) via TDD in disjoint lanes; blocked by Lanes A and B
