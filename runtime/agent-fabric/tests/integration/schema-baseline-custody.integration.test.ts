@@ -50,6 +50,7 @@ describe("current schema artifact custody", () => {
     const database = new Database(":memory:");
     try {
       applyMigrations(database);
+      expect(database.pragma("foreign_key_check")).toStrictEqual([]);
       const objectCount = database.prepare(`
         SELECT COUNT(*) AS count FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'
       `).get() as { count: number };
