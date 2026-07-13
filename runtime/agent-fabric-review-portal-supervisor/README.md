@@ -6,14 +6,15 @@ Spec 04 section 9.21.3 and Spec 05 section 6:
 - the binary accepts only `portal-stdio-v1` and exactly
   `AGENT_FABRIC_REVIEW_SOCKET`, `AGENT_FABRIC_REVIEW_ACTION` and
   `AGENT_FABRIC_REVIEW_CONTRACT`;
-- portal mode requires private supervisor FD 3 to be absent, connects to one
+- portal mode requires every inherited descriptor above stderr to be absent, connects to one
   AF_UNIX broker once, and relays bounded LF frames without interpreting JSON,
   UTF-8 or MCP;
 - supervisor helpers mark FD 3 `CLOEXEC`, bind local peer credentials to
-  PID/start/PGID/session identity, verify bounded ancestry, and perform
-  TERM -> 250 ms -> KILL -> reap cleanup only for an exact isolated group;
-- custody helpers reject absolute/traversing names and inspect/remove only an
-  exact non-symlink socket or regular file beneath the canonical, owner-matched
+  PID/start/PGID/session identity plus Darwin audit-token PID generation, verify bounded ancestry,
+  and perform polled TERM -> 250 ms -> KILL -> bounded WNOHANG reap cleanup only for an exact
+  isolated group while retaining trigger/outcome evidence;
+- custody helpers walk and retain no-follow directory descriptors, use fstatat/openat/unlinkat,
+  and remove only an exact owner-matched socket or SHA-256-matched regular file beneath the exact
   0700 directory identity.
 
 TypeScript remains the sole JSON-RPC/MCP parser, policy owner, ledger/journal
@@ -22,7 +23,8 @@ owner and one-use broker. The binary never receives a bearer capability.
 ## Fail-closed integration status
 
 This crate alone does **not** prove `certifying-review-packet-only.v1`. Keep
-Cursor and Agy capability false until daemon integration also proves all of the
+every helper-backed certifying route `capability=false`; in particular, `setsid` escape prevention
+and outer OS confinement remain explicitly false until daemon integration proves all of the
 following on the activated build:
 
 - stopped-child launch and durable `review_portal_process_custody` persistence
@@ -33,9 +35,8 @@ following on the activated build:
   OS confinement;
 - control EOF, deadline, cancellation, provider exit and daemon/supervisor
   death wiring to the cleanup owner;
-- no-follow directory/device/inode **and expected file digest** verification
-  before removal (this crate verifies names/type/device/inode but does not own
-  the daemon's persisted digest comparison);
+- durable persistence and comparison of the expected custody identity/digest passed to this
+  crate's no-follow removal boundary;
 - current-build source/auth/tool/network denial plus `setsid`, double-fork,
   daemonisation and reparent escape canaries.
 
@@ -43,6 +44,8 @@ Run the crate gate with:
 
 ```sh
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+test "$(awk '/^\[\[package\]\]/{count++} END{print count+0}' Cargo.lock)" -eq 1
+cargo metadata --locked --offline --no-deps --format-version 1 >/dev/null
+cargo clippy --locked --offline --all-targets -- -D warnings
+cargo test --locked --offline
 ```

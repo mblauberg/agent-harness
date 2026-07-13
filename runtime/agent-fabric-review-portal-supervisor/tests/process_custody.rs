@@ -7,8 +7,9 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use agent_fabric_review_portal_supervisor::{
-    CleanupTrigger, ProcessError, TERMINATION_GRACE, TerminationOutcome, cleanup_on_control_eof,
-    observe_process, terminate_process_group_and_reap, verify_process_identity,
+    CleanupTrigger, ProcessError, TERMINATION_GRACE, TerminationEvidence, TerminationOutcome,
+    cleanup_on_control_eof, observe_process, terminate_process_group_and_reap,
+    verify_process_identity,
 };
 
 #[test]
@@ -46,9 +47,12 @@ fn control_eof_terminates_and_reaps_the_exact_isolated_child() {
     assert_eq!(
         cleanup_on_control_eof(std::io::Cursor::new(Vec::<u8>::new()), identity)
             .expect("control EOF cleanup"),
-        TerminationOutcome::Killed,
+        TerminationEvidence {
+            trigger: CleanupTrigger::ControlEof,
+            outcome: TerminationOutcome::Terminated,
+        },
     );
-    assert!(started.elapsed() >= TERMINATION_GRACE);
+    assert!(started.elapsed() < TERMINATION_GRACE);
     let _ = child.wait();
 }
 
@@ -80,7 +84,13 @@ fn term_then_kills_and_reaps_a_term_resistant_isolated_process_group() {
     let started = Instant::now();
     let outcome = terminate_process_group_and_reap(identity, CleanupTrigger::Deadline)
         .expect("bounded cleanup");
-    assert_eq!(outcome, TerminationOutcome::Killed);
+    assert_eq!(
+        outcome,
+        TerminationEvidence {
+            trigger: CleanupTrigger::Deadline,
+            outcome: TerminationOutcome::Killed,
+        }
+    );
     assert!(started.elapsed() >= TERMINATION_GRACE);
     assert!(observe_process(process_id).is_err());
     let _ = child.wait();
@@ -125,7 +135,10 @@ fn leader_exit_during_grace_cannot_leave_a_term_resistant_descendant_alive() {
 
     assert_eq!(
         outcome.expect("complete group cleanup"),
-        TerminationOutcome::Killed
+        TerminationEvidence {
+            trigger: CleanupTrigger::Cancellation,
+            outcome: TerminationOutcome::Killed,
+        }
     );
     assert!(observe_process(descendant_id).is_err());
 }

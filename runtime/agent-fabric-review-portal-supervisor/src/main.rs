@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use agent_fabric_review_portal_supervisor::{
-    parse_portal_invocation, require_portal_control_fd_closed, run_portal,
+    parse_portal_invocation, require_portal_descriptors_closed, run_portal,
 };
 
 fn main() -> ExitCode {
@@ -9,7 +9,7 @@ fn main() -> ExitCode {
     let environment = std::env::vars_os().collect::<Vec<_>>();
     let result = parse_portal_invocation(&arguments, &environment)
         .and_then(|config| {
-            require_portal_control_fd_closed()?;
+            require_portal_descriptors_closed()?;
             Ok(config)
         })
         .and_then(|config| {

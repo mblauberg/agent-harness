@@ -105,10 +105,15 @@ jobs:
         run: rustup toolchain install 1.94.1 --profile minimal --component clippy --component rustfmt
       - name: Check formatting
         run: cargo fmt --check
+      - name: Require a dependency-free locked graph
+        run: |
+          package_count="$(awk '/^\[\[package\]\]/{count++} END{print count+0}' Cargo.lock)"
+          test "$package_count" -eq 1
+          cargo metadata --locked --offline --no-deps --format-version 1 >/dev/null
       - name: Run Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --offline --all-targets -- -D warnings
       - name: Run tests
-        run: cargo test
+        run: cargo test --locked --offline
 
   console:
     name: Agent fabric Console, evaluation, load and audit

@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 #[cfg(unix)]
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 #[cfg(unix)]
 use std::thread;
 use std::time::Duration;
@@ -17,6 +17,7 @@ pub const REVIEW_CONTRACT_ENV: &str = "AGENT_FABRIC_REVIEW_CONTRACT";
 pub const MAX_LF_FRAME_BYTES: usize = 98_304;
 pub const CONTROL_FD: std::os::raw::c_int = 3;
 pub const TERMINATION_GRACE: Duration = Duration::from_millis(250);
+pub const REAP_DEADLINE: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PortalConfig {
@@ -92,12 +93,20 @@ pub enum CustodyEntryKind {
     RegularFile,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct CustodyEntry {
+    pub identity: FileIdentity,
+    pub kind: CustodyEntryKind,
+    pub digest: [u8; 32],
+}
+
 #[derive(Debug)]
 pub enum CustodyError {
     InvalidBasename,
     DirectoryIdentityMismatch,
     DirectoryNotPrivate,
     EntryIdentityMismatch,
+    EntryDigestMismatch,
     EntryTypeForbidden,
     Io(io::Error),
 }
@@ -117,6 +126,7 @@ pub struct PeerIdentity {
     pub effective_group_id: u32,
     pub process: ProcessIdentity,
     pub audit_token: Option<[u32; 8]>,
+    pub process_id_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -134,11 +144,20 @@ pub enum TerminationOutcome {
     Killed,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct TerminationEvidence {
+    pub trigger: CleanupTrigger,
+    pub outcome: TerminationOutcome,
+}
+
 #[derive(Debug)]
 pub enum ProcessError {
     IdentityMismatch,
     AncestryMismatch,
+    AuditTokenMismatch,
     ProcessGroupNotIsolated,
+    ReapDeadlineExceeded,
+    ProcessGroupSurvivedTermination,
     Io(io::Error),
 }
 
@@ -147,8 +166,17 @@ impl fmt::Display for ProcessError {
         match self {
             Self::IdentityMismatch => formatter.write_str("process identity changed"),
             Self::AncestryMismatch => formatter.write_str("process escaped the custody ancestry"),
+            Self::AuditTokenMismatch => {
+                formatter.write_str("Darwin audit token does not match the observed peer")
+            }
             Self::ProcessGroupNotIsolated => {
                 formatter.write_str("process group/session is not isolated")
+            }
+            Self::ReapDeadlineExceeded => {
+                formatter.write_str("verified child was not reaped before the fixed deadline")
+            }
+            Self::ProcessGroupSurvivedTermination => {
+                formatter.write_str("isolated process group survived bounded termination")
             }
             Self::Io(error) => write!(formatter, "process custody failed: {error}"),
         }
@@ -181,6 +209,7 @@ impl fmt::Display for CustodyError {
             }
             Self::DirectoryNotPrivate => formatter.write_str("custody directory is not private"),
             Self::EntryIdentityMismatch => formatter.write_str("custody entry identity changed"),
+            Self::EntryDigestMismatch => formatter.write_str("custody entry digest changed"),
             Self::EntryTypeForbidden => formatter.write_str("custody entry type is not removable"),
             Self::Io(error) => write!(formatter, "custody path inspection failed: {error}"),
         }
@@ -263,17 +292,61 @@ pub fn parse_portal_invocation(
     })
 }
 
-/// Verifies that portal mode cannot inherit the supervisor's private control descriptor.
+/// Verifies that portal mode inherited no descriptors beyond standard input/output/error.
 ///
 /// # Errors
 ///
-/// Returns [`SupervisorError`] when descriptor 3 is open or cannot be inspected.
-pub fn require_portal_control_fd_closed() -> Result<(), SupervisorError> {
-    match descriptor_flags(CONTROL_FD) {
-        Ok(None) => Ok(()),
-        Ok(Some(_)) => invalid("portal mode inherited the private supervisor control FD"),
-        Err(error) => invalid(format!("cannot verify private control FD closure: {error}")),
+/// Returns [`SupervisorError`] when any descriptor above 2 is open or inspection fails.
+pub fn require_portal_descriptors_closed() -> Result<(), SupervisorError> {
+    // Collect first, then drop ReadDir before checking. `/dev/fd` includes its own transient scan
+    // descriptor; after the iterator closes, that candidate reads EBADF while every inherited
+    // descriptor remains observable, including one above a subsequently lowered RLIMIT_NOFILE.
+    let descriptors = {
+        let entries = std::fs::read_dir("/dev/fd").map_err(|error| {
+            SupervisorError::InvalidInvocation(format!(
+                "cannot enumerate portal descriptors: {error}"
+            ))
+        })?;
+        entries
+            .map(|entry| {
+                let entry = entry.map_err(|error| {
+                    SupervisorError::InvalidInvocation(format!(
+                        "cannot enumerate a portal descriptor: {error}"
+                    ))
+                })?;
+                entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| {
+                        SupervisorError::InvalidInvocation(
+                            "portal descriptor name is not UTF-8".into(),
+                        )
+                    })?
+                    .parse::<i32>()
+                    .map_err(|_| {
+                        SupervisorError::InvalidInvocation(
+                            "portal descriptor namespace contained a non-numeric entry".into(),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for descriptor in descriptors.into_iter().filter(|descriptor| *descriptor > 2) {
+        match descriptor_flags(descriptor) {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                return invalid(format!(
+                    "portal mode inherited non-stdio descriptor {descriptor}"
+                ));
+            }
+            Err(error) => {
+                return invalid(format!(
+                    "cannot verify portal descriptor {descriptor} closure: {error}"
+                ));
+            }
+        }
     }
+    Ok(())
 }
 
 /// Marks the supervisor's private control descriptor close-on-exec and verifies the flag.
@@ -335,46 +408,10 @@ pub fn inspect_custody_entry(
     directory: &Path,
     expected_directory: FileIdentity,
     basename: &str,
-) -> Result<(FileIdentity, CustodyEntryKind), CustodyError> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
-
+) -> Result<CustodyEntry, CustodyError> {
     validate_cleanup_basename(basename)?;
-    if !directory.is_absolute() || std::fs::canonicalize(directory)? != directory {
-        return Err(CustodyError::DirectoryIdentityMismatch);
-    }
-    let directory_metadata = std::fs::symlink_metadata(directory)?;
-    if !directory_metadata.file_type().is_dir() || directory_metadata.file_type().is_symlink() {
-        return Err(CustodyError::DirectoryIdentityMismatch);
-    }
-    let actual_directory = FileIdentity {
-        device: directory_metadata.dev(),
-        inode: directory_metadata.ino(),
-    };
-    if actual_directory != expected_directory {
-        return Err(CustodyError::DirectoryIdentityMismatch);
-    }
-    if directory_metadata.mode() & 0o077 != 0
-        || directory_metadata.uid() != unsafe_sys::effective_user_id()
-    {
-        return Err(CustodyError::DirectoryNotPrivate);
-    }
-
-    let entry_metadata = std::fs::symlink_metadata(directory.join(basename))?;
-    let file_type = entry_metadata.file_type();
-    let kind = if file_type.is_socket() {
-        CustodyEntryKind::Socket
-    } else if file_type.is_file() && !file_type.is_symlink() {
-        CustodyEntryKind::RegularFile
-    } else {
-        return Err(CustodyError::EntryTypeForbidden);
-    };
-    Ok((
-        FileIdentity {
-            device: entry_metadata.dev(),
-            inode: entry_metadata.ino(),
-        },
-        kind,
-    ))
+    let directory = open_private_custody_directory(directory, expected_directory)?;
+    inspect_custody_entry_at(&directory, basename)
 }
 
 #[cfg(unix)]
@@ -387,16 +424,364 @@ pub fn remove_custody_entry(
     directory: &Path,
     expected_directory: FileIdentity,
     basename: &str,
-    expected_entry: FileIdentity,
-    expected_kind: CustodyEntryKind,
+    expected_entry: CustodyEntry,
 ) -> Result<(), CustodyError> {
-    let (actual_entry, actual_kind) =
-        inspect_custody_entry(directory, expected_directory, basename)?;
-    if actual_entry != expected_entry || actual_kind != expected_kind {
+    use std::os::fd::AsRawFd;
+
+    validate_cleanup_basename(basename)?;
+    let directory = open_private_custody_directory(directory, expected_directory)?;
+    let actual_entry = inspect_custody_entry_at(&directory, basename)?;
+    if actual_entry.identity != expected_entry.identity || actual_entry.kind != expected_entry.kind
+    {
         return Err(CustodyError::EntryIdentityMismatch);
     }
-    std::fs::remove_file(directory.join(basename))?;
+    if actual_entry.digest != expected_entry.digest {
+        return Err(CustodyError::EntryDigestMismatch);
+    }
+    let basename = custody_basename_c_string(basename)?;
+    let final_status = unsafe_sys::entry_status_at(directory.as_raw_fd(), &basename)?;
+    if entry_identity_and_kind(final_status)? != (expected_entry.identity, expected_entry.kind) {
+        return Err(CustodyError::EntryIdentityMismatch);
+    }
+    unsafe_sys::unlink_entry_at(directory.as_raw_fd(), &basename)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn open_private_custody_directory(
+    directory: &Path,
+    expected_directory: FileIdentity,
+) -> Result<std::fs::File, CustodyError> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    let mut components = directory.components();
+    if !directory.is_absolute() || !matches!(components.next(), Some(Component::RootDir)) {
+        return Err(CustodyError::DirectoryIdentityMismatch);
+    }
+    let mut current = unsafe_sys::open_root_directory()?;
+    for component in components {
+        let Component::Normal(component) = component else {
+            return Err(CustodyError::DirectoryIdentityMismatch);
+        };
+        let component = std::ffi::CString::new(component.as_bytes())
+            .map_err(|_| CustodyError::DirectoryIdentityMismatch)?;
+        current = unsafe_sys::open_directory_at(current.as_raw_fd(), &component)?;
+    }
+    let metadata = current.metadata()?;
+    let identity = FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    };
+    if !metadata.file_type().is_dir() || identity != expected_directory {
+        return Err(CustodyError::DirectoryIdentityMismatch);
+    }
+    if metadata.mode() & 0o077 != 0 || metadata.uid() != unsafe_sys::effective_user_id() {
+        return Err(CustodyError::DirectoryNotPrivate);
+    }
+    Ok(current)
+}
+
+#[cfg(unix)]
+fn custody_basename_c_string(basename: &str) -> Result<std::ffi::CString, CustodyError> {
+    std::ffi::CString::new(basename.as_bytes()).map_err(|_| CustodyError::InvalidBasename)
+}
+
+#[cfg(unix)]
+fn inspect_custody_entry_at(
+    directory: &std::fs::File,
+    basename: &str,
+) -> Result<CustodyEntry, CustodyError> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+
+    let basename = custody_basename_c_string(basename)?;
+    let status = unsafe_sys::entry_status_at(directory.as_raw_fd(), &basename)?;
+    let (identity, kind) = entry_identity_and_kind(status)?;
+    if status.user_id != unsafe_sys::effective_user_id() {
+        return Err(CustodyError::DirectoryNotPrivate);
+    }
+    let digest = match kind {
+        CustodyEntryKind::Socket => socket_identity_digest(identity),
+        CustodyEntryKind::RegularFile => {
+            let mut file = unsafe_sys::open_regular_entry_at(directory.as_raw_fd(), &basename)?;
+            let metadata = file.metadata()?;
+            if (FileIdentity {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            }) != identity
+                || metadata.mode() & unsafe_sys::FILE_TYPE_MASK != unsafe_sys::REGULAR_FILE_TYPE
+            {
+                return Err(CustodyError::EntryIdentityMismatch);
+            }
+            let digest = sha256_reader(&mut file)?;
+            let final_metadata = file.metadata()?;
+            if (FileIdentity {
+                device: final_metadata.dev(),
+                inode: final_metadata.ino(),
+            }) != identity
+                || final_metadata.len() != metadata.len()
+                || final_metadata.mtime() != metadata.mtime()
+                || final_metadata.mtime_nsec() != metadata.mtime_nsec()
+            {
+                return Err(CustodyError::EntryIdentityMismatch);
+            }
+            digest
+        }
+    };
+    Ok(CustodyEntry {
+        identity,
+        kind,
+        digest,
+    })
+}
+
+#[cfg(unix)]
+fn entry_identity_and_kind(
+    status: unsafe_sys::EntryStatus,
+) -> Result<(FileIdentity, CustodyEntryKind), CustodyError> {
+    let kind = match status.mode & unsafe_sys::FILE_TYPE_MASK {
+        unsafe_sys::SOCKET_FILE_TYPE => CustodyEntryKind::Socket,
+        unsafe_sys::REGULAR_FILE_TYPE => CustodyEntryKind::RegularFile,
+        _ => return Err(CustodyError::EntryTypeForbidden),
+    };
+    Ok((
+        FileIdentity {
+            device: status.device,
+            inode: status.inode,
+        },
+        kind,
+    ))
+}
+
+#[cfg(unix)]
+fn socket_identity_digest(identity: FileIdentity) -> [u8; 32] {
+    let mut input = Vec::with_capacity(58);
+    input.extend_from_slice(b"agent-fabric-custody-socket-v1\0");
+    input.extend_from_slice(&identity.device.to_be_bytes());
+    input.extend_from_slice(&identity.inode.to_be_bytes());
+    sha256_bytes(&input)
+}
+
+fn sha256_reader<R: Read>(reader: &mut R) -> io::Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => return hasher.finalize(),
+            Ok(length) => hasher.update(&buffer[..length])?,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher
+        .update(bytes)
+        .expect("in-memory SHA-256 input length is bounded");
+    hasher
+        .finalize()
+        .expect("in-memory SHA-256 bit length is bounded")
+}
+
+struct Sha256 {
+    state: [u32; 8],
+    block: [u8; 64],
+    block_length: usize,
+    byte_length: u64,
+}
+
+impl Sha256 {
+    const fn new() -> Self {
+        Self {
+            state: [
+                0x6a09_e667,
+                0xbb67_ae85,
+                0x3c6e_f372,
+                0xa54f_f53a,
+                0x510e_527f,
+                0x9b05_688c,
+                0x1f83_d9ab,
+                0x5be0_cd19,
+            ],
+            block: [0; 64],
+            block_length: 0,
+            byte_length: 0,
+        }
+    }
+
+    fn update(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        self.byte_length = self
+            .byte_length
+            .checked_add(
+                u64::try_from(bytes.len())
+                    .map_err(|_| io::Error::other("SHA-256 input length overflow"))?,
+            )
+            .ok_or_else(|| io::Error::other("SHA-256 input length overflow"))?;
+        while !bytes.is_empty() {
+            let available = 64 - self.block_length;
+            let consumed = available.min(bytes.len());
+            self.block[self.block_length..self.block_length + consumed]
+                .copy_from_slice(&bytes[..consumed]);
+            self.block_length += consumed;
+            bytes = &bytes[consumed..];
+            if self.block_length == 64 {
+                let block = self.block;
+                sha256_compress(&mut self.state, &block);
+                self.block_length = 0;
+            }
+        }
+        Ok(())
+    }
+
+    fn finalize(mut self) -> io::Result<[u8; 32]> {
+        let bit_length = self
+            .byte_length
+            .checked_mul(8)
+            .ok_or_else(|| io::Error::other("SHA-256 bit length overflow"))?;
+        self.block[self.block_length] = 0x80;
+        self.block_length += 1;
+        if self.block_length > 56 {
+            self.block[self.block_length..].fill(0);
+            let block = self.block;
+            sha256_compress(&mut self.state, &block);
+            self.block = [0; 64];
+            self.block_length = 0;
+        }
+        self.block[self.block_length..56].fill(0);
+        self.block[56..].copy_from_slice(&bit_length.to_be_bytes());
+        let block = self.block;
+        sha256_compress(&mut self.state, &block);
+
+        let mut digest = [0_u8; 32];
+        for (chunk, word) in digest.chunks_exact_mut(4).zip(self.state) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+        Ok(digest)
+    }
+}
+
+const SHA256_ROUND_CONSTANTS: [u32; 64] = [
+    0x428a_2f98,
+    0x7137_4491,
+    0xb5c0_fbcf,
+    0xe9b5_dba5,
+    0x3956_c25b,
+    0x59f1_11f1,
+    0x923f_82a4,
+    0xab1c_5ed5,
+    0xd807_aa98,
+    0x1283_5b01,
+    0x2431_85be,
+    0x550c_7dc3,
+    0x72be_5d74,
+    0x80de_b1fe,
+    0x9bdc_06a7,
+    0xc19b_f174,
+    0xe49b_69c1,
+    0xefbe_4786,
+    0x0fc1_9dc6,
+    0x240c_a1cc,
+    0x2de9_2c6f,
+    0x4a74_84aa,
+    0x5cb0_a9dc,
+    0x76f9_88da,
+    0x983e_5152,
+    0xa831_c66d,
+    0xb003_27c8,
+    0xbf59_7fc7,
+    0xc6e0_0bf3,
+    0xd5a7_9147,
+    0x06ca_6351,
+    0x1429_2967,
+    0x27b7_0a85,
+    0x2e1b_2138,
+    0x4d2c_6dfc,
+    0x5338_0d13,
+    0x650a_7354,
+    0x766a_0abb,
+    0x81c2_c92e,
+    0x9272_2c85,
+    0xa2bf_e8a1,
+    0xa81a_664b,
+    0xc24b_8b70,
+    0xc76c_51a3,
+    0xd192_e819,
+    0xd699_0624,
+    0xf40e_3585,
+    0x106a_a070,
+    0x19a4_c116,
+    0x1e37_6c08,
+    0x2748_774c,
+    0x34b0_bcb5,
+    0x391c_0cb3,
+    0x4ed8_aa4a,
+    0x5b9c_ca4f,
+    0x682e_6ff3,
+    0x748f_82ee,
+    0x78a5_636f,
+    0x84c8_7814,
+    0x8cc7_0208,
+    0x90be_fffa,
+    0xa450_6ceb,
+    0xbef9_a3f7,
+    0xc671_78f2,
+];
+
+fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
+    let mut schedule = [0_u32; 64];
+    for (index, chunk) in block.chunks_exact(4).enumerate() {
+        schedule[index] = u32::from_be_bytes(
+            chunk
+                .try_into()
+                .expect("SHA-256 message schedule chunk is four bytes"),
+        );
+    }
+    for index in 16..64 {
+        let small_zero = schedule[index - 15].rotate_right(7)
+            ^ schedule[index - 15].rotate_right(18)
+            ^ (schedule[index - 15] >> 3);
+        let small_one = schedule[index - 2].rotate_right(17)
+            ^ schedule[index - 2].rotate_right(19)
+            ^ (schedule[index - 2] >> 10);
+        schedule[index] = schedule[index - 16]
+            .wrapping_add(small_zero)
+            .wrapping_add(schedule[index - 7])
+            .wrapping_add(small_one);
+    }
+
+    let mut working = *state;
+    for index in 0..64 {
+        let big_one =
+            working[4].rotate_right(6) ^ working[4].rotate_right(11) ^ working[4].rotate_right(25);
+        let choice = (working[4] & working[5]) ^ ((!working[4]) & working[6]);
+        let temporary_one = working[7]
+            .wrapping_add(big_one)
+            .wrapping_add(choice)
+            .wrapping_add(SHA256_ROUND_CONSTANTS[index])
+            .wrapping_add(schedule[index]);
+        let big_zero =
+            working[0].rotate_right(2) ^ working[0].rotate_right(13) ^ working[0].rotate_right(22);
+        let majority =
+            (working[0] & working[1]) ^ (working[0] & working[2]) ^ (working[1] & working[2]);
+        let temporary_two = big_zero.wrapping_add(majority);
+        working = [
+            temporary_one.wrapping_add(temporary_two),
+            working[0],
+            working[1],
+            working[2],
+            working[3].wrapping_add(temporary_one),
+            working[4],
+            working[5],
+            working[6],
+        ];
+    }
+    for (target, value) in state.iter_mut().zip(working) {
+        *target = target.wrapping_add(value);
+    }
 }
 
 #[cfg(unix)]
@@ -444,8 +829,8 @@ pub fn verify_process_identity(expected: ProcessIdentity) -> Result<(), ProcessE
 /// remains alive after cleanup.
 pub fn terminate_process_group_and_reap(
     expected: ProcessIdentity,
-    _trigger: CleanupTrigger,
-) -> Result<TerminationOutcome, ProcessError> {
+    trigger: CleanupTrigger,
+) -> Result<TerminationEvidence, ProcessError> {
     verify_process_identity(expected)?;
     if expected.process_id == unsafe_sys::current_process_id()
         || expected.parent_process_id != unsafe_sys::current_process_id()
@@ -457,6 +842,22 @@ pub fn terminate_process_group_and_reap(
     signal_group(expected.process_group_id, unsafe_sys::SIGTERM)?;
     let deadline = std::time::Instant::now() + TERMINATION_GRACE;
     while std::time::Instant::now() < deadline {
+        if unsafe_sys::child_exited_without_reaping(expected.process_id)?
+            && !process_group_has_other_members(expected.process_group_id, expected.process_id)?
+        {
+            reap_before_deadline(
+                expected.process_id,
+                std::time::Instant::now() + REAP_DEADLINE,
+            )?;
+            require_group_absent_before_deadline(
+                expected.process_group_id,
+                std::time::Instant::now() + REAP_DEADLINE,
+            )?;
+            return Ok(TerminationEvidence {
+                trigger,
+                outcome: TerminationOutcome::Terminated,
+            });
+        }
         thread::sleep(Duration::from_millis(5));
     }
 
@@ -464,20 +865,18 @@ pub fn terminate_process_group_and_reap(
     // unreaped during the grace period anchors both PID and process-group number, so escalation
     // cannot target a reused group if the leader exits before one of its descendants.
     signal_group_if_present(expected.process_group_id, unsafe_sys::SIGKILL)?;
-    loop {
-        match wait_for_child(expected.process_id, false)? {
-            ChildWait::Reaped => break,
-            ChildWait::Running => thread::yield_now(),
-        }
-    }
-    let absence_deadline = std::time::Instant::now() + TERMINATION_GRACE;
-    while unsafe_sys::process_group_exists(expected.process_group_id)? {
-        if std::time::Instant::now() >= absence_deadline {
-            return Err(io::Error::other("isolated process group survived SIGKILL").into());
-        }
-        thread::sleep(Duration::from_millis(5));
-    }
-    Ok(TerminationOutcome::Killed)
+    reap_before_deadline(
+        expected.process_id,
+        std::time::Instant::now() + REAP_DEADLINE,
+    )?;
+    require_group_absent_before_deadline(
+        expected.process_group_id,
+        std::time::Instant::now() + REAP_DEADLINE,
+    )?;
+    Ok(TerminationEvidence {
+        trigger,
+        outcome: TerminationOutcome::Killed,
+    })
 }
 
 #[cfg(unix)]
@@ -489,7 +888,7 @@ pub fn terminate_process_group_and_reap(
 pub fn cleanup_on_control_eof<R: Read>(
     mut control: R,
     expected: ProcessIdentity,
-) -> Result<TerminationOutcome, ProcessError> {
+) -> Result<TerminationEvidence, ProcessError> {
     let mut buffer = [0_u8; 256];
     loop {
         match control.read(&mut buffer) {
@@ -514,11 +913,20 @@ pub fn observe_peer(stream: &UnixStream) -> Result<PeerIdentity, ProcessError> {
 
     let (effective_user_id, effective_group_id, process_id, audit_token) =
         unsafe_sys::peer_credentials(stream.as_raw_fd())?;
+    let process_id_version = peer_process_id_version(
+        audit_token,
+        effective_user_id,
+        effective_group_id,
+        process_id,
+    )?;
+    let process = observe_process(process_id)?;
+    verify_peer_generation(audit_token)?;
     Ok(PeerIdentity {
         effective_user_id,
         effective_group_id,
-        process: observe_process(process_id)?,
+        process,
         audit_token,
+        process_id_version,
     })
 }
 
@@ -602,6 +1010,174 @@ fn wait_for_child(process_id: i32, nonblocking: bool) -> Result<ChildWait, Proce
         }
         return Err(error.into());
     }
+}
+
+#[cfg(unix)]
+fn reap_before_deadline(process_id: i32, deadline: std::time::Instant) -> Result<(), ProcessError> {
+    reap_with_deadline(deadline, || wait_for_child(process_id, true))
+}
+
+#[cfg(unix)]
+fn reap_with_deadline<F>(deadline: std::time::Instant, mut poll: F) -> Result<(), ProcessError>
+where
+    F: FnMut() -> Result<ChildWait, ProcessError>,
+{
+    loop {
+        match poll()? {
+            ChildWait::Reaped => return Ok(()),
+            ChildWait::Running if std::time::Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            ChildWait::Running => return Err(ProcessError::ReapDeadlineExceeded),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn require_group_absent_before_deadline(
+    process_group_id: i32,
+    deadline: std::time::Instant,
+) -> Result<(), ProcessError> {
+    while unsafe_sys::process_group_exists(process_group_id)? {
+        if std::time::Instant::now() >= deadline {
+            return Err(ProcessError::ProcessGroupSurvivedTermination);
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn process_group_has_other_members(
+    process_group_id: i32,
+    leader_process_id: i32,
+) -> Result<bool, ProcessError> {
+    Ok(unsafe_sys::process_group_members(process_group_id)?
+        .into_iter()
+        .any(|process_id| process_id != leader_process_id))
+}
+
+#[cfg(target_os = "linux")]
+fn process_group_has_other_members(
+    process_group_id: i32,
+    leader_process_id: i32,
+) -> Result<bool, ProcessError> {
+    for entry in std::fs::read_dir("/proc")? {
+        let entry = entry?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Ok(process_id) = name.parse::<i32>() else {
+            continue;
+        };
+        if process_id == leader_process_id {
+            continue;
+        }
+        match process_identity_parts(process_id) {
+            Ok((_, _, candidate_group_id, _)) if candidate_group_id == process_group_id => {
+                return Ok(true);
+            }
+            Ok(_) => {}
+            Err(ProcessError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_group_has_other_members(
+    _process_group_id: i32,
+    _leader_process_id: i32,
+) -> Result<bool, ProcessError> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "process-group membership inspection is unavailable on this platform",
+    )
+    .into())
+}
+
+#[cfg(target_os = "macos")]
+/// Validates the stable fields carried by a Darwin kernel audit token.
+///
+/// # Errors
+///
+/// Returns [`ProcessError::AuditTokenMismatch`] when any field differs or the PID generation is
+/// zero.
+pub fn validate_darwin_audit_token_fields(
+    audit_token: [u32; 8],
+    effective_user_id: u32,
+    effective_group_id: u32,
+    process_id: i32,
+) -> Result<u32, ProcessError> {
+    let fields = unsafe_sys::darwin_audit_token_fields(audit_token);
+    if fields.effective_user_id != effective_user_id
+        || fields.effective_group_id != effective_group_id
+        || fields.process_id != process_id
+        || fields.process_id_version == 0
+    {
+        return Err(ProcessError::AuditTokenMismatch);
+    }
+    Ok(fields.process_id_version)
+}
+
+#[cfg(target_os = "macos")]
+/// Requires a Darwin audit token to still name its live, exact PID generation.
+///
+/// # Errors
+///
+/// Returns [`ProcessError::AuditTokenMismatch`] when the generation no longer exists.
+pub fn validate_darwin_peer_generation(audit_token: [u32; 8]) -> Result<(), ProcessError> {
+    unsafe_sys::validate_live_darwin_audit_token(audit_token)
+        .map_err(|_| ProcessError::AuditTokenMismatch)
+}
+
+#[cfg(target_os = "macos")]
+fn peer_process_id_version(
+    audit_token: Option<[u32; 8]>,
+    effective_user_id: u32,
+    effective_group_id: u32,
+    process_id: i32,
+) -> Result<Option<u32>, ProcessError> {
+    let audit_token = audit_token.ok_or(ProcessError::AuditTokenMismatch)?;
+    validate_darwin_peer_generation(audit_token)?;
+    validate_darwin_audit_token_fields(
+        audit_token,
+        effective_user_id,
+        effective_group_id,
+        process_id,
+    )
+    .map(Some)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn peer_process_id_version(
+    audit_token: Option<[u32; 8]>,
+    _effective_user_id: u32,
+    _effective_group_id: u32,
+    _process_id: i32,
+) -> Result<Option<u32>, ProcessError> {
+    if audit_token.is_some() {
+        return Err(ProcessError::AuditTokenMismatch);
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn verify_peer_generation(audit_token: Option<[u32; 8]>) -> Result<(), ProcessError> {
+    validate_darwin_peer_generation(audit_token.ok_or(ProcessError::AuditTokenMismatch)?)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn verify_peer_generation(audit_token: Option<[u32; 8]>) -> Result<(), ProcessError> {
+    if audit_token.is_some() {
+        return Err(ProcessError::AuditTokenMismatch);
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -717,17 +1293,29 @@ pub fn read_lf_frame<R: BufRead>(reader: &mut R) -> Result<Option<Vec<u8>>, Fram
 pub fn run_portal(config: &PortalConfig) -> Result<(), PortalRunError> {
     let stream = UnixStream::connect(&config.socket_path)?;
     let request_stream = stream.try_clone()?;
-    let (request_result_sender, request_result_receiver) = mpsc::sync_channel(1);
+    let request_failure = Arc::new(Mutex::new(None));
+    let request_thread_failure = Arc::clone(&request_failure);
     thread::spawn(move || {
-        let result = relay_requests(io::stdin(), request_stream);
-        let _ = request_result_sender.send(result);
+        if let Err(error) = relay_requests(io::stdin(), &request_stream) {
+            // Publish the request failure before waking the response relay with socket shutdown.
+            // That ordering makes malformed-stdin failure deterministic rather than scheduler-
+            // dependent.
+            if let Ok(mut failure) = request_thread_failure.lock() {
+                *failure = Some(error);
+            }
+            let _ = request_stream.shutdown(std::net::Shutdown::Both);
+        }
     });
 
-    relay_responses(stream, io::stdout())?;
-    match request_result_receiver.try_recv() {
-        Ok(result) => result,
-        Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => Ok(()),
+    let response_result = relay_responses(stream, io::stdout());
+    let request_result = request_failure
+        .lock()
+        .map_err(|_| PortalRunError::Io(io::Error::other("request relay state poisoned")))?
+        .take();
+    if let Some(error) = request_result {
+        return Err(error);
     }
+    response_result
 }
 
 #[cfg(not(unix))]
@@ -744,21 +1332,15 @@ pub fn run_portal(_config: &PortalConfig) -> Result<(), PortalRunError> {
 }
 
 #[cfg(unix)]
-fn relay_requests<R: Read>(input: R, mut stream: UnixStream) -> Result<(), PortalRunError> {
+fn relay_requests<R: Read>(input: R, mut stream: &UnixStream) -> Result<(), PortalRunError> {
     let mut reader = BufReader::new(input);
     loop {
         let frame = match read_lf_frame(&mut reader) {
             Ok(Some(frame)) => frame,
             Ok(None) => break,
-            Err(error) => {
-                let _ = stream.shutdown(std::net::Shutdown::Both);
-                return Err(error.into());
-            }
+            Err(error) => return Err(error.into()),
         };
-        if let Err(error) = stream.write_all(&frame) {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-            return Err(error.into());
-        }
+        stream.write_all(&frame)?;
     }
     stream.shutdown(std::net::Shutdown::Write)?;
     Ok(())
@@ -848,7 +1430,10 @@ fn validate_contract_locator(value: &str) -> Result<(), SupervisorError> {
 
 #[allow(unsafe_code)]
 mod unsafe_sys {
+    use std::ffi::CStr;
+    use std::fs::File;
     use std::io;
+    use std::os::fd::FromRawFd;
     use std::os::raw::{c_int, c_uint};
 
     pub const BAD_FILE_DESCRIPTOR: c_int = 9;
@@ -858,17 +1443,233 @@ mod unsafe_sys {
     pub const OPERATION_NOT_PERMITTED: c_int = 1;
     pub const SIGKILL: c_int = 9;
     pub const SIGTERM: c_int = 15;
+    pub const FILE_TYPE_MASK: u32 = 0o170_000;
+    pub const REGULAR_FILE_TYPE: u32 = 0o100_000;
+    pub const SOCKET_FILE_TYPE: u32 = 0o140_000;
     const F_GETFD: c_int = 1;
     const F_SETFD: c_int = 2;
     const WNOHANG: c_int = 1;
 
+    #[repr(C, align(8))]
+    struct SignalInfo([u8; 128]);
+
+    #[cfg(target_os = "macos")]
+    const OPEN_CLOSE_ON_EXEC: c_int = 0x0100_0000;
+    #[cfg(target_os = "macos")]
+    const OPEN_DIRECTORY: c_int = 0x0010_0000;
+    #[cfg(target_os = "macos")]
+    const OPEN_NO_FOLLOW: c_int = 0x0000_0100;
+    #[cfg(target_os = "macos")]
+    const OPEN_NONBLOCK: c_int = 0x0000_0004;
+    #[cfg(target_os = "macos")]
+    const AT_SYMLINK_NO_FOLLOW: c_int = 0x0020;
+
+    #[cfg(target_os = "linux")]
+    const OPEN_CLOSE_ON_EXEC: c_int = 0x0008_0000;
+    #[cfg(target_os = "linux")]
+    const OPEN_DIRECTORY: c_int = 0x0001_0000;
+    #[cfg(target_os = "linux")]
+    const OPEN_NO_FOLLOW: c_int = 0x0002_0000;
+    #[cfg(target_os = "linux")]
+    const OPEN_NONBLOCK: c_int = 0x0000_0800;
+    #[cfg(target_os = "linux")]
+    const AT_SYMLINK_NO_FOLLOW: c_int = 0x0100;
+
+    #[cfg(target_os = "macos")]
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct PlatformTimespec {
+        seconds: i64,
+        nanoseconds: i64,
+    }
+
+    #[cfg(target_os = "macos")]
+    #[repr(C)]
+    struct PlatformStat {
+        device: i32,
+        mode: u16,
+        hard_links: u16,
+        inode: u64,
+        user_id: u32,
+        group_id: u32,
+        special_device: i32,
+        access_time: PlatformTimespec,
+        modification_time: PlatformTimespec,
+        change_time: PlatformTimespec,
+        birth_time: PlatformTimespec,
+        size: i64,
+        blocks: i64,
+        block_size: i32,
+        flags: u32,
+        generation: u32,
+        spare: i32,
+        quad_spare: [i64; 2],
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[repr(C)]
+    struct PlatformStat {
+        device: u64,
+        inode: u64,
+        hard_links: u64,
+        mode: u32,
+        user_id: u32,
+        group_id: u32,
+        padding: i32,
+        special_device: u64,
+        size: i64,
+        block_size: i64,
+        blocks: i64,
+        access_seconds: i64,
+        access_nanoseconds: i64,
+        modification_seconds: i64,
+        modification_nanoseconds: i64,
+        change_seconds: i64,
+        change_nanoseconds: i64,
+        reserved: [i64; 3],
+    }
+
+    #[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
+    #[repr(C)]
+    struct PlatformStat {
+        device: u64,
+        inode: u64,
+        mode: u32,
+        hard_links: u32,
+        user_id: u32,
+        group_id: u32,
+        special_device: u64,
+        padding: u64,
+        size: i64,
+        block_size: i32,
+        padding_two: i32,
+        blocks: i64,
+        access_seconds: i64,
+        access_nanoseconds: u64,
+        modification_seconds: i64,
+        modification_nanoseconds: u64,
+        change_seconds: i64,
+        change_nanoseconds: u64,
+        unused: [u32; 2],
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct EntryStatus {
+        pub device: u64,
+        pub inode: u64,
+        pub mode: u32,
+        pub user_id: u32,
+    }
+
     unsafe extern "C" {
         fn fcntl(descriptor: c_int, command: c_int, ...) -> c_int;
+        fn fstatat(
+            directory_descriptor: c_int,
+            path: *const std::os::raw::c_char,
+            status: *mut PlatformStat,
+            flags: c_int,
+        ) -> c_int;
         fn geteuid() -> c_uint;
         fn getpid() -> c_int;
         fn getsid(process_id: c_int) -> c_int;
         fn kill(process_id: c_int, signal: c_int) -> c_int;
+        fn open(path: *const std::os::raw::c_char, flags: c_int, ...) -> c_int;
+        fn openat(
+            directory_descriptor: c_int,
+            path: *const std::os::raw::c_char,
+            flags: c_int,
+            ...
+        ) -> c_int;
+        fn waitid(id_type: c_int, id: c_uint, info: *mut SignalInfo, options: c_int) -> c_int;
         fn waitpid(process_id: c_int, status: *mut c_int, options: c_int) -> c_int;
+        fn unlinkat(
+            directory_descriptor: c_int,
+            path: *const std::os::raw::c_char,
+            flags: c_int,
+        ) -> c_int;
+    }
+
+    fn file_from_descriptor(descriptor: c_int) -> io::Result<File> {
+        if descriptor == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: descriptor is a fresh owned descriptor returned by open/openat.
+        Ok(unsafe { File::from_raw_fd(descriptor) })
+    }
+
+    pub fn open_root_directory() -> io::Result<File> {
+        let root = c"/";
+        // SAFETY: root is a permanent NUL-terminated path and no mode argument is needed without
+        // O_CREAT.
+        file_from_descriptor(unsafe {
+            open(
+                root.as_ptr(),
+                OPEN_DIRECTORY | OPEN_NO_FOLLOW | OPEN_CLOSE_ON_EXEC,
+            )
+        })
+    }
+
+    pub fn open_directory_at(directory_descriptor: c_int, name: &CStr) -> io::Result<File> {
+        // SAFETY: name is NUL-terminated, directory_descriptor remains borrowed for the call, and
+        // no mode argument is needed without O_CREAT.
+        file_from_descriptor(unsafe {
+            openat(
+                directory_descriptor,
+                name.as_ptr(),
+                OPEN_DIRECTORY | OPEN_NO_FOLLOW | OPEN_CLOSE_ON_EXEC,
+            )
+        })
+    }
+
+    pub fn open_regular_entry_at(directory_descriptor: c_int, name: &CStr) -> io::Result<File> {
+        // SAFETY: name is NUL-terminated, directory_descriptor remains borrowed for the call, and
+        // no mode argument is needed without O_CREAT. O_NONBLOCK prevents a raced FIFO from
+        // blocking before its fstat/type rejection.
+        file_from_descriptor(unsafe {
+            openat(
+                directory_descriptor,
+                name.as_ptr(),
+                OPEN_NO_FOLLOW | OPEN_CLOSE_ON_EXEC | OPEN_NONBLOCK,
+            )
+        })
+    }
+
+    pub fn entry_status_at(directory_descriptor: c_int, name: &CStr) -> io::Result<EntryStatus> {
+        let mut status = std::mem::MaybeUninit::<PlatformStat>::zeroed();
+        // SAFETY: status is correctly sized/aligned platform storage, name is NUL-terminated, and
+        // AT_SYMLINK_NOFOLLOW prevents the terminal component from being followed.
+        if unsafe {
+            fstatat(
+                directory_descriptor,
+                name.as_ptr(),
+                status.as_mut_ptr(),
+                AT_SYMLINK_NO_FOLLOW,
+            )
+        } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: successful fstatat initialized the complete platform stat structure.
+        let status = unsafe { status.assume_init() };
+        #[cfg(target_os = "macos")]
+        let device = u64::from(status.device.cast_unsigned());
+        #[cfg(target_os = "linux")]
+        let device = status.device;
+        Ok(EntryStatus {
+            device,
+            inode: status.inode,
+            mode: u32::from(status.mode),
+            user_id: status.user_id,
+        })
+    }
+
+    pub fn unlink_entry_at(directory_descriptor: c_int, name: &CStr) -> io::Result<()> {
+        // SAFETY: name is NUL-terminated and directory_descriptor stays open for the call.
+        if unsafe { unlinkat(directory_descriptor, name.as_ptr(), 0) } == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn descriptor_flags(descriptor: c_int) -> c_int {
@@ -913,10 +1714,13 @@ mod unsafe_sys {
             return Ok(true);
         }
         let error = io::Error::last_os_error();
-        if error.raw_os_error() == Some(NO_SUCH_PROCESS) {
-            Ok(false)
-        } else {
-            Err(error)
+        match error.raw_os_error() {
+            Some(NO_SUCH_PROCESS) => Ok(false),
+            // Darwin returns EPERM while a signalled group has only unreaped zombie members.
+            // Treat that as present so the bounded absence poll can wait; persistence through the
+            // deadline remains a hard failure rather than an access-denied success.
+            Some(OPERATION_NOT_PERMITTED) => Ok(true),
+            _ => Err(error),
         }
     }
 
@@ -925,6 +1729,48 @@ mod unsafe_sys {
         let options = if nonblocking { WNOHANG } else { 0 };
         // SAFETY: status points to valid writable storage for waitpid's duration.
         unsafe { waitpid(process_id, &raw mut status, options) }
+    }
+
+    pub fn child_exited_without_reaping(process_id: i32) -> io::Result<bool> {
+        const P_PID: c_int = 1;
+        const WEXITED: c_int = 4;
+        #[cfg(target_os = "macos")]
+        const WNOWAIT: c_int = 0x20;
+        #[cfg(not(target_os = "macos"))]
+        const WNOWAIT: c_int = 0x0100_0000;
+
+        let process_id_unsigned = u32::try_from(process_id)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "negative child PID"))?;
+        loop {
+            let mut info = SignalInfo([0; 128]);
+            // SAFETY: info is an aligned, zeroed buffer at least as large as siginfo_t on the
+            // supported Darwin and Linux targets. WNOWAIT prevents this observation from reaping.
+            let result = unsafe {
+                waitid(
+                    P_PID,
+                    process_id_unsigned,
+                    &raw mut info,
+                    WEXITED | WNOHANG | WNOWAIT,
+                )
+            };
+            if result == 0 {
+                #[cfg(target_os = "macos")]
+                const PID_OFFSET: usize = 12;
+                #[cfg(not(target_os = "macos"))]
+                const PID_OFFSET: usize = 16;
+                // SAFETY: PID_OFFSET names the aligned si_pid field within the platform siginfo_t
+                // prefix, and SignalInfo is initialized before the read.
+                let observed = unsafe {
+                    std::ptr::read_unaligned(info.0.as_ptr().add(PID_OFFSET).cast::<c_int>())
+                };
+                return Ok(observed == process_id);
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(INTERRUPTED) {
+                continue;
+            }
+            return Err(error);
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -941,6 +1787,86 @@ mod unsafe_sys {
         let process_id = socket_option::<c_int>(descriptor, SOL_LOCAL, LOCAL_PEERPID)?;
         let audit_token = socket_option::<[u32; 8]>(descriptor, SOL_LOCAL, LOCAL_PEERTOKEN)?;
         Ok((user_id, group_id, process_id, Some(audit_token)))
+    }
+
+    #[cfg(target_os = "macos")]
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct AuditToken {
+        values: [u32; 8],
+    }
+
+    #[cfg(target_os = "macos")]
+    #[derive(Debug, Clone, Copy)]
+    pub struct DarwinAuditTokenFields {
+        pub effective_user_id: u32,
+        pub effective_group_id: u32,
+        pub process_id: i32,
+        pub process_id_version: u32,
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn darwin_audit_token_fields(token: [u32; 8]) -> DarwinAuditTokenFields {
+        let token = AuditToken { values: token };
+        // SAFETY: libbsm consumes the complete by-value audit token and returns scalar fields.
+        DarwinAuditTokenFields {
+            effective_user_id: unsafe { audit_token_to_euid(token) },
+            effective_group_id: unsafe { audit_token_to_egid(token) },
+            process_id: unsafe { audit_token_to_pid(token) },
+            process_id_version: unsafe { audit_token_to_pidversion(token) }.cast_unsigned(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn validate_live_darwin_audit_token(token: [u32; 8]) -> io::Result<()> {
+        let mut token = AuditToken { values: token };
+        let mut path = [0_u8; 4096];
+        // SAFETY: token and path point to live, correctly sized storage. libproc validates the
+        // audit-token PID generation before returning the executable path.
+        let length = unsafe {
+            proc_pidpath_audittoken(
+                &raw mut token,
+                path.as_mut_ptr().cast(),
+                u32::try_from(path.len()).expect("fixed path buffer fits u32"),
+            )
+        };
+        if length <= 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn process_group_members(process_group_id: i32) -> io::Result<Vec<i32>> {
+        let mut process_ids = vec![0_i32; 4096];
+        let byte_capacity = c_int::try_from(
+            process_ids
+                .len()
+                .checked_mul(std::mem::size_of::<i32>())
+                .ok_or_else(|| io::Error::other("process group buffer overflow"))?,
+        )
+        .map_err(|_| io::Error::other("process group buffer is too large"))?;
+        // SAFETY: process_ids is a writable byte_capacity-sized PID array for libproc.
+        let count = unsafe {
+            proc_listpgrppids(
+                process_group_id,
+                process_ids.as_mut_ptr().cast(),
+                byte_capacity,
+            )
+        };
+        if count < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let count =
+            usize::try_from(count).map_err(|_| io::Error::other("negative process group count"))?;
+        if count >= process_ids.len() {
+            return Err(io::Error::other(
+                "process group exceeds bounded inspection capacity",
+            ));
+        }
+        process_ids.truncate(count);
+        Ok(process_ids)
     }
 
     #[cfg(target_os = "linux")]
@@ -1045,6 +1971,25 @@ mod unsafe_sys {
             buffer: *mut std::os::raw::c_void,
             buffer_size: c_int,
         ) -> c_int;
+        fn proc_listpgrppids(
+            process_group_id: c_int,
+            buffer: *mut std::os::raw::c_void,
+            buffer_size: c_int,
+        ) -> c_int;
+        fn proc_pidpath_audittoken(
+            audit_token: *mut AuditToken,
+            buffer: *mut std::os::raw::c_void,
+            buffer_size: u32,
+        ) -> c_int;
+    }
+
+    #[cfg(target_os = "macos")]
+    #[link(name = "bsm")]
+    unsafe extern "C" {
+        fn audit_token_to_euid(audit_token: AuditToken) -> u32;
+        fn audit_token_to_egid(audit_token: AuditToken) -> u32;
+        fn audit_token_to_pid(audit_token: AuditToken) -> c_int;
+        fn audit_token_to_pidversion(audit_token: AuditToken) -> c_int;
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1092,5 +2037,41 @@ mod unsafe_sys {
             start_seconds: info.start_seconds,
             start_microseconds: info.start_microseconds,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_matches_the_standard_empty_message_vector() {
+        assert_eq!(
+            sha256_bytes(b""),
+            [
+                0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+                0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+                0x78, 0x52, 0xb8, 0x55,
+            ]
+        );
+        assert_eq!(
+            sha256_bytes(b"abc"),
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reap_polling_stops_at_the_fixed_deadline_without_a_blocking_wait() {
+        let started = std::time::Instant::now();
+        let result = reap_with_deadline(started + Duration::from_millis(15), || {
+            Ok(ChildWait::Running)
+        });
+        assert!(matches!(result, Err(ProcessError::ReapDeadlineExceeded)));
+        assert!(started.elapsed() < Duration::from_millis(100));
     }
 }

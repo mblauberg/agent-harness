@@ -29,31 +29,68 @@ fn removes_only_the_exact_preinspected_entry_identity() {
         inode: metadata.ino(),
     };
     fs::write(directory.join("capsule"), b"first").expect("capsule");
-    let (entry_identity, entry_kind) =
+    let entry =
         inspect_custody_entry(&directory, directory_identity, "capsule").expect("inspect capsule");
-    remove_custody_entry(
-        &directory,
-        directory_identity,
-        "capsule",
-        entry_identity,
-        entry_kind,
-    )
-    .expect("remove exact capsule");
+    remove_custody_entry(&directory, directory_identity, "capsule", entry)
+        .expect("remove exact capsule");
     assert!(!directory.join("capsule").exists());
 
     fs::write(directory.join("capsule"), b"replacement").expect("replacement");
-    assert!(
-        remove_custody_entry(
-            &directory,
-            directory_identity,
-            "capsule",
-            entry_identity,
-            entry_kind,
-        )
-        .is_err()
-    );
+    assert!(remove_custody_entry(&directory, directory_identity, "capsule", entry,).is_err());
     assert!(directory.join("capsule").exists());
     fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[test]
+fn rejects_same_inode_capsule_content_drift_before_unlink() {
+    let directory = private_directory();
+    let metadata = fs::metadata(&directory).expect("directory metadata");
+    let directory_identity = FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    };
+    let capsule = directory.join("capsule");
+    fs::write(&capsule, b"sealed-first").expect("initial capsule");
+    let expected =
+        inspect_custody_entry(&directory, directory_identity, "capsule").expect("inspect capsule");
+
+    fs::write(&capsule, b"mutated-data").expect("mutate same inode");
+    let metadata_after = fs::metadata(&capsule).expect("mutated metadata");
+    assert_eq!(
+        expected.identity,
+        FileIdentity {
+            device: metadata_after.dev(),
+            inode: metadata_after.ino(),
+        },
+        "canary must mutate content without replacing the inode"
+    );
+    assert!(remove_custody_entry(&directory, directory_identity, "capsule", expected,).is_err());
+    assert_eq!(
+        fs::read(&capsule).expect("preserved capsule"),
+        b"mutated-data"
+    );
+    fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[test]
+fn rejects_a_swapped_or_symlinked_custody_directory() {
+    let directory = private_directory();
+    let metadata = fs::metadata(&directory).expect("directory metadata");
+    let directory_identity = FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    };
+    fs::write(directory.join("capsule"), b"sealed").expect("capsule");
+    let expected =
+        inspect_custody_entry(&directory, directory_identity, "capsule").expect("inspect capsule");
+
+    let retained = directory.with_extension("retained");
+    fs::rename(&directory, &retained).expect("retain original directory");
+    std::os::unix::fs::symlink(&retained, &directory).expect("swap path with symlink");
+    assert!(remove_custody_entry(&directory, directory_identity, "capsule", expected,).is_err());
+    assert!(retained.join("capsule").exists());
+    fs::remove_file(&directory).expect("remove swap symlink");
+    fs::remove_dir_all(&retained).expect("cleanup retained directory");
 }
 
 #[test]
@@ -85,9 +122,10 @@ fn inspects_only_the_exact_private_directory_and_non_symlink_socket_or_file() {
     let socket_path = directory.join("portal.sock");
     let listener = UnixListener::bind(&socket_path).expect("socket");
 
-    let (_, kind) =
+    let entry =
         inspect_custody_entry(&directory, identity, "portal.sock").expect("exact socket custody");
-    assert_eq!(kind, CustodyEntryKind::Socket);
+    assert_eq!(entry.kind, CustodyEntryKind::Socket);
+    assert_ne!(entry.digest, [0; 32]);
     assert!(
         inspect_custody_entry(
             &directory,
