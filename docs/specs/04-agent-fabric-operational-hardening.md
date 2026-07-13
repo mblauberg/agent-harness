@@ -4338,9 +4338,12 @@ adapter_provider_smoke_subjects(
 
 adapter_effective_configurations(
   configuration_id, configuration_revision,
-  adapter_id, adapter_contract_digest, executable_identity_digest,
+  adapter_id TEXT NOT NULL, adapter_contract_digest, executable_identity_digest,
   capability_snapshot_generation, capability_snapshot_digest,
-  capability_body_digest, subject_kind, subject_id, subject_ref_digest,
+  capability_body_digest,
+  subject_kind TEXT NOT NULL CHECK(subject_kind IN
+    ('activation','provider-smoke','provider-action')),
+  subject_ref_digest TEXT NOT NULL,
   subject_activation_id, subject_activation_revision, subject_smoke_id,
   subject_action_adapter_id, subject_action_id,
   activation_configuration_id, activation_configuration_revision,
@@ -4351,7 +4354,6 @@ adapter_effective_configurations(
   configuration_json, configuration_digest, created_at,
   PRIMARY KEY(configuration_id, configuration_revision),
   UNIQUE(configuration_id, configuration_revision, configuration_digest),
-  UNIQUE(adapter_id, subject_kind, subject_id, subject_ref_digest),
   UNIQUE(evidence_id, evidence_revision),
   UNIQUE(configuration_digest),
   FOREIGN KEY(evidence_id, evidence_revision)
@@ -4375,8 +4377,31 @@ adapter_effective_configurations(
       activation_configuration_revision,
       activation_configuration_digest)
     REFERENCES adapter_effective_configurations(
-      configuration_id, configuration_revision, configuration_digest)
+      configuration_id, configuration_revision, configuration_digest),
+  CHECK(
+    (subject_kind='activation' AND subject_activation_id IS NOT NULL AND
+      subject_activation_revision IS NOT NULL AND subject_smoke_id IS NULL AND
+      subject_action_adapter_id IS NULL AND subject_action_id IS NULL) OR
+    (subject_kind='provider-smoke' AND subject_activation_id IS NULL AND
+      subject_activation_revision IS NULL AND subject_smoke_id IS NOT NULL AND
+      subject_action_adapter_id IS NULL AND subject_action_id IS NULL) OR
+    (subject_kind='provider-action' AND subject_activation_id IS NULL AND
+      subject_activation_revision IS NULL AND subject_smoke_id IS NULL AND
+      subject_action_adapter_id IS NOT NULL AND
+      subject_action_adapter_id=adapter_id AND subject_action_id IS NOT NULL))
 )
+
+CREATE UNIQUE INDEX one_effective_configuration_per_activation_subject
+  ON adapter_effective_configurations(
+    adapter_id, subject_activation_id, subject_activation_revision)
+  WHERE subject_kind='activation';
+CREATE UNIQUE INDEX one_effective_configuration_per_smoke_subject
+  ON adapter_effective_configurations(adapter_id, subject_smoke_id)
+  WHERE subject_kind='provider-smoke';
+CREATE UNIQUE INDEX one_effective_configuration_per_provider_action
+  ON adapter_effective_configurations(
+    subject_action_adapter_id, subject_action_id)
+  WHERE subject_kind='provider-action';
 ```
 
 Each discovery row composite-foreign-keys the exact existing
@@ -4395,8 +4420,14 @@ subject/config row, so the later route-to-configuration FK creates no cycle.
 Effective-configuration insert validates the closed Spec 03 object and its
 digest. A closed discriminator CHECK requires exactly the activation columns,
 smoke column, or provider-action pair columns for its `subject_kind`; every
-other subject column is null. The selected columns reproduce `subjectRef` and
-`subject_ref_digest` and must satisfy the displayed foreign key. The nullable
+other subject column is null. Adapter ID, subject kind and subject-ref digest
+are nonnull, and the provider-action arm separately proves its action-adapter
+column nonnull before equality, so SQLite's NULL CHECK semantics cannot bypass
+an arm or its partial index. The selected columns reproduce `subjectRef` and
+`subject_ref_digest` and must satisfy the displayed foreign key. The three
+partial unique indexes make the selected ref—not a caller-selected value—the
+one-to-one subject identity. A different configuration ID, revision or digest
+cannot create a second effective configuration for the same subject. The nullable
 activation-configuration triple is all null only for an activation
 subject; smoke/action subjects require a same-adapter activation parent and
 cannot update it. Subject arm/ref digest, executable, snapshot instance/body,
@@ -4729,6 +4760,7 @@ Verification adds schema-generation parity; discovery manifest/artifact digest
 equality and exact registration-revision foreign keys; capability current-
 pointer, expiry and same-body refresh races;
 effective-configuration subject/activation lineage; raw/normalised effort and
+duplicate-subject rejection by all three partial unique indexes;
 native-mode round-trip; actual review-route proof and every observed route-
 field mismatch; exact cut-custody ref joins; point-of-use body/
 permission/surface drift before effect; ambiguous-effect non-rerouting; honest

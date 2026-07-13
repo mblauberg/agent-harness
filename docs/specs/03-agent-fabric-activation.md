@@ -106,7 +106,6 @@ adapterEffectiveConfigurationV1:
   executableIdentityDigest: sha256-prefixed-digest
   capabilitySnapshotRef: capabilitySnapshotRefV1
   subjectKind: activation | provider-smoke | provider-action
-  subjectId: stable-subject-id
   subjectRef:
     oneOf:
       - activationId: exact-activation-id
@@ -136,8 +135,12 @@ Subject kind selects exactly one matching ref arm. Activation requires null
 `activationConfigurationRef`; smoke/action require the exact current activation
 configuration for the same adapter/contract/executable and cannot cite another
 subject. `subjectRefDigest` is SHA-256 of RFC 8785 JCS of the selected closed
-subject-ref arm. The tuple `(subjectKind,subjectId,subjectRefDigest)` is globally unique per
-adapter, and `(configurationId,configurationRevision)` is immutable and unique.
+subject-ref arm. `subjectKind` plus that exact selected ref is the sole subject
+identity; there is no caller-authored parallel ID. Per adapter, one activation
+ID/revision or smoke ID owns one effective configuration, and one canonical
+provider action pair owns one effective configuration. The database enforces
+those discriminator-specific identities independently of the digest.
+`(configurationId,configurationRevision)` is immutable and unique.
 `configurationDigest` is SHA-256 of RFC 8785 JCS over the complete object with
 only that field omitted. Capability instance/body, requested/effective,
 permission and discovery-surface identities equality-bind the shared route and
@@ -161,7 +164,8 @@ ineligible for a gate requiring that attestation.
 Conformance adds positive and negative fixtures for snapshot expiry, binary or
 contract drift, raw-effort/native-mode round-trip, ignored configuration,
 provider substitution, subject-arm/activation-lineage crossing, permission-
-profile mismatch, honest unknown actual identity and point-of-use body-stable
+profile mismatch, duplicate activation/smoke/action subject refs under different
+configuration IDs/digests, honest unknown actual identity and point-of-use body-stable
 capability revalidation. Subscription/login changes, OpenCode activation,
 paid-region selection and global model/effort preference changes remain
 separate human gates.
