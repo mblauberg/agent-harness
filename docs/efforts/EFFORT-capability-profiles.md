@@ -1,9 +1,10 @@
 # EFFORT: capability-compiled execution authority
 
 Updated: 13 July 2026
-Status: active — Lane B implemented and verified; Lane C characterisation
-goldens integrated; V2 cutover blocked on Lane A integration and a
-non-overlapping runtime baseline
+Status: active. Lane B implemented and locally verified; publication stopped
+after `main` advanced and exposed the already-known Lane D/Rust failures. Lane
+C characterisation goldens are integrated; V2 cutover remains blocked on Lane
+A integration and a non-overlapping runtime baseline.
 
 ## Destination
 
@@ -51,16 +52,32 @@ spec-edit) leg, digest-bound to the ADRs and this map.
     [HANDOFF-2026-07-13-capability-profiles-v2.md](../handoffs/HANDOFF-2026-07-13-capability-profiles-v2.md)
     only after the handoff's A/B/runtime gates pass
 - [ ] Lane D — runtime reconciliation: repair the failing Fabric test families
-  via TDD after Lane B integration. The verified `main@54ca037` baseline
-  includes:
-  - missing `model_routing_evidence` table;
-  - `lifecycle_rotation_custody.action_id` versus `provider_action_id` drift
-    and its unhandled rejections;
-  - `provider_actions` 25-column/24-value insert drift plus foreign-key
-    failures across launch custody, Herdr composition and restart recovery;
-  - MCP operation, schema and registry vocabulary drift;
-  - Claude adapter wrapper-manifest closure drift, revealed after root
-    dependency resolution succeeds.
+  via TDD after Lane B integration. Reproduction on the Lane B rebase over
+  `main@24ceb83` passed 149 Fabric files/1,054 tests and failed 30 files/162
+  tests with 14 unhandled errors. The residual families and direct-cut route
+  are:
+  - the current baseline intentionally removed predecessor
+    `model_routing_evidence`/`cross_family_review_evidence` stores and APIs,
+    while runtime writers, receipt schemas and projectors still use them;
+    remove those predecessor surfaces and project current route/review
+    evidence instead of restoring compatibility tables;
+  - `lifecycle_rotation_custody` is a new custody identity and state machine,
+    not an `action_id` to `provider_action_id` rename; cut the old runtime
+    prepare/replay/unreconciled flow and acceptance probes directly to the
+    current custody contract;
+  - `provider_actions` now requires a canonical
+    `provider_action_pair_preflights` parent. Add one atomic helper and migrate
+    all production action writers; repair positional 24-value fixtures with
+    explicit columns and preflight parents;
+  - the MCP registry is current, but the hand-maintained authority enum lacks
+    14 current operations and several Fabric callers still send predecessor
+    provider-action shapes;
+  - both Claude and Codex checked-in adapter closure manifests are stale after
+    protocol resolution exposed their full generated dependency sets.
+- [ ] Rust CI reconciliation: Linux clippy has platform-specific cfg,
+  conversion and credential-field lints; macOS portal relay has two-second
+  helper deadlines plus one unbounded broker accept. Keep this separate from
+  Lane B's build graph and prove it on both hosted targets.
 - [ ] Step 2 — pure admission extraction into `AuthorityCompiler`
   (read-only behaviour unchanged); starts after Lane C
 - [ ] Step 3 — one-provider write pilot behind the pre-approved adversarial
@@ -111,6 +128,24 @@ gh api --method POST repos/mblauberg/provenant/rulesets \
 }
 JSON
 ```
+
+## Lane B integration checkpoint
+
+- Build commit `6d88713` rebases the reviewed Lane B change on
+  `main@24ceb83`, including Lane C's read-only characterisation goldens.
+- Rebase verification passed clean install, root clean/build, deterministic
+  schema generation/check, all workspace typechecks, the six repository CI
+  policy tests and the unchanged public-release gate. The generated protocol
+  schema is 2,061,826 bytes.
+- The clean-checkout daemon/status proof, Protocol 46 files/785 tests, Herdr
+  10 files/45 tests, Console 20 files/259 tests, audits and 458-test harness
+  gate remain the accepted Lane B evidence. The full Fabric failures above
+  are semantic and unchanged by the workspace migration.
+- The first accepted artifact (`2db4f5a`) was pushed to draft PR
+  [#7](https://github.com/mblauberg/provenant/pull/7). Promotion stopped when
+  remote `main` advanced, invalidating its exact ancestry and acceptance
+  binding. Nothing was merged or released to `main`; the rebased artifact
+  requires fresh review and exact acceptance before promotion resumes.
 
 ## Deferred registry (decided, not scheduled here)
 
