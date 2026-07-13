@@ -1,23 +1,30 @@
 # Agent fabric activation and operations
 
-Status: Base activation implemented; v1.1 capability/effective-route amendment implementation and final human acceptance pending
-Version: 1.1
+Status: Base activation implemented; v1.2 capability/effective-route amendment implementation and final human acceptance pending
+Version: 1.2
 Date: 13 July 2026
 Decision owner: Human maintainer
 Approval: Direct instruction to implement, activate and provider-smoke all listed capabilities, with quota use authorised
 
-Version 1.1 requires every active adapter to publish the shared versioned
+Version 1.2 closes effective-configuration identity, subject lineage and
+permission semantics across activation, smoke and provider actions. It permits
+authorised write-capable generic work while retaining enforced read-only as a
+hard certifying-review requirement. Version 1.1 requires every active adapter to publish the shared versioned
 capability snapshot and effective launch configuration, and makes requested,
 actual or honestly unknown route identity part of activation evidence.
 
 ## Outcome
 
-Promote the coordination-only agent fabric into a safely activated local model-execution fabric for Claude, Codex, Agy, Cursor and Kiro, with Pi ready but unavailable until an open-weight provider/model is installed. Add operator-started human-readable Herdr observation and coordinated seat rotation without weakening authority, disclosure, read-only execution or fail-closed compatibility gates.
+Promote the coordination-only agent fabric into a safely activated local model-execution fabric for Claude, Codex, Agy, Cursor and Kiro, with Pi ready but unavailable until an open-weight provider/model is installed. Add operator-started human-readable Herdr observation and coordinated seat rotation without weakening authority, disclosure, certifying-review/Kiro read-only boundaries or fail-closed compatibility gates.
 
 ## Required behaviour
 
 1. Every activated adapter is bound to verified wrapper closure, upstream executable or package, protocol/schema and model-family constraints.
-2. Provider work uses the admitted absolute working directory and cannot request write tools, edit modes, approval bypasses, extra roots or uncontrolled provider/model substitutions.
+2. Provider work uses the admitted absolute working directory and exact matched
+   permission profile. Generic work may use write tools/edit modes only when its
+   task authority and matched profile explicitly grant them; approval bypasses,
+   extra roots and uncontrolled provider/model substitutions remain forbidden.
+   Certifying review always requires an enforced `read-only` profile.
 3. Malformed, drifted or ambiguous provider responses fail closed before state is accepted.
 4. Kiro uses a real, version-pinned ACP client with bounded framing, capability negotiation, session lifecycle and read-only tool policy.
 5. Activation is staged and reversible. One adapter failure cannot disable coordination or corrupt another adapter's journal.
@@ -69,7 +76,8 @@ An adapter may enter `activeAdapters` only when its current `kind: available`
 capability snapshot
 binds the activated executable/package, wrapper closure, adapter contract,
 host/version, model catalogue, raw effort values, raw native-mode values,
-context boundary claims, orchestration bounds and read-only enforcement. The
+context boundary claims, orchestration bounds and enforceable permission
+source. The
 snapshot source is exactly `runtime-discovery` or
 `version-pinned-conformance`. A conformance fixture cannot be reported as
 runtime discovery. A `source/kind: unavailable` snapshot is persisted negative
@@ -77,29 +85,73 @@ evidence but cannot activate the adapter or admit answer-bearing work. Expiry
 or contract drift removes the adapter from new automatic admission without
 rewriting prior receipts.
 
-Every activation and provider-backed smoke stores one closed
+`safety.enforcedReadOnly` is a capability fact, not a global permission mode.
+`true` is mandatory before the adapter/profile pair can advertise certifying
+review. `false` may activate generic answer-bearing work only when the exact
+permission profile, task authority and launch envelope admit the requested
+writes. `unknown` cannot certify review and cannot satisfy any task that depends
+on enforced read-only. No route gains write authority from activation alone.
+
+Every activation, provider-backed smoke and answer-bearing provider action
+stores one closed
 `adapterEffectiveConfigurationV1` beside the shared snapshot and route lineage:
 
 ```yaml
 adapterEffectiveConfigurationV1:
   schemaVersion: 1
+  configurationId: stable-id
+  configurationRevision: positive-contiguous-integer
   adapterId: exact-adapter-id
   adapterContractDigest: sha256-prefixed-digest
   executableIdentityDigest: sha256-prefixed-digest
-  capabilitySnapshotDigest: sha256-prefixed-digest
+  capabilitySnapshotRef: capabilitySnapshotRefV1
+  subjectKind: activation | provider-smoke | provider-action
+  subjectRef:
+    oneOf:
+      - activationId: exact-activation-id
+        activationRevision: positive-integer
+      - smokeId: exact-smoke-id
+        actionRef: ProviderActionRefV1
+      - actionRef: ProviderActionRefV1
+  subjectRefDigest: sha256-prefixed-digest
+  activationConfigurationRef:
+    oneOf:
+      - null
+      - configurationId: exact-activation-configuration-id
+        configurationRevision: exact-activation-configuration-revision
+        configurationDigest: sha256-prefixed-digest
   requestedConfigurationDigest: sha256-prefixed-digest
   effectiveConfigurationDigest: sha256-prefixed-digest
+  permissionProfileDigest: sha256-prefixed-digest
+  discoverySurfaceRef: discoverySurfaceRefV1
   ignoredOrUnsupportedFields: [exact-field-paths]
   permissionSource: adapter | host | config-overlay | unknown
   observedAt: timestamp
   configurationDigest: sha256-prefixed-digest
 ```
 
-The object is closed; field paths are sorted and unique.
-`configurationDigest` is RFC 8785 JCS over the object with that field omitted.
+The object and each subject arm are closed; field paths are sorted and unique.
+Subject kind selects exactly one matching ref arm. Activation requires null
+`activationConfigurationRef`; smoke/action require the exact current activation
+configuration for the same adapter/contract/executable and cannot cite another
+subject. `subjectRefDigest` is SHA-256 of RFC 8785 JCS of the selected closed
+subject-ref arm. `subjectKind` plus that exact selected ref is the sole subject
+identity; there is no caller-authored parallel ID. Per adapter, one activation
+ID/revision or smoke ID owns one effective configuration, and one canonical
+provider action pair owns one effective configuration. The database enforces
+those discriminator-specific identities independently of the digest.
+`(configurationId,configurationRevision)` is immutable and unique.
+`configurationDigest` is SHA-256 of RFC 8785 JCS over the complete object with
+only that field omitted. Capability instance/body, requested/effective,
+permission and discovery-surface identities equality-bind the shared route and
+launch evidence.
 Host-global settings remain user-owned. Fabric generates only a minimal
 per-run overlay inside existing authority, records every unsupported field and
-does not silently persist global defaults or hooks.
+does not silently persist global defaults or hooks. Smoke/action rows record
+their effective view and never update either the activation row or global host
+configuration. Spec 04 owns the generated schema, immutable persistence,
+registered evidence and cross-row constraints; this specification owns the
+activation/evidence semantics.
 
 Smoke evidence round-trips the exact requested identity and the shared admitted
 identity. Where the provider reports actual host/adapter/provider/family/model/
@@ -111,7 +163,9 @@ ineligible for a gate requiring that attestation.
 
 Conformance adds positive and negative fixtures for snapshot expiry, binary or
 contract drift, raw-effort/native-mode round-trip, ignored configuration,
-provider substitution, honest unknown actual identity and point-of-use
+provider substitution, subject-arm/activation-lineage crossing, permission-
+profile mismatch, duplicate activation/smoke/action subject refs under different
+configuration IDs/digests, honest unknown actual identity and point-of-use body-stable
 capability revalidation. Subscription/login changes, OpenCode activation,
 paid-region selection and global model/effort preference changes remain
 separate human gates.

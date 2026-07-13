@@ -1,12 +1,14 @@
 # Adaptive agent harness lifecycle
 
-Status: Base implementation machine verified; v1.1 route-evidence amendment implementation and human acceptance pending
-Version: 1.1
+Status: Base implementation machine verified; v1.2 route-evidence amendment implementation and human acceptance pending
+Version: 1.2
 Date: 13 July 2026
 Chair: Codex
 Paired design peer: Claude Code, Fable 5 (Opus fallback)
 
-Version 1.1 binds route and topology evaluation references to the neutral
+Version 1.2 registers route-evaluation payloads as artifacts behind conforming
+delivery evidence rows, freezes the evaluated route identity preimage, and uses
+the shared topology-wave record rather than an untyped rationale. Version 1.1 binds route and topology evaluation references to the neutral
 delivery receipt, requires task-local repeated evidence with expiry and an
 explicit baseline/promotion state, and keeps exported aggregates content-free.
 It does not approve a learned or Pareto router.
@@ -531,15 +533,61 @@ extend the neutral delivery evidence contract. They do not authorise a learned
 router, a global model leaderboard or automatic preference mutation.
 
 When a model route or multi-agent topology materially affects an outcome or
-review gate, `RUN.json` includes one or more closed
-`routeEvaluationEvidenceRefV1` records in its `evidence` array. All fields are
-required; nullable values represent unavailable measurements rather than
-omitted truth.
+review gate, the run registers one or more closed
+`routeEvaluationEvidenceV1` JSON artifacts. `RUN.json.artifacts[]` contains the
+ordinary delivery artifact row for each payload. `RUN.json.evidence[]` contains
+only an ordinary base evidence row—never the payload object itself:
 
 ```yaml
-routeEvaluationEvidenceRefV1:
+id: stable-evidence-id
+kind: deterministic
+gate: route-evaluation-contract
+method: adaptive-harness-route-evaluation.v1
+status: pass | fail | unavailable | not_applicable
+artifact_id: exact-RUN-artifact-id-for-route-evaluation-payload
+source_paths: [authority-scoped-input-paths]
+result:
+  exit_code: integer
+  receipt_digest: exact-payload-artifact-digest
+```
+
+The base row retains its existing required field set and validation semantics;
+no route-specific sibling or nested extension is added to `delivery-run`.
+Judgement aggregate rows remain ordinary judgement evidence with their existing
+`model_lineage`. The registered payload carries the route-specific contract.
+All payload fields are required; nullable values represent unavailable
+measurements rather than omitted truth.
+
+```yaml
+evaluatedRouteIdentityV1:
+  schemaVersion: 1
+  hostId: exact-host
+  hostVersion: exact-host-version
+  adapterId: exact-adapter
+  adapterContractDigest: sha256-prefixed-digest
+  endpointProvider: exact-provider
+  family: canonical-family
+  model: exact-model
+  resolvedEffort: resolvedEffortV1
+  normalizedReasoningEffort: none | low | medium | high | xhigh | max | null
+  rawNativeMode: exact-provider-value | null
+  orchestrationMode: single | native-subagents | dynamic-workflow | provider-multi-agent
+  capabilityBodyDigest: sha256-prefixed-digest
+  requestedConfigurationDigest: sha256-prefixed-digest
+  effectiveConfigurationDigest: sha256-prefixed-digest
+  permissionProfileDigest: sha256-prefixed-digest
+  discoverySurfaceRef: discoverySurfaceRefV1
+  routePolicyRevision: exact-revision
+  harnessRevision: exact-revision
+  harnessDigest: sha256-prefixed-digest
+  contextPolicyRevision: exact-revision
+  contextPolicyDigest: sha256-prefixed-digest
+  topologyWavePlanRef: topologyWavePlanRefV1
+
+routeEvaluationEvidenceV1:
   schemaVersion: 1
   taskClass: stable-task-class
+  evaluatedRouteIdentity: evaluatedRouteIdentityV1
   evaluatedRouteIdentityDigest: sha256-prefixed-digest
   evaluationPlanRef: registeredEvidenceRefV1
   plannedTrialCount: positive-integer-at-most-256
@@ -548,10 +596,10 @@ routeEvaluationEvidenceRefV1:
       actionRef: ProviderActionRefV1
       deployedRouteAdmissionDigest: sha256-prefixed-digest
       deployedRouteObservationDigest: sha256-prefixed-digest | null
-  topologyEvidenceRef: registeredEvidenceRefV1
+  topologyWavePlanRef: topologyWavePlanRefV1
   harnessRevision: exact-revision
   harnessDigest: sha256-prefixed-digest
-  discoverySurfaceEvidenceRef: registeredEvidenceRefV1
+  discoverySurfaceRef: discoverySurfaceRefV1
   routePolicyRevision: exact-revision
   contextPolicyRevision: exact-revision
   contextPolicyDigest: sha256-prefixed-digest
@@ -578,35 +626,45 @@ shorthand for the exact existing Spec 01 `EvidenceArtifactRegistration` tuple:
 the same current run/session and immutable registration revision. The generated
 schema expands that tuple directly.
 
-The object, nested baseline and every registration reference are closed.
+The payload, `evaluatedRouteIdentityV1`, nested baseline and every registration
+reference are closed.
 `objectivePassCount` and
 `objectiveTrialCount` are both null or both non-null, and the count cannot
 exceed the denominator. A non-null denominator cannot exceed the number of
 distinct trial rows with a non-null, parent-bound proved observation. Baseline
 `none` requires a non-null reason and null reference; every other baseline
 requires a reference and null reason.
-`evidenceDigest` is RFC 8785 JCS over the complete record with that field
-omitted.
+`evidenceDigest` is SHA-256 of RFC 8785 JCS over the complete record with only
+that field omitted.
+
+`evaluatedRouteIdentityDigest` is SHA-256 of RFC 8785 JCS of exactly the closed
+`evaluatedRouteIdentityV1` object as displayed, with no omitted or added field.
+The identity is action-free: it excludes action IDs, snapshot instance/clocks,
+trial ordinals and observations while retaining the stable capability body,
+effective configuration, permission, discovery, route/harness/context policy
+and exact topology-wave
+row identity. The payload's top-level harness, route-policy,
+context-policy, discovery-surface and topology-wave refs equality-copy that
+preimage; a mismatch rejects.
 
 `evaluationPlanRef` names the current immutable run-owned evaluation plan and
 its exact revision/digest; that plan declares this task class, route-evaluation
 kind, dataset, baseline and `plannedTrialCount`; those values must equal this
 record. The protocol safety maximum is
 256; it is not a recommendation for policy volume. `trialRoutes` is nonempty;
-ordinals are contiguous, action refs are unique, admission digests are unique
+ordinals are contiguous, canonical `(adapterId,actionId)` pairs are distinct,
+admission digests are distinct
 and array length equals both `trialCount` and `plannedTrialCount`. Each
 action/admission/optional-observation tuple equality-resolves through the
-current Fabric receipt/evidence registration. Every admission has the same
-host, adapter/contract, endpoint, family/model, resolved raw effort,
-normalised reasoning, raw native mode, orchestration mode, permission profile,
-route policy, harness revision/digest, discovery-surface ref and context-policy
-revision/digest after removing action identity. The topology evidence
-registration path/digest is then added to that tuple. RFC 8785 JCS of that
-exact action-free tuple is
-`evaluatedRouteIdentityDigest`. The top-level discovery-surface registration
+current Fabric receipt/evidence registration. After removing action and
+snapshot-instance identity, every admission must reproduce the route-owned
+fields of the displayed `evaluatedRouteIdentityV1`; its capability-body digest
+permits instance refresh without conflating different capability content. The
+evaluation plan supplies and equality-binds the topology-wave ref. The top-level discovery-surface registration
 must equal every admission's `discoverySurfaceRefV1` evidence ID/revision/path/
 digest. Top-level harness, route-policy and context-policy revisions/digests
-must likewise equal every admission; a different value rejects. A non-null observation digest
+must likewise equal every admission; the topology wave must equal the plan. A
+different value rejects. A non-null observation digest
 must parent-bind its trial admission. Null means the trial has no proved
 terminal observation and cannot contribute an objective pass.
 
@@ -618,10 +676,13 @@ adapter contract, route policy, discovery surface, dataset or expired record is
 not current route evidence. Capability and safety constraints remain hard gates
 regardless of an evaluation result.
 
-Every topology-bearing wave additionally stores, in `topologyEvidenceRef`, the
-dependency/decomposability assessment, selected
-single-owner/fabric-explicit/host-native shape, shared-state contention, one
-accountable chair, stage owner, write partition, budget and stop condition.
+Every topology-bearing evaluation references the exact Spec 01
+`topologyWavePlanV1` row through the closed Spec 01
+`topologyWavePlanRefV1`; the ref equality-binds session/run/task/wave/revision/
+digest to the current or historical plan row. That plan already owns
+dependency/decomposability, topology, contention, one accountable chair, stage
+owners, write partitions, budget, stop conditions, authority/policy lineage and
+append-only rationale. The evaluation cannot restate or broaden them.
 Parallelism is evidence-driven and bounded; agent count is not a quality
 measure.
 
@@ -636,6 +697,8 @@ Portable aggregates may include counts, latency buckets, token/cost values and
 classified failure codes. They exclude prompts, answers, tool arguments,
 artifact content, private messages, secrets, project names and absolute paths.
 Rich local evidence stays run-owned and is referenced by digest. Validation
-fixtures cover repeated-trial arithmetic, baseline nullability, expiry and
-revision drift, task-class isolation, topology rationale, content-free export
-and the absence of any automatic promotion side effect.
+fixtures cover the conforming base evidence row/artifact join, exact identity
+preimage and digest, distinct action pairs/admission digests, planned/effective
+trial equality and numerator/denominator bounds, baseline nullability, expiry
+and revision drift, task-class isolation, topology-wave currency, content-free
+export and the absence of any automatic promotion side effect.

@@ -1,7 +1,7 @@
 # Project Fabric Console and adaptive session orchestration
 
 Status: Approved; implementation in progress
-Version: 1.11
+Version: 1.12
 Date: 13 July 2026
 Risk: Crucial
 Decision owner: Human maintainer
@@ -10,7 +10,10 @@ Independent review: native architecture, operator UX and implementability;
 Cursor Grok 4.5 High; Agy Gemini 3.1 Pro
 Review result (v1.0): no unresolved P0-P2 on the approved revision
 
-Version 1.11 adopts the mature continuity/routing research into the existing
+Version 1.12 closes the Console's exact topology, route-arm, capability-refresh,
+actual-review-identity and context-pressure projections. It distinguishes
+unknown, observed null, inapplicable and configured default without inventing
+UI data. Version 1.11 adopts the mature continuity/routing research into the existing
 Console owner: topology-wave rationale, exact route evidence with honest
 unknown/source/confidence, and native-mode boundary tests. It keeps 80x24 as
 the reference/default while preserving the 30x6 dynamic minimum and does not
@@ -1046,7 +1049,11 @@ not a chair assertion. It is true only when:
 3. every head/action-pair/evidence record binds that target, active chair-
    binding chain, artifact,
    bundle, coverage, profile, task, route, answer/result and final-prompt digest,
-   and its route equals the activated adapter/family/model/effort snapshot;
+   its route equals the activated adapter/family/model/effort snapshot, and its
+   observed endpoint provider/family/model actual-route identity is proved and
+   equals both admission and the resolved profile, while every other observed
+   route field is admission-equal (honest unavailable optional arms remain
+   allowed);
 4. `native` is explicitly `same-family-exempt`, while
    `other-primary`, `cursor-grok` and `agy-gemini` each prove reviewer family
    distinct from the target-chair family; this is not a contributor-family
@@ -1054,7 +1061,8 @@ not a chair assertion. It is true only when:
 5. required `unavailableSlots` is empty, normal finding capacity is available,
    and top-level blockers and every slot
    blocker array are empty. A nonterminal, ambiguous, route-integrity,
-   insufficient-read, stale, UNUSABLE or proved terminal provider-failure
+   insufficient-read, actual-route-unproved, actual-route-mismatch, stale,
+   UNUSABLE or proved terminal provider-failure
    action cannot complete a slot.
 
 For the current Codex/OpenAI target the resolved matrix requires native Codex,
@@ -1280,6 +1288,27 @@ Implementation is accepted only when objective tests demonstrate:
     supervisor/PID-reuse/setsid/double-fork/reparent cleanup. Required capability
     absence appears before target as typed unavailable slots. Receipt v2
     validates without a resolver and rejects unknown future closed codes.
+43. Discovery-surface fixtures prove exact digest-free manifest JCS bytes,
+    manifest/artifact/registration equality and route/launch host/version/
+    profile/raw-mode binding. Capability fixtures prove admission instance/body,
+    harmless same-body refresh with separate dispatch clocks, actual dispatch
+    append and no-effect body/permission/surface drift. Activation/smoke/action
+    effective-configuration evidence proves subject uniqueness and activation
+    lineage without global mutation.
+44. Route projection fixtures enumerate the requested/admitted/observed field
+    matrix and all `Not requested`/`Configured default`/`Inapplicable`/`None`/
+    `Unknown` states. Certifying review proves actual endpoint provider/family/
+    model identity and rejects every other observed route-field inequality, or
+    emits the exact unproved/mismatch blocker, accepts no
+    resolution and retains every safe adverse finding.
+45. Topology-wave fixtures prove closed plan/ref/current shapes, append-only
+    revision/rationale, predecessor/current CAS, scoped list/read, one chair,
+    intact historical-predecessor chain semantics, existing authority/policy
+    fencing, discriminated current/stale/unavailable arms and stale display.
+    Context-pressure fixtures prove the exact lifecycle-observation join,
+    source/confidence/token invariants, crossed-arm rejection, scoped read,
+    age/stale derivation without mutation, spend separation and absence of
+    percentages or automatic lifecycle effects.
 
 ## 16. Implementation gate
 
@@ -1310,7 +1339,9 @@ adds no continuity routing or automatic successor-selection policy. Version
 1.10 freezes the failure-receipt, terminal-sequence/cut, paged-finding,
 capacity, live-recovery and exact resize contracts, and removes the remaining
 stale lifecycle-blocking language. It does not add automatic continuity routing,
-legacy schemas or compatibility paths.
+legacy schemas or compatibility paths. Version 1.12 binds the Console to the
+closed topology/current, route/capability, actual-review-identity and context-
+pressure wires added to Specs 01–04; it adds no Console-owned codec or policy.
 Final human acceptance remains pending; Git push,
 release, deployment and other separately gated effects remain unauthorised.
 
@@ -1322,13 +1353,17 @@ specialise existing Console behaviour; they do not create another
 specification or state owner.
 
 Each coordination run still has exactly one accountable chair. Before a
-topology wave starts, the plan projection shows its dependency/decomposability
-assessment, selected single-owner/fabric-explicit/host-native shape,
-shared-state contention, one stage owner, non-overlapping write partition,
-budget and stop condition. Dynamic team changes remain inside the resolved
-authority envelope and append a new wave rationale; agent count is never shown
-as a quality or progress measure. A host-native leg is one bounded task beneath
-the chair unless a contract-tested native-child identity bridge exists.
+topology wave starts, Runs consumes only the exact Spec 01
+`topologyWavePlanV1` plus `topologyWavePlanCurrentV1` projection. It shows
+run/task/wave/revision/predecessor, dependency and decomposability evidence,
+topology mode, current chair, every stage owner and write partition, contention,
+budget, stop conditions, existing authority/policy refs, state, rationale ref
+and digest. Missing or read-derived stale plans remain visible and cannot be
+presented as ready to start. Dynamic team changes append a new plan revision and
+rationale under the existing authority/policy; the Console never edits an old
+plan, creates authority or chooses a team. Agent count is never shown as a
+quality or progress measure. A host-native leg is one bounded task beneath the
+chair unless a contract-tested native-child identity bridge exists.
 
 Section 5.3 remains binding: substantial or larger implementation starts in a
 fresh provider context from the accepted digest-bound scope/handoff. Resuming
@@ -1337,43 +1372,76 @@ rotation. Parent compact/rotate never implies child completion or continuity,
 and no deep/native workflow may become a second chair, own a human gate or hold
 an unpartitioned shared write scope.
 
-The Agents, Runs and Evidence views consume the exact Spec 01
-`deployedRouteAdmissionV1` plus optional `deployedRouteObservationV1`
-projection. They display requested, admitted and
-observed host/adapter/provider/family/model, raw provider effort, normalised
-reasoning effort, raw native mode and orchestration mode as distinct labelled
-fields. Every observed value displays its source and confidence. A null value
-renders `Unknown`; the Console never copies an admitted value into actual,
-infers effort or native mode from a model label, or turns a vendor/product name
-into capability evidence. Capability snapshot source, expiry and route-policy/
-discovery-surface revisions are visible in detail. Route/topology evaluation
-references from Spec 02 show task class, trial count, baseline, evidence age,
-expiry and promotion state without presenting a universal model rank.
+The Agents, Runs and Evidence views consume the exact closed Spec 01 provider-
+route projection: admission, separately labelled admission/dispatch capability
+summaries, latest dispatch and optional observation. They render only fields
+owned by each arm:
 
-Context pressure and spend are separate rows. Context pressure displays
+| Arm | Displayed fields |
+|---|---|
+| Requested | adapter alias, model alias, explicit model, raw provider effort, raw native mode |
+| Admitted | host, adapter/contract, endpoint provider, family, model, resolved effort, normalised reasoning effort, raw native mode, orchestration mode, capability snapshot instance/body, effective-configuration ref plus requested/effective digests, permission profile and discovery surface |
+| Observed | host, adapter, endpoint provider, family, model, resolved effort, normalised reasoning effort, raw native mode and orchestration mode, each with source/confidence |
+
+Requested null displays `Not requested`, never `Unknown`. An applied admitted
+effort with no requested raw effort is labelled `Configured default`; the
+tagged inapplicable effort arm and its null normalised value display
+`Inapplicable`. An observed `state: unavailable` displays `Unknown` with its
+unavailable/unknown provenance. An observed raw-native-mode value of null
+displays `None` with source/confidence; it is distinct from unavailable.
+Observed inapplicable effort likewise displays `Inapplicable`. No other null is
+silently converted to any of these labels.
+
+Detail shows admission and dispatch snapshot generation/source/observedAt/
+expiresAt/body digest separately, plus route-policy and discovery-surface refs.
+An instance-only capability refresh is visible without implying drift; body,
+permission or surface drift displays the terminal no-effect route outcome.
+Requested/admitted differences link the ordered substitution journal. The
+Console never copies admission into actual, infers effort/native mode from a
+model label, or turns a vendor/product name into capability evidence.
+
+Certifying review detail also displays required versus actual endpoint
+provider/family/model, every other observed-versus-admitted route field,
+observation digest, actual-route identity digest and
+`proved equal`, `actual-route-unproved` or `actual-route-mismatch`. The latter
+two visibly block certification and resolution acceptance while retained
+adverse findings remain reviewable. Generic work has no actual-route
+certification badge. Route/topology evaluation references from Spec 02 show
+task class, trial count, baseline, exact topology-wave ref, evidence age, expiry
+and promotion state without presenting a universal model rank.
+
+Context pressure and spend are separate rows. The context row consumes only
+Spec 01 `providerContextPressureReadV1` and displays
 `low`, `medium`, `high` or `unknown` plus source, confidence and observation
-age; tokens/cost/turn reservations remain in resource capacity. Unknown current
-window state never becomes a fabricated percentage. This amendment adds no
+age/currency; token counts may appear as raw nullable values, while cost/turn
+reservations remain in resource capacity. Missing or stale state is labelled,
+never refreshed by a UI write. Unknown current window state never becomes a
+fabricated percentage. This amendment adds no
 automatic threshold, hysteresis, maximum-compaction count or successor picker.
 Existing lifecycle actions and recovery custody remain the only mutation path.
 
 Usability and protocol fixtures add:
 
 1. one-chair/topology-wave views for single-owner, explicit Fabric and opaque
-   host-native legs, including shared-state contention and stop condition;
+   host-native legs, including every closed plan field, append-only rationale,
+   missing/stale currency, shared-state contention and stop condition;
 2. fresh implementation versus same-history crash-recovery and parent/child
    lifecycle independence;
-3. requested/admitted/observed equality, authorised substitution and honest
-   unknown actual identity with source/confidence labels;
-4. raw `max`/`ultra`-style provider values remaining distinct from normalised
+3. the exact per-arm display matrix, authorised substitution, separate
+   admission/dispatch snapshot clocks, identical-body refresh, body drift and
+   honest unknown actual identity with source/confidence labels;
+4. `Not requested`, `Configured default`, `Inapplicable`, observed `None` and
+   unavailable `Unknown` remaining distinct; raw `max`/`ultra`-style provider values remaining distinct from normalised
    reasoning and orchestration fields, with unsupported native mode failing or
    showing the authorised fallback;
 5. host-native negative cases for a second chair, embedded semantic gate,
    unpartitioned writer scope and double decomposition ownership;
 6. route-evidence expiry/baseline display and content-free operational spans;
-   and
 7. context pressure remaining independent from spend across unknown, stale and
-   exact observations.
+   exact composite-audit-bound observations; and
+8. certifying provider/family/model actual-route proof, every observed route-
+   field equality, mismatch/unproved
+   blockers, resolution denial and retained adverse findings.
 
 All fixtures run through the existing geometry matrix: invalid/zero, 29x5
 inert, exact 30x6 compact, reference/default 80x24 and a wide terminal, including

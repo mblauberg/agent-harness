@@ -1,14 +1,17 @@
 # Shared agent fabric
 
 Status: Current protocol, provider-task, review-snapshot, route-lineage, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
-Version: 0.33
+Version: 0.34
 Date: 13 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.33 folds the mature July 2026 continuity and route-evidence findings
+Version 0.34 closes the deployed-route, discovery-surface, review-identity,
+context-pressure and topology-wave wire contracts required by Spec 05. It makes
+capability refresh stable by content, gives certification an observed-identity
+oracle, and adds no automatic routing, topology or lifecycle authority. Version 0.33 folds the mature July 2026 continuity and route-evidence findings
 into the existing owners. It adds one versioned adapter-capability snapshot,
 exact requested/admitted/observed deployed-route identity and privacy-minimised
 operational spans without adding an automatic pressure controller, learned
@@ -1065,7 +1068,8 @@ topReviewBlockerEnum: [certifying-review-capability-unavailable,
 slotReviewBlockerEnum: [missing-evidence, nonterminal-action,
   ambiguous-action, provider-terminal-failure, terminal-no-effect,
   retired-unknown, route-integrity, insufficient-read-coverage,
-  noncertifying, unusable, wrong-artifact, wrong-bundle, wrong-route,
+  noncertifying, actual-route-mismatch, actual-route-unproved,
+  unusable, wrong-artifact, wrong-bundle, wrong-route,
   wrong-provider, wrong-model, wrong-chair-generation,
   reviewer-family-distinctness, open-findings]
 reviewCurrencyBlockerEnum: [certifying-review-capability-unavailable,
@@ -1073,7 +1077,8 @@ reviewCurrencyBlockerEnum: [certifying-review-capability-unavailable,
   profile-unavailable, integrity-failure, missing-evidence,
   nonterminal-action, ambiguous-action, provider-terminal-failure,
   terminal-no-effect, retired-unknown, route-integrity,
-  insufficient-read-coverage, noncertifying, unusable, superseded,
+  insufficient-read-coverage, noncertifying, actual-route-mismatch,
+  actual-route-unproved, unusable, superseded,
   wrong-artifact, wrong-bundle, wrong-route, wrong-provider, wrong-model,
   wrong-chair-generation, reviewer-family-distinctness, open-findings]
 providerTerminalFailureEnum: [max-turns-exhausted, provider-rejected,
@@ -1192,10 +1197,13 @@ localProviderRoute:
   slotEnum: [native, other-primary, cursor-grok, agy-gemini, null]
 
 providerRoute:
-  required: [actionRef, taskId, route, admission, observation]
+  required: [actionRef, taskId, route, admission, capabilitySummary,
+    latestDispatch, observation]
   actionRef: ProviderActionRefV1
   route: localProviderRoute
   admission: deployedRouteAdmissionV1
+  capabilitySummary: capabilitySnapshotSummaryV1
+  latestDispatch: deployedRouteDispatchV1-or-null
   observation: deployedRouteObservationV1-or-null
   ids: [taskId]
   invariant: actionRef equals admission.actionRef;
@@ -1208,10 +1216,16 @@ providerRoute:
     admission.admitted.family equals route.providerFamily;
     admission.admitted.model equals route.resolvedModel;
     admission.admitted.resolvedEffort deep-equals route.resolvedEffort;
+    capabilitySummary.admission snapshot identity/body equal admission;
+    capabilitySummary.dispatch and latestDispatch are both null or equality-copy
+      the same dispatch snapshot ref/source/clocks/body;
+    nonnull latestDispatch actionRef/admissionDigest/effectiveConfigurationRef
+      equal admission;
     nonnull observation actionRef/admissionDigest equal admission
 
-The receipt's `deployedRouteAdmissionV1`,
-`deployedRouteObservationV1`, `discoverySurfaceRefV1` and typed
+The receipt's `deployedRouteAdmissionV1`, `capabilitySnapshotSummaryV1`,
+`deployedRouteDispatchV1`, `deployedRouteObservationV1`,
+`discoverySurfaceRefV1`, `adapterEffectiveConfigurationRefV1` and typed
 `observedValueV1` names above are local `$defs`. Their byte shapes are generated
 once from the same protocol definitions used by public reads and are embedded
 inside the standalone receipt schema. They are not external references and
@@ -1290,6 +1304,12 @@ findingWindow:
   conditional: normal requires maximumNewFindings 32 and positive byte bound;
     resolution-only requires both maxima zero
 
+lifecycleCustodyRefV1:
+  required: [schemaVersion, runId, agentId, custodyId, custodyRevision]
+  schemaVersion: {const: 1}
+  ids: [runId, agentId, custodyId]
+  positive: [custodyRevision]
+
 reviewCertificationBasis:
   oneOf:
     - kind: active-binding
@@ -1302,28 +1322,35 @@ reviewCertificationBasis:
     - kind: predecessor-cut
       required: [kind, actionBindingGeneration, firstSuccessorBindingGeneration,
         activeBindingGeneration, terminalSequence, certificationCutSequence,
-        certificationCutDigest, bindingChainDigest]
+        certificationCutCustodyRef, certificationCutDigest, bindingChainDigest]
       positive: [actionBindingGeneration, firstSuccessorBindingGeneration,
         activeBindingGeneration, terminalSequence]
       nonnegative: [certificationCutSequence]
+      certificationCutCustodyRef: lifecycleCustodyRefV1
       digests: [certificationCutDigest, bindingChainDigest]
-      invariant: terminalSequence-less-than-or-equal-certificationCutSequence
+      invariant: terminalSequence-less-than-or-equal-certificationCutSequence;
+        certificationCutCustodyRef equals first-successor binding predecessor
+        certification-cut custody and the referenced cut custody
     - kind: post-cut
       required: [kind, actionBindingGeneration, firstSuccessorBindingGeneration,
         activeBindingGeneration, terminalSequence, certificationCutSequence,
-        certificationCutDigest, bindingChainDigest]
+        certificationCutCustodyRef, certificationCutDigest, bindingChainDigest]
       positive: [actionBindingGeneration, firstSuccessorBindingGeneration,
         activeBindingGeneration, terminalSequence]
       nonnegative: [certificationCutSequence]
+      certificationCutCustodyRef: lifecycleCustodyRefV1
       digests: [certificationCutDigest, bindingChainDigest]
-      invariant: terminalSequence-greater-than-certificationCutSequence
+      invariant: terminalSequence-greater-than-certificationCutSequence;
+        certificationCutCustodyRef equals first-successor binding predecessor
+        certification-cut custody and the referenced cut custody
 
 reviewEvidenceRecord:
   required: [evidenceId, targetGeneration, slot, taskId, actionRef,
     terminalSequence, terminalKind, verdict, answerSafety, providerAnswerDigest,
     terminalResultDigest, reviewResultDigest, providerFailureCode,
-    providerFailureDigest, routeReceiptDigest,
-    finalPromptDigest, adapterId, providerFamily, model, bundleDigest,
+    providerFailureDigest, routeReceiptDigest, routeObservationDigest,
+    actualRouteIdentityDigest,
+    finalPromptDigest, adapterId, endpointProvider, providerFamily, model, bundleDigest,
     coverageDigest, profileDigest, priorHeadGeneration, newHeadGeneration,
     attemptGeneration, priorEvidenceId, priorOpenFindingSet,
     reportedResolvedFindingDigests, acceptedResolvedFindingDigests,
@@ -1331,7 +1358,7 @@ reviewEvidenceRecord:
     readCoverageDigest, coverageSummary, reviewerFamilyRelation,
     certificationBasisAtTerminal, mutationReceiptDigest]
   nullOnly: [reviewResultDigest, providerFailureCode, providerFailureDigest,
-    priorEvidenceId]
+    routeObservationDigest, actualRouteIdentityDigest, priorEvidenceId]
   nullConstants: [providerFailureCode, providerFailureDigest]
   terminalKindEnum: [safe-answer, unusable-answer]
   verdictEnum: [CLEAN, FINDINGS, UNUSABLE]
@@ -1340,7 +1367,7 @@ reviewEvidenceRecord:
     reviewResultDigest; unusable-answer requires unusable and UNUSABLE with null
     reviewResultDigest
   actionRef: ProviderActionRefV1
-  ids: [evidenceId, taskId, adapterId, providerFamily, model,
+  ids: [evidenceId, taskId, adapterId, endpointProvider, providerFamily, model,
     priorEvidenceId]
   invariant: actionRef.adapterId-equals-adapterId
   positive: [targetGeneration, terminalSequence, newHeadGeneration,
@@ -1349,7 +1376,10 @@ reviewEvidenceRecord:
   digests: [providerAnswerDigest, terminalResultDigest, routeReceiptDigest,
     finalPromptDigest, bundleDigest, coverageDigest, profileDigest,
     readCoverageDigest, mutationReceiptDigest]
-  nullableDigests: [reviewResultDigest]
+  nullableDigests: [reviewResultDigest, routeObservationDigest,
+    actualRouteIdentityDigest]
+  invariant: nonnull actualRouteIdentityDigest requires nonnull
+    routeObservationDigest and proved endpoint-provider/family/model arms
   digestArrays: [reportedResolvedFindingDigests,
     acceptedResolvedFindingDigests]
   slotEnum: [native, other-primary, cursor-grok, agy-gemini]
@@ -1366,7 +1396,7 @@ reviewTerminalFailureRecord:
   required: [targetGeneration, slot, taskId, actionRef,
     terminalSequence, terminalKind, providerFailureCode,
     providerFailureDigest, terminalResultDigest, routeReceiptDigest,
-    finalPromptDigest, adapterId, providerFamily, model, bundleDigest,
+    finalPromptDigest, adapterId, endpointProvider, providerFamily, model, bundleDigest,
     coverageDigest, profileDigest, attemptGeneration, unchangedHeadGeneration,
     unchangedOpenFindingSetDigest, unchangedRepairRequiredFindingSetDigest,
     reviewerFamilyRelation]
@@ -1374,7 +1404,7 @@ reviewTerminalFailureRecord:
   providerFailureCodeEnum: providerTerminalFailureEnum
   actionRef: ProviderActionRefV1
   slotEnum: [native, other-primary, cursor-grok, agy-gemini]
-  ids: [taskId, adapterId, providerFamily, model]
+  ids: [taskId, adapterId, endpointProvider, providerFamily, model]
   positive: [targetGeneration, terminalSequence, attemptGeneration]
   nonnegative: [unchangedHeadGeneration]
   digests: [providerFailureDigest, terminalResultDigest, routeReceiptDigest,
@@ -4455,24 +4485,17 @@ Added requirements are:
 
 Acceptance additionally requires:
 
-- **AC-038:** compatibility tests exercise old client/new daemon, new
-  client/old daemon, negotiated success, negotiated-missing-field,
-  unnegotiated-extra-field and malformed-summary frames for both snapshot and
-  Attention projection-page and view-page. A genuine pre-feature daemon fixture
-  pinned at `af548f8` proves the single fresh-connection fallback, pinned
-  optional-feature profile, preserved required features, fresh nonce, absence
-  of any pre-initialise mutation and honest unavailable UI. A separate
-  `466e5c7` fixture proves the unnegotiated required-field intermediate fails
-  closed with no fallback row or partial projection. Retry fixtures prove only
-  structured `PROTOCOL_INVALID` retries, all other error classes do not, the
-  original error remains primary on second failure and successful downgrade is
-  visible. Future-name fixtures prove unknown optional names are ignored,
-  unknown required names fail as unavailable and malformed, duplicate,
-  65-combined-entry, 64-plus-64, cross-array duplicate, over-64-byte or non-
-  ASCII names reject without truncation or normalisation. Shape fixtures include
-  mixed presence and every conflict candidate. Legacy evaluation/export
-  fixtures prove no zero-fill, timestamp or
-  aggregate claim. Migration tests prove insert/update/delete delivery
+- **AC-038:** current-baseline tests exercise only the v0.34 client/daemon
+  schema set: unnegotiated base success, negotiated exact-extension success,
+  negotiated-missing-field, unnegotiated-extra-field and malformed-summary
+  frames for snapshot, Attention projection-page and view-page. There is no
+  downgrade, vintage-daemon fixture, retry-as-older-schema or compatibility
+  export. Unknown bounded optional feature names are ignored only at
+  initialise; unknown required names are unavailable. Every unknown enum value,
+  schema version other than the exact current constant, mixed extension
+  presence, duplicate name, 65-combined-entry, 64-plus-64 entry, cross-array
+  duplicate, over-64-byte or non-ASCII name fails closed before projection or
+  mutation. Current-schema migration tests prove insert/update/delete delivery
   changes advance global revision exactly as defined, force resnapshot for a
   stale page, and cause a polling Console to observe pending-to-terminal state
   without an unrelated Fabric event while resize/resnapshot preserves stable UI
@@ -5763,6 +5786,7 @@ reviewTargetChairBindingV1:
   predecessorBindingDigest: null-for-one-otherwise-exact-prior-digest
   predecessorCertificationCutSequence: null-for-one-otherwise-nonnegative-sequence
   predecessorCertificationCutDigest: null-for-one-otherwise-exact-cut-digest
+  predecessorCertificationCutCustodyRef: null | lifecycleCustodyRefV1
   agentId: exact-same-chair-agent
   principalGeneration: positive-generation
   chairLeaseGeneration: positive-generation
@@ -5779,7 +5803,7 @@ reviewTargetChairBindingV1:
   deliveryReviewBasisDigest: exact-target-basis-digest
   repositorySourceStateDigest: exact-target-source-digest
   bundleDigest: exact-target-bundle-digest
-  lifecycleCustodyRef: null-for-one-otherwise-exact-finalized-adopted-custody
+  lifecycleCustodyRef: null | lifecycleCustodyRefV1
   checkpointDigest: null-for-one-otherwise-exact-custody-checkpoint
   lifecycleAdoptionEvidenceDigest: null-for-one-otherwise-sha256-prefixed-digest
   bindingDigest: sha256-prefixed-canonical-binding-digest
@@ -5791,7 +5815,7 @@ reviewCertificationCutV1:
   predecessorBindingGeneration: exact-active-binding-at-adoption
   predecessorBindingDigest: exact-active-binding-digest
   terminalSequenceHighWater: nonnegative-run-sequence
-  lifecycleCustodyRef: exact-finalized-adopted-custody
+  lifecycleCustodyRef: lifecycleCustodyRefV1
   lifecycleAdoptionEvidenceDigest: sha256-prefixed-digest
   cutDigest: sha256-prefixed-canonical-cut-digest
 
@@ -5801,6 +5825,11 @@ reviewTargetChairBindingPointerV1:
   revision: positive-CAS-revision
 ~~~
 
+Every nonnull custody ref above uses the exact closed
+`lifecycleCustodyRefV1`; its run equals the cut/target run, its agent equals the
+chair binding agent and its revision identifies the immutable finalized
+`adopted` custody row. Crossed agent, custody ID or revision rejects.
+
 The public idempotent execution/replay surface for this transition is:
 
 ~~~yaml
@@ -5809,7 +5838,7 @@ reviewTargetRebindV1:
   commandId: stable-command-id
   targetGeneration: exact-current-target
   expectedChairBindingGeneration: exact-current-active-binding
-  lifecycleCustodyRef: exact-finalized-adopted-custody/revision
+  lifecycleCustodyRef: lifecycleCustodyRefV1
 
 reviewTargetRebindReceiptV1:
   schemaVersion: 1
@@ -5855,18 +5884,22 @@ is legal only when one finalized `adopted` lifecycle custody proves the same
 contract, family, model, profile, task, artifact, basis, source and bundle.
 Only principal, chair-lease, provider-session, bridge and route-receipt
 generations may advance. Its predecessor binding digest and predecessor
-certification-cut sequence/digest are nonnull and exact.
+certification-cut custody/sequence/digest are nonnull and exact.
 
 Every first terminalisation of a certifying provider action atomically reserves
 one stable positive `terminalSequence` from the run high-water; replay returns
-that sequence. At the same serialization point as true-chair lifecycle
+that sequence. At the same serialization point as each true-chair lifecycle
 adoption, the daemon snapshots the current terminal-sequence high-water into
-one exact `reviewCertificationCutV1`. If the same-subject predicates above hold,
-that adoption transaction appends the successor binding, copies the cut into
-its predecessor-cut fields and advances the pointer. The adoption never waits,
-rolls back or creates a human gate because of review state. If any predicate
-does not hold, lifecycle adoption still succeeds and the unchanged target
-becomes read-derived stale.
+one exact `reviewCertificationCutV1` keyed by the adopting lifecycle custody. A
+stale target may therefore accumulate multiple distinct custody-keyed cuts for
+the same target and predecessor binding. The unique cut digest prevents
+duplicate identity without collapsing those adoptions. If the same-subject
+predicates above hold, that adoption transaction appends the successor binding,
+equality-binds the exact custody/cut, copies the cut sequence/digest into its
+predecessor fields and advances the pointer. A successor can never cite a cut
+from another custody. Review state never waits, rejects, rolls back or creates a
+human gate for adoption. If any predicate does not hold, lifecycle adoption
+still succeeds and the unchanged target becomes read-derived stale.
 
 An action retains its dispatch binding generation. Evidence under binding `b`
 uses normal current predicates while `b` is active and has no successor. Once a
@@ -5943,6 +5976,9 @@ resolvedReviewProfileSlotV1:
   adapterContractDigest: sha256-prefixed-digest
   providerFamily: canonical-family
   model: exact-model
+  requiredActualEndpointProvider: exact-provider-id
+  requiredActualProviderFamily: exact-provider-family
+  requiredActualModel: exact-provider-model
   requestedEffort: null-or-exact-effort
   resolvedEffort: resolvedEffortV1
   sourceMode: direct-portal-or-portal-helper
@@ -5972,6 +6008,33 @@ that digest omitted. Unknown/extra slots or fields, crossed availability
 identity, an inapplicable effort with nonnull request, or a relation other than
 the two admitted snapshot values rejects. The same slot object is stored,
 projected in Console and equality-checked at dispatch.
+`requiredActualProviderFamily` and `requiredActualModel` must equal the slot's
+admitted `providerFamily` and `model`; `requiredActualEndpointProvider` equals
+the resolved admitted endpoint behind the allowed route alias. None may be
+derived after terminal output.
+
+The three `requiredActual*` fields are certification requirements, not aliases
+for admission. Endpoint provider, family and model must each be proved by the
+terminal `deployedRouteObservationV1` `observed` arm, sourced from the
+authenticated provider result or a contract-defined adapter attestation, and
+must equal both this profile and the admitted route. Their exact observation
+digest and admission digest bind the closed `actualReviewRouteIdentityV1` and
+its `actualRouteIdentityDigest`. Missing/unavailable proof emits
+`actual-route-unproved`; any proved inequality emits `actual-route-mismatch`.
+Any other route field that is observed rather than unavailable must also equal
+admission or emits the same mismatch.
+Either makes the result noncertifying and accepts no reported resolutions, but
+every safely parsed adverse P0-P2 finding is retained and added to the paged
+open set. This rule applies only to certifying review. Generic provider work
+continues under its matched permission profile and route authority.
+
+Every resolved certifying slot also requires its capability snapshot
+`safety.enforcedReadOnly: true` and an equality-matched enforced read-only
+permission profile at availability, preparation, admission and dispatch. False
+or unknown produces the existing typed certifying-slot unavailable result before
+provider I/O; it cannot fall back to a generic call. This does not make generic
+answer-bearing work read-only: a non-review action may use an authority-matched
+write-capable profile as specified by Spec 03.
 
 | Slot | Adapter class and ID | Family/model rule | Reviewer-family relation to target chair |
 | --- | --- | --- | --- |
@@ -6363,6 +6426,17 @@ remains a safe-answer with its safe findings and reported resolution set, but
 is noncertifying, accepts no resolution and adds every new P0-P2 finding. Raw
 unsafe or unparseable output is unusable-answer. Provider repetition of a
 coverage digest is never read proof.
+
+Actual-route proof is classified at the same terminal boundary. A missing or
+unavailable required provider/family/model observation leaves a safe answer
+noncertifying with `actual-route-unproved`; any observed route value unequal to
+admission, or any required value unequal to the resolved profile, uses
+`actual-route-mismatch`. The observation digest and, only when the required
+identity is proved, the complete closed `actualRouteIdentityDigest` are stored
+in the immutable evidence record. Neither blocker discards a safe FINDINGS
+payload: resolutions remain unaccepted while all adverse findings retain normal
+custody. Generic, non-review provider actions do not acquire this certification
+predicate.
 
 ~~~yaml
 terminalResultIdentityV1:
@@ -6800,8 +6874,11 @@ reviewCompletionV1:
             providerFailureDigest: null-or-sha256-prefixed-digest
             routeReceiptDigest: null-or-sha256-prefixed-digest
             adapterId: exact-resolved-adapter
+            endpointProvider: exact-required-provider
             providerFamily: exact-resolved-family
             model: exact-resolved-model
+            routeObservationDigest: null-or-sha256-prefixed-digest
+            actualRouteIdentityDigest: null-or-sha256-prefixed-digest
             readCoverageDigest: null-or-sha256-prefixed-digest
             reviewerFamilyRelation: same-family-exempt-or-distinct-family-proved-or-same-family-forbidden-or-family-unproved
             currentCertificationBasis: null-or-reviewCertificationBasis
@@ -6851,7 +6928,8 @@ exactly: `certifying-review-capability-unavailable`,
 `profile-unavailable`, `integrity-failure`. Slot precedence is exactly:
 `missing-evidence`, `nonterminal-action`, `ambiguous-action`,
 `provider-terminal-failure`, `terminal-no-effect`, `retired-unknown`,
-`route-integrity`, `insufficient-read-coverage`, `noncertifying`, `unusable`,
+`route-integrity`, `insufficient-read-coverage`, `noncertifying`,
+`actual-route-mismatch`, `actual-route-unproved`, `unusable`,
 `wrong-artifact`, `wrong-bundle`, `wrong-route`, `wrong-provider`,
 `wrong-model`, `wrong-chair-generation`, `reviewer-family-distinctness`,
 `open-findings`. A code cannot appear in both places. `superseded` is only a
@@ -6868,7 +6946,9 @@ targetChair/profile are null and slots is empty. A merely unavailable profile
 uses its dedicated target-present arm. With a structurally valid target/profile,
 slots contains exactly four rows; stale-target is top-level only.
 
-`open-findings` is emitted iff the slot head's complete paged open set is
+`actual-route-mismatch` takes precedence over `actual-route-unproved` when any
+observed route field is unequal; otherwise incomplete required identity proof emits
+only `actual-route-unproved`. `open-findings` is emitted iff the slot head's complete paged open set is
 nonempty. A provider failure row uses `provider-terminal-failure` and unchanged
 head/open/repair sets; it never masquerades as missing evidence. The generated
 reducer truth-table fixture enumerates every top arm and every slot cause,
@@ -7138,7 +7218,8 @@ Acceptance additionally requires:
   fixtures expose exact unavailable slots before target creation. Annotation
   fixtures enforce the four values, append-only current projection and absence
   from completion/receipt. Standalone receipt validation uses no resolver and
-  rejects every future objective/provider/operation code.
+  rejects every future objective/provider/operation code. Cut/basis fixtures
+  equality-bind the exact agent/custody/revision ref and reject crossed custody.
 
 ### 32.20 Asynchronous lifecycle rotation custody
 
@@ -7485,10 +7566,9 @@ preference, native deep-mode registry or OpenCode activation.
 
 Every activated adapter publishes one current immutable
 `adapterCapabilitySnapshotV1`. Every object below is closed; every array is
-bounded, ordered as stated and duplicate-free. Timestamps are RFC 3339 UTC,
-digests use lowercase `sha256:<64 hex>`, IDs are nonempty UTF-8 strings of at
-most 256 bytes, and `snapshotDigest` is RFC 8785 JCS over the complete object
-with that field omitted.
+ordered as stated and duplicate-free, and a bound exists only where explicitly
+stated. Timestamps are RFC 3339 UTC, digests use lowercase
+`sha256:<64 hex>`, and IDs are nonempty UTF-8 strings of at most 256 bytes.
 
 ~~~yaml
 adapterCapabilitySnapshotV1:
@@ -7532,7 +7612,28 @@ adapterCapabilitySnapshotV1:
           permissionSource: adapter | host | config-overlay | unknown
       - kind: unavailable
         reason: exact-safe-unavailable-reason
+  capabilityBodyDigest: sha256-prefixed-digest
   snapshotDigest: sha256-prefixed-digest
+
+capabilitySnapshotRefV1:
+  snapshotId: stable-id
+  snapshotGeneration: positive-integer
+  snapshotDigest: sha256-prefixed-digest
+  capabilityBodyDigest: sha256-prefixed-digest
+
+capabilitySnapshotSummaryV1:
+  admission:
+    snapshotRef: capabilitySnapshotRefV1
+    source: runtime-discovery | version-pinned-conformance | unavailable
+    observedAt: timestamp
+    expiresAt: timestamp
+  dispatch:
+    oneOf:
+      - null
+      - snapshotRef: capabilitySnapshotRefV1
+        source: runtime-discovery | version-pinned-conformance | unavailable
+        observedAt: timestamp
+        expiresAt: timestamp
 ~~~
 
 The two `capabilities` arms are disjoint. `source: unavailable` requires the
@@ -7547,6 +7648,15 @@ mean unknown, not unlimited or false. Runtime discovery and version-pinned
 conformance are distinct sources. Product prose, a model alias or a prior
 successful call is not a capability snapshot.
 
+`capabilityBodyDigest` is SHA-256 of RFC 8785 JCS of exactly
+`{schemaVersion,adapterId,adapterContractDigest,hostId,hostVersion,source,capabilities}`.
+Snapshot ID, generation, observation/expiry clocks and both digest fields are
+excluded. `snapshotDigest` is SHA-256 of RFC 8785 JCS of the complete snapshot
+with only `snapshotDigest` omitted. Thus a refreshed immutable snapshot may
+advance its instance identity and clocks while retaining the same body digest.
+Every ref equality-copies all four fields from its snapshot row; no digest-only
+or generation-only reference is valid.
+
 Every answer-bearing provider action binds one immutable
 `deployedRouteAdmissionV1`; terminal evidence may append one
 `deployedRouteObservationV1`. They supplement, and do not replace, the existing
@@ -7554,6 +7664,34 @@ Every answer-bearing provider action binds one immutable
 contracts in section 32.19.
 
 ~~~yaml
+discoverySurfaceManifestV1:
+  schemaVersion: 1
+  hostId: exact-host-id
+  hostVersion: exact-host-version
+  providerProfile: exact-profile-id
+  rawNativeMode: exact-provider-value | null
+  principalScopeDigest: sha256-prefixed-digest
+  permissionProfileDigest: sha256-prefixed-digest
+  negotiatedFeatureSetDigest: sha256-prefixed-digest
+  rendererVersion: exact-version
+  bootstrapText: exact-rendered-bootstrap-text
+  skills:
+    - name: exact-visible-skill-name
+      description: exact-visible-skill-description
+  tools:
+    - name: exact-visible-tool-name
+      description: exact-visible-tool-description
+      inputSchema: exact-canonical-JSON-Schema
+  agentCommands:
+    - name: exact-visible-agent-or-command-name
+      description: exact-visible-description
+  nativePreambleText: exact-rendered-native-preamble
+  bootstrapDigest: sha256-prefixed-digest
+  skillCatalogueDigest: sha256-prefixed-digest
+  toolRegistryDigest: sha256-prefixed-digest
+  agentCommandRegistryDigest: sha256-prefixed-digest
+  nativePreambleDigest: sha256-prefixed-digest
+
 discoverySurfaceRefV1:
   evidenceId: exact-EvidenceArtifactRegistration-id
   evidenceRevision: positive-integer
@@ -7564,18 +7702,14 @@ discoverySurfaceRefV1:
   hostVersion: exact-host-version
   providerProfile: exact-profile-id
   rawNativeMode: exact-provider-value | null
-  principalScopeDigest: sha256-prefixed-digest
-  permissionProfileDigest: sha256-prefixed-digest
-  negotiatedFeatureSetDigest: sha256-prefixed-digest
   evidenceKind: discovery-surface.v1
   producer: fabric-daemon
-  rendererVersion: exact-version
-  bootstrapDigest: sha256-prefixed-digest
-  skillCatalogueDigest: sha256-prefixed-digest
-  toolRegistryDigest: sha256-prefixed-digest
-  agentCommandRegistryDigest: sha256-prefixed-digest
-  nativePreambleDigest: sha256-prefixed-digest
-  renderedSurfaceDigest: sha256-prefixed-digest
+  manifestDigest: sha256-prefixed-digest
+
+adapterEffectiveConfigurationRefV1:
+  configurationId: stable-id
+  configurationRevision: positive-integer
+  configurationDigest: sha256-prefixed-digest
 
 deployedRouteAdmissionV1:
   schemaVersion: 1
@@ -7599,7 +7733,10 @@ deployedRouteAdmissionV1:
     normalizedReasoningEffort: none | low | medium | high | xhigh | max | null
     rawNativeMode: exact-provider-value | null
     orchestrationMode: single | native-subagents | dynamic-workflow | provider-multi-agent
-    capabilitySnapshotDigest: sha256-prefixed-digest
+    capabilitySnapshotRef: capabilitySnapshotRefV1
+    effectiveConfigurationRef: adapterEffectiveConfigurationRefV1
+    requestedConfigurationDigest: sha256-prefixed-digest
+    effectiveConfigurationDigest: sha256-prefixed-digest
     permissionProfileDigest: sha256-prefixed-digest
     discoverySurfaceRef: discoverySurfaceRefV1
   routePolicyRevision: exact-revision
@@ -7608,6 +7745,18 @@ deployedRouteAdmissionV1:
   contextPolicyRevision: exact-revision
   contextPolicyDigest: sha256-prefixed-digest
   admissionDigest: sha256-prefixed-digest
+
+deployedRouteDispatchV1:
+  schemaVersion: 1
+  actionRef: ProviderActionRefV1
+  admissionDigest: sha256-prefixed-digest
+  dispatchOrdinal: positive-contiguous-integer
+  capabilitySnapshotRef: capabilitySnapshotRefV1
+  effectiveConfigurationRef: adapterEffectiveConfigurationRefV1
+  permissionProfileDigest: sha256-prefixed-digest
+  discoverySurfaceRef: discoverySurfaceRefV1
+  dispatchedAt: timestamp
+  dispatchDigest: sha256-prefixed-digest
 
 observedValueV1:
   oneOf:
@@ -7630,28 +7779,65 @@ deployedRouteObservationV1:
   family: observedValueV1<canonical-family>
   model: observedValueV1<exact-provider-model>
   resolvedEffort: observedValueV1<resolvedEffortV1>
+  normalizedReasoningEffort: observedValueV1<none-or-low-or-medium-or-high-or-xhigh-or-max-or-null>
   rawNativeMode: observedValueV1<exact-provider-value-or-null>
   orchestrationMode: observedValueV1<single-or-native-subagents-or-dynamic-workflow-or-provider-multi-agent>
   observedAt: timestamp
   observationDigest: sha256-prefixed-digest
+
+actualReviewRouteIdentityV1:
+  schemaVersion: 1
+  admissionDigest: sha256-prefixed-digest
+  observationDigest: sha256-prefixed-digest
+  hostId: observedValueV1<nonempty-id>
+  adapterId: observedValueV1<nonempty-id>
+  endpointProvider: observedValueV1<nonempty-id-required-observed>
+  family: observedValueV1<canonical-family-required-observed>
+  model: observedValueV1<exact-provider-model-required-observed>
+  resolvedEffort: observedValueV1<resolvedEffortV1>
+  normalizedReasoningEffort: observedValueV1<none-or-low-or-medium-or-high-or-xhigh-or-max-or-null>
+  rawNativeMode: observedValueV1<exact-provider-value-or-null>
+  orchestrationMode: observedValueV1<single-or-native-subagents-or-dynamic-workflow-or-provider-multi-agent>
+  actualRouteIdentityDigest: sha256-prefixed-digest
 ~~~
 
-`admissionDigest` and `observationDigest` are separate JCS digests over their
-complete objects with the respective digest field omitted. Admission never
-changes after action commit. Observation is absent before terminal evidence and
-is inserted at most once; it parent-binds the immutable admission digest.
+`admissionDigest`, `dispatchDigest` and `observationDigest` are separate SHA-256
+digests over RFC 8785 JCS of their complete closed objects with only their own
+digest field omitted. Admission never changes after action commit. Each actual
+dispatch appends one immutable contiguous-ordinal dispatch row immediately
+before provider I/O; it parent-binds the admission and exact snapshot,
+effective-configuration, permission and discovery-surface identities used for
+that attempt. Every dispatch row also enters the existing ordered route-event
+journal and receipt history; the joined public route uses `latestDispatch` only
+as its labelled current detail, not as a replacement for history. Observation
+is absent before terminal evidence and is inserted at most once; it parent-
+binds the immutable admission digest.
 `observedValueV1` expands in the checked-in schema to a closed type-specific
-union. Required identity values cannot be null in the observed arm. Only raw
-native mode admits an observed null, which means the provider proved no raw
-native mode; `state: unavailable` remains distinguishable. Every field has its
+union. Required identity values cannot be null in the observed arm. Exactly two
+typed cases admit an observed null: raw native mode, meaning the provider proved
+no raw native mode, and normalised reasoning when resolved effort is observed
+`inapplicable`. `state: unavailable` remains distinguishable. Every field has its
 own evidence source/confidence, so a provider may prove model while effort
 remains honestly unavailable. `provider-result` and `exact` require a field
 directly present in the authenticated provider result. `adapter-attestation`
 and `attested` require a contract-defined adapter observation. Crossed source,
 confidence, state or null combinations reject.
+`actualRouteIdentityDigest` is SHA-256 of RFC 8785 JCS of the complete closed
+`actualReviewRouteIdentityV1` with only that digest omitted. Every route field
+equality-copies the corresponding observation arm, and its admission/observation
+digests equality-bind the exact route pair. Endpoint provider, family and model
+must be proved observed arms; the remaining arms may be honestly unavailable.
+Any observed host/adapter/provider/family/model/effort/native-mode/orchestration
+value unequal to admission is `actual-route-mismatch`, even when all three
+profile-required identity values match. An unavailable required provider/
+family/model arm cannot form this object and is `actual-route-unproved`.
 An observed null raw native mode requires observed `single` orchestration;
 non-single orchestration requires an observed non-null raw native mode. An
 unavailable native-mode field cannot be used to infer orchestration.
+When both effort fields are observed, applied resolved effort requires the
+snapshot-mapped nonnull normalised value, while inapplicable requires an
+observed null normalised value. An unavailable effort arm cannot be filled from
+admission.
 
 An applied admitted `resolvedEffortV1.value` is the raw provider effort, must
 equal one applied capability normalisation and requires its corresponding
@@ -7671,34 +7857,122 @@ existing `publisherKind: fabric` and `producer: fabric-daemon`. Public/agent
 evidence publication rejects that kind.
 After resolving exact host/version/profile/native mode and the active generated
 skill/tool/agent-command registries, the daemon renders the session-start
-manifest, writes it as a run-file, registers that exact path/digest/revision and
-equality-binds principal scope, permission profile, negotiated features, the
-five content-input digests and renderer version above. Admission requires the
-surface permission-profile digest to equal its own field. Its bytes are
-the rendered bootstrap instructions, skill name/description catalogue,
-advertised tool names/descriptions/input schemas, agent/command descriptions
-and mandatory native-mode preamble visible at session start. The adapter launch
-envelope equality-binds the same ref and effective configuration; an adapter
-that cannot prove it applied that envelope leaves the route unavailable.
-Canonical JCS of the closed manifest yields `renderedSurfaceDigest`. This
-must equal `artifactRef.digest` because the registered source bytes are that
-canonical manifest. This records the actual surface; it creates no target or
-hard ceiling.
+manifest. The exact artifact bytes are RFC 8785 JCS of the closed
+`discoverySurfaceManifestV1`, which deliberately contains no digest of itself.
+`manifestDigest` is SHA-256 of those exact bytes and must byte-equal
+`artifactRef.digest`; the registered artifact bytes must reproduce it. The ref's
+host/version/profile/raw-mode tuple equality-copies the manifest and is also
+bound to route resolution, capability host/body and the adapter launch
+envelope. The manifest binds principal scope, permission profile, negotiated
+features, renderer version, the exact rendered bootstrap/preamble and exact
+ordered skill/tool/command catalogues. Each of the five component digests is
+SHA-256 of the corresponding exact canonical text/array value and rejects a
+content/digest mismatch. No artificial item or byte ceiling is added here;
+existing run-artifact/storage authority remains the resource boundary. Admission
+requires its permission digest and admitted native mode to match the manifest/
+ref; requested native mode is either the same raw value or null under the
+recorded configured-default policy. The launch envelope equality-binds the same ref and effective
+configuration; an adapter that cannot prove application leaves the route
+unavailable. This records the actual rendered surface and creates no target,
+catalogue-count limit or other hard ceiling.
 
 At new-action admission, snapshot expiry or adapter-contract/model/effort/mode
-incompatibility rejects before provider I/O. Immediately before every initial
-dispatch or permitted retry, the daemon equality-CASes the same snapshot
-generation/digest, adapter contract, admitted model, permission-profile digest,
-discovery-surface registration/digest and route admission. Predispatch drift supersedes the zero-effect action and requires
-fresh resolution. Ambiguous effect stays with the original action/recovery
-owner and cannot reroute or replay.
+incompatibility rejects before provider I/O. Admission immutably binds both the
+snapshot instance ref and its body digest. Immediately before every initial
+dispatch or permitted retry, the daemon reads the current snapshot and requires
+it to be unexpired, adapter/contract/host compatible and body-equal to the
+admitted body. A newer instance with identical body is permitted and is written
+to that attempt's dispatch row, so harmless refresh cannot starve an action.
+Body, permission-profile or discovery-surface drift terminalises the zero-effect
+action and resolves afresh under a new pair. The per-action effective-
+configuration ref must still identify the same adapter/contract/executable,
+snapshot body, requested/effective configuration, permission and surface at
+every dispatch; any mismatch is likewise no-effect. Admission is never
+rewritten.
+Ambiguous effect stays with the original action/recovery owner and cannot reroute
+or replay.
 
 The existing `fabric.v1.provider-action.read`, generated agent/MCP read and
 scoped operator Evidence projection expose one closed route variant containing
-`admission: deployedRouteAdmissionV1` and
-`observation: null | deployedRouteObservationV1`. Receipt-v2 `providerRoutes`
-uses the same pair. No separate Console codec, latest-timestamp choice or
-action-ID-only lookup exists.
+`admission: deployedRouteAdmissionV1`, `capabilitySummary:
+capabilitySnapshotSummaryV1`, `latestDispatch: null |
+deployedRouteDispatchV1` and `observation: null |
+deployedRouteObservationV1`. The summary's separately labelled admission and
+dispatch arms each equality-copy their own snapshot ref, source, observed/expiry
+clocks and body digest; when present the dispatch arm also equals
+`latestDispatch.capabilitySnapshotRef`. A refreshed dispatch instance can never
+inherit the admission snapshot's clocks. Snapshot/route/action joins are exact, not a
+latest-timestamp choice. Receipt-v2 `providerRoutes` uses the same closed shape.
+No separate Console codec or action-ID-only lookup exists.
+
+Context pressure has one public, non-authoritative wire:
+
+~~~yaml
+providerContextPressureV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  agentId: exact-agent
+  adapterId: exact-adapter
+  providerGeneration: positive-integer
+  contextRevision: nonnegative-integer
+  observationAuditRef:
+    sourceEventId: exact-lifecycle-observation-event
+    providerGeneration: exact-parent-generation
+    contextRevision: exact-parent-revision
+    evidenceDigest: sha256-prefixed-digest
+  pressure: low | medium | high | unknown
+  source: native-exact | native-estimated | hook-boundary | unavailable
+  confidence: exact | estimated | unknown
+  windowTokens: nonnegative-integer | null
+  usedTokens: nonnegative-integer | null
+  remainingTokens: nonnegative-integer | null
+  observedAt: timestamp
+  expiresAt: timestamp
+  evidenceDigest: sha256-prefixed-digest
+  revision: positive-integer
+
+providerContextPressureReadV1:
+  oneOf:
+    - schemaVersion: 1
+      currency: current
+      pressure: providerContextPressureV1
+      readAt: timestamp-at-or-after-observedAt-and-before-expiresAt
+      ageSeconds: nonnegative-integer
+    - schemaVersion: 1
+      currency: stale
+      pressure: providerContextPressureV1
+      readAt: timestamp-at-or-after-pressure-expiresAt
+      ageSeconds: nonnegative-integer
+    - schemaVersion: 1
+      currency: unavailable
+      pressure: null
+      readAt: timestamp
+      ageSeconds: null
+
+providerContextPressureReadRequestV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  agentId: exact-agent
+~~~
+
+`fabric.v1.provider-context-pressure.read` and the scoped operator System
+projection accept exact project-session/run/agent scope and return only
+`providerContextPressureReadV1`. The record equality-binds the exact lifecycle
+observation audit tuple; no orphan or best-effort join is valid. Token values
+are all null for unavailable source, which also requires `pressure: unknown`
+and `confidence: unknown`. `native-exact` requires exact confidence and three
+nonnull token fields satisfying `usedTokens + remainingTokens = windowTokens`;
+`native-estimated` requires estimated confidence and the same nonnull arithmetic.
+`hook-boundary` requires exact or estimated confidence; its token triple is all
+null or all nonnull with the same arithmetic. Unknown confidence requires
+unknown pressure. `expiresAt` is later than `observedAt`.
+`ageSeconds` and stale currency derive at the read snapshot from
+`readAt`, `observedAt` and `expiresAt`; age is the nonnegative whole-second
+difference between read and observation time. Reads never mutate a row and never expose
+a percentage. This record reserves no spend, grants no authority and triggers
+no lifecycle action.
 
 Section 32.20 remains the only lifecycle authority. A policy-required rotation
 starts a genuinely fresh provider context and injects only the bounded,
@@ -7712,6 +7986,201 @@ stable identity mapping required by the existing child-custody contracts;
 otherwise its native graph remains one opaque bounded task. Automatic pressure
 thresholds, hysteresis, maximum compaction counts and successor selection are
 explicitly outside this amendment.
+
+Coordination topology planning has one closed, revisioned advisory record:
+
+~~~yaml
+topologyWavePlanRefV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  taskId: exact-coordination-root-task
+  waveId: stable-wave-id
+  waveRevision: positive-integer
+  planDigest: sha256-prefixed-digest
+
+topologyWavePlanV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  taskId: exact-coordination-root-task
+  waveId: stable-wave-id
+  waveRevision: positive-contiguous-integer
+  predecessor: topologyWavePlanRefV1 | null
+  dependencies:
+    - dependencyTaskId: exact-task
+      requiredState: ready | completed
+      evidenceRef: exact-existing-task-or-evidence-ref
+  decomposability:
+    kind: atomic | decomposable | conditionally-decomposable
+    evidenceRef: exact-existing-evidence-ref
+  topology:
+    executionShape: single-owner | fabric-explicit | host-native
+    mode: serial | parallel | fan-out-fan-in | dynamic
+    maximumConcurrentAgents: positive-integer
+  chair:
+    agentId: exact-current-chair
+    principalGeneration: positive-integer
+    chairLeaseGeneration: positive-integer
+  stageOwners:
+    - stageId: stable-stage-id
+      taskId: exact-task
+      ownerAgentId: exact-agent
+      writePartitionId: stable-partition-id | null
+  writePartitions:
+    - partitionId: stable-partition-id
+      ownerAgentId: exact-stage-owner-agent
+      mode: exclusive-write | shared-read
+      pathSetDigest: sha256-prefixed-digest
+      authorityRef: exact-existing-authority-ref
+  contention:
+    mode: none | serialized | disjoint-partitions
+    serializationOwnerAgentId: exact-agent | null
+    evidenceRef: exact-existing-evidence-ref
+  budget:
+    providerTurns: nonnegative-integer
+    toolCalls: nonnegative-integer
+    wallClockSeconds: nonnegative-integer
+    maximumParallelAgents: positive-integer
+  stopConditions:
+    - conditionId: stable-id
+      kind: objective-complete | gate-failed | budget-exhausted | human-gate
+      predicateRef: exact-existing-policy-or-gate-ref
+  authority:
+    authorityRevision: positive-integer
+    authorityRef: exact-existing-run-authority-ref
+    authorityDigest: sha256-prefixed-digest
+  policy:
+    policyRevision: positive-integer
+    policyRef: exact-existing-coordination-policy-ref
+    policyDigest: sha256-prefixed-digest
+  state: proposed | approved | started | completed | superseded | cancelled
+  rationaleRef: exact-registered-evidence-artifact-ref
+  createdAt: timestamp
+  planDigest: sha256-prefixed-digest
+
+topologyWavePlanCurrentV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  taskId: exact-coordination-root-task
+  waveId: stable-wave-id
+  waveRevision: positive-integer
+  planDigest: sha256-prefixed-digest
+  revision: positive-CAS-revision
+
+topologyWavePlanInputV1:
+  schemaVersion: 1
+  taskId: exact-coordination-root-task
+  waveId: stable-wave-id
+  dependencies: exact-topologyWavePlanV1-dependencies
+  decomposability: exact-topologyWavePlanV1-decomposability
+  topology: exact-topologyWavePlanV1-topology
+  stageOwners: exact-topologyWavePlanV1-stageOwners
+  writePartitions: exact-topologyWavePlanV1-writePartitions
+  contention: exact-topologyWavePlanV1-contention
+  budget: exact-topologyWavePlanV1-budget
+  stopConditions: exact-topologyWavePlanV1-stopConditions
+  state: proposed | approved | started | completed | superseded | cancelled
+  rationaleRef: exact-registered-evidence-artifact-ref
+
+topologyWaveAppendRequestV1:
+  schemaVersion: 1
+  commandId: stable-command-id
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  expectedCurrent:
+    oneOf:
+      - kind: none
+        expectedPointerRevision: 0
+      - kind: current
+        planRef: topologyWavePlanRefV1
+        expectedPointerRevision: positive-CAS-revision
+  plan: topologyWavePlanInputV1
+
+topologyWaveAppendReceiptV1:
+  schemaVersion: 1
+  commandId: exact-command-id
+  status: appended
+  priorPlanRef: topologyWavePlanRefV1 | null
+  planRef: topologyWavePlanRefV1
+  pointer: topologyWavePlanCurrentV1
+  receiptDigest: sha256-prefixed-digest
+
+topologyWaveCurrentReadRequestV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  taskId: exact-coordination-root-task
+
+topologyWaveCurrentReadV1:
+  oneOf:
+    - schemaVersion: 1
+      currency: current
+      plan: topologyWavePlanV1
+      pointer: topologyWavePlanCurrentV1
+    - schemaVersion: 1
+      currency: stale
+      plan: topologyWavePlanV1
+      pointer: topologyWavePlanCurrentV1
+    - schemaVersion: 1
+      currency: unavailable
+      plan: null
+      pointer: null
+
+topologyWaveListRequestV1:
+  schemaVersion: 1
+  projectSessionId: exact-session
+  coordinationRunId: exact-run
+  taskId: exact-coordination-root-task
+  pageSize: positive-integer-at-most-200
+  cursor: opaque-scope-and-watermark-bound-cursor | null
+
+topologyWaveListV1:
+  schemaVersion: 1
+  plans: ordered-topologyWavePlanV1-array
+  nextCursor: opaque-scope-and-watermark-bound-cursor | null
+  watermarkRevision: nonnegative-integer
+~~~
+
+All arrays are canonically sorted and duplicate-free; dependencies,
+stageOwners, writePartitions and stopConditions are nonempty where their mode
+requires them. `planDigest` is SHA-256 of RFC 8785 JCS of the complete plan with
+only `planDigest` omitted. Every change, state advance or rationale change
+appends the next wave revision and advances the sole current pointer by CAS;
+plans and rationale artifacts are immutable. A successor equality-binds its
+predecessor, run/task, existing authority/policy refs and their current revisions
+at append. It cannot mint authority, expand a write partition, change the one
+coordination chair or choose agents automatically.
+
+`fabric.v1.topology-wave.append` is the sole public mutation. It requires the
+current chair capability for the exact session/run and accepts only the closed
+request above. The daemon derives project/run, contiguous wave revision,
+current chair binding, current authority/policy tuples, `createdAt` and
+`planDigest`; none is caller-authored.
+The `none` arm is legal only when no pointer exists and revision is zero. The
+`current` arm must equality-match the pointed ref and revision. One transaction
+derives plan predecessor as null for `none` or exactly the current arm's
+`planRef`; the caller cannot author or fork it. It validates task/dependency/
+owner/write authority, inserts the next immutable plan,
+CAS-advances the pointer and records the receipt. Exact command replay returns
+that receipt before current-state checks; changed replay or pointer conflict
+mutates nothing. `receiptDigest` is SHA-256 of exact receipt JCS with only that
+field omitted. This operation is for the chair/harness, not the Console.
+
+`fabric.v1.topology-wave.current.read` accepts exact project-session/run/task
+scope in `topologyWaveCurrentReadRequestV1` and returns only
+`topologyWaveCurrentReadV1`; `fabric.v1.topology-wave.list` accepts/returns the
+closed list pair above in stable plan-digest order. A plan is read-derived stale
+when its authority, policy, chair binding or dependency is no longer current,
+or when its immutable predecessor chain is missing, noncontiguous or digest-
+invalid. A predecessor is historical by definition and need not be the current
+pointer; an exact intact immediately preceding revision/wave link does not make
+its successor stale. The current/stale arms require plan and pointer to equality-
+bind the same exact row; absent pointer requires the unavailable/null arm. Reads
+never rewrite plan state. Console uses this same current
+projection before a wave starts and keeps stale plans visible; no Console-only
+planner, second authority ledger or automatic topology policy exists.
 
 The fabric may export privacy-minimised `fabricOperationalSpanV1` rows:
 
@@ -7739,6 +8208,13 @@ Spans contain no prompt, answer, tool argument/result, artifact bytes, private
 message, capability or absolute path. Generic telemetry is operational evidence
 only; the richer receipt remains authoritative for authority, disclosure,
 reviewer relation, gates and artifact evidence. Conformance tests cover closed
-codec rejection, snapshot expiry, raw/normalised round-trip, honest unknown,
-pre-dispatch drift, ambiguous-action non-rerouting, fresh rotation versus
-same-history recovery, independent child custody and content-free telemetry.
+codec and unknown-enum rejection; exact non-self-referential discovery-manifest
+bytes/digest/registration equality; snapshot expiry and identical-body refresh;
+body/permission/surface drift before effect; raw/normalised round-trip and honest
+unknown versus observed-null native mode; actual review-route proof/mismatch and
+observed effort/native mismatch with adverse-finding retention; ambiguous-action
+non-rerouting; context-pressure audit joins/discriminated stale read/cross-arm
+rejection/no-percentage; topology append/CAS/discriminated currency/predecessor-
+chain/authority fencing; fresh rotation versus same-history recovery;
+independent child custody;
+and content-free telemetry.
